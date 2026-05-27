@@ -41,10 +41,11 @@ let paused_state_requires_approval (old : keeper_meta) =
 let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
   match p.tool_access_opt, old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
   | None, Custom _, None, Some _ ->
-      (false, "tool_also_allow requires a preset-based keeper policy; set tool_preset first")
+      tool_result_error
+        "tool_also_allow requires a preset-based keeper policy; set tool_preset first"
   | _ ->
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
-  | Error msg -> (false, msg)
+  | Error msg -> tool_result_error msg
   | Ok active_goal_ids ->
   let goal_provided = Option.is_some p.goal_opt in
   let profile_default_text opt fallback =
@@ -384,7 +385,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         ();
       Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
         p.name err;
-      (false, err)
+      tool_result_error err
   | Ok () ->
       (match
          Keeper_sandbox_runtime.ensure_keeper_startup_preflight
@@ -397,7 +398,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
              ();
            Log.Keeper.warn "update_keeper failed sandbox preflight for %s: %s"
              p.name err;
-           (false, err)
+           tool_result_error err
        | Ok () ->
       (match write_meta ctx.config updated with
        | Error e ->
@@ -405,8 +406,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
              Keeper_metrics.(to_string WriteMetaFailures)
              ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
              ();
-           (false, e)
+           tool_result_error e
        | Ok () ->
          stop_keepalive ~base_path:ctx.config.base_path updated.name;
          start_keepalive ctx updated;
-         (true, Yojson.Safe.to_string (meta_to_json updated))))
+         tool_result_ok (Yojson.Safe.to_string (meta_to_json updated))))

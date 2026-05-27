@@ -50,7 +50,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
         }
       in
       match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
-      | Some result -> result
+      | Some result -> Tool_result.is_success result, Tool_result.message result
       | None -> (false, "masc_keeper_msg dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -256,7 +256,7 @@ let keeper_stream_send_event writer mutex closed event =
 
 (** Execute keeper dispatch with real-time streaming.
     Calls [dispatch_stream] which forwards MODEL text deltas to [on_text_delta].
-    Returns the same [(bool, string)] result as the batch path.
+    Projects the typed keeper result into the local HTTP stream response pair.
     No external timeout — keeper internal limits control duration
     (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
 let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
@@ -278,7 +278,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
         Tool_keeper.dispatch_stream ~on_text_delta keeper_ctx
           ~name:"masc_keeper_msg" ~args:arguments
       with
-      | Some result -> result
+      | Some result -> Tool_result.is_success result, Tool_result.message result
       | None -> (false, "masc_keeper_msg stream dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

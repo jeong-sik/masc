@@ -378,7 +378,11 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
           | None, _ | _, None -> Worker_done (f ())
         in
         (match worker_result with
-         | Worker_done (ok, body) -> Done { ok; body }
+         | Worker_done result ->
+           Done
+             { ok = tool_result_success result
+             ; body = tool_result_body result
+             }
          | Worker_timeout { timeout_sec } ->
            timeout_done_status ~request_id ~keeper_name ~timeout_sec)
       with

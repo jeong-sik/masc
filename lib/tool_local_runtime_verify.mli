@@ -2,25 +2,13 @@
 (** Tool_local_runtime_verify — Runtime contract verification for
     local LLM runtime pools (llama.cpp / Ollama).
 
-    Exposes 3 verification entries.  The .ml does
-    [include Tool_local_runtime_http] for internal access to HTTP
-    helpers ([trim_to_option], discovery resolution, etc.); those
-    helpers are intentionally hidden from external callers via
-    this .mli — verify is the contract layer, http is the
-    implementation layer.
+    Exposes 3 verification entries. Verify is the contract layer; HTTP
+    helper plumbing is kept out of this public interface.
 
-    Internal: ~25 helpers stay private —
-    \[runtime_snapshots_for_pool], \[safe_discovery_endpoints],
-    \[discovery_endpoints_for_pool], \[active_slots_of_json],
-    \[slot_count_of_json], the 4 [endpoint_*] field projectors,
-    \[first_endpoint_url], \[error_message_of_http_error],
-    \[probe_chat_completion_compatible], \[chat_contract_probe_body],
-    \[chat_contract_reachable], \[chat_contract_status],
-    \[runtime_verify_json_from_discovery] /
-    \[runtime_verify_json_legacy] (the two backends behind
-    {!runtime_verify_json}).  Plus the 3 [Oas_types] alias
-    + the [include Tool_local_runtime_http] cascade.  All
-    consumed only inside {!runtime_verify_json}'s pipeline. *)
+    Internal helpers stay private: discovery resolution, endpoint field
+    projectors, chat-completions probing, and the discovery-backed
+    renderer behind {!runtime_verify_json}.  The old single-host legacy
+    probe fallback is gone; verification now requires OAS discovery. *)
 
 val provider_health_reachable : status:int option -> bool
 (** [provider_health_reachable ~status] is [true] iff
@@ -74,11 +62,11 @@ val runtime_verify_json :
   Yojson.Safe.t
 (** [runtime_verify_json ?runtime_pool ?expected_slots
       ?expected_ctx ?expected_model ()] runs the full runtime
-    verification pipeline against either the discovery cache
-    (when an endpoint set is resolvable for [?runtime_pool]) or
-    the legacy single-host probe (fallback).
+    verification pipeline against the OAS discovery cache.
 
     Returns a JSON object with health/slot/ctx/model
     diagnostics + the {!classify_runtime_blocker} verdict.  [?runtime_pool]
     selects the pool by name; default behaviour is "use the
-    default pool" via {!Local_runtime_pool.default_pool_label}. *)
+    default pool" via {!Local_runtime_pool.default_pool_label}.  When
+    discovery has no resolvable endpoints, the result fails closed with
+    [runtime_blocker = "oas_discovery_unavailable"]. *)

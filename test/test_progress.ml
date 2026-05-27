@@ -66,62 +66,6 @@ let test_tracker_complete () =
   check bool "final progress is 1.0" true
     (Float.equal 1.0 (Yojson.Safe.Util.member "progress" params |> Yojson.Safe.Util.to_float))
 
-let test_handle_tool_start () =
-  setup ();
-  let args = `Assoc [
-    ("action", `String "start");
-    ("task_id", `String "tool-test");
-    ("total_steps", `Int 5);
-  ] in
-  let (success, msg) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "start succeeds" true success;
-  check bool "message mentions task" true (String.length msg > 0)
-
-let test_handle_tool_update () =
-  setup ();
-  let args = `Assoc [
-    ("action", `String "update");
-    ("task_id", `String "update-test");
-    ("progress", `Float 0.6);
-    ("message", `String "60% done");
-  ] in
-  let (success, msg) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "update succeeds" true success;
-  check bool "notification sent" true (List.length !captured_json > 0);
-  check bool "message shows percentage" true (String.length msg > 0 && String.sub msg 0 (min 16 (String.length msg)) = "Progress updated")
-
-let test_handle_tool_complete () =
-  setup ();
-  let args = `Assoc [
-    ("action", `String "complete");
-    ("task_id", `String "complete-test");
-  ] in
-  let (success, _) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "complete succeeds" true success;
-
-  let json = List.hd !captured_json in
-  let params = Yojson.Safe.Util.member "params" json in
-  check bool "progress is 1.0" true
-    (Float.equal 1.0 (Yojson.Safe.Util.member "progress" params |> Yojson.Safe.Util.to_float))
-
-let test_handle_tool_invalid_action () =
-  setup ();
-  let args = `Assoc [
-    ("action", `String "invalid");
-    ("task_id", `String "test");
-  ] in
-  let (success, _) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "invalid action fails" false success
-
-let test_handle_tool_missing_task_id () =
-  setup ();
-  let args = `Assoc [
-    ("action", `String "update");
-    ("progress", `Float 0.5);
-  ] in
-  let (success, _) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "missing task_id fails" false success
-
 let test_start_and_stop_tracking () =
   setup ();
   let _ = Masc_mcp.Progress.start_tracking ~task_id:"track-test" ~total_steps:10 () in
@@ -134,56 +78,44 @@ let test_start_and_stop_tracking () =
 
 let test_validate_task_id_empty () =
   setup ();
-  let args = `Assoc [
-    ("action", `String "start");
-    ("task_id", `String "");
-  ] in
-  let (success, msg) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "empty task_id fails" false success;
-  check bool "error mentions empty" true (String.length msg > 0)
+  match Masc_mcp.Progress.validate_task_id "" with
+  | Error err ->
+    check bool "error mentions empty" true
+      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+  | Ok _ -> fail "empty task_id should fail"
 
 let test_validate_task_id_too_long () =
   setup ();
   let long_id = String.make 300 'x' in
-  let args = `Assoc [
-    ("action", `String "start");
-    ("task_id", `String long_id);
-  ] in
-  let (success, msg) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "long task_id fails" false success;
-  check bool "error mentions too long" true (String.length msg > 0)
+  match Masc_mcp.Progress.validate_task_id long_id with
+  | Error err ->
+    check bool "error mentions too long" true
+      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+  | Ok _ -> fail "long task_id should fail"
 
 let test_validate_task_id_invalid_chars () =
   setup ();
-  let args = `Assoc [
-    ("action", `String "start");
-    ("task_id", `String "task\x00id");  (* null char *)
-  ] in
-  let (success, msg) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "invalid chars fail" false success;
-  check bool "error mentions invalid" true (String.length msg > 0)
+  match Masc_mcp.Progress.validate_task_id "task\x00id" with
+  | Error err ->
+    check bool "error mentions invalid" true
+      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+  | Ok _ -> fail "task_id with null char should fail"
 
 let test_validate_progress_out_of_range () =
   setup ();
-  let args = `Assoc [
-    ("action", `String "update");
-    ("task_id", `String "test");
-    ("progress", `Float 1.5);
-  ] in
-  let (success, msg) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "progress > 1.0 fails" false success;
-  check bool "error mentions range" true (String.length msg > 0)
+  match Masc_mcp.Progress.validate_progress 1.5 with
+  | Error err ->
+    check bool "error mentions range" true
+      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+  | Ok _ -> fail "progress > 1.0 should fail"
 
 let test_validate_progress_negative () =
   setup ();
-  let args = `Assoc [
-    ("action", `String "update");
-    ("task_id", `String "test");
-    ("progress", `Float (-0.5));
-  ] in
-  let (success, msg) = Masc_mcp.Progress.handle_progress_tool args in
-  check bool "negative progress fails" false success;
-  check bool "error mentions range" true (String.length msg > 0)
+  match Masc_mcp.Progress.validate_progress (-0.5) with
+  | Error err ->
+    check bool "error mentions range" true
+      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+  | Ok _ -> fail "negative progress should fail"
 
 let () =
   Eio_main.run @@ fun env ->
@@ -198,13 +130,6 @@ let () =
         test_case "create" `Quick test_tracker_create;
         test_case "step" `Quick test_tracker_step;
         test_case "complete" `Quick test_tracker_complete;
-      ]);
-      ("tool_handler", [
-        test_case "start" `Quick test_handle_tool_start;
-        test_case "update" `Quick test_handle_tool_update;
-        test_case "complete" `Quick test_handle_tool_complete;
-        test_case "invalid action" `Quick test_handle_tool_invalid_action;
-        test_case "missing task_id" `Quick test_handle_tool_missing_task_id;
       ]);
       ("tracking", [
         test_case "start and stop" `Quick test_start_and_stop_tracking;

@@ -228,8 +228,10 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              reqd
          | None ->
            (match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
-            | Some (true, body)
-              when String.equal action "boot" || String.equal action "clear" ->
+            | Some result
+              when Tool_result.is_success result
+                   && (String.equal action "boot" || String.equal action "clear") ->
+              let body = Tool_result.message result in
               if String.equal action "boot"
               then (
                 resume_booted_keeper_if_needed ();
@@ -247,7 +249,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    (String.escaped name)
                    body)
                 reqd
-            | Some (true, _body) ->
+            | Some result when Tool_result.is_success result ->
               (match action with
                | "shutdown" ->
                  persist_keeper_paused_state true;
@@ -259,7 +261,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    (String.escaped action)
                    (String.escaped name))
                 reqd
-            | Some (false, body) ->
+            | Some result ->
+              let body = Tool_result.message result in
               log_lifecycle_result "rejected";
               Http.Response.json ~status:`Bad_request ~request:req
                 (Yojson.Safe.to_string

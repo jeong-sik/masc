@@ -276,8 +276,9 @@ let keeper_exists ~sw ~clock state keeper_name =
     Tool_keeper.dispatch (gate_keeper_ctx ~sw ~clock state)
       ~name:"masc_keeper_status" ~args
   with
-  | Some (true, _) -> Ok true
-  | Some (false, err) ->
+  | Some result when Tool_result.is_success result -> Ok true
+  | Some result ->
+      let err = Tool_result.message result in
       if String_util.contains_substring
            (String.lowercase_ascii err) "keeper not found"
       then Ok false
@@ -288,7 +289,8 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
   match
     Tool_keeper.dispatch (gate_keeper_ctx ~sw ~clock state) ~name:tool_name ~args
   with
-  | Some (true, body) -> (
+  | Some result when Tool_result.is_success result -> (
+      let body = Tool_result.message result in
       try
         ignore (Yojson.Safe.from_string body);
         respond_json_with_cors ~status:`OK request reqd body
@@ -299,7 +301,8 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
           respond_json_with_cors ~status:`Internal_server_error request reqd
             (Yojson.Safe.to_string
                (Channel_gate.error_json "internal error")) )
-  | Some (false, err) ->
+  | Some result ->
+      let err = Tool_result.message result in
       let lower = String.lowercase_ascii err in
       let status =
         if String_util.contains_substring lower "keeper not found" then `Not_found

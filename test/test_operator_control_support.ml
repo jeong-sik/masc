@@ -49,7 +49,7 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
 
 let dispatch_keeper_exn ctx ~name ~args =
   match Tool_keeper.dispatch ctx ~name ~args with
-  | Some result -> result
+  | Some result -> Tool_result.is_success result, Tool_result.message result
   | None -> failwith ("keeper dispatch missing: " ^ name)
 
 (* unit_update_exn / start_operation_exn removed (CP purge: Command_plane_v2 deleted) *)

@@ -21,7 +21,43 @@ type 'a context = {
   net: [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
 }
 
-type tool_result = bool * string
+type tool_result = Tool_result.result
+
+let tool_result_payload body =
+  match Tool_result.structured_payload_of_message body with
+  | Some json -> json
+  | None -> `String body
+;;
+
+let tool_result_ok ?(tool_name = "") body : tool_result =
+  Tool_result.make_ok
+    ~tool_name
+    ~start_time:(Time_compat.now ())
+    ~data:(tool_result_payload body)
+    ()
+;;
+
+let tool_result_error
+      ?(tool_name = "")
+      ?(class_ = Tool_result.Runtime_failure)
+      body
+  : tool_result
+  =
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time:(Time_compat.now ())
+    ~data:(tool_result_payload body)
+    body
+;;
+
+let tool_result_with_tool_name ~tool_name : tool_result -> tool_result = function
+  | Ok payload -> Ok { payload with tool_name }
+  | Error payload -> Error { payload with tool_name }
+;;
+
+let tool_result_body = Tool_result.message
+let tool_result_success = Tool_result.is_success
 
 let schemas = Keeper_schema.schemas
 

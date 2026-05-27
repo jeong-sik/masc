@@ -17,22 +17,7 @@ module Float = Stdlib.Float
 
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
-include Tool_local_runtime_http
 module Oas_types = Agent_sdk.Types
-
-let runtime_snapshots_for_pool runtime_pool =
-  let snapshots = Local_runtime_pool.snapshots () in
-  match Option.bind runtime_pool String_util.trim_to_option with
-  | None -> snapshots
-  | Some pool when String.equal pool Local_runtime_pool.default_pool_label -> snapshots
-  | Some pool ->
-      let filtered =
-        List.filter
-          (fun (runtime : Local_runtime_pool.runtime_snapshot) ->
-            String.equal runtime.id pool || String.equal runtime.base_url pool)
-          snapshots
-      in
-      if Stdlib.List.length filtered = 0 then snapshots else filtered
 
 let safe_discovery_endpoints () =
   try Some (Discovery_cache.get_cached_or_refresh ())
@@ -59,52 +44,6 @@ let discovery_endpoints_for_pool runtime_pool =
       in
       let filtered = List.filter matches_pool endpoints in
       Some (if Stdlib.List.length filtered = 0 then endpoints else filtered)
-
-let active_slots_of_json json =
-  let open Yojson.Safe.Util in
-  let slots =
-    match json with
-    | `List items -> items
-    | `Assoc _ -> (
-        match member "slots" json with
-        | `List items -> items
-        | _ -> (
-            match member "data" json with
-            | `List items -> items
-            | _ -> (
-                match member "items" json with `List items -> items | _ -> [])))
-    | _ -> []
-  in
-  let is_active slot =
-    let status =
-      slot |> member "status" |> to_string_option |> Option.value ~default:""
-      |> String.lowercase_ascii
-    in
-    (slot |> member "is_processing" |> to_bool_option |> Option.value ~default:false)
-    || (match slot |> member "state" with
-       | `Int value -> value <> 0
-       | `Intlit value -> Option.value ~default:0 (parse_int_opt value) <> 0
-       | _ -> false)
-    || String.equal status "processing" || String.equal status "prompt" || String.equal status "generating"
-  in
-  List.fold_left (fun acc slot -> if is_active slot then acc + 1 else acc) 0 slots
-
-let slot_count_of_json json =
-  let open Yojson.Safe.Util in
-  let slots =
-    match json with
-    | `List items -> items
-    | `Assoc _ -> (
-        match member "slots" json with
-        | `List items -> items
-        | _ -> (
-            match member "data" json with
-            | `List items -> items
-            | _ -> (
-                match member "items" json with `List items -> items | _ -> [])))
-    | _ -> []
-  in
-  List.length slots
 
 let endpoint_model_id (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.models with
@@ -192,37 +131,6 @@ let probe_chat_completion_compatible
 
 let provider_health_reachable ~status =
   Option.equal Int.equal status (Some 200)
-
-let chat_contract_probe_body ~model_id =
-  Yojson.Safe.to_string
-    (`Assoc
-      [
-        ("model", `String model_id);
-        ("messages", `List [ `Assoc [ ("role", `String "user"); ("content", `String "ping") ] ]);
-        ("max_tokens", `Int 1);
-        ("temperature", `Float 0.0);
-      ])
-
-let chat_contract_reachable ~status ~body =
-  if not (Option.equal Int.equal status (Some 200)) then
-    false
-  else
-    match body with
-    | None -> false
-    | Some payload -> (
-        match Yojson.Safe.from_string payload with
-        | exception Yojson.Json_error _ -> false
-        | json -> (
-            match Yojson.Safe.Util.member "choices" json with
-            | `List _ -> true
-            | _ -> false))
-
-let chat_contract_status ~status ~body =
-  match status with
-  | Some 200 when chat_contract_reachable ~status ~body -> "confirmed"
-  | Some (400 | 404 | 405 | 415 | 422) -> "rejected"
-  | Some _ -> "unknown"
-  | None -> "unknown"
 
 let classify_runtime_blocker ~provider_reachable ~slot_reachable
     ~chat_contract_status ~expected_model ~actual_model_id ~expected_slots
@@ -399,205 +307,34 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("runtimes", `List (List.rev runtime_rows));
     ]
 
-let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
-    ?expected_model () =
-  let runtimes = runtime_snapshots_for_pool runtime_pool in
-  let has_runtimes = Stdlib.List.length runtimes > 0 in
-  let configured_capacity =
-    runtimes
-    |> List.fold_left
-         (fun acc (runtime : Local_runtime_pool.runtime_snapshot) ->
-           acc + runtime.max_concurrency)
-         0
-  in
-  let configured_max_concurrent_models = Inference_utils.max_concurrent_models in
-  let available_model_permits = Inference_utils.model_permits_available () in
-  let runtime_rows, provider_reachable, slot_reachable, actual_slots_total,
-      active_slots_now, actual_ctxs, actual_models, chat_contract_statuses =
-    List.fold_left
-      (fun
-        (rows, provider_ok, slot_ok, slots_acc, active_acc, ctxs, models, chat_states)
-        (runtime : Local_runtime_pool.runtime_snapshot)
-      ->
-        let base_url = String.trim runtime.base_url in
-        let provider_url = base_url ^ "/health" in
-        let slot_url = base_url ^ "/slots" in
-        let props_url = base_url ^ "/props" in
-        let models_url =
-          base_url ^ Masc_network_defaults.openai_models_path
-        in
-        let provider_status, _provider_body, provider_err =
-          match http_get_text_with_status provider_url with
-          | Ok (status_code, payload) -> (status_code, Some payload, None)
-          | Error err -> (None, None, Some err)
-        in
-        let slot_status, slot_json, slot_err =
-          match http_get_json_with_status slot_url with
-          | Ok (status_code, payload) -> (status_code, Some payload, None)
-          | Error err -> (None, None, Some err)
-        in
-        let props_status, props_json, props_err =
-          match http_get_json_with_status props_url with
-          | Ok (status_code, payload) -> (status_code, Some payload, None)
-          | Error err -> (None, None, Some err)
-        in
-        let models_status, models_json, models_err =
-          match http_get_json_with_status models_url with
-          | Ok (status_code, payload) -> (status_code, Some payload, None)
-          | Error err -> (None, None, Some err)
-        in
-        let provider_ok_row =
-          provider_health_reachable ~status:provider_status
-        in
-        let provider_ok' = provider_ok && provider_ok_row in
-        let slot_ok_row = Option.equal Int.equal slot_status (Some 200) in
-        let slot_ok' = slot_ok && slot_ok_row in
-        let actual_slots =
-          match Option.bind props_json (fun json -> int_member json "total_slots") with
-          | Some total -> Some total
-          | None ->
-              (match slot_json with
-               | Some json ->
-                   let total = slot_count_of_json json in
-                   if total > 0 then Some total else None
-               | None -> None)
-        in
-        let actual_ctx =
-          Option.bind props_json (fun json ->
-              match Yojson.Safe.Util.member "default_generation_settings" json with
-              | `Assoc _ as settings -> int_member settings "n_ctx"
-              | _ -> None)
-        in
-        let actual_model =
-          match
-            Option.bind models_json (fun json ->
-                match Yojson.Safe.Util.member "data" json with
-                | `List ((`Assoc _ as first) :: _) -> string_member first "id"
-                | `List _ -> None
-                | _ -> None)
-          with
-          | Some model -> Some model
-          | None -> runtime.model
-        in
-        let probe_model =
-          match actual_model with
-          | Some model_id -> Some model_id
-          | None -> (
-              match expected_model with
-              | Some model_id when not (String.equal (String.trim model_id) "") -> Some (String.trim model_id)
-              | _ -> runtime.model)
-        in
-        let chat_status, chat_body, chat_err =
-          match probe_model with
-          | None -> (None, None, Some "chat contract probe skipped: no model id available")
-          | Some model_id ->
-              let url =
-                base_url ^ Masc_network_defaults.openai_chat_completions_path
-              in
-              let body_json = chat_contract_probe_body ~model_id in
-              match http_post_json_text_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Http ()) ~url ~body_json with
-              | Ok (status_code, payload) -> (status_code, Some payload, None)
-              | Error err -> (None, None, Some err)
-        in
-        let chat_status_label =
-          chat_contract_status ~status:chat_status ~body:chat_body
-        in
-        let current_active =
-          slot_json |> Option.map active_slots_of_json |> Option.value ~default:0
-        in
-        let row =
-          `Assoc
-            [
-              ("runtime_id", `String runtime.id);
-              ("base_url", `String base_url);
-              ("provider_base_url", `String base_url);
-              ("slot_url", `String base_url);
-              ("provider_reachable", `Bool provider_ok_row);
-              ("provider_status_code", Json_util.int_opt_to_json provider_status);
-              ("provider_error", Json_util.string_opt_to_json provider_err);
-              ("slot_reachable", `Bool slot_ok_row);
-              ("slot_status_code", Json_util.int_opt_to_json slot_status);
-              ("slot_error", Json_util.string_opt_to_json slot_err);
-              ("props_status_code", Json_util.int_opt_to_json props_status);
-              ("props_error", Json_util.string_opt_to_json props_err);
-              ("models_status_code", Json_util.int_opt_to_json models_status);
-              ("models_error", Json_util.string_opt_to_json models_err);
-              ("chat_status_code", Json_util.int_opt_to_json chat_status);
-              ("chat_contract_status", `String chat_status_label);
-              ("chat_contract_reachable", `Bool (chat_contract_reachable ~status:chat_status ~body:chat_body));
-              ("chat_error", Json_util.string_opt_to_json chat_err);
-              ("expected_model", Json_util.string_opt_to_json expected_model);
-              ("actual_model_id", Json_util.string_opt_to_json actual_model);
-              ("expected_slots", Json_util.int_opt_to_json expected_slots);
-              ("actual_slots", Json_util.int_opt_to_json actual_slots);
-              ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
-              ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
-              ("active_slots_now", `Int current_active);
-            ]
-        in
-        ( row :: rows,
-          provider_ok',
-          slot_ok',
-          slots_acc + Option.value ~default:0 actual_slots,
-          active_acc + current_active,
-          (match actual_ctx with Some value -> value :: ctxs | None -> ctxs),
-          (match actual_model with Some value -> value :: models | None -> models),
-          chat_status_label :: chat_states ))
-      ([], true, true, 0, 0, [], [], []) runtimes
-  in
-  let actual_ctx =
-    match List.sort_uniq compare actual_ctxs with [ value ] -> Some value | _ -> None
-  in
-  let actual_model_id =
-    match List.sort_uniq String.compare actual_models with
-    | [ value ] -> Some value
-    | _ -> None
-  in
-  let overall_chat_contract_status =
-    let states = List.sort_uniq String.compare chat_contract_statuses in
-    if not has_runtimes then
-      "unknown"
-    else if List.mem "rejected" states then
-      "rejected"
-    else if List.mem "unknown" states then
-      "unknown"
-    else
-      "confirmed"
-  in
-  let runtime_blocker, detail =
-    classify_runtime_blocker
-      ~provider_reachable:(provider_reachable && has_runtimes)
-      ~slot_reachable:(slot_reachable && has_runtimes) ~expected_model
-      ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx ~actual_ctx
-      ~chat_contract_status:overall_chat_contract_status
-      ~chat_completion_compatible:true
-  in
+let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
+    ?expected_ctx ?expected_model () =
   `Assoc
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
-      ("provider_base_url", `String Env_config.Local_runtime.server_url);
-      ("slot_url", `String Env_config.Local_runtime.server_url);
-      ("provider_reachable", `Bool (provider_reachable && has_runtimes));
-      ("slot_reachable", `Bool (slot_reachable && has_runtimes));
-      ("chat_completion_compatible", `Bool true);
-      ("chat_contract_status", `String overall_chat_contract_status);
-      ("chat_contract_reachable", `Bool (String.equal overall_chat_contract_status "confirmed"));
+      ("source", `String "oas_discovery");
+      ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
+      ("provider_base_url", `Null);
+      ("slot_url", `Null);
+      ("provider_reachable", `Bool false);
+      ("slot_reachable", `Bool false);
+      ("chat_completion_compatible", `Null);
       ("expected_model", Json_util.string_opt_to_json expected_model);
-      ("actual_model_id", Json_util.string_opt_to_json actual_model_id);
+      ("actual_model_id", `Null);
       ("expected_slots", Json_util.int_opt_to_json expected_slots);
-      ("actual_slots", `Int actual_slots_total);
+      ("actual_slots", `Int 0);
       ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
-      ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
-      ("active_slots_now", `Int active_slots_now);
-      ("peak_hot_slots", `Int active_slots_now);
-      ("configured_capacity", `Int configured_capacity);
-      ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
-      ("available_model_permits", `Int available_model_permits);
-      ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
-      ("detail", Json_util.string_opt_to_json detail);
-      ("pass", `Bool (Option.is_none runtime_blocker));
-      ("runtimes", `List (List.rev runtime_rows));
+      ("actual_ctx", `Null);
+      ("active_slots_now", `Int 0);
+      ("peak_hot_slots", `Int 0);
+      ("configured_capacity", `Int 0);
+      ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
+      ("available_model_permits", `Int (Inference_utils.model_permits_available ()));
+      ("runtime_blocker", `String "oas_discovery_unavailable");
+      ("detail", `String "runtime verification requires OAS discovery endpoints");
+      ("pass", `Bool false);
+      ("runtimes", `List []);
     ]
 
 let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () =
@@ -606,5 +343,5 @@ let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_mo
       runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_ctx
         ?expected_model endpoints ()
   | None ->
-      runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
+      runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots ?expected_ctx
         ?expected_model ()

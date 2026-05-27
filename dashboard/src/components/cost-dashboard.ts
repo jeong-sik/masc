@@ -64,7 +64,7 @@ import {
   keeperDecisionsState,
   windowMinutes,
 } from './cost/cost-store'
-import { formatTokens, severityClass } from './cost/cost-formatters'
+import { formatCostTokens, severityClass } from './cost/cost-formatters'
 import {
   severityBuckets,
   auditEntryMatchesLogId,
@@ -85,7 +85,7 @@ export {
   isAuditFocus,
   auditRouteParams,
   auditLogRouteParams,
-  formatTokens,
+  formatCostTokens,
   auditEntryMatchesLogId,
   prioritizeAuditEntriesByLogId,
   summarizeAuditActors,
@@ -359,8 +359,8 @@ function ModelRow({
       <th scope="row" class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">
         ${model.model_id}
       </th>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(inTok)}</td>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(outTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(inTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
         ${formatCost(cost)}
       </td>
@@ -409,8 +409,8 @@ function KeeperRow({
       <th scope="row" class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">
         ${keeper.keeper_name}
       </th>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(inTok)}</td>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(outTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(inTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
         ${formatCost(cost)}
       </td>
@@ -1231,7 +1231,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
             />
             <${StatTile}
               label="Tokens In / Out"
-              value=${`${formatTokens(t.totalIn)} / ${formatTokens(t.totalOut)}`}
+              value=${`${formatCostTokens(t.totalIn)} / ${formatCostTokens(t.totalOut)}`}
               delta=${{ direction: 'flat', text: 'aggregated window' }}
             />
             <${StatTile}

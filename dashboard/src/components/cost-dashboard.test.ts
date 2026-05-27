@@ -5,7 +5,7 @@ import {
   auditEntryMatchesLogId,
   auditLogRouteParams,
   auditRouteParams,
-  formatTokens,
+  formatCostTokens,
   isAuditFocus,
   isCostFocus,
   isCostView,
@@ -64,7 +64,7 @@ describe("viewModeForCostFocus", () => {
   })
 })
 
-describe("formatTokens", () => {
+describe("formatCostTokens", () => {
   it.each([
     [0, "0"],
     [999, "999"],
@@ -75,7 +75,7 @@ describe("formatTokens", () => {
     [1_500_000, "1.50M"],
     [2_340_000, "2.34M"],
   ])("formats %d as %s", (n, expected) => {
-    expect(formatTokens(n)).toBe(expected)
+    expect(formatCostTokens(n)).toBe(expected)
   })
 })
 

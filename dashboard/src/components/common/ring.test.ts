@@ -115,12 +115,6 @@ describe('ringFocusClasses (pure)', () => {
     expect(cls).toContain('focus-visible:ring-offset-bg-1')
   })
 
-  it('visible=false uses bare focus: prefix (legacy mouse+keyboard)', () => {
-    const cls = ringFocusClasses({ visible: false })
-    expect(cls).toBe('focus:outline-none focus:ring-1 focus:ring-accent-fg')
-    expect(cls).not.toContain('focus-visible:')
-  })
-
   it('inset=true emits ring-inset and suppresses offset', () => {
     const cls = ringFocusClasses({ width: 2, tone: 'accent-fg', inset: true })
     expect(cls).toContain('focus-visible:ring-inset')

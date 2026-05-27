@@ -33,7 +33,6 @@ export function normalizeMemorySubsystemsFocus(focus?: string): MemorySubsystems
 
 function memoryFocusTargetClasses(focused: boolean): string {
   const base = ringFocusClasses({
-    visible: false,
     tone: 'accent-medium',
     width: 2,
     offset: 2,

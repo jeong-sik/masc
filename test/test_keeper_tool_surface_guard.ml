@@ -76,15 +76,18 @@ let test_public_alias_guidance_ignores_public_execute () =
        "Execute")
 ;;
 
-let test_public_alias_guidance_prefers_visible_write_alias () =
+let test_public_alias_guidance_prefers_visible_edit_alias () =
+  let expected =
+    Some
+      "tool_edit_file is an internal keeper implementation tool name, not a \
+       model-facing tool. Use EditFile instead."
+  in
   check
     (option string)
-    "visible write alias"
-    (Some
-       "tool_edit_file is an internal keeper implementation tool name, not a \
-        model-facing tool. Use WriteFile instead.")
+    "visible edit alias"
+    expected
     (Resolution.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "WriteFile" ]
+       ~visible_tool_names:[ "EditFile" ]
        "tool_edit_file")
 ;;
 
@@ -152,7 +155,7 @@ let test_has_valid_tool_call_false_when_empty () =
 
 (* Use real canonical tool names. Passive_status tools must have
    Tool_catalog.effect_domain = Some Read_only so classify_tool_progress
-   classifies them correctly without dispatch-owned capability sets. *)
+   classifies them through catalog-backed capabilities. *)
 
 let passive_tool = "keeper_tasks_list"
 let passive_tool_alt = "keeper_context_status"
@@ -262,9 +265,9 @@ let () =
             `Quick
             test_public_alias_guidance_ignores_public_execute
         ; test_case
-            "internal edit prefers visible WriteFile alias"
+            "internal edit prefers visible EditFile alias"
             `Quick
-            test_public_alias_guidance_prefers_visible_write_alias
+            test_public_alias_guidance_prefers_visible_edit_alias
         ; test_case
             "internal alias reports when public alias is not visible"
             `Quick

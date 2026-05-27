@@ -498,6 +498,8 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   let contract_classifier = "lib/keeper/keeper_contract_classifier.ml" in
   let pr_metrics = "lib/keeper/keeper_hooks_oas_pr_metrics.ml" in
   let output_json = "lib/keeper/keeper_hooks_oas_output_json.ml" in
+  let registry = "lib/keeper/keeper_tool_registry.ml" in
+  let registry_mli = "lib/keeper/keeper_tool_registry.mli" in
   assert_contains "lib/dune" "keeper_tool_capability_axis";
   assert_contains axis "Keeper_tool_alias.canonical_resolution";
   assert_not_contains axis "Keeper_tool_alias.route";
@@ -515,6 +517,8 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_contains output_json
     "Keeper_tool_capability_axis.shell_command_input_candidates";
   assert_contains axis "shell_command_input_candidates";
+  assert_not_contains registry ("keeper_" ^ "read_" ^ "only_" ^ "set");
+  assert_not_contains registry_mli ("keeper_" ^ "read_" ^ "only_" ^ "set");
   assert_not_contains output_json "\"tool_execute\" ->";
   assert_not_contains output_json "\"tool_execute\" ->"
 

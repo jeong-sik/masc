@@ -84,7 +84,7 @@ let traversal_strategy_of_json = function
   | `String "priority" -> Some Priority
   | `String "round_robin" -> Some RoundRobin
   | `String "random" -> Some Random
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> None
 
 let cascade_item_to_json (item : cascade_item) : Yojson.Safe.t =
   `Assoc [
@@ -113,7 +113,7 @@ let cascade_item_of_json (json : Yojson.Safe.t) : cascade_item option =
        | Some id, Some provider, Some model, Some timeout_ms, Some priority ->
            Some { id; provider; model; timeout_ms; priority }
        | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let cascade_group_to_json (group : cascade_group) : Yojson.Safe.t =
   `Assoc [
@@ -151,7 +151,7 @@ let cascade_group_of_json (json : Yojson.Safe.t) : cascade_group option =
       (match name_opt, strategy_opt with
        | Some name, Some strategy -> Some { name; items; strategy; fallback_group }
        | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let cascade_profile_to_json (profile : cascade_profile) : Yojson.Safe.t =
   `Assoc [
@@ -175,7 +175,7 @@ let cascade_profile_of_json (json : Yojson.Safe.t) : cascade_profile option =
       (match name_opt with
        | Some name -> Some { name; groups }
        | None -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let cascade_ref_to_json (ref_ : cascade_ref) : Yojson.Safe.t =
   `Assoc [
@@ -202,7 +202,7 @@ let cascade_ref_of_json (json : Yojson.Safe.t) : cascade_ref option =
       (match group_opt with
        | Some group -> Some { group; item }
        | None -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 (* ------------------------------------------------------------------ *)
 (* Migration helper: string -> cascade_ref                            *)

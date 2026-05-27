@@ -20,7 +20,7 @@ async function refreshObservatoryPanel(): Promise<void> {
 }
 
 async function refreshHarnessLabSurface(): Promise<void> {
-  const { refreshHarnessSurface } = await import('./components/harness-health')
+  const { refreshHarnessSurface } = await import('./components/harness-health-state')
   await refreshHarnessSurface()
 }
 

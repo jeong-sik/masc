@@ -14,8 +14,6 @@ import {
   loadHarnessHealth,
   clearHarnessReloadTimer,
   handleHarnessSSE,
-  resetHarnessHealthState,
-  refreshHarnessSurface,
 } from './harness-health-state'
 import type {
   RailStatus,
@@ -37,8 +35,6 @@ import {
   PreCompactList,
   HandoffList,
 } from './harness-health-sections'
-
-export { resetHarnessHealthState, refreshHarnessSurface }
 
 // ── Mermaid flow helpers (live state graph) ──
 // Mermaid classDef requires literal hex values — CSS vars are not resolved.

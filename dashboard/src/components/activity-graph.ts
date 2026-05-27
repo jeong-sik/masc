@@ -21,7 +21,7 @@ import {
   buildRawCategoryCounts,
   categoryLabel,
   eventDetail,
-  eventKindLabel as activityEventKindLabel,
+  activityEventKindLabel,
   type ActionTimelineFilter,
 } from './activity-graph-groups'
 import { registerActivityRefresh } from '../sse-store'

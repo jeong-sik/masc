@@ -112,7 +112,7 @@ let cooldown_config_for ~provider_key =
 let hard_quota_cooldown_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
-    ~default:3600.0
+    ~default:Masc_time_constants.hour
     ()
 
 (** Cooldown duration for provider calls classified as terminal structural
@@ -121,7 +121,7 @@ let hard_quota_cooldown_sec =
 let terminal_failure_cooldown_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
-    ~default:3600.0
+    ~default:Masc_time_constants.hour
     ()
 
 (** Default cooldown applied immediately on a transient HTTP 429. *)

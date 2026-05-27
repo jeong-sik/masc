@@ -172,6 +172,14 @@ let sdk_agent_error_fields = function
     ; "participant_name", (match participant_name with Some n -> `String n | None -> `Null)
     ; "question", `String question
     ]
+  | Agent_sdk.Error.AgentExecutionTimeout
+      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
+    [ "variant", `String "agent_execution_timeout"
+    ; "elapsed_sec", `Float elapsed_sec
+    ; "timeout_sec", `Float timeout_sec
+    ; "turn_count", `Int turn_count
+    ; "max_turns", `Int max_turns
+    ]
 ;;
 
 let sdk_mcp_error_fields = function

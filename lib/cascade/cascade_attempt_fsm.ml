@@ -159,6 +159,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   (* Other Agent error variants are structural (budget, idle, exit, retries,
      guardrails, tripwires) and would recur on any model — not cascadeable. *)
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
+  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
   | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)

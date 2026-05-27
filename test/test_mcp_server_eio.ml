@@ -881,7 +881,9 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
      fixture directly so downstream managed-profile assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
+  let _joined =
+    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+  in
   let _added =
     Masc_mcp.Coord.add_task state.room_config ~title:"managed-claim"
       ~priority:2 ~description:""
@@ -914,6 +916,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  Masc_mcp.Auth.disable_auth base_path;
   let sid = "mcp-transition-claim-guidance" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -923,7 +926,9 @@ let test_handle_request_tools_call_transition_claim_guidance () =
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
+  let _joined =
+    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+  in
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"transition-claim"
        ~priority:2 ~description:"");
@@ -966,6 +971,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  Masc_mcp.Auth.disable_auth base_path;
   let sid = "mcp-transition-done-guidance" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -975,7 +981,9 @@ let test_handle_request_tools_call_transition_done_guidance () =
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
+  let _joined =
+    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+  in
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"transition-done"
        ~priority:2 ~description:"");
@@ -1030,6 +1038,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  Masc_mcp.Auth.disable_auth base_path;
   let sid = "mcp-deprecated-claim-alias" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1039,7 +1048,9 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
+  let _joined =
+    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+  in
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"deprecated-claim"
        ~priority:2 ~description:"");

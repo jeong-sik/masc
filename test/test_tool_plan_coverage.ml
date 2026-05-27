@@ -58,7 +58,7 @@ let test_dispatch_plan_init () =
   match Tool_plan.dispatch ctx ~name:"masc_plan_init" ~args with
   | Some result ->
       check bool "dispatches to plan_init" true (String.length (Tool_result.message result) > 0);
-      ignore (Tool_result.is_success result)
+      check bool "plan_init succeeds" true (Tool_result.is_success result)
   | None -> fail "expected Some"
 
 let test_dispatch_plan_update () =

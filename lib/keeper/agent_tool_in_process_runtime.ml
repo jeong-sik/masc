@@ -116,18 +116,18 @@ let handle_masc_board ~name ~args =
          ])
 ;;
 
-(* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.t option]
+(* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
    returned by [Tool_*.dispatch] to the in_process_runtime string-output
    convention. [None] means the dispatcher does not recognise the name
    (the descriptor → dispatcher mapping is misconfigured if this fires
    for a tool reachable via [descriptors_for_internal]). *)
 let dispatch_option_to_string ~name = function
-  | Some (result : Tool_result.t) ->
-    if result.Tool_result.success
-    then result.Tool_result.message
+  | Some (result : Tool_result.result) ->
+    if Tool_result.is_success result
+    then Tool_result.message result
     else
       Yojson.Safe.to_string
-        (`Assoc [ "error", `String result.Tool_result.message ])
+        (`Assoc [ "error", `String (Tool_result.message result) ])
   | None ->
     Yojson.Safe.to_string
       (`Assoc
@@ -378,7 +378,7 @@ let handle_masc_approval ~name ~args =
 let handle_masc_local_runtime ~name ~args =
   (* Tool_local_runtime.dispatch is polymorphic in ctx (handlers ignore it).
      The result type is the older [bool * string] tuple from
-     Tool_local_runtime_core, not Tool_result.t — predates RFC-0189
+     Tool_local_runtime_core, not Tool_result.result — predates RFC-0189
      typed-result migration. Convert tuple → string via the same
      success/failure convention used elsewhere. *)
   match Tool_local_runtime.dispatch () ~name ~args with

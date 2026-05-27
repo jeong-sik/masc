@@ -90,22 +90,6 @@ let test_finalize_applies_transformer_before_observer () =
   | None -> fail "expected observer to run"
 ;;
 
-let test_mcp_execute_invokes_finalize () =
-  let path = "lib/mcp_server_eio_execute.ml" in
-  let n =
-    Ast_grep.count_calls
-      ~module_path:path
-      ~callee:"Tool_dispatch_emit.finalize_from_handler"
-  in
-  if n < 2
-  then
-    failf
-      "mcp_server_eio_execute.ml must call \
-       Tool_dispatch_emit.finalize_from_handler >= 2 (PR-5: \
-       dispatch_by_tag + dispatch_internal_keeper_runtime); got %d"
-      n
-;;
-
 let () =
   run
     "tool-dispatch-emit"

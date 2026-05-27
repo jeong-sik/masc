@@ -23,14 +23,8 @@ module Float = Stdlib.Float
 
 open Tool_inline_dispatch_types
 
-(* RFC-0189 PR-1b: this module migrates ahead of the shared
-   [Tool_inline_dispatch_types.tool_result = Tool_result.t] alias.
-   The three [handle_*] signatures below shadow the alias with explicit
-   [Tool_result.result option] returns; callers (sole call site:
-   [Tool_inline_dispatch.dispatch]) lift to legacy via
-   [Option.map Tool_result.to_legacy].  Other consumers of the shared
-   alias (Tool_inline_dispatch_comm, Tool_inline_dispatch_extra) stay on
-   the legacy record until their own PR-1b cluster lands. *)
+(* RFC-0189 PR-2: lifecycle handlers return [Tool_result.result option]
+   directly, matching the shared inline dispatch alias. *)
 
 let inline_ok ~tool_name ~start_time body : Tool_result.result =
   let data =

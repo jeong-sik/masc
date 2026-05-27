@@ -1,17 +1,23 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
-import { normalizeStatusSection, sectionLabel, type StatusSection } from "./status"
+import { sectionItemsForTab } from "../config/navigation"
+import { isHiddenDiagnostic, isMonitorLane, normalizeStatusSection, sectionLabel, type StatusSection } from "./status"
 
 describe("sectionLabel", () => {
-  it.each([
-    ["observatory", "Evidence Timeline"],
-    ["journey", "Journey"],
-    ["runtime", "Cascade & Runtime"],
-    ["fleet-health", "Tool Monitor"],
-    ["cognition", "Keeper Cognition"],
-    ["agents", "Keeper Fleet"],
-  ] as [StatusSection, string][])("maps %s to %s", (section, expected) => {
-    expect(sectionLabel(section)).toBe(expected)
+  it("uses monitoring navigation labels as the SSOT", () => {
+    for (const item of sectionItemsForTab("monitoring")) {
+      expect(sectionLabel(item.params.section as StatusSection)).toBe(item.label)
+    }
+  })
+})
+
+describe("monitor lane visibility", () => {
+  it("uses monitoring navigation hidden flags as the SSOT", () => {
+    for (const item of sectionItemsForTab("monitoring")) {
+      const section = item.params.section as StatusSection
+      expect(isMonitorLane(section)).toBe(item.hidden !== true)
+      expect(isHiddenDiagnostic(section)).toBe(item.hidden === true)
+    }
   })
 })
 

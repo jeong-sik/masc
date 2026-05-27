@@ -1,10 +1,11 @@
 // MASC Dashboard — Status Surface
-// Monitor is keeper-operations first. Tool, cascade/runtime, evidence, and
+// Monitor is keeper-fleet first. Tool, cascade/runtime, evidence, and
 // hidden diagnostic/deep-link routes remain routeable through this dispatcher.
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
+import { sectionItemsForTab } from '../config/navigation'
 import { LoadingState } from './common/feedback-state'
 
 export type StatusSection =
@@ -13,24 +14,17 @@ export type StatusSection =
   | 'feature-health'
   | 'cognition'
 
-// Monitor sidebar exposes 4 keeper-facing lanes; the remaining sections are
-// reachable only via deep links or hidden diagnostic routes. The same flag
-// lives on each entry's `hidden: true` in navigation.ts — this Set mirrors
-// that classification so the dispatcher and future grouped layouts can ask
-// without re-reading the nav config. Source of truth stays in navigation.ts.
-const MONITOR_LANE_SECTIONS: ReadonlySet<StatusSection> = new Set<StatusSection>([
-  'agents',
-  'fleet-health',
-  'runtime',
-  'observatory',
-])
+function monitorSectionItem(section: StatusSection) {
+  return sectionItemsForTab('monitoring').find(item => item.params.section === section)
+}
 
 export function isMonitorLane(section: StatusSection): boolean {
-  return MONITOR_LANE_SECTIONS.has(section)
+  const item = monitorSectionItem(section)
+  return item !== undefined && item.hidden !== true
 }
 
 export function isHiddenDiagnostic(section: StatusSection): boolean {
-  return !MONITOR_LANE_SECTIONS.has(section)
+  return !isMonitorLane(section)
 }
 
 const LazyAgentsUnified = lazy(async () => ({
@@ -69,28 +63,7 @@ function sectionFallback(label: string) {
 }
 
 export function sectionLabel(section: StatusSection): string {
-  switch (section) {
-    case 'observatory':
-      return 'Evidence Timeline'
-    case 'journey':
-      return 'Journey'
-    case 'runtime':
-      return 'Cascade & Runtime'
-    case 'cascade-config':
-      return 'Cascade Config'
-    case 'fleet-health':
-      return 'Tool Monitor'
-    case 'doctor':
-      return 'Doctor'
-    case 'transport-health':
-      return 'Transport Health'
-    case 'feature-health':
-      return 'Feature Flags'
-    case 'cognition':
-      return 'Keeper Cognition'
-    case 'agents':
-      return 'Keeper Fleet'
-  }
+  return monitorSectionItem(section)?.label ?? section
 }
 
 function renderSection(section: StatusSection) {

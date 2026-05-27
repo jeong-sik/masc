@@ -209,9 +209,10 @@ let take n lst =
 let now_iso () = Masc_domain.now_iso ()
 let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 
-let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
-  let limit = clamp_limit limit in
-  let all = load_requests ?base_path () in
+(* Compute the request-listing projection from an already-loaded list.
+   Factored out so [proof_compose] can share the disk scan between
+   summary and request listing. *)
+let requests_json_of_requests ?task_id ~limit all : Yojson.Safe.t =
   let filtered = filter_by_task_id all task_id in
   let sorted = sort_desc filtered in
   let trimmed = take limit sorted in
@@ -221,6 +222,11 @@ let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
      ; ("requests", `List (List.map request_to_json trimmed))
      ]
      @ fd_pressure_fields ())
+
+let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
+  let limit = clamp_limit limit in
+  let all = load_requests ?base_path () in
+  requests_json_of_requests ?task_id ~limit all
 
 (* ── Summary projection ─────────────────────────────── *)
 
@@ -261,9 +267,11 @@ let is_rejected (req : V.verification_request) : bool =
 let bucket_of_status (req : V.verification_request) : string =
   req |> status_bucket_of_request |> status_bucket_to_string
 
-let summary_json ?base_path ?recent () : Yojson.Safe.t =
-  let recent = clamp_recent recent in
-  let all = load_requests ?base_path () in
+(* Compute the summary projection from an already-loaded request list.
+   Factored out so [proof_compose] can share the disk scan between
+   summary and request listing. *)
+let summary_json_of_requests ~recent all : Yojson.Safe.t =
+  let recent = clamp_recent (Some recent) in
   let total = List.length all in
   let pending = ref 0 in
   let approved = ref 0 in
@@ -295,3 +303,23 @@ let summary_json ?base_path ?recent () : Yojson.Safe.t =
      ; ("recent_rejections", `List recent_rejections)
      ]
      @ fd_pressure_fields ())
+
+let summary_json ?base_path ?recent () : Yojson.Safe.t =
+  let recent = Option.value recent ~default:default_recent in
+  let all = load_requests ?base_path () in
+  summary_json_of_requests ~recent all
+
+(* Single-load companion for handlers that emit both projections
+   side-by-side ([/api/v1/dashboard/proof] is the live caller).
+
+   [summary_json] and [requests_json] each call [load_requests], so
+   the historic proof handler scanned the verification store twice
+   per refresh.  This helper performs one scan and folds the two
+   projections from the shared list. *)
+let proof_compose ?base_path ?recent ?limit () : Yojson.Safe.t * Yojson.Safe.t =
+  let recent = Option.value recent ~default:default_recent in
+  let limit = clamp_limit limit in
+  let all = load_requests ?base_path () in
+  let summary = summary_json_of_requests ~recent all in
+  let requests = requests_json_of_requests ~limit all in
+  summary, requests

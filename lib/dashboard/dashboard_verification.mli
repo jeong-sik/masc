@@ -90,3 +90,21 @@ val requests_json :
       }
     ]} *)
 val summary_json : ?base_path:string -> ?recent:int -> unit -> Yojson.Safe.t
+
+(** Single-load companion to {!summary_json} + {!requests_json}.
+
+    Handlers that emit both projections side-by-side
+    ([/api/v1/dashboard/proof] is the live caller) previously called
+    {!summary_json} and {!requests_json} back-to-back, each
+    performing its own [Verification.list_requests] disk scan.
+    [proof_compose] performs one scan and folds both projections
+    from the shared list, halving the on-disk read cost per refresh.
+
+    The two returned values use the same shapes documented on
+    {!summary_json} and {!requests_json}. *)
+val proof_compose :
+  ?base_path:string ->
+  ?recent:int ->
+  ?limit:int ->
+  unit ->
+  Yojson.Safe.t * Yojson.Safe.t

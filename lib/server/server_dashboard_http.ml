@@ -187,11 +187,11 @@ let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
    so the main domain keeps serving requests during refresh. *)
 let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
   let base_path = config.Coord.base_path in
-  let verification_summary =
-    Dashboard_verification.summary_json ~base_path ~recent ()
-  in
-  let verification_requests =
-    Dashboard_verification.requests_json ~base_path ~limit ()
+  (* Single disk scan via [proof_compose]; the historical
+     [summary_json] + [requests_json] sequence walked the verification
+     store twice per refresh. *)
+  let verification_summary, verification_requests =
+    Dashboard_verification.proof_compose ~base_path ~recent ~limit ()
   in
   let proof_source ~id ~label ~route =
     `Assoc [ "id", `String id; "label", `String label; "route", `String route ]

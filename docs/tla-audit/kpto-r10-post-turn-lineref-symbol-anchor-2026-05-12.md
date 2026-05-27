@@ -3,7 +3,7 @@
 **Date**: 2026-05-12 · **Iteration**: 84 (`/loop` FSM/TLA+/OCaml drift hunt) · **Phase**: R (line-ref sweep, cluster #3)
 **Spec**: `specs/keeper-state-machine/KeeperPostTurnOrchestration.tla` (401 LOC, bug-model paired)
 **OCaml**: `lib/keeper/keeper_post_turn.ml` — `apply_post_turn_lifecycle_with_resilience_handles` (the post-turn lifecycle body the spec models) · `lib/keeper/keeper_unified_turn.ml` — the `current_turn_blocker_info` stamp
-**Verdict**: **9 line-ref citations symbol-anchored; the ~8 `keeper_post_turn.ml:NNN` ones (lines 600-656) were still roughly accurate but converted preventively, the 1 `keeper_unified_turn.ml:1640` had genuinely drifted (the stamp site is near line 1810, the ref-decl near 789), and the enclosing-function name in the `phase` row was slightly wrong (`apply_post_turn_lifecycle` → `apply_post_turn_lifecycle_with_resilience_handles`).** Model body unchanged; TLC re-verified (clean = no error, depth 11; buggy = `SafetyInvariant` violated).
+**Verdict**: **9 line-ref citations symbol-anchored; the ~8 `keeper_post_turn.ml:NNN` ones (lines 600-656) were still roughly accurate but converted preventively, the 1 `keeper_unified_turn.ml:1640` had genuinely drifted (the stamp site is near line 1810, the ref-decl near 789), and the enclosing-function name in the `phase` row was corrected to `apply_post_turn_lifecycle_with_resilience_handles`.** Model body unchanged; TLC re-verified (clean = no error, depth 11; buggy = `SafetyInvariant` violated).
 
 ## Why this cluster (line-ref sweep #3, the last big one)
 
@@ -13,7 +13,7 @@ iter 81's corpus survey flagged KeeperPostTurnOrchestration as the third cluster
 
 | Spec citation | Actual 2026-05-12 | Drift | Action |
 |---|---|---|---|
-| `keeper_post_turn.ml:600-656` — `phase` row ("control-flow position inside apply_post_turn_lifecycle") | the post-compaction → rollover → wirein-chain tail of `apply_post_turn_lifecycle_with_resilience_handles` (function @361, tail @~595-656); `apply_post_turn_lifecycle` itself (@658) is a 5-line wrapper | ~0 (line band still right) but the *function name* was wrong | → `keeper_post_turn.ml — apply_post_turn_lifecycle_with_resilience_handles (post-compaction → rollover → wirein-chain tail)`; semantic column corrected to name the real function |
+| `keeper_post_turn.ml:600-656` — `phase` row ("control-flow position inside the post-turn lifecycle") | the post-compaction → rollover → wirein-chain tail of `apply_post_turn_lifecycle_with_resilience_handles` (function @361, tail @~595-656) | ~0 (line band still right) but the *function name* was wrong | → `keeper_post_turn.ml — apply_post_turn_lifecycle_with_resilience_handles (post-compaction → rollover → wirein-chain tail)`; semantic column corrected to name the real function |
 | `keeper_post_turn.ml:622-632` — `compaction_decision` | the `compaction = { attempted; applied; failure_reason; trigger; ... }` record @~625-637 | ~0..+5 | → symbol anchor (the record construction in `apply_post_turn_lifecycle_with_resilience_handles`) |
 | `keeper_post_turn.ml:600-608` — `rollover_decision` (×2, incl. inline at line 187) | `Keeper_rollover.maybe_rollover_oas_handoff` call @601 | ~0 | → symbol anchor |
 | `keeper_post_turn.ml:648-656` — `wirein_order` (×3: mapping row + lines 80, 295) | the `apply_*_wirein` chain (`apply_autonomous_wirein`@648 → `apply_resilience_wirein` → `apply_tool_emission_wirein` → `apply_multimodal_wirein`@656) | ~0 (exact) | → symbol anchor (the chain) |

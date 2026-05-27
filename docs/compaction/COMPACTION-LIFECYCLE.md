@@ -71,7 +71,7 @@ stateDiagram-v2
 **Post-turn lifecycle contract**
 ([`keeper_state_machine.mli:110-138`](../../lib/keeper/keeper_state_machine.mli)):
 `Compaction_started`/`Compaction_completed`/`Compaction_failed` MUST
-be dispatched only from `Keeper_post_turn.apply_post_turn_lifecycle`.
+be dispatched only from `Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`.
 Violations reopen the
 [`KeepalivePhaseConsistency.tla`](../../specs/bug-models/KeepalivePhaseConsistency.tla)
 bug — `NoDrainTransition` / `GhostDispatch` invariants would catch it.

@@ -223,7 +223,7 @@ cadence pattern).
 
 ### 6.2 Lifecycle (Phase 2)
 
-- Reuse [test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts]
+- Reuse [test_post_turn_lifecycle_no_state_advances_cooldown_ts]
   (added by #15682) but assert it advances [last_compact_check_ts],
   not [last_continuity_update_ts].
 - New test: post-turn with no snapshot leaves

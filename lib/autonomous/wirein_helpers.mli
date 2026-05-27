@@ -6,16 +6,13 @@
     These helpers live in [lib/autonomous/] (rather than directly
     inside [lib/keeper/keeper_post_turn]) so they can be unit-tested
     without pulling the entire [masc_mcp] library into the test
-    closure. The keeper-side [apply_post_turn_lifecycle] dispatches
-    to {!masc_autonomous_enabled} and {!upsert_autonomous_meta} from
-    here. *)
+    closure. The keeper post-turn lifecycle dispatches to
+    {!masc_autonomous_enabled} and {!upsert_autonomous_meta} from here. *)
 
 val masc_autonomous_enabled : unit -> bool
 (** [true] iff the [MASC_AUTONOMOUS] environment variable is set
     to one of ["1"], ["true"], ["yes"], or ["on"] (case-sensitive).
-    The default ([false]) keeps the autonomous wire-in inert —
-    calling [Keeper_post_turn.apply_post_turn_lifecycle] is
-    identical to its pre-A5 behaviour. *)
+    The default ([false]) keeps the autonomous wire-in inert. *)
 
 val upsert_autonomous_meta :
   Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option

@@ -50,7 +50,7 @@ code_refs:
 세 spec은 각자 영역에서 유효하지만, **한 turn 안에서 여러 FSM이 순서를 지키며 전이하는 joint property**는 아무도 검사하지 않는다. 근거:
 
 - `Keeper_state_machine.mli:131-136` `Context_measured` 이벤트는 Decision, Compaction, Cascade, Recovery의 분기 조건을 공통으로 공급하지만 이 공유 측정의 존재를 joint spec으로 명시한 곳이 없다.
-- `keeper_post_turn.ml:45-232` `apply_post_turn_lifecycle`는 `Compaction_started/completed`, `Handoff_started/completed`를 한 turn 안에 atomic하게 emit하지만, 이 atomic 경계를 TLC로 검증할 수 있는 spec이 없다.
+- `keeper_post_turn.ml:45-232` `apply_post_turn_lifecycle_with_resilience_handles`는 `Compaction_started/completed`, `Handoff_started/completed`를 한 turn 안에 atomic하게 emit하지만, 이 atomic 경계를 TLC로 검증할 수 있는 spec이 없다.
 - `docs/tla-audit/state-fsm-gap-2026-04-13.md` Bug #1(PR #6834, `keeper_keepalive.ml:774-836`)은 **data record 스토어와 FSM condition 스토어 간 비동기**가 만든 one-way trap이었다. 이 RFC의 live observer contract에서는 그 two-store 축을 더 이상 ownership 대상으로 두지 않는다. `KeeperRecoveryOrchestration.tla`는 historical audit model로만 남는다.
 - 대시보드 관점에서 각 FSM이 `dashboard/src/components/keeper-*.ts`의 개별 위젯으로 흩어져 있어 "이 keeper의 현재 상태가 invariants를 만족하는가"를 한눈에 볼 수 없다.
 
@@ -228,7 +228,7 @@ L2는 `WF_vars(ClearFailing)`이 fairness에 포함되어야만 성립한다. fa
 
 ### 관찰 hook 위치
 
-- `lib/keeper/keeper_post_turn.ml:45-232` `apply_post_turn_lifecycle` — `Compaction_started/completed`, `Handoff_started/completed` 각 emit 직후 `Keeper_event_bus` 브로드캐스트.
+- `lib/keeper/keeper_post_turn.ml:45-232` `apply_post_turn_lifecycle_with_resilience_handles` — `Compaction_started/completed`, `Handoff_started/completed` 각 emit 직후 `Keeper_event_bus` 브로드캐스트.
 - `lib/keeper/keeper_unified_turn.ml` — phase gate 입출.
 - Topic: `keeper.composite.tick`.
 - Envelope: OAS event_bus envelope `{correlation_id, run_id, ts}` (PR OAS#845, `project_oas-event-bus-envelope-2026-04-12.md`).

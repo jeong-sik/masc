@@ -30,7 +30,7 @@
  *     a TLC trace and replays each (state, action, state') tuple
  *     through OCaml.  Current phases ship parity + spot transitions.
  *   - B2/B3 in-process replay.  The compute_tool_surface and
- *     apply_post_turn_lifecycle pipelines need keeper-runtime
+ *     keeper post-turn lifecycle pipelines need keeper-runtime
  *     fixtures (acc / meta / switch); the TLC layer is the
  *     load-bearing check for invariants.
  *)

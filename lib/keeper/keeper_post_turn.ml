@@ -684,27 +684,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
   let body = apply_tool_emission_wirein ~now:now_ts body in
   apply_multimodal_wirein ~now:now_ts body
 
-let apply_post_turn_lifecycle
-    ~(on_compaction_started : unit -> unit)
-    ~(on_handoff_started : unit -> unit)
-    ~(base_dir : string)
-    ~(meta : keeper_meta)
-    ~(model : string)
-    ~(primary_model_max_tokens : int)
-    ~(current_turn_blocker_info : blocker_info option)
-    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
-  apply_post_turn_lifecycle_with_resilience_handles
-    ~resilience_audit_store:None
-    ~resilience_strategy_executor:None
-    ~on_compaction_started
-    ~on_handoff_started
-    ~base_dir
-    ~meta
-    ~model
-    ~primary_model_max_tokens
-    ~current_turn_blocker_info
-    ~checkpoint
-
 let forced_overflow_retry_meta
     (meta : keeper_meta)
     ~(turn_generation : int)

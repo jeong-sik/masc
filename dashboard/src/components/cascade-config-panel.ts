@@ -421,7 +421,7 @@ function ProfileCard({
       await onAssignKeeper(selectedKeeper.value, profile.name)
       assignmentMessage.value = `${selectedKeeper.value} → ${profile.name}`
     } catch (error) {
-      assignmentMessage.value = `Failed to assign: ${errorMessage(error)}`
+      assignmentMessage.value = `Failed to assign: ${errorToString(error)}`
     } finally {
       assigning.value = false
     }
@@ -1090,7 +1090,11 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
   `
 }
 
-function errorMessage(error: unknown): string {
+// Generic Error -> message conversion with String() fallback (no special
+// 'unknown error' literal, no nullable return, no fallback param).
+// Distinct from errorMessageOrNull / errorMessageOrUnknown / errorMessageOr
+// in other modules.
+function errorToString(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
@@ -1349,10 +1353,10 @@ function CascadeRawConfigEditor({
         await onRefresh()
         saveMessage.value = '저장 완료.'
       } catch (error) {
-        saveMessage.value = `저장됨, 새로고침 실패: ${errorMessage(error)}`
+        saveMessage.value = `저장됨, 새로고침 실패: ${errorToString(error)}`
       }
     } catch (error) {
-      saveMessage.value = `Failed to save: ${errorMessage(error)}`
+      saveMessage.value = `Failed to save: ${errorToString(error)}`
     } finally {
       saving.value = false
     }

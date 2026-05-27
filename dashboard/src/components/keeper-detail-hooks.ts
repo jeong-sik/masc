@@ -22,7 +22,10 @@ const RUNTIME_TRACE_REFRESH_MS = 30_000
  */
 export type KeeperDetailEvidenceState<T> = EvidenceState<T>
 
-function errorMessage(err: unknown, fallback: string): string {
+// Error -> message conversion with caller-supplied fallback (distinct from
+// errorMessageOrUnknown which hard-codes 'unknown error', and from
+// errorToString / errorMessageOrNull in other modules).
+function errorMessageOr(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
@@ -50,7 +53,7 @@ export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvid
         }
       } catch (err) {
         if (!cancelled && !controller.signal.aborted) {
-          const message = errorMessage(err, 'composite fetch failed')
+          const message = errorMessageOr(err, 'composite fetch failed')
           setEvidence((current) => applyFetchFailed(current, message, Date.now()))
         }
       }
@@ -87,7 +90,7 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
         }
       } catch (err) {
         if (!cancelled && !controller.signal.aborted) {
-          const message = errorMessage(err, 'runtime trace fetch failed')
+          const message = errorMessageOr(err, 'runtime trace fetch failed')
           setEvidence((current) => applyFetchFailed(current, message, Date.now()))
         }
       }

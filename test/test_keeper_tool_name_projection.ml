@@ -24,6 +24,11 @@ let test_visible_public_alias_wins () =
     "tool_execute projects to visible Execute"
     (Some "Execute")
     (Projection.model_name ~visible_tool_names:[ "Execute" ] "tool_execute");
+  check
+    (option string)
+    "mcp-prefixed public Execute remains visible"
+    (Some "Execute")
+    (Projection.model_name ~visible_tool_names:[ "Execute" ] "mcp__masc__Execute");
   match
     Projection.resolve_model_name ~visible_tool_names:[ "tool_execute"; "Execute" ]
       "tool_execute"

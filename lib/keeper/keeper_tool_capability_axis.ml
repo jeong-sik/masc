@@ -2,7 +2,7 @@
 
     Callers may pass public aliases ([Execute], [WriteFile], ...), public MCP
     names, prefixed MCP names, or internal handler names. This module
-    normalizes names through the alias SSOT before answering capability
+    normalizes names through descriptor resolution before answering capability
     predicates. *)
 
 type t =
@@ -27,11 +27,9 @@ let masc_keeper_name (tool : Tool_name.Masc_keeper.t) =
 
 let canonical_tool_name name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  match Keeper_tool_alias.canonical_resolution name with
-  | Keeper_tool_alias.Public_mcp { internal; _ }
-  | Keeper_tool_alias.Public_alias { internal } -> internal
-  | Keeper_tool_alias.Internal { canonical } -> canonical
-  | Keeper_tool_alias.Unknown -> stripped
+  match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
+  | Some internal -> internal
+  | None -> stripped
 ;;
 
 let candidate_names name =

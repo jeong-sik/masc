@@ -616,7 +616,10 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   let registry = "lib/keeper/keeper_tool_registry.ml" in
   let registry_mli = "lib/keeper/keeper_tool_registry.mli" in
   assert_contains "lib/dune" "keeper_tool_capability_axis";
-  assert_contains axis "Keeper_tool_alias.canonical_resolution";
+  assert_contains
+    axis
+    "Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name";
+  assert_not_contains axis "Keeper_tool_alias.canonical_resolution";
   assert_not_contains axis "Keeper_tool_alias.route";
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
@@ -643,6 +646,10 @@ let test_public_alias_projection_uses_core_axis () =
   let coord_classify = "lib/coord/coord_task_classify.ml" in
   let keeper_alias = "lib/keeper/keeper_tool_alias.ml" in
   let run_tools_setup = "lib/keeper/keeper_run_tools_setup.ml" in
+  let tool_resolution = "lib/keeper/keeper_tool_resolution.ml" in
+  let tool_resolution_mli = "lib/keeper/keeper_tool_resolution.mli" in
+  let tool_name_projection = "lib/keeper/keeper_tool_name_projection.ml" in
+  let turn_driver_helpers = "lib/keeper/keeper_turn_driver_helpers.ml" in
   let oas_bundle = "lib/keeper/keeper_tools_oas_bundle.ml" in
   assert_contains "lib/core/dune" "tool_name_alias_axis";
   assert_contains core_axis "public_name = \"Execute\"; internal_name = \"tool_execute\"";
@@ -665,6 +672,22 @@ let test_public_alias_projection_uses_core_axis () =
   assert_not_contains run_tools_setup "Keeper_tool_alias.route";
   assert_contains agent_surface "Agent_tool_descriptor.find_public";
   assert_not_contains agent_surface "Keeper_tool_alias.route";
+  assert_contains tool_resolution "Agent_tool_descriptor.find_public";
+  assert_contains
+    tool_resolution
+    "Agent_tool_descriptor_resolution.public_names_for_internal";
+  assert_not_contains tool_resolution "Keeper_tool_alias.public_names";
+  assert_not_contains tool_resolution "Keeper_tool_alias.route";
+  assert_contains tool_resolution_mli "Agent_tool_descriptor.find_public";
+  assert_not_contains tool_resolution_mli "Keeper_tool_alias.route";
+  assert_contains
+    tool_name_projection
+    "Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name";
+  assert_not_contains tool_name_projection "Keeper_tool_alias.canonical_internal_name";
+  assert_contains
+    turn_driver_helpers
+    "Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name";
+  assert_not_contains turn_driver_helpers "Keeper_tool_alias.canonical_internal_name";
   assert_contains oas_bundle "Agent_tool_descriptor.public_descriptors";
   assert_not_contains oas_bundle "Keeper_tool_alias.public_names";
   assert_not_contains oas_bundle "Keeper_tool_alias.route"

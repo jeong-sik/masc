@@ -6,7 +6,7 @@
     stay diff-friendly. *)
 
 open Alcotest
-module EC = Masc_mcp.Evidence_claim
+module EC = Evidence_claim
 
 let check_claim = check (testable EC.pp EC.equal)
 

@@ -6,6 +6,7 @@ import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { stripStateBlocks } from '../../keeper-message'
+import { SYSTEM_MESSAGE_FROM } from '../../lib/board-utils'
 import { navigate } from '../../router'
 import { messages } from '../../store'
 import type { Message } from '../../types'
@@ -97,7 +98,7 @@ function StateRow({ row }: { row: StateBlockRow }) {
         ${row.message.seq !== undefined
           ? html`<span class="text-3xs font-semibold tabular-nums uppercase tracking-[var(--track-caps)] text-[var(--warn-bright)]">#${row.message.seq}</span>`
           : null}
-        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? 'system'}</span>
+        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
         ${row.message.timestamp
           ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
           : null}
@@ -137,7 +138,7 @@ function StateRow({ row }: { row: StateBlockRow }) {
 
 export function StateBlockMessages() {
   const rows = useMemo(() => buildStateBlockRows(messages.value), [messages.value])
-  const sourceCount = new Set(rows.map(row => row.message.from ?? 'system')).size
+  const sourceCount = new Set(rows.map(row => row.message.from ?? SYSTEM_MESSAGE_FROM)).size
 
   return html`
     <section class="grid gap-4" aria-labelledby="state-block-messages-heading">

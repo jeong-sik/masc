@@ -6,6 +6,7 @@ import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { stripStateBlocks } from '../../keeper-message'
+import { SYSTEM_MESSAGE_FROM } from '../../lib/board-utils'
 import { currentDashboardActorName } from '../../lib/dashboard-session-actor'
 import { navigate } from '../../router'
 import { messages, shellAuthSummary } from '../../store'
@@ -134,7 +135,7 @@ function MessageRow({ row }: { row: MentionInboxRow }) {
   return html`
     <article class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3.5 py-3">
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? 'system'}</span>
+        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
         ${row.message.timestamp
           ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
           : null}

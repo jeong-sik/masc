@@ -33,6 +33,19 @@ let guarded_file_not_contains_pattern file_rel pattern =
 
 let retired_preflight_tool_name = "keeper_" ^ "preflight_check"
 
+let retired_docker_pr_reprobe_wrapper =
+  "scripts/harness_" ^ "keeper_docker_" ^ "pr_" ^ "lifecycle_" ^ "reprobe.sh"
+
+let retired_docker_pr_reprobe_workload =
+  "scripts/harness/workload/" ^ "keeper_docker_" ^ "pr_" ^ "lifecycle_"
+  ^ "reprobe.sh"
+
+let retired_docker_pr_reprobe_runbook =
+  "docs/KEEPER-DOCKER-" ^ "PR-LIFECYCLE-REPROBE.md"
+
+let retired_docker_pr_reprobe_script_name =
+  "harness_" ^ "keeper_docker_" ^ "pr_" ^ "lifecycle_" ^ "reprobe.sh"
+
 let file_contains_line_with_patterns file_rel patterns =
   let path = source_path file_rel in
   if not (Sys.file_exists path) then false
@@ -1422,38 +1435,12 @@ let test_keeper_required_tool_contracts () =
   check bool "final-turn required tool prompt does not allow one-tool partial success" true
     (file_not_contains_pattern "lib/keeper/keeper_run_tools_hooks.ml"
        "call at least one");
-  check bool "docker PR lifecycle harness default splits create/review tools" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|REQUIRED_TOOLS_DEFAULT="${REQUIRED_TOOLS:-}"|}
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-SearchWeb,Execute}}"|}
-     && file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute}}"|});
-  check bool "docker PR lifecycle harness cuts removed command/web aliases" true
-    (file_not_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "WebSearch"
-     && file_not_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|tool_name == "Bash"|}
-     && file_not_contains_pattern
-          "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "WebSearch"
-     && file_not_contains_pattern
-          "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "`Bash`");
-  check bool "runbook documents docker PR lifecycle split phases" true
-    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "The create phase"
-     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "PR creation uses visible `Execute` with"
-     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "the review phase requires `Execute`"
-     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "keeps target inspection mandatory");
+  check bool "docker PR lifecycle reprobe harness stays retired" true
+    ((not (Sys.file_exists (source_path retired_docker_pr_reprobe_wrapper)))
+     && (not (Sys.file_exists (source_path retired_docker_pr_reprobe_workload)))
+     && (not (Sys.file_exists (source_path retired_docker_pr_reprobe_runbook)))
+     && file_not_contains_pattern "docs/rfc/RFC-0019-keeper-credential-unification.md"
+          retired_docker_pr_reprobe_script_name);
   check bool "taskboard schema documents PR required_tools execute path" true
     (file_not_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
        retired_preflight_tool_name
@@ -1463,66 +1450,6 @@ let test_keeper_required_tool_contracts () =
           "review wrappers"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "sandboxed");
-  check bool "docker PR lifecycle prompt accepts brokered route proof" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "via=docker, route_via=docker, via=brokered, or route_via=brokered")
-  ;
-  check bool "docker PR lifecycle branch matches worktree branch contract" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"|}
-     && file_contains_pattern
-          "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "`keeper-<keeper>-agent/<run_id>`");
-  check bool "docker PR lifecycle rejects stale proof branches before mutate" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "assert_no_proof_branch_collisions_for_mutate"
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "branch_collision_preflight"
-     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "`branch_collision_preflight`");
-  check bool "docker PR lifecycle gates review on create success evidence" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "all_create_results_ready_for_review"
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "create_success_markers_missing"
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "skipping review phase because create phase did not produce complete success evidence"
-     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "`create-readiness-failures.jsonl`");
-  check bool "docker PR lifecycle supports review-only resume" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|PHASE_MODE="${PHASE_MODE:-both}"|}
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|--phase create|review|both|}
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|--review-resume|}
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then|}
-     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "`--phase review --review-resume`");
-  check bool "docker PR lifecycle review resolves fork head refs" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "proof_head_ref_for_keeper"
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName|}
-     && file_contains_pattern
-          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "review_target_head"
-     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "owner-qualified `OWNER:BRANCH` head ref");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")
@@ -1540,56 +1467,9 @@ let test_keeper_msg_timeout_contracts () =
   check bool "keeper msg forwards timeout_sec into Agent.run" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "?oas_timeout_s:keeper_msg_oas_timeout_s");
-  check bool "docker PR lifecycle harness decouples HTTP and keeper turn timeout" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-900}"|});
-  check bool "docker PR lifecycle harness sends keeper turn timeout" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|--argjson timeout "$KEEPER_TURN_TIMEOUT_SEC"|});
-  check bool "docker PR lifecycle harness pins server incarnation" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "SERVER_INCARNATION_ACTUAL");
-  check bool "docker PR lifecycle harness checks incarnation during polling" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "assert_server_incarnation_unchanged");
-  check bool "docker PR lifecycle harness captures incarnation failures under set -e" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|if fields="$(capture_server_incarnation "$health_file")"; then|});
-  check bool "docker PR lifecycle harness reports missing commit separately" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "server health missing build.commit for incarnation check");
-  check bool "docker PR lifecycle harness records restart-lost requests" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "server_incarnation_changed");
-  check bool "docker PR lifecycle prompt routes mutating git through Execute" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Use the visible Execute tool inside your Docker playground for proof-file creation and git add/commit/push");
-  check bool "docker PR lifecycle prompt names visible Execute for push" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Commit and git push exactly branch");
-  check bool "docker PR lifecycle prompt uses docker bash for proof edit" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "visible Execute tool inside your Docker playground");
-  check bool "docker PR lifecycle prompt routes pr create through visible Execute" true
-    (file_contains_pattern
-       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Use visible Execute with executable=\"gh\" and typed argv for PR creation");
-  check bool "runbook documents server incarnation restart classification" true
-    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "`server_incarnation_changed`");
-  check bool "runbook documents keeper turn timeout" true
-    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "`masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`")
+  check bool "keeper msg timeout contract does not depend on retired docker PR harness" true
+    ((not (Sys.file_exists (source_path retired_docker_pr_reprobe_wrapper)))
+     && not (Sys.file_exists (source_path retired_docker_pr_reprobe_workload)))
 
 let test_keeper_supervisor_domain_pool_contracts () =
   check bool "keeper supervisor never submits Eio loop body to domain pool" true
@@ -1843,20 +1723,14 @@ let test_forge_pr_audit_contracts () =
        ("pr-" ^ "action-metrics")
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           ("pr_" ^ "action_metric"));
-  check bool "keeper fleet audit recognizes route_evidence docker markers" true
-    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "route_evidence"
-     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-          "route_evidence.via=docker");
-  check bool "keeper fleet audit can scope lifecycle evidence by run id" true
-    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "--evidence-run-id"
-     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+  check bool "keeper fleet audit does not consume docker PR lifecycle scope" true
+    (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       "route_evidence.via=docker"
+     && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "--evidence-run-id"
+     && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           "load_harness_evidence_windows"
-     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "--evidence-run-id \"$RUN_ID\""
-     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "--harness-run-dir \"$RUN_DIR\"");
+     && not (Sys.file_exists (source_path retired_docker_pr_reprobe_workload)));
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})

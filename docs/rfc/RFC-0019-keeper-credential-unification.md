@@ -351,10 +351,8 @@ MASC_CRED_MATERIALIZER=on dune exec masc-mcp -- serve
 # server returns device code → operator visits github.com/login/device →
 # server completes materialization → toast: "Materialized: credential <id>"
 
-# Now keeper smoke
-keeper_name="anyang-keepers" \
-  scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh
-# Expected: PR created, attributed to <username> from credential record.
+# Now run a focused credential-backed keeper smoke.
+# Expected: credential materialization is visible in keeper runtime state.
 ```
 
 **PR-C**:

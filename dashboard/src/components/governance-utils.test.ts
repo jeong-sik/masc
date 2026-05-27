@@ -3,7 +3,7 @@ import {
   itemKey,
   getSelectedDecision,
   filteredItemsByFilter,
-  kindLabel,
+  governanceKindLabel,
   formatAgeSummary,
 } from './governance-utils'
 import type { GovernanceDecisionItem } from '../types'
@@ -117,17 +117,17 @@ describe('filteredItemsByFilter', () => {
 // serializePreview
 // ================================================================
 
-describe('kindLabel', () => {
+describe('governanceKindLabel', () => {
   it('returns "Case" for case', () => {
-    expect(kindLabel('case')).toBe('Case')
+    expect(governanceKindLabel('case')).toBe('Case')
   })
 
   it('returns "Petition" for petition', () => {
-    expect(kindLabel('petition')).toBe('Petition')
+    expect(governanceKindLabel('petition')).toBe('Petition')
   })
 
   it('returns raw value for unknown', () => {
-    expect(kindLabel('custom')).toBe('custom')
+    expect(governanceKindLabel('custom')).toBe('custom')
   })
 })
 

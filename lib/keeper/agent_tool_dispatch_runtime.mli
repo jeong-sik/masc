@@ -166,6 +166,11 @@ val execute_keeper_tool_call_with_outcome
   -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?mcp_session_id:string
   -> name:string
   -> input:Yojson.Safe.t
   -> unit

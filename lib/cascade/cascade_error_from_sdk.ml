@@ -22,23 +22,30 @@ open Cascade_internal_error
 
 let parse_masc_internal_error_json (json : Yojson.Safe.t) :
     masc_internal_error option =
-  let int_opt_of_assoc key = function
-    | `Assoc fields -> (
+  let int_opt_of_assoc key json =
+    match Yojson.Safe.Util.to_assoc json with
+    | exception _ -> None
+    | fields -> (
         match List.assoc_opt key fields with
         | Some (`Int value) -> Some value
         | Some (`Intlit value) -> int_of_string_opt value
-        | _ -> None)
-    | _ -> None
+        | Some
+            ( `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ )
+        | None ->
+            None)
   in
-  let float_opt_of_assoc key = function
-    | `Assoc fields -> (
+  let float_opt_of_assoc key json =
+    match Yojson.Safe.Util.to_assoc json with
+    | exception _ -> None
+    | fields -> (
         match List.assoc_opt key fields with
         | Some (`Float value) -> Some value
         | Some (`Int value) -> Some (float_of_int value)
         | Some (`Intlit value) ->
             Option.map float_of_int (int_of_string_opt value)
-        | _ -> None)
-    | _ -> None
+        | Some ( `Null | `Bool _ | `String _ | `List _ | `Assoc _ )
+        | None ->
+            None)
   in
   match json with
   | `Assoc fields -> (
@@ -53,8 +60,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                indistinguishable from a real cascade-reason value and
                poison downstream typed pattern matches. *)
             let reason_opt =
-              match List.assoc_opt "reason"
-                      (match json with `Assoc fields -> fields | _ -> []) with
+              match List.assoc_opt "reason" fields with
               | Some json_val ->
                   Keeper_meta_contract.cascade_exhaustion_reason_of_json json_val
               | None -> None

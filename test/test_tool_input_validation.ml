@@ -1122,10 +1122,10 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
 (* Test: oneOf with empty/null values (regression guard)             *)
 (* ================================================================ *)
 
-(** Shape-validation boundary: an empty [pipeline = []] is treated as absent by
-    the lightweight oneOf pre-hook, so this layer forwards the payload. The
-    typed Execute parser still rejects any [executable] + [pipeline] field pair
-    before dispatch. *)
+(** Shape-validation boundary: [not: {required: ["pipeline"]}] must treat the
+    [pipeline] key as present even when its value is an empty array. Otherwise
+    validation forwards a payload that the typed Execute parser rejects as an
+    [executable] + [pipeline] mutually-exclusive pair. *)
 let test_validate_args_tool_execute_exec_with_empty_pipeline () =
   let args =
     `Assoc
@@ -1140,13 +1140,14 @@ let test_validate_args_tool_execute_exec_with_empty_pipeline () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check string) "executable preserved" "pwd"
-      (assoc_string "executable" forwarded)
   | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool) "mentions exact-one-of" true
+      (string_contains msg "exactly one of")
+  | Ok forwarded ->
     Alcotest.failf
-      "expected tool_execute with executable + empty pipeline to pass, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+      "expected tool_execute with executable + empty pipeline to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 (** stages is not a tool_execute input field. Sending stages in args triggers
     additionalProperties rejection since the schema declares
@@ -1186,13 +1187,14 @@ let test_validate_args_tool_execute_pipeline_rejects_null_exec () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check bool) "executable not in forwarded" true
-      (Yojson.Safe.Util.member "executable" forwarded = `Null)
   | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool) "mentions exact-one-of" true
+      (string_contains msg "exactly one of")
+  | Ok forwarded ->
     Alcotest.failf
-      "expected tool_execute pipeline with null exec to pass shape validation, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+      "expected tool_execute pipeline with null exec to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 (* ================================================================ *)
 (* Test: oneOf with const discriminator                              *)

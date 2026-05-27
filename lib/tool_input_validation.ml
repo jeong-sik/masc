@@ -144,6 +144,7 @@ let typed_shell_unsupported_field_hint schema names =
 type one_of_branch = {
   required : string list;
   consts : (string * Yojson.Safe.t) list;
+  forbidden_required : string list;
 }
 
 let one_of_branch_constraints schema =
@@ -170,7 +171,12 @@ let one_of_branch_constraints schema =
                    props
                | _ -> []
              in
-             Some { required; consts })
+             let forbidden_required =
+               match Yojson.Safe.Util.member "not" branch with
+               | `Assoc _ as not_schema -> required_names not_schema
+               | _ -> []
+             in
+             Some { required; consts; forbidden_required })
         branches
     in
     if List.length constraints = List.length branches then constraints else []
@@ -203,6 +209,7 @@ let one_of_required_shape_error schema = function
         | Some (`List []) -> false
         | Some _ -> true
       in
+      let key_is_present name = Option.is_some (List.assoc_opt name fields) in
       let const_field_matches name expected =
         match List.assoc_opt name fields with
         | Some actual -> Yojson.Safe.equal actual expected
@@ -210,6 +217,7 @@ let one_of_required_shape_error schema = function
       in
       let branch_matches branch =
         List.for_all has_present branch.required
+        && not (List.exists key_is_present branch.forbidden_required)
         && List.for_all
              (fun (name, expected) -> const_field_matches name expected)
              branch.consts

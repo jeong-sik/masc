@@ -5,6 +5,14 @@ open Server_auth
 (* Re-export cache types and helpers from sub-module *)
 include Server_dashboard_http_cache
 
+(* Deep dashboard surface cache TTL — 2 minutes.  Used for mission
+   and execution surfaces that involve multi-step compute. *)
+let deep_surface_cache_ttl_s = 120.0
+
+(* Shell dashboard surface cache TTL — 15 seconds.  Shell state
+   changes more frequently than deep surfaces. *)
+let shell_surface_cache_ttl_s = 15.0
+
 type dashboard_compute_mode =
       Server_dashboard_http_runtime_support.dashboard_compute_mode =
   | Inline_shared
@@ -186,7 +194,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       cached_surface_or_first_success_json
         mission_cache
         ~cache_key:"mission:default"
-        ~ttl:120.0
+        ~ttl:deep_surface_cache_ttl_s
         ~clock
         ~timeout_sec:dashboard_mission_timeout_s
         (fun () -> compute ())
@@ -200,7 +208,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       in
       Dashboard_cache.get_or_compute_with_timeout
         cache_key
-        ~ttl:120.0
+        ~ttl:deep_surface_cache_ttl_s
         ~clock
         ~timeout_sec:dashboard_mission_timeout_s
         (compute ?actor)
@@ -261,7 +269,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
     in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:dashboard_mission_timeout_s
       compute)
@@ -811,11 +819,11 @@ let dashboard_shell_http_json
     | Some clock ->
       Dashboard_cache.get_or_compute_with_timeout
         cache_key
-        ~ttl:15.0
+        ~ttl:shell_surface_cache_ttl_s
         ~clock
         ~timeout_sec:(dashboard_shell_timeout_for ~light)
         compute
-    | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+    | None -> Dashboard_cache.get_or_compute cache_key ~ttl:shell_surface_cache_ttl_s compute
   in
   let payload =
     if startup_prewarm_pending

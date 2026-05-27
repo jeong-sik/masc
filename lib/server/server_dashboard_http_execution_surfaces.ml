@@ -4,6 +4,14 @@
 open Server_utils
 open Server_dashboard_http_core
 
+(* Deep dashboard surface cache TTL — 2 minutes.  Duplicated from
+   [server_dashboard_http_core.ml] because the .mli doesn't export
+   local values. *)
+let deep_surface_cache_ttl_s = 120.0
+
+(* Shell/execution-trust surface cache TTL — 15 seconds. *)
+let shell_surface_cache_ttl_s = 15.0
+
 (* Routed through Env_config_runtime.Dashboard so operators can raise
    the ceiling on slow-disk deployments without a rebuild. The outer
    wrapper at [server_runtime_bootstrap.ml] uses the matching
@@ -27,11 +35,11 @@ let warm_shell_cache (state : Mcp_server.server_state) =
          | Some clock ->
            Dashboard_cache.get_or_compute_with_timeout
              cache_key
-             ~ttl:15.0
+             ~ttl:shell_surface_cache_ttl_s
              ~clock
              ~timeout_sec:shell_prewarm_timeout_s
              compute
-         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:shell_surface_cache_ttl_s compute
        in
        (try
           let light_result = cache_shell_payload ~light:true in
@@ -334,7 +342,7 @@ let with_execution_metadata ~config ?cache_key ~query json =
     ~scope:"dashboard_execution"
     ~producer:"Dashboard_execution.json"
     ~store_kind:"process_cache"
-    ~ttl_s:120.0
+    ~ttl_s:deep_surface_cache_ttl_s
     ~timeout_s:Env_config_runtime.Dashboard.execution_timeout_sec
     ~background_refresh_interval_s:60.0
     ~query
@@ -736,7 +744,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     cached_surface_or_first_success_json
       execution_cache
       ~cache_key:"execution:default:light"
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ~light:true)
@@ -756,7 +764,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ?actor ?fixture ~light)
@@ -789,11 +797,11 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   | Some clock ->
     Dashboard_cache.get_or_compute_with_timeout
       "execution-trust:default"
-      ~ttl:15.0
+      ~ttl:shell_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
       compute
-  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:15.0 compute)
+  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:shell_surface_cache_ttl_s compute)
   |> attach_surface_envelope
 ;;
 

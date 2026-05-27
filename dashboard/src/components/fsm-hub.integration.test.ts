@@ -27,11 +27,13 @@ import {
 import type { GateKeepersData } from '../api/gate'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import {
-  deriveStateEntries,
-  deriveSwimlaneSegments,
   isCompositeFetchNotFound,
   shouldUseGateKeeperFallback,
 } from './fsm-hub'
+import {
+  deriveStateEntries,
+  deriveSwimlaneSegments,
+} from './fsm-hub-derivations'
 import type { CompositeObservation } from './fsm-hub-types'
 
 /** Server-shaped keeper composite snapshot matching the projected

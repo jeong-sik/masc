@@ -42,55 +42,11 @@ import { MeasurementCard, InvariantsPanel } from './fsm-hub-health-panels'
 import { ringFocusClasses } from './common/ring'
 import { formatIndependentCounters, formatRatioPair } from './counter-format'
 
-// ── Backward-compatible re-exports ─────────────────────
-// External consumers (agents-unified.ts, fsm-hub.test.ts)
-// import from './fsm-hub' — these re-exports keep that working.
-
-export type {
-  CompositeObservation,
-  DwellEntry,
-  HoveredSegment,
-  LaneDwell,
-  OperationalInsight,
-  ObservedLaneSummary,
-  StateEntries,
-  TimeAxisTick,
-  SwimlaneSegment,
-  TopTransition,
-} from './fsm-hub-types'
-
-export { displayState } from './fsm-hub-types'
-
 import {
   toolRequirementLabel,
   toolSurfaceClassLabel,
   turnLaneLabel,
 } from './fsm-hub-types'
-
-export {
-  appendCompositeObservation,
-  deriveLaneDwellHistograms,
-  deriveTransitionHistory,
-  deriveTopTransitions,
-  derivePhaseLog,
-  deriveStateEntries,
-  deriveTimeAxisTicks,
-  deriveSwimlaneSegments,
-  laneTransitionCount,
-  inferTransitionReason,
-} from './fsm-hub-derivations'
-
-export { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
-export { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
-
-export {
-  flagTooltip,
-  invariantDescription,
-} from './fsm-hub-health-panels'
-
-export {
-  isTransitionInSegment,
-} from './fsm-hub-timeline-panels'
 
 export function shouldUseGateKeeperFallback(
   executionLoadedValue: boolean,

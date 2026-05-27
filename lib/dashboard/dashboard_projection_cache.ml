@@ -16,11 +16,14 @@ let normalize_actor_name = function
       if trimmed <> "" then trimmed else "dashboard"
   | None -> "dashboard"
 
+let snapshot_cache_ttl_s = 3.0
+let digest_cache_ttl_s = 5.0
+
 let get_or_compute_snapshot_json ~config ~actor compute =
   let actor_name = normalize_actor_name actor in
   Dashboard_cache.get_or_compute
     (actor_cache_key config "snapshot" actor_name)
-    ~ttl:3.0 (fun () -> compute actor_name)
+    ~ttl:snapshot_cache_ttl_s (fun () -> compute actor_name)
 
 let invalidate_snapshot_json ~config =
   Dashboard_cache.invalidate_prefix (actor_cache_key config "snapshot" "")
@@ -29,4 +32,4 @@ let get_or_compute_digest_json ~config ~actor compute =
   let actor_name = normalize_actor_name actor in
   Dashboard_cache.get_or_compute
     (actor_cache_key config "digest" actor_name)
-    ~ttl:5.0 (fun () -> compute actor_name)
+    ~ttl:digest_cache_ttl_s (fun () -> compute actor_name)

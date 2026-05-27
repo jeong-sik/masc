@@ -111,8 +111,10 @@ let status_json_compute ~base_path () =
    #18993 / #18994 / #19007 / #19015 / #19023 / #19024).  TTL 5s
    because goal-loop status is the most live-feeling of the dashboard
    surfaces and the parse cost is small. *)
+let goal_loop_cache_ttl_s = 5.0
+
 let status_json ~base_path () =
   let cache_key = Printf.sprintf "goal_loop_status:%s" base_path in
-  Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:goal_loop_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       status_json_compute ~base_path ()))

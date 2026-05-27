@@ -10,6 +10,7 @@ let slo_sample_limit = 1000
 let slo_target_ordered_ratio = 0.99
 let slo_target_exhaustion_count = 10
 let slo_target_burn_rate = 1.0
+let slo_cache_ttl_s = 30.0
 
 let compute_slo_counts (events : Cascade_strategy_trace.event list) =
   List.fold_left
@@ -75,6 +76,6 @@ let slo_json_compute () =
    5→30s and compute offloaded so a miss no longer blocks the HTTP main
    domain. *)
 let slo_json () =
-  Dashboard_cache.get_or_compute "cascade:slo" ~ttl:30.0 (fun () ->
+  Dashboard_cache.get_or_compute "cascade:slo" ~ttl:slo_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline slo_json_compute)
 ;;

@@ -481,8 +481,10 @@ let raw_config_json_compute () =
 
    TTL bumped 60→120s now that writes invalidate explicitly — the cache
    only ever drops when the operator saves a new TOML. *)
+let raw_config_cache_ttl_s = 120.0
+
 let raw_config_json () =
-  Dashboard_cache.get_or_compute raw_config_cache_key ~ttl:120.0 (fun () ->
+  Dashboard_cache.get_or_compute raw_config_cache_key ~ttl:raw_config_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline raw_config_json_compute)
 ;;
 

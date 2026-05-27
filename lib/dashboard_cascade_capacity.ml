@@ -66,8 +66,10 @@ let client_capacity_json_compute () =
    to the [computing=6] stampede behind 8.6s tail latencies. TTL extended
    2→10s — dashboard polls don't need sub-second freshness when the registry
    only flips on fiber acquire/release. *)
+let client_capacity_cache_ttl_s = 10.0
+
 let client_capacity_json () =
-  Dashboard_cache.get_or_compute "cascade:client_capacity" ~ttl:10.0 (fun () ->
+  Dashboard_cache.get_or_compute "cascade:client_capacity" ~ttl:client_capacity_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline client_capacity_json_compute)
 ;;
 

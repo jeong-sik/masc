@@ -198,9 +198,10 @@ let keepers_json
                            @ [ "runtime_trust", runtime_trust ])))
                   else (
                     let t_agent = Time_compat.now () in
+                    let agent_status_cache_ttl_s = 2.0 in
                     let agent_json =
                       let cache_key = "kas:" ^ meta.agent_name in
-                      Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+                      Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
                         Keeper_status_runtime.parse_agent_status
                           config
                           ~agent_name:meta.agent_name)
@@ -496,10 +497,11 @@ let keepers_json
                            ; ( "turn_budget"
                              , let t_profile = Time_compat.now () in
                                let cache_key = "kpd:" ^ meta.name in
+                               let keeper_profile_cache_ttl_s = 10.0 in
                                let result =
                                  Dashboard_cache.get_or_compute
                                    cache_key
-                                   ~ttl:10.0
+                                   ~ttl:keeper_profile_cache_ttl_s
                                    (fun () ->
                                       let profile =
                                         Keeper_types_profile.load_keeper_profile_defaults

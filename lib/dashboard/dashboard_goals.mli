@@ -2,10 +2,12 @@
     forest assembly, per-node JSON rendering, full tree
     JSON envelope, and per-goal detail.
 
-    External surface (4 entries + 1 record):
-    - {b tree node record} ({!tree_node}) returned by
-      {!build_forest}, consumed by record-pattern access
-      in [dashboard_http_keeper].
+    {b SSOT}: types and pure helpers come from
+    {!Dashboard_goals_types} via [include] below.
+    Each type has exactly one canonical definition
+    in the owning submodule — do not redeclare here.
+
+    External surface beyond the cascade (4 own-module entries):
     - {b forest builder} ({!build_forest}).
     - {b per-node JSON renderer} ({!tree_node_to_json})
       consumed by [dashboard_http_keeper] when assembling
@@ -15,55 +17,9 @@
       [test/test_dashboard_goals].
     - {b per-goal detail} ({!goal_detail_json}) consumed
       by [server_dashboard_http] +
-      [test/test_dashboard_goals].
+      [test/test_dashboard_goals]. *)
 
-    Internal helpers stay private at this boundary
-    (~50 internal lets — [goal_status_color],
-    [goal_health_string],
-    [build_goal_verification_projection],
-    [goal_policy_nodes],
-    [flatten_tree], [convergence_of_node],
-    [stagnation_seconds_of_node],
-    [keeper_metas_for_goal],
-    [linkage_diagnostics_of_node],
-    [pending_approval_count_of_goal],
-    [infra_risk_count_of_node],
-    [keeper_detail_json] +
-    [goal_detail_keeper] type, every per-section
-    sub-renderer consumed only inside the surface
-    entries above). *)
-
-(** {1 Tree node record} *)
-
-type tree_node = {
-  goal : Goal_store.goal;
-  children : tree_node list;
-  tasks : (Masc_domain.task * string) list;
-  convergence : float;
-      (** 0.0 .. 1.0 completion ratio. *)
-  health : string;
-  badges : string list;
-  last_activity_at : string;
-  stagnation_seconds : int;
-  linked_keeper_names : string list;
-  pending_approval_count : int;
-  infra_risk_count : int;
-  linkage_source : string;
-  linkage_warning_count : int;
-  status_reason : string;
-  blocking_source : string;
-  blocking_reason : string;
-  latest_keeper_ref : string option;
-  latest_turn_ref : int option;
-  stalled_since : string option;
-  activity_observation : string;
-  stagnation_status : string;
-}
-(** Per-goal projection node returned by
-    {!build_forest}.  Concrete record because
-    [dashboard_http_keeper] reaches the [.goal] /
-    [.linked_keeper_names] / [.children] fields directly
-    when assembling the per-keeper goal block. *)
+include module type of Dashboard_goals_types
 
 (** {1 Forest builder} *)
 

@@ -116,10 +116,10 @@ let rec start_child ~sw ~clock cs =
 (** Start all children. Call within an Eio.Switch context. *)
 let start ~sw ~clock t =
   if t.started then
-    Log.Server.warn ~ctx:"supervisor" "[Supervisor] already started"
+    Log.Server.warn ~keeper_name:"supervisor" "[Supervisor] already started"
   else begin
     t.started <- true;
-    Log.Server.info ~ctx:"supervisor" "[Supervisor] starting %d children" (List.length t.children);
+    Log.Server.info ~keeper_name:"supervisor" "[Supervisor] starting %d children" (List.length t.children);
     List.iter (fun cs -> start_child ~sw ~clock cs) t.children
   end
 
@@ -166,7 +166,7 @@ let reenable ~sw ~clock t name =
       cs.disabled <- false;
       cs.restart_count <- 0;
       cs.restart_times <- [];
-      Log.Server.info ~ctx:name "[Supervisor] re-enabling child %s" name;
+      Log.Server.info ~keeper_name:name "[Supervisor] re-enabling child %s" name;
       start_child ~sw ~clock cs;
       true
   | _ -> false

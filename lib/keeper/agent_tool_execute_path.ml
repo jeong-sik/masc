@@ -27,7 +27,7 @@ let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let repo_root_of_cwd ~(config : Coord.config) ~(meta : keeper_meta) cwd =
+let repo_path_context ~(config : Coord.config) ~(meta : keeper_meta) cwd =
   let playground =
     keeper_playground_root ~config ~meta
     |> normalize_repo_cwd_path
@@ -50,10 +50,10 @@ let repo_root_of_cwd ~(config : Coord.config) ~(meta : keeper_meta) cwd =
         let worktree_root =
           Filename.concat (Filename.concat repo_root ".worktrees") task_name
         in
-        Some (repo_name, repo_root, [ repo_root; worktree_root ])
+        Some (repo_name, repo_root, worktree_root, [ worktree_root ])
       | repo_name :: _ when Keeper_repo_readiness.safe_repo_component repo_name ->
         let repo_root = Filename.concat repos_root repo_name in
-        Some (repo_name, repo_root, [ repo_root ])
+        Some (repo_name, repo_root, repo_root, [ repo_root ])
       | _ -> None
 
 let repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel =
@@ -69,12 +69,16 @@ let repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel =
     repo_name
     repo_name
 
-let validate_repo_cwd_ready ~(config : Coord.config) ~(meta : keeper_meta) cwd =
-  match repo_root_of_cwd ~config ~meta cwd with
+let validate_repo_path_ready
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(probe_path : string)
+      cwd
+  =
+  match repo_path_context ~config ~meta cwd with
   | None -> Ok ()
-  | Some (repo_name, repo_root, accepted_toplevels) ->
-    let probe_path = cwd in
-    if not (safe_is_dir repo_root) then
+  | Some (repo_name, repo_root, _path_root, accepted_toplevels) ->
+    if not (safe_is_dir probe_path) then
       Error
         (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:None)
     else
@@ -99,71 +103,72 @@ let validate_repo_cwd_ready ~(config : Coord.config) ~(meta : keeper_meta) cwd =
         Error
           (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:top_opt)
 
+let validate_repo_cwd_ready ~(config : Coord.config) ~(meta : keeper_meta) cwd =
+  validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd
+
 let validate_repo_path_args_ready
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       (ir : Masc_exec.Shell_ir.t)
   =
-  let literal_args_of_simple simple =
-    let rec collect acc = function
-      | [] -> Some (List.rev acc)
-      | Masc_exec.Shell_ir.Lit (arg, _) :: rest -> collect (arg :: acc) rest
-      | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
+  let path_args_of_simple simple =
+    let command_name =
+      Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+      |> Filename.basename
     in
-    collect [] simple.Masc_exec.Shell_ir.args
+    match Exec_policy.simple_literal_args simple with
+    | None -> []
+    | Some args -> Exec_policy.path_argument_values command_name args
   in
-  let rec literal_path_args = function
+  let rec path_args = function
     | Masc_exec.Shell_ir.Simple simple ->
-      Option.value ~default:[] (literal_args_of_simple simple)
+      path_args_of_simple simple
     | Masc_exec.Shell_ir.Pipeline stages ->
-      List.concat_map literal_path_args stages
+      List.concat_map path_args stages
   in
-  let validate_seen seen raw =
+  let validate_target seen raw =
     let trimmed = String.trim raw in
-    if trimmed = "" || String.starts_with ~prefix:"-" trimmed then Ok seen
+    if trimmed = "" then Ok seen
     else
       let target =
         if Filename.is_relative trimmed then Filename.concat cwd trimmed else trimmed
       in
-      match repo_root_of_cwd ~config ~meta target with
+      match repo_path_context ~config ~meta target with
       | None -> Ok seen
-      | Some (repo_name, repo_root, accepted_toplevels) ->
-        let key = normalize_repo_cwd_path repo_root in
+      | Some (_repo_name, repo_root, path_root, _accepted_toplevels) ->
+        let key = normalize_repo_cwd_path path_root in
         if List.mem key seen then Ok seen
-        else if not (safe_is_dir repo_root) then
-          Error
-            (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:None)
-        else
-          let top =
-            Keeper_repo_readiness.run_git
-              ~timeout_sec:Keeper_repo_readiness.read_only_probe_timeout_sec
-              ~clone_path:repo_root
-              [ "rev-parse"; "--show-toplevel" ]
-          in
-          let top_opt = if top.ok then Some top.output else None in
-          let top_matches =
-            top.ok
-            && List.exists
-                 (fun expected ->
-                    String.equal
-                      (normalize_repo_cwd_path top.output)
-                      (normalize_repo_cwd_path expected))
-                 accepted_toplevels
-          in
-          if top_matches then Ok (key :: seen)
-          else
-            Error
-              (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:top_opt)
+        else (
+          match
+            validate_repo_path_ready
+              ~config
+              ~meta
+              ~probe_path:path_root
+              target
+          with
+          | Ok () -> Ok (key :: seen)
+          | Error _ as err -> err)
   in
-  literal_path_args ir
+  let validate_seen (expect_separated_path, seen) raw =
+    let trimmed = String.trim raw in
+    if expect_separated_path
+    then Result.map (fun seen -> false, seen) (validate_target seen trimmed)
+    else (
+      match Exec_policy_path_arg_descriptor.path_value_of_flagged_token trimmed with
+      | Some path -> Result.map (fun seen -> false, seen) (validate_target seen path)
+      | None when Exec_policy_path_arg_descriptor.is_path_flag trimmed ->
+        Ok (true, seen)
+      | None -> Result.map (fun seen -> false, seen) (validate_target seen trimmed))
+  in
+  path_args ir
   |> List.fold_left
        (fun acc raw ->
           match acc with
           | Error _ as err -> err
           | Ok seen -> validate_seen seen raw)
-       (Ok [])
-  |> Result.map ignore
+       (Ok (false, []))
+  |> Result.map (fun _ -> ())
 
 let resolve_tool_write_cwd
       ~(config : Coord.config)

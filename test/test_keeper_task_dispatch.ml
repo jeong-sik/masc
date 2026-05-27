@@ -183,6 +183,7 @@ let contract_requiring_tools required_tools : Masc_domain.task_contract =
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
+  ; required_evidence_typed = []
   ; links = { operation_id = None; session_id = None }
   }
 ;;

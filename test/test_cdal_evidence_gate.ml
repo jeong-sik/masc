@@ -85,6 +85,7 @@ let make_contract
   ; completion_contract
   ; required_tools
   ; required_evidence
+  ; required_evidence_typed = []
   ; inspect_gate_evidence
   ; verify_gate_evidence
   ; links = { operation_id = None; session_id = None }

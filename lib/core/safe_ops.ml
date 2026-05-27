@@ -434,12 +434,12 @@ let safe_member key = function
     (match List.assoc_opt key l with
      | Some v -> v
      | None -> `Null)
-  | _ -> `Null
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Null
 
 let json_string ?(default = "") key json =
   match safe_member key json with
   | `String s -> s
-  | _ -> default
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> default
 
 (* Small LLMs (including some keepers under the local cascade) routinely
    stringify numeric tool-call arguments: max_results:"0.0", offset:"100.0",
@@ -477,31 +477,31 @@ let json_int ?(default = 0) key json =
   | `Int i -> i
   | `Float f -> int_of_float f
   | `String s -> Option.value ~default (parse_numeric_string s)
-  | _ -> default
+  | `Null | `Bool _ | `Intlit _ | `List _ | `Assoc _ -> default
 
 let json_float ?(default = 0.0) key json =
   match safe_member key json with
   | `Float f -> f
   | `Int i -> float_of_int i
   | `String s -> Option.value ~default (parse_float_string s)
-  | _ -> default
+  | `Null | `Bool _ | `Intlit _ | `List _ | `Assoc _ -> default
 
 let json_bool ?(default = false) key json =
   match safe_member key json with
   | `Bool b -> b
   | `String s -> Option.value ~default (parse_bool_string s)
-  | _ -> default
+  | `Null | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> default
 
 let json_string_list key json =
   match safe_member key json with
   | `List l ->
       List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 
 let json_string_opt key json =
   match safe_member key json with
   | `String s -> Some s
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None
 
 (* String-coercing *_opt variants mirror json_int/json_float/json_bool:
    accept stringified numerics/bools from small-LLM callers. Missing key
@@ -511,35 +511,35 @@ let json_int_opt key json =
   | `Int i -> Some i
   | `Float f -> Some (int_of_float f)
   | `String s -> parse_numeric_string s
-  | _ -> None
+  | `Null | `Bool _ | `Intlit _ | `List _ | `Assoc _ -> None
 
 let json_float_opt key json =
   match safe_member key json with
   | `Float f -> Some f
   | `Int i -> Some (float_of_int i)
   | `String s -> parse_float_string s
-  | _ -> None
+  | `Null | `Bool _ | `Intlit _ | `List _ | `Assoc _ -> None
 
 let json_bool_opt key json =
   match safe_member key json with
   | `Bool b -> Some b
   | `String s -> parse_bool_string s
-  | _ -> None
+  | `Null | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None
 
 let json_list key json =
   match safe_member key json with
   | `List l -> l
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 
 let json_list_opt key json =
   match safe_member key json with
   | `List l -> Some l
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None
 
 let json_assoc key json =
   match safe_member key json with
   | `Assoc a -> a
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 
 let json_member_opt key json =
   match safe_member key json with

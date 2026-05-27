@@ -68,9 +68,13 @@ let slo_json_compute () =
     ]
 ;;
 
-(* Strategy trace events folded over [slo_sample_limit]; measured 3s/call
-   against a busy trace ring. Short TTL because SLO status is polled by
-   the dashboard top bar at a high cadence. *)
+(* PR #19088 wrapped this with [Dashboard_cache] (3s→~0.3s warm). Follow-up:
+   the 5s TTL collided with the dashboard top-bar poll rate, so a single
+   miss triggered concurrent recomputes (cache-stats [computing=6]) and
+   the same fiber stack returned 8.6s on a follow-up read. TTL extended
+   5→30s and compute offloaded so a miss no longer blocks the HTTP main
+   domain. *)
 let slo_json () =
-  Dashboard_cache.get_or_compute "cascade:slo" ~ttl:5.0 slo_json_compute
+  Dashboard_cache.get_or_compute "cascade:slo" ~ttl:30.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline slo_json_compute)
 ;;

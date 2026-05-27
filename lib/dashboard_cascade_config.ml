@@ -472,12 +472,18 @@ let raw_config_json_compute () =
     ]
 ;;
 
-(* Wrap [raw_config_json_compute] with [Dashboard_cache]: TOML→JSON render
-   measured at 21s/call on a populated cascade. Long TTL is safe because
-   writes go through [save_raw_config_json] which invalidates the entry. *)
+(* PR #19088 wrapped this with [Dashboard_cache], reducing the cold path
+   from 21s to ~0.4s. Follow-up: cache miss still ran the TOML→JSON
+   materialize on the calling fiber's Eio main domain, so a single miss
+   stalled every concurrent HTTP fiber (cache-stats showed [computing=6]
+   with 8.6s tail latency). Mirrors PRs #18991..#19031 that offload heavy
+   projections via [Domain_pool_ref].
+
+   TTL bumped 60→120s now that writes invalidate explicitly — the cache
+   only ever drops when the operator saves a new TOML. *)
 let raw_config_json () =
-  Dashboard_cache.get_or_compute raw_config_cache_key ~ttl:60.0
-    raw_config_json_compute
+  Dashboard_cache.get_or_compute raw_config_cache_key ~ttl:120.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline raw_config_json_compute)
 ;;
 
 (* RFC-0058 §9 Phase 9.3: dashboard save accepts only TOML payloads now;

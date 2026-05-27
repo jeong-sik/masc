@@ -153,15 +153,18 @@ let health_json_compute ?(window_minutes = 30) ?(base_path : string option) () =
     ]
 ;;
 
-(* Recompute is dominated by [Model_inference_metrics.compute] which scans
-   the full inference log over [window_minutes]; measured 1s/call on a
-   busy cluster. TTL keyed on (window_minutes, base_path) so different
-   dashboards see independent caches. *)
+(* PR #19088 wrapped this with [Dashboard_cache] (1s→~0.2s warm). Follow-up:
+   the inference-log scan is disk-bound and was running on the Eio main
+   domain on every miss, so a single cold read blocked the HTTP loop.
+   Offload onto a worker domain so concurrent fibers stay served. TTL
+   extended 10→30s — provider perf rollups move on minute scale, sub-10s
+   freshness isn't actionable. *)
 let health_json ?(window_minutes = 30) ?(base_path : string option) () =
   let key =
     Printf.sprintf "cascade:health:%d:%s" window_minutes
       (Option.value ~default:"" base_path)
   in
-  Dashboard_cache.get_or_compute key ~ttl:10.0 (fun () ->
-    health_json_compute ~window_minutes ?base_path ())
+  Dashboard_cache.get_or_compute key ~ttl:30.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      health_json_compute ~window_minutes ?base_path ()))
 ;;

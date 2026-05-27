@@ -40,14 +40,10 @@ export function toolMatchesCategory(
 /**
  * SSOT for tool list filtering across the dashboard.
  *
- * Until 2026-05-27 `tool-quality-panel.ts` defined its own 2-arg variant
- * (`filterTools(tools, query)`) — a strict subset of this 3-arg variant
- * with `category` always implicitly `'all'`. Two definitions of the same
- * operation could drift independently. The category parameter now defaults
- * to `'all'` so the 2-arg call site keeps working through a re-export from
- * `tool-quality-panel`, and the generic constraint is loosened to any
- * `{ name: string }` so both `ToolMetricsTopEntry` and `ToolStat` callers
- * type-check without coupling to a specific tool schema.
+ * Until 2026-05-27 `tool-quality-panel.ts` exposed its own compatible import
+ * path for this operation. Callers now import the filter from this owning
+ * module, while the category parameter still defaults to `'all'` for the
+ * two-argument `filterTools(tools, query)` panel use case.
  */
 export function filterTools<T extends { name: string }>(
   items: T[],

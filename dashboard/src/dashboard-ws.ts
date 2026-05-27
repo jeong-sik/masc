@@ -23,6 +23,7 @@ import {
   noteDashboardWsPing,
   noteDashboardWsPong,
 } from './dashboard-ws-state'
+import { errorToString } from './lib/format-string'
 
 type JsonObject = Record<string, unknown>
 type PendingRpc = {
@@ -588,7 +589,7 @@ function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
   batch(() => {
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
-    dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+    dashboardWsLastError.value = errorToString(err)
   })
   if (!wasReady) clearCachedWsUrl()
   lastSubscribeKey = ''
@@ -632,7 +633,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   } catch (err) {
     if (generation === connectGeneration && shouldReconnect) {
       batch(() => {
-        dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+        dashboardWsLastError.value = errorToString(err)
       })
       scheduleReconnect()
     }
@@ -663,7 +664,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     // a stale entry from an earlier session does not survive.
     clearCachedWsUrl()
     batch(() => {
-      dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+      dashboardWsLastError.value = errorToString(err)
     })
     scheduleReconnect()
     return

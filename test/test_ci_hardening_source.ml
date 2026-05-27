@@ -1717,11 +1717,11 @@ let test_dedicated_github_pr_tool_contracts_removed () =
     (not
        (Sys.file_exists
           (source_path ("lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"))));
-  check bool "PR work stays on Execute path" true
+  check bool "PR work stays on ordinary Execute path" true
     (file_not_contains_pattern "config/tool_policy.toml"
        ("tools = [\"" ^ retired_preflight_tool_name ^ "\"]")
      && file_contains_pattern "config/prompts/keeper.capabilities.md"
-          {|Execute` with `executable="gh"`|});
+          "Forge PR creation is not a keeper-native tool concept");
   check bool "operator identity status avoids gh auth probes" true
     (file_not_contains_pattern "lib/operator/operator_control.ml"
        "run_gh_auth_status"

@@ -2306,7 +2306,7 @@ let test_prompt_includes_operational_tool_guidance () =
     bool
     "mentions worktree inspection guidance"
     true
-    (contains_substring sys "tool_read_file");
+    (contains_substring sys "ReadFile");
   check
     bool
     "mentions server-managed heartbeat"
@@ -2314,9 +2314,10 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "Heartbeat is server-managed");
   check
     bool
-    "mentions Execute gh PR creation path"
+    "mentions ordinary forge PR creation path"
     true
-    (contains_substring sys "Create or update PRs through `Execute` with `executable=\"gh\"");
+    (contains_substring sys
+       "this is not a separate keeper tool family");
   check
     bool
     "warns passive discovery tools do not satisfy active turns"
@@ -2416,9 +2417,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
         literally lists that exact name");
   check
     bool
-    "visible gh PR creation path documented"
+    "forge PR creation stays off keeper-native tools"
     true
-    (contains_substring prompt "Use `gh pr create` or `gh pr edit`");
+    (contains_substring prompt "Forge PR creation is not a keeper-native tool concept");
   check
     bool
     "masc tools are not bash commands"
@@ -2483,7 +2484,7 @@ let test_world_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "cd repos/<REPO_NAME> && git status")
 ;;
 
-let test_system_prompt_routes_gh_through_execute_shell_ir () =
+let test_system_prompt_routes_forge_through_execute_shell_ir () =
   let sys =
     Masc_mcp.Keeper_prompt.build_keeper_system_prompt
       ~goal:"test goal"
@@ -2505,11 +2506,11 @@ let test_system_prompt_routes_gh_through_execute_shell_ir () =
        "Use only the exact tool schemas currently shown to you by the runtime");
   check
     bool
-    "mentions shell-ir scoped github access"
+    "mentions shell-ir scoped forge access"
     true
     (contains_substring
        sys
-       "GitHub and PR commands are ordinary Execute typed-argv calls routed through Shell IR/policy");
+       "Forge/PR commands are ordinary Execute typed-argv calls routed through Shell IR/policy");
   check
     bool
     "does not advertise removed github helper"
@@ -11059,7 +11060,7 @@ let () =
         ; test_case
             "prefers submit over legacy workflow"
             `Quick
-            test_system_prompt_routes_gh_through_execute_shell_ir
+            test_system_prompt_routes_forge_through_execute_shell_ir
         ; test_case
             "includes autonomous trigger section"
             `Quick

@@ -4,7 +4,6 @@ import { html } from 'htm/preact'
 import { activeKeeperName } from '../../keeper-state'
 import {
   InspectorKeeperBDI,
-  inspectorKeeperPin,
   normalizeKeeperBdiSnapshot,
   pinInspectorKeeper,
 } from './inspector-keeper-bdi'
@@ -67,7 +66,6 @@ afterEach(() => {
   activeIdeFile.value = 'package.json'
   ideContextFocus.value = null
   window.location.hash = ''
-  void inspectorKeeperPin.value
 })
 
 function setCursorFor(keeperId: string, cursor: Partial<KeeperCursor> & { file_path: string; line: number }): void {
@@ -373,4 +371,3 @@ describe('InspectorKeeperBDI', () => {
     render(null, container)
   })
 })
-

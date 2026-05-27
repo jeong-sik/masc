@@ -29,10 +29,16 @@ let check ~author ~now =
       let recent = List.filter (fun t -> now -. t < window) !ts_ref in
       ts_ref := recent;
       if List.length recent >= limit
-      then
-        let oldest = List.hd (List.sort Stdlib.compare recent) in
-        let retry_after = window -. (now -. oldest) +. 1.0 in
-        Some retry_after
+      then (
+        (* [limit > 0] (line 23) plus [List.length recent >= limit]
+           guarantee the sorted list is non-empty; the [[]] branch is
+           unreachable but typed exhaustively so the compiler enforces
+           the invariant. *)
+        match List.sort Stdlib.compare recent with
+        | [] -> None
+        | oldest :: _ ->
+          let retry_after = window -. (now -. oldest) +. 1.0 in
+          Some retry_after)
       else None
 ;;
 

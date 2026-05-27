@@ -88,5 +88,38 @@ let of_command = function
   | Shell_ir_typed.W (Sudo { target_argv }) ->
     let args = List.map arg target_argv in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sudo, args) ]
+  | Shell_ir_typed.W (Find { path; name; type_ }) ->
+    let args =
+      arg path
+      :: (match name with None -> [] | Some n -> [ arg "-name"; arg n ])
+      @ (match type_ with
+         | None -> []
+         | Some `File -> [ arg "-type"; arg "f" ]
+         | Some `Dir -> [ arg "-type"; arg "d" ])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Find, args) ]
+  | Shell_ir_typed.W (Head { path; lines }) ->
+    let args = [ arg "-n"; arg (string_of_int lines); arg path ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Head, args) ]
+  | Shell_ir_typed.W (Tail { path; lines }) ->
+    let args = [ arg "-n"; arg (string_of_int lines); arg path ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tail, args) ]
+  | Shell_ir_typed.W (Grep { pattern; path; recursive; case_sensitive }) ->
+    let args =
+      (if recursive then [ arg "-r" ] else [])
+      @ (if case_sensitive then [] else [ arg "-i" ])
+      @ arg pattern
+        :: (match path with None -> [] | Some p -> [ arg p ])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Grep, args) ]
+  | Shell_ir_typed.W (Mkdir { path; parents }) ->
+    let args = (if parents then [ arg "-p" ] else []) @ [ arg path ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Mkdir, args) ]
+  | Shell_ir_typed.W (Wc { path; mode }) ->
+    let flag =
+      arg (match mode with `Lines -> "-l" | `Words -> "-w" | `Chars -> "-c")
+    in
+    let args = [ flag; arg path ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Wc, args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

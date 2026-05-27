@@ -89,5 +89,36 @@ let pp fmt = function
          ~pp_sep:(fun fmt () -> Format.fprintf fmt " ")
          Format.pp_print_string)
       target_argv
+  | W (Find { path; name; type_ }) ->
+    Format.fprintf
+      fmt
+      "Find(path=%s, name=%a, type_=%a)"
+      path
+      (Format.pp_print_option Format.pp_print_string)
+      name
+      (Format.pp_print_option (fun fmt t ->
+         Format.pp_print_string fmt (match t with `File -> "f" | `Dir -> "d")))
+      type_
+  | W (Head { path; lines }) ->
+    Format.fprintf fmt "Head(path=%s, lines=%d)" path lines
+  | W (Tail { path; lines }) ->
+    Format.fprintf fmt "Tail(path=%s, lines=%d)" path lines
+  | W (Grep { pattern; path; recursive; case_sensitive }) ->
+    Format.fprintf
+      fmt
+      "Grep(pattern=%s, path=%a, recursive=%b, case_sensitive=%b)"
+      pattern
+      (Format.pp_print_option Format.pp_print_string)
+      path
+      recursive
+      case_sensitive
+  | W (Mkdir { path; parents }) ->
+    Format.fprintf fmt "Mkdir(path=%s, parents=%b)" path parents
+  | W (Wc { path; mode }) ->
+    Format.fprintf
+      fmt
+      "Wc(path=%s, mode=%s)"
+      path
+      (match mode with `Lines -> "lines" | `Words -> "words" | `Chars -> "chars")
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

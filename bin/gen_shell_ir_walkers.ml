@@ -351,6 +351,249 @@ parse false false [] args|}
 | [] -> None
 | args -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sudo { target_argv = args }))|}
     }
+  ; { name = "Find"
+    ; anon_pattern = "Find _"
+    ; bind_pattern = "Find { path; name; type_ }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        [ path ]
+        @ (match name with None -> [] | Some n -> [ "-name"; n ])
+        @ (match type_ with
+           | None -> []
+           | Some `File -> [ "-type"; "f" ]
+           | Some `Dir -> [ "-type"; "d" ])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Find
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Find"
+    ; parse_body =
+        Some
+          {|
+let rec parse name type_ path = function
+  | [] ->
+    (match path with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = p; name; type_ }))
+     | None -> None)
+  | "-name" :: n :: rest -> parse (Some n) type_ path rest
+  | "-type" :: "f" :: rest -> parse name (Some `File) path rest
+  | "-type" :: "d" :: rest -> parse name (Some `Dir) path rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match path with
+      | None -> parse name type_ (Some arg) rest
+      | Some _ -> None)
+in
+parse None None None args|}
+    }
+  ; { name = "Head"
+    ; anon_pattern = "Head _"
+    ; bind_pattern = "Head { path; lines }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args = [ "-n"; string_of_int lines; path ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Head
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Head"
+    ; parse_body =
+        Some
+          {|
+let rec parse lines path = function
+  | [] ->
+    (match path with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Head { path = p; lines }))
+     | None -> None)
+  | "-n" :: n :: rest ->
+    (match int_of_string_opt n with
+     | Some l -> parse l path rest
+     | None -> None)
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match path with
+      | None -> parse lines (Some arg) rest
+      | Some _ -> None)
+in
+parse 10 None args|}
+    }
+  ; { name = "Tail"
+    ; anon_pattern = "Tail _"
+    ; bind_pattern = "Tail { path; lines }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args = [ "-n"; string_of_int lines; path ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Tail
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Tail"
+    ; parse_body =
+        Some
+          {|
+let rec parse lines path = function
+  | [] ->
+    (match path with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tail { path = p; lines }))
+     | None -> None)
+  | "-n" :: n :: rest ->
+    (match int_of_string_opt n with
+     | Some l -> parse l path rest
+     | None -> None)
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match path with
+      | None -> parse lines (Some arg) rest
+      | Some _ -> None)
+in
+parse 10 None args|}
+    }
+  ; { name = "Grep"
+    ; anon_pattern = "Grep _"
+    ; bind_pattern = "Grep { pattern; path; recursive; case_sensitive }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if recursive then [ "-r" ] else [])
+        @ (if case_sensitive then [] else [ "-i" ])
+      in
+      let args =
+        flag_args
+        @ [ pattern ]
+        @ (match path with None -> [] | Some p -> [ p ])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Grep
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Grep"
+    ; parse_body =
+        Some
+          {|
+let rec parse recursive case_sensitive pattern path = function
+  | [] ->
+    (match pattern with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Grep { pattern = p; path; recursive; case_sensitive }))
+     | None -> None)
+  | "-r" :: rest | "-R" :: rest | "--recursive" :: rest ->
+    parse true case_sensitive pattern path rest
+  | "-i" :: rest | "--ignore-case" :: rest ->
+    parse recursive false pattern path rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match pattern with
+      | None -> parse recursive case_sensitive (Some arg) path rest
+      | Some _ ->
+        (match path with
+         | None -> parse recursive case_sensitive pattern (Some arg) rest
+         | Some _ -> None))
+in
+parse true true None None args|}
+    }
+  ; { name = "Mkdir"
+    ; anon_pattern = "Mkdir _"
+    ; bind_pattern = "Mkdir { path; parents }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args = if parents then [ "-p" ] else [] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Mkdir
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ [ path ])
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Mkdir"
+    ; parse_body =
+        Some
+          {|
+let rec parse parents path = function
+  | [] ->
+    (match path with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkdir { path = p; parents }))
+     | None -> None)
+  | "-p" :: rest | "--parents" :: rest -> parse true path rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match path with
+      | None -> parse parents (Some arg) rest
+      | Some _ -> None)
+in
+parse false None args|}
+    }
+  ; { name = "Wc"
+    ; anon_pattern = "Wc _"
+    ; bind_pattern = "Wc { path; mode }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        match mode with `Lines -> [ "-l" ] | `Words -> [ "-w" ] | `Chars -> [ "-c" ]
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Wc
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ [ path ])
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Wc"
+    ; parse_body =
+        Some
+          {|
+let rec parse mode path = function
+  | [] ->
+    (match path with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wc { path = p; mode }))
+     | None -> None)
+  | "-l" :: rest | "--lines" :: rest -> parse `Lines path rest
+  | "-w" :: rest | "--words" :: rest -> parse `Words path rest
+  | "-c" :: rest | "--bytes" :: rest | "--chars" :: rest -> parse `Chars path rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match path with
+      | None -> parse mode (Some arg) rest
+      | Some _ -> None)
+in
+parse `Lines None args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"
@@ -484,13 +727,15 @@ let emit_of_simple buf spec =
     \        | Some Exec_program.Curl -> gen_parse_Curl lit_argv\n\
     \        | Some Exec_program.Rm -> gen_parse_Rm lit_argv\n\
     \        | Some Exec_program.Sudo -> gen_parse_Sudo lit_argv\n\
+    \        | Some Exec_program.Find -> gen_parse_Find lit_argv\n\
+    \        | Some Exec_program.Head -> gen_parse_Head lit_argv\n\
+    \        | Some Exec_program.Tail -> gen_parse_Tail lit_argv\n\
+    \        | Some Exec_program.Grep -> gen_parse_Grep lit_argv\n\
+    \        | Some Exec_program.Mkdir -> gen_parse_Mkdir lit_argv\n\
+    \        | Some Exec_program.Wc -> gen_parse_Wc lit_argv\n\
     \        | Some\n\
     \            ( Exec_program.Pwd\n\
     \            | Exec_program.Echo\n\
-    \            | Exec_program.Head\n\
-    \            | Exec_program.Tail\n\
-    \            | Exec_program.Grep\n\
-    \            | Exec_program.Find\n\
     \            | Exec_program.Which\n\
     \            | Exec_program.Test\n\
     \            | Exec_program.Basename\n\
@@ -500,7 +745,6 @@ let emit_of_simple buf spec =
     \            | Exec_program.Df\n\
     \            | Exec_program.Sort\n\
     \            | Exec_program.Uniq\n\
-    \            | Exec_program.Wc\n\
     \            | Exec_program.Cut\n\
     \            | Exec_program.Tr\n\
     \            | Exec_program.File\n\
@@ -524,7 +768,6 @@ let emit_of_simple buf spec =
     \            | Exec_program.Dune_local_sh\n\
     \            | Exec_program.Diff\n\
     \            | Exec_program.Patch\n\
-    \            | Exec_program.Mkdir\n\
     \            | Exec_program.Npm\n\
     \            | Exec_program.Node\n\
     \            | Exec_program.Npx\n\

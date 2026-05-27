@@ -59,6 +59,12 @@ let constructor_label = function
      | Shell_ir_typed.Curl _ -> "Curl"
      | Shell_ir_typed.Rm _ -> "Rm"
      | Shell_ir_typed.Sudo _ -> "Sudo"
+     | Shell_ir_typed.Find _ -> "Find"
+     | Shell_ir_typed.Head _ -> "Head"
+     | Shell_ir_typed.Tail _ -> "Tail"
+     | Shell_ir_typed.Grep _ -> "Grep"
+     | Shell_ir_typed.Mkdir _ -> "Mkdir"
+     | Shell_ir_typed.Wc _ -> "Wc"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

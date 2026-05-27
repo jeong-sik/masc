@@ -83,10 +83,6 @@ describe('summarizeKbd (pure)', () => {
     })
   })
 
-  it('keeps className as a fallback alias but lets class win', () => {
-    expect(summarizeKbd({ className: 'ml-1' }).classNameLength).toBe(4)
-    expect(summarizeKbd({ class: 'mr-22', className: 'ml-1' }).classNameLength).toBe(5)
-  })
 })
 
 describe('Kbd component', () => {

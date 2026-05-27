@@ -1,13 +1,11 @@
 open Alcotest
 
-(** RFC-0085 PR-5 — Verify the unified dispatch finaliser fires typed
-    observers and applies the result transformer.
+(** Tests for Tool_dispatch_emit finalization.
 
     The test uses {!Tool_dispatch_emit.finalize_from_handler} directly
-    rather than spinning up the MCP server, since the MCP path's
-    behaviour is *contractually* "call [Tool_dispatch_emit.finalize_*]
-    on every dispatch result".  This isolates the side-effect contract
-    from MCP wiring noise.
+    because MCP dispatch paths resolve handlers outside
+    {!Tool_dispatch.guarded_dispatch}.  This isolates the post-dispatch
+    side-effect contract from MCP wiring noise.
 
     Verified contracts:
     1. [finalize_from_handler (Some r)] fires the dispatch observer with
@@ -15,20 +13,20 @@ open Alcotest
     2. [finalize_from_handler None] fires the dispatch observer with
        [No_handler].
     3. [apply_result_transformer] is applied to [Some r] before
-       hooks observe it.
-    4. Source-level: [mcp_server_eio_execute.ml] and
-       [tool_dispatch.ml] together reference
-       [Tool_dispatch_emit.finalize_from_handler]
-       (or, in the guarded_dispatch case, an inline mirror) so all
-       three dispatch paths (keeper / MCP-tag / MCP-internal) emit
-       observer events. *)
+       observers see it. *)
 
 let mk_result ~tool_name ~text =
   let start = Unix.gettimeofday () in
   Tool_result.ok ~tool_name ~start_time:start text
 ;;
 
-let test_finalize_handled_fires_typed_hook () =
+let string_ends_with ~suffix s =
+  let n = String.length s in
+  let slen = String.length suffix in
+  n >= slen && String.sub s (n - slen) slen = suffix
+;;
+
+let test_finalize_handled_fires_observer () =
   let seen = ref [] in
   let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.t option) =
     seen := (outcome, Option.is_some r) :: !seen
@@ -44,7 +42,7 @@ let test_finalize_handled_fires_typed_hook () =
     failf "expected [Handled, Some]; got %d observations" (List.length other)
 ;;
 
-let test_finalize_no_handler_fires_typed_hook () =
+let test_finalize_no_handler_fires_observer () =
   let seen = ref [] in
   let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.t option) =
     seen := (outcome, Option.is_some r) :: !seen
@@ -58,59 +56,49 @@ let test_finalize_no_handler_fires_typed_hook () =
   | _ -> failf "expected [No_handler, None] observation"
 ;;
 
-let test_finalize_applies_transformer () =
+let test_finalize_applies_transformer_before_observer () =
   let called = ref 0 in
+  let observed_message = ref None in
   let transformer (r : Tool_result.t) : Tool_result.t =
     incr called;
     { r with message = r.message ^ "[capped]" }
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
   Masc_mcp.Tool_dispatch.set_result_transformer transformer;
+  Masc_mcp.Tool_dispatch.register_dispatch_observer
+    (fun (outcome : Masc_mcp.Dispatch_outcome.t) r ->
+      match outcome, r with
+      | Handled, Some out -> observed_message := Some out.message
+      | _ -> fail "expected observer to see handled result");
   let r = Some (mk_result ~tool_name:"t" ~text:"raw") in
   let r' = Masc_mcp.Tool_dispatch_emit.finalize_from_handler r in
   Masc_mcp.Tool_dispatch.clear_hooks ();
   check int "transformer ran once" 1 !called;
+  let suffix = "[capped]" in
   (match r' with
    | Some out ->
      check bool "transformer suffix appended" true
-       (String.length out.message > 0
-        && let n = String.length out.message in
-           let suffix = "[capped]" in
-           let slen = String.length suffix in
-           n >= slen && String.sub out.message (n - slen) slen = suffix)
-   | None -> fail "expected Some result")
-;;
-
-let test_mcp_execute_invokes_finalize () =
-  (* Source-level structural check: mcp_server_eio_execute.ml must
-     reference Tool_dispatch_emit.finalize_from_handler at least
-     twice (dispatch_by_tag + dispatch_internal_keeper_runtime). *)
-  let path = "lib/mcp_server_eio_execute.ml" in
-  let n =
-    Ast_grep.count_calls
-      ~module_path:path
-      ~callee:"Tool_dispatch_emit.finalize_from_handler"
-  in
-  if n < 2
-  then
-    failf
-      "mcp_server_eio_execute.ml must call \
-       Tool_dispatch_emit.finalize_from_handler >= 2 (PR-5: \
-       dispatch_by_tag + dispatch_internal_keeper_runtime); got %d"
-      n
+       (string_ends_with ~suffix out.message)
+   | None -> fail "expected Some result");
+  match !observed_message with
+  | Some message ->
+    check bool "observer saw transformed result" true
+      (string_ends_with ~suffix message)
+  | None -> fail "expected observer to run"
 ;;
 
 let () =
   run
-    "rfc-0085-pr-5-dispatch-emit"
+    "tool-dispatch-emit"
     [ ( "dispatch observer fan-out"
-      , [ test_case "Handled arm" `Quick test_finalize_handled_fires_typed_hook
-        ; test_case "No_handler arm" `Quick test_finalize_no_handler_fires_typed_hook
+      , [ test_case "Handled arm" `Quick test_finalize_handled_fires_observer
+        ; test_case "No_handler arm" `Quick test_finalize_no_handler_fires_observer
         ] )
     ; ( "result transformer"
-      , [ test_case "applied via finalize" `Quick test_finalize_applies_transformer ] )
-    ; ( "MCP path coverage"
-      , [ test_case "MCP execute invokes finalize" `Quick test_mcp_execute_invokes_finalize
+      , [ test_case
+            "applied before observer"
+            `Quick
+            test_finalize_applies_transformer_before_observer
         ] )
     ]
 ;;

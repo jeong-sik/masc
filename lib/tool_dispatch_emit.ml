@@ -1,18 +1,19 @@
-(** RFC-0085 PR-5 — Unified dispatch post-processing helper.
+(** Unified dispatch post-processing helper.
 
-    Centralises the two side-effects that every dispatch path must run
-    after the handler completes:
+    MCP dispatch paths that resolve handlers outside
+    {!Tool_dispatch.guarded_dispatch} call this helper after a handler
+    returns.  It centralises the two side-effects that every dispatch
+    path must run after the handler completes:
 
     1. Apply the registered [result_transformer] (e.g. Tool_output_validation
        output cap) when the [Handled] arm fires.
     2. Fire [run_dispatch_observers] with the typed {!Dispatch_outcome.t}
-       so all five observers (Tool_metrics, Tool_usage_log,
-       Otel_dispatch_hook, Tool_output_validation, server_bootstrap_loops)
-       see every external MCP / keeper / inline call uniformly.
+       so telemetry, metrics, and audit observers see external MCP,
+       keeper, and inline calls uniformly.
 
-    Before PR-5, only [Tool_dispatch.guarded_dispatch] fired typed
-    hooks, so external MCP [tools/call] traffic flowed silently
-    through [Tool_metrics] et al.  RFC-0085 §"Root Gap 1". *)
+    The same ordering is mirrored in [Tool_dispatch.guarded_dispatch]
+    because [Tool_dispatch] cannot depend on this module without
+    creating a dependency cycle. *)
 
 let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.t option)
   : Tool_result.t option

@@ -179,12 +179,10 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
               | exn -> Some (Tool_result.of_exn ~tool_name:name ~start_time exn))
            | None -> None)
       in
-      (* RFC-0085 PR-5 — finalisation is done inline here (we cannot
+      (* Finalization is done inline here because [Tool_dispatch] cannot
          depend on [Tool_dispatch_emit] without creating a dependency
-         cycle).  The logic is byte-identical to
-         [Tool_dispatch_emit.finalize], and any change must be mirrored
-         in both places.  Future RFC may extract a shared private
-         function once [Tool_dispatch_emit] is restructured.
+         cycle.  Keep the ordering aligned with
+         [Tool_dispatch_emit.finalize].
 
          Order: transformer first (mutates the Tool_result.t inside the
          [Handled] arm), then typed observer fan-out. *)

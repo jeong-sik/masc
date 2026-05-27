@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { escapeRegExp } from '../lib/format-string'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const generatedCss = readFileSync(join(here, 'tokens.generated.css'), 'utf8')
@@ -21,10 +22,6 @@ function expectDeclarationExists(css: string, name: string) {
 
 function expectNoDeclaration(css: string, name: string, value: string) {
   expect(css).not.toMatch(new RegExp(`${name}:\\s*${escapeRegExp(value)}\\s*;`))
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 describe('Cockpit token cascade', () => {

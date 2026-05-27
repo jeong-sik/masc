@@ -143,7 +143,8 @@ async function loadComponentWithApi(api: {
     `,
   }))
   const module = await import('./harness-health')
-  module.resetHarnessHealthState()
+  const { resetHarnessHealthState } = await import('./harness-health-state')
+  resetHarnessHealthState()
   return module
 }
 
@@ -160,7 +161,7 @@ describe('HarnessHealth', () => {
   })
 
   afterEach(async () => {
-    const { resetHarnessHealthState } = await import('./harness-health')
+    const { resetHarnessHealthState } = await import('./harness-health-state')
     resetHarnessHealthState()
     render(null, container)
     container.remove()

@@ -107,7 +107,7 @@ let prune_archive ~base_path ~retention_days ~min_keep : int * int =
   then 0, 0
   else (
     let now = Unix.gettimeofday () in
-    let cutoff = now -. (float_of_int retention_days *. 86400.0) in
+    let cutoff = now -. (float_of_int retention_days *. Masc_time_constants.day) in
     let entries =
       try Sys.readdir archive_dir |> Array.to_list with
       | Sys_error _ -> []

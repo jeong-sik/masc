@@ -276,7 +276,7 @@ let get_drift_stats config ~days =
   if not (Sys.file_exists path) then (0, 0, 0.0)
   else
     let cutoff =
-      Time_compat.now () -. (float_of_int (max 0 days) *. 24.0 *. 3600.0)
+      Time_compat.now () -. (float_of_int (max 0 days) *. Masc_time_constants.day)
     in
     (* Streaming aggregation — total / drift_count / similarity_sum
        fold over the JSONL without materialising the row list. The

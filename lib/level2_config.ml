@@ -43,7 +43,9 @@ module Hebbian = struct
      1h / 14d ratio satisfies this: ~336 consolidation passes before a
      single synapse's decay window closes. *)
   let consolidation_interval_s () =
-    Env_config_core.get_float ~default:3600.0 "MASC_HEBBIAN_CONSOLIDATION_INTERVAL_S"
+    Env_config_core.get_float
+      ~default:Masc_time_constants.hour
+      "MASC_HEBBIAN_CONSOLIDATION_INTERVAL_S"
   let decay_after_days () =
     Env_config_core.get_float ~default:14.0 "MASC_HEBBIAN_DECAY_AFTER_DAYS"
 end

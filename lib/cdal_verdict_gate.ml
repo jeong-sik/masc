@@ -240,7 +240,7 @@ let ledger_health_report ?base_dir () : ledger_health =
 (* Threshold for boot-time staleness WARN.  7 days picks up the
    12-day production dormancy from #10115 with margin while not
    firing on transient quiet periods. *)
-let stale_age_seconds_default = 7. *. 86400.
+let stale_age_seconds_default = 7. *. Masc_time_constants.day
 
 let log_ledger_health_warn_if_stale ?base_dir
     ?(stale_age_seconds = stale_age_seconds_default) () : ledger_health =
@@ -253,14 +253,14 @@ let log_ledger_health_warn_if_stale ?base_dir
         Cdal_eval_v1.persist. (#10115)"
        report.base_dir
    | Some _, Some age when age > stale_age_seconds ->
-     let days = age /. 86400. in
+     let days = age /. Masc_time_constants.day in
      Log.Task.warn
        "[cdal-gate] ledger health: latest verdict file is %.1f \
         days old (threshold %.1f days; %d files scanned in %s).  \
         Writer pipeline likely dormant — strict-contract tasks \
         will fail until restored. (#10115)"
        days
-       (stale_age_seconds /. 86400.)
+       (stale_age_seconds /. Masc_time_constants.day)
        report.total_files
        report.base_dir
    | Some _, _ -> ());

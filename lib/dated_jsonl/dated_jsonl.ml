@@ -231,7 +231,7 @@ let prune_unlocked t ~days =
   if days <= 0 then 0
   else begin
     let now = Unix.gettimeofday () in
-    let cutoff = now -. (float_of_int days *. 86400.0) in
+    let cutoff = now -. (float_of_int days *. Masc_time_constants.day) in
     let cutoff_tm = Unix.gmtime cutoff in
     let cutoff_month =
       Printf.sprintf "%04d-%02d"

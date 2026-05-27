@@ -215,7 +215,9 @@ let read_events_for_agent (config : Coord.config) ~agent_id ~window_days
   if String.trim agent_id = "" then []
   else begin
     let now = Time_compat.now () in
-    let since = event_date_string (now -. (float_of_int window_days *. 86400.0)) in
+    let since =
+      event_date_string (now -. (float_of_int window_days *. Masc_time_constants.day))
+    in
     let until = event_date_string now in
     let store = get_store config in
     Dated_jsonl.read_range store ~since ~until

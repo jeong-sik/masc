@@ -136,8 +136,8 @@ vi.mock('../router', () => ({
   route: mocks.route,
 }))
 
+import { KeeperDetailPage } from './keeper-detail-page'
 import {
-  KeeperDetailPage,
   clearKeeperDetailSelection,
   closeKeeperDetail,
   filterCheckpointHistory,

@@ -10,7 +10,7 @@ import { navigate, route } from '../router'
 import { agents, keepers, executionLoaded } from '../store'
 import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
-import { KeeperDetailPage } from './keeper-detail'
+import { KeeperDetailPage } from './keeper-detail-page'
 import { namespaceTruth } from '../namespace-truth-store'
 import {
   formatKeeperRosterCount,

@@ -217,6 +217,59 @@ let test_classify_unknown_read () =
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "unknown command is R0" true (Risk.is_r0 envelope)
 
+(* --- S7 stamp invariant: ∀ envelope. envelope.risk = classify(undecided envelope.ir).risk --- *)
+
+let stamp_invariant_cases =
+  (* R0_Read *)
+  [ simple_ir "ls" []
+  ; simple_ir "cat" [ "file.txt" ]
+  ; simple_ir "rg" [ "pattern" ]
+  ; simple_ir "git" [ "status" ]
+  ; simple_ir "gh" [ "pr"; "view"; "123" ]
+  ; simple_ir "echo" [ "hello" ]
+  ; simple_ir "pwd" []
+  ; simple_ir "my-custom-tool" [ "--help" ]
+  (* R1_Reversible_mutation *)
+  ; simple_ir "git" [ "commit"; "-m"; "msg" ]
+  ; simple_ir "git" [ "push" ]
+  ; simple_ir "git" [ "checkout"; "-b"; "feature" ]
+  ; simple_ir "npm" [ "install" ]
+  ; simple_ir "mkdir" [ "dir" ]
+  ; simple_ir "touch" [ "file" ]
+  ; simple_ir "gh" [ "pr"; "create"; "--title"; "t" ]
+  ; simple_ir "gh" [ "issue"; "close"; "123" ]
+  ; simple_ir "gh" [ "api"; "-X"; "POST"; "/repos/o/r/issues" ]
+  (* R2_Irreversible *)
+  ; simple_ir "git" [ "reset"; "HEAD~1" ]
+  ; simple_ir "git" [ "reset"; "--hard"; "HEAD~1" ]
+  ; simple_ir "rm" [ "file" ]
+  ; simple_ir "gh" [ "pr"; "merge"; "123" ]
+  ; simple_ir "gh" [ "repo"; "delete"; "owner/repo" ]
+  ; simple_ir "gh" [ "api"; "-X"; "DELETE"; "/repos/o/r" ]
+  (* Destructive_protected *)
+  ; simple_ir "git" [ "push"; "--force"; "origin"; "main" ]
+  ; simple_ir "git" [ "push"; "--force-with-lease"; "origin"; "main" ]
+  (* Pipeline *)
+  ; pipeline_ir [ ("git", [ "push"; "--force"; "origin"; "main" ]); ("cat", []) ]
+  ; pipeline_ir [ ("ls", []); ("grep", [ "pattern" ]) ]
+  ]
+
+let test_s7_stamp_invariant () =
+  List.iteri
+    (fun idx ir ->
+       let envelope = Risk.classify (Risk.undecided ir) in
+       let stamped_risk = envelope.Risk.risk in
+       let reclassified = Risk.classify (Risk.undecided envelope.Risk.ir) in
+       let reclassified_risk = reclassified.Risk.risk in
+       Alcotest.(check string)
+         (Format.asprintf "S7 invariant[%d]: stamp=%s reclassified=%s"
+            idx
+            (Risk.string_of_risk_class stamped_risk)
+            (Risk.string_of_risk_class reclassified_risk))
+         (Risk.string_of_risk_class stamped_risk)
+         (Risk.string_of_risk_class reclassified_risk))
+    stamp_invariant_cases
+
 (* --- test runner --- *)
 
 let () =
@@ -236,4 +289,5 @@ let () =
   test_classify_pipeline_first_stage_destructive ();
   test_classify_repo_hosting_cli_read_only_prefixes_equivalence ();
   test_classify_unknown_read ();
-  print_endline "test_shell_ir_risk: 15/15 passed"
+  test_s7_stamp_invariant ();
+  print_endline "test_shell_ir_risk: 16/16 passed"

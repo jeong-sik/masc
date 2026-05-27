@@ -157,7 +157,7 @@ let make_pre_hook ~config ~governance_level =
        which boundary observes it. *)
     Tool_dispatch.Reject
       (Error
-         { Tool_result.class_ = Workflow_rejection
+         { Tool_result.class_ = Tool_result.Workflow_rejection
          ; message = Yojson.Safe.to_string response
          ; data = response
          ; tool_name = name
@@ -186,7 +186,7 @@ let make_pre_hook ~config ~governance_level =
        from runtime/transient errors. *)
     Tool_dispatch.Reject
       (Error
-         { Tool_result.class_ = Policy_rejection
+         { Tool_result.class_ = Tool_result.Policy_rejection
          ; message = Yojson.Safe.to_string response
          ; data = response
          ; tool_name = name

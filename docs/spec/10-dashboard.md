@@ -515,12 +515,11 @@ const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
    - `activity|live -> observatory` (+ `view=live` when applicable)
    - `telemetry|fleet|tool-quality|governance|attribution -> fleet-health` (+ `view`)
    - `cascade-inspector|cost -> runtime` (+ `view`)
-   - `safe-autonomy -> command.operations&view=safety`
    - `git-graph -> workspace.repositories&view=graph`
    - `intervene|governance|inspector -> operations`
    - `workspace.goals -> workspace.planning`
    - `connectors.connector-* -> connectors.connector-status?connector=*`
-7. `command?section=operations&view=connectors` 는 top-level `connectors` surface로 canonical redirect 된다
+7. `command:connectors` 는 top-level `connectors:connector-status` surface로 canonical redirect 된다
 
 ### 4.4. SSE Integration
 

@@ -388,7 +388,6 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   // Dashboard consolidation Phase 1+6: command surface
   'command:intervene':    { section: 'operations' },
   'command:governance':   { section: 'operations' },
-  'command:connectors':   { section: 'operations', view: 'connectors' },
   'command:inspector':    { section: 'operations', view: 'inspector' },
 
   // Dashboard consolidation Phase 1: workspace surface
@@ -456,7 +455,6 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   // `CROSS_SURFACE_SECTION_REDIRECTS` (router.ts) and `SECTION_REDIRECTS`
   // (this file, line 332+) that carry `view` as part of the canonical destination
   // (e.g. `monitoring:git-graph → workspace:repositories?view=graph`,
-  // `command:connectors → command:operations?view=connectors`,
   // cockpit IDE `?mode=Split → code:ide-shell?view=split-diff`).
   // `planning` does not gain `view` via redirect (`workspace:goals → planning`
   // drops view); instead, direct `replaceRoute` callers pass `view: 'default'`

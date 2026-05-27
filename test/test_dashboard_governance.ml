@@ -705,7 +705,7 @@ let test_refresh_once_skips_fresh_cached_result () =
         ~masc_tools:[]
         ~dispatch:(fun ~name ~args:_ ->
           Error
-            { Tool_result.class_ = Runtime_failure
+            { Tool_result.class_ = Tool_result.Runtime_failure
             ; message = "unused"
             ; data = `String "unused"
             ; tool_name = name
@@ -748,7 +748,7 @@ let test_refresh_once_skips_timeout_backoff () =
         ~masc_tools:[]
         ~dispatch:(fun ~name ~args:_ ->
           Error
-            { Tool_result.class_ = Runtime_failure
+            { Tool_result.class_ = Tool_result.Runtime_failure
             ; message = "unused"
             ; data = `String "unused"
             ; tool_name = name

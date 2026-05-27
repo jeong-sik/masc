@@ -43,7 +43,7 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
       in
       Reject
         (Error
-           { Tool_result.class_ = Runtime_failure
+           { Tool_result.class_ = Tool_result.Runtime_failure
            ; message = msg
            ; data = `Assoc [("error", `String msg)]
            ; tool_name

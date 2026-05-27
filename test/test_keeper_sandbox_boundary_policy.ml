@@ -361,15 +361,15 @@ let test_memory_tools_use_agent_tool_memory_runtime () =
   assert_not_contains in_process ("Keeper_" ^ "exec_memory");
   assert_not_contains memory_runtime ("keeper_" ^ "exec_memory")
 
-let test_preflight_uses_agent_tool_preflight_runtime () =
+let test_preflight_uses_keeper_cascade_resilience () =
   let heartbeat_scheduling = "lib/keeper/keeper_heartbeat_loop_scheduling.ml" in
   let turn = "lib/keeper/keeper_turn.ml" in
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.mli");
-  assert_contains "lib/dune" "agent_tool_preflight_runtime";
+  assert_contains "lib/dune" "keeper_cascade_resilience";
   assert_not_contains "lib/dune" ("keeper_" ^ "exec_preflight");
-  assert_contains heartbeat_scheduling "Agent_tool_preflight_runtime.";
-  assert_contains turn "Agent_tool_preflight_runtime.";
+  assert_contains heartbeat_scheduling "Keeper_cascade_resilience.";
+  assert_contains turn "Keeper_cascade_resilience.";
   assert_not_contains heartbeat_scheduling ("Keeper_" ^ "exec_preflight");
   assert_not_contains turn ("Keeper_" ^ "exec_preflight")
 
@@ -619,9 +619,9 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
   assert_not_contains contract_classifier
-    "\"tool_workspace_inspect\"; \"tool_execute\"; \"tool_execute\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"";
   assert_not_contains agent_surface
-    "\"tool_workspace_inspect\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
   assert_contains pr_metrics "Keeper_tool_capability_axis.supports";
   assert_not_contains pr_metrics
     "List.mem tool_name [ \"tool_execute\"; \"tool_execute\"; \"tool_execute\" ]";
@@ -641,13 +641,13 @@ let test_public_alias_projection_uses_core_axis () =
   assert_contains core_axis "public_name = \"Execute\"; internal_name = \"tool_execute\"";
   assert_contains coord_classify "Tool_name_alias_axis.canonical_required_tool_name";
   assert_not_contains coord_classify "\"Bash\" -> \"tool_execute\"";
-  assert_not_contains coord_classify "\"Grep\" -> \"tool_workspace_inspect\"";
+  assert_not_contains coord_classify "\"Grep\" -> \"tool_search_files\"";
   assert_contains keeper_alias "Agent_tool_descriptor.public_descriptors";
   assert_contains keeper_alias "Agent_tool_descriptor.public_names";
   assert_contains keeper_alias "let strip_mcp_masc_prefix";
   assert_not_contains keeper_alias
     "\"Bash\", { internal_name = \"tool_execute\"";
-  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_workspace_inspect\""
+  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_search_files\""
 
 let test_backend_host_exec_uses_sandbox_actor () =
   let backend_sources =
@@ -771,9 +771,9 @@ let () =
             `Quick
             test_memory_tools_use_agent_tool_memory_runtime;
           Alcotest.test_case
-            "preflight uses agent tool preflight runtime"
+            "preflight uses keeper cascade resilience"
             `Quick
-            test_preflight_uses_agent_tool_preflight_runtime;
+            test_preflight_uses_keeper_cascade_resilience;
           Alcotest.test_case
             "status metrics left exec axis"
             `Quick

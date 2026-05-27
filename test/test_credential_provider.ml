@@ -87,7 +87,7 @@ let with_config_dir_env config_dir f =
       Config_dir_resolver.reset ())
     f
 
-let write_keeper_identity_toml ~base_path ~keeper_name ~github_identity =
+let write_repo_cli_identity_toml ~base_path ~keeper_name ~repo_cli_identity =
   let keepers_dir = Filename.concat base_path ".masc/config/keepers" in
   mkdir_p keepers_dir;
   let path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
@@ -96,8 +96,8 @@ let write_keeper_identity_toml ~base_path ~keeper_name ~github_identity =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () ->
       Printf.fprintf oc
-        "[keeper]\nname = %S\ngithub_identity = %S\ngit_identity_mode = \"github_identity\"\n"
-        keeper_name github_identity)
+        "[keeper]\nname = %S\nrepo_cli_identity = %S\ngit_identity_mode = \"repo_cli_identity\"\n"
+        keeper_name repo_cli_identity)
 
 let seed_credential ~base_path cred =
   match Credential_store.add ~base_path cred with
@@ -140,10 +140,10 @@ let make_repo ~id ~credential_id : repository =
 
 let make_keeper_binding ~bundle_root ~gh_config_dir : KRC.keeper_binding =
   {
-    KRC.github_identity = Some "test-gh";
-    effective_github_identity = "test-gh";
+    KRC.configured_repo_cli_identity = Some "test-gh";
+    effective_repo_cli_identity = "test-gh";
     credential_scope = KRC.Keeper_identity;
-    git_identity_mode = "github_identity";
+    git_identity_mode = "repo_cli_identity";
     bundle_root;
     gh_config_dir;
   }
@@ -224,7 +224,7 @@ let test_required_repo_cli_mount_missing_path_fails_closed () =
 let test_required_repo_cli_mount_allows_absent_optional_siblings () =
   with_temp_base_path (fun base_path ->
       let bundle_root =
-        Filename.concat base_path ".masc/github-identities/test-gh"
+        Filename.concat base_path ".masc/repo-cli-identities/test-gh"
       in
       let gh_config_dir = Filename.concat bundle_root "gh" in
       mkdir_p gh_config_dir;
@@ -418,10 +418,10 @@ let test_resolve_credential_store_mounts_explicit_ssh_key () =
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let gh_config_dir =
-        Filename.concat base_path ".masc/github-identities/cred-A/gh"
+        Filename.concat base_path ".masc/repo-cli-identities/cred-A/gh"
       in
       let ssh_key_path =
-        Filename.concat base_path ".masc/github-identities/cred-A/ssh/id_ed25519"
+        Filename.concat base_path ".masc/repo-cli-identities/cred-A/ssh/id_ed25519"
       in
       seed_minimal_gh_bundle ~gh_config_dir;
       mkdir_p (Filename.dirname ssh_key_path);
@@ -455,18 +455,18 @@ let test_resolve_credential_store_mounts_explicit_ssh_key () =
                binding.ro_mounts)
       | Error err -> failf "expected credential binding, got %s" (CP.pp_error err))
 
-let test_credential_store_mapping_conflicting_github_identity_fails_closed
+let test_credential_store_mapping_conflicting_repo_cli_identity_fails_closed
     () =
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let config_dir = Filename.concat base_path ".masc/config" in
       let keeper_name = "keeper-conflict" in
       let declared_identity = "declared-reviewer" in
-      write_keeper_identity_toml ~base_path ~keeper_name
-        ~github_identity:declared_identity;
+      write_repo_cli_identity_toml ~base_path ~keeper_name
+        ~repo_cli_identity:declared_identity;
       with_config_dir_env config_dir (fun () ->
           let gh_config_dir =
-            Filename.concat base_path ".masc/github-identities/other/gh"
+            Filename.concat base_path ".masc/repo-cli-identities/other/gh"
           in
           seed_credential ~base_path
             (make_credential ~id:"other-credential" ~username:"other-user"
@@ -600,7 +600,7 @@ let test_preflight_missing_hosts_yml () =
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let gh_config_dir =
-        Filename.concat base_path ".masc/github-identities/cred-B/gh"
+        Filename.concat base_path ".masc/repo-cli-identities/cred-B/gh"
       in
       mkdir_p gh_config_dir;
       seed_credential ~base_path
@@ -632,7 +632,7 @@ let test_preflight_fake_token_accepted_without_gh_auth_probe () =
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let gh_config_dir =
-        Filename.concat base_path ".masc/github-identities/cred-C/gh"
+        Filename.concat base_path ".masc/repo-cli-identities/cred-C/gh"
       in
       seed_minimal_gh_bundle ~gh_config_dir;
       seed_credential ~base_path
@@ -699,8 +699,8 @@ let () =
             test_resolve_without_mapping_fails_closed;
           test_case "explicit ssh key is mounted" `Quick
             test_resolve_credential_store_mounts_explicit_ssh_key;
-          test_case "conflicting keeper github_identity fails closed" `Quick
-            test_credential_store_mapping_conflicting_github_identity_fails_closed;
+          test_case "conflicting keeper repo_cli_identity fails closed" `Quick
+            test_credential_store_mapping_conflicting_repo_cli_identity_fails_closed;
         ] );
       ( "lifecycle (PR-1 noop)",
         [

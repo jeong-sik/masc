@@ -12,7 +12,7 @@ type runtime_lens_proof_acc =
   ; mutable latest_ts : float option
   ; mutable docker_visible : bool
   ; mutable git_credentials_enabled : bool
-  ; mutable github_identity_materialized : bool
+  ; mutable repo_cli_identity_materialized : bool
   ; mutable pr_create_observed : bool
   ; tools : (string, unit) Hashtbl.t
   ; successful_tools : (string, unit) Hashtbl.t
@@ -28,7 +28,7 @@ let runtime_lens_proof_acc () =
   ; latest_ts = None
   ; docker_visible = false
   ; git_credentials_enabled = false
-  ; github_identity_materialized = false
+  ; repo_cli_identity_materialized = false
   ; pr_create_observed = false
   ; tools = Hashtbl.create 8
   ; successful_tools = Hashtbl.create 8
@@ -136,21 +136,21 @@ let runtime_lens_call_has_git_credentials output_opt text =
   | Some output -> runtime_lens_has_true_field output "git_creds_enabled"
   | None -> false
 
-let runtime_lens_call_has_github_identity output_opt text =
+let runtime_lens_call_has_repo_cli_identity output_opt text =
   let structured =
     match output_opt with
     | Some output ->
         runtime_lens_has_string_field output "credential_scope" "keeper_identity"
         &&
-        (runtime_lens_has_string_field output "git_identity_mode" "github_identity"
+        (runtime_lens_has_string_field output "git_identity_mode" "repo_cli_identity"
          || runtime_lens_has_string_field output "state" "materialized")
     | None -> false
   in
   structured
   ||
-  (runtime_lens_text_contains text "\"credential_scope\":\"keeper_identity\""
-   &&
-   (runtime_lens_text_contains text "\"git_identity_mode\":\"github_identity\""
+   (runtime_lens_text_contains text "\"credential_scope\":\"keeper_identity\""
+    &&
+   (runtime_lens_text_contains text "\"git_identity_mode\":\"repo_cli_identity\""
     || runtime_lens_text_contains text
          "\"credential_state\":{\"state\":\"materialized\""))
 
@@ -186,8 +186,8 @@ let runtime_lens_accumulate_tool_proof acc json =
   then acc.docker_visible <- true;
   if runtime_lens_call_has_git_credentials output_opt text
   then acc.git_credentials_enabled <- true;
-  if runtime_lens_call_has_github_identity output_opt text
-  then acc.github_identity_materialized <- true
+  if runtime_lens_call_has_repo_cli_identity output_opt text
+  then acc.repo_cli_identity_materialized <- true
 
 let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
   let acc = runtime_lens_proof_acc () in
@@ -198,13 +198,13 @@ let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
   let status =
     if
       acc.docker_visible
-      && (acc.git_credentials_enabled || acc.github_identity_materialized)
+      && (acc.git_credentials_enabled || acc.repo_cli_identity_materialized)
     then "pass"
     else if
       acc.matched_tool_call_count > 0
       && (acc.docker_visible
           || acc.git_credentials_enabled
-          || acc.github_identity_materialized)
+          || acc.repo_cli_identity_materialized)
     then "warn"
     else "missing"
   in
@@ -223,7 +223,7 @@ let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
     ; ("network_modes", Json_util.json_string_list (runtime_lens_sorted_set acc.network_modes))
     ; ("docker_visible", `Bool acc.docker_visible)
     ; ("git_credentials_enabled", `Bool acc.git_credentials_enabled)
-    ; ("github_identity_materialized", `Bool acc.github_identity_materialized)
+    ; ("repo_cli_identity_materialized", `Bool acc.repo_cli_identity_materialized)
     ; ("pr_create_observed", `Bool acc.pr_create_observed)
     ; ( "latest_at",
         match acc.latest_ts with

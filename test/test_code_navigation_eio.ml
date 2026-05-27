@@ -84,7 +84,7 @@ let extract_tool_output response =
 
 let prepare_code_surface ~clock:_ ~sw:_ _state = ()
 
-(* ===== E2E Test: tool_workspace_inspect ===== *)
+(* ===== E2E Test: tool_search_files ===== *)
 
 let test_code_search_basic () =
   Eio_main.run @@ fun env ->
@@ -104,7 +104,7 @@ let test_code_search_basic () =
     ("id", `Int 1);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "tool_workspace_inspect");
+      ("name", `String "tool_search_files");
       ("arguments", `Assoc [
         ("query", `String "ripgrep");
         ("path", `String "lib/");
@@ -164,7 +164,7 @@ let test_code_search_basic () =
      | None -> fail "missing results field")
   end
 
-(* ===== E2E Test: tool_workspace_inspect ===== *)
+(* ===== E2E Test: tool_search_files ===== *)
 
 let test_code_symbols_basic () =
   Eio_main.run @@ fun env ->
@@ -183,7 +183,7 @@ let test_code_symbols_basic () =
     ("id", `Int 2);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "tool_workspace_inspect");
+      ("name", `String "tool_search_files");
       ("arguments", `Assoc [
         ("path", `String "lib/config.ml");
       ]);

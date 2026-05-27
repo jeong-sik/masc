@@ -5,7 +5,7 @@
     is initialised once on sibling load — observably identical to the
     pre-extraction top-level lets. *)
 
-let dashboard_request_timeout_s = 30.0
+let dashboard_request_timeout_s = Env_config_runtime.Dashboard.request_timeout_sec
 
 (** Standard SWR cache TTL — 60 seconds. Used by most dashboard
     endpoints for stale-while-revalidate caching. *)

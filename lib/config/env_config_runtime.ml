@@ -805,6 +805,18 @@ module Dashboard = struct
   let full_health_critical_failure_threshold =
     Stdlib.max 1
       (get_int ~default:5 "MASC_FULL_HEALTH_CRITICAL_FAILURE_THRESHOLD")
+
+  (** Default request timeout for dashboard HTTP endpoints.
+
+      Wraps [with_dashboard_timeout] and
+      [Dashboard_cache.get_or_compute_with_timeout] across 8 call sites
+      in [server_dashboard_http_core_cache], [namespace_truth],
+      [operator_digest], [operator_query], and [operator_snapshot].
+      Previously hardcoded as 30.0 at [server_dashboard_http_core_cache.ml:8].
+      Floor 5s prevents degenerate operator overrides. *)
+  let request_timeout_sec =
+    Float.max 5.0
+      (get_float ~default:30.0 "MASC_DASHBOARD_REQUEST_TIMEOUT_SEC")
 end
 
 (** {1 Internal Timers and TTLs}

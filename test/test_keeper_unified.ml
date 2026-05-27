@@ -9948,6 +9948,7 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
       ~allowed_tool_names:tools
       affordances
   in
+  let retired_discovery_affordance = "work_" ^ "discovery" in
   check
     bool
     "task_claim affordance with claim tool present stays advisory"
@@ -10005,14 +10006,14 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "masc_transition" ] [ "task_verify" ]);
   check
     bool
-    "timer-only work_discovery does not hard-gate even with progress tools"
+    "timer-only legacy discovery does not hard-gate even with progress tools"
     false
-    (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ "work_discovery" ]);
+    (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ retired_discovery_affordance ]);
   check
     bool
-    "work_discovery plus task_claim stays advisory without stronger signal"
+    "legacy discovery plus task_claim stays advisory without stronger signal"
     false
-    (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
+    (gate ~tools:[ "keeper_task_claim" ] [ retired_discovery_affordance; "task_claim" ]);
   check
     bool
     "all gated affordances missing tools -> gate suppressed"

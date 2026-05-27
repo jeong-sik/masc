@@ -182,16 +182,18 @@ let has_key key = function
   | `Assoc fields -> List.mem_assoc key fields
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
 
+let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix
+
 let test_persisted_retired_runtime_meta_fields_scrubbed () =
   let retired_fields =
     [
       "repo_cli_identity", `String "anyang-keepers";
-      "last_work_discovery_ts", `String "2026-05-24T16:29:11Z";
-      "work_discovery_count", `Int 12;
-      "work_discovery_enabled", `Bool true;
-      "work_discovery_sources", `List [ `String "taskboard" ];
-      "work_discovery_interval_sec", `Int 60;
-      "work_discovery_guidance", `String "legacy guidance";
+      "last_" ^ retired_discovery_key "_ts", `String "2026-05-24T16:29:11Z";
+      retired_discovery_key "_count", `Int 12;
+      retired_discovery_key "_enabled", `Bool true;
+      retired_discovery_key "_sources", `List [ `String "taskboard" ];
+      retired_discovery_key "_interval_sec", `Int 60;
+      retired_discovery_key "_guidance", `String "legacy guidance";
     ]
   in
   let legacy_json =

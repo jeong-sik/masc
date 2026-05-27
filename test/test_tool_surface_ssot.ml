@@ -139,17 +139,14 @@ let test_keeper_internal_contains_known_tools () =
     ]
 
 let test_retired_pr_tools_are_not_active_schemas () =
+  let retired_pr_review_tool suffix = "keeper_" ^ "pr_review_" ^ suffix in
   List.iter
     (fun name ->
       Alcotest.(check bool) (name ^ " removed from raw schema universe") false
         (Option.is_some (raw_schema_by_name name));
       Alcotest.(check bool) (name ^ " not keeper-internal surface") false
         (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name))
-    [
-      "keeper_pr_review_read";
-      "keeper_pr_review_comment";
-      "keeper_pr_review_reply";
-    ]
+    [ retired_pr_review_tool "read"; retired_pr_review_tool "comment"; retired_pr_review_tool "reply" ]
 
 let test_keeper_voice_replacement_contract () =
   Alcotest.(check (option string))

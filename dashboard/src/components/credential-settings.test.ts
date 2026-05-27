@@ -11,10 +11,10 @@ import {
   credentialStateLabel,
   credentialTypeBadgeClass,
   credentialTypeLabel,
-  isRecord,
   normalizeCredentialsResponse,
   parseCredentialState,
 } from "./credential-settings"
+import { isRecord } from "../lib/type-guards"
 
 describe("coerceCredentialType", () => {
   it("returns github for unknown", () => {

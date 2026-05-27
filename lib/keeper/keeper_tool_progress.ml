@@ -117,6 +117,10 @@ let is_keeper_observation_alias name =
   | _ -> false
 ;;
 
+let effect_domain_for_tool_name name =
+  Agent_tool_descriptor_resolution.effect_domain_for_tool_name name
+;;
+
 let tool_name_can_satisfy_required_contract name =
   let observation_alias = is_keeper_observation_alias name in
   let name = Keeper_tool_resolution.canonical_tool_name name in
@@ -131,7 +135,7 @@ let tool_name_can_satisfy_required_contract name =
   else if is_completion_tool_name name
   then true
   else (
-    match Tool_catalog.effect_domain name with
+    match effect_domain_for_tool_name name with
     | Some Tool_catalog.Read_only -> false
     | Some
         ( Tool_catalog.Masc_coordination
@@ -154,7 +158,7 @@ let required_tool_satisfaction ?(satisfying_tools : string list = [])
   then Ok ()
   else (
     let mutates =
-      match Tool_catalog.effect_domain tool_name with
+      match effect_domain_for_tool_name call.name with
       | Some Tool_catalog.Read_only -> false
       | _ ->
         Keeper_exec_tools.has_mutating_side_effect_with_input ~tool_name ~input:call.input
@@ -276,7 +280,7 @@ let is_owned_task_progress_tool_name name =
     if is_completion_tool_name name || is_owned_task_coordination_progress_tool_name name
     then true
     else (
-      match Tool_catalog.effect_domain name with
+      match effect_domain_for_tool_name name with
       | Some (Tool_catalog.Playground_write | Tool_catalog.Host_repo_write) -> true
       | Some Tool_catalog.Masc_coordination | Some Tool_catalog.Read_only | None -> false))
 ;;

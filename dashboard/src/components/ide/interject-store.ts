@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { errorToString } from '../../lib/format-string'
 
 export type InterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
@@ -154,7 +155,7 @@ export function createInterjectStore({
       setSnapshot({
         ...after,
         busy_action: null,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorToString(err),
       })
       return false
     }

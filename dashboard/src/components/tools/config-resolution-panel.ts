@@ -18,6 +18,7 @@ import { StatusChip } from '../common/status-chip'
 import { CopyIdButton } from '../common/copy-id-button'
 import { TextInput } from '../common/input'
 import { formatNumber } from '../../lib/format-number'
+import { errorToString } from '../../lib/format-string'
 
 function ConfigCard({
   class: cx,
@@ -446,7 +447,7 @@ function RuntimeProbePanel() {
       state.value = {
         ...state.value,
         loading: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorToString(error),
       }
     }
   }

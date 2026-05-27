@@ -116,6 +116,12 @@ val all_descriptors : unit -> t list
 
 val public_names : unit -> string list
 val internal_names : t -> string list
+(** [resolve_short_alias name] normalises agent_sdk / Claude Code native
+    tool names (Read/Write/Edit/Bash) to MASC canonical public names
+    (ReadFile/WriteFile/EditFile/Execute).  Returns [name] unchanged when
+    no alias matches. *)
+val resolve_short_alias : string -> string
+
 val find_public : string -> t option
 val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list

@@ -1199,8 +1199,29 @@ let internal_names d =
   [ d.internal_name ]
 ;;
 
+(** Short aliases emitted by agent_sdk / Claude Code LLMs that do not match
+    our canonical public names.  When a keeper receives e.g. "Read" instead of
+    "ReadFile", this table normalises before the descriptor lookup.
+
+    These are NOT added to [public_descriptors] so that the descriptor surface
+    hard-cut invariant (exactly 7 LLM-native names) is preserved. *)
+let short_public_aliases : (string * string) list =
+  [ "Read", "ReadFile"
+  ; "Write", "WriteFile"
+  ; "Edit", "EditFile"
+  ; "Bash", "Execute"
+  ]
+;;
+
+let resolve_short_alias name =
+  match List.assoc_opt name short_public_aliases with
+  | Some canonical -> canonical
+  | None -> name
+;;
+
 let find_public name =
-  List.find_opt (fun d -> String.equal d.public_name name) public_descriptors
+  let canonical = resolve_short_alias name in
+  List.find_opt (fun d -> String.equal d.public_name canonical) public_descriptors
 ;;
 
 let public_descriptors_for_internal internal_name =

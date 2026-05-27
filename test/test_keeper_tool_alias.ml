@@ -240,6 +240,7 @@ let test_mcp_prefixed_keeper_internal_routes () =
 ;;
 
 let test_legacy_public_names_hard_cut () =
+  (* Names with no alias — must remain absent from the public surface. *)
   List.iter
     (fun legacy ->
        Alcotest.(check bool)
@@ -250,7 +251,22 @@ let test_legacy_public_names_hard_cut () =
          (Printf.sprintf "%s has no public schema" legacy)
          None
          (Option.map Yojson.Safe.to_string (Alias.public_input_schema legacy)))
-    [ "Bash"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
+    [ "Grep"; "WebSearch"; "WebFetch" ];
+  (* Short aliases emitted by agent_sdk / Claude Code LLMs — must resolve
+     to their canonical public counterparts. *)
+  List.iter
+    (fun (alias, canonical) ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s resolves via alias to %s" alias canonical)
+         true
+         (Option.is_some (Alias.route alias));
+       let resolved_schema = Alias.public_input_schema alias in
+       let canonical_schema = Alias.public_input_schema canonical in
+       Alcotest.(check (option string))
+         (Printf.sprintf "%s has same schema as %s" alias canonical)
+         (Option.map Yojson.Safe.to_string canonical_schema)
+         (Option.map Yojson.Safe.to_string resolved_schema))
+    [ "Read", "ReadFile"; "Write", "WriteFile"; "Edit", "EditFile"; "Bash", "Execute" ]
 ;;
 
 let test_alias_canonical_internal_name_for_set_logic () =

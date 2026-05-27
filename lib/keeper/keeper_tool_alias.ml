@@ -103,11 +103,17 @@ let record_route_outcome ~tool ~routed_to ~result =
 ;;
 
 (** [route public_name] returns routing info for a known LLM-native tool.
-    [None] means the name is not in our surface — a routing miss. *)
+    [None] means the name is not in our surface — a routing miss.
+
+    Short aliases (Read/Write/Edit/Bash) are resolved via
+    [Agent_tool_descriptor.resolve_short_alias] before lookup. *)
 let route name =
   match Hashtbl.find_opt routing_table name with
   | Some r -> Some r
-  | None -> None
+  | None ->
+    let canonical = Agent_tool_descriptor.resolve_short_alias name in
+    if String.equal canonical name then None
+    else Hashtbl.find_opt routing_table canonical
 ;;
 
 (** [public_names ()] returns all LLM-native public names in stable order.

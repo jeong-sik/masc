@@ -615,21 +615,22 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                  ~tool_name:name ~start_time
                  (Printf.sprintf "Tool timed out after %.0fs: %s%s"
                     timeout_sec name source))
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | Coord.Not_initialized ->
+       (* RFC-0189: server bootstrap incomplete — Masc_domain
+          System NotInitialized.  [Runtime_failure] (caller
+          cannot fix; the operator must initialise MASC). *)
+       Tool_result.error
+         ~failure_class:(Some Tool_result.Runtime_failure)
+         ~tool_name:name ~start_time
+         (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+     | exn ->
        (* Never let a tool exception crash the MCP server. *)
        let err = Printexc.to_string exn in
        let trace = Printexc.get_backtrace () in
        let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
-       if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-         (* RFC-0189: server bootstrap incomplete — Masc_domain
-            System NotInitialized.  [Runtime_failure] (caller
-            cannot fix; the operator must initialise MASC). *)
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
-           ~tool_name:name ~start_time
-           (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
-       else
-         (Log.Mcp.error "tools/call crashed: %s" err_detail;
+       (Log.Mcp.error "tools/call crashed: %s" err_detail;
           (* RFC-0189: catch-all for unexpected exceptions —
              [Runtime_failure].  Could become more specific via
              [of_exn] once the exception variants are typed; for

@@ -111,9 +111,27 @@ let validate_file_path_r path : (string, masc_error) result =
 (* Ensure initialized                           *)
 (* ============================================ *)
 
+(* Typed sentinel for the not-initialized case.
+
+   Before: [ensure_initialized] raised [Invalid_argument "MASC not
+   initialized. Use masc_init first."], and four downstream catch
+   sites recovered the case via [Printexc.to_string +
+   contains_casefold ... "masc not initialized"]. That was the
+   RFC-0088 §"String/Substring 분류기" anti-pattern in cross-module
+   form — a prose string round-tripped through the exception slot
+   to carry semantic information.
+
+   Registering a printer keeps existing telemetry/log paths that
+   format the exception via [Printexc.to_string] unchanged. *)
+exception Not_initialized
+
+let () =
+  Printexc.register_printer (function
+    | Not_initialized -> Some "MASC not initialized. Use masc_init first."
+    | _ -> None)
+
 let ensure_initialized config =
-  if not (is_initialized config) then
-    invalid_arg "MASC not initialized. Use masc_init first."
+  if not (is_initialized config) then raise Not_initialized
 
 let ensure_initialized_r config : (unit, masc_error) result =
   if is_initialized config then Ok ()

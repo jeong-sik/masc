@@ -835,7 +835,7 @@ let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
     | None -> []
     | Some store ->
       let now = Time_compat.now () in
-      let since_ts = now -. (window_hours *. 3600.0) in
+      let since_ts = now -. (window_hours *. Masc_time_constants.hour) in
       let since_date = iso_date_of_unix since_ts in
       let until_date = iso_date_of_unix now in
       let keeper_matches name json =

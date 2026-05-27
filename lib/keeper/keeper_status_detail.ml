@@ -780,7 +780,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("lifecycle", `Assoc [
              ("created_at", `String m.created_at);
              ("updated_at", `String m.updated_at);
-             ("uptime_hours", `Float (keeper_age_s /. 3600.0));
+             ("uptime_hours", `Float (keeper_age_s /. Masc_time_constants.hour));
            ]);
            ("proactive", `Assoc [
              ("enabled", `Bool m.proactive.enabled);

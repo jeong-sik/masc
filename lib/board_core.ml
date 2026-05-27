@@ -354,7 +354,7 @@ let add_comment_with_status
                       ; expires_at =
                           (if ttl = 0
                            then 0.0
-                           else now +. (Stdlib.Float.of_int ttl *. 3600.0))
+                           else now +. (Stdlib.Float.of_int ttl *. Masc_time_constants.hour))
                       ; votes_up = 0
                       ; votes_down = 0
                       }

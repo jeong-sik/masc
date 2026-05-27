@@ -399,7 +399,7 @@ let create_post_with_outcome
     let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
     let expires_at =
       let now = Time_compat.now () in
-      if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. 3600.0)
+      if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. Masc_time_constants.hour)
     in
     match
       normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()

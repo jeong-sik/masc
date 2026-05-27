@@ -16,7 +16,7 @@ import {
 } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { RouteLink } from './common/route-link'
 import { TimeAgo } from './common/time-ago'
 import {

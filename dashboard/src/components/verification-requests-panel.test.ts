@@ -38,13 +38,10 @@ vi.mock('./common/card', () => ({
   `,
 }))
 
-vi.mock('./common/empty-state', () => ({
+vi.mock('./common/feedback-state', () => ({
   EmptyState: ({ children }: any) => html`
     <div data-testid="empty-state">${children}</div>
   `,
-}))
-
-vi.mock('./common/feedback-state', () => ({
   ErrorState: ({ message }: any) => html`
     <div data-testid="error-state">${message}</div>
   `,

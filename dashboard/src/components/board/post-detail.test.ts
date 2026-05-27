@@ -37,7 +37,7 @@ vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-vi.mock('../common/empty-state', () => ({
+vi.mock('../common/feedback-state', () => ({
   EmptyState: ({ message }: { message: string }) => h('div', {}, message),
 }))
 

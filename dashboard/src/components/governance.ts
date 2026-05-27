@@ -9,7 +9,7 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-ref
 import { Card } from './common/card'
 import type { KpiCellKind } from './kpi-shared'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { StatusDot } from './common/status-dot'
 import { JsonViewerCard } from './common/json-viewer'
 import { ActionButton } from './common/button'

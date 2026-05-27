@@ -5,7 +5,7 @@ import { fetchKeeperDecisions, type KeeperDecision, type KeeperDecisionsResponse
 import { formatTimeHms } from '../lib/format-time'
 import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
 
 interface DecisionStats {

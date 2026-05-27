@@ -3,7 +3,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { useMemo } from 'preact/hooks'
-import { EmptyState } from '../common/empty-state'
+import { EmptyState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { normalizeToolName } from '../tool-call-shared'
 import {

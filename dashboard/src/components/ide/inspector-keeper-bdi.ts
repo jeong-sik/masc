@@ -1,4 +1,3 @@
-import { computed } from '@preact/signals'
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { activeKeeperName } from '../../keeper-state'
@@ -59,16 +58,10 @@ interface InspectorKeeperPin {
   readonly line: number | null
 }
 
-/**
- * RFC-0027 PR-α backward-compat: legacy single-pin signal is now a derived
- * projection over the head of `pinnedKeepers` (max-4 LRU store). Reads stay
- * identical; mutators move to `pinKeeper` / `clearPins` from
- * `multi-keeper-pin-store.ts`.
- */
-export const inspectorKeeperPin = computed<InspectorKeeperPin | null>(() => {
+function inspectorPinFromHead(): InspectorKeeperPin | null {
   const head = headPinnedKeeper.value
   return head ? { keeperName: head.keeperName, line: head.line } : null
-})
+}
 
 export function pinInspectorKeeper(keeperName: string, line: number | null): void {
   const trimmed = keeperName.trim()
@@ -138,8 +131,8 @@ async function fetchKeeperBdiSnapshot(keeperName: string, signal: AbortSignal): 
 }
 
 function useInspectorKeeperPin(): InspectorKeeperPin | null {
-  const [pin, setPin] = useState(inspectorKeeperPin.value)
-  useEffect(() => inspectorKeeperPin.subscribe(value => setPin(value)), [])
+  const [pin, setPin] = useState<InspectorKeeperPin | null>(inspectorPinFromHead())
+  useEffect(() => headPinnedKeeper.subscribe(() => setPin(inspectorPinFromHead())), [])
   return pin
 }
 

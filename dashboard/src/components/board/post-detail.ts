@@ -12,6 +12,7 @@ import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, replaceRoute, route } from '../../router'
+import { votePost, voteComment } from '../../api/board'
 import { ModerationBadge } from './moderation-badge'
 import { ReactionBar } from './reaction-bar'
 import {
@@ -39,8 +40,6 @@ import {
   visibilityBadgeColor,
   postVisibilityAuditLabel,
   boardPostKind,
-  votePost,
-  voteComment,
   refreshBoard,
 } from './board-state'
 import type { BoardComment, BoardPost } from './board-state'

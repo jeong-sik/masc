@@ -4,6 +4,7 @@ import type cytoscape from 'cytoscape'
 import type { GitGraphResponse, GitGraphNode } from '../api/git-graph'
 import { InlineSpinner } from './common/inline-spinner'
 import { getCytoscape, type CyCore } from './common/cytoscape-loader'
+import { errorToString } from '../lib/format-string'
 
 // Cytoscape does not resolve CSS variables. Resolve once against :root
 // with fallback to literal hex values.
@@ -275,7 +276,7 @@ export function GitGraphView({ graph, focusRef = null }: GitGraphViewProps) {
         setLoading(false)
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err))
+          setError(errorToString(err))
           setLoading(false)
         }
       }

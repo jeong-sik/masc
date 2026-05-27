@@ -53,6 +53,7 @@ import { StatusChip } from './common/status-chip'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { formatPct1 } from '../lib/format-number'
+import { errorToString } from '../lib/format-string'
 
 interface CascadeData {
   config: CascadeConfigResponse | null
@@ -1090,13 +1091,6 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
   `
 }
 
-// Generic Error -> message conversion with String() fallback (no special
-// 'unknown error' literal, no nullable return, no fallback param).
-// Distinct from errorMessageOrNull / errorMessageOrUnknown / errorMessageOr
-// in other modules.
-function errorToString(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 function SourceAssistInput({
   id,

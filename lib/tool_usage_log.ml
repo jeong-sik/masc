@@ -50,7 +50,7 @@ let dashboard_surface = "/api/v1/dashboard/tools"
    "stale" alerts on healthy fleets. 3600 s matches the operational rhythm
    without masking a true write-pipeline failure — Dated_jsonl append errors
    already record a coverage_gap that bypasses this SLO. *)
-let freshness_slo_s = 3600.0
+let freshness_slo_s = Masc_time_constants.hour
 
 let store_dir masc_root = Filename.concat masc_root "tool_usage"
 

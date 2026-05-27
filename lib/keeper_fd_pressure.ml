@@ -233,7 +233,7 @@ let external_cooldown_sec_of level =
   in
   Env_config_core.get_float ~default:default_sec env_var
   |> Float.max 5.0
-  |> Float.min 3600.0
+  |> Float.min Masc_time_constants.hour
 ;;
 
 let engage_external ~reason ~level ~ts () =

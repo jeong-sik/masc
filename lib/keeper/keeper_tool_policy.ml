@@ -177,8 +177,11 @@ let is_keeper_safe_inline_tool name =
   List.mem name keeper_safe_inline_tools
 
 let is_keeper_mcp_context_required name =
-  not (is_keeper_safe_inline_tool name)
-  && Tool_capability.has Tool_capability.Mcp_context_required name
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  not (is_keeper_safe_inline_tool stripped)
+  && Agent_tool_descriptor_resolution.capability_has
+       Tool_capability.Mcp_context_required
+       name
 
 let keeper_supported_keeper_masc_tools =
   [ "masc_keeper_list"

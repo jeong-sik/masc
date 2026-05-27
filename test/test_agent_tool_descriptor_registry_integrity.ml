@@ -20,6 +20,7 @@
 open Alcotest
 module Descriptor = Masc_mcp.Agent_tool_descriptor
 module Exec = Masc_mcp.Keeper_exec_tools
+module Policy = Masc_mcp.Keeper_tool_policy
 module Registry = Masc_mcp.Keeper_tool_registry
 module Resolution = Masc_mcp.Agent_tool_descriptor_resolution
 module Tool_board_registry = Masc_mcp.Tool_board_registry
@@ -221,6 +222,25 @@ let test_readonly_policy_projects_to_input_aware_registry () =
        ~tool_name:"tool_write_file"
        ~input:(`Assoc [ "path", `String "x"; "content", `String "y" ]))
 
+let test_mcp_context_policy_uses_descriptor_resolution () =
+  Alcotest.(check bool)
+    "approval_pending does not require MCP session"
+    false
+    (Policy.is_keeper_mcp_context_required "masc_approval_pending");
+  Alcotest.(check bool)
+    "mcp-prefixed approval_pending keeps inline exemption"
+    false
+    (Policy.is_keeper_mcp_context_required "mcp__masc__masc_approval_pending");
+  Alcotest.(check bool)
+    "approval_get still requires MCP session"
+    true
+    (Policy.is_keeper_mcp_context_required "masc_approval_get");
+  Alcotest.(check bool)
+    "mcp-prefixed approval_get still requires MCP session"
+    true
+    (Policy.is_keeper_mcp_context_required "mcp__masc__masc_approval_get")
+;;
+
 let test_mutation_boundary_delegates_to_descriptor_policy () =
   let search_input = `Assoc [ "pattern", `String "Agent_tool_descriptor" ] in
   Alcotest.(check bool)
@@ -341,6 +361,10 @@ let () =
             "descriptor read-only policy projects to input-aware registry"
             `Quick
             test_readonly_policy_projects_to_input_aware_registry
+        ; test_case
+            "MCP context policy uses descriptor resolution"
+            `Quick
+            test_mcp_context_policy_uses_descriptor_resolution
         ; test_case
             "mutation boundary delegates to descriptor policy"
             `Quick

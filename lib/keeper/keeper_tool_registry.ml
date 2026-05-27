@@ -127,10 +127,10 @@ let is_keeper_read_only_tool (name : string) : bool =
 
 let is_effectively_read_only_tool (name : string) : bool =
   (* Keeper-local check first (bare Hashtbl, no mutex) before
-     catalog-backed capability lookup. *)
+     descriptor-aware capability lookup. *)
   is_keeper_read_only_tool name
-  || Tool_capability.has Tool_capability.Read_only name
-  || Tool_capability.has Tool_capability.Idempotent name
+  || Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
+  || Agent_tool_descriptor_resolution.capability_has Tool_capability.Idempotent name
 ;;
 
 let has_mutating_side_effect (name : string) : bool =

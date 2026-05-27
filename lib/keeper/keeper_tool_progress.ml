@@ -137,7 +137,9 @@ let tool_name_can_satisfy_required_contract name =
         ( Tool_catalog.Masc_coordination
         | Tool_catalog.Playground_write
         | Tool_catalog.Host_repo_write ) -> true
-    | None -> not (Tool_capability.has Tool_capability.Read_only name))
+    | None ->
+      not
+        (Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name))
 ;;
 
 let required_tool_satisfaction ?(satisfying_tools : string list = [])

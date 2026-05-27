@@ -45,10 +45,16 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (satisfies_required_tool "ReadFile" (`Assoc []));
   check bool "SearchFiles alias cannot satisfy required-action contract" false
     (satisfies_required_tool "SearchFiles" (`Assoc []));
+  check bool "mcp-prefixed SearchFiles remains passive" false
+    (satisfies_required_tool "mcp__masc__SearchFiles" (`Assoc []));
+  check bool "SearchWeb alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "SearchWeb" (`Assoc []));
   check bool "ReadFile alias remains passive progress" true
     (KTP.is_passive_status_tool_name "ReadFile");
   check bool "SearchFiles alias remains passive progress" true
-    (KTP.is_passive_status_tool_name "SearchFiles")
+    (KTP.is_passive_status_tool_name "SearchFiles");
+  check bool "SearchWeb alias remains passive progress" true
+    (KTP.is_passive_status_tool_name "SearchWeb")
 ;;
 
 let test_required_tool_satisfaction_accepts_mutating_tools () =

@@ -107,13 +107,13 @@ let handle_runtime_verify _ctx args : Core.tool_result =
     match Json_util.assoc_member_opt "expected_slots" args with
     | Some (`Int value) -> Some (max 1 value)
     | Some (`Intlit value) -> Core.parse_int_opt value
-    | _ -> None
+    | Some (`Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> None
   in
   let expected_ctx =
     match Json_util.assoc_member_opt "expected_ctx" args with
     | Some (`Int value) -> Some (max 1 value)
     | Some (`Intlit value) -> Core.parse_int_opt value
-    | _ -> None
+    | Some (`Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> None
   in
   ok_response
     ~tool_name
@@ -135,7 +135,7 @@ let handle_runtime_bench _ctx args : Core.tool_result =
         match Core.parse_int_opt value with
         | Some parsed -> max 1 (min 128 parsed)
         | None -> 8)
-    | _ -> 8
+    | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ -> 8
   in
   let rounds =
     match Json_util.assoc_member_opt "rounds" args with
@@ -144,7 +144,7 @@ let handle_runtime_bench _ctx args : Core.tool_result =
         match Core.parse_int_opt value with
         | Some parsed -> max 1 (min 8 parsed)
         | None -> 1)
-    | _ -> 1
+    | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ -> 1
   in
   let max_tokens =
     match Json_util.assoc_member_opt "max_tokens" args with
@@ -153,7 +153,7 @@ let handle_runtime_bench _ctx args : Core.tool_result =
         match Core.parse_int_opt value with
         | Some parsed -> max 1 (min 128 parsed)
         | None -> 16)
-    | _ -> 16
+    | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ -> 16
   in
   let timeout_sec =
     match Json_util.assoc_member_opt "timeout_sec" args with
@@ -162,7 +162,7 @@ let handle_runtime_bench _ctx args : Core.tool_result =
         match Core.parse_int_opt value with
         | Some parsed -> max 3 (min 120 parsed)
         | None -> 8)
-    | _ -> 8
+    | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ -> 8
   in
   let prompt =
     match Json_util.assoc_member_opt "prompt" args with
@@ -196,7 +196,7 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
         match Core.parse_int_opt value with
         | Some parsed -> parsed
         | None -> 2)
-    | _ -> 2
+    | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ -> 2
   in
   let max_tokens =
     match Json_util.assoc_member_opt "max_tokens" args with
@@ -205,7 +205,7 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
         match Core.parse_int_opt value with
         | Some parsed -> parsed
         | None -> 16)
-    | _ -> 16
+    | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ -> 16
   in
   let timeout_sec =
     match Json_util.assoc_member_opt "timeout_sec" args with
@@ -214,7 +214,8 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
         (match Core.parse_int_opt value with
          | Some parsed -> parsed
          | None -> Tool_local_runtime_probe.default_probe_timeout_sec)
-    | _ -> Tool_local_runtime_probe.default_probe_timeout_sec
+    | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+      Tool_local_runtime_probe.default_probe_timeout_sec
   in
   let think_mode =
     match Json_util.assoc_member_opt "think_mode" args with
@@ -224,7 +225,7 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
         | None ->
             Error
               "think_mode must be one of auto, disabled, or enabled")
-    | _ -> (
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) | None -> (
         match Json_util.assoc_member_opt "think" args with
         | Some (`Bool true) -> Ok Tool_local_runtime_probe.Think_enabled
         | Some (`Bool false) -> Ok Tool_local_runtime_probe.Think_disabled

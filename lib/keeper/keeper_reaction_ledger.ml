@@ -330,7 +330,7 @@ let read_recent_for_keeper ~base_path ~keeper_name ~limit =
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let string_field name json =

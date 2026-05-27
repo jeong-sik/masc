@@ -37,7 +37,8 @@ let importance_of_json (json : Yojson.Safe.t) : int =
     (match List.assoc_opt "importance" fields with
      | Some (`Int n) -> max 1 (min 10 n)
      | _ -> default_importance ())
-  | _ -> default_importance ()
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    default_importance ()
 
 (** Extract content string from JSON value. *)
 let content_of_json (json : Yojson.Safe.t) : string =
@@ -47,7 +48,8 @@ let content_of_json (json : Yojson.Safe.t) : string =
     (match List.assoc_opt "content" fields with
      | Some (`String s) -> s
      | _ -> Yojson.Safe.to_string json)
-  | _ -> Yojson.Safe.to_string json
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ ->
+    Yojson.Safe.to_string json
 
 (** Generate a timestamp-based session ID as fallback. *)
 let generate_session_id () =
@@ -244,7 +246,7 @@ let metadata_string_list key metadata =
       values
       |> List.filter_map (function
            | `String value when String.trim value <> "" -> Some value
-           | _ -> None)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> None)
   | _ -> []
 
 let metadata_context key metadata =
@@ -253,7 +255,7 @@ let metadata_context key metadata =
       fields
       |> List.filter_map (function
            | k, `String value -> Some (k, value)
-           | _ -> None)
+           | _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) -> None)
   | _ -> []
 
 let metadata_float key metadata =

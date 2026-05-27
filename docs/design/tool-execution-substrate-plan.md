@@ -1,6 +1,7 @@
 # Tool Execution Substrate Plan
 
-Status: decision plan
+Status: implementation stack in progress; PR-A through PR-H are implemented and
+locally verified, with final completion gated by PR review and CI merge gates
 Created: 2026-05-27
 Scope: keeper agent tool surface, descriptor spine, Shell IR, and tool admission rules
 HTML companion: `docs/design/tool-execution-substrate-plan.html`
@@ -223,7 +224,7 @@ Every descriptor-backed tool call should emit:
 Static descriptor evidence is not enough. The receipt must show why this
 specific call was allowed, blocked, or escalated.
 
-## Concrete Work Plan
+## Concrete Implementation Stack
 
 ### PR-A: Decision Plan and Ratchet Targets
 

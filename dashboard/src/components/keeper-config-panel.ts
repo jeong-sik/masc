@@ -19,6 +19,7 @@ import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { SetupGuideCard } from './setup-guide-card'
@@ -705,25 +706,23 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     }
   }
 
-  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
-
   // --- Toolbar ---
   const toolbar = html`
     <div class="flex gap-2 items-center mb-3">
       ${isEditing ? html`
         <button type="button"
-          class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
+          class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
           onClick=${saveConfig}
           disabled=${isSaving}
         >${isSaving ? '저장 중...' : '저장'}</button>
         <button type="button"
-          class="${btnBase} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
+          class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
           onClick=${cancelEdit}
           disabled=${isSaving}
         >취소</button>
       ` : html`
         <button type="button"
-          class="${btnBase} bg-[var(--purple)] text-[var(--color-bg-0)]"
+          class="${BTN_FILLED_BASE} bg-[var(--purple)] text-[var(--color-bg-0)]"
           title="편집: 프롬프트 편집 모드로 진입합니다"
           onClick=${enterEditMode}
         >편집하기</button>
@@ -1100,12 +1099,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${runtimeHasChanges ? html`
         <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)]">
           <button type="button"
-            class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
+            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
             onClick=${saveRuntimeConfig}
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           <button type="button"
-            class="${btnBase} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
+            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
             title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
             onClick=${resetRuntimeDraft}
           >초기화하기</button>

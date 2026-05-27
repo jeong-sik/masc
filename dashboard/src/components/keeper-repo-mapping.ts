@@ -14,6 +14,7 @@ import { fetchRepositoriesList } from '../api/repositories'
 import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { BTN_FILLED_BASE } from './common/button-filled-base'
 import {
   credentialStateBadgeClass,
   credentialStateLabel,
@@ -320,8 +321,6 @@ export function KeeperRepoMapping() {
   const mappings = mState.status === 'loaded' ? mState.data : []
   const mappingByKeeper = new Map(mappings.map(m => [m.keeper_id, m]))
 
-  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
-
   async function handleSave(keeperId: string) {
     const draft = draftMappings.value.get(keeperId)
     if (draft === undefined) return
@@ -376,7 +375,7 @@ export function KeeperRepoMapping() {
         <h2 class="text-sm font-bold text-text-strong">키퍼 저장소 매핑</h2>
         <button
           type="button"
-          class="${btnBase} bg-[var(--color-bg-hover)] text-text-body"
+          class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-text-body"
           onClick=${() => loadKeeperRepoMappings({ force: true })}
         >
           새로고침
@@ -447,7 +446,7 @@ export function KeeperRepoMapping() {
                     ` : null}
                     <button
                       type="button"
-                      class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] py-1 px-3 text-2xs"
+                      class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] py-1 px-3 text-2xs"
                       onClick=${() => handleSave(keeperId)}
                       disabled=${isSaving || !changed}
                     >

@@ -412,12 +412,10 @@ let is_tool_auth_strict_enabled () = true
    strict-auth internals.  Keeper runtime tools are NOT a prefix: a [keeper_*]
    prefix alone is not enough to cross auth — the catalog must own the tool.
    That check stays separate. *)
-let internal_tool_prefixes = [ "masc_" ]
-
 let has_internal_tool_prefix tool_name =
-  List.exists
-    (fun pref -> String.starts_with ~prefix:pref tool_name)
-    internal_tool_prefixes
+  Tool_name.of_string tool_name
+  |> Option.map Tool_name.is_masc
+  |> Option.value ~default:false
 ;;
 
 let is_unmapped_internal_tool_name tool_name =

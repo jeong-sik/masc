@@ -122,7 +122,7 @@ let filter_model_visible_suggestions names =
   |> List.filter_map (fun name ->
     match public_alias_for_internal name with
     | Some public -> Some public
-    | None when String.starts_with ~prefix:"keeper_" name -> None
+    | None when (Tool_name.of_string name |> Option.map Tool_name.is_keeper |> Option.value ~default:false) -> None
     | None -> Some name)
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;

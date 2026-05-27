@@ -223,7 +223,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
     || eq Tool_name.Masc.Board_delete
   in
   List.filter (fun (s : Masc_domain.tool_schema) ->
-      String.starts_with ~prefix:"masc_" s.name
+      (Tool_name.of_string s.name |> Option.map Tool_name.is_masc |> Option.value ~default:false)
       && not (is_keeper_mcp_context_required s.name)
       && supported_in_keeper s.name
       && not (is_keeper_denied s.name)

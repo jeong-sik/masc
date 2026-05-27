@@ -18,7 +18,8 @@ import { IdeInterject } from './ide-interject'
 import { ExecuteOutputDrawer } from './execute-output-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
-import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
+import { InspectorKeeperBDI } from './inspector-keeper-bdi'
+import { pinKeeper } from './multi-keeper-pin-store'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
@@ -677,7 +678,7 @@ export function IdeShell() {
             findOpen=${findOpen}
             onFindOpen=${handleFindOpen}
             onFindClose=${handleFindClose}
-            onKeeperLineSelect=${pinInspectorKeeper}
+            onKeeperLineSelect=${pinKeeper}
             annotations=${annotations}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />

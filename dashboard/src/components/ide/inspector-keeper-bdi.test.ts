@@ -5,10 +5,9 @@ import { activeKeeperName } from '../../keeper-state'
 import {
   InspectorKeeperBDI,
   normalizeKeeperBdiSnapshot,
-  pinInspectorKeeper,
 } from './inspector-keeper-bdi'
 import { routeHashParams } from './ide-test-helpers'
-import { clearPins } from './multi-keeper-pin-store'
+import { clearPins, pinKeeper } from './multi-keeper-pin-store'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { activeIdeFile, ideContextFocus } from './ide-state'
@@ -108,7 +107,7 @@ describe('InspectorKeeperBDI', () => {
   it('pins selected keeper/line and renders the BDI snapshot', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
     vi.stubGlobal('fetch', fetchMock)
-    pinInspectorKeeper('scholar', 42)
+    pinKeeper('scholar', 42)
 
     const container = createContainer()
     render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
@@ -161,7 +160,7 @@ describe('InspectorKeeperBDI', () => {
 
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
     vi.stubGlobal('fetch', fetchMock)
-    pinInspectorKeeper('scholar', 42)
+    pinKeeper('scholar', 42)
 
     const container = createContainer()
     render(html`<${InspectorKeeperBDI} pollMs=${60_000} traceActive=${true} />`, container)
@@ -192,7 +191,7 @@ describe('InspectorKeeperBDI', () => {
 
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
     vi.stubGlobal('fetch', fetchMock)
-    pinInspectorKeeper('scholar', 42)
+    pinKeeper('scholar', 42)
 
     const container = createContainer()
     render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)

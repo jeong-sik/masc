@@ -143,17 +143,17 @@ let test_docker_does_not_own_command_semantics () =
   assert_not_contains docker_mli "val cmd_targets_git_or_gh";
   assert_not_contains docker_mli "val cmd_targets_gh";
   assert_not_contains docker_mli "val resolve_sandbox_root_git_cwd";
-  assert_not_contains docker_mli "val stages_targets_git_or_gh";
-  assert_not_contains docker_mli "val stages_targets_gh";
+  assert_not_contains docker_mli "val stages_target_repo_commands";
+  assert_not_contains docker_mli "val stages_target_repo_hosting_cli";
   assert_not_contains docker_mli "val resolve_sandbox_root_git_cwd_of_stages";
   assert_not_contains docker_ml "let cmd_targets_git_or_gh";
   assert_not_contains docker_ml "let cmd_targets_gh";
   assert_not_contains docker_ml "let resolve_sandbox_root_git_cwd";
-  assert_not_contains docker_ml "let stages_targets_git_or_gh";
-  assert_not_contains docker_ml "let stages_targets_gh";
+  assert_not_contains docker_ml "let stages_target_repo_commands";
+  assert_not_contains docker_ml "let stages_target_repo_hosting_cli";
   assert_not_contains docker_ml "let resolve_sandbox_root_git_cwd_of_stages";
-  assert_contains semantics_ml "let stages_targets_git_or_gh";
-  assert_contains semantics_ml "let stages_targets_gh";
+  assert_contains semantics_ml "let stages_target_repo_commands";
+  assert_contains semantics_ml "let stages_target_repo_hosting_cli";
   assert_contains semantics_ml "let resolve_sandbox_root_git_cwd_of_stages";
   assert_contains semantics_ml "let parsed_stages_of_ir";
   assert_contains semantics_ml "Masc_exec.Shell_ir.Pipeline";
@@ -277,7 +277,7 @@ let test_shell_shared_is_removed () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let execute_ml = "lib/keeper/agent_tool_execute_runtime.ml" in
   let dispatch_ml = "lib/keeper/agent_tool_dispatch_runtime.ml" in
-  let exec_shell_ml = "lib/keeper/agent_tool_shell_runtime.ml" in
+  let exec_shell_ml = "lib/keeper/agent_tool_command_runtime.ml" in
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_shell.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_shell.mli");
   let retired_shared_path = "lib/keeper/keeper_" ^ "shell_shared" in
@@ -305,7 +305,7 @@ let test_shell_shared_is_removed () =
     "lib/keeper/keeper_workspace_read_ops.ml"
     "Agent_tool_execute_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains execute_ml "Agent_tool_execute_timeout.clamp_shell_timeout";
-  assert_contains dispatch_ml "Keeper_workspace_op.valid_strings";
+  assert_not_contains dispatch_ml "Keeper_workspace_op.valid_strings";
   assert_not_contains shell_ops_ml (retired_shared ^ ".");
   assert_not_contains
     "lib/keeper/keeper_workspace_read_ops.ml"
@@ -319,16 +319,16 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   let runtime_ml = "lib/keeper/agent_tool_runtime.ml" in
   assert_contains "lib/dune" "agent_tool_runtime";
   assert_contains runtime_ml "Agent_tool_descriptor.descriptors_for_internal";
-  assert_contains runtime_ml "Agent_tool_shell_runtime.handle_tool_execute";
-  assert_contains runtime_ml "Agent_tool_shell_runtime.handle_tool_search_files";
+  assert_contains runtime_ml "Agent_tool_command_runtime.handle_tool_execute";
+  assert_contains runtime_ml "Agent_tool_command_runtime.handle_tool_search_files";
   assert_contains runtime_ml "Agent_tool_filesystem_runtime.handle_read_file";
   assert_contains runtime_ml "Agent_tool_filesystem_runtime.handle_file_write";
   assert_contains runtime_ml "let handle_remote_mcp";
   assert_contains runtime_ml "Agent_tool_remote_mcp_runtime.handle_registered_remote_tool";
   assert_contains runtime_ml "| Remote_mcp -> handle_remote_mcp";
   assert_contains dispatch_ml "Agent_tool_runtime.handle_internal";
-  assert_not_contains dispatch_ml "Agent_tool_shell_runtime.handle_tool_execute";
-  assert_not_contains dispatch_ml "Agent_tool_shell_runtime.handle_tool_search_files";
+  assert_not_contains dispatch_ml "Agent_tool_command_runtime.handle_tool_execute";
+  assert_not_contains dispatch_ml "Agent_tool_command_runtime.handle_tool_search_files";
   assert_not_contains dispatch_ml "Agent_tool_filesystem_runtime.handle_read_file";
   assert_not_contains dispatch_ml "Agent_tool_filesystem_runtime.handle_file_write"
 
@@ -361,15 +361,15 @@ let test_memory_tools_use_agent_tool_memory_runtime () =
   assert_not_contains in_process ("Keeper_" ^ "exec_memory");
   assert_not_contains memory_runtime ("keeper_" ^ "exec_memory")
 
-let test_preflight_uses_agent_tool_preflight_runtime () =
+let test_preflight_uses_keeper_cascade_resilience () =
   let heartbeat_scheduling = "lib/keeper/keeper_heartbeat_loop_scheduling.ml" in
   let turn = "lib/keeper/keeper_turn.ml" in
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.mli");
-  assert_contains "lib/dune" "agent_tool_preflight_runtime";
+  assert_contains "lib/dune" "keeper_cascade_resilience";
   assert_not_contains "lib/dune" ("keeper_" ^ "exec_preflight");
-  assert_contains heartbeat_scheduling "Agent_tool_preflight_runtime.";
-  assert_contains turn "Agent_tool_preflight_runtime.";
+  assert_contains heartbeat_scheduling "Keeper_cascade_resilience.";
+  assert_contains turn "Keeper_cascade_resilience.";
   assert_not_contains heartbeat_scheduling ("Keeper_" ^ "exec_preflight");
   assert_not_contains turn ("Keeper_" ^ "exec_preflight")
 
@@ -619,9 +619,9 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
   assert_not_contains contract_classifier
-    "\"tool_workspace_inspect\"; \"tool_execute\"; \"tool_execute\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"";
   assert_not_contains agent_surface
-    "\"tool_workspace_inspect\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
   assert_contains pr_metrics "Keeper_tool_capability_axis.supports";
   assert_not_contains pr_metrics
     "List.mem tool_name [ \"tool_execute\"; \"tool_execute\"; \"tool_execute\" ]";
@@ -641,13 +641,13 @@ let test_public_alias_projection_uses_core_axis () =
   assert_contains core_axis "public_name = \"Execute\"; internal_name = \"tool_execute\"";
   assert_contains coord_classify "Tool_name_alias_axis.canonical_required_tool_name";
   assert_not_contains coord_classify "\"Bash\" -> \"tool_execute\"";
-  assert_not_contains coord_classify "\"Grep\" -> \"tool_workspace_inspect\"";
+  assert_not_contains coord_classify "\"Grep\" -> \"tool_search_files\"";
   assert_contains keeper_alias "Agent_tool_descriptor.public_descriptors";
   assert_contains keeper_alias "Agent_tool_descriptor.public_names";
   assert_contains keeper_alias "let strip_mcp_masc_prefix";
   assert_not_contains keeper_alias
     "\"Bash\", { internal_name = \"tool_execute\"";
-  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_workspace_inspect\""
+  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_search_files\""
 
 let test_backend_host_exec_uses_sandbox_actor () =
   let backend_sources =
@@ -656,12 +656,18 @@ let test_backend_host_exec_uses_sandbox_actor () =
     ; "lib/keeper/keeper_docker_client_real.ml"
     ]
   in
+  let retired_shell_actor = "Keeper_" ^ "shell" in
   List.iter
     (fun rel ->
-       assert_not_contains rel "~actor:`Keeper_shell";
-       assert_not_contains rel "actor = `Keeper_shell")
+       assert_not_contains rel ("~actor:`" ^ retired_shell_actor);
+       assert_not_contains rel ("actor = `" ^ retired_shell_actor))
     backend_sources;
-  assert_contains "lib/keeper/keeper_sandbox_docker.ml" "~actor:`System_sandbox"
+  assert_contains "lib/keeper/keeper_sandbox_docker.ml" "~actor:`System_sandbox";
+  assert_not_contains "lib/exec/agent_id.ml" retired_shell_actor;
+  assert_not_contains "lib/exec/agent_id.mli" retired_shell_actor;
+  assert_not_contains "lib/exec/agent_id.ml" ("keeper" ^ "/shell");
+  assert_contains "lib/exec/agent_id.ml" "`Tool_execute";
+  assert_contains "lib/exec/agent_id.ml" "\"tool/execute\""
 
 let test_shell_ops_drops_gh_bridge () =
   let shell_ops = "lib/keeper/keeper_workspace_ops.ml" in
@@ -765,9 +771,9 @@ let () =
             `Quick
             test_memory_tools_use_agent_tool_memory_runtime;
           Alcotest.test_case
-            "preflight uses agent tool preflight runtime"
+            "preflight uses keeper cascade resilience"
             `Quick
-            test_preflight_uses_agent_tool_preflight_runtime;
+            test_preflight_uses_keeper_cascade_resilience;
           Alcotest.test_case
             "status metrics left exec axis"
             `Quick
@@ -789,11 +795,11 @@ let () =
             `Quick
             test_dispatch_runtime_left_legacy_exec_axis;
           Alcotest.test_case
-            "shell ops host IR uses keeper shell IR facade"
+            "shell ops host IR uses Execute Shell IR facade"
             `Quick
             test_shell_ops_host_ir_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
-            "keeper bash dispatch uses keeper shell IR facade"
+            "Execute dispatch uses Execute Shell IR facade"
             `Quick
             test_tool_execute_dispatch_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
@@ -801,11 +807,11 @@ let () =
             `Quick
             test_retired_remote_command_parser_absent;
           Alcotest.test_case
-            "keeper bash input lowering uses keeper shell IR facade"
+            "Execute input lowering uses Execute Shell IR facade"
             `Quick
             test_tool_execute_input_lowering_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
-            "docker shell path validation uses keeper shell IR facade"
+            "docker shell path validation uses Execute Shell IR facade"
             `Quick
             test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case

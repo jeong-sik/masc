@@ -8,7 +8,7 @@
 
 module Coord = Masc_mcp.Coord
 module Exec_core = Masc_mcp.Exec_core
-module Agent_tool_shell_runtime = Masc_mcp.Agent_tool_shell_runtime
+module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
@@ -304,7 +304,7 @@ let parse_error_field raw =
   |> Json.to_string_option
 
 let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
-  let elapsed = Agent_tool_shell_runtime.For_testing.elapsed_duration_ms in
+  let elapsed = Agent_tool_command_runtime.For_testing.elapsed_duration_ms in
   Alcotest.(check int) "sub-ms positive duration rounds up to 1" 1
     (elapsed ~start_time:10.0 ~end_time:10.0004);
   Alcotest.(check int) "one ms duration stays one" 1
@@ -324,7 +324,7 @@ let classification family =
 
 let test_git_exit_128_emits_typed_deterministic_retry_marker () =
   let fields =
-    Agent_tool_shell_runtime.For_testing.deterministic_retry_fields_for_process_result
+    Agent_tool_command_runtime.For_testing.deterministic_retry_fields_for_process_result
       ~classification:(classification Exec_core.Git_read)
       ~status:(Unix.WEXITED 128)
   in
@@ -341,7 +341,7 @@ let test_git_exit_128_emits_typed_deterministic_retry_marker () =
 
 let test_non_git_exit_128_has_no_deterministic_retry_marker () =
   let fields =
-    Agent_tool_shell_runtime.For_testing.deterministic_retry_fields_for_process_result
+    Agent_tool_command_runtime.For_testing.deterministic_retry_fields_for_process_result
       ~classification:(classification Exec_core.Build)
       ~status:(Unix.WEXITED 128)
   in
@@ -351,9 +351,9 @@ let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
     "tool_search_files_ir native timeout floor"
-    Agent_tool_shell_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec
+    Agent_tool_command_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec
     (Masc_mcp.Agent_tool_execute_timeout.clamp_shell_timeout
-       ~min_sec:Agent_tool_shell_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec
+       ~min_sec:Agent_tool_command_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec
        ~default:Masc_mcp.Agent_tool_execute_timeout.io_timeout_sec
        args)
 
@@ -367,7 +367,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
   check
     "trivial command keeps native floor"
     (`Assoc [ "executable", `String "echo"; "argv", `List [ `String "ok" ] ])
-    Agent_tool_shell_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec;
+    Agent_tool_command_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec;
   check
     "git command uses tool dispatch floor"
     (`Assoc
@@ -500,7 +500,7 @@ let test_playground_guard_traversal () =
   Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
     true would_match_raw
 
-(* ── tool_workspace_inspect readonly hints teach the model about alternatives ───── *)
+(* ── tool_search_files readonly hints teach the model about alternatives ───── *)
 
 let make_readonly_meta name =
   let json =
@@ -523,7 +523,7 @@ let make_write_enabled_meta name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "write-enabled keeper bash test");
+        ("goal", `String "write-enabled Execute test");
         ( "tool_access",
           Keeper_types.tool_access_to_json
             (Keeper_types.Preset
@@ -548,7 +548,7 @@ let test_tool_execute_typed_process_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -582,7 +582,7 @@ let test_tool_execute_typed_pipeline_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -625,7 +625,7 @@ let test_tool_execute_typed_docker_falls_back_to_local_playground () =
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -668,7 +668,7 @@ let test_tool_search_files_find_accepts_name_alias () =
   ensure_dir lib_dir;
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml") "let x = 1\n");
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:
@@ -702,7 +702,7 @@ let test_tool_search_files_ls_recovers_doubled_playground_prefix () =
     Filename.concat playground ((playground_path_of meta.name) ^ "repos")
   in
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -716,14 +716,14 @@ let test_tool_search_files_ls_recovers_doubled_playground_prefix () =
   Alcotest.(check string) "path normalized to repos root" repos
     (json |> Json.member "path" |> Json.to_string)
 
-let test_tool_search_files_bash_op_is_unsupported () =
+let test_tool_search_files_retired_command_op_is_unsupported () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "bash-unsupported" in
+  let meta = make_readonly_meta "retired-command-unsupported" in
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -735,22 +735,22 @@ let test_tool_search_files_bash_op_is_unsupported () =
     (Some "unsupported_op") (parse_error_field raw);
   let json = Yojson.Safe.from_string raw in
   let supported_ops = json |> Json.member "supported_ops" |> Json.to_list in
-  Alcotest.(check bool) "bash not supported" false
+  Alcotest.(check bool) "retired command op not supported" false
     (List.mem (`String "bash") supported_ops)
 
-let test_tool_search_files_bash_op_does_not_execute () =
+let test_tool_search_files_retired_command_op_does_not_execute () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "bash-no-exec" in
+  let meta = make_readonly_meta "retired-command-no-exec" in
   let playground =
     Filename.concat base_path (playground_path_of meta.name)
   in
   ensure_dir playground;
   let marker = Filename.concat playground "should-not-exist" in
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -760,7 +760,7 @@ let test_tool_search_files_bash_op_does_not_execute () =
   in
   Alcotest.(check (option string)) "error is unsupported"
     (Some "unsupported_op") (parse_error_field raw);
-  Alcotest.(check bool) "bash op did not execute" false
+  Alcotest.(check bool) "retired command op did not execute" false
     (Sys.file_exists marker)
 
 let test_rewrite_turn_runtime_paths_to_host () =
@@ -778,7 +778,7 @@ let test_rewrite_turn_runtime_paths_to_host () =
       container_root container_root
   in
   let rewritten =
-    Agent_tool_shell_runtime.rewrite_turn_runtime_paths_to_host ~config ~meta input
+    Agent_tool_command_runtime.rewrite_turn_runtime_paths_to_host ~config ~meta input
   in
   Alcotest.(check string) "container paths rewritten to host root"
     (Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
@@ -792,7 +792,7 @@ let test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path () =
   let meta = make_docker_meta "minjae" in
   let input = "worktree /tmp/other\n" in
   Alcotest.(check string) "unrelated paths untouched" input
-    (Agent_tool_shell_runtime.rewrite_turn_runtime_paths_to_host ~config ~meta input)
+    (Agent_tool_command_runtime.rewrite_turn_runtime_paths_to_host ~config ~meta input)
 
 let test_rewrite_docker_host_paths_to_container () =
   with_eio_fs @@ fun () ->
@@ -809,7 +809,7 @@ let test_rewrite_docker_host_paths_to_container () =
       host_root host_root
   in
   let rewritten =
-    Agent_tool_shell_runtime.rewrite_docker_host_paths_to_container
+    Agent_tool_command_runtime.rewrite_docker_host_paths_to_container
       ~config ~meta input
   in
   Alcotest.(check string) "host root rewritten only on path boundary"
@@ -842,14 +842,14 @@ let test_rewrite_docker_container_paths_for_host_validation () =
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 
-let test_bash_missing_typed_input_field () =
+let test_execute_missing_typed_input_field () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_docker_meta "missing-typed-input" in
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
@@ -869,7 +869,7 @@ let test_shell_missing_op_field () =
   Keeper_registry.clear ();
   let meta = make_readonly_meta "missing-op" in
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [ ("path", `String "/some/path") ])
@@ -888,7 +888,7 @@ let test_shell_unsupported_op () =
   Keeper_registry.clear ();
   let meta = make_readonly_meta "bad-op" in
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -918,7 +918,7 @@ let test_rg_regex_pipe_pattern_via_typed_execute () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml")
     "let ghost_value = 1\nlet task_value = 2\nlet other = 3\n");
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -949,7 +949,7 @@ let test_rg_literal_pipe_in_pattern () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "data.txt")
     "a|b\nc|d\ne f\n");
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -980,7 +980,7 @@ let test_rg_metachar_not_pipe () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "test.ml")
     "let x = 1\nlet y = 2\n");
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1007,7 +1007,7 @@ let test_literal_pipe_in_typed_argv () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1030,7 +1030,7 @@ let test_literal_pipe_in_typed_argv () =
 
 let () =
   Alcotest.run
-    "Keeper bash safety"
+    "Execute safety"
     [ ( "allowlist"
       , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
         ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands
@@ -1123,7 +1123,7 @@ let () =
             `Quick
             test_tool_execute_typed_docker_falls_back_to_local_playground
         ] )
-    ; ( "tool_workspace_inspect"
+    ; ( "tool_search_files"
       , [ Alcotest.test_case
             "find accepts name alias"
             `Quick
@@ -1133,13 +1133,13 @@ let () =
             `Quick
             test_tool_search_files_ls_recovers_doubled_playground_prefix
         ; Alcotest.test_case
-            "op=bash is unsupported"
+            "retired command op is unsupported"
             `Quick
-            test_tool_search_files_bash_op_is_unsupported
+            test_tool_search_files_retired_command_op_is_unsupported
         ; Alcotest.test_case
-            "op=bash does not execute"
+            "retired command op does not execute"
             `Quick
-            test_tool_search_files_bash_op_does_not_execute
+            test_tool_search_files_retired_command_op_does_not_execute
         ] )
     ; ( "rg_exit_code"
       , [ Alcotest.test_case
@@ -1167,7 +1167,7 @@ let () =
         ] )
     ; ( "regex_pipe"
       , [ Alcotest.test_case
-            "rg regex pipe pattern via typed bash"
+            "rg regex pipe pattern via typed Execute"
             `Quick
             test_rg_regex_pipe_pattern_via_typed_execute
         ; Alcotest.test_case
@@ -1187,7 +1187,7 @@ let () =
       , [ Alcotest.test_case
             "missing typed input field"
             `Quick
-            test_bash_missing_typed_input_field
+            test_execute_missing_typed_input_field
         ; Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field
         ; Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op
         ] )

@@ -46,7 +46,7 @@ let executable_is_dune_local executable =
   || String.ends_with ~suffix:"/scripts/dune-local.sh" executable
 ;;
 
-(* TEL-OK: pure timeout classification; caller records keeper shell execution
+(* TEL-OK: pure timeout classification; caller records tool execute execution
    telemetry after the selected timeout is applied. *)
 let typed_stage_needs_tool_dispatch_floor fields =
   match string_field "executable" fields with

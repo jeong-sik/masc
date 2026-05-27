@@ -1,13 +1,13 @@
-(** Integration tests for tool_workspace_inspect read-side containment.
+(** Integration tests for tool_search_files read-side containment.
 
     RFC-0006 Phase B-1.5: extend the host-FS read guard from B-1
-    (handle_tool_read_file) to tool_workspace_inspect read ops (ls/cat/rg/find/
+    (handle_tool_read_file) to tool_search_files read ops (ls/cat/rg/find/
     head/tail/wc/tree/git_status/git_log/git_diff). Docker keepers are
     always contained to their playground via the same containment
     module. *)
 
 module Coord = Masc_mcp.Coord
-module Agent_tool_shell_runtime = Masc_mcp.Agent_tool_shell_runtime
+module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
@@ -206,7 +206,7 @@ let test_legacy_keeper_unaffected () =
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "secret.txt" in
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
   (* Strict predicate: this test specifically asserts the symmetric
@@ -227,7 +227,7 @@ let test_docker_keeper_blocks_ls_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:
@@ -245,7 +245,7 @@ let test_docker_keeper_blocks_cat_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
@@ -267,7 +267,7 @@ let test_docker_keeper_blocks_rg_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:
@@ -291,7 +291,7 @@ let test_docker_keeper_blocks_find_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:
@@ -311,7 +311,7 @@ let test_docker_keeper_allows_inside_playground () =
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String "demo.txt") ])
   in
   (* Goal: containment did not block. Whether `cat` succeeds depends on
@@ -422,7 +422,7 @@ let test_docker_git_creds_contained () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])

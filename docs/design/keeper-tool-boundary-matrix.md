@@ -24,11 +24,10 @@ Scope:
 | Owner | Responsibility | Must not own |
 | --- | --- | --- |
 | `execution-dispatch` | Keeper-side command, board, status, task, persona, memory, and receipt execution dispatch. | Tool name policy, sandbox runtime mechanics, GitHub transport details. |
-| `github-runtime` | GitHub environment, repository, runner, and shared GitHub runtime helpers. | Generic keeper execution dispatch or tool policy. |
 | `hook-observation` | OAS hook event parsing, metrics, and observational adapters. | OAS tool handler execution or keeper runtime dispatch. |
 | `oas-tool-bridge` | Keeper tool bridge for OAS bundle, handler, telemetry, JSON, markers, workflow, and deterministic errors. | Generic tool policy or non-OAS hook observation. |
 | `sandbox-runtime` | Sandbox containment, Docker runtime, read/session runners, executor, and shell IR target plumbing. | Tool naming policy or GitHub runtime. |
-| `shell-surface` | Shell command parsing, typed bash input, shell ops, path, readonly policy, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
+| `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, readonly policy, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
 | `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, emission, registry, policy, resolution, and tool-specific policy records. | OAS bridge implementation, shell parsing, sandbox execution. |
 
 ## Coverage Manifest
@@ -47,14 +46,12 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/agent_tool_memory_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_persona_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_persona_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_preflight_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_preflight_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_remote_mcp_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_remote_mcp_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_shared_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_shared_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_shell_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_shell_runtime.mli` - execution-dispatch
+- `lib/keeper/agent_tool_command_runtime.ml` - execution-dispatch
+- `lib/keeper/agent_tool_command_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_task_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_task_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_voice_runtime.ml` - execution-dispatch
@@ -131,10 +128,10 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_shell_ir_target.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.mli` - sandbox-runtime
-- `lib/keeper/agent_tool_execute_input.ml` - execute-surface
-- `lib/keeper/agent_tool_execute_input.mli` - execute-surface
-- `lib/keeper/agent_tool_execute_runtime.ml` - execute-surface
-- `lib/keeper/agent_tool_execute_runtime.mli` - execute-surface
+- `lib/keeper/agent_tool_execute_input.ml` - shell-surface
+- `lib/keeper/agent_tool_execute_input.mli` - shell-surface
+- `lib/keeper/agent_tool_execute_runtime.ml` - shell-surface
+- `lib/keeper/agent_tool_execute_runtime.mli` - shell-surface
 - `lib/keeper/agent_tool_execute_command_parse.ml` - shell-surface
 - `lib/keeper/agent_tool_execute_command_parse.mli` - shell-surface
 - `lib/keeper/agent_tool_execute_command_semantics.ml` - shell-surface

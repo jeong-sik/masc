@@ -1018,7 +1018,7 @@ let test_approval_queue_surfaces_action_key_and_sandbox_target () =
       let id =
         Lib.Keeper_approval_queue.submit_pending
           ~keeper_name:"governance-judge"
-          ~tool_name:"tool_workspace_inspect"
+          ~tool_name:"tool_search_files"
           ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
           ~risk_level:Lib.Keeper_approval_queue.Medium
           ~runtime_contract:

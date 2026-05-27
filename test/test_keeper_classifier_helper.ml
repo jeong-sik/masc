@@ -120,7 +120,7 @@ let test_tool_filtered_classifier_uses_visible_capability () =
   Alcotest.check s "read/search tools do not create a signal"
     C.No_actionable_signal
     (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "tool_workspace_inspect" ]
+       ~allowed_tool_names:[ "tool_search_files" ]
        (obs ()))
 
 let () =

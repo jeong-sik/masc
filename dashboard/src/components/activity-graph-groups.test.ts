@@ -51,7 +51,7 @@ describe('categoryForActivityKind', () => {
   it('surfaces tool and verification payload details in summaries', () => {
     const toolEvent = makeEvent(1, 'tool.called', {
       actor: 'agent-llm-a',
-      payload: { tool_name: 'keeper_shell', cmd: 'gh pr create --draft' },
+      payload: { tool_name: 'Execute', cmd: 'gh pr create --draft' },
     })
     const verifyEvent = makeEvent(2, 'task.submit_for_verification', {
       actor: 'agent-llm-a',

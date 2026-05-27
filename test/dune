@@ -234,7 +234,7 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_keeper_bash_safety
+  test_agent_tool_execute_safety
   test_agent_tool_execute_typed_input
   test_hitl_approval
   test_approval_callback_wired
@@ -558,7 +558,7 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_keeper_bash_safety
+  test_agent_tool_execute_safety
   test_agent_tool_execute_typed_input
   test_hitl_approval
   test_approval_callback_wired
@@ -816,7 +816,7 @@
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_keeper_tools_oas
-  test_keeper_bash_retry_deterministic_close
+  test_agent_tool_execute_retry_deterministic_close
   test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_keeper_runtime_config_ssot
@@ -1036,7 +1036,7 @@
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_keeper_tools_oas
-  test_keeper_bash_retry_deterministic_close
+  test_agent_tool_execute_retry_deterministic_close
   test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_keeper_runtime_config_ssot
@@ -1636,7 +1636,7 @@
 
 (include stanzas/test_keeper_failure_policy.inc)
 
-(include stanzas/test_agent_tool_shell_runtime_cwd_response.inc)
+(include stanzas/test_agent_tool_command_runtime_cwd_response.inc)
 
 (include stanzas/test_agent_tool_dispatch_runtime.inc)
 

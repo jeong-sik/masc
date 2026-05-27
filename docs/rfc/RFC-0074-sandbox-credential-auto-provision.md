@@ -105,7 +105,7 @@ credential 자동 주입은 *default off* (`auto_provision_credentials=false`). 
 
 - (a) `dune build` 통과 — `plan_of_preset` exhaustive match 가드.
 - (b) `dune exec test/test_keeper_resource_plan.exe` — preset 8개 × 자원 5개 매트릭스 검증.
-- (c) sangsu (preset=coding) boot 후 `runtime_readiness.blocked` 가 (credential 자동 주입 off 기준) `GitHub PR helper` 만 포함, fs/bash/git 도구는 Ready.
+- (c) sangsu boot 후 `runtime_readiness.blocked` 가 (credential 자동 주입 off 기준) credentialed typed `gh` execution 만 포함하고, file/search/Execute 도구는 Ready.
 - (d) `auto_provision_credentials=true` 설정 후 reboot → `runtime_readiness.blocked` 가 빈 배열.
 
 ## 7. Workaround Rejection Self-Check

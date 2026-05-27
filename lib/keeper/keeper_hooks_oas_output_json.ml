@@ -258,7 +258,7 @@ let command_candidates_of_tool_io ~tool_name ~input ~output_json =
   |> add_candidates (command_input_of_tool ~tool_name input)
   |> add_candidate (output_command_of_json output_json)
 
-let gh_argv_of_segment segment =
+let repo_hosting_cli_argv_of_segment segment =
   match
     Agent_tool_execute_command_parse.parse_cmd_to_ir_opt segment
     |> Option.map Agent_tool_execute_command_semantics.effective_stages_of_ir

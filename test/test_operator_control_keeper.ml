@@ -1240,11 +1240,11 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           Alcotest.(check bool) "keeper_recover confirm true" true
             Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool);
           Alcotest.(check bool)
-            "github_identity_login_prepare is NOT in available actions" true
-            (Option.is_none (find_action "github_identity_login_prepare"));
+            "repo_cli_identity_login_prepare is NOT in available actions" true
+            (Option.is_none (find_action "repo_cli_identity_login_prepare"));
           Alcotest.(check bool)
-            "github_identity_status is NOT in available actions" true
-            (Option.is_none (find_action "github_identity_status"));
+            "repo_cli_identity_status is NOT in available actions" true
+            (Option.is_none (find_action "repo_cli_identity_status"));
           let task_inject =
             match find_action "task_inject" with
             | Some row -> row

@@ -193,6 +193,7 @@ let review_completion_notes
         task_description = task.description;
         completion_notes = notes;
         agent_name = ctx.agent_name;
+        task_id = task.id;
       } in
       let on_verdict result =
         Eval_calibration.record_verdict

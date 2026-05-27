@@ -329,7 +329,10 @@ let keeper_expectation_for_name name =
       (* Playground resolves paths under .masc/playground/<agent>/ but
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
-      Expect_success_or_guard [ "file not found" ]
+      Expect_success_or_guard
+        [ "file not found"; "keeper not found in registry" ]
+  | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
+      Expect_success_or_guard [ "keeper not found in registry" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

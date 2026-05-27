@@ -8,7 +8,7 @@ import {
 } from '../lib/keeper-runtime-display'
 import { isKeeperPaused, keeperActionVisibility } from '../lib/keeper-predicates'
 import { TimeAgo } from './common/time-ago'
-import { formatDuration } from './mission-utils'
+import { formatDuration } from '../lib/format-time'
 import type { Keeper } from '../types'
 import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
 import {

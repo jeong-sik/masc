@@ -8,7 +8,7 @@ import { PanelCard } from './common/panel-card'
 import { KeeperBadge } from './keeper-badge'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
 import { KeeperMemoryPanel } from './memory-subsystems'
-import { formatDuration } from './mission-utils'
+import { formatDuration } from '../lib/format-time'
 
 type KeeperInspectorFocus = 'bdi' | 'tool-access' | 'memory'
 

@@ -275,10 +275,8 @@ let make_executed_tool_result ?outcome raw_output =
   { raw_output; outcome; payload_shape }
 ;;
 
-(* RFC-0179 PR-3 retired the legacy success/failure tool result helpers and
-   the [is_keeper_board_tool_name] predicate. Every coordination tool now
-   dispatches through [Agent_tool_runtime.handle_internal] and outcome is
-   inferred from the raw JSON via [classify_tool_result_payload]. *)
+(* Coordination tools dispatch through [Agent_tool_runtime.handle_internal].
+   Outcome is inferred from raw JSON via [classify_tool_result_payload]. *)
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
@@ -403,17 +401,15 @@ let execute_keeper_tool_call_with_outcome
        match Agent_tool_runtime.handle_internal agent_tool_runtime_context ~name ~args with
        | Some raw_output -> make_executed_tool_result raw_output
        | None ->
-       (* RFC-0179 PR-3 retired every legacy match arm in favor of
-          descriptor-backed dispatch via [Agent_tool_runtime.handle_internal]
-          above. The only remaining path is the unknown-tool fallback —
-          a remote MCP probe followed by a suggestion-enriched error. *)
-       (match name with
-       | other ->
+       (* Descriptor-backed dispatch did not recognize this name. Check
+          registered remote MCP tools before returning a suggestion-enriched
+          unknown-tool error. *)
+       let unknown_name = name in
          (match
             Agent_tool_remote_mcp_runtime.handle_registered_remote_tool
               ~config
               ~keeper_name:meta.name
-              ~name:other
+              ~name:unknown_name
               ~args
           with
           | Some raw_output -> make_executed_tool_result raw_output
@@ -423,9 +419,9 @@ let execute_keeper_tool_call_with_outcome
               let scored =
                 candidates
                 |> List.filter_map (fun c ->
-                  if String.length c > 2 && String.length other > 2
+                  if String.length c > 2 && String.length unknown_name > 2
                   then (
-                    let other_lower = String.lowercase_ascii other in
+                    let unknown_name_lower = String.lowercase_ascii unknown_name in
                     let c_lower = String.lowercase_ascii c in
                     let contains haystack needle =
                       let nlen = String.length needle in
@@ -442,7 +438,9 @@ let execute_keeper_tool_call_with_outcome
                         done;
                         !found)
                     in
-                    if contains c_lower other_lower || contains other_lower c_lower
+                    if
+                      contains c_lower unknown_name_lower
+                      || contains unknown_name_lower c_lower
                     then Some c
                     else None)
                   else None)
@@ -467,7 +465,7 @@ let execute_keeper_tool_call_with_outcome
               | None -> `String name
             in
             let fields =
-              [ "error", `String "unknown_tool"; "tool", `String other ]
+              [ "error", `String "unknown_tool"; "tool", `String unknown_name ]
               @
               match suggestion with
               | [] ->
@@ -478,7 +476,7 @@ let execute_keeper_tool_call_with_outcome
                 ]
             in
             make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields))))
-       ))
+      )
 ;;
 
 let execute_keeper_tool_call

@@ -149,8 +149,10 @@ let test_tool_count_matches_allowed () =
             (fun name ->
                List.mem name allowed
                ||
-               match Keeper_tool_alias.route name with
-               | Some r -> List.mem r.internal_name allowed
+               match Agent_tool_descriptor.find_public name with
+               | Some descriptor ->
+                 Agent_tool_descriptor.internal_names descriptor
+                 |> List.exists (fun internal_name -> List.mem internal_name allowed)
                | None -> false)
             tool_names))
 ;;

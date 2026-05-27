@@ -50,24 +50,19 @@ let make_tool_bundle
      the LLM-visible surface alongside their public alias.  Mirrors the
      pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
   let aliased_internal_names =
-    List.filter_map
-      (fun public ->
-         match Keeper_tool_alias.route public with
-         | Some r -> Some (Agent_tool_descriptor.internal_names r.descriptor)
-         | None -> None)
-      (Keeper_tool_alias.public_names ())
+    Agent_tool_descriptor.public_descriptors
+    |> List.map Agent_tool_descriptor.internal_names
     |> List.concat
   in
   let alias_public_names_in_surface =
-    List.filter
-      (fun public ->
-         match Keeper_tool_alias.route public with
-         | Some r ->
-           List.exists
-             (fun internal_name -> List.mem internal_name universe_names)
-             (Agent_tool_descriptor.internal_names r.descriptor)
-         | None -> false)
-      (Keeper_tool_alias.public_names ())
+    Agent_tool_descriptor.public_descriptors
+    |> List.filter_map (fun descriptor ->
+      if
+        List.exists
+          (fun internal_name -> List.mem internal_name universe_names)
+          (Agent_tool_descriptor.internal_names descriptor)
+      then Some descriptor.public_name
+      else None)
   in
   let assembled_surface_names =
     List.filter (fun n -> not (List.mem n aliased_internal_names)) universe_names
@@ -133,58 +128,49 @@ let make_tool_bundle
       tool_defs
   in
   (* Pass B: register LLM-native capability names (Execute/ReadFile/etc)
-     via the flat routing table. The handler dispatches with
-     [~name:r.internal_name] so all telemetry SSOT remains internal;
+     via descriptor projection. The handler dispatches with
+     [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
      only the Tool.schema.name (LLM-visible) is the public name.
-     [r.translate] reshapes the LLM's payload before dispatch;
-     [r.public_schema] provides the LLM-facing schema. *)
+     [descriptor.translate] reshapes the LLM's payload before dispatch;
+     [descriptor.input_schema] provides the LLM-facing schema. *)
   let alias_tools =
     List.filter_map
-      (fun public ->
-         match Keeper_tool_alias.route public with
-         | None -> None (* routing miss — should not happen for public_names *)
-         | Some r ->
-           let internal = r.internal_name in
-           if not (List.mem internal universe_names)
-           then None
-           else (
-             match
-               List.find_opt
-                 (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
-                 tool_defs
-             with
-             | None -> None
-             | Some internal_def ->
-               let input_schema =
-                 match r.public_schema with
-                 | Some s -> s
-                 | None -> internal_def.input_schema
-               in
-              let description = r.descriptor.description in
-               let h =
-                 Keeper_tools_oas_handler.make_keeper_tool_handler
-                   ~name:internal
-                   ~input_schema:internal_def.input_schema
-                   ~config
-                   ~meta
-                   ~ctx_snapshot
-                   ?turn_sandbox_factory
-                   ?turn_sandbox_factory_git
-                   ~exec_cache
-                   ?search_fn
-                   ?on_tool_called
-                   ?clock
-                   ~translate_input:r.translate
-                   ~failure_counts
-                   ()
-               in
-               Some
-                 (Tool_bridge.oas_tool_of_masc
-                    ~name:public
-                    ~description
-                    ~input_schema
-                    (fun input -> h input))))
-      (Keeper_tool_alias.public_names ())
+      (fun (descriptor : Agent_tool_descriptor.t) ->
+         let internal = descriptor.internal_name in
+         if not (List.mem internal universe_names)
+         then None
+         else (
+           match
+             List.find_opt
+               (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
+               tool_defs
+           with
+           | None -> None
+           | Some internal_def ->
+             let h =
+               Keeper_tools_oas_handler.make_keeper_tool_handler
+                 ~name:internal
+                 ~input_schema:internal_def.input_schema
+                 ~config
+                 ~meta
+                 ~ctx_snapshot
+                 ?turn_sandbox_factory
+                 ?turn_sandbox_factory_git
+                 ~exec_cache
+                 ?search_fn
+                 ?on_tool_called
+                 ?clock
+                 ~translate_input:descriptor.translate
+                 ~failure_counts
+                 ()
+             in
+             Some
+               (Tool_bridge.oas_tool_of_masc
+                  ~name:descriptor.public_name
+                  ~description:descriptor.description
+                  ~input_schema:descriptor.input_schema
+                  (fun input -> h input))))
+      Agent_tool_descriptor.public_descriptors
   in
   let bundle =
     { tools = internal_tools @ alias_tools

@@ -460,6 +460,3 @@ let top_count_name_and_count
   |> function
   | (k, v) :: _ -> Some (k, v)
   | [] -> None
-
-let get_agent_identity (name : string) =
-  Dashboard_execution_helpers.get_agent_identity name

@@ -57,7 +57,7 @@ let core_always_tools =
       keeper_tasks_audit (admin).
     - keeper_tools_list moved from core_always to discoverable.
     - Execute stays visible because it is the write-side git path after
-      removing legacy PR wrappers.
+      removing retired repository mutation wrappers.
     - 26 → 20 tools.  9B tool selection accuracy improves with fewer
       choices (vLLM Semantic Router research: k=3-5 optimal for 7-9B).
 

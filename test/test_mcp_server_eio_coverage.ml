@@ -7,6 +7,7 @@ open Alcotest
 
 module Mcp_server_eio = Masc_mcp.Mcp_server_eio
 module Mcp_server = Masc_mcp.Mcp_server
+module Mcp_server_eio_protocol = Masc_mcp.Mcp_server_eio_protocol
 (* ============================================================
    is_jsonrpc_v2 Tests
    ============================================================ *)
@@ -293,32 +294,32 @@ let test_jsonrpc_request_of_yojson_minimal () =
   | Error e -> fail ("parse error: " ^ e)
 
 (* ============================================================
-   detect_mode Tests (Mcp_server_eio-specific)
+   detect_mode Tests (Mcp_server_eio_protocol-specific)
    ============================================================ *)
 
 let test_detect_mode_framed () =
-  let result = Mcp_server_eio.detect_mode "Content-Length: 123" in
-  check bool "framed mode" true (result = Mcp_server_eio.Framed)
+  let result = Mcp_server_eio_protocol.detect_mode "Content-Length: 123" in
+  check bool "framed mode" true (result = Mcp_server_eio_protocol.Framed)
 
 let test_detect_mode_framed_lowercase () =
-  let result = Mcp_server_eio.detect_mode "content-length: 456" in
-  check bool "framed mode lowercase" true (result = Mcp_server_eio.Framed)
+  let result = Mcp_server_eio_protocol.detect_mode "content-length: 456" in
+  check bool "framed mode lowercase" true (result = Mcp_server_eio_protocol.Framed)
 
 let test_detect_mode_framed_mixed_case () =
-  let result = Mcp_server_eio.detect_mode "Content-LENGTH: 789" in
-  check bool "framed mode mixed" true (result = Mcp_server_eio.Framed)
+  let result = Mcp_server_eio_protocol.detect_mode "Content-LENGTH: 789" in
+  check bool "framed mode mixed" true (result = Mcp_server_eio_protocol.Framed)
 
 let test_detect_mode_line_delimited () =
-  let result = Mcp_server_eio.detect_mode "{\"jsonrpc\":\"2.0\"}" in
-  check bool "line delimited" true (result = Mcp_server_eio.LineDelimited)
+  let result = Mcp_server_eio_protocol.detect_mode "{\"jsonrpc\":\"2.0\"}" in
+  check bool "line delimited" true (result = Mcp_server_eio_protocol.LineDelimited)
 
 let test_detect_mode_empty () =
-  let result = Mcp_server_eio.detect_mode "" in
-  check bool "empty is line delimited" true (result = Mcp_server_eio.LineDelimited)
+  let result = Mcp_server_eio_protocol.detect_mode "" in
+  check bool "empty is line delimited" true (result = Mcp_server_eio_protocol.LineDelimited)
 
 let test_detect_mode_partial_content () =
-  let result = Mcp_server_eio.detect_mode "Content" in
-  check bool "partial is line delimited" true (result = Mcp_server_eio.LineDelimited)
+  let result = Mcp_server_eio_protocol.detect_mode "Content" in
+  check bool "partial is line delimited" true (result = Mcp_server_eio_protocol.LineDelimited)
 
 (* ============================================================
    governance_defaults Tests

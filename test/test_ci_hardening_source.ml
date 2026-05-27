@@ -1641,20 +1641,20 @@ let test_dedicated_forge_pr_tool_contracts_removed () =
     (file_not_contains_pattern "lib/operator/operator_control.ml" "root_fallback");
   check bool "keeper manual does not gate readiness on gh auth status" true
     (file_not_contains_pattern "docs/KEEPER-USER-MANUAL.md" "gh auth status");
-  check bool "retired PR wrapper names absent from active policy" true
+  check bool "retired repository wrapper names absent from active policy" true
     (file_not_contains_pattern "config/tool_policy.toml"
        ("keeper_" ^ "pr_")
      && file_not_contains_pattern "config/tool_policy.toml"
           ("github_" ^ "pr_"));
-  check bool "stale PR helper wording absent from active docs" true
+  check bool "stale repository helper wording absent from active docs" true
     (file_not_contains_pattern "config/prompts/keeper.capabilities.md"
-       ("dedicated " ^ "PR tool")
+       ("dedicated " ^ "repository tool")
      && file_not_contains_pattern "docs/KEEPER-USER-MANUAL.md"
-          ("dedicated " ^ "PR tool")
+          ("dedicated " ^ "repository tool")
      && file_not_contains_pattern "docs/KEEPER-USER-MANUAL.md"
           ("native " ^ "PR/GitHub tools")
      && file_not_contains_pattern "docs/KEEPER-FILE-MODEL.md"
-          ("dedicated " ^ "PR tool")
+          ("dedicated " ^ "repository tool")
      && not
           (Sys.file_exists
              (source_path "docs/design/keeper-tool-runtime-boundary-plan.md"))
@@ -1794,7 +1794,7 @@ let test_forge_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--require-pr-create-evidence");
-  check bool "keeper fleet audit no longer consumes PR tool markers" true
+  check bool "keeper fleet audit no longer consumes repository tool markers" true
     (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        ("PR_" ^ "CREATE_TOOLS")
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
@@ -2876,7 +2876,7 @@ let () =
              test_docker_config_storage_contracts;
           test_case "tool failure classification contracts" `Quick
             test_tool_failure_classification_contracts;
-          test_case "dedicated GitHub PR tool removal contracts" `Quick
+          test_case "dedicated repository tool removal contracts" `Quick
             test_dedicated_forge_pr_tool_contracts_removed;
           test_case "tool execution substrate ratchet contracts" `Quick
             test_tool_execution_substrate_ratchet_contracts;

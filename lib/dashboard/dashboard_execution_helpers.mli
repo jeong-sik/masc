@@ -9,10 +9,8 @@
     {!Dashboard_execution}) do
     [include Dashboard_execution_helpers] in their .ml +
     .mli, so this boundary's surface flows through to
-    every dashboard execution consumer.  Plus 2 dotted
-    callers ({!get_agent_identity} from
-    [dashboard_http_keeper_metrics],
-    {!get_agent_profile} from
+    every dashboard execution consumer.  Plus dotted
+    callers ({!get_agent_profile} from
     [server_dashboard_http_core] +
     [server_routes_http_routes_room]).
 
@@ -137,10 +135,6 @@ type agent_profile = {
 val get_agent_profile : string -> agent_profile
 (** Resolves the agent's profile through the persona
     file → Neo4j cache → fallback chain. *)
-
-val get_agent_identity : string -> string * string
-(** [(emoji, korean_name)] tuple for [name] — pinned for
-    [dashboard_http_keeper_metrics]. *)
 
 (** {1 JSON envelope helpers} *)
 

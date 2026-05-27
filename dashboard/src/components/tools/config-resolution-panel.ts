@@ -11,14 +11,13 @@ import type {
   KeeperRuntimeField,
 } from '../../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
-import { MISSING_DATA_DASH } from '../../lib/format-string'
+import { MISSING_DATA_DASH, errorToString } from '../../lib/format-string'
 import { Btn } from '../btn'
 import { SectionCard } from '../common/card'
 import { StatusChip } from '../common/status-chip'
 import { CopyIdButton } from '../common/copy-id-button'
 import { TextInput } from '../common/input'
 import { formatNumber } from '../../lib/format-number'
-import { errorToString } from '../../lib/format-string'
 
 function ConfigCard({
   class: cx,
@@ -295,7 +294,7 @@ function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
 function fmtBoolean(value: boolean | null | undefined): string {
   if (value === true) return 'yes'
   if (value === false) return 'no'
-  return '--'
+  return MISSING_DATA_DASH
 }
 
 function probeTone(signal: string | null | undefined, probeOk: boolean | null | undefined): string {
@@ -354,7 +353,7 @@ function sourceTone(source: string): string {
 }
 
 function fmtKeeperValue(value: number | null, fmt: 'int' | 'float' | 'duration'): string {
-  if (value === null || value === undefined) return '--'
+  if (value === null || value === undefined) return MISSING_DATA_DASH
   switch (fmt) {
     case 'int': return String(Math.round(value))
     case 'float': return value.toFixed(1)
@@ -405,7 +404,7 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
   const fleet = runtimeResolution.fleet_safety
   const fdValue = fd
     ? `${fd.fd_open ?? MISSING_DATA_DASH} / ${fd.fd_limit ?? MISSING_DATA_DASH}`
-    : '--'
+    : MISSING_DATA_DASH
   const fdTone = fd?.pressure_active ? 'bad' : 'neutral'
 
   return html`
@@ -421,7 +420,7 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
         <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? MISSING_DATA_DASH)} />
-        <${RuntimeMetaRow} label="fd pressure" value=${fd?.pressure_active == null ? '--' : fd.pressure_active ? 'active' : 'clear'} />
+        <${RuntimeMetaRow} label="fd pressure" value=${fd?.pressure_active == null ? MISSING_DATA_DASH : fd.pressure_active ? 'active' : 'clear'} />
       </div>
     <//>
   `
@@ -518,7 +517,7 @@ function RuntimeProbePanel() {
                 label="prompt eval delta"
                 value=${assessment?.prompt_eval_duration_reduction_ratio != null
                   ? `${formatNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
-                  : '--'}
+                  : MISSING_DATA_DASH}
               />
               <${RuntimeMetaRow}
                 label="loaded models"

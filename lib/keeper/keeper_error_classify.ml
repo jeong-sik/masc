@@ -157,6 +157,7 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
       contract = Agent_sdk.Completion_contract_id.Require_tool_use
   (* Other agent-level errors are not require-tool-use contract violations. *)
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
+  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
   | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
@@ -790,6 +791,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Provider _ -> false
   (* Other agent error variants. *)
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
+  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
@@ -815,6 +817,7 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> true
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
+  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (TokenBudgetExceeded _)

@@ -239,6 +239,13 @@ let of_agent_error (e : Agent_sdk.Error.agent_error) : t =
     ; openai_kind = kind_server
     ; openai_code = Some "exit_condition_met"
     ; message }
+  | AgentExecutionTimeout _ ->
+    (* agent_sdk 0.200.2 (#18988) introduced this variant; surface as 504
+       so callers can distinguish deadline expiry from generic 500s. *)
+    { http_status = `Gateway_timeout
+    ; openai_kind = kind_server
+    ; openai_code = Some "agent_execution_timeout"
+    ; message }
 
 let of_mcp_error (e : Agent_sdk.Error.mcp_error) : t =
   let message = Agent_sdk.Error.to_string (Agent_sdk.Error.Mcp e) in

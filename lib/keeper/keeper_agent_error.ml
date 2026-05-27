@@ -79,6 +79,10 @@ let sdk_termination_semantics = function
     Provider_wall_clock_timeout
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_budget_exhausted
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
+    (* agent_sdk 0.200.2 (#18988): wall-clock deadline analog of
+       MaxTurnsExceeded — both represent runtime budget exhaustion. *)
+    Oas_turn_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
     Oas_idle_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) ->
@@ -241,6 +245,11 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_tripwire_violation:tripwire=%s" tripwire
   | Agent_sdk.Error.InputRequired { request_id; question = _; _ } ->
     Printf.sprintf "agent_error_input_required:request_id=%s" request_id
+  | Agent_sdk.Error.AgentExecutionTimeout
+      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
+    Printf.sprintf
+      "agent_error_execution_timeout:elapsed_sec=%.3f,timeout_sec=%.3f,turn_count=%d,max_turns=%d"
+      elapsed_sec timeout_sec turn_count max_turns
 ;;
 
 let network_error_kind_to_wire = function

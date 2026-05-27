@@ -459,7 +459,7 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 | Event_bus bridge | Complete | OAS native/custom events are relayed to SSE and persisted under `.masc/oas-events/` |
 | Dashboard OAS runtime health | Complete | dashboard health uses `durable replay + live tail`, not live-only counters |
 | Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |
-| Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_exec_context.ml`의 wrapper + serialized context를 유지 |
+| Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_context_runtime.ml`의 wrapper + serialized context를 유지 |
 | Memory bridge | Partial | Long_term + Episodic + Procedural bridged. Working/Scratchpad는 OAS 내부. 전체 통합은 미완 |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
 | Cascade config | Complete | cascade_name -> MASC catalog/profile -> OAS Provider_registry/catalog -> Provider_config.t |
@@ -488,8 +488,8 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 | Phase | Scope | Primary modules | Expected output |
 |------|-------|-----------------|-----------------|
 | A | truth surface cleanup | `keeper_checkpoint_store`, `keeper_agent_run`, `keeper_post_turn` | native OAS checkpoint is documented and treated as runtime truth |
-| B | replay semantics + side-effect boundary | `keeper_agent_run`, `keeper_post_turn`, `agent_tool_shell_runtime`, `retired_file_write_tool` | typed replay target facts and mutation-boundary rules |
-| C | wrapper reduction | `keeper_exec_context`, `keeper_agent_run`, `keeper_post_turn`, `context_compact_oas` | `working_context` dependency inventory and marker-leakage backlog |
+| B | replay semantics + side-effect boundary | `keeper_agent_run`, `keeper_post_turn`, `agent_tool_command_runtime`, `retired_file_write_tool` | typed replay target facts and mutation-boundary rules |
+| C | wrapper reduction | `keeper_context_runtime`, `keeper_agent_run`, `keeper_post_turn`, `context_compact_oas` | `working_context` dependency inventory and marker-leakage backlog |
 | D | optional delta path | `keeper_checkpoint_store`, `delta-checkpoint-read-path` | delta restore remains subordinate to full checkpoint truth |
 
 ### 12.1.2 Active Tasks

@@ -91,11 +91,11 @@ type t =
   | ToolsOasDeterministicFailures
   | OasHookOutputParseFailures
   | TurnUpUpdateFailures
-  | ExecToolsFailures
+  | AgentToolDispatchRuntimeFailures
   | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
-  | WorkspaceInspectFailures
+  | SearchFilesFailures
   | TagDispatchFailures
   | TraceEmitFailures
   | TransitionAuditFailures
@@ -103,7 +103,7 @@ type t =
   | OperatorBroadcastSuppressed
   | LlmBridgeFailures
   | SessionCleanupFailures
-  | ShellBashFailures
+  | ToolExecuteFailures
   | RolloverFailures
   | LifecycleDispatchRejections
   | RecordingErrorDedup
@@ -220,8 +220,8 @@ type t =
   | ToolNotAllowed
   | TurnGateRejectedTerminal
   | ReceiptUnmappedDisposition
-  | BashNetworkUpgrade
-  | BashLocalExecution
+  | ExecuteNetworkUpgrade
+  | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
   | StaySilentLoopDetected
@@ -328,11 +328,11 @@ let to_string = function
     "masc_keeper_tools_oas_deterministic_failures_total"
   | OasHookOutputParseFailures -> "masc_keeper_oas_hook_output_parse_failures_total"
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
-  | ExecToolsFailures -> "masc_keeper_exec_tools_failures_total"
+  | AgentToolDispatchRuntimeFailures -> "masc_agent_tool_dispatch_runtime_failures_total"
   | CircuitBreakerTrips -> "masc_keeper_circuit_breaker_trips_total"
   | PromptFailures -> "masc_keeper_prompt_failures_total"
   | RunContextFailures -> "masc_keeper_run_context_failures_total"
-  | WorkspaceInspectFailures -> "masc_keeper_workspace_inspect_failures_total"
+  | SearchFilesFailures -> "masc_keeper_search_files_failures_total"
   | TagDispatchFailures -> "masc_keeper_tag_dispatch_failures_total"
   | TraceEmitFailures -> "masc_keeper_trace_emit_failures_total"
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"
@@ -340,7 +340,7 @@ let to_string = function
   | OperatorBroadcastSuppressed -> "masc_keeper_operator_broadcast_suppressed_total"
   | LlmBridgeFailures -> "masc_keeper_llm_bridge_failures_total"
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
-  | ShellBashFailures -> "masc_keeper_shell_bash_failures_total"
+  | ToolExecuteFailures -> "masc_agent_tool_execute_runtime_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
   | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"
@@ -466,8 +466,8 @@ let to_string = function
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | TurnGateRejectedTerminal -> "masc_keeper_turn_gate_rejected_terminal_total"
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
-  | BashNetworkUpgrade -> "masc_keeper_bash_network_upgrade_total"
-  | BashLocalExecution -> "masc_keeper_bash_local_execution_total"
+  | ExecuteNetworkUpgrade -> "masc_keeper_execute_network_upgrade_total"
+  | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
   | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
   | StaySilentLoopDetected -> "masc_keeper_stay_silent_loop_detected_total"

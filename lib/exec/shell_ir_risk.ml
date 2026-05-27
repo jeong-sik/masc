@@ -62,9 +62,9 @@ let classify_write_detail (words : string list) : risk_class option =
     Some R2_Irreversible
   | _ -> None
 
-(* --- gh classification on IR words ---------------------------------- *)
+(* --- Repo-hosting CLI classification on IR words -------------------- *)
 
-let gh_irreversible_ops =
+let repo_hosting_cli_irreversible_ops =
   [
     ("pr", [ "merge"; "ready" ]);
     ("repo", [ "delete"; "archive"; "transfer"; "rename" ]);
@@ -78,7 +78,7 @@ let gh_irreversible_ops =
   ]
 ;;
 
-let gh_reversible_mutations =
+let repo_hosting_cli_reversible_mutations =
   [
     ("pr",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock";
@@ -130,7 +130,7 @@ let extract_method_from_parts parts =
            && String.starts_with ~prefix:"--method=" tok ->
       Some
         (String.uppercase_ascii (String.sub tok 9 (String.length tok - 9)))
-    (* gh accepts `-X<METHOD>` as a single token. Stress test
+    (* The repo-hosting CLI accepts `-X<METHOD>` as a single token. Stress test
        2026-05-26: `gh api -XDELETE /repos/o/r` fell through to GET -> R0
        even though Execute, Shell IR, and worker-dev dispatch paths depend on
        this for the live gate. *)
@@ -145,11 +145,9 @@ let extract_method_from_parts parts =
   find parts
 
 (* GraphQL mutation fragments that mark a query body as R2 irreversible.
-   Conservative deny-list. The sister classifier in Shell_ir_github used
-   to carry an independent copy of this list — they have drifted before
-   (stress test 2026-05-26). Future RFC: unify or codegen from
-   GraphQL introspection. *)
-let gh_graphql_r2_fragments =
+   Conservative deny-list. Keep this in Shell IR risk so Execute has one
+   parser-owned source for command risk instead of a product-level GH family. *)
+let repo_hosting_graphql_r2_fragments =
   [ "deletepullrequest"; "deleteissue"; "deletebranch"; "deleteref";
     "deleteproject"; "deletebranchprotectionrule";
     "removeouterfromorganization"; "transferrepository";
@@ -188,9 +186,9 @@ let body_contains_r2_mutation words =
            else scan (i + 1)
          in
          scan 0)
-    gh_graphql_r2_fragments
+    repo_hosting_graphql_r2_fragments
 
-let classify_gh (words : string list) : risk_class =
+let classify_repo_hosting_cli (words : string list) : risk_class =
   match words with
   | [] | [ _ ] -> R0_Read
   | _ :: command_raw :: rest ->
@@ -220,7 +218,7 @@ let classify_gh (words : string list) : risk_class =
     let dangerous_subs_for_cmd =
       List.fold_left
         (fun acc (c, subs) -> if c = command then acc @ subs else acc)
-        [] gh_irreversible_ops
+        [] repo_hosting_cli_irreversible_ops
     in
     let positional_dangerous_hit =
       let is_flag tok = String.length tok > 0 && tok.[0] = '-' in
@@ -230,7 +228,7 @@ let classify_gh (words : string list) : risk_class =
            && List.mem (String.lowercase_ascii t) dangerous_subs_for_cmd)
         rest
     in
-    if in_table gh_irreversible_ops command sub
+    if in_table repo_hosting_cli_irreversible_ops command sub
        || positional_dangerous_hit
     then R2_Irreversible
     else if command = "api" then
@@ -252,7 +250,7 @@ let classify_gh (words : string list) : risk_class =
       else if List.mem method_ [ "POST"; "PUT"; "PATCH" ] then R1_Reversible_mutation
       else if has_mutating_method words then R1_Reversible_mutation
       else R0_Read
-    else if in_table gh_reversible_mutations command sub then R1_Reversible_mutation
+    else if in_table repo_hosting_cli_reversible_mutations command sub then R1_Reversible_mutation
     else R0_Read
 
 (* --- Stage-word extraction (local copy; dependency direction prevents
@@ -375,7 +373,7 @@ let classify (T ir : undecided t) : decided decided_ir =
        | None -> R2_Irreversible)
     else
       (match words with
-       | "gh" :: _ -> classify_gh words
+       | "gh" :: _ -> classify_repo_hosting_cli words
        | _ -> R0_Read)
   in
   { ir; risk }

@@ -5,7 +5,7 @@
     Pure context operations (previously in Keeper_working_context)
     are inlined below.
 
-    Extracted from Keeper_exec_context as part of #4955 god-file split. *)
+    Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
 open Printf
 open Keeper_types

@@ -140,8 +140,8 @@ persona_name = "analyst"
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (basic-mode git/gh dispatcher can promote to `inherit`); `local` defaults to `inherit`. Hard mode requires `none`. |
 | `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
-| `github_identity` | Optional | Bound GitHub CLI identity bundle | Resolves to `.masc/github-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |
-| `git_identity_mode` | Optional | Commit identity policy | `keeper_alias` keeps git author separate from GitHub auth; `github_identity` is reserved for future explicit coupling. |
+| `repo_cli_identity` | Optional | Bound repo CLI identity bundle | Resolves to `.masc/repo-cli-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |
+| `git_identity_mode` | Optional | Commit identity policy | `keeper_alias` keeps git author separate from GitHub auth; `repo_cli_identity` is reserved for future explicit coupling. |
 | `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` claims only tasks linked to these goals. If the scoped pool has no task claimable with the keeper's current capabilities, the claim stops; only auto-repaired keeper-purpose goals may fall back to all claimable tasks. |
 
 ### Additional supported overlay fields
@@ -174,8 +174,8 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | --- | --- |
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
-| `git_identity_mode` | `keeper_alias`, `github_identity` |
-| `tool_preset` | `minimal`, `social`, `messaging`, `coding`, `research`, `delivery`, `full` |
+| `git_identity_mode` | `keeper_alias`, `repo_cli_identity` |
+| `tool_preset` | `minimal`, `social`, `messaging`, `research`, `delivery`, `full` |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
 | `cascade_name` | keeper-assignable declarative cascade profiles exposed by the active catalog: route targets, tier names, or tier-group names that are not marked `keeper-assignable = false` |
 
@@ -193,8 +193,8 @@ Operational intent:
 - private writable lane: the keeper sandbox. The current local/docker storage path is `.masc/playground/<keeper>/...`, but keeper tools should use sandbox-relative paths such as `repos/<repo>` and `mind/<file>`.
 - no arbitrary shared writable shell directory
 - `sandbox_profile=docker`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
-- `github_identity`가 설정된 keeper는 `.masc/github-identities/<identity>/gh`만 사용하고, bundle이 없으면 fail-closed 된다. operator 개인 `gh` config, ambient `GH_TOKEN`/`GITHUB_TOKEN`, SSH agent로는 fallback 하지 않는다.
-- `github_identity`가 없는 keeper는 `.masc/github-identities/root/gh` root bundle만 fallback으로 사용한다. root bundle도 없으면 fail-closed 된다.
+- `repo_cli_identity`가 설정된 keeper는 `.masc/repo-cli-identities/<identity>/gh`만 사용하고, bundle이 없으면 fail-closed 된다. operator 개인 `gh` config, ambient `GH_TOKEN`/`GITHUB_TOKEN`, SSH agent로는 fallback 하지 않는다.
+- `repo_cli_identity`가 없는 keeper는 `.masc/repo-cli-identities/root/gh` root bundle만 fallback으로 사용한다. root bundle도 없으면 fail-closed 된다.
 - `MASC_KEEPER_SANDBOX_HARD_MODE=true`에서는 Docker container의 ambient operator credential 사용이 꺼지고, GitHub access는 selected identity bundle의 `GH_CONFIG_DIR`로 검증된 `tool_execute` 경로만 사용한다.
 
 ### Removed / forbidden fields (hard-rejected)

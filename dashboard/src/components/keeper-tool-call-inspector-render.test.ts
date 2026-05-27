@@ -51,7 +51,7 @@ describe('KeeperToolCallInspector render', () => {
         {
           ts: 1_777_100_000,
           keeper: 'analyst',
-          tool: 'keeper_bash',
+          tool: 'Execute',
           input: { cmd: 'pwd' },
           output: '{"ok":true}',
           success: true,

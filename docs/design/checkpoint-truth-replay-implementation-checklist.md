@@ -72,12 +72,12 @@ Acceptance:
 
 - [ ] current keeper tools를 RFC의 class A/B/C/D에 임시 매핑
 - [ ] Class D replay 금지 규칙이
-  `keeper_bash`, PR submit, external writes 쪽과 모순 없는지 확인
+  `tool_execute`, PR submit, external writes 쪽과 모순 없는지 확인
 
 Implementation anchors:
 
 - `lib/keeper/keeper_agent_run.ml`
-- `lib/keeper/agent_tool_shell_runtime.ml`
+- `lib/keeper/agent_tool_command_runtime.ml`
 - `retired file-write tool module`
 
 Acceptance:
@@ -88,7 +88,7 @@ Acceptance:
 
 ### C1. `working_context` dependency inventory
 
-- [ ] `lib/keeper/keeper_exec_context.ml`
+- [ ] `lib/keeper/keeper_context_runtime.ml`
   - `working_context`가 어디서 필요한지 inventory 작성
 - [ ] `lib/keeper/keeper_post_turn.ml`
   - `context_of_oas_checkpoint` 결과를 다시 wrapper로 다루는 지점 정리
@@ -133,11 +133,11 @@ Acceptance:
 - `lib/keeper/keeper_checkpoint_store.ml`
 - `lib/keeper/keeper_agent_run.ml`
 - `lib/keeper/keeper_post_turn.ml`
-- `lib/keeper/keeper_exec_context.ml`
+- `lib/keeper/keeper_context_runtime.ml`
 
 ### Secondary
 
-- `lib/keeper/agent_tool_shell_runtime.ml`
+- `lib/keeper/agent_tool_command_runtime.ml`
 - `retired file-write tool module`
 - `lib/context_compact_oas.ml`
 

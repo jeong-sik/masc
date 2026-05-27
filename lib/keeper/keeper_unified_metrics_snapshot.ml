@@ -2,7 +2,7 @@
     keeper_unified_metrics.ml. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 module Social = Keeper_social_model
 
 include Keeper_unified_metrics_support
@@ -19,7 +19,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~(context_tokens : int)
     ~(context_max : int)
     ~(message_count : int)
-    ~(compaction : Keeper_exec_context.compaction_event)
+    ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
     ?provider_timeout_plan_json ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
@@ -52,7 +52,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
           ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
           ("total_tokens",
-           `Int (Keeper_exec_context.total_tokens result.usage));
+           `Int (Keeper_context_runtime.total_tokens result.usage));
         ]
         @ usage_trust_json_fields usage_trust)
     else

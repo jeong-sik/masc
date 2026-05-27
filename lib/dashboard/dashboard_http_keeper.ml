@@ -463,10 +463,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                          `Assoc [
                            ("has_checkpoint", `Bool true);
                            ("source", `String "checkpoint");
-                           ("context_ratio", `Float (Keeper_exec_context.context_ratio c));
-                           ("context_tokens", `Int (Keeper_exec_context.token_count c));
+                           ("context_ratio", `Float (Keeper_context_runtime.context_ratio c));
+                           ("context_tokens", `Int (Keeper_context_runtime.token_count c));
                            ("context_max", `Int c.max_tokens);
-                           ("message_count", `Int (Keeper_exec_context.message_count c));
+                           ("message_count", `Int (Keeper_context_runtime.message_count c));
                          ])
           in
 	          let context_source =

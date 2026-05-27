@@ -152,7 +152,7 @@ let strict_allowlist_policy ~allowed_commands : Exec_shell_gate.allowlist_policy
   { allowed_commands; allow_pipes = false; redirect_allowed = false }
 ;;
 
-let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands ()
+let tool_execute_allowlist_policy ?(allow_pipes = true) ~allowed_commands ()
   : Exec_shell_gate.allowlist_policy =
   { allowed_commands; allow_pipes; redirect_allowed = false }
 ;;
@@ -300,7 +300,7 @@ let block_reason_of_exec_too_complex
       | `Unknown_construct _ ) -> Injection
 ;;
 
-type parse_mode = Strict | Coding
+type parse_mode = Strict | Tool_execute
 
 let parse_string_to_ir ~mode cmd =
   let trimmed = String.trim cmd in
@@ -309,7 +309,7 @@ let parse_string_to_ir ~mode cmd =
   else (
     match Masc_exec_bash_parser.Bash.parse_string trimmed with
     | (Masc_exec.Parsed.Parse_error _ | Masc_exec.Parsed.Parse_aborted _) ->
-      Error (match mode with Strict -> Chain_or_redirect | Coding -> Injection)
+      Error (match mode with Strict -> Chain_or_redirect | Tool_execute -> Injection)
     | Masc_exec.Parsed.Too_complex reason ->
       Error (block_reason_of_exec_too_complex (Unsupported_construct reason))
     | Masc_exec.Parsed.Parsed ir -> Ok ir)
@@ -355,7 +355,7 @@ let validate_command ?caller ir =
   validate_command_with_allowlist ?caller ~allowed_commands:dev_allowed_commands ir
 ;;
 
-let command_context_coding_with_allowlist
+let command_context_tool_execute_with_allowlist
       ?caller
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
@@ -365,7 +365,7 @@ let command_context_coding_with_allowlist
     Exec_shell_gate.gate_typed
       ?caller
       ~ir
-      ~allowlist:(coding_allowlist_policy ~allow_pipes ~allowed_commands ())
+      ~allowlist:(tool_execute_allowlist_policy ~allow_pipes ~allowed_commands ())
       ~path_policy:Exec_shell_gate.allow_all_paths
       ~sandbox:Exec_shell_gate.host_sandbox
       ()
@@ -393,8 +393,8 @@ let command_context_coding_with_allowlist
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
 ;;
 
-let validate_command_coding_with_allowlist ?caller ?allow_pipes ~allowed_commands ir =
-  command_context_coding_with_allowlist
+let validate_command_tool_execute_with_allowlist ?caller ?allow_pipes ~allowed_commands ir =
+  command_context_tool_execute_with_allowlist
     ?caller
     ?allow_pipes
     ~allowed_commands
@@ -402,8 +402,8 @@ let validate_command_coding_with_allowlist ?caller ?allow_pipes ~allowed_command
   |> Result.map (fun _ -> ())
 ;;
 
-let validate_command_coding ?caller ir =
-  validate_command_coding_with_allowlist
+let validate_command_tool_execute ?caller ir =
+  validate_command_tool_execute_with_allowlist
     ?caller
     ~allow_pipes:true
     ~allowed_commands:dev_allowed_commands
@@ -830,7 +830,7 @@ let sanitize_command_for_log cmd =
   if trimmed = ""
   then Log_sanitize.sanitize_command_for_log cmd
   else (
-    match parse_string_to_ir ~mode:Coding trimmed with
+    match parse_string_to_ir ~mode:Tool_execute trimmed with
     | Ok ir -> Log_sanitize.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
     | Error _ -> Log_sanitize.sanitize_command_for_log cmd)
 ;;

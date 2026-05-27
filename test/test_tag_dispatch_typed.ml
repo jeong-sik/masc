@@ -5,7 +5,7 @@ open Alcotest
     PR-7 wrapped the primary keeper-turn dispatch sites; PR-8 wrapped the
     MCP server tag-dispatch caller sites. PR-9 closes the remaining
     fallback path inside [agent_tool_remote_mcp_runtime.ml:180-190] where
-    [Tool_dispatch.lookup_tag] + [Keeper_exec_shared.tag_dispatch_fn]
+    [Tool_dispatch.lookup_tag] + [Agent_tool_shared_runtime.tag_dispatch_fn]
     handle tools that didn't resolve through the handler registry.
 
     With this PR, ALL THREE dispatch entries in masc-mcp emit the
@@ -31,7 +31,7 @@ let pinned_dispatch_entries_covered = 3
     - MCP server (tag-based dispatch via dispatch_by_tag /
       dispatch_internal_keeper_runtime_tool)
     - Tag-dispatch fallback (keeper_tag_dispatch.ml /
-      Keeper_exec_shared.tag_dispatch_fn)
+      Agent_tool_shared_runtime.tag_dispatch_fn)
     PR-9 brings all 3 to telemetry parity. *)
 
 let test_outcome_vocab_parity () =

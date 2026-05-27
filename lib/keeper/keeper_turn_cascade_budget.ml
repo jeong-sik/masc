@@ -5,12 +5,12 @@
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 module EC = Keeper_error_classify
 
 type cascade_execution = {
   cascade_name : Cascade_name.t;
-  max_context_resolution : Keeper_exec_context.max_context_resolution;
+  max_context_resolution : Keeper_context_runtime.max_context_resolution;
   max_context : int;
   temperature : float;
   max_tokens : int;
@@ -824,7 +824,7 @@ let resolved_max_context_for_turn
     ~(meta : keeper_meta)
     (model_labels : string list) : int =
   let resolution =
-    Keeper_exec_context.resolve_max_context_resolution
+    Keeper_context_runtime.resolve_max_context_resolution
       ~requested_override:meta.max_context_override model_labels
   in
   if resolution.primary_budget < resolution.cascade_budget then begin

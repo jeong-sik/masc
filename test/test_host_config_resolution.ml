@@ -26,7 +26,7 @@ let test_host_field_values () =
     d.cred_root;
   (check string)
     "host.host_bash pins /bin/bash \
-     (keeper_shell_bash.ml:745, 802)"
+     (agent_tool_execute_runtime.ml:745, 802)"
     "/bin/bash"
     d.host_bash;
   (check string)

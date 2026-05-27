@@ -149,7 +149,7 @@ let dispatch
            (Printf.sprintf
               "tool '%s' requires MCP session context (not available in keeper)"
               name))
-    (* ── Tier D: Cycle-breaking — modules that back-reference Keeper_exec_* *)
+    (* ── Tier D: Cycle-breaking — runtime modules that back-reference dispatcher state *)
     | Mod_compact ->
       Some
         (err

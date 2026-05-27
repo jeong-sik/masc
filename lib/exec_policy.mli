@@ -19,7 +19,7 @@ val block_reason_to_string : block_reason -> string
 val block_reason_to_string_with_allowlist :
   allowed_commands:string list -> block_reason -> string
 
-type parse_mode = Strict | Coding
+type parse_mode = Strict | Tool_execute
 
 val parse_string_to_ir :
   mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
@@ -43,21 +43,21 @@ val validate_command :
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
-val command_context_coding_with_allowlist :
+val command_context_tool_execute_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
-val validate_command_coding_with_allowlist :
+val validate_command_tool_execute_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
-val validate_command_coding :
+val validate_command_tool_execute :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result

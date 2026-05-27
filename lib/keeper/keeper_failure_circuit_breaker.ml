@@ -85,7 +85,7 @@ let fingerprint_of_error ?(max_len = 120) (error_msg : string) : string =
   if !i < len then s ^ "…" else s
 
 (** Mutex protecting [states] and every per-keeper [breaker_state].
-    Every production path goes through [Keeper_exec_tools.apply_circuit_breaker]
+    Every production path goes through [Agent_tool_dispatch_runtime.apply_circuit_breaker]
     which runs on whichever keeper fiber handled the tool call — multiple
     keepers execute tools concurrently, so [Hashtbl.find_opt] + conditional
     [Hashtbl.replace] in [get_or_create] is a textbook TOCTOU, and the

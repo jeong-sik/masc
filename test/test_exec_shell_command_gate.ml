@@ -8,7 +8,7 @@
     1. [Masc_exec_command_gate.Shell_command_gate.gate_raw] verdict shape
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
-    2. [Masc_mcp.Worker_dev_tools.validate_command_coding_with_allowlist]
+    2. [Masc_mcp.Worker_dev_tools.validate_command_tool_execute_with_allowlist]
        worker verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
@@ -115,9 +115,9 @@ let worker_tag (result : (unit, W.block_reason) result) : string =
   | Error (W.Command_not_allowed _) -> "command_not_allowed"
 ;;
 
-let validate_worker_coding_raw ~allowed_commands raw =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Coding raw with
-  | Ok ir -> W.validate_command_coding_with_allowlist ~allowed_commands ir
+let validate_worker_execute_raw ~allowed_commands raw =
+  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Tool_execute raw with
+  | Ok ir -> W.validate_command_tool_execute_with_allowlist ~allowed_commands ir
   | Error reason -> Error reason
 ;;
 
@@ -138,7 +138,7 @@ let run_corpus_row fixture =
        else fixture.raw_cmd)
   in
   let worker =
-    validate_worker_coding_raw ~allowed_commands:allowed fixture.raw_cmd
+    validate_worker_execute_raw ~allowed_commands:allowed fixture.raw_cmd
   in
   Alcotest.(check string)
     (label ^ " worker verdict")
@@ -517,7 +517,7 @@ let test_backslash_pipe_in_double_quotes_allows () =
 
 let test_brace_expansion_is_too_complex_glob_brace () =
   (* Corpus fixture: ls {a,b}.txt
-     Worker gate: ok (brace not in the coding shell injection precheck).
+     Worker gate: ok (brace not in the Execute shell injection precheck).
      IR: Too_complex (Unsupported_construct `Glob_brace).
      Phase 0 PR-A2: new fixture covering classify_too_complex's
      [has "{" || has "}"] arm — previously no corpus row exercised

@@ -1,5 +1,5 @@
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
   match result with
@@ -252,7 +252,7 @@ let required_tool_workflow_rejection config ~agent_tool_names claim_goal_scope =
     | missing ->
       Some
         (Printf.sprintf
-           "Workflow rejected: this keeper lacks required execution/repo tool(s): %s. Route the task to a coding/verifier keeper or update required_tools."
+           "Workflow rejected: this keeper lacks required execution/repo tool(s): %s. Route the task to a keeper whose tool access satisfies required_tools, or update required_tools."
            (String.concat ", " missing)))
 ;;
 

@@ -562,7 +562,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
       {
         cascade_name = Cascade_name.of_string_exn "tool_required";
         configured_labels = [ "agent_code"; "provider_c" ];
-        required_tool_names = [ "tool_execute"; "tool_workspace_inspect" ];
+        required_tool_names = [ "tool_execute"; "tool_search_files" ];
         provider_rejections =
           [
             { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };

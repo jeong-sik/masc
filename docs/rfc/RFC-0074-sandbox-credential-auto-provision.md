@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## 1. Context
 
-`Keeper_run_tools.prepare_agent_setup` (lib/keeper/keeper_run_tools.ml:96-127) 가 turn 시작 시점에 `turn_sandbox_factory`, `turn_sandbox_factory_git`, credential bundle 을 옵셔널 인자로 받는다. 현재 boot path (`lib/keeper/keeper_registry.ml`) 가 이들을 *자동 부착하지 않으므로*, coding preset 의 fs/bash/shell/pr 도구가 turn 시점에 `factory=None` 으로 실행 fail 한다.
+`Keeper_run_tools.prepare_agent_setup` (lib/keeper/keeper_run_tools.ml:96-127) 가 turn 시작 시점에 `turn_sandbox_factory`, `turn_sandbox_factory_git`, credential bundle 을 옵셔널 인자로 받는다. 현재 boot path (`lib/keeper/keeper_registry.ml`) 가 이들을 *자동 부착하지 않으므로*, delivery preset 의 fs/bash/shell/pr 도구가 turn 시점에 `factory=None` 으로 실행 fail 한다.
 
 RFC-0073 이 *gap 을 진단*한다면 이 RFC 는 *gap 을 닫는다*.
 
@@ -60,7 +60,6 @@ val attach :
 |---|---|---|---|---|
 | Minimal | Forbidden | Forbidden | Forbidden | [] |
 | Social | Forbidden | Forbidden | Forbidden | [Slack_token] |
-| Coding | Required | Required | Required | [Github_token] |
 | Research | Required | Optional | Forbidden | [Web_search_key] |
 | Delivery | Required | Required | Required | [Github_token; Slack_token] |
 | Full | Required | Required | Required | [Github_token; Slack_token; Web_search_key] |
@@ -106,7 +105,7 @@ credential 자동 주입은 *default off* (`auto_provision_credentials=false`). 
 
 - (a) `dune build` 통과 — `plan_of_preset` exhaustive match 가드.
 - (b) `dune exec test/test_keeper_resource_plan.exe` — preset 8개 × 자원 5개 매트릭스 검증.
-- (c) sangsu (preset=coding) boot 후 `runtime_readiness.blocked` 가 (credential 자동 주입 off 기준) `GitHub PR helper` 만 포함, fs/bash/git 도구는 Ready.
+- (c) sangsu boot 후 `runtime_readiness.blocked` 가 (credential 자동 주입 off 기준) credentialed typed `gh` execution 만 포함하고, file/search/Execute 도구는 Ready.
 - (d) `auto_provision_credentials=true` 설정 후 reboot → `runtime_readiness.blocked` 가 빈 배열.
 
 ## 7. Workaround Rejection Self-Check

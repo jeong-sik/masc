@@ -73,7 +73,7 @@ let executable_lane executable argv =
        | _ -> Shell))
 ;;
 
-let typed_bash_stage_class fields =
+let typed_execute_stage_class fields =
   match List.assoc_opt "executable" fields with
   | Some (`String executable) ->
     let argv =
@@ -85,7 +85,7 @@ let typed_bash_stage_class fields =
   | _ -> Shell
 ;;
 
-let typed_bash_args_class args =
+let typed_execute_args_class args =
   let combine left right =
     match left, right with
     | Docker, _ | _, Docker -> Docker
@@ -94,12 +94,12 @@ let typed_bash_args_class args =
   in
   let rec stages_class = function
     | [] -> Shell
-    | `Assoc fields :: rest -> combine (typed_bash_stage_class fields) (stages_class rest)
+    | `Assoc fields :: rest -> combine (typed_execute_stage_class fields) (stages_class rest)
     | _ :: rest -> stages_class rest
   in
   match args with
   | `Assoc fields ->
-    let direct = typed_bash_stage_class fields in
+    let direct = typed_execute_stage_class fields in
     let pipeline =
       match List.assoc_opt "pipeline" fields with
       | Some (`List stages) -> stages_class stages
@@ -138,8 +138,8 @@ let classify_structured_shell_op args =
 let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   let open Tool_name.Keeper in
   match tool with
-  | Tool_name.Keeper.Execute -> typed_bash_args_class args
-  | Workspace_inspect -> classify_structured_shell_op args
+  | Tool_name.Keeper.Execute -> typed_execute_args_class args
+  | Search_files -> classify_structured_shell_op args
   | Fs_edit -> Filesystem_write
   | Fs_read | Tool_search -> Filesystem_read
   | Memory_write | Handoff -> Filesystem_write

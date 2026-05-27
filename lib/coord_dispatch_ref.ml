@@ -1,7 +1,7 @@
 (** RFC-0182 §3.1 — coord dispatch dependency inversion ref.
 
     [Agent_tool_in_process_runtime] is compiled very early in module
-    order (transitively imported by [Keeper_exec_tools]). [Tool_coord]
+    order (transitively imported by [Agent_tool_dispatch_runtime]). [Tool_coord]
     is compiled late (it depends on [Keeper_runtime] which depends on
     most of the keeper layer). A direct import from
     [Agent_tool_in_process_runtime] to [Tool_coord] would close a

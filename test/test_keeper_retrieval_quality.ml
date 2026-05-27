@@ -30,8 +30,8 @@ let make_meta () =
 let build_keeper_index () =
   let meta = make_meta () in
   (* Inject masc_* schemas so the universe includes governance, agent, etc. *)
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  let tool_schemas = Keeper_exec_tools.keeper_universe_model_tools meta in
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  let tool_schemas = Agent_tool_dispatch_runtime.keeper_universe_model_tools meta in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
   let tool_entries =
@@ -95,12 +95,12 @@ let test_file_write_kr () =
 let test_file_search_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_en" idx
-    "search for all occurrences of tool_edit_file in the codebase" "tool_workspace_inspect")
+    "search for all occurrences of tool_edit_file in the codebase" "tool_search_files")
 
 let test_file_search_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_kr" idx
-    "명령어 검색 탐색" "tool_workspace_inspect")
+    "명령어 검색 탐색" "tool_search_files")
 
 (* ================================================================ *)
 (* Scenarios: knowledge lookup                                      *)
@@ -194,7 +194,7 @@ let test_github_pr_en () =
 let test_github_issue_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_issue_kr" idx
-    "깃허브 이슈 풀리퀘스트" "tool_workspace_inspect")
+    "깃허브 이슈 풀리퀘스트" "tool_search_files")
 
 (* ================================================================ *)
 (* Scenarios: masc_* tools (Korean BM25 retrieval — #4520)          *)
@@ -203,12 +203,12 @@ let test_github_issue_kr () =
 let test_tool_search_files_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"tool_search_files_kr" idx
-    "코드 검색 소스코드" "tool_workspace_inspect")
+    "코드 검색 소스코드" "tool_search_files")
 
 let test_tool_search_files_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"tool_search_files_en" idx
-    "search the codebase for function definitions" "tool_workspace_inspect")
+    "search the codebase for function definitions" "tool_search_files")
 
 (* masc_plan_get is not retrievable via BM25 with Korean queries:
    "계획", "플랜" are common terms that produce no BM25 match against
@@ -256,9 +256,9 @@ let test_index_size () =
 
 let test_search_alias_entries_target_keeper_universe () =
   let meta = make_meta () in
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let tool_names =
-    Keeper_exec_tools.keeper_universe_model_tools meta
+    Agent_tool_dispatch_runtime.keeper_universe_model_tools meta
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let missing =
@@ -294,7 +294,7 @@ let test_full_universe_worktree_en () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "keeper_retrieval_quality"
     [
       ( "file_ops",

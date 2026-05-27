@@ -14,7 +14,7 @@ import { IdeConversationRail } from './ide-conversation-rail'
 import { IdeActivityPanel } from './ide-activity-panel'
 import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
 import { IdeInterject } from './ide-interject'
-import { KeeperShellDrawer } from './keeper-shell-drawer'
+import { ExecuteOutputDrawer } from './execute-output-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
@@ -320,7 +320,7 @@ export function deriveIdeStatusbarModel({
 
   const layerLabel = statusbarLayerLabel(activeLayers)
   addStatusbarChip(chips, 'layers', layerLabel ?? undefined, 'info', layerLabel ? `Active layers: ${layerLabel}` : '')
-  if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Keeper shell drawer open')
+  if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
   if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')
 
@@ -728,7 +728,7 @@ export function IdeShell() {
           `}
       </div>
       ${terminalOpen
-        ? html`<${KeeperShellDrawer} keeperName=${terminalKeeper} />`
+        ? html`<${ExecuteOutputDrawer} keeperName=${terminalKeeper} />`
         : null}
       <${IdeInterject} keeperName=${terminalKeeper} />
     </section>

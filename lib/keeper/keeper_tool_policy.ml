@@ -115,7 +115,6 @@ let preset_name_of_tool_preset = function
   | Social -> "social"
   | Messaging -> "messaging"
   | Dispatch -> "dispatch"
-  | Coding -> "coding"
   | Research -> "research"
   | Delivery -> "delivery"
   | Full -> "full"
@@ -123,7 +122,7 @@ let preset_name_of_tool_preset = function
 (* ── Privileged operation gates ------------------------------------ *)
 
 let preset_allows_privileged_operations = function
-  | Coding | Delivery | Full -> true
+  | Delivery | Full -> true
   | Minimal | Social | Messaging | Dispatch | Research -> false
 
 let allows_workflow_for_preset (preset : tool_preset) : bool =
@@ -282,7 +281,7 @@ let last_turn_safe_tool_names () =
                 "keeper_time_now"; "keeper_tool_search";
                 "keeper_broadcast"; "keeper_tasks_list"; "keeper_task_done";
                 "keeper_task_submit_for_verification"; "masc_tasks";
-                "masc_transition"; "tool_read_file"; "tool_workspace_inspect";
+                "masc_transition"; "tool_read_file"; "tool_search_files";
                 "tool_execute"; "masc_web_search"; "masc_web_fetch" ]
     "last_turn_safe"
 

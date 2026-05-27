@@ -7,8 +7,8 @@ module Masc_log = Log
 open Agent_sdk
 open Masc_mcp
 
-let ctx_messages = Keeper_exec_context.messages_of_context
-let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
+let ctx_messages = Keeper_context_runtime.messages_of_context
+let ctx_system_prompt = Keeper_context_runtime.system_prompt_of_context
 
 let temp_counter = ref 0
 
@@ -586,37 +586,37 @@ let test_restore_messages () =
 (* ================================================================ *)
 
 let test_oas_context_sync () =
-  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:1000 in
-  let ctx = Keeper_exec_context.append ctx
+  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:1000 in
+  let ctx = Keeper_context_runtime.append ctx
     (Agent_sdk.Types.user_msg "hello") in
-  let ctx = Keeper_exec_context.sync_oas_context ctx in
+  let ctx = Keeper_context_runtime.sync_oas_context ctx in
   let msg_count =
     Context.get_scoped
-      (Keeper_exec_context.oas_context_of_context ctx)
+      (Keeper_context_runtime.oas_context_of_context ctx)
       Context.Session "message_count" in
   (match msg_count with
    | Some (`Int n) -> Alcotest.(check int) "message count synced" 1 n
    | _ -> Alcotest.fail "expected message_count in oas_context")
 
 let test_compact_syncs_oas_context () =
-  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:1000 in
-  let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "msg1") in
-  let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "msg2") in
+  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:1000 in
+  let ctx = Keeper_context_runtime.append ctx (Agent_sdk.Types.user_msg "msg1") in
+  let ctx = Keeper_context_runtime.append ctx (Agent_sdk.Types.assistant_msg "msg2") in
   let messages =
     (* Issue #8597 #1: ~system_prompt dropped from compact signature. *)
     Context_compact_oas.compact
       ~messages:(ctx_messages ctx)
       ~strategies:[Context_compact_oas.MergeContiguous] () in
-  let ctx = Keeper_exec_context.sync_oas_context
+  let ctx = Keeper_context_runtime.sync_oas_context
     {
       ctx with
       checkpoint =
-        { (Keeper_exec_context.checkpoint_of_context ctx) with messages };
+        { (Keeper_context_runtime.checkpoint_of_context ctx) with messages };
     }
   in
   let ratio =
     Context.get_scoped
-      (Keeper_exec_context.oas_context_of_context ctx)
+      (Keeper_context_runtime.oas_context_of_context ctx)
       Context.Session "context_ratio" in
   (match ratio with
    | Some (`Float r) ->

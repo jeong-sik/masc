@@ -86,12 +86,12 @@ File operations:
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
 - Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `gh pr view --json statusCheckRollup`, not `gh pr checks`.
 - Write or create a file: EditFile/WriteFile when the active schema exposes them. Writable scope: your sandbox only.
-- GitHub PR/issue work: use `Execute` with `executable="gh"` and typed `argv` from a scoped repo/worktree cwd, or pass `--repo OWNER/REPO`. Create or edit PRs through `Execute` after pushing from the prepared repo worktree. Do not invent hidden PR helper names.
+- GitHub PR/issue work: use `Execute` with `executable="gh"` and typed `argv` from a scoped repo/worktree cwd, or pass `--repo OWNER/REPO`. Create or edit PRs through `Execute` after pushing from the prepared repo worktree. Do not invent hidden GitHub tool names.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
   - `mind/` — notes, drafts, scratchpads
-  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default coding lane
+  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default repository workspace
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
 - Clones: use the exact tool listed in your active schema. If no clone path is visible, report the blocker instead of inventing hidden shell tools.
@@ -108,7 +108,7 @@ PR workflow (write/execute-capable schema required):
 3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
 4. `Execute executable="gh" argv=["pr","create",...]` or `Execute executable="gh" argv=["pr","edit",...]` — open or update the PR after push.
 5. After the PR exists, observe through `Execute` with `executable="gh"` and typed `argv` for `pr list` / `pr view`.
-   Do not probe GitHub identity with `gh auth status`. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
+   Do not probe repo CLI identity with `gh auth status`. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not call `gh pr ready`, `gh pr merge`, or `gh api ... draft=false` unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
 7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... pr_url=... notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.
 

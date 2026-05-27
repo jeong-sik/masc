@@ -571,7 +571,6 @@ describe('summaryCounts', () => {
     const counts = summaryCounts(rows)
     expect(counts.live).toBe(2)
     expect(counts.hot).toBe(1)
-    expect(counts.toolCovered).toBe(1)
     expect(counts.toolTelemetryCovered).toBe(1)
     expect(counts.toolActive).toBe(1)
     expect(counts.toolQuiet).toBe(0)
@@ -584,7 +583,6 @@ describe('summaryCounts', () => {
       makeRow({ name: 'unknown', tool_calls: 0, recent_tools: [], tool_activity_known: false }),
     ])
 
-    expect(counts.toolCovered).toBe(1)
     expect(counts.toolTelemetryCovered).toBe(1)
     expect(counts.toolActive).toBe(0)
     expect(counts.toolQuiet).toBe(1)
@@ -599,15 +597,6 @@ describe('summaryCounts', () => {
     ])
 
     expect(toolTelemetryCoverageDetail(counts, 3)).toBe('도구 telemetry 확인 2/3 · 활동 1 · 기록 없음 1 · 미확인 1')
-  })
-
-  it('counts explicit zero-tool telemetry as covered', () => {
-    const counts = summaryCounts([
-      makeRow({ recent_tools: [], tool_calls: 0, tool_activity_known: true }),
-      makeRow({ recent_tools: [], tool_calls: 0, tool_activity_known: false }),
-    ])
-
-    expect(counts.toolCovered).toBe(1)
   })
 })
 

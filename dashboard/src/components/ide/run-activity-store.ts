@@ -130,7 +130,7 @@ export function createRunActivityStore(
 }
 
 function normalizeMaxEvents(value: number | undefined): number {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value
+  if (isPositiveSafeInteger(value)) return value
   return DEFAULT_MAX_EVENTS
 }
 

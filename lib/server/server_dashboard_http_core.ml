@@ -585,11 +585,6 @@ let dashboard_shell_payload_json
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config)
   : Yojson.Safe.t
   =
-  let contains_substring haystack needle =
-    (* Empty-needle returns false here, unlike String_util.contains_substring's
-       Re.execp-compatible empty=true. Guard preserves the original contract. *)
-    String.length needle > 0 && String_util.contains_substring haystack needle
-  in
   let dashboard_auth_error_code = function
     | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> Some "invalid_token"
     | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> Some "token_expired"
@@ -598,15 +593,8 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
            { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
       Some "same_origin_blocked"
     | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> Some "insufficient_role"
-    | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized reason) ->
-      let normalized = String.lowercase_ascii reason in
-      if contains_substring normalized "bearer token belongs to"
-      then Some "actor_mismatch"
-      else if
-        contains_substring normalized "token required"
-        || contains_substring normalized "authentication required"
-      then Some "missing_token"
-      else Some "unknown"
+    | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; _ }) ->
+      Some (Masc_domain.Auth_error.unauthorized_reason_to_string reason)
     | _ -> Some "unknown"
   in
   let auth_cfg = Auth.load_auth_config config.base_path in
@@ -638,8 +626,10 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
         Error
           (Masc_domain.Auth
              (Masc_domain.Auth_error.Unauthorized
-                "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound \
-                 credential)"))
+                { reason = Missing_token
+                ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound \
+                             credential)"
+                }))
       else Ok "dashboard"
   in
   let effective_agent =
@@ -663,7 +653,8 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
            auth_cfg
        with
        | Ok _ -> Ok ()
-       | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)))
+       | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+           { reason = Generic; message = msg })))
   in
   let keeper_authorization_result =
     match endpoint_gate_result with

@@ -322,7 +322,10 @@ let refresh_token config ~agent_name ~old_token
     (* Allow refresh even if expired *)
     (match load_credential config agent_name with
      | None ->
-       Error (Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name)))
+       Error (Auth (Auth_error.Unauthorized
+         { reason = Missing_token
+         ; message = "No credential found for " ^ agent_name
+         }))
      | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)
   | Error e -> Error e
   | Ok old_cred -> create_token config ~agent_name ~role:old_cred.role
@@ -393,7 +396,8 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
             (Auth
                (Auth_error.Forbidden
                   { agent = agent_name; action = permission_to_string permission }))
-      else Error (Auth (Auth_error.Unauthorized "Token required")))
+      else Error (Auth (Auth_error.Unauthorized
+        { reason = Missing_token; message = "Token required" })))
 ;;
 
 let permission_for_tool tool_name = Tool_permission_map.permission_for_tool tool_name
@@ -476,7 +480,8 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
     | Ok (Some cred) -> Ok cred.role
     | Ok None ->
       if auth_cfg.require_token
-      then Error (Auth (Auth_error.Unauthorized "Token required"))
+      then Error (Auth (Auth_error.Unauthorized
+        { reason = Missing_token; message = "Token required" }))
       else Ok Worker)
 ;;
 

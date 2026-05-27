@@ -1104,7 +1104,8 @@ let test_masc_error_invalid_file_path () =
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_unauthorized () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized "missing token")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+    { reason = Missing_token; message = "missing token" })) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_forbidden () =

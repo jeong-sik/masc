@@ -130,14 +130,27 @@ module Agent_error = struct
 end
 
 module Auth_error = struct
+  (** Typed classification of [Unauthorized] reasons.  Replaces substring
+      matching in dashboard auth JSON rendering.  Each variant maps to a
+      stable dashboard error code string. *)
+  type unauthorized_reason =
+    | Actor_mismatch   (** Token owner ≠ requested agent *)
+    | Missing_token    (** No bearer token provided *)
+    | Generic          (** Catch-all for other unauthorized causes *)
+
   type t =
-    | Unauthorized of string
+    | Unauthorized of { reason: unauthorized_reason; message: string }
     | Forbidden of { agent: string; action: string }
     | TokenExpired of string
     | InvalidToken of string
 
+  let unauthorized_reason_to_string = function
+    | Actor_mismatch -> "actor_mismatch"
+    | Missing_token -> "missing_token"
+    | Generic -> "unknown"
+
   let to_string = function
-    | Unauthorized reason -> Printf.sprintf "[AuthError] Unauthorized: %s" reason
+    | Unauthorized { message; _ } -> Printf.sprintf "[AuthError] Unauthorized: %s" message
     | Forbidden { agent; action } -> Printf.sprintf "[AuthError] Forbidden: %s cannot %s" agent action
     | TokenExpired agent ->
         Printf.sprintf "[AuthError] Token expired for %s. Use masc_auth_refresh." agent

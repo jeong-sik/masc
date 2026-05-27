@@ -28,7 +28,7 @@
         },
         {
           "file": "lib/server/server_routes_http_routes_dashboard.ml",
-          "value": 1072
+          "value": 1078
         },
         {
           "file": "lib/types/types_core.ml",
@@ -3073,7 +3073,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 61,
+      "baseline": 60,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3270,7 +3270,7 @@
         },
         {
           "file": "lib/tool_inline_dispatch_extra.ml",
-          "value": 4
+          "value": 3
         },
         {
           "file": "lib/tool_registry.ml",

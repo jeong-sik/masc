@@ -1018,9 +1018,9 @@ let test_resolve_agent_name_rejects_internal_keeper_without_name () =
       let request = Httpun.Request.create ~headers `POST "/mcp" in
       match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
       | Ok _ -> fail "expected missing keeper name header to be rejected"
-      | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) ->
+      | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { message; _ })) ->
           check bool "mentions keeper header" true
-            (Astring.String.is_infix ~affix:"x-masc-keeper-name" msg)
+            (Astring.String.is_infix ~affix:"x-masc-keeper-name" message)
       | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 (* ============================================================

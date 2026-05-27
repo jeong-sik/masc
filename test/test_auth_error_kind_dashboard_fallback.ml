@@ -68,7 +68,8 @@ let invalid_token_err =
   Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "stale-token-x")
 
 let unauthorized_err =
-  Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized "no perms")
+  Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+    { reason = Generic; message = "no perms" })
 
 let test_outcome_error_token_mismatch_renders_remediation () =
   (* [Token_mismatch] is the only [err_kind] that appends the

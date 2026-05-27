@@ -47,7 +47,8 @@ let test_classify_token_expired () =
         (Aek.to_string other)
 
 let test_classify_unauthorized () =
-  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized "x")) with
+  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+    { reason = Generic; message = "x" })) with
   | Aek.Unauthorized -> ()
   | other ->
       Alcotest.failf

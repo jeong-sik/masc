@@ -4,6 +4,7 @@ import { telemetrySourceLabel } from '../config/telemetry-sources'
 import type { Keeper, StopCause } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
 import { formatMsCompact } from '../lib/format-number'
+import { firstNonEmptyString } from '../lib/format-string'
 import { normalizeStopCause } from '../lib/stop-cause'
 import {
   keeperActivityDisplay,
@@ -128,13 +129,7 @@ export function normalizeModelText(value: string | null | undefined): string | n
   return text == null || isPlaceholderModel(text) ? null : text
 }
 
-export function firstNonEmptyString(...values: Array<string | null | undefined>): string | null {
-  for (const value of values) {
-    const normalized = normalizeText(value)
-    if (normalized) return normalized
-  }
-  return null
-}
+export { firstNonEmptyString }
 
 export function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()

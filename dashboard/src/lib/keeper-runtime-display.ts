@@ -1,5 +1,6 @@
 import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import { relativeTime } from './format-time'
+import { firstNonEmptyString } from './format-string'
 import { isKeeperPaused } from './keeper-predicates'
 
 /** Max seconds since last heartbeat to consider the keeper process alive. */
@@ -143,14 +144,6 @@ export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackS
   return status && status.trim() !== '' ? status : 'unknown'
 }
 
-function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
-  for (const value of values) {
-    const text = trimmed(value)
-    if (text) return text
-  }
-  return null
-}
-
 function codeLabel(value: string | null | undefined): string | null {
   const text = trimmed(value)
   return text ? text.replace(/_/g, ' ') : null
@@ -177,14 +170,14 @@ export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
     blockerLabel
     ?? attentionReasonForPause(keeper.attention_reason)
     ?? attentionReasonForPause(trust?.attention_reason)
-    ?? firstNonEmpty(
+    ?? firstNonEmptyString(
       keeper.runtime_blocker_summary,
       trust?.latest_terminal_reason?.summary,
       keeper.diagnostic?.continuity_summary,
       keeper.diagnostic?.summary,
     )
     ?? '운영자 일시정지'
-  const nextAction = firstNonEmpty(
+  const nextAction = firstNonEmptyString(
     codeLabel(keeper.next_human_action),
     codeLabel(trust?.next_human_action),
     codeLabel(trust?.latest_next_action),

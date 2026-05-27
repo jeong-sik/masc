@@ -67,7 +67,7 @@ let strip_mcp_prefix name =
 let has_agent_name_field (schema : Masc_domain.tool_schema) =
   match (match Json_util.assoc_member_opt "properties" schema.input_schema with Some x -> Json_util.assoc_member_opt "agent_name" x | None -> None) with
   | Some `Null | None -> false
-  | Some _ -> true
+  | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) -> true
 
 let inject_default_agent_name ~(worker_name : string)
     ~(schema : Masc_domain.tool_schema option) (args : Yojson.Safe.t) =
@@ -106,7 +106,7 @@ let request_id_matches request_id json =
       | Some v -> v = request_id
       | None -> false)
   | Some (`String value) -> String.equal value (string_of_int request_id)
-  | _ -> false
+  | Some (`Null | `Bool _ | `Float _ | `List _ | `Assoc _) | None -> false
 
 let normalize_mcp_body ~request_id body =
   let lines = String.split_on_char '\n' body in
@@ -142,19 +142,24 @@ let extract_tool_text json =
   | Some (`List (`Assoc fields :: _)) -> (
       match List.assoc_opt "text" fields with
       | Some (`String s) -> s
-      | _ -> Yojson.Safe.to_string json)
-  | _ -> Yojson.Safe.to_string json
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) ->
+        Yojson.Safe.to_string json)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+    Yojson.Safe.to_string json
 
 let extract_jsonrpc_error json =
   match json with
   | `Assoc fields -> (
       match List.assoc_opt "error" fields with
-      | Some (`Assoc err_fields) -> (
-          match List.assoc_opt "message" err_fields with
-          | Some (`String s) when String.trim s <> "" -> Some s
-          | _ -> None)
-      | _ -> None)
-  | _ -> None
+      | Some error_json -> (
+          match error_json with
+          | `Assoc err_fields -> (
+              match List.assoc_opt "message" err_fields with
+              | Some (`String s) when String.trim s <> "" -> Some s
+              | None | Some _ -> None)
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
+      | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
     ~(request_body : string) : (string, string) result =
@@ -286,7 +291,7 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
       let is_error =
         match (match Json_util.assoc_member_opt "result" json with Some x -> Json_util.assoc_member_opt "isError" x | None -> None) with
         | Some (`Bool b) -> b
-        | _ -> false
+        | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> false
       in
       Ok { text = extract_tool_text json; is_error }
 

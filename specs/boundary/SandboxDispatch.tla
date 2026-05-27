@@ -2,13 +2,13 @@
 \* Boundary spec for keeper sandbox dispatch routing.
 \*
 \* Runtime truth (lib/keeper/keeper_tools_oas.ml +
-\* lib/keeper/agent_tool_shell_runtime.ml):
+\* lib/keeper/agent_tool_command_runtime.ml):
 \*
 \*   - [meta_profile] is the keeper's declared sandbox preference
 \*     (Local | Docker).
 \*   - [in_playground] gates whether playground-host fallback is even a
 \*     candidate route at the dispatch site.
-\*   - [dispatched_via] records how the most recent RunBash request was
+\*   - [dispatched_via] records how the most recent typed Execute request was
 \*     resolved: None (no dispatch yet), Host, DockerReuse (existing
 \*     container), DockerColdstart (new container).
 \*
@@ -29,7 +29,7 @@
 \*
 \* Bug Model (memory: TLA+ Bug Model pattern):
 \*   - Spec       (clean): all dispatches respect the profile contract.
-\*   - SpecBuggy:  RunBashHostFallback action lets a Docker-declared
+\*   - SpecBuggy:  ExecuteHostFallback action lets a Docker-declared
 \*     keeper resolve to Host. DockerImpliesDockerVia MUST flag it.
 \*
 \* Reference: issue #11611 part 2.
@@ -69,8 +69,8 @@ EffectiveResolve(p, ip) ==
     /\ dispatched_via' = "None"
     /\ UNCHANGED << request_pending >>
 
-\* A new RunBash request enters the dispatch site.
-SubmitRun ==
+\* A new typed Execute request enters the dispatch site.
+SubmitExecute ==
     /\ ~ request_pending
     /\ request_pending' = TRUE
     /\ dispatched_via' = "None"
@@ -95,7 +95,7 @@ DispatchClean(via) ==
 
 Next ==
     \/ \E p \in ProfileSet, ip \in BOOLEAN : EffectiveResolve(p, ip)
-    \/ SubmitRun
+    \/ SubmitExecute
     \/ \E via \in ViaSet \ {"None"} : DispatchClean(via)
 
 Spec == Init /\ [][Next]_vars
@@ -117,12 +117,12 @@ DockerImpliesDockerVia ==
 
 \* ── Bug actions (used only by SpecBuggy) ──────────────────────────────────
 
-\* B1: RunBashHostFallback. The regression class: a Docker-declared
-\* keeper hits the legacy host-fallback path inside [run_docker_hardened_bash]
+\* B1: ExecuteHostFallback. The regression class: a Docker-declared
+\* keeper hits a legacy host-fallback path in the typed Execute dispatch layer
 \* and resolves the request via Host. This is the silent fallback that
 \* makes Docker isolation a soft contract; the spec catches it as an
 \* invariant violation in <=3 steps.
-RunBashHostFallback ==
+ExecuteHostFallback ==
     /\ request_pending
     /\ dispatched_via = "None"
     /\ meta_profile = "Docker"
@@ -132,7 +132,7 @@ RunBashHostFallback ==
 
 NextBuggy ==
     \/ Next
-    \/ RunBashHostFallback
+    \/ ExecuteHostFallback
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 

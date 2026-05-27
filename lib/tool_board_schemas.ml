@@ -277,7 +277,7 @@ let tool_comment_add : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; ( "description"
                       , `String
-                          "Post ID (format: p-xxxx...). Get from keeper_board_list \
+                          "Post ID (format: p-xxxx...). Get from masc_board_list \
                            results." )
                     ] )
               ; ( "content"
@@ -320,7 +320,7 @@ let tool_vote : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; ( "description"
                       , `String
-                          "Post ID (format: p-xxxx...). Get from keeper_board_list \
+                          "Post ID (format: p-xxxx...). Get from masc_board_list \
                            results." )
                     ] )
               ; ( "voter"

@@ -488,51 +488,6 @@ let masc_approval_get_spec : tool_spec =
   }
 ;;
 
-let masc_spawn_spec : tool_spec =
-  { name = "masc_spawn"
-  ; description =
-      "Spawn an agent process to execute a task. [agent_name] names a child \
-       binary or workflow registered by the local masc-mcp setup; pass [model] \
-       explicitly when the registered binary needs it. Use when you need \
-       another agent to work in parallel on a subtask. Pair with masc_add_task \
-       to create the task first."
-  ; parameters =
-      [ { p_name = "agent_name"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description =
-            "Agent identity to spawn. Free-form; resolved against the local \
-             agent roster (operator-configured) — the server holds no closed \
-             list of supported agents."
-        ; p_required = true
-        }
-      ; { p_name = "model"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description =
-            "Explicit model id. Required when the registered agent binary \
-             needs it (e.g. a local llama runner)."
-        ; p_required = false
-        }
-      ; { p_name = "prompt"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "The task/prompt to send to the agent"
-        ; p_required = true
-        }
-      ; { p_name = "timeout_seconds"
-        ; p_type = T_int { min = None; max = None; default = Some 300 }
-        ; p_description = "Max execution time in seconds (default: 300)"
-        ; p_required = false
-        }
-      ; { p_name = "working_dir"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Working directory for the agent (optional)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 (* === PR-2d: inline_coord group (6 tools) === *)
 
 let masc_start_spec : tool_spec =
@@ -694,10 +649,9 @@ let phase6_specs : tool_spec list =
   ; masc_plan_clear_task_spec
   ; masc_note_add_spec
   ; masc_deliver_spec
-    (* PR-2c: inline_infra (3 of 4 — masc_mcp_session deferred) *)
+    (* PR-2c: inline_infra (masc_mcp_session manual; masc_spawn removed by RFC-0182) *)
   ; masc_approval_pending_spec
   ; masc_approval_get_spec
-  ; masc_spawn_spec
     (* PR-2d: inline_coord group *)
   ; masc_start_spec
   ; masc_join_spec

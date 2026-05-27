@@ -160,23 +160,24 @@ let descriptor_boundary_exempt tool_name =
      | None -> None)
 ;;
 
+let effect_domain_boundary_exempt = function
+  | Some Tool_catalog.Read_only
+  | Some Tool_catalog.Masc_coordination
+  | Some Tool_catalog.Playground_write -> Some true
+  | Some Tool_catalog.Host_repo_write -> Some false
+  | None -> None
+;;
+
 let catalog_boundary_exempt tool_name =
-  let decision_for_effect_domain = function
-    | Some Tool_catalog.Read_only
-    | Some Tool_catalog.Masc_coordination
-    | Some Tool_catalog.Playground_write -> Some true
-    | Some Tool_catalog.Host_repo_write -> Some false
-    | None -> None
-  in
-  match decision_for_effect_domain (Tool_catalog.effect_domain tool_name) with
+  match effect_domain_boundary_exempt (Tool_catalog.effect_domain tool_name) with
   | Some _ as decision -> decision
   | None ->
     (match
        Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name
      with
      | Some internal_name when not (String.equal internal_name tool_name) ->
-       decision_for_effect_domain (Tool_catalog.effect_domain internal_name)
-     | _ -> None)
+       effect_domain_boundary_exempt (Tool_catalog.effect_domain internal_name)
+     | Some _ | None -> None)
 ;;
 
 (* ── Input-aware mutation-boundary bypass ────────────────────

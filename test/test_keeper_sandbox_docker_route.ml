@@ -1235,13 +1235,15 @@ let test_tool_search_files_gh_pr_review_is_unsupported () =
            ; ("cwd", `String playground)
            ])
   in
-  Alcotest.(check (option bool)) "blocked" (Some false)
-    (parse_bool_field raw "ok");
+  (match parse_bool_field raw "ok" with
+   | Some false -> ()
+   | _ -> Alcotest.failf "blocked raw=%s" raw);
   Alcotest.(check (option string)) "error"
     (Some "unsupported_op")
     (parse_string_field raw "error");
   Alcotest.(check (option string)) "unsupported op" (Some "gh")
     (parse_string_field raw "op")
+
 let docker_run_line log_path =
   read_file log_path
   |> String.split_on_char '\n'
@@ -1315,7 +1317,7 @@ let test_execute_missing_image_falls_back_to_local_playground () =
   Alcotest.(check bool) "docker run skipped" false
     (contains_substring log "\nrun ")
 
-let test_execute_missing_image_outside_playground_emits_typed_failure () =
+let test_execute_outside_playground_rejects_before_image_preflight () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground:_ ->
@@ -1339,20 +1341,14 @@ let test_execute_missing_image_outside_playground_emits_typed_failure () =
       ~args:(tool_execute_typed_pipeline_args ~cwd)
       ()
   in
-  Alcotest.(check (option bool)) "blocked" (Some false)
+  Alcotest.(check (option bool)) "legacy ok omitted" None
     (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
+  Alcotest.(check bool) "path rejection" true
+    (response_mentions raw "error" "path_outside_sandbox");
+  Alcotest.(check (option string)) "docker not requested" None
     (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "tool failure class"
-    (Some "policy_rejection")
-    (parse_string_field raw "failure_class");
-  Alcotest.(check (option string)) "sandbox failure class"
-    (Some "image_missing")
-    (parse_string_field raw "sandbox_failure_class");
-  Alcotest.(check bool) "error uses typed image code" true
-    (response_mentions raw "error" "image_not_found");
-  let log = read_file log_path in
-  Alcotest.(check bool) "image inspect attempted" true
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "image inspect skipped" false
     (contains_substring log "image inspect missing:test");
   Alcotest.(check bool) "docker run skipped" false
     (contains_substring log "\nrun ")
@@ -1889,7 +1885,7 @@ let test_execute_blocks_file_redirect_before_docker () =
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
 
-let test_execute_blocks_gh_pr_checks_before_docker () =
+let test_execute_gh_pr_checks_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1905,19 +1901,18 @@ let test_execute_blocks_gh_pr_checks_before_docker () =
            ~argv:[ "pr"; "checks"; "15659"; "--repo"; "jeong-sik/masc-mcp" ])
       ()
   in
-  (match parse_bool_field raw "ok" with
-   | Some true -> Alcotest.failf "gh pr checks unexpectedly succeeded: %s" raw
-   | Some false | None -> ());
+  Alcotest.(check (option bool)) "typed gh succeeds" (Some true)
+    (parse_bool_field raw "ok");
   Alcotest.(check (option string))
-    "gh shell is outside typed Execute allowlist"
-    (Some "executable \"gh\" not in dev_full allowlist")
-    (parse_string_field raw "error");
+    "typed gh routes through docker"
+    (Some "docker")
+    (parse_string_field raw "via");
   Alcotest.(check (option string))
     "no legacy shell next-tool bridge"
     None
     (parse_string_field raw "required_next_tool");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
-  Alcotest.(check bool) "docker container was not invoked" false
+  Alcotest.(check bool) "docker container was invoked" true
     (docker_log_has_container_execution log)
 
 let test_execute_search_pipeline_exposes_structured_recovery_plan () =
@@ -2121,8 +2116,8 @@ let () =
             "docker Execute blocks file redirects before docker"
             `Quick test_execute_blocks_file_redirect_before_docker;
           Alcotest.test_case
-            "docker Execute blocks gh pr checks before docker"
-            `Quick test_execute_blocks_gh_pr_checks_before_docker;
+            "docker Execute routes gh pr checks through docker"
+            `Quick test_execute_gh_pr_checks_routes_through_docker;
           Alcotest.test_case
             "docker Execute shape block exposes structured recovery plan"
             `Quick test_execute_search_pipeline_exposes_structured_recovery_plan;
@@ -2190,9 +2185,9 @@ let () =
           Alcotest.test_case "tool_execute missing image falls back locally" `Quick
             test_execute_missing_image_falls_back_to_local_playground;
           Alcotest.test_case
-            "tool_execute missing image outside playground emits typed failure"
+            "tool_execute outside playground rejects before image preflight"
             `Quick
-            test_execute_missing_image_outside_playground_emits_typed_failure;
+            test_execute_outside_playground_rejects_before_image_preflight;
           Alcotest.test_case
             "missing playground bind source blocks before docker"
             `Quick test_execute_missing_playground_blocks_before_docker;

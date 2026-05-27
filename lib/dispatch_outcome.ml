@@ -23,7 +23,7 @@ let of_string = function
   | "rejected_by_pre_hook" -> Some (Rejected_by_pre_hook { reason = "" })
   | "no_handler" -> Some No_handler
   | "handler_error" -> Some (Handler_error { exn = "" })
-  | _ -> None
+  | _unknown -> None
 ;;
 
 let all_arms =

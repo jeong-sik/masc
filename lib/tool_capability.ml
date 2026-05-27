@@ -22,7 +22,7 @@ let of_string = function
   | "mcp_context_required" -> Some Mcp_context_required
   | "destructive" -> Some Destructive
   | "idempotent" -> Some Idempotent
-  | _ -> None
+  | _unknown -> None
 ;;
 
 let all_kinds =

@@ -1,30 +1,20 @@
-exception Semaphore_wait_timeout of float
+(** Keeper Turn Slot — concurrency control for keeper turn execution.
 
-type slot_pool =
-  | Turn_pool
-  | Autonomous_pool
-  | Reactive_pool
+    Manages semaphores, fairness queuing, and slot diagnostics for
+    keeper turn concurrency.
 
-val slot_pool_to_string : slot_pool -> string
+    All type definitions ([slot_pool], [semaphore_wait_phase],
+    [semaphore_wait_timeout]) and their pure converters live in
+    {!Keeper_turn_slot_types}.  Re-exported here so callers can
+    continue using [Keeper_turn_slot.slot_pool] etc. without reaching
+    into the types submodule. *)
 
-type semaphore_wait_phase =
-  | Autonomous_queue_head
-  | Autonomous_slot
-  | Reactive_slot
-  | Turn_slot
+(** {1 SSOT Types} *)
+include module type of struct
+  include Keeper_turn_slot_types
+end
 
-val semaphore_wait_phase_to_string : semaphore_wait_phase -> string
-
-type semaphore_wait_timeout = {
-  timeout_wait_sec : float;
-  timeout_phase : semaphore_wait_phase;
-  timeout_autonomous_available : int;
-  timeout_reactive_available : int;
-  timeout_turn_available : int;
-  timeout_queue_depth : int;
-  timeout_queue_ahead : int option;
-  timeout_holders : (string * float) list;
-}
+(** {1 Own-module types and vals} *)
 
 (** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
 val keeper_turn_throttle_limit : int

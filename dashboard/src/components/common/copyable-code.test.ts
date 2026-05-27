@@ -8,13 +8,12 @@ import {
   summarizeCopyableCode,
 } from './copyable-code'
 import { _testResetToasts } from './toast'
+import type { ExecCommandFn, HappyDomDocument } from './happy-dom-helpers'
 
 const flushUi = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
-type ExecCommandFn = (cmd: string) => boolean
-type HappyDomDocument = { execCommand?: ExecCommandFn }
 const doc = document as unknown as HappyDomDocument
 
 describe('CopyableCode', () => {

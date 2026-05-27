@@ -515,6 +515,12 @@ let command_pattern_arg_flags cmd =
     ; "--regexp", true
     ; "-f", true
     ; "--file", true
+    ; "-A", false
+    ; "--after-context", false
+    ; "-B", false
+    ; "--before-context", false
+    ; "-C", false
+    ; "--context", false
     ; "-g", false
     ; "--glob", false
     ; "--iglob", false
@@ -528,6 +534,12 @@ let command_pattern_arg_flags cmd =
     ; "--regexp", true
     ; "-f", true
     ; "--file", true
+    ; "-A", false
+    ; "--after-context", false
+    ; "-B", false
+    ; "--before-context", false
+    ; "-C", false
+    ; "--context", false
     ; "--include", false
     ; "--exclude", false
     ; "--exclude-dir", false

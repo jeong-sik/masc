@@ -8,7 +8,7 @@ import {
   getKindCounts, getTraceFilter, setTraceFilter,
   getStatusCounts, getTraceStatusFilter, setTraceStatusFilter,
   getTraceSearchQuery, setTraceSearchQuery,
-  _traceSlots,
+  traceSlots,
 } from './session-trace-state'
 import type { TraceEventKind, TraceStatus } from './session-trace-state'
 
@@ -36,8 +36,8 @@ const STATUS_CHIPS: Array<{ key: StatusKey; label: string }> = [
 ]
 
 export function SessionTraceFilter({ agentName }: { agentName: string }) {
-  // Read _traceSlots.value to subscribe to slot changes
-  void _traceSlots.value
+  // Read traceSlots.value to subscribe to slot changes.
+  void traceSlots.value
 
   const counts = getKindCounts(agentName)
   const currentFilter = getTraceFilter(agentName)

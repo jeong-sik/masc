@@ -16,7 +16,7 @@ import {
   getTraceSearchQuery,
   loadSessionTrace,
   closeSessionTrace,
-  _traceSlots,
+  traceSlots,
 } from './session-trace-state'
 import type { TraceSummary } from './session-trace-state'
 import { isOfflineStatus } from '../../lib/keeper-classifiers'
@@ -107,8 +107,8 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
     }
   }, [agentName, isKeeper])
 
-  // Subscribe to traceSlots changes for reactivity
-  void _traceSlots.value
+  // Subscribe to traceSlots changes for reactivity.
+  void traceSlots.value
 
   const loading = getTraceLoading(agentName)
   const error = getTraceError(agentName)

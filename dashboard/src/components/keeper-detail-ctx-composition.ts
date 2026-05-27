@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { formatTokens } from '../lib/format-number'
+import { SPARKLINE_W, SPARKLINE_PAD } from '../lib/sparkline-config'
 import { TextInput } from './common/input'
 import { Eyebrow } from './common/eyebrow'
 import type { Keeper, KeeperMetricPoint } from '../types'
@@ -10,9 +11,6 @@ import {
   filterCtxCompositionEntries,
 } from './keeper-detail-ctx-utils'
 import { MutedSpan, DetailRow, DetailCard } from './keeper-detail-kpi'
-
-const SPARKLINE_W = 200
-const SPARKLINE_PAD = 2
 
 export const ctxCompositionSearch = signal('')
 

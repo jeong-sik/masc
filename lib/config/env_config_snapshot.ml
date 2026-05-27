@@ -228,8 +228,12 @@ let dashboard_entries =
       "Context ratio threshold: handoff-imminent";
     entry ~default:"0.70" "MASC_DASHBOARD_CTX_PREPARING"
       "Context ratio threshold: preparing";
-    entry ~default:"75" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
-      "Execution refresh timeout";
+    entry ~default:"48" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
+      "Execution refresh timeout (floor 30, ceiling 300)";
+    entry ~default:"120" "MASC_DASHBOARD_EXECUTION_TIMEOUT_SEC"
+      "Execution surface compute timeout (floor 5)";
+    entry ~default:"30" "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC"
+      "Execution-trust surface compute timeout (floor 1)";
     entry ~default:"(none)" "MASC_DASHBOARD_FIXTURE"
       "Dashboard fixture name override";
     entry ~default:"false" "MASC_DASHBOARD_FIXTURES_ENABLED"
@@ -248,6 +252,10 @@ let dashboard_entries =
       "Health penalty for warning context ratio";
     entry ~default:"3600.0" "MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC"
       "Keeper action-age threshold (seconds, 1 hour)";
+    entry ~default:"25" "MASC_DASHBOARD_MISSION_TIMEOUT_SEC"
+      "Mission card compute timeout (floor 1)";
+    entry ~default:"60" "MASC_DASHBOARD_RENDER_TIMEOUT_SEC"
+      "Dashboard render pipeline timeout (floor 5)";
     entry ~default:"0.95" "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
       "Runtime warning context ratio threshold";
     entry ~default:"300.0" "MASC_DASHBOARD_SIGNAL_LIVE_SEC"
@@ -256,6 +264,14 @@ let dashboard_entries =
       "Duration for borderline quiet warning (seconds, 10 min)";
     entry ~default:"1200.0" "MASC_DASHBOARD_SIGNAL_STALE_SEC"
       "Duration after which a signal is stale (seconds, 20 min)";
+    entry ~default:"8" "MASC_DASHBOARD_SHELL_LIGHT_TIMEOUT_SEC"
+      "Shell render timeout — light path (floor 0.5)";
+    entry ~default:"30" "MASC_DASHBOARD_SHELL_PREWARM_TIMEOUT_SEC"
+      "Shell prewarm inner timeout (floor 1)";
+    entry ~default:"35" "MASC_DASHBOARD_SHELL_PREWARM_OUTER_TIMEOUT_SEC"
+      "Shell prewarm outer timeout (floor 5)";
+    entry ~default:"16" "MASC_DASHBOARD_SHELL_TIMEOUT_SEC"
+      "Shell render timeout — full path (floor 1)";
     entry ~default:"8" "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
       "Transport health timeout";
     (* RFC-0138 Phase 3 Step 4 — MASC_NAMESPACE_TRUTH_*_TIMEOUT_S env

@@ -67,7 +67,8 @@ let restart_limit_exceeded cs =
     On failure, logs and applies restart policy. *)
 let rec start_child ~sw ~clock cs =
   if cs.disabled then begin
-    Log.Server.info "[Supervisor] skipping disabled child: %s" cs.spec.name
+    Log.Server.info ~keeper_name:cs.spec.name
+      "[Supervisor] skipping disabled child: %s" cs.spec.name
   end else begin
     cs.running <- true;
     Eio.Fiber.fork ~sw (fun () ->
@@ -75,21 +76,21 @@ let rec start_child ~sw ~clock cs =
       try
         cs.spec.start ();
         cs.running <- false;
-        Log.Server.info "[Supervisor] child %s exited normally" name
+        Log.Server.info ~keeper_name:name "[Supervisor] child %s exited normally" name
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         cs.running <- false;
         let msg = Printexc.to_string exn in
-        Log.Server.warn "[Supervisor] child %s crashed: %s" name msg;
+        Log.Server.warn ~keeper_name:name "[Supervisor] child %s crashed: %s" name msg;
 
         match cs.spec.strategy with
         | Temporary ->
-            Log.Server.info "[Supervisor] child %s is temporary, not restarting" name
+            Log.Server.info ~keeper_name:name "[Supervisor] child %s is temporary, not restarting" name
         | Transient when exn = Exit ->
-            Log.Server.info "[Supervisor] child %s transient normal exit" name
+            Log.Server.info ~keeper_name:name "[Supervisor] child %s transient normal exit" name
         | Permanent | Transient ->
             if restart_limit_exceeded cs then begin
               cs.disabled <- true;
-              Log.Server.error "[Supervisor] child %s DISABLED: %d restarts in %.0fs"
+              Log.Server.error ~keeper_name:name "[Supervisor] child %s DISABLED: %d restarts in %.0fs"
                 name cs.spec.max_restarts cs.spec.restart_window_s
             end else begin
               cs.restart_count <- cs.restart_count + 1;
@@ -102,7 +103,7 @@ let rec start_child ~sw ~clock cs =
                  would pin it at the 30s cap forever. *)
               let recent = List.length cs.restart_times in
               let delay = Float.min 30.0 (Float.of_int recent) in
-              Log.Server.info
+              Log.Server.info ~keeper_name:name
                 "[Supervisor] restarting %s in %.0fs (recent %d in %.0fs, lifetime %d)"
                 name delay recent cs.spec.restart_window_s cs.restart_count;
               Eio.Time.sleep clock delay;
@@ -115,10 +116,10 @@ let rec start_child ~sw ~clock cs =
 (** Start all children. Call within an Eio.Switch context. *)
 let start ~sw ~clock t =
   if t.started then
-    Log.Server.warn "[Supervisor] already started"
+    Log.Server.warn ~ctx:"supervisor" "[Supervisor] already started"
   else begin
     t.started <- true;
-    Log.Server.info "[Supervisor] starting %d children" (List.length t.children);
+    Log.Server.info ~ctx:"supervisor" "[Supervisor] starting %d children" (List.length t.children);
     List.iter (fun cs -> start_child ~sw ~clock cs) t.children
   end
 
@@ -165,7 +166,7 @@ let reenable ~sw ~clock t name =
       cs.disabled <- false;
       cs.restart_count <- 0;
       cs.restart_times <- [];
-      Log.Server.info "[Supervisor] re-enabling child %s" name;
+      Log.Server.info ~ctx:name "[Supervisor] re-enabling child %s" name;
       start_child ~sw ~clock cs;
       true
   | _ -> false

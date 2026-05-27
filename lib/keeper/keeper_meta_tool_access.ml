@@ -59,8 +59,12 @@ let legacy_keeper_internal_tool_names =
      or use [Custom] with explicit write tool names. *)
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
   |> List.filter (fun name ->
-         not (String.starts_with ~prefix:"masc_" name)
-         && not (List.exists (String.equal name) write_tools))
+         let is_masc =
+           match Tool_name.of_string name with
+           | Some t -> Tool_name.is_masc t
+           | None -> false
+         in
+         not is_masc && not (List.exists (String.equal name) write_tools))
 ;;
 
 let legacy_session_min_tool_names =

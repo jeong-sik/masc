@@ -48,8 +48,8 @@ val keeper_read_only_tools : string list
 val is_keeper_read_only_tool : string -> bool
 
 (** [true] when [name] is read-only or idempotent (safe to retry).
-    Keeper-local fast-path (no mutex), then catalog-backed
-    {!Tool_capability.has}. Prefer {!has_mutating_side_effect}
+    Keeper-local fast-path (no mutex), then descriptor-aware capability
+    projection. Prefer {!has_mutating_side_effect}
     at call sites for positive-sense readability. *)
 val is_effectively_read_only_tool : string -> bool
 

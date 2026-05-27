@@ -157,6 +157,11 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
     (capability_has Masc_mcp.Tool_capability.Read_only "SearchFiles");
   check
     bool
+    "mcp-prefixed SearchFiles read-only via descriptor resolution"
+    true
+    (capability_has Masc_mcp.Tool_capability.Read_only "mcp__masc__SearchFiles");
+  check
+    bool
     "WriteFile destructive via descriptor resolution"
     true
     (capability_has Masc_mcp.Tool_capability.Destructive "WriteFile");

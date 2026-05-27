@@ -183,8 +183,8 @@ val cost_guard :
   max_cost_usd:float option ->
   Agent_sdk.Hooks.hooks
 
-(** Destructive-pattern detection for tools flagged by
-    {!Tool_capability.has}; runs only when [enabled]. *)
+(** Destructive-pattern detection for tools flagged by descriptor-aware
+    capability projection; runs only when [enabled]. *)
 val destructive_guard :
   meta_ref:Keeper_types.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->

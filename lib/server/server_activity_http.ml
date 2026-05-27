@@ -147,24 +147,42 @@ let graph_http_json ~deps ~state request =
   let since_raw =
     deps.query_param request "since" |> Option.value ~default:""
   in
-  (* Cache key uses [since_raw] (request param) not [since_ms] (now-derived) so
-     two requests within the TTL window with the same "5m" window hit the same
-     entry. Concrete [since_ms] is computed inside the compute closure on miss. *)
-  let cache_key =
-    Printf.sprintf "activity:graph:%s:%d:%d:%s"
-      (String.concat "," kinds) limit timeline_limit since_raw
+  (* RFC-0201 Step 2.  Match the snapshot's pre-computed shape
+     exactly: [kinds=[]], [limit=500], [timeline_limit=80],
+     [since_raw=""].  Aggregated result returned as-is — cannot
+     be re-sliced post-compute (unlike Step 1's events list). *)
+  let is_default_query =
+    kinds = []
+    && limit = 500
+    && timeline_limit = 80
+    && since_raw = ""
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-    Domain_pool_ref.submit_io_or_inline (fun () ->
-      let since_ms =
-        match parse_since_ms since_raw with
-        | Some delta_ms ->
-            let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
-            Some (now_ms - delta_ms)
-        | None -> None
-      in
-      Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
-        ~timeline_limit ?since_ms ()))
+  let snapshot_hit =
+    if is_default_query then
+      match Dashboard_snapshot.current () with
+      | Some snap when snap.activity_graph_default <> `Null ->
+        Some snap.activity_graph_default
+      | _ -> None
+    else None
+  in
+  match snapshot_hit with
+  | Some json -> json
+  | None ->
+    let cache_key =
+      Printf.sprintf "activity:graph:%s:%d:%d:%s"
+        (String.concat "," kinds) limit timeline_limit since_raw
+    in
+    Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        let since_ms =
+          match parse_since_ms since_raw with
+          | Some delta_ms ->
+              let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+              Some (now_ms - delta_ms)
+          | None -> None
+        in
+        Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
+          ~timeline_limit ?since_ms ()))
 
 let swimlane_http_json ~deps ~state request =
 
@@ -175,20 +193,34 @@ let swimlane_http_json ~deps ~state request =
   let since_raw =
     deps.query_param request "since" |> Option.value ~default:""
   in
-  let cache_key =
-    Printf.sprintf "activity:swimlane:%d:%s" limit since_raw
+  (* RFC-0201 Step 3.  Snapshot shape: [limit=500], [since_raw=""]
+     — exact match required (aggregated result not sliceable). *)
+  let is_default_query = limit = 500 && since_raw = "" in
+  let snapshot_hit =
+    if is_default_query then
+      match Dashboard_snapshot.current () with
+      | Some snap when snap.activity_swimlane_default <> `Null ->
+        Some snap.activity_swimlane_default
+      | _ -> None
+    else None
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-    Domain_pool_ref.submit_io_or_inline (fun () ->
-      let since_ms =
-        match parse_since_ms since_raw with
-        | Some delta_ms ->
-            let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
-            Some (now_ms - delta_ms)
-        | None -> None
-      in
-      Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
-        ?since_ms ()))
+  match snapshot_hit with
+  | Some json -> json
+  | None ->
+    let cache_key =
+      Printf.sprintf "activity:swimlane:%d:%s" limit since_raw
+    in
+    Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        let since_ms =
+          match parse_since_ms since_raw with
+          | Some delta_ms ->
+              let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+              Some (now_ms - delta_ms)
+          | None -> None
+        in
+        Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
+          ?since_ms ()))
 
 let stream_headers ~deps origin =
   Httpun.Headers.of_list

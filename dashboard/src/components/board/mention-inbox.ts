@@ -5,8 +5,7 @@ import { ActionButton } from '../common/button'
 import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
-import { stripStateBlocks } from '../../keeper-message'
-import { SYSTEM_MESSAGE_FROM, boardMessageRowKey } from '../../lib/board-utils'
+import { SYSTEM_MESSAGE_FROM, boardMessageRowKey, previewBoardMessage } from '../../lib/board-utils'
 import { currentDashboardActorName } from '../../lib/dashboard-session-actor'
 import { navigate } from '../../router'
 import { messages, shellAuthSummary } from '../../store'
@@ -121,12 +120,8 @@ export function buildMentionInboxModel(
   }
 }
 
-function previewContent(message: Message): string {
-  return stripStateBlocks(message.content).trim() || message.content.trim() || '(empty)'
-}
-
 function MessageRow({ row }: { row: MentionInboxRow }) {
-  const preview = previewContent(row.message)
+  const preview = previewBoardMessage(row.message)
   const hasState = row.message.content.includes('[STATE]')
   return html`
     <article class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3.5 py-3">

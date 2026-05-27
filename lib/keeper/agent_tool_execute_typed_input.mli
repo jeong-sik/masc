@@ -75,6 +75,21 @@ type allowlist_mode =
   | Dev_full
   | Readonly
 
+(** Closed sum of task-state file paths that keepers must read through
+    [keeper_tasks_list] / [masc_status] rather than via shell probes.
+    The prompt (config/prompts/keeper.world.md and
+    keeper.unified.system.md) names these paths as forbidden and
+    promises a runtime [task_state_file_probe_blocked] enforcement; this
+    type lets the Execute gate actually enforce that promise. New
+    blocked paths must be added here, not as substring rules. *)
+type task_state_path =
+  | Backlog_json
+  | State_backlog_json
+  | Goal_loop_status_json
+  | Repo_local_backlog_json
+  | Repo_worktree_task_json
+  | Top_level_task_json
+
 type validation_error =
   | Executable_not_allowlisted of {
       name : string;
@@ -100,6 +115,18 @@ type validation_error =
           {!RFC-0198 Phase B} typed redirect fields or {!Pipeline} mode,
           instead of the runtime [find]/[grep] "unknown primary" failure
           that previously surfaced via [exec exit 1]. *)
+  | Argv_probes_task_state_file of {
+      executable : string;
+      index : int;
+      token : string;
+      matched : task_state_path;
+    }
+      (** Issue #18892. Token matches one of the
+          {!task_state_path} forms. Reading task state from the
+          filesystem is forbidden by the prompt and intentionally not
+          mounted in the keeper sandbox; the typed rejection points the
+          caller at [keeper_tasks_list] / [masc_status] instead of the
+          generic ENOENT that the runtime previously surfaced. *)
   | Redirect_path_not_absolute of {
       fd : int;
       path : string;

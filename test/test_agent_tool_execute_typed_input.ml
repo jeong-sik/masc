@@ -980,6 +980,97 @@ let test_of_json_rejects_redirect_with_both_discard_and_file () =
   | Error _ -> ()
 ;;
 
+(* Issue #18892: Task-state file probe rejection.
+
+   The prompt forbids reading task-state JSON files via shell (see
+   config/prompts/keeper.world.md). Before this fix the runtime did not
+   enforce the promise — keepers ran [cat .masc/backlog.json] and saw
+   only a generic ENOENT. These tests pin the typed rejection so the
+   contract is observable from outside the gate. *)
+
+let expect_task_state_probe ~token ~variant input =
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error
+      (Execute_input.Argv_probes_task_state_file
+        { token = t; matched; _ }) ->
+    Alcotest.(check string) "rejected token text" token t;
+    Alcotest.(check bool)
+      (Printf.sprintf "matched %s variant" token)
+      true
+      (matched = variant)
+  | Error other ->
+    Alcotest.failf
+      "expected Argv_probes_task_state_file for %S, got %a"
+      token
+      Execute_input.pp_validation_error
+      other
+  | Ok () -> Alcotest.failf "expected %S to be rejected" token
+;;
+
+let test_task_state_probe_paths_rejected () =
+  let cases =
+    [ ".masc/backlog.json", Execute_input.Backlog_json
+    ; ".masc/state/backlog.json", Execute_input.State_backlog_json
+    ; ".masc/goal-loop/status.json", Execute_input.Goal_loop_status_json
+    ; ( "repos/masc-mcp/.masc/backlog.json"
+      , Execute_input.Repo_local_backlog_json )
+    ; ( "repos/masc-mcp/.masc/state/backlog.json"
+      , Execute_input.Repo_local_backlog_json )
+    ; ( "repos/oas/.worktrees/feature-x/.task.json"
+      , Execute_input.Repo_worktree_task_json )
+    ; ".task.json", Execute_input.Top_level_task_json
+    ; "task.json", Execute_input.Top_level_task_json
+    ; "./.masc/backlog.json", Execute_input.Backlog_json
+    ]
+  in
+  List.iter
+    (fun (token, variant) ->
+      let input = mk_exec "cat" [ token ] in
+      expect_task_state_probe ~token ~variant input)
+    cases
+;;
+
+let test_task_state_probe_rejection_redirects_to_keeper_tasks_list () =
+  let input = mk_exec "cat" [ ".masc/backlog.json" ] in
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Argv_probes_task_state_file _ as err) ->
+    let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
+    Alcotest.(check bool)
+      "error mentions keeper_tasks_list redirect"
+      true
+      (contains_substring msg "keeper_tasks_list");
+    Alcotest.(check bool)
+      "error mentions task_state_file_probe_blocked rule_id"
+      true
+      (contains_substring msg "task_state_file_probe_blocked")
+  | _ -> Alcotest.fail "expected Argv_probes_task_state_file"
+;;
+
+let test_task_state_probe_does_not_match_random_json () =
+  (* Tokens that contain "backlog" or "json" elsewhere must NOT trigger
+     the gate — false positives would block legitimate work. *)
+  let benign =
+    [ "config/backlog.example.json"
+    ; "build/output.json"
+    ; "lib/keeper/keeper_task_state.ml"
+    ; ".masc/personas/verifier/profile.json"
+    ; "repos/masc-mcp/lib/dune"
+    ]
+  in
+  List.iter
+    (fun token ->
+      let input = mk_exec "cat" [ token ] in
+      match Execute_input.validate ~mode:Execute_input.Dev_full input with
+      | Ok () -> ()
+      | Error other ->
+        Alcotest.failf
+          "benign token %S unexpectedly rejected: %a"
+          token
+          Execute_input.pp_validation_error
+          other)
+    benign
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
@@ -1094,6 +1185,18 @@ let suite =
           "rfc_0198_phaseb_file_relative_path_rejected"
           `Quick
           test_redirect_file_relative_path_rejected
+      ; Alcotest.test_case
+          "issue_18892_task_state_probe_paths_rejected"
+          `Quick
+          test_task_state_probe_paths_rejected
+      ; Alcotest.test_case
+          "issue_18892_task_state_probe_redirects_to_keeper_tasks_list"
+          `Quick
+          test_task_state_probe_rejection_redirects_to_keeper_tasks_list
+      ; Alcotest.test_case
+          "issue_18892_task_state_probe_no_false_positives"
+          `Quick
+          test_task_state_probe_does_not_match_random_json
       ; Alcotest.test_case
           "rfc_0198_phaseb_stderr_discard_equivalent_to_dev_null"
           `Quick

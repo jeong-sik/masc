@@ -28,6 +28,23 @@ type allowlist_mode =
   | Dev_full
   | Readonly
 
+(** Closed sum of task-state file paths that keepers must read through
+    [keeper_tasks_list] / [masc_status] rather than via shell probes.
+    The prompt (config/prompts/keeper.world.md and keeper.unified.system.md)
+    already names these paths as forbidden and promises a runtime
+    [task_state_file_probe_blocked] enforcement; this type makes the
+    promise true at the Execute gate. New patterns must be added here
+    as variants, not as substring rules (RFC-0088 §"String 분류기"). *)
+type task_state_path =
+  | Backlog_json  (** [.masc/backlog.json] *)
+  | State_backlog_json  (** [.masc/state/backlog.json] *)
+  | Goal_loop_status_json  (** [.masc/goal-loop/status.json] *)
+  | Repo_local_backlog_json
+      (** [repos/<repo>/.masc/backlog.json] or [repos/<repo>/.masc/state/backlog.json] *)
+  | Repo_worktree_task_json
+      (** [repos/<repo>/.worktrees/<task>/.task.json] *)
+  | Top_level_task_json  (** [.task.json] / [task.json] at any depth *)
+
 type validation_error =
   | Executable_not_allowlisted of {
       name : string;
@@ -44,6 +61,12 @@ type validation_error =
       executable : string;
       index : int;
       token : string;
+    }
+  | Argv_probes_task_state_file of {
+      executable : string;
+      index : int;
+      token : string;
+      matched : task_state_path;
     }
   | Redirect_path_not_absolute of {
       fd : int;
@@ -345,14 +368,91 @@ let looks_like_shell_redirection token =
       else false
 ;;
 
+(** Normalise a path-like token for blocklist matching: strip a single
+    leading [./] (the prompt mentions both [.masc/backlog.json] and
+    bare-prefixed forms in the wild) and an optional trailing [/]. Does
+    not resolve [..] or normalize multiple slashes; the blocklist
+    targets canonical literal forms emitted by typical shell muscle
+    memory ([cat .masc/backlog.json], [ls .masc/state/]), not arbitrary
+    filesystem traversal — that's the sandbox's job. *)
+let normalize_probe_token token =
+  let t =
+    if String.length token >= 2 && String.sub token 0 2 = "./"
+    then String.sub token 2 (String.length token - 2)
+    else token
+  in
+  if String.length t > 0 && t.[String.length t - 1] = '/'
+  then String.sub t 0 (String.length t - 1)
+  else t
+;;
+
+(** Closed pattern matcher. Mirrors the prompt's forbidden-path list
+    one-to-one (config/prompts/keeper.world.md). Adding a new blocked
+    path means: (a) update the prompt, (b) add a [task_state_path]
+    variant, (c) extend this matcher. The exhaustive match on the
+    return value forces every consumer to handle every new variant. *)
+let looks_like_task_state_probe token : task_state_path option =
+  let t = normalize_probe_token token in
+  let starts_with prefix s =
+    let pl = String.length prefix
+    and sl = String.length s in
+    sl >= pl && String.sub s 0 pl = prefix
+  in
+  let ends_with suffix s =
+    let sl = String.length suffix
+    and tl = String.length s in
+    tl >= sl && String.sub s (tl - sl) sl = suffix
+  in
+  let contains needle s =
+    let nl = String.length needle
+    and sl = String.length s in
+    if nl = 0 || nl > sl
+    then false
+    else
+      let rec loop i =
+        if i + nl > sl
+        then false
+        else if String.sub s i nl = needle
+        then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  if t = ".masc/backlog.json" then Some Backlog_json
+  else if t = ".masc/state/backlog.json" then Some State_backlog_json
+  else if t = ".masc/goal-loop/status.json" then Some Goal_loop_status_json
+  else if
+    starts_with "repos/" t
+    && (ends_with "/.masc/backlog.json" t
+        || ends_with "/.masc/state/backlog.json" t)
+  then Some Repo_local_backlog_json
+  else if
+    starts_with "repos/" t
+    && contains "/.worktrees/" t
+    && ends_with "/.task.json" t
+  then Some Repo_worktree_task_json
+  else if t = ".task.json" || t = "task.json" then Some Top_level_task_json
+  else None
+;;
+
 let check_argv ~executable argv =
   let rec loop i = function
     | [] -> Ok ()
-    | token :: _ when shell_metachar_in_token token ->
-      Error (Argv_contains_shell_metachar { executable; index = i; token })
-    | token :: _ when looks_like_shell_redirection token ->
-      Error (Argv_contains_shell_redirection { executable; index = i; token })
-    | _ :: rest -> loop (i + 1) rest
+    | token :: rest ->
+      if shell_metachar_in_token token
+      then
+        Error (Argv_contains_shell_metachar { executable; index = i; token })
+      else if looks_like_shell_redirection token
+      then
+        Error
+          (Argv_contains_shell_redirection { executable; index = i; token })
+      else (
+        match looks_like_task_state_probe token with
+        | Some matched ->
+          Error
+            (Argv_probes_task_state_file
+               { executable; index = i; token; matched })
+        | None -> loop (i + 1) rest)
   in
   loop 0 argv
 ;;
@@ -616,6 +716,27 @@ let pp_validation_error ppf = function
       executable
       index
       token
+  | Argv_probes_task_state_file { executable; index; token; matched } ->
+    let path_name =
+      match matched with
+      | Backlog_json -> ".masc/backlog.json"
+      | State_backlog_json -> ".masc/state/backlog.json"
+      | Goal_loop_status_json -> ".masc/goal-loop/status.json"
+      | Repo_local_backlog_json -> "repos/<repo>/.masc/[state/]backlog.json"
+      | Repo_worktree_task_json -> "repos/<repo>/.worktrees/<task>/.task.json"
+      | Top_level_task_json -> ".task.json"
+    in
+    Format.fprintf
+      ppf
+      "task_state_file_probe_blocked: executable %S argv[%d]=%S targets \
+       task-state file (%s) which is intentionally not mounted in the \
+       keeper sandbox. Use keeper_tasks_list / masc_status to read task \
+       state — those tools return the same data through the typed \
+       interface that the runtime actually trusts."
+      executable
+      index
+      token
+      path_name
   | Redirect_path_not_absolute { fd; path } ->
     let label =
       match fd with

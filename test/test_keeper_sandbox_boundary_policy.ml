@@ -639,6 +639,7 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
 
 let test_public_alias_projection_uses_core_axis () =
   let core_axis = "lib/core/tool_name_alias_axis.ml" in
+  let agent_surface = "lib/keeper/keeper_agent_tool_surface.ml" in
   let coord_classify = "lib/coord/coord_task_classify.ml" in
   let keeper_alias = "lib/keeper/keeper_tool_alias.ml" in
   let run_tools_setup = "lib/keeper/keeper_run_tools_setup.ml" in
@@ -662,6 +663,8 @@ let test_public_alias_projection_uses_core_axis () =
     "Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names";
   assert_not_contains run_tools_setup "Keeper_tool_alias.public_names";
   assert_not_contains run_tools_setup "Keeper_tool_alias.route";
+  assert_contains agent_surface "Agent_tool_descriptor.find_public";
+  assert_not_contains agent_surface "Keeper_tool_alias.route";
   assert_contains oas_bundle "Agent_tool_descriptor.public_descriptors";
   assert_not_contains oas_bundle "Keeper_tool_alias.public_names";
   assert_not_contains oas_bundle "Keeper_tool_alias.route"

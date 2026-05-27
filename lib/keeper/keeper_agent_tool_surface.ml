@@ -413,8 +413,8 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   in
   let exact_tool_choice_if_public = function
     | [ name ] ->
-      (match Keeper_tool_alias.route name with
-       | Some _ -> Some (Agent_sdk.Types.Tool name)
+      (match Agent_tool_descriptor.find_public name with
+       | Some _descriptor -> Some (Agent_sdk.Types.Tool name)
        | None -> None)
     | [] | _ :: _ :: _ -> None
   in

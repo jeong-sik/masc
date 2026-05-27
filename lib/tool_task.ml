@@ -52,7 +52,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
          handoff_to = None;
        } in
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Stdlib.Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record(cancel) failed: %s" (Stdlib.Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        Thompson_sampling.record_quality_signal
@@ -69,7 +69,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
-       Log.Task.error "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
+       Log.Task.error ~keeper_name:task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response ~tool_name ~start_time result
 
 and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
@@ -211,7 +211,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
       match Auth.read_initial_admin ctx.config.base_path with
       | Some admin when String.equal ctx.agent_name admin -> true
       | _ ->
-        Log.Task.warn "[anti-rationalization] force=true rejected: agent=%s lacks admin privilege"
+        Log.Task.warn ~keeper_name:task_id "[anti-rationalization] force=true rejected: agent=%s lacks admin privilege"
           ctx.agent_name;
         false
     else false
@@ -344,6 +344,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
         (match task.contract with
          | Some contract when contract_requires_verification contract ->
            Log.Task.info
+             ~keeper_name:task_id
              "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
              task_id ctx.agent_name
              (List.length contract.completion_contract
@@ -404,6 +405,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     | ( Masc_domain.Submit_for_verification
       , Some ({ task_status = Masc_domain.Todo; _ } : Masc_domain.task) ) ->
       Log.Task.info
+        ~keeper_name:task_id
         "[verification-alias] treating todo submit_for_verification with evidence as submit_pr_evidence task=%s agent=%s"
         task_id
         ctx.agent_name;
@@ -513,7 +515,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                 ?handoff_context ?agent_tool_names ?prepare_verification_request
                 ?prepare_verification_verdict () in
       if is_version_mismatch r && attempt < max_cas_retries then begin
-        Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
+        Log.Task.info ~keeper_name:task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
           task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
         Time_compat.sleep cas_retry_delay_s;
         try_transition (attempt + 1)
@@ -572,6 +574,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
           (match verification_id_before with
            | None ->
              Log.Task.warn
+               ~keeper_name:task_id
                "approve_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
@@ -599,6 +602,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
           (match verification_id_before with
            | None ->
              Log.Task.warn
+               ~keeper_name:task_id
                "reject_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
@@ -629,7 +633,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
          handoff_to = None;
        } in
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Stdlib.Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record(transition-done) failed: %s" (Stdlib.Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        Thompson_sampling.record_quality_signal
          ~agent_name:ctx.agent_name
@@ -649,7 +653,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
          handoff_to = None;
        } in
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Stdlib.Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record(transition-cancel) failed: %s" (Stdlib.Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        Thompson_sampling.record_quality_signal
          ~agent_name:ctx.agent_name

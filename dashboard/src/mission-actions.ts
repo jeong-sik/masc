@@ -1,4 +1,5 @@
 import { isAbortError } from './lib/async-state'
+import { errorMessageOr } from './lib/format-string'
 import {
   missionSnapshot,
   missionLoading,
@@ -60,7 +61,7 @@ export async function refreshMissionSnapshot(
       missionSnapshot.value = normalized
       lastMissionSnapshotRefreshAt = Date.now()
     } catch (err) {
-      missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'
+      missionError.value = errorMessageOr(err, 'Failed to load mission snapshot')
     } finally {
       missionLoading.value = false
       inflightMissionSnapshotRefresh = null
@@ -88,7 +89,7 @@ export async function refreshMissionSessionDetail(
     missionSessionDetail.value = normalizeMissionSessionDetail(raw)
   } catch (err) {
     if (isAbortError(err)) return
-    missionSessionDetailError.value = err instanceof Error ? err.message : 'Failed to load session detail'
+    missionSessionDetailError.value = errorMessageOr(err, 'Failed to load session detail')
   } finally {
     if (!opts?.signal?.aborted) {
       missionSessionDetailLoading.value = false
@@ -115,7 +116,7 @@ export async function refreshMissionBriefing(
     }
   } catch (err) {
     if (isAbortError(err)) return
-    missionBriefingError.value = err instanceof Error ? err.message : 'Failed to load mission briefing'
+    missionBriefingError.value = errorMessageOr(err, 'Failed to load mission briefing')
     clearMissionBriefingPoll()
   } finally {
     if (!opts?.signal?.aborted) {

@@ -320,16 +320,3 @@ export async function savePersonaDraft(opts?: { overwrite?: boolean; dryRun?: bo
   }
 }
 
-export async function shutdownKeeper(keeperName: string): Promise<void> {
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (!access.allowed) {
-    showToast(access.reason ?? '키퍼 종료 권한이 없습니다.', 'error', 6000)
-    return
-  }
-  try {
-    await callMcpTool('masc_keeper_down', { name: keeperName })
-    showToast(`${keeperName} 키퍼 종료 완료`, 'success')
-  } catch (err) {
-    showToast(`키퍼 종료 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
-  }
-}

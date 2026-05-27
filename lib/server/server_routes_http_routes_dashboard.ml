@@ -17,6 +17,17 @@ let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
 let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 
+(* TTL for dashboard endpoints with moderate data freshness requirements
+   (planning, goals, surfaces, harness health, eval feed). *)
+let standard_cache_ttl_s = 5.0
+
+(* TTL for live-operational dashboard endpoints (provider logs, mission,
+   session state, active tasks). *)
+let live_cache_ttl_s = 3.0
+
+(* TTL for near-realtime dashboard endpoints (nudges, operator snapshot). *)
+let realtime_cache_ttl_s = 2.0
+
 let dashboard_error_json ?ok message =
   let fields = [ ("error", `String message) ] in
   let fields =

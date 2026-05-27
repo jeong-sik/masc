@@ -189,6 +189,7 @@ let workflow_rejection_payload_json
       ?tool_suggestion
       ?hint
       ?scope_policy
+      ?(alternatives = [])
       ?(extra_fields = [])
       ~error_class
       ~recoverability
@@ -203,6 +204,14 @@ let workflow_rejection_payload_json
       [ "scope_policy", `String (workflow_rejection_scope_policy_to_string scope_policy) ]
     | None -> []
   in
+  let alternatives_field =
+    if alternatives = []
+    then []
+    else
+      [ ( "alternatives"
+        , `List (List.map (fun name -> `String name) alternatives) )
+      ]
+  in
   let fields =
     [ "ok", `Bool false
     ; "error", `String message
@@ -211,6 +220,7 @@ let workflow_rejection_payload_json
     ; "recoverable", `Bool (workflow_rejection_recoverability_to_bool recoverability)
     ]
     @ optional_string_field "hint" hint
+    @ alternatives_field
     @ (if diagnosis = [] then [] else [ "diagnosis", `Assoc diagnosis ])
     @ extra_fields
   in

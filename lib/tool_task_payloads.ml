@@ -41,6 +41,7 @@ let workflow_rejection_payload_json
       ?tool_suggestion
       ?hint
       ?scope_policy
+      ?(alternatives = [])
       ?extra_fields
       message
   =
@@ -54,6 +55,7 @@ let workflow_rejection_payload_json
     ?tool_suggestion
     ?hint
     ?scope_policy
+    ~alternatives
     ?extra_fields
     ~error_class:Keeper_tools_oas_workflow.Workflow_error_deterministic
     ~recoverability:Keeper_tools_oas_workflow.Workflow_unrecoverable

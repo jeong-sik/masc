@@ -232,28 +232,14 @@ let handle_masc_surface_audit ~args =
    [Tool_keeper] / [Tool_keeper_ops] / [Keeper_status_detail] handlers
    that the registered ref delegates to. *)
 let handle_masc_keeper ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
-  let tuple =
+  let result =
     !Keeper_dispatch_ref.dispatch
       ~config
       ~agent_name:meta.agent_name
       ~name
       ~args
   in
-  match tuple with
-  | Some (true, body) -> body
-  | Some (false, body) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_keeper cluster did not \
-                 recognise %S (Keeper_dispatch_ref not registered, or \
-                 tool gated on Phase 5 Eio plumbing)"
-                name)
-         ])
+  dispatch_option_to_string ~name result
 ;;
 
 (* RFC-0182 §3.1 — masc_persona cluster.  [Keeper_persona] /
@@ -265,21 +251,7 @@ let handle_masc_keeper ~(config : Coord.config) ~(meta : keeper_meta) ~name ~arg
    TEL-OK: descriptor projection — telemetry lives in [Keeper_persona] /
    [Keeper_persona_authoring] backing handlers. *)
 let handle_masc_persona ~name ~args =
-  let tuple = !Persona_dispatch_ref.dispatch ~name ~args in
-  match tuple with
-  | Some (true, body) -> body
-  | Some (false, body) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_persona cluster did not \
-                 recognise %S (Persona_dispatch_ref not registered?)"
-                name)
-         ])
+  !Persona_dispatch_ref.dispatch ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 (* RFC-0182 §3.1 — masc_approval cluster.  Ports the same dispatch logic

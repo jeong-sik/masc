@@ -306,7 +306,7 @@ function normalizedDiagnosticHealthState(row: FleetRow): string | null {
   return normalizeText(row.diagnostic_health_state)?.toLowerCase() ?? null
 }
 
-function isOfflineDiagnosticHealthState(state: string | null): boolean {
+export function isOfflineDiagnosticHealthState(state: string | null): boolean {
   return state === 'offline' || state === 'dead'
 }
 

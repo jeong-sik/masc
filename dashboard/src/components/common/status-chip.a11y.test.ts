@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
 //
 // jest-axe coverage for StatusChip — pill renders status verdicts
-// across the dashboard. Two API surfaces (legacy `label` prop + modern
-// `children`) plus tone palette + uppercase toggle. Tests guard that
-// every combination remains axe-clean (no aria-prohibited-attr from
-// span chips and no contrast issues at the chip level).
+// across the dashboard. Children content, tone palette, and uppercase
+// toggle stay axe-clean (no aria-prohibited-attr from span chips and no
+// contrast issues at the chip level).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -22,11 +21,6 @@ describe('StatusChip a11y', () => {
     document.body.removeChild(container)
   })
 
-  it('legacy label prop passes axe', async () => {
-    render(html`<${StatusChip} label="OK" />`, container)
-    expect(await axe(container)).toHaveNoViolations()
-  })
-
   it('children API passes axe', async () => {
     render(html`<${StatusChip}>Active<//>`, container)
     expect(await axe(container)).toHaveNoViolations()
@@ -35,10 +29,10 @@ describe('StatusChip a11y', () => {
   it('tone variants (semantic enum + raw Tailwind) pass axe', async () => {
     render(
       html`<div>
-        <${StatusChip} label="OK" tone="ok" />
-        <${StatusChip} label="WARN" tone="warn" />
-        <${StatusChip} label="ERR" tone="err" />
-        <${StatusChip} label="custom" tone="bg-[var(--accent-12)] text-white" />
+        <${StatusChip} tone="ok">OK<//>
+        <${StatusChip} tone="warn">WARN<//>
+        <${StatusChip} tone="err">ERR<//>
+        <${StatusChip} tone="bg-[var(--accent-12)] text-white">custom<//>
       </div>`,
       container,
     )

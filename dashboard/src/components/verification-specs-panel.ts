@@ -96,10 +96,10 @@ function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
               <tr class="border-t border-[var(--color-border-default)]">
                 <td class="py-1 pr-4 font-medium text-[var(--color-fg-primary)]">${entry.name}</td>
                 <td class="py-1 pr-4">
-                  <${StatusChip} tone=${categoryTone(entry.category)} label=${categoryLabel(entry.category)} />
+                  <${StatusChip} tone=${categoryTone(entry.category)}>${categoryLabel(entry.category)}<//>
                 </td>
                 <td class="py-1 pr-4">
-                  <${StatusChip} tone=${cov.tone} label=${cov.label} />
+                  <${StatusChip} tone=${cov.tone}>${cov.label}<//>
                 </td>
                 <td class="py-1 pr-4 font-mono text-[var(--color-fg-muted)]">${entry.path}</td>
                 <td class="py-1 text-[var(--color-fg-muted)]">${shortMtime(entry.mtime_iso)}</td>

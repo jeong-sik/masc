@@ -183,10 +183,10 @@ function ResultsTable({ entries }: { entries: TlcResultEntry[] }) {
               <td class="py-1 pr-4 font-medium text-[var(--color-fg-primary)]">${entry.spec_name}</td>
               <td class="py-1 pr-4 font-mono text-[var(--color-fg-muted)]">${entry.cfg_name}</td>
               <td class="py-1 pr-4">
-                <${StatusChip} tone=${categoryTone(entry.category)} label=${categoryLabel(entry.category)} />
+                <${StatusChip} tone=${categoryTone(entry.category)}>${categoryLabel(entry.category)}<//>
               </td>
               <td class="py-1 pr-4">
-                <${StatusChip} tone=${tlcStatusTone(entry.status)} label=${tlcStatusLabel(entry.status)} />
+                <${StatusChip} tone=${tlcStatusTone(entry.status)}>${tlcStatusLabel(entry.status)}<//>
               </td>
               <td class="py-1 pr-4 text-right text-[var(--color-fg-secondary)]">${formatTlcMetric(entry.states_explored)}</td>
               <td class="py-1 pr-4 text-right text-[var(--color-fg-secondary)]">${formatTlcMetric(entry.distinct_states)}</td>

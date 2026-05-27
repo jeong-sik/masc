@@ -155,22 +155,6 @@ describe('StatusChip component', () => {
     expect(el.getAttribute('data-status-chip-is-semantic-tone')).toBe('true')
   })
 
-  it('label prop renders when children absent (legacy API)', () => {
-    render(html`<${StatusChip} label="present" />`, container)
-    const el = container.querySelector('[data-status-chip]')!
-    expect(el.textContent).toBe('present')
-    expect(el.getAttribute('data-status-chip-content-source')).toBe('label')
-    expect(el.getAttribute('data-status-chip-label-length')).toBe('7')
-  })
-
-  it('children win over label when both are set', () => {
-    render(html`<${StatusChip} label="legacy">actual<//>`, container)
-    const el = container.querySelector('[data-status-chip]')!
-    expect(el.textContent).toBe('actual')
-    expect(el.getAttribute('data-status-chip-content-source')).toBe('children')
-    expect(el.getAttribute('data-status-chip-label-length')).toBe('6')
-  })
-
   it('data-status-chip-tone reflects tone prop', () => {
     render(html`<${StatusChip} tone="warn">heads up<//>`, container)
     expect(container.querySelector('[data-status-chip]')!.getAttribute('data-status-chip-tone')).toBe('warn')
@@ -211,15 +195,14 @@ describe('StatusChip component', () => {
       uppercase: true,
       hasCustomClass: false,
       hasTestId: false,
-      labelLength: 0,
       classNameLength: 0,
       testIdLength: 0,
     })
   })
 
-  it('summarizes raw-tone label status chip state', () => {
+  it('summarizes raw-tone children status chip state', () => {
     expect(summarizeStatusChip({
-      label: 'custom',
+      children: 'custom',
       tone: 'bg-[var(--accent-12)]',
       className: 'ml-2',
       uppercase: false,
@@ -227,20 +210,12 @@ describe('StatusChip component', () => {
     })).toEqual({
       tone: 'bg-[var(--accent-12)]',
       isSemanticTone: false,
-      contentSource: 'label',
+      contentSource: 'children',
       uppercase: false,
       hasCustomClass: true,
       hasTestId: true,
-      labelLength: 6,
       classNameLength: 4,
       testIdLength: 11,
     })
-  })
-
-  it('summarizes children content as taking precedence over label', () => {
-    expect(summarizeStatusChip({
-      label: 'legacy',
-      children: 'actual',
-    }).contentSource).toBe('children')
   })
 })

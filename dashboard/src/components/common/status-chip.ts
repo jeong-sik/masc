@@ -49,7 +49,7 @@ export type StatusChipTone =
   | 'select'
   | ''
 
-export type StatusChipContentSource = 'children' | 'label' | 'empty'
+export type StatusChipContentSource = 'children' | 'empty'
 
 export interface StatusChipSummary {
   readonly tone: string
@@ -58,7 +58,6 @@ export interface StatusChipSummary {
   readonly uppercase: boolean
   readonly hasCustomClass: boolean
   readonly hasTestId: boolean
-  readonly labelLength: number
   readonly classNameLength: number
   readonly testIdLength: number
 }
@@ -170,25 +169,19 @@ function hasChildrenContent(children: ComponentChildren | undefined): boolean {
 }
 
 export function summarizeStatusChip({
-  label,
   tone = '',
   className,
   uppercase = true,
   children,
   testId,
 }: {
-  label?: string
   tone?: string
   className?: string
   uppercase?: boolean
   children?: ComponentChildren
   testId?: string
 }): StatusChipSummary {
-  const contentSource = hasChildrenContent(children)
-    ? 'children'
-    : label !== undefined
-      ? 'label'
-      : 'empty'
+  const contentSource = hasChildrenContent(children) ? 'children' : 'empty'
 
   return {
     tone,
@@ -197,16 +190,12 @@ export function summarizeStatusChip({
     uppercase,
     hasCustomClass: className !== undefined && className !== '',
     hasTestId: testId !== undefined && testId !== '',
-    labelLength: label?.length ?? 0,
     classNameLength: className?.length ?? 0,
     testIdLength: testId?.length ?? 0,
   }
 }
 
 export interface StatusChipProps {
-  /** Legacy API — plain text label. Prefer `children` for new
-      call sites. When both are set, `children` wins. */
-  label?: string
   /** One of the semantic enum members, OR a raw Tailwind class
       string (e.g. the output of `verdictTone()`). Both are valid. */
   tone?: string
@@ -222,7 +211,6 @@ export interface StatusChipProps {
 }
 
 export function StatusChip({
-  label,
   tone = '',
   class: cx,
   uppercase = true,
@@ -230,7 +218,6 @@ export function StatusChip({
   testId,
 }: StatusChipProps) {
   const summary = summarizeStatusChip({
-    label,
     tone,
     className: cx,
     uppercase,
@@ -238,7 +225,7 @@ export function StatusChip({
     testId,
   })
   const cls = statusChipClasses(tone, cx, uppercase)
-  const content = summary.contentSource === 'children' ? children : label ?? ''
+  const content = summary.contentSource === 'children' ? children : ''
   return html`<span
     class=${cls}
     data-status-chip
@@ -248,7 +235,6 @@ export function StatusChip({
     data-status-chip-uppercase=${summary.uppercase ? 'true' : 'false'}
     data-status-chip-has-custom-class=${summary.hasCustomClass}
     data-status-chip-has-test-id=${summary.hasTestId}
-    data-status-chip-label-length=${summary.labelLength}
     data-status-chip-class-length=${summary.classNameLength}
     data-status-chip-test-id-length=${summary.testIdLength}
     data-testid=${testId}

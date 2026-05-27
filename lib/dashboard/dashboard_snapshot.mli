@@ -35,6 +35,20 @@ type t = private {
       filter, since) fall through to the synchronous compute path.
       [`Null] until the refresh fiber's first publish (bootstrap stays
       [`Null] like [namespace_truth]). *)
+  activity_graph_default : Yojson.Safe.t;
+  (** RFC-0201 Step 2.  [Activity_graph.graph_json] computed against
+      the dashboard panel's default query ([kinds=[]], [limit=500],
+      [timeline_limit=80], [since_ms=None]).  Returned as-is to
+      default-shape callers — the result is aggregated (heatmap +
+      timeline + series counts) and cannot be sliced post-compute.
+      Non-default queries (kinds filter, alternate [limit] /
+      [timeline_limit], [since]) fall through to the synchronous
+      compute path.  [`Null] before first refresh-fiber publish. *)
+  activity_swimlane_default : Yojson.Safe.t;
+  (** RFC-0201 Step 3.  [Activity_graph.agent_spans_json] computed
+      against the dashboard panel's default query ([limit=500],
+      [since_ms=None]).  Same as-is return contract as
+      [activity_graph_default]. *)
 }
 
 val current : unit -> t option
@@ -79,6 +93,8 @@ val make_for_test :
   namespace_truth:Yojson.Safe.t ->
   telemetry_summary:Yojson.Safe.t ->
   ?activity_events_default:Yojson.Safe.t ->
+  ?activity_graph_default:Yojson.Safe.t ->
+  ?activity_swimlane_default:Yojson.Safe.t ->
   unit ->
   t
 (** Test-only constructor.  Outside tests, snapshots are produced only

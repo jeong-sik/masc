@@ -107,6 +107,12 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Mvn { subcommand = "clean"; args = [ "install" ] })
   ; W (Cmake { subcommand = "--build"; args = [ "."; "--target"; "install" ] })
   ; W (Dune_local_sh { subcommand = "build"; args = [ "-j4" ] })
+  ; W (Osascript { subcommand = "-e"; args = [ "tell app \"Finder\"" ] })
+  ; W (Play { subcommand = "song.mp3"; args = [ "rate"; "44100" ] })
+  ; W (Rec { subcommand = "output.wav"; args = [ "trim"; "0"; "10" ] })
+  ; W (Ffplay { subcommand = "video.mp4"; args = [ "-autoexit" ] })
+  ; W (Mpg123 { subcommand = "song.mp3"; args = [ "-q" ] })
+  ; W (Open { subcommand = "file.txt"; args = [] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -194,9 +200,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    84
+    90
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 84 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 90 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -295,6 +301,12 @@ let test_of_simple_round_trip () =
     ; W (Mvn { subcommand = "test"; args = [ "-DskipTests=false" ] })
     ; W (Cmake { subcommand = ".."; args = [ "-DCMAKE_BUILD_TYPE=Release" ] })
     ; W (Dune_local_sh { subcommand = "runtest"; args = [ "-f" ] })
+    ; W (Osascript { subcommand = "-e"; args = [ "display dialog \"hello\"" ] })
+    ; W (Play { subcommand = "recording.wav"; args = [] })
+    ; W (Rec { subcommand = "mic.wav"; args = [ "rate"; "44100" ] })
+    ; W (Ffplay { subcommand = "clip.mp4"; args = [ "-nodisp"; "-autoexit" ] })
+    ; W (Mpg123 { subcommand = "podcast.mp3"; args = [ "-q"; "--list"; "playlist.m3u" ] })
+    ; W (Open { subcommand = "https://example.com"; args = [ "-a"; "Safari" ] })
     ]
   in
   List.iter
@@ -391,6 +403,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Yarn"; "Pnpm"; "Uv"; "Glab"; "Pytest"; "Terminal_notifier"
     ; "Ruff"; "Pyright"; "Tsc"; "Ocamlfind"; "Rustc"; "Gofmt"; "Gradle"; "Ninja"
     ; "Java"; "Javac"; "Mvn"; "Cmake"; "Dune_local_sh"
+    ; "Osascript"; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

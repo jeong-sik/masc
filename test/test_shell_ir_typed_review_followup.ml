@@ -134,6 +134,12 @@ let constructor_label = function
      | Shell_ir_typed.Mvn _ -> "Mvn"
      | Shell_ir_typed.Cmake _ -> "Cmake"
      | Shell_ir_typed.Dune_local_sh _ -> "Dune_local_sh"
+     | Shell_ir_typed.Osascript _ -> "Osascript"
+     | Shell_ir_typed.Play _ -> "Play"
+     | Shell_ir_typed.Rec _ -> "Rec"
+     | Shell_ir_typed.Ffplay _ -> "Ffplay"
+     | Shell_ir_typed.Mpg123 _ -> "Mpg123"
+     | Shell_ir_typed.Open _ -> "Open"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

@@ -385,5 +385,17 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Cmake, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Dune_local_sh { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Dune_local_sh, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Osascript { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Osascript, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Play { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Play, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Rec { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rec, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Ffplay { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ffplay, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Mpg123 { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Mpg123, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Open { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Open, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

@@ -438,5 +438,23 @@ let pp fmt = function
   | W (Dune_local_sh { subcommand; args }) ->
     Format.fprintf fmt "Dune_local_sh(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
+  | W (Osascript { subcommand; args }) ->
+    Format.fprintf fmt "Osascript(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Play { subcommand; args }) ->
+    Format.fprintf fmt "Play(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Rec { subcommand; args }) ->
+    Format.fprintf fmt "Rec(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Ffplay { subcommand; args }) ->
+    Format.fprintf fmt "Ffplay(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Mpg123 { subcommand; args }) ->
+    Format.fprintf fmt "Mpg123(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Open { subcommand; args }) ->
+    Format.fprintf fmt "Open(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

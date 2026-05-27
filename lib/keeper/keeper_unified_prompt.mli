@@ -22,7 +22,10 @@ val state_block_instruction_text : string
 val build_prompt :
   meta:Keeper_types.keeper_meta ->
   base_path:string ->
-  profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   string * string
+(** When [?profile_defaults] is omitted, personality fields fall back to
+    [meta.{will,needs,desires,instructions}] directly (legacy behavior).
+    Production hot path supplies it; tests can keep the bare call. *)

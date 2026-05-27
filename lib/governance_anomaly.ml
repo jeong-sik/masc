@@ -331,7 +331,7 @@ let load_profile ~base_path ~agent_id =
                                  (function
                                    | `Float f -> Some f
                                    | `Int i -> Some (float_of_int i)
-                                   | _ -> None)
+                                   | `Null | `Bool _ | `Intlit _ | `String _ | `List _ | `Assoc _ -> None)
                                  items)
                         | _ -> Array.make 24 (1.0 /. 24.0)
                       in

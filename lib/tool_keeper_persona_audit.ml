@@ -327,9 +327,9 @@ let summary items =
         List.filter_map
           (function
             | `String issue -> Some issue
-            | _ -> None)
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None)
           issues
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   let has_issue issue item = List.mem issue (issue_list item) in
   let count pred =
@@ -340,19 +340,19 @@ let summary items =
     count (fun item ->
         match Option.value ~default:(`Null) (Json_util.assoc_member_opt field item) with
         | `Bool true -> true
-        | _ -> false)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> false)
   in
   let count_autoboot_disabled =
     count (fun item ->
         match Option.value ~default:(`Null) (Json_util.assoc_member_opt "autoboot_enabled" item) with
         | `Bool false -> true
-        | _ -> false)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> false)
   in
   let ok_count =
     count (fun item ->
         match Option.value ~default:(`Null) (Json_util.assoc_member_opt "ok" item) with
         | `Bool true -> true
-        | _ -> false)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> false)
   in
   `Assoc
     [
@@ -394,7 +394,7 @@ let handle ~(config : Coord.config) args : tool_result =
           (fun item ->
             match Option.value ~default:(`Null) (Json_util.assoc_member_opt "ok" item) with
             | `Bool true -> false
-            | _ -> true)
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> true)
           audited_items
     in
     let repair_result =

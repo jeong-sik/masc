@@ -484,7 +484,7 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
          | None -> row_fields
        in
        `Assoc row_fields
-     | _ -> row)
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> row)
   | other -> other
 ;;
 

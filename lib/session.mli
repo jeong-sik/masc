@@ -185,6 +185,3 @@ val get_or_create_mcp_session :
 (** Add [Mcp-Session-Id] to response headers. *)
 val add_mcp_session_header :
   Cohttp.Header.t -> McpSessionStore.mcp_session -> Cohttp.Header.t
-
-(** Handle the [mcp_session] tool (get/create/list/cleanup/remove). *)
-val handle_mcp_session_tool : Yojson.Safe.t -> bool * string

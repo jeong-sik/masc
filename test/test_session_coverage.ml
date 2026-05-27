@@ -281,74 +281,6 @@ let test_extract_mcp_session_id_other_headers () =
   | Some _ -> fail "expected None"
 
 (* ============================================================
-   handle_mcp_session_tool Tests
-   ============================================================ *)
-
-let test_handle_mcp_session_tool_create () =
-  let args = `Assoc [("action", `String "create"); ("agent_name", `String "test-agent")] in
-  let (success, response) = Session.handle_mcp_session_tool args in
-  check bool "create succeeds" true success;
-  check bool "response nonempty" true (String.length response > 0)
-
-let test_handle_mcp_session_tool_list () =
-  let args = `Assoc [("action", `String "list")] in
-  let (success, response) = Session.handle_mcp_session_tool args in
-  check bool "list succeeds" true success;
-  check bool "has count" true (
-    try let _ = Str.search_forward (Str.regexp "count") response 0 in true
-    with Not_found -> false)
-
-let test_handle_mcp_session_tool_get_missing () =
-  let args = `Assoc [("action", `String "get"); ("session_id", `String "nonexistent-xyz")] in
-  let (success, response) = Session.handle_mcp_session_tool args in
-  check bool "get missing fails" false success;
-  check bool "says not found" true (
-    try let _ = Str.search_forward (Str.regexp "not found") response 0 in true
-    with Not_found -> false)
-
-let test_handle_mcp_session_tool_get_no_id () =
-  let args = `Assoc [("action", `String "get")] in
-  let (success, response) = Session.handle_mcp_session_tool args in
-  check bool "get without id fails" false success;
-  check bool "says session_id required" true (
-    try let _ = Str.search_forward (Str.regexp "session_id required") response 0 in true
-    with Not_found -> false)
-
-let test_handle_mcp_session_tool_remove_no_id () =
-  let args = `Assoc [("action", `String "remove")] in
-  let (success, _) = Session.handle_mcp_session_tool args in
-  check bool "remove without id fails" false success
-
-let test_handle_mcp_session_tool_remove_missing () =
-  let args = `Assoc [("action", `String "remove"); ("session_id", `String "nonexistent-xyz")] in
-  let (success, _) = Session.handle_mcp_session_tool args in
-  check bool "remove missing fails" false success
-
-let test_handle_mcp_session_tool_cleanup () =
-  let args = `Assoc [("action", `String "cleanup")] in
-  let (success, response) = Session.handle_mcp_session_tool args in
-  check bool "cleanup succeeds" true success;
-  check bool "says removed" true (
-    try let _ = Str.search_forward (Str.regexp "Removed") response 0 in true
-    with Not_found -> false)
-
-let test_handle_mcp_session_tool_unknown_action () =
-  let args = `Assoc [("action", `String "unknown-action")] in
-  let (success, response) = Session.handle_mcp_session_tool args in
-  check bool "unknown action fails" false success;
-  check bool "says unknown" true (
-    try let _ = Str.search_forward (Str.regexp "Unknown action") response 0 in true
-    with Not_found -> false)
-
-let test_handle_mcp_session_tool_no_action () =
-  let args = `Assoc [] in
-  let (success, response) = Session.handle_mcp_session_tool args in
-  check bool "no action fails" false success;
-  check bool "says action required" true (
-    try let _ = Str.search_forward (Str.regexp "action required") response 0 in true
-    with Not_found -> false)
-
-(* ============================================================
    status_string Tests (requires Eio runtime - basic only)
    ============================================================ *)
 
@@ -437,17 +369,6 @@ let () =
       test_case "prefers mcp" `Quick test_extract_mcp_session_id_prefers_mcp;
       test_case "missing" `Quick test_extract_mcp_session_id_missing;
       test_case "other headers" `Quick test_extract_mcp_session_id_other_headers;
-    ];
-    "handle_mcp_session_tool", [
-      test_case "create" `Quick test_handle_mcp_session_tool_create;
-      test_case "list" `Quick test_handle_mcp_session_tool_list;
-      test_case "get missing" `Quick test_handle_mcp_session_tool_get_missing;
-      test_case "get no id" `Quick test_handle_mcp_session_tool_get_no_id;
-      test_case "remove no id" `Quick test_handle_mcp_session_tool_remove_no_id;
-      test_case "remove missing" `Quick test_handle_mcp_session_tool_remove_missing;
-      test_case "cleanup" `Quick test_handle_mcp_session_tool_cleanup;
-      test_case "unknown action" `Quick test_handle_mcp_session_tool_unknown_action;
-      test_case "no action" `Quick test_handle_mcp_session_tool_no_action;
     ];
     "status_string", [
       test_case "empty" `Quick test_status_string_empty;

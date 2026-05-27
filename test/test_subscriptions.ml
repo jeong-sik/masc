@@ -7,12 +7,6 @@ module Subscriptions = Masc_mcp.Subscriptions
 (* Initialize RNG for crypto *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
-(* Helper: check if s2 is substring of s1 *)
-let contains s1 s2 =
-  let re = Str.regexp_string s2 in
-  try ignore (Str.search_forward re s1 0); true
-  with Not_found -> false
-
 (** Resource type conversion tests *)
 let test_resource_type_roundtrip () =
   let types = [
@@ -148,75 +142,6 @@ let test_pop_notifications () =
   let notifs2 = Subscriptions.SubscriptionStore.pop_notifications sub.id in
   check int "notifications consumed" 0 (List.length notifs2)
 
-(** Tool handler tests *)
-let test_tool_subscribe () =
-  let args = `Assoc [
-    ("action", `String "subscribe");
-    ("subscriber", `String "tool_agent");
-    ("resource", `String "tasks");
-  ] in
-  let (success, result) = Subscriptions.handle_subscription_tool args in
-  check bool "subscribe success" true success;
-  check bool "result has id" true (contains result "id")
-
-let test_tool_unsubscribe () =
-  let sub = Subscriptions.SubscriptionStore.subscribe
-    ~subscriber:"unsub_agent"
-    ~resource:Subscriptions.Tasks
-    () in
-  let args = `Assoc [
-    ("action", `String "unsubscribe");
-    ("subscription_id", `String sub.id);
-  ] in
-  let (success, _) = Subscriptions.handle_subscription_tool args in
-  check bool "unsubscribe success" true success
-
-let test_tool_list () =
-  let _ = Subscriptions.SubscriptionStore.subscribe
-    ~subscriber:"list_agent"
-    ~resource:Subscriptions.Tasks
-    () in
-  let args = `Assoc [("action", `String "list")] in
-  let (success, result) = Subscriptions.handle_subscription_tool args in
-  check bool "list success" true success;
-  check bool "has count" true (contains result "count")
-
-let test_tool_list_by_subscriber () =
-  let _ = Subscriptions.SubscriptionStore.subscribe
-    ~subscriber:"specific_list_agent"
-    ~resource:Subscriptions.Tasks
-    () in
-  let args = `Assoc [
-    ("action", `String "list");
-    ("subscriber", `String "specific_list_agent");
-  ] in
-  let (success, result) = Subscriptions.handle_subscription_tool args in
-  check bool "list by subscriber success" true success;
-  check bool "has subscriptions" true (contains result "subscriptions")
-
-let test_tool_poll () =
-  let sub = Subscriptions.SubscriptionStore.subscribe
-    ~subscriber:"poll_tool_agent"
-    ~resource:Subscriptions.Tasks
-    () in
-  let args = `Assoc [
-    ("action", `String "poll");
-    ("subscription_id", `String sub.id);
-  ] in
-  let (success, result) = Subscriptions.handle_subscription_tool args in
-  check bool "poll success" true success;
-  check bool "has notifications array" true (contains result "notifications")
-
-let test_tool_invalid_action () =
-  let args = `Assoc [("action", `String "invalid")] in
-  let (success, _) = Subscriptions.handle_subscription_tool args in
-  check bool "invalid action fails" false success
-
-let test_tool_missing_action () =
-  let args = `Assoc [] in
-  let (success, _) = Subscriptions.handle_subscription_tool args in
-  check bool "missing action fails" false success
-
 (** JSON serialization *)
 let test_subscription_to_json () =
   let sub = Subscriptions.SubscriptionStore.subscribe
@@ -316,16 +241,6 @@ let notification_tests = [
   "pop notifications", `Quick, test_pop_notifications;
 ]
 
-let tool_tests = [
-  "subscribe action", `Quick, test_tool_subscribe;
-  "unsubscribe action", `Quick, test_tool_unsubscribe;
-  "list action", `Quick, test_tool_list;
-  "list by subscriber", `Quick, test_tool_list_by_subscriber;
-  "poll action", `Quick, test_tool_poll;
-  "invalid action", `Quick, test_tool_invalid_action;
-  "missing action", `Quick, test_tool_missing_action;
-]
-
 let json_tests = [
   "subscription_to_json", `Quick, test_subscription_to_json;
   "notification_to_json", `Quick, test_notification_to_json;
@@ -343,7 +258,6 @@ let () =
     "subscription", subscription_tests;
     "matching", matching_tests;
     "notification", notification_tests;
-    "tool", tool_tests;
     "json", json_tests;
     "hooks", hook_tests;
   ]

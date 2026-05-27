@@ -84,19 +84,31 @@ val try_admission_or_wait :
   t ->
   tier_id:string ->
   ?wait_config:wait_config ->
+  ?deadline:Cascade_deadline.t ->
   sw:Eio.Switch.t ->
   (unit -> 'a) ->
   ('a, rejection_detail) result
-(** [try_admission_or_wait t ~tier_id ?wait_config ~sw f] attempts
+(** [try_admission_or_wait t ~tier_id ?wait_config ?deadline ~sw f] attempts
     admission on the underlying tier.
 
     If capacity is available, [f ()] runs immediately (zero wait).
     If full, the calling fiber enters a bounded wait loop with backoff
     until either:
     - Admission becomes available → [Ok (f ())], or
-    - [timeout_s] elapses → [Error (Timeout_expired _)], or
+    - the effective timeout elapses → [Error (Timeout_expired _)], or
     - [max_retries] exceeded → [Error (Max_retries_exceeded _)], or
     - [sw] is cancelled → [Error (Cancelled _)].
+
+    The effective timeout is computed via the RFC-0192 § 2 invariant:
+    {[
+      effective_timeout_s = match deadline with
+        | None   -> wait_config.timeout_s
+        | Some d -> Cascade_deadline.composed_attempt_budget
+                      ~clock ~deadline:d ~amplifier:wait_config.timeout_s
+    ]}
+    i.e. [min wait_config.timeout_s (deadline - now)]. When [deadline]
+    is omitted (or the scheduler has no clock), behaviour is identical
+    to before this RFC — pure backward compatibility.
 
     On admission, release happens automatically when [f] returns
     (whether normally or by exception) via the underlying

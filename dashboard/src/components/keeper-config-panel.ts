@@ -20,6 +20,7 @@ import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
+import { FIELD_STYLE_BASE } from './common/field-style-base'
 import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { SetupGuideCard } from './setup-guide-card'
@@ -452,8 +453,6 @@ function PromptBlock({
   `
 }
 
-const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset'
-
 // ── Inline editing components for runtime config ────────
 
 function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
@@ -541,7 +540,7 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
       <div class="text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
       <textarea
         aria-label=${label}
-        class="${fieldStyle} resize-y custom-scrollbar"
+        class="${FIELD_STYLE_BASE} resize-y custom-scrollbar"
         rows=${rows}
         value=${val}
         onInput=${(e: Event) => updateDraft(field, (e.target as HTMLTextAreaElement).value)}

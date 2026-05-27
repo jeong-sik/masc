@@ -22,6 +22,7 @@ import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
+import { FIELD_STYLE_BASE } from './common/field-style-base'
 
 export {
   coerceCredentialType,
@@ -237,7 +238,6 @@ export function CredentialSettings() {
     }
   }
 
-  const fieldStyle ='w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset'
   const helperStyle = 'mt-1 text-3xs leading-relaxed text-text-dim'
 
   return html`
@@ -264,7 +264,7 @@ export function CredentialSettings() {
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">ID</label>
               <input
                 type="text"
-                class="${fieldStyle}"
+                class="${FIELD_STYLE_BASE}"
                 placeholder="my-credential"
                 value=${draft.id}
                 onInput=${(e: Event) => { addDraft.value = { ...draft, id: (e.target as HTMLInputElement).value } }}
@@ -274,7 +274,7 @@ export function CredentialSettings() {
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">이름</label>
               <input
                 type="text"
-                class="${fieldStyle}"
+                class="${FIELD_STYLE_BASE}"
                 placeholder="선택 사항"
                 value=${draft.name}
                 onInput=${(e: Event) => { addDraft.value = { ...draft, name: (e.target as HTMLInputElement).value } }}
@@ -284,7 +284,7 @@ export function CredentialSettings() {
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">사용자명</label>
               <input
                 type="text"
-                class="${fieldStyle}"
+                class="${FIELD_STYLE_BASE}"
                 placeholder="github-user"
                 value=${draft.username}
                 onInput=${(e: Event) => { addDraft.value = { ...draft, username: (e.target as HTMLInputElement).value } }}
@@ -293,7 +293,7 @@ export function CredentialSettings() {
             <div>
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">타입</label>
               <select
-                class="${fieldStyle}"
+                class="${FIELD_STYLE_BASE}"
                 value=${draft.type}
                 onChange=${(e: Event) => {
                   const nextType = coerceCredentialType((e.target as HTMLSelectElement).value)
@@ -314,7 +314,7 @@ export function CredentialSettings() {
               <div>
                 <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">gh login</label>
                 <select
-                  class="${fieldStyle}"
+                  class="${FIELD_STYLE_BASE}"
                   value=${draft.oauth_method ?? DEFAULT_OAUTH_METHOD}
                   onChange=${(e: Event) => {
                     addDraft.value = {
@@ -331,7 +331,7 @@ export function CredentialSettings() {
                 <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">GH_CONFIG_DIR</label>
                 <input
                   type="text"
-                  class="${fieldStyle}"
+                  class="${FIELD_STYLE_BASE}"
                   placeholder="base_path/.masc/github-identities/<credential-id>/gh"
                   value=${draft.gh_config_dir ?? ''}
                   onInput=${(e: Event) => { addDraft.value = { ...draft, gh_config_dir: (e.target as HTMLInputElement).value } }}
@@ -342,7 +342,7 @@ export function CredentialSettings() {
                 <div>
                   <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">Token</label>
                   <textarea
-                    class="${fieldStyle} min-h-20 resize-y"
+                    class="${FIELD_STYLE_BASE} min-h-20 resize-y"
                     placeholder="gh auth login --with-token 입력값"
                     value=${draft.token ?? ''}
                     onInput=${(e: Event) => { addDraft.value = { ...draft, token: (e.target as HTMLTextAreaElement).value } }}
@@ -355,7 +355,7 @@ export function CredentialSettings() {
                 <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">SSH key path</label>
                 <input
                   type="text"
-                  class="${fieldStyle}"
+                  class="${FIELD_STYLE_BASE}"
                   placeholder="base_path/.masc/github-identities/<credential-id>/ssh/id_ed25519"
                   value=${draft.ssh_key_path ?? ''}
                   onInput=${(e: Event) => { addDraft.value = { ...draft, ssh_key_path: (e.target as HTMLInputElement).value } }}
@@ -366,7 +366,7 @@ export function CredentialSettings() {
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">GPG key id</label>
               <input
                 type="text"
-                class="${fieldStyle}"
+                class="${FIELD_STYLE_BASE}"
                 placeholder="선택 사항"
                 value=${draft.gpg_key_id ?? ''}
                 onInput=${(e: Event) => { addDraft.value = { ...draft, gpg_key_id: (e.target as HTMLInputElement).value } }}
@@ -376,7 +376,7 @@ export function CredentialSettings() {
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">설명</label>
               <input
                 type="text"
-                class="${fieldStyle}"
+                class="${FIELD_STYLE_BASE}"
                 placeholder="선택 사항"
                 value=${draft.description ?? ''}
                 onInput=${(e: Event) => { addDraft.value = { ...draft, description: (e.target as HTMLInputElement).value } }}

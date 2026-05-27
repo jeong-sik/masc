@@ -155,12 +155,12 @@
    agent_tool_execute_runtime
    keeper_workspace_ops
    agent_tool_command_runtime
-   github_credentials
+   repo_cli_credentials
    keeper_credential_provider
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_activation_readiness
-   agent_tool_preflight_runtime
+   keeper_cascade_resilience
    agent_tool_task_runtime
    agent_tool_voice_runtime
    agent_tool_dispatch_runtime

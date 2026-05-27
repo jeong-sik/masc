@@ -22,6 +22,12 @@ describe("monitor lane visibility", () => {
 })
 
 describe("normalizeStatusSection", () => {
+  it("accepts every monitoring navigation section", () => {
+    for (const item of sectionItemsForTab("monitoring")) {
+      expect(normalizeStatusSection(item.params.section)).toBe(item.params.section)
+    }
+  })
+
   it("falls back to the monitoring default section", () => {
     expect(normalizeStatusSection("memory-subsystems")).toBe("agents")
     expect(normalizeStatusSection("unknown")).toBe("agents")

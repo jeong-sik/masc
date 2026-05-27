@@ -14,8 +14,13 @@ export type StatusSection =
   | 'feature-health'
   | 'cognition'
 
-function monitorSectionItem(section: StatusSection) {
+function monitorSectionItem(section: string | undefined) {
+  if (!section) return undefined
   return sectionItemsForTab('monitoring').find(item => item.params.section === section)
+}
+
+function isStatusSection(section: string | undefined): section is StatusSection {
+  return monitorSectionItem(section) !== undefined
 }
 
 export function isMonitorLane(section: StatusSection): boolean {
@@ -92,18 +97,7 @@ function renderSection(section: StatusSection) {
 }
 
 export function normalizeStatusSection(section: string | undefined): StatusSection {
-  if (
-    section === 'observatory'
-    || section === 'journey'
-    || section === 'runtime'
-    || section === 'cascade-config'
-    || section === 'fleet-health'
-    || section === 'doctor'
-    || section === 'transport-health'
-    || section === 'feature-health'
-    || section === 'cognition'
-    || section === 'agents'
-  ) return section
+  if (isStatusSection(section)) return section
   return 'agents'
 }
 

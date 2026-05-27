@@ -47,7 +47,20 @@ export function categoryForActivityKind(kind: string): ActivityCategory {
   return 'other'
 }
 
-export function categoryLabel(category: ActivityCategory): string {
+/**
+ * Activity-timeline-domain category → 한국어 라벨.
+ *
+ * Distinct from `categoryLabel(cat: ContentCategory)` in `board/board-state.ts`:
+ *   - Activity enum: `'task' | 'session' | 'message' | 'board' | 'governance' | 'lifecycle' | 'other'`
+ *   - Board ContentCategory: `'article' | 'review' | 'notice' | 'system'`
+ *
+ * 두 enum 이 다르므로 타입 시스템이 cross-domain mis-use 는 잡아 주지만,
+ * *이름* 충돌이라 import 사이트 자동완성에서 헷갈리고 새 timeline 카테고리
+ * 도입 시 board 쪽 함수를 잘못 부를 위험. Renamed from `categoryLabel` to
+ * `activityCategoryLabel` on 2026-05-27 — 이름에 도메인을 박아 SSOT
+ * collision 폐쇄.
+ */
+export function activityCategoryLabel(category: ActivityCategory): string {
   switch (category) {
     case 'task': return '태스크'
     case 'session': return '세션'

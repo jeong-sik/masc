@@ -41,7 +41,7 @@ let resolve_model_name ~(visible_tool_names : string list) (name : string) =
   let visible = visible_set visible_tool_names in
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   let internal_name =
-    match Keeper_tool_alias.canonical_internal_name stripped with
+    match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name stripped with
     | Some internal_name -> internal_name
     | None -> stripped
   in

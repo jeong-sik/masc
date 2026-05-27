@@ -136,7 +136,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       cascade_catalog_source_path: '/tmp/config/cascade.toml',
     },
     tools: {
-      tool_access: { kind: 'preset', preset: 'coding' },
+      tool_access: { kind: 'preset', preset: 'delivery' },
       resolved_allowlist: ['keeper_fs_read'],
       tool_denylist: ['Execute'],
       active_masc_tool_count: 1,

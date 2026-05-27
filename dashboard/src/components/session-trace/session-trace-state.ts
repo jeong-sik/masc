@@ -817,8 +817,6 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   }
 }
 
-export { appendLiveOasEvent, appendLiveToolCall } from './session-trace-live-store'
-
 export function closeSessionTrace(agentName: string): void {
   const next = { ...traceSlots.value }
   delete next[agentName]

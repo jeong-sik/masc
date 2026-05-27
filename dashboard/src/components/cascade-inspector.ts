@@ -15,6 +15,7 @@ import { LoadingState, ErrorState, EmptyState } from './common/feedback-state'
 import { FilterChips } from './common/filter-chips'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
+import { errorToString } from '../lib/format-string'
 
 export type CascadeInspectorFocus = 'deep-dive' | 'compare'
 type CascadeInspectorChip = 'trace' | CascadeInspectorFocus
@@ -91,7 +92,7 @@ async function refreshTrace() {
     traceEvents.value = res.events
     traceUpdatedAt.value = res.updated_at
   } catch (err) {
-    traceError.value = err instanceof Error ? err.message : String(err)
+    traceError.value = errorToString(err)
   } finally {
     traceLoading.value = false
   }
@@ -104,7 +105,7 @@ async function refreshHealth() {
     const res = await fetchCascadeHealth()
     healthProviders.value = res.providers
   } catch (err) {
-    healthError.value = err instanceof Error ? err.message : String(err)
+    healthError.value = errorToString(err)
   } finally {
     healthLoading.value = false
   }

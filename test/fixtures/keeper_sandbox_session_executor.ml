@@ -7,6 +7,8 @@
    [cleanup] → [D.rm]. No I/O, no clock, no Random in this module —
    those are all behind [D]. *)
 
+open Masc_mcp
+
 module Make (D : Keeper_docker_client.S) = struct
   type t =
     { container_name : Keeper_container_name.t

@@ -35,7 +35,6 @@ import {
   displayState,
   extractLaneValue,
   INVARIANT_LABELS,
-  TRANSITION_FIELDS,
   type LaneKey,
 } from './fsm-hub-types'
 
@@ -1304,8 +1303,3 @@ export function inferKeeperNameFrom(snap: KeeperCompositeSnapshot): string {
   const m = /^keeper:([^:]+):/.exec(snap.correlation_id)
   return m?.[1] ?? snap.correlation_id
 }
-
-// Re-exported helpers let tests target the pure slices without spinning
-// up the component. TRANSITION_FIELDS is re-exported for completeness
-// so a caller doesn't need to reach into fsm-hub-types for AXES parity.
-export { TRANSITION_FIELDS }

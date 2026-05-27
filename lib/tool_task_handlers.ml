@@ -130,7 +130,7 @@ let is_registered_keeper_agent_alias_name config agent_name =
         match Nickname.extract_agent_type value with
         | Some agent_type when Keeper_config.validate_name agent_type ->
             separator_variants agent_type
-        | _ -> []
+        | Some _ | None -> []
       else []
     in
     let base_variants = separator_variants keeper_name in

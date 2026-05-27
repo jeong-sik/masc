@@ -4,6 +4,7 @@ import { namespaceTruth, namespaceTruthInitializing } from '../../namespace-trut
 import { serverStatus, shellAuthSummary } from '../../store'
 import { showToast } from '../common/toast'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
+import { errorToString } from '../../lib/format-string'
 
 type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
@@ -69,7 +70,7 @@ export async function pauseRoom(): Promise<void> {
   }
   flowLoading.value = true
   try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('Namespace paused.', 'success') }
-  catch (err) { showToast(`Pause failed: ${err instanceof Error ? err.message : String(err)}`, 'error') }
+  catch (err) { showToast(`Pause failed: ${errorToString(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
 
@@ -81,7 +82,7 @@ export async function resumeRoom(): Promise<void> {
   }
   flowLoading.value = true
   try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('Namespace resumed.', 'success') }
-  catch (err) { showToast(`Resume failed: ${err instanceof Error ? err.message : String(err)}`, 'error') }
+  catch (err) { showToast(`Resume failed: ${errorToString(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
 
@@ -99,7 +100,7 @@ export async function runGarbageCollection(): Promise<void> {
     maintenanceResult.value = raw
     showToast('GC complete.', 'success')
   } catch (err) {
-    showToast(`GC failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    showToast(`GC failed: ${errorToString(err)}`, 'error')
   } finally { maintenanceLoading.value = false }
 }
 
@@ -115,6 +116,6 @@ export async function cleanupZombies(): Promise<void> {
     maintenanceResult.value = raw
     showToast('Zombie cleanup complete.', 'success')
   } catch (err) {
-    showToast(`Zombie cleanup failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    showToast(`Zombie cleanup failed: ${errorToString(err)}`, 'error')
   } finally { maintenanceLoading.value = false }
 }

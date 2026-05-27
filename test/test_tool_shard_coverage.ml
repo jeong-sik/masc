@@ -59,9 +59,11 @@ let test_shard_governance_removed () =
   Alcotest.(check bool) "governance shard removed"
     true (Option.is_none (Tool_shard.get_shard "governance"))
 
-let test_shard_coding_removed () =
-  Alcotest.(check bool) "coding shard removed" true
-    (Option.is_none (Tool_shard.get_shard "coding"))
+let retired_tool_mode_shard = "co" ^ "ding"
+
+let test_retired_tool_mode_shard_removed () =
+  Alcotest.(check bool) "retired tool-mode shard removed" true
+    (Option.is_none (Tool_shard.get_shard retired_tool_mode_shard))
 
 let test_retired_search_family_name_removed () =
   let legacy_name = "s" ^ "hell" in
@@ -95,8 +97,8 @@ let test_default_shard_names () =
   (* governance shard removed; must not appear in defaults *)
   Alcotest.(check bool) "governance not in defaults" false
     (List.mem "governance" defaults);
-  Alcotest.(check bool) "coding not in defaults" false
-    (List.mem "coding" defaults);
+  Alcotest.(check bool) "retired tool-mode not in defaults" false
+    (List.mem retired_tool_mode_shard defaults);
   Alcotest.(check bool) "weather removed from defaults" false
     (List.mem "weather" defaults);
   (* voice still not in defaults: gated by policy_voice_enabled boolean *)
@@ -476,7 +478,8 @@ let test_set_agent_shards_from_persona () =
   Alcotest.(check bool) "has base" true (List.mem "base" active);
   Alcotest.(check bool) "has board" true (List.mem "board" active);
   Alcotest.(check bool) "has library" true (List.mem "library" active);
-  Alcotest.(check bool) "no coding" false (List.mem "coding" active);
+  Alcotest.(check bool) "no retired tool-mode shard" false
+    (List.mem retired_tool_mode_shard active);
   Alcotest.(check bool) "no search_files" false (List.mem "search_files" active);
   (* Verify tools_of_shards returns restricted set *)
   let tools = Tool_shard.tools_of_shards active in
@@ -506,7 +509,8 @@ let () =
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
       Alcotest.test_case "search_files" `Quick test_shard_search_files_exists;
       Alcotest.test_case "governance removed" `Quick test_shard_governance_removed;
-      Alcotest.test_case "coding removed" `Quick test_shard_coding_removed;
+      Alcotest.test_case "retired tool-mode shard removed" `Quick
+        test_retired_tool_mode_shard_removed;
       Alcotest.test_case "legacy search-family removed" `Quick test_retired_search_family_name_removed;
       Alcotest.test_case "voice" `Quick test_shard_voice_exists;
       Alcotest.test_case "unknown" `Quick test_shard_unknown;

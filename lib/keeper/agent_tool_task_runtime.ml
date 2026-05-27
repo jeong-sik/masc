@@ -767,7 +767,10 @@ let handle_keeper_task_tool
           )
         ; "data", Tool_task.claim_next_transient_error_data err
         ]
-      | _ -> [ "result", `String message ]
+      | Coord.Claim_next_claimed _
+      | Coord.Claim_next_no_unclaimed
+      | Coord.Claim_next_no_eligible _
+      | Coord.Claim_next_error _ -> [ "result", `String message ]
     in
     Yojson.Safe.to_string
       (`Assoc

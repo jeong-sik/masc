@@ -70,7 +70,7 @@ key = "ZAI_API_KEY"
 [providers.runpod_mtp]
 display-name = "RunPod Qwen"
 protocol = "provider_d-http"
-endpoint = "https://example.runpod.net/v1"
+endpoint = "https://ma8xbr1kgbclkl-19123.proxy.runpod.net/v1"
 
 [providers.runpod_mtp.credentials]
 type = "env"
@@ -83,7 +83,7 @@ supports-runtime-mcp-http-headers = true
 
 [providers.runpod_mtp.healthcheck]
 enabled = true
-endpoint = "https://example.runpod.net/v1/models"
+endpoint = "https://ma8xbr1kgbclkl-19123.proxy.runpod.net/v1/models"
 method = "GET"
 timeout_seconds = 10
 probe_interval_seconds = 60

@@ -12,9 +12,16 @@ type keeper_path_rejection =
   | Not_found_relative of { raw : string }
   | Ambiguous_relative_read_path of { raw : string; candidate_count : int }
 
-(** LLM-facing opaque message derived from the rejection variant.
-    Preserves legacy string prefixes for downstream classifiers. *)
+(** LLM-facing opaque message derived from the rejection variant. *)
 val rejection_to_user_message : keeper_path_rejection -> string
+
+(** Stable lowercase prefix token for [rejection_to_user_message]. *)
+val rejection_message_prefix : keeper_path_rejection -> string
+
+(** Parse only the typed rejection tag from a user-facing rejection
+    message. Payload fields are intentionally left empty / zero because
+    the parser is for classification, not message reconstruction. *)
+val parse_rejection_prefix : string -> keeper_path_rejection option
 
 (** Operator-facing telemetry — increments the path-rejection counter
     with a [kind] label derived from the constructor. *)

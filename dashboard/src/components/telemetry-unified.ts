@@ -26,6 +26,7 @@ import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-
 import { formatElapsedCompact, unixSecondsToDate } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
+import { errorToString } from '../lib/format-string'
 import { Btn } from './btn'
 import { OasHealthChip } from './oas-health-chip'
 import { CopyIdButton } from './common/copy-id-button'
@@ -1199,7 +1200,7 @@ export function TelemetryUnified() {
           if (isAbortError(error)) throw error
           return {
             cacheStats: null,
-            cacheStatsError: error instanceof Error ? error.message : String(error),
+            cacheStatsError: errorToString(error),
           }
         })
       const [telemetry, , store, cacheStatsResult] = await Promise.all([

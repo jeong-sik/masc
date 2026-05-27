@@ -20,6 +20,8 @@
     Determinism contract: deterministic plan + deterministic client +
     pure policy value ⇒ deterministic response sequence. *)
 
+open Masc_mcp
+
 module Make : functor (D : Keeper_docker_client.S) -> sig
   (** [execute_plan plan] runs [plan] through [D.run] once. *)
   val execute_plan

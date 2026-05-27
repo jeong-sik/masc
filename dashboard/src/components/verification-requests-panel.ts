@@ -28,6 +28,7 @@ import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
 import { relativeTime } from '../lib/format-time'
+import { errorToString } from '../lib/format-string'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
@@ -197,7 +198,7 @@ async function submitResolve(
     setRowAction(row.request_id, { kind: 'idle' })
     refresh()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorToString(err)
     setRowAction(row.request_id, { kind: 'error', message })
   }
 }

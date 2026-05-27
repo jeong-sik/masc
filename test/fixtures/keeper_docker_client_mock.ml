@@ -1,5 +1,7 @@
 (* RFC-0070 Phase 3b-iv.1b — Mock Keeper_docker_client. See .mli. *)
 
+open Masc_mcp
+
 (* Injection queues — proper FIFO via [Queue.t] (amortized O(1) push +
    O(1) peek/pop), replacing the previous [q := !q @ [x]] list-append
    form which was O(n) per push and O(n²) across many injections (the

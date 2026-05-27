@@ -86,7 +86,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | Workflow | Primary tools |
 |----------|---------------|
 | 의견 내기 / 토론 참여 | `keeper_board_post`, `keeper_board_comment` |
-| 최신 정보 / 외부 자료 확인 | `masc_web_search` (also exposed to model clients as `SearchWeb`) |
+| 최신 정보 / 외부 자료 확인 | `SearchWeb` -> `FetchWeb` |
 | 찬성 / 반대 신호 | `keeper_board_vote` |
 | 거버넌스 의견 제출 | retired as keeper tools; use board discussion/vote paths and governance dashboard read models |
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify` |

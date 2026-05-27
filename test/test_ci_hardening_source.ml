@@ -1714,7 +1714,24 @@ let test_tool_execution_substrate_ratchet_contracts () =
      && file_not_contains_pattern "config/prompts/keeper.tool_hints.toml" "gh_commit"
      && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "pr_comment"
      && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "pr_review"
-     && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "gh_commit")
+     && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "gh_commit");
+  check bool "keeper-facing prompts use web aliases, not internal MCP web names" true
+    (file_not_contains_pattern "config/prompts/keeper.unified.system.md"
+       "masc_web_search"
+     && file_not_contains_pattern "config/prompts/keeper.unified.system.md"
+          "masc_web_fetch"
+     && file_not_contains_pattern "config/prompts/keeper.tool_hints.toml"
+          "masc_web_search"
+     && file_not_contains_pattern "config/prompts/keeper.tool_hints.toml"
+          "masc_web_fetch"
+     && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md"
+          "masc_web_search"
+     && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md"
+          "masc_web_fetch"
+     && file_contains_pattern "config/prompts/keeper.unified.system.md" "SearchWeb"
+     && file_contains_pattern "config/prompts/keeper.unified.system.md" "FetchWeb"
+     && file_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "SearchWeb"
+     && file_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "FetchWeb")
 
 let test_keeper_behavior_hardcoding_ratchet_contracts () =
   check bool "keeper behavior hardcoding ratchet script exists" true

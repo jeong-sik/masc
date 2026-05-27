@@ -635,10 +635,10 @@
             <td><code>bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail</code>, focused source-test build, and targeted case <code>test source_guard 28</code>.</td>
           </tr>
           <tr>
-            <td><span class="status next">PR-C</span> Prompt alignment</td>
+            <td><span class="status done">PR-C</span> Prompt alignment</td>
             <td>Stop keeper prompts from suggesting stale names.</td>
-            <td>Normalize keeper prompts to <code>SearchWeb</code>, <code>FetchWeb</code>, <code>SearchFiles</code>, <code>ReadFile</code>, <code>EditFile</code>, <code>WriteFile</code>, <code>Execute</code>.</td>
-            <td><code>scripts/dune-local.sh build test/test_keeper_tool_alias.exe test/test_keeper_tool_matrix.exe</code></td>
+            <td>Normalize keeper prompts/matrix to <code>SearchWeb</code>, <code>FetchWeb</code>, <code>SearchFiles</code>, <code>ReadFile</code>, <code>EditFile</code>, <code>WriteFile</code>, <code>Execute</code>, and ratchet internal web names out of keeper-facing guidance.</td>
+            <td><code>bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail</code> plus focused source-test build/case.</td>
           </tr>
           <tr>
             <td><span class="status next">PR-D</span> Decision evidence</td>
@@ -889,6 +889,10 @@
           <tr>
             <td>Active micro-tool scan</td>
             <td>Enforced by <code>scripts/lint/no-tool-substrate-adapter-surface.sh</code> and source-guard case 28: no active-surface hits for <code>pr_comment</code>, <code>pr_review</code>, <code>pr_close</code>, <code>gh_pr</code>, <code>gh_commit</code>, <code>github_comment</code>, or PR wrapper prefixes in descriptor/prompt/policy/matrix surfaces.</td>
+          </tr>
+          <tr>
+            <td>Keeper prompt web aliases</td>
+            <td>Keeper-facing prompts and the capability matrix use <code>SearchWeb</code> / <code>FetchWeb</code>; <code>masc_web_search</code> / <code>masc_web_fetch</code> remain outside these model-facing guidance surfaces.</td>
           </tr>
           <tr>
             <td>Known caveat</td>

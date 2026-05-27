@@ -18,7 +18,15 @@ import {
   type InferOutput,
 } from 'valibot'
 
-function formatIssues(issues: readonly BaseIssue<unknown>[]): string {
+/**
+ * Format a valibot issue list as a `; `-joined string of
+ * `<dotted.path>: <message>` segments, using `<root>` for issues
+ * whose `path` resolves to an empty array. Exposed so per-domain
+ * `SchemaDriftError` subclasses that build their own summary in a
+ * `super(...)` call don't have to inline the same `.map(...).join(';')`
+ * block — keeps the `<root>` sentinel and the segment shape in one place.
+ */
+export function formatIssues(issues: readonly BaseIssue<unknown>[]): string {
   return issues
     .map(issue => {
       const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'

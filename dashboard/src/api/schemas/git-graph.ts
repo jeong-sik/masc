@@ -11,6 +11,7 @@ import {
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+import { formatIssues } from './drift-error'
 
 const RepoInfoSchema = object({
   id: string(),
@@ -85,13 +86,7 @@ export class GitGraphSchemaDriftError extends Error {
   readonly issues: readonly BaseIssue<unknown>[]
 
   constructor(issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`git-graph schema drift: ${summary}`)
+    super(`git-graph schema drift: ${formatIssues(issues)}`)
     this.name = GitGraphSchemaDriftError.name
     this.issues = issues
   }

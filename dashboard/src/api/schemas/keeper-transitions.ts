@@ -18,6 +18,7 @@ import {
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+import { formatIssues } from './drift-error'
 
 const KeeperTransitionOperatorSignalSchema = object({
   class: string(),
@@ -53,13 +54,7 @@ export type KeeperTransitionsResponse = InferOutput<typeof KeeperTransitionsResp
 export class KeeperTransitionsSchemaDriftError extends Error {
   readonly issues: readonly BaseIssue<unknown>[]
   constructor(issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`keeper transitions schema drift: ${summary}`)
+    super(`keeper transitions schema drift: ${formatIssues(issues)}`)
     this.name = KeeperTransitionsSchemaDriftError.name
     this.issues = issues
   }

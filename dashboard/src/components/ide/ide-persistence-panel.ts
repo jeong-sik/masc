@@ -19,8 +19,7 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import { useSignalValue } from './use-signal-value'
-
-const REFRESH_MS = 30_000
+import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 
 type LifecycleState = 'created' | 'active' | 'idle' | 'terminated'
 
@@ -238,7 +237,7 @@ function LifecycleMini({ state, phase }: { state: LifecycleState; phase: string 
 
 export function IdePersistencePanel({
   keeperName: explicitKeeperName,
-  pollMs = REFRESH_MS,
+  pollMs = DEFAULT_PANEL_REFRESH_MS,
 }: IdePersistencePanelProps) {
   const activeName = useSignalValue(activeKeeperName)
   const keeperRows = useSignalValue(keepers)

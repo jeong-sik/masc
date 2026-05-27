@@ -9,7 +9,7 @@
 type tried_source =
   | Dispatch_table              (** Tool_dispatch.is_registered *)
   | Tool_name_variant           (** Tool_name.of_string *)
-  | Alias_route                 (** Keeper_tool_alias.route *)
+  | Public_descriptor           (** Agent_tool_descriptor.find_public *)
   | Alias_internal              (** Keeper_tool_alias.is_known_internal *)
   | Alias_masc_to_internal      (** Keeper_tool_alias.public_masc_to_internal *)
   | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)

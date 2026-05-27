@@ -47,7 +47,20 @@ export function categoryForActivityKind(kind: string): ActivityCategory {
   return 'other'
 }
 
-export function categoryLabel(category: ActivityCategory): string {
+/**
+ * Activity-timeline-domain category → 한국어 라벨.
+ *
+ * Distinct from `categoryLabel(cat: ContentCategory)` in `board/board-state.ts`:
+ *   - Activity enum: `'task' | 'session' | 'message' | 'board' | 'governance' | 'lifecycle' | 'other'`
+ *   - Board ContentCategory: `'article' | 'review' | 'notice' | 'system'`
+ *
+ * 두 enum 이 다르므로 타입 시스템이 cross-domain mis-use 는 잡아 주지만,
+ * *이름* 충돌이라 import 사이트 자동완성에서 헷갈리고 새 timeline 카테고리
+ * 도입 시 board 쪽 함수를 잘못 부를 위험. Renamed from `categoryLabel` to
+ * `activityCategoryLabel` on 2026-05-27 — 이름에 도메인을 박아 SSOT
+ * collision 폐쇄.
+ */
+export function activityCategoryLabel(category: ActivityCategory): string {
   switch (category) {
     case 'task': return '태스크'
     case 'session': return '세션'
@@ -59,7 +72,18 @@ export function categoryLabel(category: ActivityCategory): string {
   }
 }
 
-export function eventKindLabel(kind: string): string {
+/**
+ * Activity-timeline-domain event kind (`'agent.joined'` / `'task.done'` 등
+ * dot-namespaced raw kind string) → 한국어 라벨.
+ *
+ * Distinct from `journalEventKindLabel(entry: JournalEntry)` in
+ * `live-store.ts` (iter#9 rename). 입력 타입과 입력 공간이 완전히 다르고
+ * 매핑하는 enum 도 다르다. 두 변형이 같은 이름 `eventKindLabel` 일 때 import
+ * 사이트가 별칭 (`eventKindLabel as activityEventKindLabel`) 으로 회피하던
+ * 패턴 자체가 SSOT 위반 시그널이었음 — 정의에 도메인을 박아 별칭을 제거.
+ * Renamed from `eventKindLabel` to `activityEventKindLabel` on 2026-05-27.
+ */
+export function activityEventKindLabel(kind: string): string {
   switch (kind) {
     case 'agent.joined': return '입장'
     case 'agent.left': return '퇴장'
@@ -208,7 +232,7 @@ function canMergeGroup(group: MutableGroup, event: ActivityGraphTimelineEvent): 
 function sequenceSummary(events: ActivityGraphTimelineEvent[]): string {
   const labels: string[] = []
   for (const event of events) {
-    const label = eventKindLabel(event.kind)
+    const label = activityEventKindLabel(event.kind)
     if (labels[labels.length - 1] !== label) labels.push(label)
   }
   return labels.join(' -> ')
@@ -247,9 +271,9 @@ function groupTitle(category: ActivityCategory, events: ActivityGraphTimelineEve
     case 'governance':
       return subjectId || '거버넌스 활동'
     case 'lifecycle':
-      return actor || eventKindLabel(latest.kind)
+      return actor || activityEventKindLabel(latest.kind)
     default:
-      return subjectId || eventKindLabel(latest.kind)
+      return subjectId || activityEventKindLabel(latest.kind)
   }
 }
 

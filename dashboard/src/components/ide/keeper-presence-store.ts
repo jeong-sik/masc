@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import { isRecord } from '../common/normalize'
+import { hasNonEmptyStringField, isRecord } from '../common/normalize'
 
 export type KeeperPresenceStatus = 'active' | 'idle' | 'blocked'
 
@@ -119,8 +119,6 @@ export function createKeeperPresenceStore(
   }
 }
 
-type UnknownRecord = Record<string, unknown>
-
 function isPresenceSnapshot(value: unknown): value is KeeperPresenceSnapshot {
   if (!isRecord(value)) return false
   const k = value['kind']
@@ -135,7 +133,7 @@ function withSortedEntries(snap: KeeperPresenceSnapshot): KeeperPresenceSnapshot
 
 function normalizeSnapshot(value: unknown): KeeperPresenceSnapshot | null {
   if (!isRecord(value)) return null
-  if (!hasNonEmptyString(value, 'runtime_id')) return null
+  if (!hasNonEmptyStringField(value, 'runtime_id')) return null
   if (!Array.isArray(value.entries)) return null
 
   const entries = value.entries
@@ -143,8 +141,8 @@ function normalizeSnapshot(value: unknown): KeeperPresenceSnapshot | null {
     .filter((entry): entry is KeeperPresenceEntry => entry !== null)
     .sort(compareEntries)
 
-  const branch = hasNonEmptyString(value, 'branch') ? (value['branch'] as string) : undefined
-  const supervisor = hasNonEmptyString(value, 'supervisor') ? (value['supervisor'] as string) : undefined
+  const branch = hasNonEmptyStringField(value, 'branch') ? (value['branch'] as string) : undefined
+  const supervisor = hasNonEmptyStringField(value, 'supervisor') ? (value['supervisor'] as string) : undefined
 
   const live: KeeperPresenceSnapshot = {
     kind: 'live',
@@ -158,9 +156,9 @@ function normalizeSnapshot(value: unknown): KeeperPresenceSnapshot | null {
 
 function normalizeEntry(value: unknown): KeeperPresenceEntry | null {
   if (!isRecord(value)) return null
-  if (!hasNonEmptyString(value, 'keeper_id')) return null
-  if (!hasNonEmptyString(value, 'workspace_label')) return null
-  if (!hasNonEmptyString(value, 'role')) return null
+  if (!hasNonEmptyStringField(value, 'keeper_id')) return null
+  if (!hasNonEmptyStringField(value, 'workspace_label')) return null
+  if (!hasNonEmptyStringField(value, 'role')) return null
   if (!isKeeperPresenceStatus(value['status'])) return null
   if (!Number.isFinite(value['last_seen_ms'])) return null
 
@@ -178,11 +176,6 @@ function compareEntries(a: KeeperPresenceEntry, b: KeeperPresenceEntry): number 
   if (statusDelta !== 0) return statusDelta
   if (a.last_seen_ms !== b.last_seen_ms) return b.last_seen_ms - a.last_seen_ms
   return a.keeper_id.localeCompare(b.keeper_id)
-}
-
-function hasNonEmptyString(record: UnknownRecord, key: string): boolean {
-  const value = record[key]
-  return typeof value === 'string' && value.trim() !== ''
 }
 
 function isKeeperPresenceStatus(value: unknown): value is KeeperPresenceStatus {

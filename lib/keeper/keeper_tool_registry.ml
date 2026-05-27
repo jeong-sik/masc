@@ -148,54 +148,61 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
   | None -> is_effectively_read_only_tool tool_name
 ;;
 
-let checkpoint_decision_of_effect_domain = function
-  | Some Tool_catalog.Read_only
-  | Some Tool_catalog.Masc_coordination
-  | Some Tool_catalog.Playground_write -> Some true
-  | Some Tool_catalog.Host_repo_write -> Some false
-  | None -> None
-;;
-
-let descriptor_checkpoint_decision tool_name =
+let descriptor_boundary_exempt tool_name =
   match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> None
   | Some descriptor ->
-    checkpoint_decision_of_effect_domain
-      descriptor.Agent_tool_descriptor.policy.effect_domain
+    (match descriptor.Agent_tool_descriptor.policy.effect_domain with
+     | Some Tool_catalog.Read_only
+     | Some Tool_catalog.Masc_coordination
+     | Some Tool_catalog.Playground_write -> Some true
+     | Some Tool_catalog.Host_repo_write -> Some false
+     | None -> None)
 ;;
 
-let catalog_checkpoint_decision tool_name =
-  match Tool_catalog.effect_domain tool_name |> checkpoint_decision_of_effect_domain with
+let catalog_boundary_exempt tool_name =
+  let decision_for_effect_domain = function
+    | Some Tool_catalog.Read_only
+    | Some Tool_catalog.Masc_coordination
+    | Some Tool_catalog.Playground_write -> Some true
+    | Some Tool_catalog.Host_repo_write -> Some false
+    | None -> None
+  in
+  match decision_for_effect_domain (Tool_catalog.effect_domain tool_name) with
   | Some _ as decision -> decision
   | None ->
-    (match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name with
+    (match
+       Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name
+     with
      | Some internal_name when not (String.equal internal_name tool_name) ->
-       Tool_catalog.effect_domain internal_name |> checkpoint_decision_of_effect_domain
+       decision_for_effect_domain (Tool_catalog.effect_domain internal_name)
      | _ -> None)
 ;;
 
-(* ── Input-aware checkpoint bypass ────────────────────────────
+(* ── Input-aware mutation-boundary bypass ────────────────────
    Some tools do mutate state, but they should not open the
-   follow-up checkpoint gate because they either:
+   main-worktree checkpoint boundary because they either:
    - only touch MASC coordination state (tasks, board, broadcast), or
    - operate inside an explicit playground sandbox.
 
-   Keep these tools mutating for reconcile/error handling; this predicate only
-   controls whether the per-turn checkpoint gate blocks follow-up tools.
+   Keep these tools mutating for reconcile/error handling; this predicate
+   only controls whether the per-turn boundary blocks follow-up tools.
 
    The effect-domain tag is resolved through the descriptor projection first,
-   so the gate no longer has to mirror tool names or infer semantics from
+   so this boundary no longer has to mirror tool names or infer semantics from
    prefixes. *)
-let allows_followup_checkpoint_with_input ~(tool_name : string) ~(input : Yojson.Safe.t)
+let is_main_worktree_boundary_exempt_with_input
+      ~(tool_name : string)
+      ~(input : Yojson.Safe.t)
   : bool
   =
   if is_read_only_with_input ~tool_name ~input
   then true
   else (
-    match descriptor_checkpoint_decision tool_name with
+    match descriptor_boundary_exempt tool_name with
     | Some decision -> decision
     | None ->
-      (match catalog_checkpoint_decision tool_name with
+      (match catalog_boundary_exempt tool_name with
        | Some decision -> decision
        | None -> false))
 ;;

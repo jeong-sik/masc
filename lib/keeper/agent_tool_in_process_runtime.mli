@@ -216,10 +216,16 @@ val handle_masc_persona
     module load.  Receives [meta] so callers like [masc_keeper_status]
     can resolve the "self" target when the [name] argument is empty. *)
 val handle_masc_keeper
-  :  config:Coord.config
+  :  ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?mcp_session_id:string
+  -> config:Coord.config
   -> meta:Keeper_types.keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
+  -> unit
   -> string
 
 (** RFC-0182 §3.1 — [masc_surface_audit] singleton.  Pure pass-through

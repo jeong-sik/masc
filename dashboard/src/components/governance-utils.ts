@@ -36,7 +36,20 @@ export function filteredItemsByFilter(filter: GovernanceFilter, items: Governanc
   }
 }
 
-export function kindLabel(value: string): string {
+/**
+ * Governance-domain kind → 표시용 라벨.
+ *
+ * Distinct from `kindLabel(kind: string)` in `board/board-state.ts`:
+ *   - Governance enum: `'case' | 'petition'` → 영어 capitalize (`'Case'`/`'Petition'`)
+ *   - Board enum: `'direct' | 'automation' | 'system'` → 한국어 (`'직접'` 등)
+ *
+ * 같은 함수명에 *완전히 다른 enum + 다른 출력 언어* 가 매핑되어 있어
+ * import 사이트에서 잘못된 변형을 부르면 governance UI 가 한국어 board
+ * 라벨로 회귀 (또는 그 반대). Renamed from `kindLabel` to
+ * `governanceKindLabel` on 2026-05-27 — 이름에 도메인을 박아 SSOT
+ * collision 폐쇄.
+ */
+export function governanceKindLabel(value: string): string {
   switch (value) {
     case 'case':
       return 'Case'

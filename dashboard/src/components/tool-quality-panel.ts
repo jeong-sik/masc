@@ -114,14 +114,14 @@ const successColor = computed(() => {
 // tool table later moves out of this panel.
 const toolSearchQuery = signal('')
 
-// Re-export from SSOT — identical logic in tool-metrics.ts
-export { toolMatchesSearch } from './tool-metrics'
-
-export function filterTools<T extends Pick<ToolStat, 'name'>>(tools: T[], query: string): T[] {
-  const q = query.trim().toLowerCase()
-  if (q === '') return tools
-  return tools.filter(t => t.name.toLowerCase().includes(q))
-}
+// Re-export from SSOT — identical logic in tool-metrics.ts. As of 2026-05-27,
+// `filterTools` is also re-exported (was previously a duplicate 2-arg
+// implementation here). The SSOT 3-arg variant defaults `category` to
+// `'all'`, so existing 2-arg callers (`filterTools(tools, query)`) keep
+// working through this re-export and the test in `tool-quality-panel.test.ts`
+// imports the same symbol path it always did.
+import { filterTools, toolMatchesSearch } from './tool-metrics'
+export { filterTools, toolMatchesSearch }
 
 function RateGauge({ rate, label }: { rate: number; label: string }) {
   const fillClass = rate >= 95 ? 'bg-[var(--ok-10)]' : rate >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'

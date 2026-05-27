@@ -688,15 +688,18 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       "expected typed tool_execute pipeline to pass validation, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
-let tool_execute_exec_argv args =
+let tool_execute_exec_stage args =
   match Agent_tool_execute_typed_input.of_json args with
-  | Ok (Agent_tool_execute_typed_input.Exec { argv; _ }) -> argv
+  | Ok (Agent_tool_execute_typed_input.Exec { executable; argv; _ }) ->
+    executable, argv
   | Ok (Agent_tool_execute_typed_input.Pipeline _) ->
     Alcotest.fail "expected exec input"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
 
-let test_tool_execute_find_expression_gets_default_path () =
+let tool_execute_exec_argv args = snd (tool_execute_exec_stage args)
+
+let test_tool_execute_find_expression_not_rewritten () =
   let argv =
     tool_execute_exec_argv
       (`Assoc
@@ -705,11 +708,11 @@ let test_tool_execute_find_expression_gets_default_path () =
         ])
   in
   Alcotest.(check (list string))
-    "find expression gets explicit cwd path"
-    [ "."; "-type"; "f"; "-name"; "*.ml" ]
+    "find expression remains caller-authored"
+    [ "-type"; "f"; "-name"; "*.ml" ]
     argv
 
-let test_tool_execute_find_global_option_keeps_option_first () =
+let test_tool_execute_find_global_option_not_rewritten () =
   let argv =
     tool_execute_exec_argv
       (`Assoc
@@ -718,24 +721,25 @@ let test_tool_execute_find_global_option_keeps_option_first () =
         ])
   in
   Alcotest.(check (list string))
-    "find global option stays before default path"
-    [ "-E"; "."; "-type"; "f" ]
+    "find global option remains caller-authored"
+    [ "-E"; "-type"; "f" ]
     argv
 
-let test_tool_execute_promoted_find_expression_gets_default_path () =
-  let argv =
-    tool_execute_exec_argv
+let test_tool_execute_empty_executable_not_promoted () =
+  let executable, argv =
+    tool_execute_exec_stage
       (`Assoc
         [ "executable", `String ""
         ; "argv", `List [ `String "find"; `String "-type"; `String "f" ]
         ])
   in
+  Alcotest.(check string) "empty executable preserved" "" executable;
   Alcotest.(check (list string))
-    "promoted find expression gets explicit cwd path"
-    [ "."; "-type"; "f" ]
+    "argv0 command is not promoted"
+    [ "find"; "-type"; "f" ]
     argv
 
-let test_tool_execute_pipeline_find_expression_gets_default_path () =
+let test_tool_execute_pipeline_find_expression_not_rewritten () =
   match
     Agent_tool_execute_typed_input.of_json
       (`Assoc
@@ -753,8 +757,8 @@ let test_tool_execute_pipeline_find_expression_gets_default_path () =
       (Agent_tool_execute_typed_input.Pipeline
         { stages = { Agent_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
     Alcotest.(check (list string))
-      "pipeline find stage gets default path"
-      [ "."; "-type"; "f" ]
+      "pipeline find stage remains caller-authored"
+      [ "-type"; "f" ]
       argv
   | Ok (Agent_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
     Alcotest.fail "expected non-empty pipeline"
@@ -1118,10 +1122,10 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
 (* Test: oneOf with empty/null values (regression guard)             *)
 (* ================================================================ *)
 
-(** Regression guard: LLM may send both executable and pipeline.
-    Schema no longer advertises oneOf (PR #18110); handler precedence
-    picks executable. Empty pipeline:[] must not trigger any validation
-    error from the pre-hook shape check. *)
+(** Shape-validation boundary: an empty [pipeline = []] is treated as absent by
+    the lightweight oneOf pre-hook, so this layer forwards the payload. The
+    typed Execute parser still rejects any [executable] + [pipeline] field pair
+    before dispatch. *)
 let test_validate_args_tool_execute_exec_with_empty_pipeline () =
   let args =
     `Assoc
@@ -1541,14 +1545,14 @@ let () =
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
-      Alcotest.test_case "tool_execute find expression default path" `Quick
-        test_tool_execute_find_expression_gets_default_path;
-      Alcotest.test_case "tool_execute find global option default path" `Quick
-        test_tool_execute_find_global_option_keeps_option_first;
-      Alcotest.test_case "tool_execute promoted find default path" `Quick
-        test_tool_execute_promoted_find_expression_gets_default_path;
-      Alcotest.test_case "tool_execute pipeline find default path" `Quick
-        test_tool_execute_pipeline_find_expression_gets_default_path;
+      Alcotest.test_case "tool_execute find expression not rewritten" `Quick
+        test_tool_execute_find_expression_not_rewritten;
+      Alcotest.test_case "tool_execute find global option not rewritten" `Quick
+        test_tool_execute_find_global_option_not_rewritten;
+      Alcotest.test_case "tool_execute empty executable not promoted" `Quick
+        test_tool_execute_empty_executable_not_promoted;
+      Alcotest.test_case "tool_execute pipeline find not rewritten" `Quick
+        test_tool_execute_pipeline_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute rejects bad typed argv" `Quick
         test_validate_args_tool_execute_rejects_bad_argv_type;
       Alcotest.test_case "tool_execute exec + empty pipeline" `Quick

@@ -1175,6 +1175,11 @@ let internal_descriptors : t list =
       "Validate keeper repair inputs (execution path currently unsupported)." ~readonly:false
   ; masc_keeper_descriptor "down" "masc_keeper_down"
       "Stop keeper keepalive, optionally remove meta and session directory." ~readonly:false
+  (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools (require sw + clock). *)
+  ; masc_keeper_descriptor "msg" "masc_keeper_msg"
+      "Submit an async keeper turn (returns request_id for keeper_msg_result polling)." ~readonly:false
+  ; masc_keeper_descriptor "up" "masc_keeper_up"
+      "Bring a keeper online (create new or update existing)." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_surface_audit singleton ────────────── *)
   ; cluster_descriptor
       ~id:"masc.surface.audit"

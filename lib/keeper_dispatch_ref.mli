@@ -13,12 +13,26 @@
     The [~agent_name] parameter carries the caller keeper's agent name
     (typically [meta.agent_name]) so tools like [masc_keeper_status]
     that fall back to "self" when the [name] arg is empty can resolve
-    the right target. *)
+    the right target.
+
+    RFC-0182 Phase 5 PR-A.2 extension: optional Eio resource params
+    [?sw] / [?clock] / [?proc_mgr] / [?net] / [?mcp_session_id] for
+    Eio-bound tools (masc_keeper_msg, masc_keeper_up,
+    masc_keeper_sandbox_status, masc_keeper_create_from_persona).
+    Existing registrations accept and ignore them.  The trailing
+    [unit] argument is required so the OCaml compiler can determine
+    when the optional defaults apply. *)
 
 val dispatch
   : (config:Coord.config
      -> agent_name:string
+     -> ?sw:Eio.Switch.t
+     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+     -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+     -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+     -> ?mcp_session_id:string
      -> name:string
      -> args:Yojson.Safe.t
+     -> unit
      -> (bool * string) option)
       ref

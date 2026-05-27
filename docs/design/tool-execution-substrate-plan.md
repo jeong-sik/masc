@@ -3,6 +3,7 @@
 Status: decision plan
 Created: 2026-05-27
 Scope: keeper agent tool surface, descriptor spine, Shell IR, and tool admission rules
+HTML companion: `docs/design/tool-execution-substrate-plan.html`
 
 ## Decision
 

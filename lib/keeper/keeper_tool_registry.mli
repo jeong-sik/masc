@@ -41,11 +41,9 @@ val descriptor_read_only_tools : string list
     projections, sorted/deduped. *)
 val keeper_read_only_tools : string list
 
-val keeper_read_only_set : (string, unit) Hashtbl.t
-
 val is_keeper_read_only_tool : string -> bool
 
-(** Combined read-only check: keeper-local set + Tool_dispatch
+(** Combined read-only check: keeper-local lookup + catalog-backed
     read-only/idempotent classification. *)
 val is_effectively_read_only_tool : string -> bool
 

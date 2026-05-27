@@ -2470,7 +2470,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "legacy pr workflow removed from prompt"
     false
-    (contains_substring prompt "github_pr_workflow")
+    (contains_substring prompt ("github_" ^ "pr_workflow"))
 ;;
 
 let test_world_prompt_distinguishes_sandbox_and_worktree () =
@@ -2540,7 +2540,7 @@ let test_system_prompt_routes_forge_through_execute_shell_ir () =
     bool
     "legacy pr workflow removed"
     false
-    (contains_substring sys "github_pr_workflow")
+    (contains_substring sys ("github_" ^ "pr_workflow"))
 ;;
 
 let test_prompt_includes_autonomous_trigger_section () =

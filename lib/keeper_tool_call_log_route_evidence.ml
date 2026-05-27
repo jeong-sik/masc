@@ -2,24 +2,41 @@
 
 let assoc_opt = function
   | `Assoc fields -> Some fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    None
 ;;
 
 let assoc_member_opt name = function
   | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    None
 ;;
 
 let assoc_string_opt name json =
   match assoc_member_opt name json with
   | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
+  | Some (`String _)
+  | Some (`Null)
+  | Some (`Bool _)
+  | Some (`Int _)
+  | Some (`Intlit _)
+  | Some (`Float _)
+  | Some (`Assoc _)
+  | Some (`List _)
+  | None -> None
 ;;
 
 let assoc_bool_opt name json =
   match assoc_member_opt name json with
   | Some (`Bool value) -> Some value
-  | _ -> None
+  | Some (`Null)
+  | Some (`Int _)
+  | Some (`Intlit _)
+  | Some (`Float _)
+  | Some (`String _)
+  | Some (`Assoc _)
+  | Some (`List _)
+  | None -> None
 ;;
 
 let rec json_string_path_opt path json =
@@ -94,10 +111,10 @@ let route_candidate_of_output json =
   else (
     match assoc_member_opt "result" json with
     | Some result when route_candidate_has_fields result -> Some result
-    | _ ->
+    | Some _ | None ->
       (match assoc_member_opt "detail" json with
        | Some detail when route_candidate_has_fields detail -> Some detail
-       | _ -> None))
+       | Some _ | None -> None))
 ;;
 
 let route_safe_input_string ~max_output_len value =
@@ -118,7 +135,8 @@ let parse_tool_output_json_sanitized text =
 
 let assoc_fields = function
   | `Assoc fields -> fields
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    []
 ;;
 
 let descriptor_evidence_fields tool_name =
@@ -143,7 +161,7 @@ let approval_reason_from_text text =
       let reason = String.sub text (idx + 1) (String.length text - idx - 1) in
       let reason = String.trim reason in
       if reason = "" then Some marker else Some reason
-    | _ -> Some marker)
+    | Some _ | None -> Some marker)
   else None
 ;;
 
@@ -208,7 +226,7 @@ let policy_decision_fields ~tool_name ?success ~descriptor_fields ~parsed_output
         [ [ "ok" ]; [ "detail"; "ok" ] ]
     with
     | Some false -> true
-    | _ -> false
+    | Some true | None -> false
   in
   let reason_for_deny =
     first_some [ error; rule_id; shape_block; reason; failure_class ]
@@ -218,13 +236,13 @@ let policy_decision_fields ~tool_name ?success ~descriptor_fields ~parsed_output
       [ approval_reason_from_text route_text
       ; (match error with
          | Some value when contains_substring value "approval_required" -> Some value
-         | _ -> None)
+         | Some _ | None -> None)
       ; (match reason with
          | Some value when contains_substring value "approval_required" -> Some value
-         | _ -> None)
+         | Some _ | None -> None)
       ; (match rule_id with
          | Some value when contains_substring value "approval_required" -> Some value
-         | _ -> None)
+         | Some _ | None -> None)
       ]
   in
   let descriptor_present = descriptor_fields <> [] in
@@ -271,7 +289,7 @@ let policy_decision_fields ~tool_name ?success ~descriptor_fields ~parsed_output
           ~default:
             (match success with
              | Some false -> "tool_call_denied"
-             | _ -> "policy_rejection")
+             | Some true | None -> "policy_rejection")
           reason_for_deny )
     | None ->
       ( "allow"
@@ -299,7 +317,7 @@ let shell_ir_risk_fields ~descriptor_fields ~parsed_output ~route_json =
       |> Option.value ~default:"unknown"
     in
     [ "shell_ir_risk_class", `String risk_class ]
-  | _ -> []
+  | Some _ | None -> []
 ;;
 
 let route_evidence_json_of_tool_io ~success ~max_output_len ~tool_name ~input ~output_text =

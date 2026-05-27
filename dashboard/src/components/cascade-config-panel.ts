@@ -1123,7 +1123,12 @@ function SourceAssistInput({
   `
 }
 
-function firstNonEmpty(values: readonly string[]): string {
+// Find the first entry whose trimmed form is non-empty; return the original
+// (untrimmed) value, or '' when none qualifies. Distinct from
+// `lib/format-string.firstNonEmptyString` — that one returns the *trimmed* form
+// and `string | null`, this one preserves the raw value for `useSignal` seeding
+// and returns `string` so the signal has a guaranteed initial value.
+function firstNonBlankOrEmpty(values: readonly string[]): string {
   return values.find(value => value.trim() !== '') ?? ''
 }
 
@@ -1133,7 +1138,7 @@ function selectedBindingLabel(
   assist: CascadeRawConfigAssist,
 ): string {
   if (provider.trim() !== '' && model.trim() !== '') return `${provider.trim()}.${model.trim()}`
-  return firstNonEmpty(assist.bindings)
+  return firstNonBlankOrEmpty(assist.bindings)
 }
 
 function CascadeSourceAssist({
@@ -1277,9 +1282,9 @@ function CascadeRawConfigEditor({
   const editorDirty = useSignal(false)
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
-  const assistProvider = useSignal(firstNonEmpty(raw?.assist?.providers ?? []))
-  const assistModel = useSignal(firstNonEmpty(raw?.assist?.models ?? []))
-  const assistTier = useSignal(firstNonEmpty(raw?.assist?.tiers ?? []) || 'primary')
+  const assistProvider = useSignal(firstNonBlankOrEmpty(raw?.assist?.providers ?? []))
+  const assistModel = useSignal(firstNonBlankOrEmpty(raw?.assist?.models ?? []))
+  const assistTier = useSignal(firstNonBlankOrEmpty(raw?.assist?.tiers ?? []) || 'primary')
   const maxConcurrent = useSignal('2')
   const thinkingBudget = useSignal('8192')
   const mode = rawConfigModeSummary(raw)
@@ -1294,13 +1299,13 @@ function CascadeRawConfigEditor({
     const assist = raw?.assist
     if (!assist) return
     if (!assist.providers.includes(assistProvider.value)) {
-      assistProvider.value = firstNonEmpty(assist.providers)
+      assistProvider.value = firstNonBlankOrEmpty(assist.providers)
     }
     if (!assist.models.includes(assistModel.value)) {
-      assistModel.value = firstNonEmpty(assist.models)
+      assistModel.value = firstNonBlankOrEmpty(assist.models)
     }
     if (!assist.tiers.includes(assistTier.value)) {
-      assistTier.value = firstNonEmpty(assist.tiers) || 'primary'
+      assistTier.value = firstNonBlankOrEmpty(assist.tiers) || 'primary'
     }
   }, [raw?.updated_at, raw?.source_path])
 

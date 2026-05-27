@@ -106,6 +106,44 @@ let test_custom_urls_use_endpoint_scoped_health_keys () =
       (List.length runtime_keys)
   | _ -> fail "custom URL specs should parse"
 
+let test_capacity_key_partitions_by_model () =
+  let open Masc_mcp.Cascade_runtime_candidate in
+  let cfg_a =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Provider_d_compat
+      ~model_id:"qwen3.5"
+      ~base_url:"https://runpod.example.test/v1"
+      ()
+  in
+  let cfg_b =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Provider_d_compat
+      ~model_id:"llama3"
+      ~base_url:"https://runpod.example.test/v1"
+      ()
+  in
+  let cfg_same =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Provider_d_compat
+      ~model_id:"qwen3.5"
+      ~base_url:"https://runpod.example.test/v1"
+      ()
+  in
+  let candidate_a = of_provider_config cfg_a in
+  let candidate_b = of_provider_config cfg_b in
+  let candidate_same = of_provider_config cfg_same in
+  let key_a = capacity_key candidate_a in
+  let key_b = capacity_key candidate_b in
+  let key_same = capacity_key candidate_same in
+  check bool "same provider different model yields different keys" true
+    (not (String.equal key_a key_b));
+  check bool "same provider same model yields same key" true
+    (String.equal key_a key_same);
+  check bool "key contains base URL" true
+    (String.starts_with ~prefix:"https://runpod.example.test/v1" key_a);
+  check bool "key contains model suffix" true
+    (String.ends_with ~suffix:":qwen3.5" key_a)
+
 let () =
   run "Cascade_runtime"
     [
@@ -119,5 +157,10 @@ let () =
             test_openai_compat_declarative_labels_do_not_require_registry_entry;
           test_case "custom URLs use endpoint-scoped health keys" `Quick
             test_custom_urls_use_endpoint_scoped_health_keys;
+        ] );
+      ( "capacity_key",
+        [
+          test_case "capacity key partitions by model on same provider" `Quick
+            test_capacity_key_partitions_by_model;
         ] );
     ]

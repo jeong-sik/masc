@@ -15,11 +15,22 @@ const ROLE_ORDER: Record<DashboardAuthRole, number> = {
   admin: 2,
 }
 
-function compactWhitespace(value: string): string {
+/**
+ * SSOT for auth-text normalization helpers.
+ *
+ * Both `compactWhitespace` and `cleanErrorMessage` were defined byte-for-byte
+ * identically in three places (`lib/dashboard-auth-access.ts`,
+ * `lib/keeper-chat-access.ts`, `components/auth-status.ts`) until
+ * 2026-05-27. Consolidated here because (a) `dashboard-auth-access` is the
+ * base auth module both other consumers already depend on, and (b) the
+ * regex `/^[^\w가-힣@]+/u` is a closed contract for trimming auth error
+ * preambles — drift would change error message visibility per surface.
+ */
+export function compactWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
-function cleanErrorMessage(value: string | null | undefined): string | null {
+export function cleanErrorMessage(value: string | null | undefined): string | null {
   if (!value) return null
   return value.replace(/^[^\w가-힣@]+/u, '').trim() || null
 }

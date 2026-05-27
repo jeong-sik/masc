@@ -10,7 +10,7 @@ import {
   setStoredToken,
 } from '../api/core'
 import { resetMcpClientState } from '../api/mcp'
-import { dashboardAuthAccess } from '../lib/dashboard-auth-access'
+import { dashboardAuthAccess, cleanErrorMessage } from '../lib/dashboard-auth-access'
 import {
   hasDashboardActorQueryParam,
   readStoredDashboardActorName,
@@ -35,11 +35,6 @@ export function __resetForTests(): void {
   tokenInput.value = ''
   actorInput.value = ''
   bannerDismissed.value = false
-}
-
-function cleanErrorMessage(value: string | null | undefined): string | null {
-  if (!value) return null
-  return value.replace(/^[^\w가-힣@]+/u, '').trim() || null
 }
 
 function mutationStatusLabel(allowed: boolean): string {

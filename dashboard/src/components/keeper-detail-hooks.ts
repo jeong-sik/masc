@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'preact/hooks'
 import { fetchKeeperComposite, fetchKeeperRuntimeTrace } from '../api/keeper'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import {
   applyFetchFailed,
   applyFetchSucceeded,
@@ -9,9 +9,6 @@ import {
   loadingEvidence,
   type EvidenceState,
 } from './keeper-detail-evidence-state'
-
-const COMPOSITE_REFRESH_MS = 30_000
-const RUNTIME_TRACE_REFRESH_MS = 30_000
 
 /**
  * Typed evidence state shared by the keeper detail surface. The union
@@ -59,7 +56,7 @@ export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvid
       }
     }
     void refresh()
-    const cleanup = setupVisibleAutoRefresh(refresh, COMPOSITE_REFRESH_MS)
+    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
     return () => {
       cancelled = true
       controller.abort()
@@ -96,7 +93,7 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
       }
     }
     void refresh()
-    const cleanup = setupVisibleAutoRefresh(refresh, RUNTIME_TRACE_REFRESH_MS)
+    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
     return () => {
       cancelled = true
       controller.abort()

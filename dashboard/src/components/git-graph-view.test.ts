@@ -16,7 +16,7 @@ function styleBlock(blocks: ReturnType<typeof stylesheet>, selector: string): St
 
 describe("borderForStatus", () => {
   it.each([
-    ["conflict", "#ef4444"],
+    ["conflict", "#c46a5a"],
     ["dirty", "#f59e0b"],
     ["current", "#22c55e"],
     ["unknown", "#3a332c"],

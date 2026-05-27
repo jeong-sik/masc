@@ -56,63 +56,72 @@ let dashboard_board_json
       blind_votes
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
-    let base_fetch =
-      board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
-    in
-    (* Fetch one extra beyond the requested page so we can answer has_more
-       without a second query. total is only emitted when the result fits
-       entirely inside the fetched window — otherwise null (unknown). *)
-    let probe_fetch = base_fetch + 1 in
-    let posts =
-      Board_dispatch.list_posts
-        ?hearth
-        ~sort_by
-        ~exclude_system
-        ~exclude_automation
-        ?author_filter
-        ~limit:probe_fetch
-        ()
-    in
-    let karma_map = Board_dispatch.get_all_karma () in
-    let get_karma author = Option.value ~default:0 (List.assoc_opt author karma_map) in
-    let fetched_len = List.length posts in
-    let window_end = offset + limit in
-    let has_more = fetched_len > window_end in
-    let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
-    let paged = posts |> drop offset |> take limit in
-    let contributor_quality_for = board_contributor_quality_lookup ?config () in
-    let posts_json =
-      List.map
-        (fun (post : Board.post) ->
-           let author = Board.Agent_id.to_string post.author in
-           let post_id = Board.Post_id.to_string post.id in
-           let current_vote = board_current_vote_for_post ~voter ~post_id in
-           let contributor_quality = contributor_quality_for author in
-           board_post_dashboard_json
-             ~blind_votes
-             ?current_vote
-             ?contributor_quality
-             ~author_karma:(get_karma author)
-             post)
-        paged
-    in
-    `Assoc
-      [ "generated_at", `String (Masc_domain.now_iso ())
-      ; ( "summary"
-        , `Assoc
-            [ "visible_posts", `Int (List.length posts_json)
-            ; "sort_by", `String (board_sort_label sort_by)
-            ; "exclude_system", `Bool exclude_system
-            ; "exclude_automation", `Bool exclude_automation
-            ] )
-      ; "posts", `List posts_json
-      ; "count", `Int (List.length posts_json)
-      ; "limit", `Int limit
-      ; "offset", `Int offset
-      ; "has_more", `Bool has_more
-      ; "total", total_json
-      ; "sort_by", `String (board_sort_label sort_by)
-      ])
+    (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
+       fleets.  The compute below scans the post store, fetches the
+       karma map, and per-post enriches with vote + contributor
+       quality.  Running this on the Eio main domain blocked every
+       other HTTP fiber for the duration.  Domain_pool_ref offloads
+       to a worker domain; the [Dashboard_cache] above keeps user
+       requests on the cache fast-path so they never wait for this
+       refresh. *)
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let base_fetch =
+        board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
+      in
+      (* Fetch one extra beyond the requested page so we can answer has_more
+         without a second query. total is only emitted when the result fits
+         entirely inside the fetched window — otherwise null (unknown). *)
+      let probe_fetch = base_fetch + 1 in
+      let posts =
+        Board_dispatch.list_posts
+          ?hearth
+          ~sort_by
+          ~exclude_system
+          ~exclude_automation
+          ?author_filter
+          ~limit:probe_fetch
+          ()
+      in
+      let karma_map = Board_dispatch.get_all_karma () in
+      let get_karma author = Option.value ~default:0 (List.assoc_opt author karma_map) in
+      let fetched_len = List.length posts in
+      let window_end = offset + limit in
+      let has_more = fetched_len > window_end in
+      let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
+      let paged = posts |> drop offset |> take limit in
+      let contributor_quality_for = board_contributor_quality_lookup ?config () in
+      let posts_json =
+        List.map
+          (fun (post : Board.post) ->
+             let author = Board.Agent_id.to_string post.author in
+             let post_id = Board.Post_id.to_string post.id in
+             let current_vote = board_current_vote_for_post ~voter ~post_id in
+             let contributor_quality = contributor_quality_for author in
+             board_post_dashboard_json
+               ~blind_votes
+               ?current_vote
+               ?contributor_quality
+               ~author_karma:(get_karma author)
+               post)
+          paged
+      in
+      `Assoc
+        [ "generated_at", `String (Masc_domain.now_iso ())
+        ; ( "summary"
+          , `Assoc
+              [ "visible_posts", `Int (List.length posts_json)
+              ; "sort_by", `String (board_sort_label sort_by)
+              ; "exclude_system", `Bool exclude_system
+              ; "exclude_automation", `Bool exclude_automation
+              ] )
+        ; "posts", `List posts_json
+        ; "count", `Int (List.length posts_json)
+        ; "limit", `Int limit
+        ; "offset", `Int offset
+        ; "has_more", `Bool has_more
+        ; "total", total_json
+        ; "sort_by", `String (board_sort_label sort_by)
+        ]))
 ;;
 
 let dashboard_memory_http_json ?config request : Yojson.Safe.t =

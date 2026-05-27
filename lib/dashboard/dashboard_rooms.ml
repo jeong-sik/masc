@@ -223,7 +223,7 @@ let room_json ~config messages =
     ]
 ;;
 
-let json ~config ?me ~limit () =
+let compute_json ~config ?me ~limit () =
   let limit = clamp_limit limit in
   let recent_desc =
     Coord.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
@@ -246,4 +246,24 @@ let json ~config ?me ~limit () =
     ; "messages", `List messages_json
     ; "mentions_inbox", `List mentions_inbox
     ]
+;;
+
+(* /api/v1/dashboard/rooms was measured at 8-9s under live load.
+   [Coord.get_messages_raw] is a synchronous scan over the message
+   store and was being executed on the Eio main domain, so other
+   HTTP fibers sharing the domain stalled for the duration.  Cache
+   the response with stale-while-revalidate and run the underlying
+   compute on a worker domain via Domain_pool. *)
+let cache_ttl_sec = 5.0
+
+let json ~config ?me ~limit () =
+  let key =
+    Printf.sprintf
+      "dashboard.rooms:%s;%s;%d"
+      config.Coord.base_path
+      (Option.value ~default:"-" me)
+      limit
+  in
+  Dashboard_cache.get_or_compute key ~ttl:cache_ttl_sec (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () -> compute_json ~config ?me ~limit ()))
 ;;

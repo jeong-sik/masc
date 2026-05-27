@@ -50,6 +50,33 @@ let task_owner_hooks = Atomic.make default_task_owner_hooks
 let set_task_owner_hooks hooks = Atomic.set task_owner_hooks hooks
 let current_task_owner_hooks () = Atomic.get task_owner_hooks
 
+(* Workflow rejection scope-blocked task registry. When a tool execution yields
+   a [Block_scope] workflow rejection, the task ID is recorded here so that
+   [handle_claim_next] can exclude it from the next [claim_next_r] call. Entries
+   expire after [blocked_task_ttl_seconds] to match the per-keeper
+   [workflow_block_ttl_seconds] in [Keeper_tools_oas]. *)
+
+let blocked_task_ttl_seconds = 1800.
+
+let blocked_task_ids_table : (string, float) Hashtbl.t = Hashtbl.create 16
+let blocked_task_ids_mutex = Mutex.create ()
+
+let register_scope_blocked_task_id task_id =
+  Mutex.protect blocked_task_ids_mutex (fun () ->
+    Hashtbl.replace blocked_task_ids_table task_id (Time_compat.now ()))
+
+let scope_blocked_task_ids () =
+  Mutex.protect blocked_task_ids_mutex (fun () ->
+    let now = Time_compat.now () in
+    let expired = ref [] in
+    Hashtbl.iter
+      (fun task_id blocked_at ->
+        if now -. blocked_at > blocked_task_ttl_seconds then
+          expired := task_id :: !expired)
+      blocked_task_ids_table;
+    List.iter (fun k -> Hashtbl.remove blocked_task_ids_table k) !expired;
+    Hashtbl.fold (fun task_id _ acc -> task_id :: acc) blocked_task_ids_table [])
+
 open Tool_args
 
 (* RFC-0189: [Masc_domain] backend Error variants (Task_error /
@@ -454,7 +481,17 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
      [handle_claim] above).  Workspace.claim_next_r operates on
      [~agent_name] alone; backlog read does not require an entry under
      agents_dir. *)
-  let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
+  (* F4: exclude tasks that are scope-blocked by prior workflow rejections.
+     The blocked-ID set is populated by [register_scope_blocked_task_id]
+     when a [Block_scope] workflow rejection is recorded. *)
+  let exclude_task_ids = scope_blocked_task_ids () in
+  let result =
+    Workspace.claim_next_r
+      ctx.config
+      ~agent_name:ctx.agent_name
+      ~exclude_task_ids
+      ()
+  in
   match result with
   | Workspace.Claim_next_claimed { message; task_id; _ } ->
     sync_owner_current_task_binding ctx;

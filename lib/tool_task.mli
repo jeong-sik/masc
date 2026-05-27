@@ -71,3 +71,11 @@ val build_verdict_sse_payload :
   req:Anti_rationalization.review_request ->
   result:Anti_rationalization.review_result ->
   Yojson.Safe.t
+
+(** F4: Register a task ID as scope-blocked by a workflow rejection.
+    [handle_claim_next] excludes these IDs from the next claim cycle.
+    Entries expire after 1800s to match [Keeper_tools_oas.workflow_block_ttl_seconds]. *)
+val register_scope_blocked_task_id : string -> unit
+
+(** F4: Return currently scope-blocked task IDs (non-expired). *)
+val scope_blocked_task_ids : unit -> string list

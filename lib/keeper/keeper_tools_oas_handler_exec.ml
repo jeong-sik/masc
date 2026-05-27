@@ -81,7 +81,13 @@ let execute_with_observers
                   (workflow_rejection_scope_block_record
                      failure_counts
                      scope_key
-                     info)
+                     info);
+                (* F4: also register the task ID in the global blocked-task
+                   registry so [claim_next_r] can exclude it. *)
+                (match info.task_id with
+                 | Some tid ->
+                   Tool_task_handlers.register_scope_blocked_task_id tid
+                 | None -> ())
               | None -> ());
             workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
           | None -> [])

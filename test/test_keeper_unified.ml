@@ -6182,13 +6182,15 @@ let test_keeper_msg_async_failure_surface () =
                       ; "message", `String "check discovery failure"
                       ])
             with
-            | Some (false, err) ->
+            | Some result when not (Tool_result.is_success result) ->
+              let err = Tool_result.message result in
               if
                 not
                   (contains_substring err "local discovery refresh required"
                    && contains_substring err "refresh failed")
               then fail ("unexpected synchronous error: " ^ err)
-            | Some (true, body) ->
+            | Some result ->
+              let body = Tool_result.message result in
               fail ("expected synchronous failure, got queued body: " ^ body)
             | None -> fail "masc_keeper_msg dispatch missing"))
 ;;

@@ -3,6 +3,10 @@ open Masc_mcp
 
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 
+let tuple_of_tool_result result =
+  Tool_result.is_success result, Tool_result.message result
+;;
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_meta_listing_" "" in
   Unix.unlink dir;
@@ -300,7 +304,8 @@ let test_keeper_listing_ignores_sidecar_json_files () =
         [ "dot.name"; "sangsu" ] keepalive_names;
       let ctx = keeper_ctx env sw config "operator" in
       let ok, body =
-        Keeper_status.handle_keeper_list ctx (`Assoc [ ("limit", `Int 10) ])
+        tuple_of_tool_result
+          (Keeper_status.handle_keeper_list ctx (`Assoc [ ("limit", `Int 10) ]))
       in
       check bool "keeper status list ok" true ok;
       let json = parse_json_exn body in
@@ -316,7 +321,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
             ~args:(`Assoc [ ("limit", `Int 10) ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_list dispatch"
       in
       check bool "tool keeper list ok without registry entries" true ok;
@@ -339,7 +344,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
             ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_list dispatch (detailed)"
       in
       check bool "tool keeper list (detailed) ok without registry entries" true
@@ -562,7 +567,7 @@ let test_keeper_up_uses_toml_autoboot_default () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
             ~args:(`Assoc [ ("name", `String keeper_name) ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_up dispatch"
       in
       check bool "keeper_up ok" true ok;
@@ -652,7 +657,7 @@ also_allow = ["masc_tasks", "masc_transition"]
           Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
             ~args:(`Assoc [ ("name", `String keeper_name) ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_up dispatch"
       in
       check bool "keeper_up update ok" true ok;
@@ -719,7 +724,7 @@ let test_keeper_list_normalizes_unknown_social_model () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
             ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_list dispatch"
       in
       check bool "tool keeper list ok" true ok;
@@ -761,7 +766,7 @@ let test_keeper_list_exposes_last_social_transition_reason () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
             ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_list dispatch"
       in
       check bool "tool keeper list ok" true ok;
@@ -809,7 +814,7 @@ let test_keeper_persona_audit_reports_durable_live_persona_keeper () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
             ~args:(`Assoc [ ("name", `String "analyst") ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_persona_audit dispatch"
       in
       check bool "tool audit ok" true ok;
@@ -873,7 +878,7 @@ let test_keeper_persona_audit_reports_dormant_autoboot_disabled_keeper () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
             ~args:(`Assoc [ ("name", `String "dormant") ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_persona_audit dispatch"
       in
       check bool "tool audit ok" true ok;
@@ -957,7 +962,7 @@ let test_keeper_persona_audit_flags_stale_active_goal_ids () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
             ~args:(`Assoc [ ("name", `String "analyst") ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_persona_audit dispatch"
       in
       check bool "tool audit ok" true ok;
@@ -1015,7 +1020,7 @@ let test_keeper_persona_audit_flags_missing_persona_runtime () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
             ~args:(`Assoc [ ("name", `String "ghost") ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_persona_audit dispatch"
       in
       check bool "tool audit ok" true ok;
@@ -1080,7 +1085,7 @@ let test_keeper_persona_audit_flags_runtime_meta_parse_error () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
             ~args:(`Assoc [ ("name", `String "broken") ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_persona_audit dispatch"
       in
       check bool "tool audit ok" true ok;
@@ -1134,7 +1139,7 @@ let test_keeper_list_preserves_known_social_model () =
           Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
             ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
         with
-        | Some result -> result
+        | Some result -> tuple_of_tool_result result
         | None -> fail "expected masc_keeper_list dispatch"
       in
       check bool "tool keeper list ok" true ok;

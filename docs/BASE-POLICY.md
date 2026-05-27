@@ -161,7 +161,7 @@ val dispatch : name:string -> args:Yojson.Safe.t -> tool_result option
 **After**:
 ```ocaml
 (** Tool_compact — placeholder tool module. … *)
-type tool_result = bool * string
+type tool_result = Tool_result.result
 val schemas : Types.tool_schema list
 val dispatch : name:string -> args:Yojson.Safe.t -> tool_result option
 ```

@@ -7,24 +7,6 @@ open Keeper_runtime
 
 include Tool_keeper_ops
 
-let typed_result_of_tuple ~tool_name (ok, body) : Tool_result.result =
-  let start_time = Time_compat.now () in
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  if ok
-  then Tool_result.make_ok ~tool_name ~start_time ~data ()
-  else
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Runtime_failure
-      ~start_time
-      ~data
-      body
-;;
-
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.  Uses
    [Coord.config] only (no Eio fields), letting Tool_keeper register
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
@@ -70,7 +52,7 @@ let keeper_list_body ~(config : Coord.config) args : tool_result =
         in
         Yojson.Safe.pretty_to_string json)
   in
-  (true, body)
+  tool_result_ok body
 
 let handle_keeper_list ctx args : tool_result =
   keeper_list_body ~config:ctx.config args
@@ -151,19 +133,19 @@ let handle_keeper_sandbox_status ctx args : tool_result =
           ~config:ctx.config ~meta ~timeout_sec ~verbose ()
       in
       let items = List.map render_item unique_metas in
-      ( true,
-        Yojson.Safe.pretty_to_string
-          (`Assoc
-             [
-               ("count", `Int (List.length items));
-               ("items", `List items);
-             ]) )
+      tool_result_ok
+        (Yojson.Safe.pretty_to_string
+           (`Assoc
+              [
+                ("count", `Int (List.length items));
+                ("items", `List items);
+              ]))
   | _ ->
       (match prepare_passive_keeper_identity ctx args with
-       | Error err -> (false, err)
+       | Error err -> tool_result_error err
        | Ok (prepared_args, identity_reseed) -> (
            match resolve_keeper_meta ctx prepared_args with
-           | Error err -> (false, err)
+           | Error err -> tool_result_error err
            | Ok meta ->
                let json =
                  `Assoc
@@ -173,15 +155,15 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                        Keeper_sandbox_control.live_status_json
                          ~include_preflight ~config:ctx.config ~meta
                          ~timeout_sec ~verbose () );
-                   ]
+                 ]
                  |> attach_identity_reseed ?identity_reseed
                in
-               (true, Yojson.Safe.pretty_to_string json)))
+               tool_result_ok (Yojson.Safe.pretty_to_string json)))
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_start_body ~(config : Coord.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
-  | Error err -> (false, err)
+  | Error err -> tool_result_error err
   | Ok meta ->
       let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
       let ttl_sec = Stdlib.Float.min 86_400.0 (Stdlib.Float.max 1.0 (get_float args "ttl_sec" 1800.0)) in
@@ -191,23 +173,23 @@ let keeper_sandbox_start_body ~(config : Coord.config) args : tool_result =
              (network_mode_to_string meta.network_mode))
       in
       (match parse_network_mode_or_error network_mode_raw with
-       | Error err -> (false, err)
+       | Error err -> tool_result_error err
        | Ok network_mode -> (
            match
              Keeper_sandbox_control.start_managed_container
                ~config ~meta ~network_mode ~ttl_sec ~timeout_sec ()
            with
-           | Error err -> (false, err)
+           | Error err -> tool_result_error err
            | Ok result ->
                invalidate_status_cache meta.name;
-               ( true,
-                 Yojson.Safe.pretty_to_string
-                   (`Assoc
-                      [
-                        ("keeper", `String meta.name);
-                        ("action", `String "start");
-                        ("sandbox", result);
-                      ]) )))
+               tool_result_ok
+                 (Yojson.Safe.pretty_to_string
+                    (`Assoc
+                       [
+                         ("keeper", `String meta.name);
+                         ("action", `String "start");
+                         ("sandbox", result);
+                       ]))))
 
 let handle_keeper_sandbox_start ctx args : tool_result =
   keeper_sandbox_start_body ~config:ctx.config args
@@ -225,7 +207,7 @@ let keeper_sandbox_stop_body ~(config : Coord.config) args : tool_result =
     | name -> Some name
   in
   match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
-  | Error err -> (false, error_response_typed ~code:Validation_error err)
+  | Error err -> tool_result_error (error_response_typed ~code:Validation_error err)
   | Ok scope ->
       let stop_result =
         Keeper_sandbox_control.stop_containers
@@ -262,16 +244,16 @@ let keeper_sandbox_stop_body ~(config : Coord.config) args : tool_result =
                  `List (List.map (fun err -> `String err) cleanup.errors));
               ]
       in
-      ( true,
-        Yojson.Safe.pretty_to_string
-          (`Assoc
-             [
-               ("action", `String "stop");
-               ("keeper", Json_util.string_opt_to_json keeper_name);
-               ("container_kind", `String (Keeper_sandbox_control.stop_scope_to_string scope));
-               ("stop_result", stop_json);
-               ("stale_cleanup", stale_json);
-             ]) )
+      tool_result_ok
+        (Yojson.Safe.pretty_to_string
+           (`Assoc
+              [
+                ("action", `String "stop");
+                ("keeper", Json_util.string_opt_to_json keeper_name);
+                ("container_kind", `String (Keeper_sandbox_control.stop_scope_to_string scope));
+                ("stop_result", stop_json);
+                ("stale_cleanup", stale_json);
+              ]))
 
 let handle_keeper_sandbox_stop ctx args : tool_result =
   keeper_sandbox_stop_body ~config:ctx.config args
@@ -303,16 +285,18 @@ let resolve_ctx ctx ~name:_ _args = ctx
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_reset_body ~(config : Coord.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
-  | Error err -> (false, err)
+  | Error err -> tool_result_error err
   | Ok meta ->
     let reset_meta = Keeper_types.reset_runtime_state meta in
     (match Keeper_types.write_meta config reset_meta with
      | Ok () ->
-       (true, Printf.sprintf
-         "Reset runtime state for %s: usage counters zeroed, last_model_used cleared."
-         meta.name)
+       tool_result_ok
+         (Printf.sprintf
+            "Reset runtime state for %s: usage counters zeroed, last_model_used cleared."
+            meta.name)
      | Error err ->
-       (false, Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
+       tool_result_error
+         (Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
 
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
@@ -340,7 +324,7 @@ let resolve_primary_max_context (meta : Keeper_types.keeper_meta option) : int =
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_compact_body ~(config : Coord.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
-  | Error err -> (false, err)
+  | Error err -> tool_result_error err
   | Ok name ->
     let force = get_bool args "force" false in
     (* Registry race: [resolve_keeper_name] succeeded but the registry entry
@@ -351,8 +335,10 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
     | None ->
       Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
-      (false, error_response_typed ~code:Validation_error
-        (Printf.sprintf "keeper %s is not in the registry" name))
+      tool_result_error
+        (error_response_typed
+           ~code:Validation_error
+           (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
     let phase_before = Keeper_state_machine.phase_to_string entry.phase in
     (* Phase precondition: Overflowed, Paused, or (Running/Failing with force).
@@ -367,10 +353,12 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
     if not allowed then begin
       Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
-      (false, error_response_typed ~code:Validation_error
-        (Printf.sprintf
-           "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
-           name phase_before))
+      tool_result_error
+        (error_response_typed
+           ~code:Validation_error
+           (Printf.sprintf
+              "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
+              name phase_before))
     end
     else begin
       (* Dispatch FSM event *)
@@ -380,7 +368,7 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
       (* Read meta for checkpoint access *)
       match read_meta_resolved config name with
       | Ok None | Error _ ->
-        (false, Printf.sprintf "keeper %s: meta unavailable for compaction" name)
+        tool_result_error (Printf.sprintf "keeper %s: meta unavailable for compaction" name)
       | Ok (Some (_resolved, meta)) ->
         let base_dir = Keeper_types.session_base_dir config in
         let model = Keeper_context_runtime.checkpoint_model_of_meta meta in
@@ -402,18 +390,20 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
           invalidate_status_cache name;
           Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
             ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Ok))] ();
-          (true,
-           Yojson.Safe.to_string
-             (`Assoc [
-               ("name", `String name);
-               ("phase_before", `String phase_before);
-               ("phase_after", `String
-                  (match Keeper_registry.get ~base_path:config.base_path name with
-                   | Some entry -> Keeper_state_machine.phase_to_string entry.phase
-                   | None -> "unknown"));
-               ("before_tokens", `Int recovery.compaction.before_tokens);
-               ("after_tokens", `Int recovery.compaction.after_tokens);
-             ]))
+          tool_result_ok
+            (Yojson.Safe.to_string
+               (`Assoc
+                 [
+                   ("name", `String name);
+                   ("phase_before", `String phase_before);
+                   ( "phase_after"
+                   , `String
+                       (match Keeper_registry.get ~base_path:config.base_path name with
+                        | Some entry -> Keeper_state_machine.phase_to_string entry.phase
+                        | None -> "unknown") );
+                   ("before_tokens", `Int recovery.compaction.before_tokens);
+                   ("after_tokens", `Int recovery.compaction.after_tokens);
+                 ]))
         | None ->
           (* Compaction infrastructure unavailable — emit [Compaction_failed]
              so [context_overflow] stays set and [derive_phase] re-projects
@@ -429,10 +419,10 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
             });
           Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
             ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label No_checkpoint))] ();
-          (false,
-           Printf.sprintf
-             "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
-             name)
+          tool_result_error
+            (Printf.sprintf
+               "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
+               name)
     end
 
 let handle_keeper_compact ctx args : tool_result =
@@ -446,20 +436,24 @@ let handle_keeper_compact ctx args : tool_result =
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_clear_body ~(config : Coord.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
-  | Error err -> (false, err)
+  | Error err -> tool_result_error err
   | Ok name ->
     let reason = String.trim (get_string args "reason" "") in
     if String.equal reason "" then
-      (false, error_response_typed ~code:Validation_error
-        "reason is required for masc_keeper_clear (audit trail)")
+      tool_result_error
+        (error_response_typed
+           ~code:Validation_error
+           "reason is required for masc_keeper_clear (audit trail)")
     else
     (* Same registry race guard as [handle_keeper_compact]: if the keeper
        disappeared between [resolve_keeper_name] and [get], abort cleanly
        rather than silently proceed with a half-applied clear. *)
     match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
-      (false, error_response_typed ~code:Validation_error
-        (Printf.sprintf "keeper %s is not in the registry" name))
+      tool_result_error
+        (error_response_typed
+           ~code:Validation_error
+           (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
       let phase_before = Keeper_state_machine.phase_to_string entry.phase in
@@ -592,21 +586,23 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
       Prometheus.inc_counter Keeper_metrics.(to_string OperatorClear)
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
-      (true,
-       Yojson.Safe.to_string
-         (`Assoc [
-           ("name", `String name);
-           ("phase_before", `String phase_before);
-           ("phase_after", `String
-              (match Keeper_registry.get ~base_path:config.base_path name with
-               | Some entry -> Keeper_state_machine.phase_to_string entry.phase
-               | None -> "unknown"));
-           ("cleared_message_count", `Int cleared_count);
-           ("checkpoint_found", `Bool checkpoint_found);
-           ("continuity_cleared", `Bool continuity_cleared);
-           ("preserve_system_prompt", `Bool preserve_system);
-           ("reason", `String reason);
-         ]))
+      tool_result_ok
+        (Yojson.Safe.to_string
+           (`Assoc
+             [
+               ("name", `String name);
+               ("phase_before", `String phase_before);
+               ( "phase_after"
+               , `String
+                   (match Keeper_registry.get ~base_path:config.base_path name with
+                    | Some entry -> Keeper_state_machine.phase_to_string entry.phase
+                    | None -> "unknown") );
+               ("cleared_message_count", `Int cleared_count);
+               ("checkpoint_found", `Bool checkpoint_found);
+               ("continuity_cleared", `Bool continuity_cleared);
+               ("preserve_system_prompt", `Bool preserve_system);
+               ("reason", `String reason);
+             ]))
 
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
@@ -615,25 +611,25 @@ let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
-  | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
-  | "masc_persona_schema" -> Some (Persona.handle_persona_schema ctx args)
-  | "masc_persona_generate" -> Some (Persona.handle_persona_generate ctx args)
-  | "masc_persona_save" -> Some (Persona.handle_persona_save ctx args)
-  | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
-  | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
-  | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
-  | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
-  | "masc_keeper_msg_result" -> Some (handle_keeper_msg_result ctx args)
-  | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
-  | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
-  | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
-  | "masc_keeper_persona_audit" -> Some (handle_keeper_persona_audit ctx args)
-  | "masc_keeper_sandbox_status" -> Some (handle_keeper_sandbox_status ctx args)
-  | "masc_keeper_sandbox_start" -> Some (handle_keeper_sandbox_start ctx args)
-  | "masc_keeper_sandbox_stop" -> Some (handle_keeper_sandbox_stop ctx args)
-  | "masc_keeper_reset" -> Some (handle_keeper_reset ctx args)
-  | "masc_keeper_compact" -> Some (handle_keeper_compact ctx args)
-  | "masc_keeper_clear" -> Some (handle_keeper_clear ctx args)
+  | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
+  | "masc_persona_schema" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_schema ctx args))
+  | "masc_persona_generate" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_generate ctx args))
+  | "masc_persona_save" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_save ctx args))
+  | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
+  | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
+  | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
+  | "masc_keeper_msg" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg ctx args))
+  | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
+  | "masc_keeper_repair" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_repair ctx args))
+  | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
+  | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
+  | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
+  | "masc_keeper_sandbox_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_sandbox_status ctx args))
+  | "masc_keeper_sandbox_start" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_sandbox_start ctx args))
+  | "masc_keeper_sandbox_stop" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_sandbox_stop ctx args))
+  | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
+  | "masc_keeper_compact" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_compact ctx args))
+  | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
   | _ -> None
 
 (** Streaming dispatch: only handles keeper_msg with text delta forwarding.
@@ -644,7 +640,10 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
   let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_keeper_msg" ->
-      Some (handle_keeper_msg_stream ~on_text_delta ctx args)
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (handle_keeper_msg_stream ~on_text_delta ctx args))
   | _ -> None
 
 (* ================================================================ *)
@@ -700,20 +699,11 @@ let () =
   := fun ~name ~args ->
     match name with
     | "masc_persona_list" ->
-      Some
-        (typed_result_of_tuple
-           ~tool_name:name
-           (Keeper_persona.persona_list_handler args))
+      Some (tool_result_with_tool_name ~tool_name:name (Keeper_persona.persona_list_handler args))
     | "masc_persona_schema" ->
-      Some
-        (typed_result_of_tuple
-           ~tool_name:name
-           (Keeper_persona.persona_schema_handler args))
+      Some (tool_result_with_tool_name ~tool_name:name (Keeper_persona.persona_schema_handler args))
     | "masc_persona_save" ->
-      Some
-        (typed_result_of_tuple
-           ~tool_name:name
-           (Keeper_persona.persona_save_handler args))
+      Some (tool_result_with_tool_name ~tool_name:name (Keeper_persona.persona_save_handler args))
     | _ -> None
 ;;
 
@@ -742,44 +732,44 @@ let () =
   := fun ~config ~agent_name ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ~name ~args () ->
     match name with
     | "masc_keeper_list" ->
-      Some (typed_result_of_tuple ~tool_name:name (keeper_list_body ~config args))
+      Some (tool_result_with_tool_name ~tool_name:name (keeper_list_body ~config args))
     | "masc_keeper_msg_result" ->
       Some
-        (typed_result_of_tuple
+        (tool_result_with_tool_name
            ~tool_name:name
            (Tool_keeper_ops.keeper_msg_result_body ~config args))
     | "masc_keeper_compact" ->
-      Some (typed_result_of_tuple ~tool_name:name (keeper_compact_body ~config args))
+      Some (tool_result_with_tool_name ~tool_name:name (keeper_compact_body ~config args))
     | "masc_keeper_clear" ->
-      Some (typed_result_of_tuple ~tool_name:name (keeper_clear_body ~config args))
+      Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args))
     | "masc_keeper_sandbox_start" ->
       Some
-        (typed_result_of_tuple ~tool_name:name (keeper_sandbox_start_body ~config args))
+        (tool_result_with_tool_name ~tool_name:name (keeper_sandbox_start_body ~config args))
     | "masc_keeper_sandbox_stop" ->
       Some
-        (typed_result_of_tuple ~tool_name:name (keeper_sandbox_stop_body ~config args))
+        (tool_result_with_tool_name ~tool_name:name (keeper_sandbox_stop_body ~config args))
     | "masc_keeper_reset" ->
-      Some (typed_result_of_tuple ~tool_name:name (keeper_reset_body ~config args))
+      Some (tool_result_with_tool_name ~tool_name:name (keeper_reset_body ~config args))
     | "masc_keeper_persona_audit" ->
       Some
-        (typed_result_of_tuple
+        (tool_result_with_tool_name
            ~tool_name:name
            (Tool_keeper_persona_audit.handle ~config args))
     | "masc_keeper_status" ->
       Some
-        (typed_result_of_tuple
+        (tool_result_with_tool_name
            ~tool_name:name
            (Tool_keeper_ops.keeper_status_body ~config ~agent_name args))
     | "masc_keeper_repair" ->
       Some
-        (typed_result_of_tuple
+        (tool_result_with_tool_name
            ~tool_name:name
            (Tool_keeper_ops.keeper_repair_body ~config ~agent_name args))
     | "masc_keeper_down" ->
       Tool_keeper_ops.invalidate_keeper_list_cache ();
       Tool_keeper_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
       Some
-        (typed_result_of_tuple
+        (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_turn_lifecycle.handle_keeper_down_config ~config args))
     (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools.  Require both

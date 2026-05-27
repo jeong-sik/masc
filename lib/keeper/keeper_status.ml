@@ -27,7 +27,7 @@ let handle_keeper_list ctx args : tool_result =
   let detailed = get_bool args "detailed" false in
   let dir = keeper_dir ctx.config in
   match Safe_ops.list_dir_safe dir with
-  | Error e -> (false, e)
+  | Error e -> tool_result_error e
   | Ok _files ->
   let keeper_names = Keeper_types.keeper_names ctx.config |> take limit in
   if not detailed then
@@ -35,7 +35,7 @@ let handle_keeper_list ctx args : tool_result =
       ("count", `Int (List.length keeper_names));
       ("keepers", `List (List.map (fun k -> `String k) keeper_names));
     ] in
-    (true, Yojson.Safe.to_string json)
+    tool_result_ok (Yojson.Safe.to_string json)
   else
     let now_ts = Time_compat.now () in
     let keepers =
@@ -320,20 +320,20 @@ let handle_keeper_list ctx args : tool_result =
         ("count", `Int (List.length keepers));
         ("keepers", `List keepers);
       ] in
-      (true, Yojson.Safe.to_string json)
+      tool_result_ok (Yojson.Safe.to_string json)
 
 let handle_keeper_trajectory ctx args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    ( false,
-      Printf.sprintf
-        "invalid keeper name %S (must be non-empty and match \
-         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-        requested_name )
+    tool_result_error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         requested_name)
   else
     match read_meta_resolved ctx.config requested_name with
-    | Error e -> (false, "read error: " ^ e)
-    | Ok None -> (false, Printf.sprintf "keeper not found: %s" requested_name)
+    | Error e -> tool_result_error ("read error: " ^ e)
+    | Ok None -> tool_result_error (Printf.sprintf "keeper not found: %s" requested_name)
     | Ok (Some (_resolved_name, m)) ->
       let limit = get_int args "limit" 20 in
       let masc_root = Common.masc_dir_from_base_path ~base_path:ctx.config.base_path in
@@ -349,7 +349,11 @@ let handle_keeper_trajectory ctx args : tool_result =
           List.filteri (fun i _e -> i >= drop) entries
       in
       if recent = [] then
-        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." m.name (Keeper_id.Trace_id.to_string m.runtime.trace_id))
+        tool_result_ok
+          (Printf.sprintf
+             "Keeper %s (trace: %s) has no trajectory entries."
+             m.name
+             (Keeper_id.Trace_id.to_string m.runtime.trace_id))
       else
         let json_list = List.map Trajectory.entry_to_json recent in
         let json = `Assoc [
@@ -360,20 +364,20 @@ let handle_keeper_trajectory ctx args : tool_result =
           ("showing", `Int (List.length recent));
           ("entries", `List json_list);
         ] in
-        (true, Yojson.Safe.to_string json)
+        tool_result_ok (Yojson.Safe.to_string json)
 
 let handle_keeper_eval ctx args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    ( false,
-      Printf.sprintf
-        "invalid keeper name %S (must be non-empty and match \
-         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-        requested_name )
+    tool_result_error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         requested_name)
   else
     match read_meta_resolved ctx.config requested_name with
-    | Error e -> (false, "read error: " ^ e)
-    | Ok None -> (false, Printf.sprintf "keeper not found: %s" requested_name)
+    | Error e -> tool_result_error ("read error: " ^ e)
+    | Ok None -> tool_result_error (Printf.sprintf "keeper not found: %s" requested_name)
     | Ok (Some (_resolved_name, m)) ->
       let scenario_file = get_string_opt args "scenario_file" in
       let masc_root = Common.masc_dir_from_base_path ~base_path:ctx.config.base_path in
@@ -381,7 +385,8 @@ let handle_keeper_eval ctx args : tool_result =
         Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
       in
       if entries = [] then
-        (true, Printf.sprintf "Keeper %s has no trajectory data to evaluate." m.name)
+        tool_result_ok
+          (Printf.sprintf "Keeper %s has no trajectory data to evaluate." m.name)
       else
         let total = List.length entries in
         (* Build a lightweight eval summary from trajectory *)
@@ -427,4 +432,4 @@ let handle_keeper_eval ctx args : tool_result =
           ("scenario_file", scenario_info);
           ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
         ] in
-        (true, Yojson.Safe.to_string json)
+        tool_result_ok (Yojson.Safe.to_string json)

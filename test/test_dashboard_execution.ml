@@ -454,8 +454,8 @@ let create_keeper env sw config name =
             ("autoboot_enabled", `Bool false);
           ])
   with
-  | Some (true, _) -> ()
-  | Some (false, err) -> fail err
+  | Some result when Tool_result.is_success result -> ()
+  | Some result -> fail (Tool_result.message result)
   | None -> fail "missing masc_keeper_up dispatch"
 
 let append_execution_receipt

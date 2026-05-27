@@ -37,6 +37,7 @@ import {
   routeRefsFromText,
   type IdeContextRouteLink,
 } from './ide-context-lens'
+import { IDE_INLINE_BADGE_BASE } from './context-badge-style'
 
 function postAuthorId(post: BoardPost): string {
   return post.author_identity?.id ?? post.author ?? '(unknown author)'
@@ -58,13 +59,8 @@ const KIND_TOKEN: Record<ThreadKind, string> = {
   suggest: 'var(--color-status-warn)',
 }
 const CONVERSATION_CONTEXT_BADGE_STYLE = {
-  fontSize: 'var(--fs-9)',
-  padding: '0 3px',
-  border: '1px solid var(--color-border-default)',
-  borderRadius: 'var(--r-0)',
-  color: 'var(--color-fg-muted)',
+  ...IDE_INLINE_BADGE_BASE,
   background: 'var(--color-bg-surface)',
-  fontFamily: 'var(--font-mono)',
 }
 
 const EMPTY_POSTS: ReadonlyArray<BoardPost> = []

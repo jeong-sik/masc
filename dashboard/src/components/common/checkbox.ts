@@ -11,6 +11,7 @@
 // ended up shipping orphan labels.
 
 import { html } from 'htm/preact'
+import { isNonEmptyString } from '../../lib/format-string'
 import { ringFocusClasses } from './ring'
 
 const CHECKBOX_BASE = `w-4 h-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} accent-[var(--color-accent-fg)]`
@@ -71,10 +72,6 @@ export interface CheckboxProps {
   onClick?: (e: Event) => void
 }
 
-function hasNonEmptyString(value: string | undefined): boolean {
-  return value !== undefined && value !== ''
-}
-
 function checkedState(checked: boolean | undefined): CheckboxCheckedState {
   if (checked === undefined) return 'unset'
   return checked ? 'true' : 'false'
@@ -89,9 +86,9 @@ function a11yHook({
   ariaLabel?: string
   ariaLabelledby?: string
 }): CheckboxA11yHook {
-  if (hasNonEmptyString(ariaLabelledby)) return 'aria-labelledby'
-  if (hasNonEmptyString(ariaLabel)) return 'aria-label'
-  if (hasNonEmptyString(id)) return 'id'
+  if (isNonEmptyString(ariaLabelledby)) return 'aria-labelledby'
+  if (isNonEmptyString(ariaLabel)) return 'aria-label'
+  if (isNonEmptyString(id)) return 'id'
   return 'none'
 }
 
@@ -112,20 +109,20 @@ export function summarizeCheckbox({
     checkedState: checkedState(checked),
     checked: checked === true,
     disabled: disabled === true,
-    hasCustomClass: hasNonEmptyString(cx),
+    hasCustomClass: isNonEmptyString(cx),
     classNameLength: cx?.length ?? 0,
-    hasId: hasNonEmptyString(id),
+    hasId: isNonEmptyString(id),
     idLength: id?.length ?? 0,
-    hasName: hasNonEmptyString(name),
+    hasName: isNonEmptyString(name),
     nameLength: name?.length ?? 0,
     a11yHook: a11yHook({ id, ariaLabel, ariaLabelledby }),
-    hasAriaLabel: hasNonEmptyString(ariaLabel),
+    hasAriaLabel: isNonEmptyString(ariaLabel),
     ariaLabelLength: ariaLabel?.length ?? 0,
-    hasAriaLabelledby: hasNonEmptyString(ariaLabelledby),
+    hasAriaLabelledby: isNonEmptyString(ariaLabelledby),
     ariaLabelledbyLength: ariaLabelledby?.length ?? 0,
-    hasValue: hasNonEmptyString(value),
+    hasValue: isNonEmptyString(value),
     valueLength: value?.length ?? 0,
-    hasTestId: hasNonEmptyString(testId),
+    hasTestId: isNonEmptyString(testId),
     testIdLength: testId?.length ?? 0,
     hasOnChange: onChange !== undefined,
     hasOnClick: onClick !== undefined,

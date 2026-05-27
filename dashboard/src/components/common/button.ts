@@ -11,6 +11,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { isNonEmptyString } from '../../lib/format-string'
 import { ringFocusClasses } from './ring'
 
 export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok' | 'warn'
@@ -118,10 +119,6 @@ export interface ActionButtonProps {
   children: ComponentChildren
 }
 
-function hasNonEmptyString(value: string | undefined): boolean {
-  return value !== undefined && value !== ''
-}
-
 function pressedState(pressed: boolean | undefined): ButtonPressedState {
   if (pressed === true) return 'true'
   if (pressed === false) return 'false'
@@ -152,15 +149,15 @@ export function summarizeActionButton({
     disabled: disabled === true,
     busy: ariaBusy === true,
     pressedState: pressedState(pressed),
-    hasCustomClass: hasNonEmptyString(cx),
+    hasCustomClass: isNonEmptyString(cx),
     classNameLength: cx?.length ?? 0,
-    hasId: hasNonEmptyString(id),
+    hasId: isNonEmptyString(id),
     idLength: id?.length ?? 0,
-    hasAriaLabel: hasNonEmptyString(ariaLabel),
+    hasAriaLabel: isNonEmptyString(ariaLabel),
     ariaLabelLength: ariaLabel?.length ?? 0,
-    hasTitle: hasNonEmptyString(title),
+    hasTitle: isNonEmptyString(title),
     titleLength: title?.length ?? 0,
-    hasTestId: hasNonEmptyString(testId),
+    hasTestId: isNonEmptyString(testId),
     testIdLength: testId?.length ?? 0,
     hasOnClick: typeof onClick === 'function',
     hasChildren: children !== undefined && children !== null,

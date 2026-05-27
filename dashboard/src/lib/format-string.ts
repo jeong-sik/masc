@@ -7,6 +7,28 @@ export function capitalize(text: string): string {
 }
 
 /**
+ * String presence check without trimming. Treats `''` as absent but keeps
+ * whitespace-only strings (`'   '`) as present.
+ *
+ * Use for attribute presence gates (id/aria-label/title/testId) where raw
+ * empty-string is the only absent state and whitespace is technically valid.
+ */
+export function isNonEmptyString(value: string | undefined): boolean {
+  return value !== undefined && value !== ''
+}
+
+/**
+ * String content check with trimming. Treats `''` and whitespace-only
+ * strings (`'   '`) both as absent.
+ *
+ * Use for content-presence gates (visible label/copy/text) where
+ * whitespace-only is functionally equivalent to empty.
+ */
+export function isNonBlankString(value: string | undefined): boolean {
+  return value !== undefined && value.trim() !== ''
+}
+
+/**
  * Return the first value that, after trimming, has non-whitespace content.
  *
  * Treats `null`, `undefined`, empty strings, and whitespace-only strings as

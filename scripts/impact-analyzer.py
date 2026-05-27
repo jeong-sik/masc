@@ -177,7 +177,7 @@ def get_risk_level(risk_score: int) -> tuple[str, str]:
         return ("LOW", "")
 
 
-def format_pr_comment(
+def format_pull_request_comment(
     changed_files: List[str], bdds: List[Dict[str, Any]], risk: Dict[str, Any]
 ) -> str:
     """
@@ -279,7 +279,7 @@ def analyze_impact(changed_files: List[str]) -> str:
     risk = calculate_risk_score(bdds)
 
     # Format comment
-    return format_pr_comment(changed_files, bdds, risk)
+    return format_pull_request_comment(changed_files, bdds, risk)
 
 
 def main():

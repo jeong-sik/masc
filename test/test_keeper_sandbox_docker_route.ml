@@ -1221,7 +1221,7 @@ let test_execute_git_push_routes_through_git_creds_docker () =
   Alcotest.(check bool) "generic typed push does not mount repo CLI identity bundle" false
     (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
 
-let test_tool_search_files_gh_pr_review_is_unsupported () =
+let test_tool_search_files_repo_review_is_unsupported () =
   with_tool_policy_config @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1885,7 +1885,7 @@ let test_execute_blocks_file_redirect_before_docker () =
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
 
-let test_execute_gh_pr_checks_routes_through_docker () =
+let test_execute_repo_checks_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -2101,8 +2101,8 @@ let () =
             "docker keeper git push routes through git-creds docker"
             `Quick test_execute_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
-            "tool_search_files gh pr review is unsupported"
-            `Quick test_tool_search_files_gh_pr_review_is_unsupported;
+            "tool_search_files repo review is unsupported"
+            `Quick test_tool_search_files_repo_review_is_unsupported;
           Alcotest.test_case
             "docker Execute executes through fake docker"
             `Quick test_execute_fake_docker_executes;
@@ -2116,8 +2116,8 @@ let () =
             "docker Execute blocks file redirects before docker"
             `Quick test_execute_blocks_file_redirect_before_docker;
           Alcotest.test_case
-            "docker Execute routes gh pr checks through docker"
-            `Quick test_execute_gh_pr_checks_routes_through_docker;
+            "docker Execute routes repo checks through docker"
+            `Quick test_execute_repo_checks_routes_through_docker;
           Alcotest.test_case
             "docker Execute shape block exposes structured recovery plan"
             `Quick test_execute_search_pipeline_exposes_structured_recovery_plan;

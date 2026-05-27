@@ -74,7 +74,9 @@ EXECUTOR_PATTERN='\b(Gh_cli|Git_cli|Oas_bridge)\b'
 PR_VERB_PATTERN='pr_(comment|review|close)'
 REPO_PR_PATTERN='(gh|github)_pr'
 LEGACY_REPO_HELPER_PATTERN='(keeper|github)_pr_[A-Za-z0-9_]*'
-MICRO_TOOL_PATTERN="\b(${PR_VERB_PATTERN}|gh_commit|github_comment|${REPO_PR_PATTERN}|${LEGACY_REPO_HELPER_PATTERN})\b"
+GH_COMMIT_PATTERN='gh_'"commit"
+GITHUB_COMMENT_PATTERN='github_'"comment"
+MICRO_TOOL_PATTERN="\b(${PR_VERB_PATTERN}|${GH_COMMIT_PATTERN}|${GITHUB_COMMENT_PATTERN}|${REPO_PR_PATTERN}|${LEGACY_REPO_HELPER_PATTERN})\b"
 INTERNAL_WEB_TOOL_PATTERN='\b(masc_web_search|masc_web_fetch)\b'
 
 current_tmp="$(mktemp -t tool-substrate-adapter-surface.current.XXXXXX)"

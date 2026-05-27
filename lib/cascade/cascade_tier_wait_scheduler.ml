@@ -189,8 +189,20 @@ let backoff_sleep t ~sw delay_s waiter_promise =
 (* ── Main API: try_admission_or_wait ────────────────────────────── *)
 
 let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
-    ~sw f =
+    ?deadline:cascade_deadline ~sw f =
   let start_time = Unix.gettimeofday () in
+  (* RFC-0192 § 2: effective per-call timeout =
+       min(wait_config.timeout_s, deadline - now()).
+     Backward-compat: cascade_deadline=None or clock=None → legacy
+     [wait_config.timeout_s] amplifier behaviour. *)
+  let effective_timeout_s =
+    match cascade_deadline, t.clock with
+    | None, _ -> wait_config.timeout_s
+    | Some _, None -> wait_config.timeout_s
+    | Some d, Some clk ->
+      Cascade_deadline.composed_attempt_budget
+        ~clock:clk ~deadline:d ~amplifier:wait_config.timeout_s
+  in
 
   (* Attempt 1: immediate try_acquire *)
   match Cascade_tier_admission.try_acquire t.admission ~tier_id with
@@ -210,12 +222,12 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
   | Cascade_tier_admission.Capacity_full _ ->
       (* Slow path — create tier state lazily, enter wait loop *)
       let ts = get_or_create_tier t tier_id in
-      let deadline = start_time +. wait_config.timeout_s in
+      let wait_deadline_s = start_time +. effective_timeout_s in
       let max_retries = wait_config.max_retries in
       let rec loop attempt total_waited =
         (* Check deadline *)
         let now = Unix.gettimeofday () in
-        if now >= deadline then begin
+        if now >= wait_deadline_s then begin
           Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
               ts.total_timeouts <- ts.total_timeouts + 1;
               ts.total_rejected <- ts.total_rejected + 1;
@@ -286,7 +298,7 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
               | Cascade_tier_admission.Capacity_full _ ->
                   (* Not admitted yet — check deadline and loop *)
                   let now2 = Unix.gettimeofday () in
-                  if now2 >= deadline then begin
+                  if now2 >= wait_deadline_s then begin
                     Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
                         ts.total_timeouts <- ts.total_timeouts + 1;
                         ts.total_rejected <- ts.total_rejected + 1;

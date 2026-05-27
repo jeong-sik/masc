@@ -255,6 +255,116 @@ let test_manual_release_wake () =
   | A.Capacity_full _ ->
       fail "should have granted on fresh admission")
 
+(* {1 Deadline propagation (RFC-0192 PR-2)} *)
+
+module D = Masc_mcp.Cascade_deadline
+
+let test_deadline_shorter_than_amplifier_drives_timeout () =
+  (* RFC-0192 § 2 invariant: when [deadline - now < wait_config.timeout_s],
+     the effective per-call budget is the deadline, not the amplifier.
+     A 5s amplifier with a 0.1s deadline must time out near 0.1s. *)
+  Eio_main.run (fun _env ->
+  let admission = A.create ~default_max_inflight:1 () in
+  let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
+  Eio.Switch.run @@ fun sw ->
+  let blocker_started, blocker_started_r = Eio.Promise.create () in
+  let blocker_never_release_p, _ = Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      ignore (W.try_admission_or_wait scheduler ~tier_id:"deadline" ~sw
+                (fun () ->
+                   Eio.Promise.resolve blocker_started_r ();
+                   Eio.Promise.await blocker_never_release_p;
+                   "never"));
+      `Stop_daemon);
+  Eio.Promise.await blocker_started;
+  let long_amplifier = {
+    W.backoff = W.Constant 0.005;
+    timeout_s = 5.0;  (* would normally wait 5s *)
+    max_retries = None;
+  } in
+  let deadline = D.of_seconds_from_now ~clock:(Eio.Stdenv.clock _env) 0.1 in
+  let start = Unix.gettimeofday () in
+  match W.try_admission_or_wait scheduler ~tier_id:"deadline"
+          ~wait_config:long_amplifier ~deadline ~sw
+          (fun () -> "should_not_run") with
+  | Error (W.Timeout_expired _) ->
+      let elapsed = Unix.gettimeofday () -. start in
+      (* Deadline-driven timeout must be far under amplifier's 5s.
+         Allow generous tolerance for scheduler backoff overhead. *)
+      check bool "elapsed << amplifier (deadline wins)" true (elapsed < 1.0)
+  | Error other ->
+      fail ("wrong rejection type: " ^ Format.asprintf "%a" W.pp_rejection_detail other)
+  | Ok _ ->
+      fail "should have timed out")
+
+let test_no_deadline_falls_back_to_amplifier () =
+  (* Backward compatibility: omitting [deadline] keeps the legacy
+     wait_config.timeout_s amplifier behaviour. *)
+  Eio_main.run (fun _env ->
+  let admission = A.create ~default_max_inflight:1 () in
+  let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
+  Eio.Switch.run @@ fun sw ->
+  let blocker_started, blocker_started_r = Eio.Promise.create () in
+  let blocker_never_release_p, _ = Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      ignore (W.try_admission_or_wait scheduler ~tier_id:"no_dl" ~sw
+                (fun () ->
+                   Eio.Promise.resolve blocker_started_r ();
+                   Eio.Promise.await blocker_never_release_p;
+                   "never"));
+      `Stop_daemon);
+  Eio.Promise.await blocker_started;
+  let short_amplifier = {
+    W.backoff = W.Constant 0.005;
+    timeout_s = 0.05;
+    max_retries = None;
+  } in
+  (* No ~deadline argument: must time out at amplifier ≈ 0.05s. *)
+  match W.try_admission_or_wait scheduler ~tier_id:"no_dl"
+          ~wait_config:short_amplifier ~sw
+          (fun () -> "should_not_run") with
+  | Error (W.Timeout_expired { tier_id; _ }) ->
+      check string "tier_id matches" "no_dl" tier_id
+  | Error other ->
+      fail ("wrong rejection: " ^ Format.asprintf "%a" W.pp_rejection_detail other)
+  | Ok _ -> fail "should have timed out")
+
+let test_expired_deadline_immediate_timeout () =
+  (* [composed_attempt_budget = 0] when deadline already in the past →
+     first try_acquire still runs (fast path), but the slow path's
+     wait loop sees wait_deadline_s = start_time + 0 → immediate
+     Timeout_expired without waiting. *)
+  Eio_main.run (fun _env ->
+  let admission = A.create ~default_max_inflight:1 () in
+  let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
+  Eio.Switch.run @@ fun sw ->
+  let blocker_started, blocker_started_r = Eio.Promise.create () in
+  let blocker_never_release_p, _ = Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      ignore (W.try_admission_or_wait scheduler ~tier_id:"expired" ~sw
+                (fun () ->
+                   Eio.Promise.resolve blocker_started_r ();
+                   Eio.Promise.await blocker_never_release_p;
+                   "never"));
+      `Stop_daemon);
+  Eio.Promise.await blocker_started;
+  let deadline = D.create ~expires_at_s:0.0 in  (* far past *)
+  let long_amplifier = {
+    W.backoff = W.Constant 0.001;
+    timeout_s = 5.0;
+    max_retries = None;
+  } in
+  let start = Unix.gettimeofday () in
+  match W.try_admission_or_wait scheduler ~tier_id:"expired"
+          ~wait_config:long_amplifier ~deadline ~sw
+          (fun () -> "should_not_run") with
+  | Error (W.Timeout_expired _) ->
+      let elapsed = Unix.gettimeofday () -. start in
+      check bool "expired deadline aborts within tolerance" true (elapsed < 0.5)
+  | Error other ->
+      fail ("wrong rejection: " ^ Format.asprintf "%a" W.pp_rejection_detail other)
+  | Ok _ -> fail "should have timed out")
+
 (* {1 Test suite} *)
 
 let () =
@@ -286,5 +396,13 @@ let () =
     "external", [
       test_case "manual release wake" `Quick
         test_manual_release_wake;
+    ];
+    "deadline (RFC-0192 PR-2)", [
+      test_case "deadline shorter than amplifier drives timeout" `Quick
+        test_deadline_shorter_than_amplifier_drives_timeout;
+      test_case "no deadline → amplifier fallback (backward-compat)" `Quick
+        test_no_deadline_falls_back_to_amplifier;
+      test_case "expired deadline → immediate timeout" `Quick
+        test_expired_deadline_immediate_timeout;
     ];
   ]

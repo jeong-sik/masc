@@ -722,7 +722,7 @@ let test_save_mapping_creates_config_dir () =
         {
           keeper_id = "keeper-new";
           repository_ids = [ "repo-a"; "repo-b" ];
-          credential_id = None;
+          mapped_credential_id = None;
         }
       in
       match Keeper_repo_mapping.save_mapping ~base_path mapping with
@@ -740,7 +740,7 @@ let test_save_mapping_preserves_credential_id () =
         {
           keeper_id = "keeper-new";
           repository_ids = ["*"];
-          credential_id = Some "cred-selected";
+          mapped_credential_id = Some "cred-selected";
         }
       in
       match Keeper_repo_mapping.save_mapping ~base_path mapping with
@@ -752,7 +752,7 @@ let test_save_mapping_preserves_credential_id () =
               Alcotest.(check (option string))
                 "credential id"
                 (Some "cred-selected")
-                loaded.credential_id
+                loaded.mapped_credential_id
           | Ok rows ->
               Alcotest.failf "expected one mapping, got %d" (List.length rows)))
 
@@ -765,7 +765,7 @@ let test_load_all_trims_credential_id () =
           Alcotest.(check (option string))
             "trimmed credential id"
             (Some "cred-selected")
-            loaded.credential_id
+            loaded.mapped_credential_id
       | Ok rows -> Alcotest.failf "expected one mapping, got %d" (List.length rows))
 
 let test_load_all_rejects_non_string_credential_id () =

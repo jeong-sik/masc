@@ -365,7 +365,7 @@ let seed_repo_cli_credential_mapping
     {
       keeper_id = keeper_name;
       repository_ids;
-      credential_id = Some credential_id;
+      mapped_credential_id = Some credential_id;
     }
   in
   match

@@ -27,7 +27,7 @@ let mapping_of_toml toml keeper_id =
           (Printf.sprintf
              "mapping.%s.credential_id must be a string when present" keeper_id)
   in
-  Ok { keeper_id; repository_ids; credential_id }
+  Ok { keeper_id; repository_ids; mapped_credential_id = credential_id }
 
 let credential_type_label = function
   | Github -> "GitHub"
@@ -43,7 +43,7 @@ let toml_of_mapping mapping =
     ]
   in
   let fields =
-    match mapping.credential_id with
+    match mapping.mapped_credential_id with
     | Some id ->
         let id = String.trim id in
         if id = "" then fields
@@ -166,7 +166,7 @@ let credentials_for_keeper ~base_path ~keeper_id =
                   in credential store: %s"
                  id keeper_id msg)
       in
-      (match mapping.credential_id with
+      (match mapping.mapped_credential_id with
       | Some id when String.trim id <> "" ->
           let id = String.trim id in
           let* credential = resolve_credential id in

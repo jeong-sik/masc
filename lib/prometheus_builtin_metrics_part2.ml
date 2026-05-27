@@ -252,8 +252,8 @@ let register
     "Total keeper run context failures (checkpoint save), labeled by keeper"
     `Counter;
   add
-    Keeper_metrics.(to_string ShellOpsFailures)
-    "Total keeper shell operation failures (R2 blocked), labeled by keeper"
+    Keeper_metrics.(to_string WorkspaceInspectFailures)
+    "Total keeper workspace inspection failures (R2 blocked), labeled by keeper"
     `Counter;
   add
     Keeper_metrics.(to_string TagDispatchFailures)

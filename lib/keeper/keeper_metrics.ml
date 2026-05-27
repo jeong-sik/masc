@@ -95,7 +95,7 @@ type t =
   | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
-  | ShellOpsFailures
+  | WorkspaceInspectFailures
   | TagDispatchFailures
   | TraceEmitFailures
   | TransitionAuditFailures
@@ -332,7 +332,7 @@ let to_string = function
   | CircuitBreakerTrips -> "masc_keeper_circuit_breaker_trips_total"
   | PromptFailures -> "masc_keeper_prompt_failures_total"
   | RunContextFailures -> "masc_keeper_run_context_failures_total"
-  | ShellOpsFailures -> "masc_keeper_shell_ops_failures_total"
+  | WorkspaceInspectFailures -> "masc_keeper_workspace_inspect_failures_total"
   | TagDispatchFailures -> "masc_keeper_tag_dispatch_failures_total"
   | TraceEmitFailures -> "masc_keeper_trace_emit_failures_total"
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"

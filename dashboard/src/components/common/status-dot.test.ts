@@ -72,7 +72,7 @@ describe('summarizeStatusDot (pure)', () => {
 
   it('summarizes semantic dots with tone metadata', () => {
     const tone = 'bg-[var(--ok-10)] ring-1'
-    expect(summarizeStatusDot({ size: 'md', className: tone, ariaLabel: 'healthy' })).toEqual({
+    expect(summarizeStatusDot({ size: 'md', class: tone, ariaLabel: 'healthy' })).toEqual({
       size: 'md',
       mode: 'semantic',
       hasCustomClass: true,

@@ -151,7 +151,8 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
         (match Planning_eio.set_current_task ctx.config ~task_id with
          | Ok () -> ()
          | Error msg ->
-             Log.Task.warn "failed to sync planning current_task to %s: %s"
+             Log.Task.warn ~keeper_name:task_id
+               "failed to sync planning current_task to %s: %s"
                task_id msg)
     | None -> Planning_eio.clear_current_task ctx.config
 
@@ -406,7 +407,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
        ])
-   | Error e -> Log.Task.warn "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
+   | Error e -> Log.Task.warn ~keeper_name:task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   result_to_response ~tool_name ~start_time result
 
 (* Look up the current Goal_store phase for each goal id in the agent's

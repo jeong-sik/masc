@@ -134,6 +134,7 @@ let warn_contract_gap (task : Masc_domain.task) =
   (match task.contract with
    | None ->
      Log.Task.warn
+       ~keeper_name:task.id
        "[verification-submit] task=%s has no contract — completion_contract \
         and evidence will be empty in the verification record"
        task.id
@@ -142,6 +143,7 @@ let warn_contract_gap (task : Masc_domain.task) =
           && c.required_evidence = []
           && c.verify_gate_evidence = [] ->
      Log.Task.warn
+       ~keeper_name:task.id
        "[verification-submit] task=%s has a contract but both \
        completion_contract and verification evidence are empty"
        task.id
@@ -159,6 +161,7 @@ let create_submit_request ~(config : Coord.config)
   | Ok _ -> Ok ()
   | Error e ->
     Log.Task.error
+      ~keeper_name:task.id
       "verification create_request failed (task=%s vrf=%s): %s"
       task.id verification_id e;
     Error e
@@ -198,6 +201,7 @@ let notify_submit_for_verification ~(config : Coord.config)
     | Ok _ -> ()
     | Error e ->
       Log.Task.error
+        ~keeper_name:task.id
         "board post failed (task=%s vrf=%s): %s"
         task.id verification_id (Board_types.show_board_error e)
   in
@@ -241,6 +245,7 @@ let record_approve_verification ~(config : Coord.config)
       Ok ()
     | Error e ->
       Log.Task.error
+        ~keeper_name:task_id
         "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
         task_id verification_id verifier e;
       Error e
@@ -267,6 +272,7 @@ let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
     | Ok _ -> ()
     | Error e ->
       Log.Task.error
+        ~keeper_name:task_id
         "board post failed (task=%s vrf=%s): %s"
         task_id verification_id (Board_types.show_board_error e)
   in
@@ -311,6 +317,7 @@ let record_reject_verification ~(config : Coord.config)
       Ok ()
     | Error e ->
       Log.Task.error
+        ~keeper_name:task_id
         "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
         task_id verification_id verifier e;
       Error e
@@ -336,6 +343,7 @@ let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
     | Ok _ -> ()
     | Error e ->
       Log.Task.error
+        ~keeper_name:task_id
         "board post failed (task=%s vrf=%s): %s"
         task_id verification_id (Board_types.show_board_error e)
   in
@@ -421,6 +429,7 @@ let check_timeouts ~(config : Coord.config) =
                | Ok _ -> ()
                | Error e ->
                  Log.Task.error
+                   ~keeper_name:task.id
                    "board post failed (task=%s vrf=%s): %s"
                    task.id verification_id (Board_types.show_board_error e)
              in
@@ -453,6 +462,7 @@ let check_timeouts ~(config : Coord.config) =
               | Ok _ -> ()
               | Error e ->
                 Log.Task.error
+                  ~keeper_name:task.id
                   "verification timeout transition failed (task=%s vrf=%s): %s"
                   task.id verification_id
                   (Masc_domain.show_masc_error e))

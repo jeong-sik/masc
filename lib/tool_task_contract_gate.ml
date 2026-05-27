@@ -70,7 +70,8 @@ let persisted_contract_rejection ~(agent_name : string)
   | None -> None
   | Some task ->
     if not (Env_config_runtime.Cdal.gate_enabled ()) then begin
-      Log.Task.info "[cdal-gate] disabled, skipping for task=%s agent=%s"
+      Log.Task.info ~keeper_name:task.id
+        "[cdal-gate] disabled, skipping for task=%s agent=%s"
         task.id agent_name;
       None
     end else
@@ -90,6 +91,7 @@ let persisted_contract_rejection ~(agent_name : string)
           else Cdal_verdict_gate.advisory_gate_label
         in
         Log.Task.info
+          ~keeper_name:task.id
           "[cdal-gate] checking verdict for task=%s agent=%s strict=%b gate=%s"
           task.id agent_name contract.strict gate_label;
         let rejection =
@@ -104,6 +106,7 @@ let persisted_contract_rejection ~(agent_name : string)
           (match rejection with
            | Some msg ->
              Log.Task.info
+               ~keeper_name:task.id
                "[cdal-gate] advisory (strict=false) for task=%s: %s"
                task.id msg
            | None -> ());

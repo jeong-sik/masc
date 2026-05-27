@@ -13,10 +13,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { ringFocusClasses } from './common/ring'
-
-type ThemeId = 'paper' | null
-const THEME_SEARCH_PARAM = 'theme'
-const THEME_STORAGE_KEYS = ['dashboardTheme', 'masc-theme-v2'] as const
+import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from '../lib/theme'
 
 function readDomTheme(): ThemeId {
   const attr = document.documentElement.dataset.theme

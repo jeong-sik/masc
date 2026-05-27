@@ -42,11 +42,7 @@ import { App } from './app'
 import { performanceMonitor } from './lib/performance-monitor'
 import { startWebVitalsCapture } from './utils/performance-metrics'
 import { startNavTelemetry } from './lib/nav-telemetry'
-
-const THEME_STORAGE_KEYS = ['dashboardTheme', 'masc-theme-v2'] as const
-const THEME_SEARCH_PARAM = 'theme'
-
-type ThemeId = 'paper' | null
+import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from './lib/theme'
 
 function normalizeTheme(raw: string | null): ThemeId {
   if (raw === 'paper' || raw === 'light') {

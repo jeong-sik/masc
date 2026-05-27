@@ -29,6 +29,8 @@ type approval =
   | Policy_selected
   | Human_required
 
+type readonly_of_input = Yojson.Safe.t -> bool option
+
 type runtime_handler =
   | Tool_execute
   | Tool_workspace_inspect
@@ -67,7 +69,8 @@ type runtime_handler =
 
 type policy =
   { visibility : Tool_catalog.visibility
-  ; readonly : bool option
+  ; readonly_of_input : readonly_of_input
+  ; readonly_hint : bool option
   ; effect_domain : Tool_catalog.effect_domain option
   ; approval : approval
   ; retryable : bool
@@ -112,6 +115,7 @@ val internal_descriptors : t list
 val all_descriptors : unit -> t list
 
 val public_names : unit -> string list
+val internal_names : t -> string list
 val find_public : string -> t option
 val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list
@@ -121,8 +125,11 @@ val public_descriptors_for_internal : string -> t list
     alongside the seven LLM-native descriptors. *)
 val descriptors_for_internal : string -> t list
 
+val readonly_static_hint : t -> bool option
+val readonly_for_input : t -> input:Yojson.Safe.t -> bool option
+
 (** Descriptor-owned read-only projection. The returned names are internal
-    handler names whose descriptor policy declares [readonly = Some true]. *)
+    handler names whose descriptor policy declares a static read-only hint. *)
 val readonly_internal_names : unit -> string list
 
 val public_input_schema : string -> Yojson.Safe.t option

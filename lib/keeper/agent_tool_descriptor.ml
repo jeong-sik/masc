@@ -24,6 +24,8 @@ type approval =
   | Policy_selected
   | Human_required
 
+type readonly_of_input = Yojson.Safe.t -> bool option
+
 type runtime_handler =
   | Tool_execute
   | Tool_workspace_inspect
@@ -62,7 +64,8 @@ type runtime_handler =
 
 type policy =
   { visibility : Tool_catalog.visibility
-  ; readonly : bool option
+  ; readonly_of_input : readonly_of_input
+  ; readonly_hint : bool option
   ; effect_domain : Tool_catalog.effect_domain option
   ; approval : approval
   ; retryable : bool
@@ -150,12 +153,18 @@ let runtime_handler_to_string = function
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
 ;;
 
-let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
-      ?(approval = Policy_selected) ?cwd_scope ?credential_profile
+let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
+      ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?credential_profile
       ?(retryable = false) ()
   =
+  let readonly_of_input =
+    match readonly_of_input with
+    | Some readonly_of_input -> readonly_of_input
+    | None -> fun _input -> readonly
+  in
   { visibility
-  ; readonly
+  ; readonly_of_input
+  ; readonly_hint = readonly
   ; effect_domain
   ; approval
   ; retryable
@@ -334,6 +343,22 @@ let translate_search_files input =
   | _ -> input
 ;;
 
+let workspace_inspect_op (input : Yojson.Safe.t) : string option =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "op" fields with
+     | Some (`String s) -> Some (String.lowercase_ascii (String.trim s))
+     | _ -> None)
+  | _ -> None
+;;
+
+let workspace_inspect_readonly_of_input input =
+  match workspace_inspect_op input with
+  | Some op when List.mem op Keeper_workspace_op.valid_strings -> Some true
+  | Some _ -> None
+  | None -> None
+;;
+
 let descriptor ~id ~public_name ~internal_name ~description ~input_schema ~policy
       ~executor ~backend ~sandbox ~runtime_handler ~translate
   =
@@ -385,12 +410,16 @@ let public_descriptors =
   ; descriptor
       ~id:"agent.workspace_inspect"
       ~public_name:"SearchFiles"
-      ~internal_name:"tool_workspace_inspect"
-      ~description:"Inspect the project workspace through a structured op (ls, cat, find, rg, head, tail, wc, tree, git_status, git_log, git_diff, pwd)."
+      ~internal_name:"tool_search_files"
+      ~description:
+        "Inspect the project workspace through structured read-only operations \
+         including ripgrep search, file reads, directory listings, and scoped \
+         git status/log/diff views."
       ~input_schema:search_files_schema
       ~policy:
         (policy
            ~readonly:true
+           ~readonly_of_input:workspace_inspect_readonly_of_input
            ~effect_domain:Tool_catalog.Read_only
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:true
@@ -1161,12 +1190,24 @@ let all_descriptors () = public_descriptors @ internal_descriptors
 
 let public_names () = List.map (fun d -> d.public_name) public_descriptors
 
+let legacy_internal_names (d : t) =
+  match d.id with
+  | "agent.workspace_inspect" -> [ "tool_workspace_inspect" ]
+  | _ -> []
+;;
+
+let internal_names d =
+  d.internal_name :: legacy_internal_names d |> List.sort_uniq String.compare
+;;
+
 let find_public name =
   List.find_opt (fun d -> String.equal d.public_name name) public_descriptors
 ;;
 
 let public_descriptors_for_internal internal_name =
-  List.filter (fun d -> String.equal d.internal_name internal_name) public_descriptors
+  List.filter
+    (fun d -> List.exists (String.equal internal_name) (internal_names d))
+    public_descriptors
 ;;
 
 (* Walks [all_descriptors ()]. Used by the runtime dispatcher to resolve any
@@ -1174,15 +1215,20 @@ let public_descriptors_for_internal internal_name =
    that live in [internal_descriptors]. While [internal_descriptors = []], this
    returns the same result as [public_descriptors_for_internal]. *)
 let descriptors_for_internal internal_name =
-  List.filter (fun d -> String.equal d.internal_name internal_name) (all_descriptors ())
+  List.filter
+    (fun d -> List.exists (String.equal internal_name) (internal_names d))
+    (all_descriptors ())
 ;;
+
+let readonly_static_hint d = d.policy.readonly_hint
+let readonly_for_input d ~input = d.policy.readonly_of_input input
 
 let readonly_internal_names () =
   all_descriptors ()
-  |> List.filter_map (fun d ->
-    match d.policy.readonly with
-    | Some true -> Some d.internal_name
-    | Some false | None -> None)
+  |> List.concat_map (fun d ->
+    match readonly_static_hint d with
+    | Some true -> internal_names d
+    | Some false | None -> [])
   |> List.sort_uniq String.compare
 ;;
 
@@ -1230,7 +1276,7 @@ let route_evidence_json d =
      ; "canonical_name", `String d.internal_name
      ; "description", `String d.description
      ; "visibility", `String (Tool_catalog.visibility_to_string policy.visibility)
-     ; "readonly", bool_opt_to_json policy.readonly
+     ; "readonly", bool_opt_to_json policy.readonly_hint
      ; "executor", `String (executor_to_string d.executor)
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)

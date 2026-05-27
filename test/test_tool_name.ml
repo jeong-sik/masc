@@ -84,7 +84,7 @@ let test_roundtrip_toplevel () =
    These are shared-surface tools whose canonical string id starts
    with "tool_" rather than "keeper_" (see PR #18520, #18779). *)
 let keeper_shared_surface_prefixes =
-  [ "tool_execute"; "tool_edit_file"; "tool_read_file"; "tool_workspace_inspect" ]
+  [ "tool_execute"; "tool_edit_file"; "tool_read_file"; "tool_search_files" ]
 
 let test_keeper_prefix () =
   List.iter (fun k ->

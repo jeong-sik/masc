@@ -1,14 +1,15 @@
-(** Tool_shard_types_schemas_shell — [shell_tools] tool_workspace_inspect schema.
+(** Tool_shard_types_schemas_shell — [shell_tools] SearchFiles schemas.
 
     Module file name retains the [_shell] suffix because [shell_tools] is the
-    canonical shard handle in [Tool_shard]. The tool surface itself is
-    tool_workspace_inspect; the shard name is a separate axis. *)
+    canonical shard handle in [Tool_shard]. [tool_search_files] is the
+    descriptor-owned canonical internal name; [tool_workspace_inspect] remains
+    as a legacy internal alias during the staged rename. *)
 
 open Tool_shard_types_enum_mirrors
 
-let shell_tools : Masc_domain.tool_schema list =
-  [ { name = "tool_workspace_inspect"
-    ; description =
+let tool_search_files_schema : Masc_domain.tool_schema =
+  { name = "tool_search_files"
+  ; description =
         "Inspect the project workspace via a structured op. ops: pwd, ls, cat, rg, git_status, \
          find, head, tail, wc, tree, git_log, git_diff. \
          Structured ops default to the keeper sandbox. IMPORTANT: paths resolve \
@@ -18,7 +19,7 @@ let shell_tools : Masc_domain.tool_schema list =
          pattern=\"*.ml\"). No generic bash execution: use Execute for command \
          execution. Use rg for pattern search, find for path discovery, head/tail for \
          line ranges, and git_log/git_diff for repo history."
-    ; input_schema =
+  ; input_schema =
         `Assoc
           [ "type", `String "object"
           ; ( "properties"
@@ -79,6 +80,13 @@ let shell_tools : Masc_domain.tool_schema list =
                 ] )
           ; "required", `List [ `String "op" ]
           ]
-    }
-  ]
+  }
+;;
+
+let legacy_tool_workspace_inspect_schema =
+  { tool_search_files_schema with name = "tool_workspace_inspect" }
+;;
+
+let shell_tools : Masc_domain.tool_schema list =
+  [ tool_search_files_schema; legacy_tool_workspace_inspect_schema ]
 ;;

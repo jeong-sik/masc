@@ -128,6 +128,7 @@ type workflow_rejection_payload =
   }
 
 let workflow_rejection_payload_of_json json =
+  let payload_from_json json =
   match json_or_detail_string_opt "failure_class" json with
   | Some "workflow_rejection" ->
     Some
@@ -144,6 +145,19 @@ let workflow_rejection_payload_of_json json =
   | Some _
   | None ->
     None
+  in
+  match payload_from_json json with
+  | Some _ as payload -> payload
+  | None ->
+    (match json_assoc_string_opt "error" json with
+     | Some raw ->
+       (try
+          match Yojson.Safe.from_string raw with
+          | `Assoc _ as nested -> payload_from_json nested
+          | _ -> None
+        with
+        | Yojson.Json_error _ -> None)
+     | None -> None)
 ;;
 
 let workflow_rejection_retry_policy payload =

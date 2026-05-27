@@ -109,7 +109,7 @@ val tool_annotations_for_profile :
 (** [tool_annotations_for_profile profile tool_name] returns the
     MCP 2025-03-26 [annotations] object — [readOnlyHint],
     [destructiveHint], [idempotentHint], [openWorldHint] — derived
-    from {!Tool_capability.has}.
+    from descriptor-aware capability resolution.
 
     Returns [None] when the field set would be empty.
     [openWorldHint] is emitted only when the tool is unambiguously
@@ -141,8 +141,9 @@ val tool_json_for_profile :
 (** [tool_json_for_profile ?usage_summary profile schema] renders
     a tool descriptor object: [name], [title], [description],
     [icons], [inputSchema], catalog metadata fields,
-    [outputSchema] (currently always omitted), [annotations],
-    plus optional usage telemetry from [?usage_summary]. *)
+    descriptor metadata fields when a descriptor owns the tool name,
+    [outputSchema] (currently always omitted), [annotations], plus optional
+    usage telemetry from [?usage_summary]. *)
 
 (** {1 JSON helpers} *)
 

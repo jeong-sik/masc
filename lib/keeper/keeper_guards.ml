@@ -645,8 +645,8 @@ let cost_guard
     | _ -> Agent_sdk.Hooks.Continue)
 
 (** Destructive pattern detection for bash/edit style tools.
-    Only applies when [enabled] is [true] and the tool is flagged by
-    [Tool_capability.has Destructive]. *)
+    Only applies when [enabled] is [true] and descriptor/catalog capability
+    lookup flags the observed tool name as destructive. *)
 let destructive_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~on_gate_decision
@@ -657,7 +657,12 @@ let destructive_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       if not enabled then Agent_sdk.Hooks.Continue
-      else if not (Tool_capability.has Tool_capability.Destructive tool_name) then
+      else if
+        not
+          (Agent_tool_descriptor_resolution.capability_has
+             Tool_capability.Destructive
+             tool_name)
+      then
         Agent_sdk.Hooks.Continue
       else
         let t0 = Time_compat.now () in

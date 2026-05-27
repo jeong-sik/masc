@@ -142,25 +142,32 @@ let has_mutating_side_effect (name : string) : bool =
    tool name. This function inspects JSON input where a live tool has
    such a contract. *)
 
-let keeper_workspace_op (input : Yojson.Safe.t) : string option =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "op" fields with
-     | Some (`String s) -> Some (String.lowercase_ascii (String.trim s))
-     | _ -> None)
-  | _ -> None
+let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
+  match Agent_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input with
+  | Some readonly -> readonly
+  | None -> is_effectively_read_only_tool tool_name
 ;;
 
-let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
-  match Agent_tool_descriptor_resolution.readonly_for_tool_name tool_name with
-  | Some readonly -> readonly
+let descriptor_boundary_exempt tool_name =
+  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  | None -> None
+  | Some descriptor ->
+    (match descriptor.Agent_tool_descriptor.policy.effect_domain with
+     | Some Tool_catalog.Read_only
+     | Some Tool_catalog.Masc_coordination
+     | Some Tool_catalog.Playground_write -> Some true
+     | Some Tool_catalog.Host_repo_write -> Some false
+     | None -> None)
+;;
+
+let catalog_boundary_exempt tool_name =
+  match Tool_catalog.is_main_worktree_boundary_exempt tool_name with
+  | Some _ as decision -> decision
   | None ->
-    (match Tool_name.of_string tool_name with
-     | Some (Keeper Workspace_inspect) ->
-       (match keeper_workspace_op input with
-        | Some op -> List.mem op Keeper_workspace_op.valid_strings
-        | None -> false)
-     | _ -> is_effectively_read_only_tool tool_name)
+    (match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name with
+     | Some internal_name when not (String.equal internal_name tool_name) ->
+       Tool_catalog.is_main_worktree_boundary_exempt internal_name
+     | _ -> None)
 ;;
 
 (* ── Input-aware mutation-boundary bypass ────────────────────
@@ -172,8 +179,9 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
    Keep these tools mutating for reconcile/error handling; this predicate
    only controls whether the per-turn boundary blocks follow-up tools.
 
-   The effect-domain tag is resolved through [Tool_catalog], so this boundary
-   no longer has to mirror tool names or infer semantics from prefixes. *)
+   The effect-domain tag is resolved through the descriptor projection first,
+   so this boundary no longer has to mirror tool names or infer semantics from
+   prefixes. *)
 let is_main_worktree_boundary_exempt_with_input
       ~(tool_name : string)
       ~(input : Yojson.Safe.t)
@@ -182,9 +190,12 @@ let is_main_worktree_boundary_exempt_with_input
   if is_read_only_with_input ~tool_name ~input
   then true
   else (
-    match Tool_catalog.is_main_worktree_boundary_exempt tool_name with
-    | Some exempt -> exempt
-    | None -> false)
+    match descriptor_boundary_exempt tool_name with
+    | Some decision -> decision
+    | None ->
+      (match catalog_boundary_exempt tool_name with
+       | Some decision -> decision
+       | None -> false))
 ;;
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)

@@ -53,7 +53,12 @@ let is_known_public name = Hashtbl.mem routing_table name
     time series. *)
 let known_internal_names_tbl : (string, unit) Hashtbl.t =
   let t = Hashtbl.create 128 in
-  Hashtbl.iter (fun _ r -> Hashtbl.replace t r.internal_name ()) routing_table;
+  Hashtbl.iter
+    (fun _ r ->
+       List.iter
+         (fun internal_name -> Hashtbl.replace t internal_name ())
+         (Agent_tool_descriptor.internal_names r.descriptor))
+    routing_table;
   List.iter
     (fun internal ->
        Hashtbl.replace t internal ();

@@ -278,6 +278,8 @@ let test_shell_shared_is_removed () =
   let bash_ml = "lib/keeper/keeper_shell_bash.ml" in
   let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
   let exec_shell_ml = "lib/keeper/keeper_exec_shell.ml" in
+  let registry_ml = "lib/keeper/keeper_tool_registry.ml" in
+  let descriptor_resolution_ml = "lib/keeper/agent_tool_descriptor_resolution.ml" in
   let retired_shared_path = "lib/keeper/keeper_" ^ "shell_shared" in
   let retired_shared = "Keeper_" ^ "shell_shared" in
   assert_source_absent (retired_shared_path ^ ".ml");
@@ -303,14 +305,16 @@ let test_shell_shared_is_removed () =
     "lib/keeper/keeper_workspace_read_ops.ml"
     "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains bash_ml "Keeper_shell_timeout.clamp_shell_timeout";
-  assert_contains exec_tools_ml "Keeper_workspace_op.valid_strings";
+  assert_contains descriptor_resolution_ml "readonly_for_tool_call";
   assert_not_contains shell_ops_ml (retired_shared ^ ".");
   assert_not_contains
     "lib/keeper/keeper_workspace_read_ops.ml"
     (retired_shared ^ ".");
   assert_not_contains bash_ml (retired_shared ^ ".");
   assert_not_contains exec_tools_ml (retired_shared ^ ".");
-  assert_not_contains exec_shell_ml retired_shared
+  assert_not_contains exec_shell_ml retired_shared;
+  assert_not_contains exec_tools_ml "Keeper_workspace_op.valid_strings";
+  assert_not_contains registry_ml "Keeper_workspace_op.valid_strings"
 
 let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in

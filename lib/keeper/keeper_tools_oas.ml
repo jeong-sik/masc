@@ -242,6 +242,36 @@ let normalize_tool_result
       (raw : string)
   : string
   =
+  let metadata_from_assoc fields =
+    fields
+    |> List.filter (fun (key, _) ->
+      not
+        (List.mem
+           key
+           [ "ok"; "error"; "detail"; "result"; "output"; "message"; "status" ]))
+  in
+  let structured_error_payload error_msg =
+    try
+      match Yojson.Safe.from_string error_msg with
+      | `Assoc fields -> Some fields
+      | _ -> None
+    with
+    | Yojson.Json_error _ -> None
+  in
+  let merge_metadata primary secondary =
+    let primary_keys = List.map fst primary in
+    primary
+    @ List.filter
+        (fun (key, _) -> not (List.mem key primary_keys))
+        secondary
+  in
+  let ensure_workflow_self_correction fields =
+    match List.assoc_opt "failure_class" fields with
+    | Some (`String "workflow_rejection")
+      when not (List.mem_assoc "self_correction_required" fields) ->
+      fields @ [ "self_correction_required", `Bool true ]
+    | _ -> fields
+  in
   try
     let json = Yojson.Safe.from_string raw in
     if success
@@ -268,13 +298,22 @@ let normalize_tool_result
                    "tool returned error status"
                  | _ -> "tool call failed")))
       in
+      let error_msg, nested_fields =
+        match structured_error_payload error_msg with
+        | Some fields ->
+          let nested_error =
+            match List.assoc_opt "error" fields with
+            | Some (`String msg) when String.trim msg <> "" -> msg
+            | _ -> error_msg
+          in
+          nested_error, metadata_from_assoc fields
+        | None -> error_msg, []
+      in
       let preserved_fields =
-        [ "failure_class"; "recoverable"; "error_class" ]
-        |> List.filter_map (fun key ->
-          match Yojson.Safe.Util.member key json with
-          | `String _ as value -> Some (key, value)
-          | `Bool _ as value -> Some (key, value)
-          | _ -> None)
+        (match json with
+         | `Assoc fields -> merge_metadata (metadata_from_assoc fields) nested_fields
+         | _ -> nested_fields)
+        |> ensure_workflow_self_correction
       in
       Yojson.Safe.to_string
         (`Assoc

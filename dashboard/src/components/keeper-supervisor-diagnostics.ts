@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { formatPct, formatPct1 } from '../lib/format-number'
 import { signal } from '@preact/signals'
 import { formatTimeAgo, SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
 import { ProgressBar } from './common/progress-bar'
@@ -97,7 +98,7 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
         ${entries.map((e) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--purple-12)]">
             <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-            <span class="text-[var(--stalled-fg)]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
+            <span class="text-[var(--stalled-fg)]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? MISSING_DATA_DASH})</span>
           </div>
         `)}
       </div>

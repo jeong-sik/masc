@@ -1,5 +1,18 @@
 // Unified string formatting utilities.
 
+/**
+ * User-visible sentinel string for missing scalar data in panel rows.
+ *
+ * `'--'` is the dashboard's convention for "value not present" in metadata
+ * tables (RuntimeMetaRow, ConfigRow, supervisor cohort summary, fleet
+ * counts, etc.). Captured here so that a future glyph change — e.g.
+ * an em-dash `'—'` for typography polish or a longer label for
+ * accessibility — propagates without sweeping every `?? '--'` callsite
+ * again. Keep this in sync with any user-visible documentation that
+ * shows the literal.
+ */
+export const MISSING_DATA_DASH = '--'
+
 /** Capitalize first character. Returns empty string unchanged. */
 export function capitalize(text: string): string {
   if (!text) return text

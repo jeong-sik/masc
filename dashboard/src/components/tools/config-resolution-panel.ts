@@ -11,6 +11,7 @@ import type {
   KeeperRuntimeField,
 } from '../../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
+import { MISSING_DATA_DASH } from '../../lib/format-string'
 import { Btn } from '../btn'
 import { Card } from '../common/card'
 import { StatusChip } from '../common/status-chip'
@@ -402,7 +403,7 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
   const fd = runtimeResolution.fd_accountant
   const fleet = runtimeResolution.fleet_safety
   const fdValue = fd
-    ? `${fd.fd_open ?? '--'} / ${fd.fd_limit ?? '--'}`
+    ? `${fd.fd_open ?? MISSING_DATA_DASH} / ${fd.fd_limit ?? MISSING_DATA_DASH}`
     : '--'
   const fdTone = fd?.pressure_active ? 'bad' : 'neutral'
 
@@ -414,11 +415,11 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
         <${StatusChip} tone=${fdTone} uppercase=${false}>fd ${fdValue}<//>
       </div>
       <div class="grid gap-3 md:grid-cols-2">
-        <${RuntimeMetaRow} label="effective base" value=${runtimeResolution.resolved_base_path.path ?? '--'} />
-        <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? '--'} />
-        <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? '--'} />
-        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? '--'} />
-        <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? '--')} />
+        <${RuntimeMetaRow} label="effective base" value=${runtimeResolution.resolved_base_path.path ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? MISSING_DATA_DASH)} />
         <${RuntimeMetaRow} label="fd pressure" value=${fd?.pressure_active == null ? '--' : fd.pressure_active ? 'active' : 'clear'} />
       </div>
     <//>
@@ -497,8 +498,8 @@ function RuntimeProbePanel() {
       ${probe
         ? html`
             <div class="grid gap-3 md:grid-cols-2">
-              <${RuntimeMetaRow} label="effective model" value=${probe.effective_model ?? '--'} />
-              <${RuntimeMetaRow} label="server" value=${probe.server_url ?? '--'} />
+              <${RuntimeMetaRow} label="effective model" value=${probe.effective_model ?? MISSING_DATA_DASH} />
+              <${RuntimeMetaRow} label="server" value=${probe.server_url ?? MISSING_DATA_DASH} />
               <${RuntimeMetaRow} label="loaded before/after" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
               <${RuntimeMetaRow}
                 label="first run load"
@@ -677,9 +678,9 @@ export function ConfigResolutionPanel({
               </div>
 
               <div class="mt-4 grid gap-3 md:grid-cols-2">
-                <${RuntimeMetaRow} label="server repo head" value=${runtimeResolution.server_repo_git_commit ?? '--'} />
-                <${RuntimeMetaRow} label="workspace head" value=${runtimeResolution.workspace_git_commit ?? '--'} />
-                <${RuntimeMetaRow} label="resolved base head" value=${runtimeResolution.resolved_base_git_commit ?? '--'} />
+                <${RuntimeMetaRow} label="server repo head" value=${runtimeResolution.server_repo_git_commit ?? MISSING_DATA_DASH} />
+                <${RuntimeMetaRow} label="workspace head" value=${runtimeResolution.workspace_git_commit ?? MISSING_DATA_DASH} />
+                <${RuntimeMetaRow} label="resolved base head" value=${runtimeResolution.resolved_base_git_commit ?? MISSING_DATA_DASH} />
                 <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.commit ?? runtimeResolution.build.release_version} />
                 <${RuntimeMetaRow} label="started at" value=${runtimeResolution.build.started_at} />
               </div>

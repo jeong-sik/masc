@@ -15,6 +15,7 @@ import {
 } from './ide-context-lens'
 import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
 import { routeLinkLabels } from './ide-context-route-helpers'
+import { errorToString } from '../../lib/format-string'
 
 type BranchTone = 'current' | 'dirty' | 'conflict' | 'stale'
 
@@ -255,7 +256,7 @@ export function IdeBranchContextPanel({
         })
         .catch(err => {
           if (cancelled || controller.signal.aborted) return
-          setError(err instanceof Error ? err.message : String(err))
+          setError(errorToString(err))
           setState('error')
         })
     }

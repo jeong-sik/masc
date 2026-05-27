@@ -402,14 +402,10 @@ let add_routes router =
   |> Http.Router.post "/api/v1/repositories/discover" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          handle_discover_repositories request reqd)
-  |> Http.Router.add ~path:("PREFIX:" ^ repositories_prefix)
-       ~methods:[`DELETE]
-       ~handler:(fun request reqd ->
+  |> Http.Router.prefix_delete repositories_prefix (fun request reqd ->
          with_token_permission_auth ~permission:Masc_domain.CanAdmin
            handle_remove_repository request reqd)
-  |> Http.Router.add ~path:("PREFIX:" ^ repositories_prefix)
-       ~methods:[`PUT]
-       ~handler:(fun request reqd ->
+  |> Http.Router.prefix_put repositories_prefix (fun request reqd ->
          with_token_permission_auth ~permission:Masc_domain.CanAdmin
            handle_update_repository request reqd)
   |> Http.Router.prefix_post repositories_prefix (fun request reqd ->

@@ -4,7 +4,8 @@
 # Reproducible census for the keeper Execute quality loop. Reads
 # <base-path>/.masc/tool_calls and buckets Execute failures by the same leak
 # classes used in the 240h runtime triage. It also prints a compact summary
-# for the adjacent shell/code surfaces that share the same failure budget.
+# for the adjacent descriptor-backed file/edit surfaces that share the same
+# failure budget.
 #
 # Usage:
 #   scripts/analyze-keeper-execute-failures.sh [base_path] [window_hours]
@@ -77,7 +78,7 @@ def output_text:
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
 def failed: (.success == false or .semantic_success == false);
 def inferred_shape:
-  if (cmd | test("gh pr checks"; "i")) then "gh_pr_checks"
+  if (cmd | test("gh pr checks"; "i")) then "repo_cli_pr_checks"
   elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
   elif (cmd | test("2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|>|<"; "i")) then "pipe_or_redirect"
   else "unknown" end;
@@ -89,11 +90,11 @@ def category:
   elif (combined | test("old_string not found"; "i")) then "edit_old_string_not_found"
   elif (combined | test("old_string found [0-9]+ times|Use replace_all=true"; "i")) then "edit_ambiguous_match"
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
-  elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
+  elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|repo CLI is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
   elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
-  elif (combined | test("sandbox root cannot run git/gh|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
+  elif (combined | test("sandbox root cannot run repo CLI|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
   elif (combined | test("image_not_found|Unable to find image.*masc-keeper-sandbox|pull access denied for masc-keeper-sandbox"; "i")) then "docker_image_not_found"
   elif (combined | test("timeout|timed out"; "i")) then "timeout"
@@ -117,7 +118,7 @@ def output_text:
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
 def failed: (.success == false or .semantic_success == false);
 def inferred_shape:
-  if (cmd | test("gh pr checks"; "i")) then "gh_pr_checks"
+  if (cmd | test("gh pr checks"; "i")) then "repo_cli_pr_checks"
   elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
   elif (cmd | test("2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|>|<"; "i")) then "pipe_or_redirect"
   else "unknown" end;
@@ -129,11 +130,11 @@ def category:
   elif (combined | test("old_string not found"; "i")) then "edit_old_string_not_found"
   elif (combined | test("old_string found [0-9]+ times|Use replace_all=true"; "i")) then "edit_ambiguous_match"
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
-  elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
+  elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|repo CLI is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
   elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
-  elif (combined | test("sandbox root cannot run git/gh|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
+  elif (combined | test("sandbox root cannot run repo CLI|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
   elif (combined | test("image_not_found|Unable to find image.*masc-keeper-sandbox|pull access denied for masc-keeper-sandbox"; "i")) then "docker_image_not_found"
   elif (combined | test("timeout|timed out"; "i")) then "timeout"

@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
 import { refreshExecution, refreshGoals } from '../../store'
+import { errorToString } from '../../lib/format-string'
 
 export const showTaskCreate = signal(false)
 export const taskCreating = signal(false)
@@ -29,7 +30,7 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
     ])
     return true
   } catch (err) {
-    showToast(`태스크 생성 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    showToast(`태스크 생성 실패: ${errorToString(err)}`, 'error')
     return false
   } finally {
     taskCreating.value = false

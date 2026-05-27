@@ -15,6 +15,7 @@ import { ActionButton } from '../common/button'
 import { TextArea, TextInput } from '../common/input'
 import { FilterChips } from '../common/filter-chips'
 import { StatusChip } from '../common/status-chip'
+import { errorToString } from '../../lib/format-string'
 
 type PromptSourceFilter = 'all' | PromptSource
 
@@ -111,7 +112,7 @@ export function PromptRegistryPanel() {
       const nextPrompt = nextPrompts.find(prompt => prompt.key === nextSelectedKey) ?? nextPrompts[0] ?? null
       setDraft(normalizeDraft(nextPrompt))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorToString(err))
     } finally {
       setLoading(false)
     }
@@ -139,7 +140,7 @@ export function PromptRegistryPanel() {
       setStatus(response.message ?? 'override 설정됨')
       await loadPrompts(selectedPrompt.key)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorToString(err))
     } finally {
       setSaving(false)
     }
@@ -158,7 +159,7 @@ export function PromptRegistryPanel() {
       setStatus(response.message ?? 'override cleared')
       await loadPrompts(selectedPrompt.key)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorToString(err))
     } finally {
       setSaving(false)
     }

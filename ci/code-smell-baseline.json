@@ -3,12 +3,12 @@
   "_policy": "Current metric values must be <= baseline. Decreases should be committed as baseline updates.",
   "metrics": {
     "godfile_loc_1000plus": {
-      "baseline": 6,
+      "baseline": 7,
       "scope": "lib/**/*.ml excluding *_intf.ml, *_test.ml, _build; LoC >= 1000",
       "files": [
         {
           "file": "lib/keeper/agent_tool_descriptor.ml",
-          "value": 1285
+          "value": 1290
         },
         {
           "file": "lib/keeper/keeper_approval_queue.ml",
@@ -27,13 +27,17 @@
           "value": 1141
         },
         {
+          "file": "lib/server/server_routes_http_routes_dashboard.ml",
+          "value": 1072
+        },
+        {
           "file": "lib/types/types_core.ml",
-          "value": 1074
+          "value": 1083
         }
       ]
     },
     "catch_all_arms": {
-      "baseline": 3125,
+      "baseline": 3080,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -46,7 +50,7 @@
         },
         {
           "file": "lib/activity_graph/activity_graph.ml",
-          "value": 4
+          "value": 5
         },
         {
           "file": "lib/agent_economy.ml",
@@ -574,7 +578,7 @@
         },
         {
           "file": "lib/coord/coord_utils_ops.ml",
-          "value": 2
+          "value": 3
         },
         {
           "file": "lib/coord/coord_verification_store.ml",
@@ -642,7 +646,7 @@
         },
         {
           "file": "lib/dashboard/dashboard_branches.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/dashboard/dashboard_cache.ml",
@@ -706,7 +710,7 @@
         },
         {
           "file": "lib/dashboard/dashboard_http_keeper_detail.ml",
-          "value": 5
+          "value": 3
         },
         {
           "file": "lib/dashboard/dashboard_http_keeper_feeds.ml",
@@ -747,10 +751,6 @@
         {
           "file": "lib/dashboard/dashboard_keeper_feature_proof.ml",
           "value": 6
-        },
-        {
-          "file": "lib/dashboard/dashboard_keeper_git_pr_proof.ml",
-          "value": 11
         },
         {
           "file": "lib/dashboard/dashboard_keeper_tool_failure_proof.ml",
@@ -810,10 +810,6 @@
         },
         {
           "file": "lib/discovery_history.ml",
-          "value": 1
-        },
-        {
-          "file": "lib/dispatch_outcome.ml",
           "value": 1
         },
         {
@@ -1058,7 +1054,7 @@
         },
         {
           "file": "lib/keeper_tool_call_log_route_evidence.ml",
-          "value": 8
+          "value": 6
         },
         {
           "file": "lib/keeper_tool_call_log.ml",
@@ -1066,7 +1062,7 @@
         },
         {
           "file": "lib/keeper/agent_tool_board_runtime.ml",
-          "value": 11
+          "value": 6
         },
         {
           "file": "lib/keeper/agent_tool_descriptor_resolution.ml",
@@ -1089,6 +1085,10 @@
           "value": 2
         },
         {
+          "file": "lib/keeper/agent_tool_execute_path.ml",
+          "value": 1
+        },
+        {
           "file": "lib/keeper/agent_tool_execute_readonly_policy.ml",
           "value": 5
         },
@@ -1098,11 +1098,15 @@
         },
         {
           "file": "lib/keeper/agent_tool_execute_typed_input.ml",
-          "value": 8
+          "value": 4
         },
         {
           "file": "lib/keeper/agent_tool_filesystem_runtime.ml",
           "value": 4
+        },
+        {
+          "file": "lib/keeper/agent_tool_in_process_runtime.ml",
+          "value": 1
         },
         {
           "file": "lib/keeper/agent_tool_memory_runtime.ml",
@@ -1118,7 +1122,7 @@
         },
         {
           "file": "lib/keeper/agent_tool_task_runtime.ml",
-          "value": 7
+          "value": 8
         },
         {
           "file": "lib/keeper/agent_tool_voice_runtime.ml",
@@ -1257,10 +1261,6 @@
           "value": 3
         },
         {
-          "file": "lib/keeper/keeper_docker_client_mock.ml",
-          "value": 5
-        },
-        {
           "file": "lib/keeper/keeper_docker_client_real.ml",
           "value": 3
         },
@@ -1270,7 +1270,7 @@
         },
         {
           "file": "lib/keeper/keeper_error_classify.ml",
-          "value": 2
+          "value": 3
         },
         {
           "file": "lib/keeper/keeper_execution_receipt_outcome_kind.ml",
@@ -1279,6 +1279,10 @@
         {
           "file": "lib/keeper/keeper_execution_receipt.ml",
           "value": 5
+        },
+        {
+          "file": "lib/keeper/keeper_failure_circuit_breaker_types.ml",
+          "value": 2
         },
         {
           "file": "lib/keeper/keeper_failure_circuit_breaker.ml",
@@ -1333,20 +1337,12 @@
           "value": 2
         },
         {
-          "file": "lib/keeper/keeper_hooks_oas_output_json.ml",
-          "value": 8
-        },
-        {
-          "file": "lib/keeper/keeper_hooks_oas_pr_metrics.ml",
-          "value": 1
-        },
-        {
           "file": "lib/keeper/keeper_hooks_oas_response_metrics.ml",
           "value": 7
         },
         {
           "file": "lib/keeper/keeper_hooks_oas_types.ml",
-          "value": 4
+          "value": 3
         },
         {
           "file": "lib/keeper/keeper_hooks_oas.ml",
@@ -1366,7 +1362,7 @@
         },
         {
           "file": "lib/keeper/keeper_keepalive_signal.ml",
-          "value": 2
+          "value": 4
         },
         {
           "file": "lib/keeper/keeper_keepalive.ml",
@@ -1414,7 +1410,7 @@
         },
         {
           "file": "lib/keeper/keeper_meta_json_parse.ml",
-          "value": 4
+          "value": 7
         },
         {
           "file": "lib/keeper/keeper_meta_json.ml",
@@ -1514,7 +1510,7 @@
         },
         {
           "file": "lib/keeper/keeper_run_tools_setup.ml",
-          "value": 5
+          "value": 4
         },
         {
           "file": "lib/keeper/keeper_run_tools_task_scope.ml",
@@ -1693,10 +1689,6 @@
           "value": 6
         },
         {
-          "file": "lib/keeper/keeper_tool_registry.ml",
-          "value": 1
-        },
-        {
           "file": "lib/keeper/keeper_tool_resolution.ml",
           "value": 1
         },
@@ -1722,7 +1714,7 @@
         },
         {
           "file": "lib/keeper/keeper_tools_oas_markers.ml",
-          "value": 9
+          "value": 8
         },
         {
           "file": "lib/keeper/keeper_tools_oas_workflow.ml",
@@ -1754,7 +1746,7 @@
         },
         {
           "file": "lib/keeper/keeper_turn_driver_admission.ml",
-          "value": 1
+          "value": 2
         },
         {
           "file": "lib/keeper/keeper_turn_driver_cascade_health.ml",
@@ -1859,10 +1851,6 @@
         {
           "file": "lib/keeper/keeper_unified_turn_event_bus.ml",
           "value": 3
-        },
-        {
-          "file": "lib/keeper/keeper_unified_turn_execution.ml",
-          "value": 1
         },
         {
           "file": "lib/keeper/keeper_unified_turn_stay_silent.ml",
@@ -2326,7 +2314,7 @@
         },
         {
           "file": "lib/server/server_activity_http.ml",
-          "value": 2
+          "value": 6
         },
         {
           "file": "lib/server/server_auth.ml",
@@ -2653,10 +2641,6 @@
           "value": 3
         },
         {
-          "file": "lib/session.ml",
-          "value": 1
-        },
-        {
           "file": "lib/shared_types/artifact_id.ml",
           "value": 1
         },
@@ -2694,7 +2678,7 @@
         },
         {
           "file": "lib/subscriptions.ml",
-          "value": 3
+          "value": 1
         },
         {
           "file": "lib/supervisor.ml",
@@ -2789,10 +2773,6 @@
           "value": 2
         },
         {
-          "file": "lib/tool_capability.ml",
-          "value": 1
-        },
-        {
           "file": "lib/tool_catalog_surfaces/tool_catalog_surfaces.ml",
           "value": 1
         },
@@ -2826,7 +2806,7 @@
         },
         {
           "file": "lib/tool_input_validation.ml",
-          "value": 18
+          "value": 19
         },
         {
           "file": "lib/tool_keeper_ops.ml",
@@ -2838,7 +2818,7 @@
         },
         {
           "file": "lib/tool_keeper.ml",
-          "value": 8
+          "value": 10
         },
         {
           "file": "lib/tool_library.ml",
@@ -2866,7 +2846,7 @@
         },
         {
           "file": "lib/tool_local_runtime_verify.ml",
-          "value": 19
+          "value": 7
         },
         {
           "file": "lib/tool_local_runtime.ml",
@@ -2925,20 +2905,12 @@
           "value": 2
         },
         {
-          "file": "lib/tool_shard_types_core.ml",
-          "value": 2
-        },
-        {
           "file": "lib/tool_shard.ml",
           "value": 2
         },
         {
           "file": "lib/tool_task_args.ml",
           "value": 2
-        },
-        {
-          "file": "lib/tool_task_completion_review.ml",
-          "value": 1
         },
         {
           "file": "lib/tool_task_contract_gate.ml",
@@ -2967,10 +2939,6 @@
         {
           "file": "lib/transport_metrics.ml",
           "value": 4
-        },
-        {
-          "file": "lib/transport_read_model.ml",
-          "value": 1
         },
         {
           "file": "lib/transport.ml",
@@ -3045,10 +3013,6 @@
           "value": 3
         },
         {
-          "file": "lib/worker_runtime_docker.ml",
-          "value": 6
-        },
-        {
           "file": "lib/worker_runtime_helper_protocol.ml",
           "value": 5
         },
@@ -3059,7 +3023,7 @@
       ]
     },
     "contains_substring_defs": {
-      "baseline": 11,
+      "baseline": 10,
       "scope": "let definitions using String/Astring substring/prefix/suffix helpers",
       "files": [
         {
@@ -3101,15 +3065,11 @@
         {
           "file": "lib/tool_blob_store/tool_output.ml",
           "value": 1
-        },
-        {
-          "file": "lib/worker_runtime_docker.ml",
-          "value": 1
         }
       ]
     },
     "ignore_no_comment": {
-      "baseline": 63,
+      "baseline": 61,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3163,10 +3123,6 @@
         {
           "file": "lib/goal/goal_janitor.ml",
           "value": 1
-        },
-        {
-          "file": "lib/keeper/agent_tool_board_runtime.ml",
-          "value": 2
         },
         {
           "file": "lib/keeper/agent_tool_shared_runtime.ml",

@@ -13,6 +13,7 @@
 // mounting a component per row.
 
 import { html } from 'htm/preact'
+import { clampPct } from '../../lib/format-number'
 
 export type ProgressBarSize = 'xs' | 'sm' | 'md'
 export type ProgressBarTone =
@@ -40,16 +41,12 @@ export interface ProgressBarSummary {
   readonly testIdLength: number
 }
 
-function clampProgressPct(pct: number): number {
-  return Math.max(0, Math.min(100, pct))
-}
-
 /** Pure: clamp a percentage into [0, 100] and produce the inline width
     style string. Exposed so callers that need to render the bar inline
     (inside a flex row with other progress bars) can use the same
     semantics without mounting the component. */
 export function progressBarWidthStyle(pct: number): string {
-  const clamped = clampProgressPct(pct)
+  const clamped = clampPct(pct)
   return `width: ${clamped.toFixed(2)}%`
 }
 
@@ -130,7 +127,7 @@ export function summarizeProgressBar({
   ariaLabel,
   testId,
 }: ProgressBarProps): ProgressBarSummary {
-  const clampedPct = clampProgressPct(pct)
+  const clampedPct = clampPct(pct)
   const fillSource = cx !== undefined && cx !== '' ? 'custom-class' : 'tone'
 
   return {

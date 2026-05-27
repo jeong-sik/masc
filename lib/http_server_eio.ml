@@ -406,9 +406,9 @@ module Request = struct
 
   (** Get path from request target *)
   let path (request : Httpun.Request.t) =
-    match String.split_on_char '?' request.target with
-    | p :: _ -> p
-    | [] -> request.target (* split always returns non-empty, but type-safe *)
+    match String.index_opt request.target '?' with
+    | Some idx -> String.sub request.target 0 idx
+    | None -> request.target
 
   (** Get HTTP method *)
   let method_ (request : Httpun.Request.t) =
@@ -421,7 +421,10 @@ end
 
 (** Router for simple path-based routing *)
 module Router = struct
+  type route_kind = Exact | Prefix
+
   type route = {
+    kind: route_kind;
     path: string;
     methods: Httpun.Method.t list;
     handler: request_handler;
@@ -432,12 +435,51 @@ module Router = struct
     | `Method_not_allowed
     | `Not_found ]
 
-  type t = route list
+  type t = {
+    exact_by_path: (string, route list) Hashtbl.t;
+    mutable prefix_routes: route list;
+    mutable route_count: int;
+  }
 
-  let empty : t = []
+  let create () =
+    { exact_by_path = Hashtbl.create 128; prefix_routes = []; route_count = 0 }
 
-  let add ~path ~methods ~handler routes =
-    { path; methods; handler } :: routes
+  let route_count router = router.route_count
+
+  let routes router =
+    let exact =
+      router.exact_by_path |> Hashtbl.to_seq_values |> List.of_seq |> List.concat
+    in
+    exact @ router.prefix_routes
+
+  let insert_prefix_route route routes =
+    let route_len = String.length route.path in
+    let rec loop acc = function
+      | [] -> List.rev (route :: acc)
+      | candidate :: rest
+        when route_len >= String.length candidate.path ->
+          List.rev_append acc (route :: candidate :: rest)
+      | candidate :: rest -> loop (candidate :: acc) rest
+    in
+    loop [] routes
+
+  let add_kind kind ~path ~methods ~handler router =
+    let route = { kind; path; methods; handler } in
+    (match kind with
+     | Exact ->
+         let existing =
+           match Hashtbl.find_opt router.exact_by_path path with
+           | Some routes -> routes
+           | None -> []
+         in
+         Hashtbl.replace router.exact_by_path path (route :: existing)
+     | Prefix ->
+         router.prefix_routes <- insert_prefix_route route router.prefix_routes);
+    router.route_count <- router.route_count + 1;
+    router
+
+  let add ~path ~methods ~handler router =
+    add_kind Exact ~path ~methods ~handler router
 
   let get path handler routes =
     add ~path ~methods:[`GET] ~handler routes
@@ -451,59 +493,42 @@ module Router = struct
   (** Match by prefix: path field is treated as a prefix, not exact match.
       The suffix (path after the prefix) is available via [Request.path]. *)
   let prefix_get prefix handler routes =
-    add ~path:("PREFIX:" ^ prefix) ~methods:[`GET] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`GET] ~handler routes
 
   let prefix_post prefix handler routes =
-    add ~path:("PREFIX:" ^ prefix) ~methods:[`POST] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`POST] ~handler routes
 
   let prefix_delete prefix handler routes =
-    add ~path:("PREFIX:" ^ prefix) ~methods:[`DELETE] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`DELETE] ~handler routes
 
   let prefix_put prefix handler routes =
-    add ~path:("PREFIX:" ^ prefix) ~methods:[`PUT] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`PUT] ~handler routes
 
-  let resolve routes request =
+  let resolve router request =
     let req_path = Request.path request in
     let req_method = Request.method_ request in
-    (* Try exact matches first *)
-    let path_matches =
-      List.filter (fun route ->
-        (not (String.length route.path > 7
-              && String.sub route.path 0 7 = "PREFIX:"))
-        && String.equal route.path req_path
-      ) routes
-    in
-    match List.find_opt (fun route -> List.mem req_method route.methods) path_matches with
+    let exact_path_matches = Hashtbl.find_opt router.exact_by_path req_path in
+    match
+      Option.bind exact_path_matches (fun routes ->
+        List.find_opt (fun route -> List.mem req_method route.methods) routes)
+    with
     | Some route -> `Matched route
     | None ->
-        (* Try prefix matches *)
-        let prefix_matches =
-          List.filter (fun route ->
-            String.length route.path > 7
-            && String.sub route.path 0 7 = "PREFIX:"
-            && let prefix = String.sub route.path 7 (String.length route.path - 7) in
-               String.starts_with req_path ~prefix
-            && List.mem req_method route.methods
-          ) routes
-        in
-        let prefix_matches =
-          List.sort
-            (fun a b ->
-              let a_len = String.length a.path - 7 in
-              let b_len = String.length b.path - 7 in
-              compare b_len a_len)
-            prefix_matches
-        in
-        (match prefix_matches with
-         | route :: _ -> `Matched route
-         | [] ->
-             if path_matches = [] then
-               `Not_found
-             else
-               `Method_not_allowed)
+        (match
+           List.find_opt
+             (fun route ->
+                String.starts_with req_path ~prefix:route.path
+                && List.mem req_method route.methods)
+             router.prefix_routes
+         with
+         | Some route -> `Matched route
+         | None ->
+             (match exact_path_matches with
+              | Some _ -> `Method_not_allowed
+              | None -> `Not_found))
 
-  let dispatch routes request reqd =
-    match resolve routes request with
+  let dispatch router request reqd =
+    match resolve router request with
     | `Matched route -> route.handler request reqd
     | `Not_found -> Response.not_found reqd
     | `Method_not_allowed -> Response.method_not_allowed reqd

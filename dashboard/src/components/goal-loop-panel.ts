@@ -14,6 +14,7 @@ import { fetchDashboardGoalsTree } from '../api/dashboard'
 import { callMcpTool } from '../api/mcp'
 import { asString, isRecord } from './common/normalize'
 import { formatMsCompact } from '../lib/format-number'
+import { errorToString } from '../lib/format-string'
 import { hydrateGoalTreeSnapshot } from '../goal-tree-state'
 import { navigate } from '../router'
 import {
@@ -324,7 +325,7 @@ function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
           .catch(() => undefined)
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(errorToString(err))
       })
       .finally(() => setSubmitting(false))
   }, [horizon, onCreated, priority, title])
@@ -550,7 +551,7 @@ export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
     void fetchGoalLoopStatus()
       .then(setStatus)
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(errorToString(err))
       })
       .finally(() => setLoading(false))
   }, [])

@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
+import { clampPct } from '../../lib/format-number'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { currentDashboardActor } from '../../api/core'
 import { callMcpTool } from '../../api/mcp'
@@ -65,6 +66,7 @@ import {
   goalCompletionTone,
 } from './goal-completion-summary'
 import { DECK_CHIP, DECK_LABEL, DECK_META } from './deck-classes'
+import { errorToString } from '../../lib/format-string'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 type GoalTransitionAction = 'request_complete' | 'approve_completion' | 'reject_completion'
@@ -530,7 +532,7 @@ async function refreshTree() {
   try {
     hydrateGoalTreeSnapshot(await fetchDashboardGoalsTree())
   } catch (err) {
-    treeError.value = err instanceof Error ? err.message : String(err)
+    treeError.value = errorToString(err)
   } finally {
     treeLoading.value = false
   }
@@ -549,14 +551,14 @@ async function refreshGoalDetail(goalId: string) {
     detailData.value = next
   } catch (err) {
     if (detailRequestSeq !== reqId) return
-    detailError.value = err instanceof Error ? err.message : String(err)
+    detailError.value = errorToString(err)
   } finally {
     if (detailRequestSeq === reqId) detailLoading.value = false
   }
 }
 
 function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' }) {
-  const clamped = Math.max(0, Math.min(100, pct))
+  const clamped = clampPct(pct)
   const barColor =
     clamped >= 80 ? 'var(--color-status-ok)'
     : clamped >= 50 ? 'var(--color-amber-bright)'
@@ -891,7 +893,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
           refreshGoalDetail(node.id),
         ])
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(errorToString(err))
       } finally {
         setPendingAction(null)
       }

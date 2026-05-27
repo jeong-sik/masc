@@ -8,6 +8,7 @@ import type {
   OperatorSnapshot,
 } from '../types'
 import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
+import { isAbortError } from '../lib/async-state'
 import {
   currentDashboardActorName,
   setCanonicalDashboardActor,
@@ -255,7 +256,7 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
       signal: controller.signal,
     })
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
+    if (isAbortError(err)) {
       if (upstreamSignal?.aborted) {
         throw err
       }

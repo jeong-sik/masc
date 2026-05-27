@@ -63,3 +63,17 @@ export function formatMsCompact(ms: number | null | undefined, fallback = ''): s
 export function isFiniteMetricValue(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
+
+/**
+ * Clamp a percentage value into the `[0, 100]` range. Width-style
+ * renderers, badge colour thresholds, and quality-score normalisers
+ * all need this exact body — three callsites previously inlined
+ * `Math.max(0, Math.min(100, ...))` (plus `progress-bar.ts` shipped
+ * a file-internal `clampProgressPct` helper with this body).
+ *
+ * Does not handle `NaN`: a `NaN` input returns `NaN`. Pair with
+ * `isFiniteMetricValue` if the input could be invalid.
+ */
+export function clampPct(value: number): number {
+  return Math.max(0, Math.min(100, value))
+}

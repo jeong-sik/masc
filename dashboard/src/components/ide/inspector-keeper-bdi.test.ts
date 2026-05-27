@@ -373,4 +373,3 @@ describe('InspectorKeeperBDI', () => {
     render(null, container)
   })
 })
-

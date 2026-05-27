@@ -336,6 +336,6 @@ val handle_start :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val add_routes :
-  sw:'a -> clock:'b -> Http.Router.route list -> Http.Router.route list
+  sw:'a -> clock:'b -> Http.Router.t -> Http.Router.t
 (** Compose every sidecar route on top of [routes].  Called from the
     HTTP routing assembly. *)

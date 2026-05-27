@@ -27,6 +27,8 @@
     state callers must not branch on; only {!container_name} is
     observable. *)
 
+open Masc_mcp
+
 module Make : functor (D : Keeper_docker_client.S) -> sig
   (** Opaque session handle. Wraps the {!Keeper_container_name.t} the
       container was started under plus the originating

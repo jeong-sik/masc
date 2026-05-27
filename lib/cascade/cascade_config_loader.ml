@@ -142,8 +142,9 @@ let load_toml_in_memory ~emit_telemetry config_path =
              with_cache_lock (fun () ->
                Hashtbl.replace config_cache cache_key (mp, json));
             if emit_telemetry then
-              Eio.traceln
-                "[CascadeConfig] loaded TOML %s mtime=%.0f (in-memory)"
+              Log.info
+                ~ctx:"CascadeConfig"
+                "loaded TOML %s mtime=%.0f (in-memory)"
                 cache_key
                 mp;
             Ok json
@@ -637,7 +638,7 @@ let load_phonebook_impl ~emit_telemetry path =
                 with_cache_lock (fun () ->
                   Hashtbl.replace phonebook_cache path (mp, pb));
                 if emit_telemetry then
-                  Eio.traceln "[CascadeConfig] loaded phonebook %s mtime=%.0f" path mp;
+                  Log.info ~ctx:"CascadeConfig" "loaded phonebook %s mtime=%.0f" path mp;
                 Ok pb
               | Some _mp ->
                 (* Race: mtime moved mid-read. Serve fresh but skip cache. *)

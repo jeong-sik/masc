@@ -1,7 +1,5 @@
 // MASC Dashboard — Operations Panel (Phase 5+6+7)
-// FilterChips toggle for ops/governance/safety/inspector sub-views.
-// Phase 7: connectors split out as a top-level surface. Legacy
-// command:connectors links are routed before this panel mounts.
+// FilterChips toggle for ops/governance/surfaces/inspector sub-views.
 
 import { html } from 'htm/preact'
 import { FilterChips } from './common/filter-chips'

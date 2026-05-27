@@ -20,9 +20,6 @@ async function loadPanel() {
   vi.doMock('./governance', () => ({
     Governance: () => html`<div data-testid="governance">Governance</div>`,
   }))
-  vi.doMock('./connector-status', () => ({
-    ConnectorStatusPanel: () => html`<div data-testid="connectors">Connectors</div>`,
-  }))
   vi.doMock('./lab-inspector', () => ({
     LabInspector: () => html`<div data-testid="inspector">Inspector</div>`,
   }))
@@ -50,7 +47,6 @@ describe('OperationsPanel', () => {
     vi.doUnmock('../router')
     vi.doUnmock('./ops')
     vi.doUnmock('./governance')
-    vi.doUnmock('./connector-status')
     vi.doUnmock('./lab-inspector')
     vi.doUnmock('./surface-readiness-panel')
   })
@@ -98,7 +94,7 @@ describe('OperationsPanel', () => {
     expect(container.querySelector('[data-testid="surfaces"]')).not.toBeNull()
   })
 
-  it('renders FilterChips options without legacy connectors view', async () => {
+  it('renders FilterChips options for the current operations views', async () => {
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
@@ -112,8 +108,6 @@ describe('OperationsPanel', () => {
     expect(labels).toContain('Governance')
     expect(labels).toContain('Surfaces')
     expect(labels).toContain('Inspector')
-    expect(labels).not.toContain('Connectors')
-    expect(labels).not.toContain('Safety')
   })
 
   it('falls back to default for unknown view param', async () => {

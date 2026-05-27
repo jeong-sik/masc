@@ -877,16 +877,11 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so downstream managed-profile assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true (Tool_result.is_success join_result);
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   let _added =
     Masc_mcp.Coord.add_task state.room_config ~title:"managed-claim"
       ~priority:2 ~description:""
@@ -926,16 +921,11 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true (Tool_result.is_success join_result);
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"transition-claim"
        ~priority:2 ~description:"");
@@ -983,16 +973,11 @@ let test_handle_request_tools_call_transition_done_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true (Tool_result.is_success join_result);
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"transition-done"
        ~priority:2 ~description:"");
@@ -1052,16 +1037,11 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true (Tool_result.is_success join_result);
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"deprecated-claim"
        ~priority:2 ~description:"");

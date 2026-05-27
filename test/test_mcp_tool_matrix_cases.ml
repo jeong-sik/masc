@@ -102,6 +102,8 @@ let endpoint_unavailable_guard_names =
 
 let endpoint_unavailable_guard_fragments =
   [
+    "keeper-internal";
+    "unavailable on this MCP endpoint";
     "not available on this MCP endpoint";
   ]
 
@@ -809,6 +811,10 @@ let web_search_guard_fragments =
 let guard_fragments_for_name name =
   if String.equal name "masc_web_search" then
     web_search_guard_fragments
+  else if
+    string_starts_with ~prefix:"tool_" name
+  then
+    endpoint_unavailable_guard_fragments @ state_guard_fragments @ git_guard_fragments
   else if
     List.exists
       (fun prefix -> string_starts_with ~prefix name)

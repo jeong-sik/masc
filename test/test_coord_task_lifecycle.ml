@@ -310,6 +310,90 @@ let test_exhaustive_consistency () =
     statuses
 ;;
 
+(* ── required_tools inference from write-intent keywords ──── *)
+
+module Classify = Coord_task_classify
+
+let assert_equal_string_list ~ctx ~expected ~actual =
+  if expected <> actual
+  then (
+    Printf.printf
+      "FAIL [%s]\n  expected: [%s]\n  actual:   [%s]\n%!"
+      ctx
+      (String.concat "; " expected)
+      (String.concat "; " actual);
+    exit 1)
+;;
+
+let test_write_intent_detected () =
+  let contract =
+    Classify.ensure_task_contract_for_verification
+      ~title:"Fix the authentication bug"
+      ~description:"The login flow needs to be updated"
+      ()
+  in
+  assert_equal_string_list
+    ~ctx:"write-intent: fix+update detected"
+    ~expected:[ "keeper_fs_edit"; "tool_execute" ]
+    ~actual:contract.required_tools
+;;
+
+let test_write_intent_korean () =
+  let contract =
+    Classify.ensure_task_contract_for_verification
+      ~title:"로그인 버그 수정"
+      ~description:"인증 흐름을 변경해야 합니다"
+      ()
+  in
+  assert_equal_string_list
+    ~ctx:"write-intent: Korean 수정+변경 detected"
+    ~expected:[ "keeper_fs_edit"; "tool_execute" ]
+    ~actual:contract.required_tools
+;;
+
+let test_write_intent_pr () =
+  let contract =
+    Classify.ensure_task_contract_for_verification
+      ~title:"Create PR for feature X"
+      ~description:"Submit pull request with new dashboard"
+      ()
+  in
+  assert_equal_string_list
+    ~ctx:"write-intent: PR detected"
+    ~expected:[ "keeper_fs_edit"; "tool_execute" ]
+    ~actual:contract.required_tools
+;;
+
+let test_no_write_intent () =
+  let contract =
+    Classify.ensure_task_contract_for_verification
+      ~title:"Analyze system performance"
+      ~description:"Review current metrics and report findings"
+      ()
+  in
+  assert_equal_string_list
+    ~ctx:"no write-intent: analyze+review"
+    ~expected:[]
+    ~actual:contract.required_tools
+;;
+
+let test_explicit_required_tools_preserved () =
+  let explicit_contract =
+    { Classify.empty_task_contract with required_tools = [ "custom_tool"; "another_tool" ] }
+  in
+  let contract =
+    Classify.ensure_task_contract_for_verification
+      ~contract:explicit_contract
+      ~title:"Fix the bug"
+      ~description:"This should not override"
+      ()
+  in
+  assert_equal_string_list
+    ~ctx:"explicit required_tools preserved"
+    ~expected:[ "custom_tool"; "another_tool" ]
+    ~actual:contract.required_tools
+;;
+
 (* ── runner ───────────────────────────────────────────────── *)
 
 let () =
@@ -324,5 +408,10 @@ let () =
   test_cancelled ();
   test_verification_disabled_todo ();
   test_exhaustive_consistency ();
+  test_write_intent_detected ();
+  test_write_intent_korean ();
+  test_write_intent_pr ();
+  test_no_write_intent ();
+  test_explicit_required_tools_preserved ();
   print_endline "test_coord_task_lifecycle: all assertions passed"
 ;;

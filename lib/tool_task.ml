@@ -175,14 +175,22 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   | Ok action ->
   let requested_action = action in
   let action_s = Masc_domain.task_action_to_string action in
-  if is_verifier_agent_name ctx.agent_name
-     && not (verifier_transition_action_allowed action)
+  let transition_action_denylist = keeper_transition_action_denylist ctx in
+  if
+    transition_action_denied_by_denylist
+      ~tool_denylist:transition_action_denylist
+      ~action:action_s
   then
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name
       ~start_time
-      (verifier_transition_rejection ~agent_name:ctx.agent_name ~action:action_s)
+      (transition_action_policy_rejection
+         ~agent_name:ctx.agent_name
+         ~action:action_s
+         ~allowed_actions:
+           (transition_action_allowed_actions
+              ~tool_denylist:transition_action_denylist))
   else
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
@@ -210,14 +218,14 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
-  let verifier_terminal_verdict_noop =
-    if is_verifier_agent_name ctx.agent_name
-       && verifier_transition_action_allowed action
+  let terminal_verdict_noop =
+    if transition_action_policy_applies transition_action_denylist
+       && is_verdict_transition_action action
     then
       match task_opt with
       | Some task when Masc_domain.task_status_is_terminal task.task_status ->
         Some
-          (verifier_terminal_verdict_noop_message
+          (terminal_verdict_noop_message
              ~task_id
              ~action:action_s
              ~status:(Masc_domain.task_status_to_string task.task_status))
@@ -225,7 +233,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     else
       None
   in
-  match verifier_terminal_verdict_noop with
+  match terminal_verdict_noop with
   | Some message -> Tool_result.ok ~tool_name ~start_time message
   | None ->
   match client_side_transition_gate_error ~task_opt ~action ~action_s with

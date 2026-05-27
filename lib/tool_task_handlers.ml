@@ -178,6 +178,32 @@ let keeper_agent_tool_names (ctx : context) =
        | Some entry -> Some (Keeper_tool_policy.keeper_allowed_tool_names entry.meta)
        | None -> None)
 
+let keeper_meta_for_agent (ctx : context) =
+  let resolved =
+    try Coord.resolve_agent_name ctx.config ctx.agent_name with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Task.warn "resolve_agent_name failed for keeper policy %s: %s"
+          ctx.agent_name
+          (Stdlib.Printexc.to_string exn);
+        ctx.agent_name
+  in
+  [ ctx.agent_name; resolved ]
+  |> List.filter_map Keeper_identity.canonical_keeper_name
+  |> Json_util.dedupe_keep_order
+  |> List.find_map (fun keeper_name ->
+       match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
+       | Some entry -> Some entry.meta
+       | None ->
+           match Keeper_types.read_meta ctx.config keeper_name with
+           | Ok (Some meta) -> Some meta
+           | Ok None | Error _ -> None)
+
+let keeper_transition_action_denylist (ctx : context) =
+  match keeper_meta_for_agent ctx with
+  | Some meta -> meta.tool_denylist
+  | None -> []
+
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_cascade : string option)
@@ -595,4 +621,3 @@ let transition_known_args =
     "evaluator_cascade";
     "handoff_context";
   ]
-

@@ -20,7 +20,7 @@ Related: RFC-0064 (LLM-native two-surface tool model), RFC-0179 (keeper_* descri
 
 ## 0. Problem framing
 
-RFC-0179 (PR #18710, 2026-05-26 merged) brought `keeper_*` coordination tools — 39 entries — under the `Agent_tool_descriptor.t` projection layer. `internal_descriptors` grew from 1 to 39, `Keeper_exec_tools.execute_keeper_tool_call_with_outcome` lost its legacy match chain (12 arms → 0), and 38 additional tools began emitting `route_evidence_json` per call.
+RFC-0179 (PR #18710, 2026-05-26 merged) brought `keeper_*` coordination tools — 39 entries — under the `Agent_tool_descriptor.t` projection layer. `internal_descriptors` grew from 1 to 39, `Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` lost its legacy match chain (12 arms → 0), and 38 additional tools began emitting `route_evidence_json` per call.
 
 A 2026-05-26 audit found that `masc_*` MCP-public coordination tools — the surface MASC agents call most heavily (`masc_join`, `masc_broadcast`, `masc_heartbeat`, `masc_messages`, `masc_board_*`) — have **0 descriptor coverage**:
 
@@ -286,7 +286,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   ; mcp_session_id : string option
   ```
-- Caller (`Keeper_exec_tools.execute_keeper_tool_call_with_outcome`) constructs the full ctx from the existing keeper Eio context.
+- Caller (`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome`) constructs the full ctx from the existing keeper Eio context.
 - `Agent_tool_in_process_runtime.handle_masc_keeper` (and new `handle_masc_operator`) receive these via the existing handler signature pattern: `~config ~meta ~sw ~clock ~proc_mgr ~net ~name ~args`.
 - Cycle-safety preserved: `Agent_tool_runtime.ctx` already imports Eio types — adding fields adds no new module deps.
 - Pro: one structural change unlocks 10 tools.  Con: signature ripple across all 11 handler dispatch arms in `Agent_tool_runtime.handle_in_process`.
@@ -305,7 +305,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 
 | Phase 5 sub-PR | LoC estimate | Files | Risk |
 |---|---|---|---|
-| PR-A: ctx Eio extension | ~50 | 2 (agent_tool_runtime.ml/.mli + Keeper_exec_tools caller) | low (compile-error-driven ripple) |
+| PR-A: ctx Eio extension | ~50 | 2 (agent_tool_runtime.ml/.mli + Agent_tool_dispatch_runtime caller) | low (compile-error-driven ripple) |
 | PR-B: keeper Eio cluster (4 tools) | ~150 | 4 (Keeper_dispatch_ref sig extend + Tool_keeper register + handler + descriptor) | medium |
 | PR-C: persona_generate | ~80 | 3 (Persona_dispatch_ref extend + Tool_keeper register + descriptor) | medium |
 | PR-D: operator cluster (5 tools) | ~200 | 4 (Operator_dispatch_ref new + Tool_operator register + handler + 5 descriptors) | medium |

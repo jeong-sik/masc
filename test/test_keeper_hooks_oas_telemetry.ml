@@ -539,12 +539,12 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
 let test_tool_execution_summary_derives_provider_and_outcome () =
   let summary =
     Hooks.tool_execution_summary
-      ~tool_name:"tool_workspace_inspect"
+      ~tool_name:"tool_search_files"
       ~model:"cli_tool_a:gpt-5.4"
       ~success:false
       ~duration_ms:12.5
   in
-  check string "tool name" "tool_workspace_inspect" summary.tool_name;
+  check string "tool name" "tool_search_files" summary.tool_name;
   check string "provider" "runtime" summary.provider;
   check string "outcome" "error" summary.outcome;
   check (float 0.001) "duration" 12.5 summary.duration_ms

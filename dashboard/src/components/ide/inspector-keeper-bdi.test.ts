@@ -33,7 +33,7 @@ const snapshot = {
   ],
   last_tool_call: {
     ts_unix: 1777986100,
-    tool: 'keeper_bash',
+    tool: 'Execute',
     success: true,
     semantic_outcome: 'success',
     duration_ms: 42,
@@ -97,7 +97,7 @@ describe('normalizeKeeperBdiSnapshot', () => {
     expect(normalized?.desire).toBe('explain current edit intent')
     expect(normalized?.intention).toBe('inspect selected line')
     expect(normalized?.recent_token_spend[0]?.total_tokens).toBe(165)
-    expect(normalized?.last_tool_call?.tool).toBe('keeper_bash')
+    expect(normalized?.last_tool_call?.tool).toBe('Execute')
   })
 
   it('rejects payloads without a keeper name', () => {
@@ -122,7 +122,7 @@ describe('InspectorKeeperBDI', () => {
     expect(container.textContent).toContain('L42')
     expect(container.textContent).toContain('line ownership needs inspection')
     expect(container.textContent).toContain('165 tok')
-    expect(container.textContent).toContain('keeper_bash')
+    expect(container.textContent).toContain('Execute')
     expect(container.textContent).toContain('42ms')
 
     render(null, container)
@@ -340,7 +340,7 @@ describe('InspectorKeeperBDI', () => {
 
     links.find(link => link.textContent === 'Telemetry')!.click()
     expect(routeHashParams().get('q')).toBe(
-      'bdi keeper:scholar generated:2026-05-05T13:00:00Z tool:keeper_bash',
+      'bdi keeper:scholar generated:2026-05-05T13:00:00Z tool:Execute',
     )
 
     links.find(link => link.textContent === 'Keeper')!.click()

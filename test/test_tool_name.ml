@@ -10,7 +10,7 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Context_status; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
-  ; Workspace_inspect; Stay_silent
+  ; Search_files; Stay_silent
   ; Task_claim; Task_create; Task_done; Task_submit_for_verification
   ; Task_force_done; Task_force_release
   ; Tasks_audit; Tasks_list; Time_now; Tool_search; Tools_list
@@ -187,16 +187,16 @@ let test_keeper_board_write_helpers () =
 let test_keeper_board_write_facade_uses_typed_contract () =
   Alcotest.(check (list string)) "exec context names mirror Tool_name"
     Tool_name.Keeper.board_write_tool_names
-    Keeper_exec_context.keeper_board_write_tool_names;
+    Keeper_context_runtime.keeper_board_write_tool_names;
   Alcotest.(check bool) "comment is board write" true
-    (Keeper_exec_context.keeper_write_done [ "keeper_board_comment" ]);
+    (Keeper_context_runtime.keeper_write_done [ "keeper_board_comment" ]);
   Alcotest.(check bool) "comment vote is not board write" false
-    (Keeper_exec_context.keeper_write_done [ "keeper_board_comment_vote" ]);
+    (Keeper_context_runtime.keeper_write_done [ "keeper_board_comment_vote" ]);
   Alcotest.(check string) "post has stable priority" "post"
-    (Keeper_exec_context.keeper_action_kind_of_tool_names
+    (Keeper_context_runtime.keeper_action_kind_of_tool_names
        [ "keeper_board_vote"; "keeper_board_post" ]);
   Alcotest.(check string) "non-board action kind is none" "none"
-    (Keeper_exec_context.keeper_action_kind_of_tool_names
+    (Keeper_context_runtime.keeper_action_kind_of_tool_names
        [ "keeper_board_comment_vote"; "unknown" ])
 
 let test_board_predicate_facade_uses_typed_contract () =
@@ -229,8 +229,9 @@ let test_is_keeper () =
 (* ── Coverage: all shard tool schemas must parse ───────────── *)
 
 let test_shard_tools_parse () =
-  let shard_names = [ "base"; "board"; "filesystem"; "shell"; "voice";
-                      "coding"; "pr"; "library" ] in
+  let shard_names =
+    [ "base"; "board"; "filesystem"; "search_files"; "voice"; "pr"; "library" ]
+  in
   let tool_names =
     List.concat_map (fun sn ->
       match Tool_shard.get_shard sn with

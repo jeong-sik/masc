@@ -14,13 +14,13 @@
     > [MASC_EXEC_TIMEOUT_DEFAULT_SEC] > [global_default_sec]. *)
 
 type caller =
-  | Shell                     (** agent_tool_shell_runtime hot-path subprocess (60s) *)
+  | Shell                     (** agent_tool_command_runtime hot-path subprocess (60s) *)
   | Fs                        (** agent_tool_filesystem_runtime file ops (30s) *)
-  | Preflight                 (** keeper_exec_preflight checks (10s) *)
+  | Preflight                 (** keeper_cascade_resilience checks (10s) *)
   | Repo_readiness            (** keeper_repo_readiness git status (10s) *)
   | Sandbox                   (** keeper_sandbox_control / keeper_sandbox_docker probes (2s) *)
   | Dispatch                  (** exec_dispatch routine execution (120s) *)
-  | Memory_audit              (** keeper_exec_memory short audits (3s) *)
+  | Memory_audit              (** agent_tool_memory_runtime short audits (3s) *)
   | Alerting                  (** keeper_alerting fanout (Slack/webhook POST + gh issue create) (20s) *)
   | Gh_quick_query             (** short gh CLI query (10s) *)
   | Status_detail             (** keeper_status_detail health probes (5/10s) *)

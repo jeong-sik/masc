@@ -12,7 +12,7 @@
       [Keeper_types.persistent_agent_names config] (or the explicit
       [?keeper_names]), reads each keeper meta, asks
       [Dashboard_cache.get_or_compute] for a 2s-cached
-      [Keeper_exec_status.parse_agent_status] view, and assembles the
+      [Keeper_status_runtime.parse_agent_status] view, and assembles the
       operator schema rows from disk meta + the cached agent status.
 
     Both paths emit the same wire shape — `runtime_class="keeper"`
@@ -95,7 +95,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
              let agent_json =
                let cache_key = "kas:" ^ meta.agent_name in
                Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-                 Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name)
+                 Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name)
              in
              let agent_status =
                match agent_json with

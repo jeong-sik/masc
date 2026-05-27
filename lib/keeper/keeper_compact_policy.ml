@@ -3,7 +3,7 @@
     Decides whether compaction should run based on ratio/message/token
     gates and cooldown, then applies OAS strategies + persona fold.
 
-    Extracted from Keeper_exec_context as part of #4955 god-file split. *)
+    Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
 open Keeper_types
 open Keeper_context_core

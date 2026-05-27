@@ -1,6 +1,6 @@
 (** Runtime dispatch for descriptor-backed agent tools.
 
-    [Keeper_exec_tools] owns cross-cutting execution bookkeeping. This module
+    [Agent_tool_dispatch_runtime] owns cross-cutting execution bookkeeping. This module
     owns the descriptor-selected lowerer/handler route for first-class agent
     tools such as [Execute], [ReadFile], [SearchFiles], and [SearchWeb]. *)
 

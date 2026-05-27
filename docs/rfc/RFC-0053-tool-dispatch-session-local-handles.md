@@ -17,15 +17,15 @@ related:
 
 ## §0 Summary
 
-`keeper_exec_tools.ml`의 `default_tool_search_fn` (line 103), `default_tool_searcher` (165), `set_tool_search_fn` (170) 같은 process-global setter가 **silent no-op fallback**을 만든다. caller가 session-local `search_fn`를 전달하지 않으면 global no-op이 암묵적으로 사용됨. 이는 `Unknown → Permissive Default` 안티패턴의 다른 변형 (global state implicit default).
+`agent_tool_dispatch_runtime.ml`의 `default_tool_search_fn` (line 103), `default_tool_searcher` (165), `set_tool_search_fn` (170) 같은 process-global setter가 **silent no-op fallback**을 만든다. caller가 session-local `search_fn`를 전달하지 않으면 global no-op이 암묵적으로 사용됨. 이는 `Unknown → Permissive Default` 안티패턴의 다른 변형 (global state implicit default).
 
 본 RFC는 process-global setter를 **session-local handle + explicit dependency** 로 대체한다. Tool dispatch는 항상 caller가 제공하는 `tool_search_handle` 또는 `Capability.t`를 받음. missing handle은 `Error Tool_search_not_provided`로 컴파일 에러 또는 명시 실패.
 
 ## §1 Problem (caller-context inventory)
 
-### §1.1 `keeper_exec_tools.ml` process-global setter 현황
+### §1.1 `agent_tool_dispatch_runtime.ml` process-global setter 현황
 
-**현재 main 코드** (`origin/main` `3904e285b8`, `lib/keeper/keeper_exec_tools.ml`):
+**현재 main 코드** (`origin/main` `3904e285b8`, `lib/keeper/agent_tool_dispatch_runtime.ml`):
 
 ```ocaml
 (* line 103 — process-global fallback definition *)
@@ -46,7 +46,7 @@ let set_tool_search_fn (f : tool_searcher) =
 
 **caller-context (sub-agent Topic B 결과)**:
 
-#### B.1 `keeper_exec_tools.ml` — `set_tool_search_fn`가 dead code
+#### B.1 `agent_tool_dispatch_runtime.ml` — `set_tool_search_fn`가 dead code
 
 | 심볼 | 라인 | 상태 |
 |------|------|------|
@@ -55,7 +55,7 @@ let set_tool_search_fn (f : tool_searcher) =
 | `tool_searcher` ref | 168 | global mutable ref |
 | `set_tool_search_fn` | 170 | **정의되었으나 코드베이스 전체에서 0회 호출** |
 
-→ setter는 존재하지만 아묏도 호출하지 않는다. 실제 데이터 흐름은 `~search_fn` optional parameter를 통해 전달됨. global ref는 **죽은 패턴**. `lib/keeper/keeper_exec_tools.ml:170`에서 정의만 되고 호출되지 않음.
+→ setter는 존재하지만 아묏도 호출하지 않는다. 실제 데이터 흐름은 `~search_fn` optional parameter를 통해 전달됨. global ref는 **죽은 패턴**. `lib/keeper/agent_tool_dispatch_runtime.ml:170`에서 정의만 되고 호출되지 않음.
 
 #### B.2 이미 존재하는 session-local pattern (canonical example)
 
@@ -82,20 +82,20 @@ local_search_fn_ref := fun ~query ~max_results -> ...
 
 | 모듈 | 심볼 | 사용 여부 | RFC-0053 관련 |
 |------|------|----------|--------------|
-| `keeper_exec_tools` | `tool_searcher` ref | **Dead** (fallback only) | **Primary target** |
-| `keeper_exec_tools` | `keeper_tool_call_recorder` ref | Used (`mcp_server_eio.ml:130`) | Secondary |
+| `agent_tool_dispatch_runtime` | `tool_searcher` ref | **Dead** (fallback only) | **Primary target** |
+| `agent_tool_dispatch_runtime` | `keeper_tool_call_recorder` ref | Used (`mcp_server_eio.ml:130`) | Secondary |
 | `keeper_tool_registry` | `masc_schemas_state` ref | Used | Out of scope |
-| `keeper_exec_shared` | `tag_dispatch_fn` ref | Used | Out of scope |
+| `agent_tool_shared_runtime` | `tag_dispatch_fn` ref | Used | Out of scope |
 | `keeper_event_bus` | `bus_ref` | Used | Out of scope |
 | `keeper_keepalive_signal` | `grpc_client_ref` | Used | Out of scope |
 | `keeper_compact_audit` | `store_ref` | Used | Out of scope |
 
-→ RFC-0053 Phase A 범위는 `keeper_exec_tools`의 `tool_searcher` / `set_tool_search_fn` 제거에 집중.
+→ RFC-0053 Phase A 범위는 `agent_tool_dispatch_runtime`의 `tool_searcher` / `set_tool_search_fn` 제거에 집중.
 
 ### §1.2 같은 root의 다른 현상
 
 PR #13987 본문:
-> remove process-global no-op keeper tool callbacks from `Keeper_exec_tools`
+> remove process-global no-op keeper tool callbacks from `Agent_tool_dispatch_runtime`
 > make `keeper_tool_search` fail explicitly when direct dispatch omits a session `search_fn`
 
 → PR #13987의 fix가 이 RFC의 Phase A 수준. 본 RFC는 그것을 확장: process-global setter **자체를 제거**, session handle **메커니즘을 도입**. 특히 `set_tool_search_fn`이 dead code임이 확인되어, 제거가 breaking change가 아님.
@@ -113,7 +113,7 @@ PR #13987 본문:
 ## §2 Goals / Non-goals
 
 ### Goals
-- `keeper_exec_tools.ml`의 process-global setter 제거
+- `agent_tool_dispatch_runtime.ml`의 process-global setter 제거
 - `tool_search` → session-local handle / explicit dependency 패턴 도입
 - missing handle 시 컴파일 에러 또는 `Error` 반환 (silent no-op X)
 - `tool_registry.ml`의 `Config` dependency → catalog surface / explicit handle
@@ -156,7 +156,7 @@ end
 
 ### §3.3 Phase 가이드
 
-- **Phase A**: `keeper_exec_tools.ml` 에서 process-global setter 제거. `search_fn` parameter 강제.
+- **Phase A**: `agent_tool_dispatch_runtime.ml` 에서 process-global setter 제거. `search_fn` parameter 강제.
 - **Phase B**: `tool_registry.ml` `Config` dependency 제거. catalog surface 도입.
 - **Phase C**: capability-based dispatch 논의 (RFC-0052과 교차)
 - **Phase D**: cross-session tool cache redesign
@@ -164,7 +164,7 @@ end
 ## §4 Implementation Plan
 
 ### PR-A: Reference implementation (single module)
-- `keeper_exec_tools.ml` 에서 `default_tool_search_fn` / `set_tool_search_fn` 제거
+- `agent_tool_dispatch_runtime.ml` 에서 `default_tool_search_fn` / `set_tool_search_fn` 제거
 - 모든 caller가 explicit `search_fn` 전달 (sub-agent Topic B.1 결과 기반)
 - PR #13987의 test coverage 재사용
 

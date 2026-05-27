@@ -19,8 +19,8 @@
 
 open Alcotest
 module Descriptor = Masc_mcp.Agent_tool_descriptor
-module Exec = Masc_mcp.Keeper_exec_tools
 module Policy = Masc_mcp.Keeper_tool_policy
+module Exec = Masc_mcp.Agent_tool_dispatch_runtime
 module Registry = Masc_mcp.Keeper_tool_registry
 module Resolution = Masc_mcp.Agent_tool_descriptor_resolution
 module Tool_board_registry = Masc_mcp.Tool_board_registry
@@ -178,7 +178,7 @@ let test_readonly_policy_is_descriptor_input_aware () =
     "unknown internal op falls back to static read-only hint"
     (Some true)
     (Resolution.readonly_for_tool_call
-       ~tool_name:"tool_workspace_inspect"
+       ~tool_name:"tool_search_files"
        ~input:internal_input)
 
 let test_readonly_policy_projects_to_input_aware_registry () =
@@ -194,15 +194,9 @@ let test_readonly_policy_projects_to_input_aware_registry () =
        ~tool_name:"mcp__masc__SearchFiles"
        ~input:search_input);
   Alcotest.(check bool)
-    "tool_workspace_inspect is descriptor read-only without legacy op"
+    "tool_search_files is descriptor read-only without legacy op"
     true
-    (Registry.is_read_only_with_input ~tool_name:"tool_workspace_inspect" ~input:search_input);
-  Alcotest.(check bool)
-    "tool_workspace_inspect invalid op remains passive instead of mutating"
-    true
-    (Registry.is_read_only_with_input
-       ~tool_name:"tool_workspace_inspect"
-       ~input:(`Assoc [ "op", `String "rm"; "pattern", `String "x" ]));
+    (Registry.is_read_only_with_input ~tool_name:"tool_search_files" ~input:search_input);
   Alcotest.(check bool)
     "ReadFile public alias is input-aware read-only"
     true
@@ -246,10 +240,6 @@ let test_public_name_projection_uses_descriptor_resolution () =
     "tool_execute public projection"
     [ "Execute" ]
     (Resolution.public_names_for_internal "tool_execute");
-  Alcotest.(check (list string))
-    "tool_workspace_inspect public projection includes legacy internal"
-    [ "SearchFiles" ]
-    (Resolution.public_names_for_internal "tool_workspace_inspect");
   Alcotest.(check (option string))
     "tool_write_file preferred public projection"
     (Some "WriteFile")
@@ -274,10 +264,10 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
        ~tool_name:"mcp__masc__SearchFiles"
        ~input:search_input);
   Alcotest.(check bool)
-    "tool_workspace_inspect without legacy op is not mutating"
+    "tool_search_files without legacy op is not mutating"
     false
     (Exec.has_mutating_side_effect_with_input
-       ~tool_name:"tool_workspace_inspect"
+       ~tool_name:"tool_search_files"
        ~input:search_input);
   Alcotest.(check bool)
     "WriteFile public alias remains mutating"

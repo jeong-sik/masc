@@ -65,7 +65,7 @@ let base_tools : Masc_domain.tool_schema list =
                       ; "description", `String "max results (1-10, default 5)"
                       ] )
                 ; (* Issue #8484: derive from local mirror that tracks
-           [Keeper_exec_memory.valid_memory_search_source_strings]. *)
+           [Agent_tool_memory_runtime.valid_memory_search_source_strings]. *)
                   ( "source"
                   , `Assoc
                       [ "type", `String "string"

@@ -1,7 +1,7 @@
 (** In-process runtime handlers for descriptor-backed coordination tools.
 
     Each handler reproduces the exact JSON the legacy
-    [Keeper_exec_tools.execute_keeper_tool_call_with_outcome] match arm used
+    [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] match arm used
     to produce. Outcome inference via [classify_tool_result_payload] yields
     the same Success/Failure label as the legacy
     [success_tool_result]/[failure_tool_result] forces. *)
@@ -20,7 +20,7 @@ let handle_stay_silent ~args:_ =
 ;;
 
 let handle_tools_list ~(meta : keeper_meta) ~args:_ =
-  Keeper_exec_shared.keeper_tools_list_json ~meta
+  Agent_tool_shared_runtime.keeper_tools_list_json ~meta
 ;;
 
 let handle_tool_search ~search_fn ~(args : Yojson.Safe.t) =
@@ -40,15 +40,15 @@ let handle_tool_search ~search_fn ~(args : Yojson.Safe.t) =
 ;;
 
 let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
-  Keeper_exec_memory.keeper_context_status_json ~config ~meta ~ctx_work
+  Agent_tool_memory_runtime.keeper_context_status_json ~config ~meta ~ctx_work
 ;;
 
 let handle_memory_search ~config ~(meta : keeper_meta) ~ctx_work ~args =
-  Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args
+  Agent_tool_memory_runtime.keeper_memory_search_json ~config ~meta ~ctx_work ~args
 ;;
 
 let handle_memory_write ~config ~(meta : keeper_meta) ~args =
-  Keeper_exec_memory.keeper_memory_write_json ~config ~meta ~args
+  Agent_tool_memory_runtime.keeper_memory_write_json ~config ~meta ~args
 ;;
 
 let handle_library_search ~(meta : keeper_meta) ~args =
@@ -95,7 +95,7 @@ let handle_voice ~(meta : keeper_meta) ~name ~args =
 ;;
 
 let handle_task ~config ~(meta : keeper_meta) ~name ~args =
-  Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args
+  Agent_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
 ;;
 
 let handle_board ~(meta : keeper_meta) ~name ~args =
@@ -164,7 +164,7 @@ let handle_masc_agent ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args
 (* RFC-0182 §3.1 — masc_coord_ cluster. Tool_coord lies LATE in module
    order (depends on Keeper_runtime which depends on much of the keeper
    layer). Agent_tool_in_process_runtime is EARLY (transitively imported
-   by Keeper_exec_tools). A direct static import here closes a cycle.
+   by Agent_tool_dispatch_runtime). A direct static import here closes a cycle.
 
    Resolution: dispatch through [Coord_dispatch_ref.dispatch]. A late
    bootstrap module ([Mcp_server_eio_execute]) registers
@@ -203,7 +203,7 @@ let handle_masc_agent_timeline ~(config : Coord.config) ~(meta : keeper_meta) ~n
    has no Keeper/Coord deps so no cycle concern.
 
    TEL-OK: descriptor projection — telemetry lives in [Tool_shard.execute]
-   and the upstream [Keeper_exec_tools] dispatch wrapper. *)
+   and the upstream [Agent_tool_dispatch_runtime] dispatch wrapper. *)
 let handle_masc_tool_shard ~name ~args =
   let ok, payload = Tool_shard.execute name args in
   if ok

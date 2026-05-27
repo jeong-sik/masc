@@ -11,8 +11,8 @@ module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_types_support = Masc_mcp.Keeper_types_support
 module Keeper_memory_policy = Masc_mcp.Keeper_memory_policy
-module KET = Masc_mcp.Keeper_exec_tools
-module KEC = Masc_mcp.Keeper_exec_context
+module KET = Masc_mcp.Agent_tool_dispatch_runtime
+module KEC = Masc_mcp.Keeper_context_runtime
 module Types = Masc_domain
 
 let keeper_meta ?(trace_id = "trace-1") ?(trace_history = []) ~name ~mention_targets () =
@@ -923,7 +923,7 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
      | Error err -> fail ("failed to seed memory bank: " ^ err));
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let json =
-      Masc_mcp.Keeper_exec_memory.keeper_context_status_json
+      Masc_mcp.Agent_tool_memory_runtime.keeper_context_status_json
         ~config ~meta ~ctx_work
       |> Yojson.Safe.from_string
     in
@@ -1456,7 +1456,7 @@ let test_memory_search_bank_empty () =
     check int "match_count is 0" 0 match_count)
 
 let test_memory_search_bank_counts_read_drops () =
-  let surface = "keeper_exec_memory_bank" in
+  let surface = "agent_tool_memory_bank" in
   let entry_reason = "entry_load_error" in
   let invalid_reason = "invalid_payload" in
   let before_entry =

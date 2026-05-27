@@ -118,7 +118,7 @@ let maybe_reseed_keeper_identity_config ~(config : Coord.config) (meta : keeper_
     | Ok new_trace_id ->
         let base_dir = Keeper_types.session_base_dir config in
         let _session =
-          Keeper_exec_context.create_session ~session_id:new_trace_id_raw
+          Keeper_context_runtime.create_session ~session_id:new_trace_id_raw
             ~base_dir
         in
         let updated_meta =
@@ -263,21 +263,21 @@ let keeper_list_row_json ~runtime_class config name =
       let now_ts = Time_compat.now () in
       let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
       let agent_status =
-        Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+        Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name
       in
       let diagnostic =
-        Keeper_exec_status.keeper_diagnostic_json
+        Keeper_status_runtime.keeper_diagnostic_json
           ~meta
           ~agent_status
           ~keepalive_running ~history_items:[] ~now_ts
-        |> Keeper_exec_status.augment_keeper_diagnostic_json
+        |> Keeper_status_runtime.augment_keeper_diagnostic_json
              ~meta ~keepalive_running
              ~keepalive_started_at:
                (Keeper_status_bridge.runtime_keepalive_started_at config meta)
              ~now_ts
       in
       let status =
-        Keeper_exec_status.keeper_surface_status ~agent_status ~diagnostic
+        Keeper_status_runtime.keeper_surface_status ~agent_status ~diagnostic
       in
       Some
         (`Assoc (

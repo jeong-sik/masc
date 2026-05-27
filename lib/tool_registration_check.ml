@@ -38,8 +38,8 @@ let raw_masc_tool_names () =
 
 let runtime_keeper_tool_names () =
   Hashtbl.create 512
-  |> add_names Keeper_exec_tools.keeper_internal_candidate_tool_names
-  |> add_names (Keeper_exec_tools.effective_core_tools ())
+  |> add_names Agent_tool_dispatch_runtime.keeper_internal_candidate_tool_names
+  |> add_names (Agent_tool_dispatch_runtime.effective_core_tools ())
   |> add_names (raw_masc_tool_names ())
 
 let validate () : validation_result =

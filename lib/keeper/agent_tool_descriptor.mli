@@ -33,7 +33,7 @@ type readonly_of_input = Yojson.Safe.t -> bool option
 
 type runtime_handler =
   | Tool_execute
-  | Tool_workspace_inspect
+  | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file

@@ -345,7 +345,7 @@ let () =
         ) ["worker"; "admin"]);
     ];
     "tool_preset_ssot", [
-      (* Issue #8430: witness covers all 8 variants — adding a 9th
+      (* Issue #8430: witness covers all 7 variants — adding an 8th
          constructor will fail to compile here AND in
          tool_preset_to_string. *)
       Alcotest.test_case "witness covers all variants" `Quick (fun () ->
@@ -355,9 +355,9 @@ let () =
           if not (List.mem actual valid_tool_preset_strings) then
             Alcotest.failf "tool_preset_to_string %S not in valid_tool_preset_strings" actual
         in
-        witness Minimal; witness Social; witness Messaging; witness Dispatch; witness Coding;
-        witness Research; witness Delivery; witness Full;
-        Alcotest.(check int) "count" 8 (List.length valid_tool_preset_strings));
+        witness Minimal; witness Social; witness Messaging; witness Dispatch; witness Research;
+        witness Delivery; witness Full;
+        Alcotest.(check int) "count" 7 (List.length valid_tool_preset_strings));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         (* Keeper_schema.tool_preset_enum_strings is a hand-mirrored copy
            of Keeper_types.valid_tool_preset_strings (cycle-avoidance).
@@ -581,7 +581,7 @@ let () =
          in lock-step with the SSOT (cycle-avoidance pattern from #8467/
          #8480). *)
       Alcotest.test_case "witness covers all 3 variants" `Quick (fun () ->
-        let module M = Masc_mcp.Keeper_exec_memory in
+        let module M = Masc_mcp.Agent_tool_memory_runtime in
         let witness s =
           let actual = M.memory_search_source_to_string s in
           if not (List.mem actual M.valid_memory_search_source_strings) then
@@ -590,7 +590,7 @@ let () =
         witness M.Memory; witness M.History; witness M.All;
         Alcotest.(check int) "count" 3 (List.length M.valid_memory_search_source_strings));
       Alcotest.test_case "of_string_opt sound partial" `Quick (fun () ->
-        let module M = Masc_mcp.Keeper_exec_memory in
+        let module M = Masc_mcp.Agent_tool_memory_runtime in
         Alcotest.(check bool) "memory" true (M.memory_search_source_of_string_opt "memory" <> None);
         Alcotest.(check bool) "HISTORY (case)" true (M.memory_search_source_of_string_opt "HISTORY" <> None);
         Alcotest.(check bool) "  all  (trim)" true
@@ -599,7 +599,7 @@ let () =
           (M.memory_search_source_of_string_opt "definitely-not-a-source" = None));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
-          Masc_mcp.Keeper_exec_memory.valid_memory_search_source_strings
+          Masc_mcp.Agent_tool_memory_runtime.valid_memory_search_source_strings
           Masc_mcp.Tool_shard.memory_search_source_enum_strings);
     ];
     "memory_kind_ssot", [
@@ -728,12 +728,12 @@ let () =
           Tool_schemas_inline_infra.mcp_session_action_enum_strings);
     ];
     "tool_search_files_op_ssot", [
-      (* Issue #8524: keep the tool_workspace_inspect structured-op variant and
+      (* Issue #8524: keep the tool_search_files structured-op variant and
          tool_shard schema mirror in sync. 2026-04-30 also pins that
-         generic bash execution is no longer advertised through
-         tool_workspace_inspect; Bash/tool_execute owns command execution. *)
+         generic shell execution is no longer advertised through
+         tool_search_files; Execute/tool_execute owns command execution. *)
       Alcotest.test_case "witness covers all 12 variants" `Quick (fun () ->
-        let module S = Masc_mcp.Agent_tool_shell_runtime in
+        let module S = Masc_mcp.Agent_tool_command_runtime in
         let witness o =
           let actual = S.shell_op_to_string o in
           if not (List.mem actual S.valid_shell_op_strings) then
@@ -742,19 +742,19 @@ let () =
         witness S.Pwd; witness S.Ls; witness S.Cat; witness S.Rg;
         witness S.Git_status; witness S.Find; witness S.Head; witness S.Tail;
         witness S.Wc; witness S.Tree; witness S.Git_log; witness S.Git_diff;
-        Alcotest.(check int) "count" 13 (List.length S.valid_shell_op_strings));
+        Alcotest.(check int) "count" 12 (List.length S.valid_shell_op_strings));
       Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
-          Masc_mcp.Agent_tool_shell_runtime.valid_shell_op_strings
-          Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings);
+          Masc_mcp.Agent_tool_command_runtime.valid_shell_op_strings
+          Masc_mcp.Tool_shard.tool_search_files_op_enum_strings);
       Alcotest.test_case "bash op not advertised" `Quick (fun () ->
         Alcotest.(check bool) "bash absent" false
-          (List.mem "bash" Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings));
+          (List.mem "bash" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
       Alcotest.test_case "legacy git/gh ops not advertised" `Quick (fun () ->
         Alcotest.(check bool) "git_clone absent" false
-          (List.mem "git_clone" Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings);
+          (List.mem "git_clone" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings);
         Alcotest.(check bool) "gh absent" false
-          (List.mem "gh" Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings));
+          (List.mem "gh" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
     ];
     "channel_label_ssot", [
       (* Issue #8569: keeper_keepalive used to hand-build the

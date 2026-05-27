@@ -1,6 +1,6 @@
 (** Keeper_tools_oas — Wrap keeper tools as [Agent_sdk.Tool.t] for [Agent.run].
 
-    Bridges [Keeper_exec_tools.execute_keeper_tool_call] dispatch
+    Bridges [Agent_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
     to [Agent_sdk.Tool.t list] via [Tool_bridge.oas_tool_of_masc]. Tool
     execution reads the current context from [ctx_snapshot]
     (immutable), enabling [Agent.run] to manage messages while

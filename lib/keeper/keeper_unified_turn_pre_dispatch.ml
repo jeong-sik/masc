@@ -5,7 +5,7 @@
    builder + unified-max-tokens fallback. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 
 module KCP = Keeper_cascade_profile
 
@@ -33,7 +33,7 @@ let build_cascade_execution
   let cascade_name_string = Cascade_name.to_string cascade_name in
   let meta_for_cascade = set_cascade_name cascade_name_string meta in
   let model_labels =
-    Keeper_exec_context.effective_model_labels_for_turn meta_for_cascade
+    Keeper_context_runtime.effective_model_labels_for_turn meta_for_cascade
   in
   match Keeper_types_support.ensure_api_keys_for_labels model_labels with
   | Error e -> Error (Agent_sdk.Error.Internal e)
@@ -44,7 +44,7 @@ let build_cascade_execution
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok () ->
        let max_context_resolution =
-         Keeper_exec_context.resolve_max_context_resolution
+         Keeper_context_runtime.resolve_max_context_resolution
            ~requested_override:meta.max_context_override
            model_labels
        in

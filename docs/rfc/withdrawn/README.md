@@ -60,7 +60,6 @@ explicit `superseded_by` relationships. The original 8-candidate pool was
 narrowed to 4 because body inspection revealed:
 
 - RFC-0005 has open Phase 2-4 (still partial active)
-- RFC-0007 is stalled but has no successor (just stale, not superseded)
 - RFC-0008 has merged PR-1 (#10660) and RFC-0019 reconciliation (partial impl)
 - RFC-0019 is currently active (credential SSOT work in agent_delegation scope)
 

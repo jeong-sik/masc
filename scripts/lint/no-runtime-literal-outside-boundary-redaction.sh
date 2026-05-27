@@ -55,7 +55,7 @@ SCAN_FILES=(
   "lib/cascade/cascade_runner.ml"
   "lib/keeper/keeper_agent_result.ml"
   "lib/keeper/keeper_agent_run.ml"
-  "lib/keeper/keeper_exec_status.ml"
+  "lib/keeper/keeper_status_runtime.ml"
   "lib/keeper/keeper_generation_lineage.ml"
   "lib/keeper/keeper_hooks_oas.ml"
   "lib/keeper/keeper_hooks_oas_types.ml"

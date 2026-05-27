@@ -28,7 +28,7 @@ type readonly_of_input = Yojson.Safe.t -> bool option
 
 type runtime_handler =
   | Tool_execute
-  | Tool_workspace_inspect
+  | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
@@ -118,7 +118,7 @@ let approval_to_string = function
 
 let runtime_handler_to_string = function
   | Tool_execute -> "tool_execute"
-  | Tool_workspace_inspect -> "tool_workspace_inspect"
+  | Tool_search_files -> "tool_search_files"
   | Tool_read_file -> "tool_read_file"
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
@@ -185,7 +185,7 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let execute_schema = Tool_shard_types_schemas_bash.tool_execute_schema.input_schema
+let execute_schema = Tool_shard_types_schemas_execute.tool_execute_schema.input_schema
 
 let read_file_schema =
   object_schema
@@ -343,7 +343,7 @@ let translate_search_files input =
   | _ -> input
 ;;
 
-let workspace_inspect_op (input : Yojson.Safe.t) : string option =
+let search_files_op (input : Yojson.Safe.t) : string option =
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "op" fields with
@@ -352,8 +352,8 @@ let workspace_inspect_op (input : Yojson.Safe.t) : string option =
   | _ -> None
 ;;
 
-let workspace_inspect_readonly_of_input input =
-  match workspace_inspect_op input with
+let search_files_readonly_of_input input =
+  match search_files_op input with
   | Some op when List.mem op Keeper_workspace_op.valid_strings -> Some true
   | Some _ -> None
   | None -> None
@@ -408,7 +408,7 @@ let public_descriptors =
       ~runtime_handler:Tool_execute
       ~translate:translate_identity
   ; descriptor
-      ~id:"agent.workspace_inspect"
+      ~id:"agent.search_files"
       ~public_name:"SearchFiles"
       ~internal_name:"tool_search_files"
       ~description:
@@ -419,7 +419,7 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~readonly_of_input:workspace_inspect_readonly_of_input
+           ~readonly_of_input:search_files_readonly_of_input
            ~effect_domain:Tool_catalog.Read_only
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:true
@@ -427,7 +427,7 @@ let public_descriptors =
       ~executor:Shell_ir
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
-      ~runtime_handler:Tool_workspace_inspect
+      ~runtime_handler:Tool_search_files
       ~translate:translate_search_files
   ; descriptor
       ~id:"agent.read_file"
@@ -526,7 +526,7 @@ let public_descriptors =
    hard-cut, 7 entries) is preserved unchanged.
 
    RFC-0179 PR-3 (full keeper_* coverage). Every legacy match arm in
-   [Keeper_exec_tools.execute_keeper_tool_call_with_outcome] is now backed by
+   [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] is now backed by
    a descriptor entry below. After this PR the legacy chain is empty modulo
    the trailing remote-MCP fallback. *)
 
@@ -538,9 +538,9 @@ let empty_object_schema =
     ]
 ;;
 
-(* Coordination tools historically dispatched by name in [Keeper_exec_tools]
+(* Coordination tools historically dispatched by name in [Agent_tool_dispatch_runtime]
    without input-schema validation — the underlying handlers (Tool_board,
-   Tool_library, Keeper_exec_task, Agent_tool_voice_runtime, etc.) parse
+   Tool_library, Agent_tool_task_runtime, Agent_tool_voice_runtime, etc.) parse
    their own input. The descriptor input_schema is informational only
    (these tools are Hidden visibility; no LLM sees the schema). A
    passthrough object schema preserves behavior. *)
@@ -1190,14 +1190,8 @@ let all_descriptors () = public_descriptors @ internal_descriptors
 
 let public_names () = List.map (fun d -> d.public_name) public_descriptors
 
-let legacy_internal_names (d : t) =
-  match d.id with
-  | "agent.workspace_inspect" -> [ "tool_workspace_inspect" ]
-  | _ -> []
-;;
-
 let internal_names d =
-  d.internal_name :: legacy_internal_names d |> List.sort_uniq String.compare
+  [ d.internal_name ]
 ;;
 
 let find_public name =

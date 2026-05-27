@@ -415,7 +415,7 @@ let test_risk_contract_risk_from_delivery_contract () =
                       ] );
                   ("repair_budget", `Int 0);
                 ] );
-            ("tool_names", `List [ `String "tool_execute"; `String "tool_workspace_inspect" ]);
+            ("tool_names", `List [ `String "tool_execute"; `String "tool_search_files" ]);
           ])
   in
   Alcotest.(check string) "delivery contract drives critical risk"

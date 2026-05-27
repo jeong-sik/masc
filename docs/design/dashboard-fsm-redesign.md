@@ -75,7 +75,7 @@ MASC `agent`와 OAS `keeper`는 다른 개념이다 (`docs/design/oas-masc-state
 |------|------|------|
 | `lib/keeper/keeper_decision_audit.ml` | 256-315 | `cascade_fsm_to_mermaid` state set을 `CascadeLiveness.tla`의 `{idle, selecting, trying, done, exhausted}` subset으로 제한. 렌더 시점에 받은 실제 profile name, provider health list, last_provider_result로 label/색 bind |
 | `lib/keeper/keeper_decision_audit.mli` | 55-73 | 시그니처 확장 (optional labelled args): `?provider_health:(string * [`Healthy|`Unhealthy|`SlotFull|`Unknown]) list`, `?slot_state:int * int`, `?effective_cascade_reason:string` |
-| `lib/server/server_routes_http_routes_dashboard.ml` | 618-633 | 기존 `Keeper_turn_driver.default_model_strings` 호출 유지, `Keeper_cascade_routing.select_cascade` 결과와 `Keeper_exec_status_metrics.last_model_used`를 함께 넘긴다 |
+| `lib/server/server_routes_http_routes_dashboard.ml` | 618-633 | 기존 `Keeper_turn_driver.default_model_strings` 호출 유지, `Keeper_cascade_routing.select_cascade` 결과와 `Keeper_status_metrics.last_model_used`를 함께 넘긴다 |
 | `lib/dashboard/dashboard_http_keeper.ml` | 147-148 | 이미 phase-aware cascade 리졸브 로직 보유 — `effective_cascade_reason` 노출 경로만 추가 |
 
 ### 재사용할 기존 함수 (새 추상화 금지)
@@ -83,7 +83,7 @@ MASC `agent`와 OAS `keeper`는 다른 개념이다 (`docs/design/oas-masc-state
 - `Keeper_cascade_routing.select_cascade` — phase→cascade 매핑 (`lib/keeper/keeper_cascade_routing.mli`)
 - `Cascade_runtime.models_of_cascade_name` — cascade 이름 → provider list
 - `Provider_adapter.is_local_provider` — provider 분류
-- `Keeper_exec_status_metrics.last_model_used` — 마지막 사용 provider
+- `Keeper_status_metrics.last_model_used` — 마지막 사용 provider
 - `Local_runtime_pool` slot telemetry — slot full 판정
 
 MASC 레벨에 새 provider/model 이름이 등장하지 않도록 주의. 값은 OAS가 내려 보낸 opaque 문자열로 대시보드에 전달한다 (`feedback_masc-model-agnostic.md`).

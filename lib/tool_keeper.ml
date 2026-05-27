@@ -310,7 +310,7 @@ let resolve_primary_max_context (meta : Keeper_types.keeper_meta option) : int =
   | None -> min_ctx
   | Some meta ->
     let resolution =
-      Keeper_exec_context.resolve_max_context_resolution_of_meta meta
+      Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
     in
     max min_ctx resolution.effective_budget
 
@@ -356,8 +356,8 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
     end
     else begin
       (* Dispatch FSM event *)
-      Keeper_exec_context.dispatch_keeper_phase_event
-        ~config:config ~keeper_name:name
+      Keeper_context_runtime.dispatch_keeper_phase_event
+        ~config ~keeper_name:name
         Keeper_state_machine.Operator_compact_requested;
       (* Read meta for checkpoint access *)
       match read_meta_resolved config name with
@@ -365,19 +365,19 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
         (false, Printf.sprintf "keeper %s: meta unavailable for compaction" name)
       | Ok (Some (_resolved, meta)) ->
         let base_dir = Keeper_types.session_base_dir config in
-        let model = Keeper_exec_context.checkpoint_model_of_meta meta in
+        let model = Keeper_context_runtime.checkpoint_model_of_meta meta in
         let max_tokens = resolve_primary_max_context (Some meta) in
-        Keeper_exec_context.dispatch_keeper_phase_event
-          ~config:config ~keeper_name:name
+        Keeper_context_runtime.dispatch_keeper_phase_event
+          ~config ~keeper_name:name
           ~origin:Keeper_registry.Operator_compact
           Keeper_state_machine.Compaction_started;
         match
-          Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+          Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
             ~base_dir ~meta ~model ~primary_model_max_tokens:max_tokens
         with
         | Some recovery ->
-          Keeper_exec_context.dispatch_compaction_completed
-            ~config:config ~keeper_name:name
+          Keeper_context_runtime.dispatch_compaction_completed
+            ~config ~keeper_name:name
             ~origin:Keeper_registry.Operator_compact
             ~before_tokens:recovery.compaction.before_tokens
             ~after_tokens:recovery.compaction.after_tokens;
@@ -403,8 +403,8 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
              (owned by the retry-loop caller) will latch the keeper to Paused.
              Emitting [Compaction_completed] here would be a false success
              signal. *)
-          Keeper_exec_context.dispatch_keeper_phase_event
-            ~config:config ~keeper_name:name
+          Keeper_context_runtime.dispatch_keeper_phase_event
+            ~config ~keeper_name:name
             ~origin:Keeper_registry.Operator_compact
             (Keeper_state_machine.Compaction_failed {
                reason = "no_valid_checkpoint";
@@ -464,7 +464,7 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
       let trace_id =
         match meta_for_trace with
         | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
-        | None -> Keeper_exec_context.generate_trace_id ()
+        | None -> Keeper_context_runtime.generate_trace_id ()
       in
       let max_tokens = resolve_primary_max_context meta_for_trace in
       let max_checkpoint_messages =
@@ -473,7 +473,7 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
         | None -> 100
       in
       let session, ctx_opt =
-        Keeper_exec_context.load_context_from_checkpoint
+        Keeper_context_runtime.load_context_from_checkpoint
           ~max_checkpoint_messages
           ~trace_id
           ~primary_model_max_tokens:max_tokens
@@ -484,7 +484,7 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
         match ctx_opt with
         | None -> 0
         | Some wctx ->
-          let existing_messages = Keeper_exec_context.messages_of_context wctx in
+          let existing_messages = Keeper_context_runtime.messages_of_context wctx in
           let msg_count = List.length existing_messages in
           let cleared_messages =
             if preserve_system then
@@ -501,7 +501,7 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
               wctx with
               checkpoint =
                 {
-                  (Keeper_exec_context.checkpoint_of_context wctx) with
+                  (Keeper_context_runtime.checkpoint_of_context wctx) with
                   messages = cleared_messages;
                 };
             }
@@ -517,9 +517,9 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
           in
           (match meta_for_trace with
            | Some meta ->
-               let model = Keeper_exec_context.checkpoint_model_of_meta meta in
+               let model = Keeper_context_runtime.checkpoint_model_of_meta meta in
                (match
-                  Keeper_exec_context.save_oas_checkpoint
+                  Keeper_context_runtime.save_oas_checkpoint
                     ~max_checkpoint_messages
                     ~session
                     ~agent_name:meta.agent_name
@@ -561,8 +561,8 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
         | None -> false
       in
       (* Dispatch FSM event to clear overflow conditions *)
-      Keeper_exec_context.dispatch_keeper_phase_event
-        ~config:config ~keeper_name:name
+      Keeper_context_runtime.dispatch_keeper_phase_event
+        ~config ~keeper_name:name
         (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
       (* Clear registry failure state *)
       Keeper_registry.set_failure_reason ~base_path:config.base_path name None;

@@ -75,13 +75,13 @@ let keeper_tool_audit_fields
       (meta : Keeper_types.keeper_meta)
   =
   let fallback_allowed =
-    if include_allowed_tools then Keeper_exec_tools.keeper_allowed_tool_names meta else []
+    if include_allowed_tools then Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta else []
   in
   let recent_tool_names = recent_tool_names_from_files config meta.name in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
     match
-      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files
+      Keeper_status_metrics.latest_tool_audit_snapshot_from_files
         config
         ~keeper_name:meta.name
     with
@@ -99,7 +99,7 @@ let keeper_tool_audit_fields
         || meta.runtime.autonomous_turn_count > 0
         || meta.runtime.autonomous_action_count > 0
       in
-      { Keeper_exec_status_metrics.empty_tool_audit_snapshot with
+      { Keeper_status_metrics.empty_tool_audit_snapshot with
         latest_tool_call_count = (if has_runtime_activity then Some 0 else None)
       ; tool_audit_source =
           (if has_runtime_activity then Some "keeper_runtime_meta" else None)

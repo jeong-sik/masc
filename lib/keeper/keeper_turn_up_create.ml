@@ -102,7 +102,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       validate_sandbox_settings
         ~config:ctx.config
         ~keeper_name:p.name
-        ~github_identity:p.profile_defaults.github_identity
+        ~repo_cli_identity:p.profile_defaults.repo_cli_identity
         ~sandbox_profile
         ~network_mode
         ~allowed_paths
@@ -377,7 +377,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                         ()
                     end) bundle_paths;
                   let session =
-                    Keeper_exec_context.create_session ~session_id:trace_id
+                    Keeper_context_runtime.create_session ~session_id:trace_id
                       ~base_dir
                   in
         let persona_extended =
@@ -416,7 +416,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~active_goals
             ()
       in
-      let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
+      let ctx0 = Keeper_context_runtime.create ~system_prompt ~max_tokens:primary_max_context in
       let meta = {
         id = None;
         name = p.name;
@@ -552,11 +552,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
       let init_save_result =
         try
-          Keeper_exec_context.save_oas_checkpoint
+          Keeper_context_runtime.save_oas_checkpoint
             ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
             ~session
             ~agent_name:meta.agent_name
-            ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+            ~model:(Keeper_context_runtime.checkpoint_model_of_meta meta)
             ~ctx:ctx0
             ~generation:0
         with

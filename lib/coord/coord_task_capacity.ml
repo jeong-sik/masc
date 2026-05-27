@@ -1,7 +1,7 @@
 (** RFC-0034.v2: per-goal task creation cap.
 
-    Moved verbatim from [lib/keeper/keeper_exec_task.ml] (introduced by
-    #13981) so all 5 task creation entrypoints can wire the same guard
+    Moved verbatim from the keeper task tool runtime helper introduced by
+    #13981 so all 5 task creation entrypoints can wire the same guard
     via [Coord_task.add_task ~reject_if]. *)
 
 type capacity_error = {
@@ -53,7 +53,7 @@ let check ?goal_id (backlog : Masc_domain.backlog) =
 ;;
 
 (* Field order matches the pre-RFC-0034.v2 shape produced by
-   [Keeper_exec_shared.error_json ~fields message], which prepends
+   [Agent_tool_shared_runtime.error_json ~fields message], which prepends
    ("error", message) before the supplied [fields]. Preserved verbatim
    so [keeper_task_create] / [masc_add_task] / etc. clients see the
    exact same JSON. *)

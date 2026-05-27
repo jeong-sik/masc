@@ -255,7 +255,7 @@ let test_turn_context_fields_stored () =
       ~tool_surface_class:"execution"
       ~visible_tool_count:2
       ~required_tools:["tool_execute"]
-      ~required_tool_candidates:["tool_execute"; "tool_workspace_inspect"]
+      ~required_tool_candidates:["tool_execute"; "tool_search_files"]
       ~missing_required_tools:["tool_edit_file"]
       ~cascade_profile:"tool_use_strict"
       ();
@@ -332,7 +332,7 @@ let test_turn_context_fields_stored () =
       Yojson.Safe.Util.(
         runtime_contract |> member "required_tools" |> to_list |> List.map to_string);
     Alcotest.(check (list string)) "runtime_contract required_tool_candidates"
-      ["tool_execute"; "tool_workspace_inspect"]
+      ["tool_execute"; "tool_search_files"]
       Yojson.Safe.Util.(
         runtime_contract |> member "required_tool_candidates" |> to_list
         |> List.map to_string);

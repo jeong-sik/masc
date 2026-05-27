@@ -838,7 +838,7 @@ let run_turn
                        ~allowed_tool_names:acc.requested_tool_names_seen
                        ~tool_calls:acc.tool_calls
                    in
-                   let usage = Keeper_exec_context.usage_of_response result.response in
+                   let usage = Keeper_context_runtime.usage_of_response result.response in
                    let ctx_composition =
                      build_ctx_composition_metrics
                        ~system_prompt:turn_system_prompt

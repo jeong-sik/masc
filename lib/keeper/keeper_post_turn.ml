@@ -11,7 +11,7 @@
     - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
     - hebbian: task lifecycle in [Coord_task]
 
-    Extracted from Keeper_exec_context as part of #4955 god-file split.
+    Extracted from Keeper_context_runtime as part of #4955 god-file split.
 
     Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
     to #11612 (Cycle 31, [keeper_rollover.ml]).  Authoritative spec

@@ -460,11 +460,11 @@ let post_keeper_alert_github
     match status with
     | Unix.WEXITED 0 -> (true, Some (short_preview ~max_len:200 out))
     | Unix.WEXITED n ->
-        (false, Some (Printf.sprintf "gh_exit_%d: %s" n (short_preview ~max_len:200 out)))
+        (false, Some (Printf.sprintf "repo_cli_exit_%d: %s" n (short_preview ~max_len:200 out)))
     | Unix.WSIGNALED n ->
-        (false, Some (Printf.sprintf "gh_signaled_%d" n))
+        (false, Some (Printf.sprintf "repo_cli_signaled_%d" n))
     | Unix.WSTOPPED n ->
-        (false, Some (Printf.sprintf "gh_stopped_%d" n))
+        (false, Some (Printf.sprintf "repo_cli_stopped_%d" n))
 
 let maybe_emit_interesting_alert
     (ctx : _ context)

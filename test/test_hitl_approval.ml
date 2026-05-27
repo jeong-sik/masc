@@ -112,12 +112,12 @@ let test_approval_queue_failure_metric_labels_site () =
       AQ.For_testing.reset_audit_store ();
       AQ.audit_approval_event ~base_path ~event_type:"warmup"
         ~id:"audit-failure-warmup" ~keeper_name:(keeper_name ^ "-warmup")
-        ~tool_name:"tool_workspace_inspect" ~risk_level:AQ.Medium ();
+        ~tool_name:"tool_search_files" ~risk_level:AQ.Medium ();
       cleanup_dir audit_dir;
       let oc = open_out_bin audit_dir in
       close_out oc;
       AQ.audit_approval_event ~base_path ~event_type:"pending"
-        ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_workspace_inspect"
+        ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_search_files"
         ~risk_level:AQ.Medium ();
       let after =
         Masc_mcp.Prometheus.metric_value_or_zero
@@ -478,7 +478,7 @@ let test_submit_and_await_clock_returns_manual_decision () =
     let decision =
       AQ.submit_and_await
         ~keeper_name
-        ~tool_name:"tool_workspace_inspect"
+        ~tool_name:"tool_search_files"
         ~input:(`Assoc [ ("op", `String "write") ])
         ~risk_level:AQ.Medium
         ~clock
@@ -1328,14 +1328,14 @@ let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun () ->
   let keeper_name = "audit-target-keeper" in
   AQ.audit_approval_event ~event_type:"resolved" ~id:"target-audit"
-    ~keeper_name ~tool_name:"tool_workspace_inspect" ~risk_level:AQ.Medium
+    ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
     ~selected_model:"openai:gpt-5.4"
     ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
   for i = 1 to 32 do
     AQ.audit_approval_event ~event_type:"resolved"
       ~id:(Printf.sprintf "other-audit-%02d" i)
       ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
-      ~tool_name:"tool_workspace_inspect" ~risk_level:AQ.Medium
+      ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
       ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
   done;
   match AQ.read_recent_audit ~keeper_name ~n:1 () with
@@ -1367,14 +1367,14 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
       in
       AQ.audit_approval_event ~base_path:config.base_path
         ~event_type:"resolved" ~id:"runtime-trust-target-audit"
-        ~keeper_name ~tool_name:"tool_workspace_inspect" ~risk_level:AQ.Medium
+        ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
         ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
       for i = 1 to 64 do
         AQ.audit_approval_event ~base_path:config.base_path
           ~event_type:"resolved"
           ~id:(Printf.sprintf "runtime-trust-other-audit-%02d" i)
           ~keeper_name:(Printf.sprintf "busy-runtime-keeper-%02d" i)
-          ~tool_name:"tool_workspace_inspect" ~risk_level:AQ.Medium
+          ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
           ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
       done;
       let snapshot =
@@ -1397,7 +1397,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
       match approval_events with
       | [ event ] ->
         Alcotest.(check bool) "approval event title mentions tool" true
-          (contains_substring (event |> member "title" |> to_string) "tool_workspace_inspect");
+          (contains_substring (event |> member "title" |> to_string) "tool_search_files");
         Alcotest.(check bool) "approval event summary mentions target keeper" true
           (contains_substring (event |> member "summary" |> to_string) keeper_name)
       | _ -> Alcotest.fail "expected exactly one target approval event")
@@ -1407,10 +1407,10 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
 let () =
   Alcotest.run "HITL Approval" [
     ("risk_classification", [
-	      Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
-	      Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
-	      Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
-	    ]);
+      Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
+      Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
+      Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
+    ]);
     ("threshold_decisions", [
       Alcotest.test_case "development allows all" `Quick test_development_allows_all;
       Alcotest.test_case "paranoid blocks medium+" `Quick test_paranoid_blocks_medium;

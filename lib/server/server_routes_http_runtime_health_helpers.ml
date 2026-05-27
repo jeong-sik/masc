@@ -49,9 +49,13 @@ let health_uptime_secs () =
 
 let health_uptime_string uptime_secs =
   if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
-  else if uptime_secs < 3600 then
+  else if uptime_secs < Masc_time_constants.hour_int then
     Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
-  else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
+  else
+    Printf.sprintf
+      "%dh %dm"
+      (uptime_secs / Masc_time_constants.hour_int)
+      ((uptime_secs mod Masc_time_constants.hour_int) / 60)
 
 let protocol_json ~listener =
   `Assoc

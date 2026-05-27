@@ -719,12 +719,11 @@ let () =
    provides them via PR-A.2 plumbing. *)
 let eio_required tool_name =
   Some
-    (typed_result_of_tuple
+    (tool_result_error
        ~tool_name
-       ( false
-       , Printf.sprintf
-           {|{"error":"%s requires Eio context (sw + clock); call via Mcp_server_eio_execute"}|}
-           tool_name ))
+       (Printf.sprintf
+          {|{"error":"%s requires Eio context (sw + clock); call via Mcp_server_eio_execute"}|}
+          tool_name))
 ;;
 
 let () =
@@ -779,31 +778,27 @@ let () =
       (match sw, clock with
        | Some sw, Some clock ->
          Some
-           (typed_result_of_tuple
-              ~tool_name:name
-              (Tool_keeper_ops.keeper_msg_body
-                 ~config
-                 ~agent_name
-                 ~sw
-                 ~clock
-                 ?proc_mgr
-                 ?net
-                 args))
+           (Tool_keeper_ops.keeper_msg_body
+              ~config
+              ~agent_name
+              ~sw
+              ~clock
+              ?proc_mgr
+              ?net
+              args)
        | _ -> eio_required "masc_keeper_msg")
     | "masc_keeper_up" ->
       (match sw, clock with
        | Some sw, Some clock ->
          Some
-           (typed_result_of_tuple
-              ~tool_name:name
-              (Tool_keeper_ops.keeper_up_body
-                 ~config
-                 ~agent_name
-                 ~sw
-                 ~clock
-                 ?proc_mgr
-                 ?net
-                 args))
+           (Tool_keeper_ops.keeper_up_body
+              ~config
+              ~agent_name
+              ~sw
+              ~clock
+              ?proc_mgr
+              ?net
+              args)
        | _ -> eio_required "masc_keeper_up")
     | _ -> None
 ;;

@@ -466,11 +466,11 @@ let keeper_msg_body
     { config; agent_name; sw; clock; proc_mgr; net }
   in
   match resolve_keeper_name_config ~config args with
-  | Error err -> (false, err)
+  | Error err -> tool_result_error err
   | Ok name ->
       let resolved_args = with_keeper_name args name in
       (match Turn.preflight_keeper_msg keeper_ctx resolved_args with
-       | Error err -> (false, err)
+       | Error err -> tool_result_error err
        | Ok () ->
          let timeout_sec =
            match Turn.keeper_msg_timeout_override resolved_args with
@@ -485,13 +485,13 @@ let keeper_msg_body
              ~base_path:config.base_path
              ~keeper_name:name
              ~f:(fun () ->
-               let ok, body = Turn.handle_keeper_msg keeper_ctx resolved_args in
-               if ok
+               let result = Turn.handle_keeper_msg keeper_ctx resolved_args in
+               if tool_result_success result
                then begin
                  invalidate_keeper_list_cache ();
                  invalidate_status_cache name
                end;
-               (ok, body))
+               result)
              ()
          in
          let json =
@@ -504,7 +504,7 @@ let keeper_msg_body
                    "Keeper turn submitted. Poll with keeper_msg_result." )
              ]
          in
-         (true, Yojson.Safe.to_string json))
+         tool_result_ok (Yojson.Safe.to_string json))
 ;;
 
 let handle_keeper_msg ctx args : tool_result =

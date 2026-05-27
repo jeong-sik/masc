@@ -202,14 +202,20 @@ let run : Verdict.t -> (Verdict.Trusted_argv.t, error) result = function
   | Verdict.Ask request -> Error (`Ask_required request)
   | Verdict.Deny { reason; _ } -> Error (`Denied reason)
 
-let run_argv ~actor ~raw_source ~summary ?(timeout_sec = 60.0) ?env argv =
+(* Default subprocess timeout.  Callers should prefer passing
+   [~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:... ())]
+   so that operators can override via per-caller env vars.  See
+   {!Env_config_exec_timeout} and [keeper_docker_client_real.ml:104]. *)
+let default_exec_timeout_sec = 60.0
+
+let run_argv ~actor ~raw_source ~summary ?(timeout_sec = default_exec_timeout_sec) ?env argv =
   with_verdict ~actor ~raw_source ~summary ~argv ?env
     ~on_allow:(fun () -> Process_eio.run_argv ~timeout_sec ?env argv)
     ~on_blocked:(fun reason ->
       blocked_output ~summary ~raw_source ~reason)
     ()
 
-let run_argv_with_status ~actor ~raw_source ~summary ?(timeout_sec = 60.0)
+let run_argv_with_status ~actor ~raw_source ~summary ?(timeout_sec = default_exec_timeout_sec)
     ?env ?cwd argv =
   with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
     ~on_allow:(fun () ->
@@ -220,7 +226,7 @@ let run_argv_with_status ~actor ~raw_source ~summary ?(timeout_sec = 60.0)
     ()
 
 let run_argv_with_status_split ~actor ~raw_source ~summary
-    ?(timeout_sec = 60.0) ?env ?cwd argv =
+    ?(timeout_sec = default_exec_timeout_sec) ?env ?cwd argv =
   with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
     ~on_allow:(fun () ->
       Process_eio.run_argv_with_status_split ~timeout_sec ?env ?cwd argv)
@@ -231,7 +237,7 @@ let run_argv_with_status_split ~actor ~raw_source ~summary
     ()
 
 let run_argv_with_stdin_and_status ~actor ~raw_source ~summary
-    ?(timeout_sec = 60.0) ?env ?cwd ~stdin_content argv =
+    ?(timeout_sec = default_exec_timeout_sec) ?env ?cwd ~stdin_content argv =
   with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
     ~on_allow:(fun () ->
       Process_eio.run_argv_with_stdin_and_status ~timeout_sec ?env ?cwd
@@ -242,7 +248,7 @@ let run_argv_with_stdin_and_status ~actor ~raw_source ~summary
     ()
 
 let run_argv_with_stdin_and_status_split ~actor ~raw_source ~summary
-    ?(timeout_sec = 60.0) ?env ?cwd ~stdin_content argv =
+    ?(timeout_sec = default_exec_timeout_sec) ?env ?cwd ~stdin_content argv =
   with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
     ~on_allow:(fun () ->
       Process_eio.run_argv_with_stdin_and_status_split ~timeout_sec ?env ?cwd
@@ -254,7 +260,7 @@ let run_argv_with_stdin_and_status_split ~actor ~raw_source ~summary
     ()
 
 let run_argv_pipeline_with_status_split ~actor ~raw_source ~summary
-    ?(timeout_sec = 60.0) stages =
+    ?(timeout_sec = default_exec_timeout_sec) stages =
   let rec check_stages = function
     | [] -> Ok ()
     | ({ Process_eio.argv; env; cwd } : Process_eio.pipeline_stage) :: rest ->

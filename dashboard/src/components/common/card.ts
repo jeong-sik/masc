@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { isNonBlankString } from '../../lib/format-string'
 import { SectionHead } from '../section-head'
 import { statusBadgeTone, statusDotColor } from './status-badge'
 
@@ -63,10 +64,6 @@ const VARIANT_CLASSES: Record<CardVariant, string> = {
   standard: CARD_STANDARD,
   light: CARD_LIGHT,
   compact: CARD_COMPACT,
-}
-
-function hasNonEmptyString(value: string | undefined): boolean {
-  return value !== undefined && value.trim() !== ''
 }
 
 function trimmedTextLength(value: string | undefined): number {
@@ -143,14 +140,14 @@ export function summarizeSurfaceCard({
   return {
     variant,
     tone: tone ?? '',
-    toneSource: hasNonEmptyString(tone) ? 'tone-class' : 'none',
-    hasTone: hasNonEmptyString(tone),
+    toneSource: isNonBlankString(tone) ? 'tone-class' : 'none',
+    hasTone: isNonBlankString(tone),
     toneLength: trimmedTextLength(tone),
-    hasCustomClass: hasNonEmptyString(cx),
+    hasCustomClass: isNonBlankString(cx),
     classNameLength: trimmedTextLength(cx),
-    hasStyle: hasNonEmptyString(style),
+    hasStyle: isNonBlankString(style),
     styleLength: trimmedTextLength(style),
-    hasTestId: hasNonEmptyString(testId),
+    hasTestId: isNonBlankString(testId),
     testIdLength: trimmedTextLength(testId),
     contentState: contentState(children),
   }
@@ -257,11 +254,11 @@ export function summarizeSectionCard({
     eyebrowState: contentState(eyebrow),
     eyebrowTextLength: textLength(eyebrow),
     hasRightSlot: right != null,
-    hasTone: hasNonEmptyString(tone),
+    hasTone: isNonBlankString(tone),
     toneLength: trimmedTextLength(tone),
-    hasCustomClass: hasNonEmptyString(cx),
+    hasCustomClass: isNonBlankString(cx),
     classNameLength: trimmedTextLength(cx),
-    hasTestId: hasNonEmptyString(effectiveTestId),
+    hasTestId: isNonBlankString(effectiveTestId),
     testIdLength: trimmedTextLength(effectiveTestId),
     contentState: contentState(children),
   }

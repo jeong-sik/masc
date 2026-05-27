@@ -470,9 +470,9 @@ let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
     true (List.mem "Execute" visible);
   Alcotest.(check bool) "tool_search_files stays out of visible surface"
     false (List.mem "tool_search_files" visible);
-  let retired_pr_prefix = "github_" ^ "pr_" in
-  Alcotest.(check bool) "legacy PR helper surface stays out of visible surface"
-    false (List.exists (String.starts_with ~prefix:retired_pr_prefix) visible)
+  let retired_repo_prefix = "github_" ^ "pr_" in
+  Alcotest.(check bool) "retired repo helper surface stays out of visible surface"
+    false (List.exists (String.starts_with ~prefix:retired_repo_prefix) visible)
 
 let test_tool_search_partition_returns_allowed_core_hits () =
   let partition =

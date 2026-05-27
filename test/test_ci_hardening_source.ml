@@ -33,18 +33,32 @@ let guarded_file_not_contains_pattern file_rel pattern =
 
 let retired_preflight_tool_name = "keeper_" ^ "preflight_check"
 
-let retired_docker_pr_reprobe_wrapper =
-  "scripts/harness_" ^ "keeper_docker_" ^ "pr_" ^ "lifecycle_" ^ "reprobe.sh"
+let retired_container_reprobe_slug =
+  String.concat ""
+    [ "keeper_"
+    ; "docker_"
+    ; "pr_"
+    ; "lifecycle_"
+    ; "reprobe.sh"
+    ]
 
-let retired_docker_pr_reprobe_workload =
-  "scripts/harness/workload/" ^ "keeper_docker_" ^ "pr_" ^ "lifecycle_"
-  ^ "reprobe.sh"
+let retired_container_reprobe_wrapper =
+  Filename.concat "scripts" ("harness_" ^ retired_container_reprobe_slug)
 
-let retired_docker_pr_reprobe_runbook =
-  "docs/KEEPER-DOCKER-" ^ "PR-LIFECYCLE-REPROBE.md"
+let retired_container_reprobe_workload =
+  Filename.concat "scripts/harness/workload" retired_container_reprobe_slug
 
-let retired_docker_pr_reprobe_script_name =
-  "harness_" ^ "keeper_docker_" ^ "pr_" ^ "lifecycle_" ^ "reprobe.sh"
+let retired_container_reprobe_runbook =
+  String.concat ""
+    [ "docs/KEEPER-"
+    ; "DOCKER-"
+    ; "PR-"
+    ; "LIFECYCLE-"
+    ; "REPROBE.md"
+    ]
+
+let retired_container_reprobe_script_name =
+  "harness_" ^ retired_container_reprobe_slug
 
 let retired_dashboard_workflow_proof_ml =
   "lib/dashboard/dashboard_keeper_" ^ "git_" ^ "pr_" ^ "proof.ml"
@@ -1441,12 +1455,12 @@ let test_keeper_required_tool_contracts () =
   check bool "final-turn required tool prompt does not allow one-tool partial success" true
     (file_not_contains_pattern "lib/keeper/keeper_run_tools_hooks.ml"
        "call at least one");
-  check bool "docker PR lifecycle reprobe harness stays retired" true
-    ((not (Sys.file_exists (source_path retired_docker_pr_reprobe_wrapper)))
-     && (not (Sys.file_exists (source_path retired_docker_pr_reprobe_workload)))
-     && (not (Sys.file_exists (source_path retired_docker_pr_reprobe_runbook)))
+  check bool "retired container reprobe harness stays absent" true
+    ((not (Sys.file_exists (source_path retired_container_reprobe_wrapper)))
+     && (not (Sys.file_exists (source_path retired_container_reprobe_workload)))
+     && (not (Sys.file_exists (source_path retired_container_reprobe_runbook)))
      && file_not_contains_pattern "docs/rfc/RFC-0019-keeper-credential-unification.md"
-          retired_docker_pr_reprobe_script_name);
+          retired_container_reprobe_script_name);
   check bool "taskboard schema documents PR required_tools execute path" true
     (file_not_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
        retired_preflight_tool_name
@@ -1473,9 +1487,9 @@ let test_keeper_msg_timeout_contracts () =
   check bool "keeper msg forwards timeout_sec into Agent.run" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "?oas_timeout_s:keeper_msg_oas_timeout_s");
-  check bool "keeper msg timeout contract does not depend on retired docker PR harness" true
-    ((not (Sys.file_exists (source_path retired_docker_pr_reprobe_wrapper)))
-     && not (Sys.file_exists (source_path retired_docker_pr_reprobe_workload)))
+  check bool "keeper msg timeout contract does not depend on retired reprobe harness" true
+    ((not (Sys.file_exists (source_path retired_container_reprobe_wrapper)))
+     && not (Sys.file_exists (source_path retired_container_reprobe_workload)))
 
 let test_keeper_supervisor_domain_pool_contracts () =
   check bool "keeper supervisor never submits Eio loop body to domain pool" true
@@ -1783,14 +1797,14 @@ let test_forge_pr_audit_contracts () =
        ("pr-" ^ "action-metrics")
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           ("pr_" ^ "action_metric"));
-  check bool "keeper fleet audit does not consume docker PR lifecycle scope" true
+  check bool "keeper fleet audit does not consume retired workflow scope" true
     (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "route_evidence.via=docker"
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           "--evidence-run-id"
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           "load_harness_evidence_windows"
-     && not (Sys.file_exists (source_path retired_docker_pr_reprobe_workload)));
+     && not (Sys.file_exists (source_path retired_container_reprobe_workload)));
   check bool "dashboard no longer has retired workflow proof surface" true
     (not (Sys.file_exists (source_path retired_dashboard_workflow_proof_ml))
      && not (Sys.file_exists (source_path retired_dashboard_workflow_proof_mli))

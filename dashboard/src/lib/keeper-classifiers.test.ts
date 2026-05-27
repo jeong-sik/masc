@@ -36,7 +36,7 @@ describe('keeperPriority', () => {
 })
 
 describe('isOfflineStatus', () => {
-  it.each(['offline', 'inactive', 'dead', 'crashed'])
+  it.each(['offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped'])
   ('returns true for %s', (status) => {
     expect(isOfflineStatus(status)).toBe(true)
   })

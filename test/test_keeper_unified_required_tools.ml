@@ -62,6 +62,12 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
     (satisfies_required_tool "keeper_task_claim" (`Assoc []));
   check bool "WriteFile alias mutates" true
     (satisfies_required_tool "WriteFile" (`Assoc []));
+  check bool "mcp-prefixed WriteFile alias mutates" true
+    (satisfies_required_tool "mcp__masc__WriteFile" (`Assoc []));
+  check bool "WriteFile alias is execution progress" true
+    (KTP.is_execution_progress_tool_name "WriteFile");
+  check bool "mcp-prefixed WriteFile alias is execution progress" true
+    (KTP.is_execution_progress_tool_name "mcp__masc__WriteFile");
   check bool "mutating gh bash satisfies" true
     (satisfies_required_tool
        "tool_execute"

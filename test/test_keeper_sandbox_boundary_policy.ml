@@ -534,6 +534,12 @@ let test_public_alias_projection_uses_core_axis () =
     "\"Bash\", { internal_name = \"tool_execute\"";
   assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_workspace_inspect\""
 
+let test_tool_call_contract_uses_public_descriptor_surface () =
+  let rel = "specs/boundary/ToolCallContract.tla" in
+  assert_contains rel "ToolRegistry == {\"SearchFiles\"";
+  assert_contains rel "tools_used' = {\"SearchFiles\"}";
+  assert_not_contains rel "\"keeper_shell\""
+
 let test_backend_host_exec_uses_sandbox_actor () =
   let backend_sources =
     [ "lib/keeper/keeper_sandbox_docker.ml"
@@ -697,6 +703,10 @@ let () =
             "public alias projection uses core axis"
             `Quick
             test_public_alias_projection_uses_core_axis;
+          Alcotest.test_case
+            "tool call contract uses public descriptor surface"
+            `Quick
+            test_tool_call_contract_uses_public_descriptor_surface;
           Alcotest.test_case
             "backend host exec uses sandbox actor"
             `Quick

@@ -809,6 +809,18 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
+(** Extract the [InputRequired] payload from an [sdk_error], if any.
+    Typed companion to {!is_input_required_error}; callers that need
+    the [input_required] record use this option-returning function so
+    a [match ... | _ -> assert false] tail is no longer required. *)
+let extract_input_required (err : Agent_sdk.Error.sdk_error)
+  : Agent_sdk.Error.input_required option
+  =
+  match err with
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired ir) -> Some ir
+  | _ -> None
+;;
+
 (** [true] when the error is an OAS [InputRequired] — the agent paused
     to request human input.  Not a failure; a special stop condition. *)
 let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =

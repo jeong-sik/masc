@@ -229,12 +229,8 @@ let run (ctx : ctx)
       Cascade_name.to_string execution.cascade_name
     in
     let mark_terminal_error err =
-      if EC.is_input_required_error err then begin
-        let ir =
-          match err with
-          | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired ir) -> ir
-          | _ -> assert false
-        in
+      match EC.extract_input_required err with
+      | Some ir ->
         Keeper_registry.mark_turn_cascade_done
           ~base_path:config.base_path
           meta.name;
@@ -253,7 +249,7 @@ let run (ctx : ctx)
           ~prev:Keeper_turn_fsm.Streaming
           (Keeper_turn_fsm.Cancelled
              Keeper_turn_fsm.Cancelled_input_required)
-      end else
+      | None ->
         Keeper_unified_turn_terminal_error.handle
           ~config
           ~keeper_name:meta.name

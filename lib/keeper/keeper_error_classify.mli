@@ -55,6 +55,15 @@ val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
     to request human input.  Not a failure; a special stop condition. *)
 val is_input_required_error : Agent_sdk.Error.sdk_error -> bool
 
+(** Extract the [InputRequired] payload from an [sdk_error], if any.
+    Typed companion to {!is_input_required_error} — callers that need
+    the [input_required] record (request_id, question, …) avoid a
+    separate pattern match plus [assert false] when the predicate
+    has already filtered for the constructor. *)
+val extract_input_required
+  :  Agent_sdk.Error.sdk_error
+  -> Agent_sdk.Error.input_required option
+
 (** [true] when an error represents terminal cascade exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
 val is_cascade_exhausted_error : Agent_sdk.Error.sdk_error -> bool

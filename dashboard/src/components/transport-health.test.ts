@@ -12,7 +12,7 @@ import {
   formatIdle,
   compactId,
   statusDot,
-  toneClass,
+  toneTextClass,
   queuePressureTone,
   sseTone,
   transportTone,
@@ -601,13 +601,13 @@ describe('statusDot', () => {
   })
 })
 
-describe('toneClass', () => {
+describe('toneTextClass', () => {
   it.each([
     ['ok', 'text-[var(--color-status-ok)]'],
     ['warn', 'text-[var(--color-status-warn)]'],
     ['bad', 'text-[var(--color-status-err)]'],
-  ] as const)('toneClass(%s) → %s', (input, expected) => {
-    expect(toneClass(input as StatusTone)).toBe(expected)
+  ] as const)('toneTextClass(%s) → %s', (input, expected) => {
+    expect(toneTextClass(input as StatusTone)).toBe(expected)
   })
 })
 

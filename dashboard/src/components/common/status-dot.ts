@@ -22,9 +22,9 @@
 import { html } from 'htm/preact'
 
 export type StatusDotSize = 'xs' | 'sm' | 'md' | 'lg'
-export type StatusDotMode = 'decorative' | 'semantic'
+type StatusDotMode = 'decorative' | 'semantic'
 
-export interface StatusDotSummary {
+interface StatusDotSummary {
   readonly size: StatusDotSize
   readonly mode: StatusDotMode
   readonly hasCustomClass: boolean
@@ -32,10 +32,7 @@ export interface StatusDotSummary {
   readonly classNameLength: number
 }
 
-/** Pure: Tailwind size tokens for each named variant. Exposed so
-    a caller that wraps its own <span> (legacy code in a hot render
-    path avoiding an extra component) stays pixel-identical. */
-export function statusDotSizeClass(size: StatusDotSize = 'sm'): string {
+function statusDotSizeClass(size: StatusDotSize = 'sm'): string {
   switch (size) {
     case 'xs': return 'w-1.5 h-1.5'  // 6px — inline legend dots
     case 'sm': return 'w-2 h-2'      // 8px — default row marker
@@ -46,9 +43,7 @@ export function statusDotSizeClass(size: StatusDotSize = 'sm'): string {
 
 const BASE = 'inline-block rounded-full shrink-0'
 
-/** Pure: full class string for a dot. Exposed so callers can pre-build
-    the string in a loop without mounting N components. */
-export function statusDotClasses(
+function statusDotClasses(
   size: StatusDotSize = 'sm',
   toneClass?: string,
   extra?: string,
@@ -59,12 +54,12 @@ export function statusDotClasses(
   return parts.join(' ')
 }
 
-export function normalizeStatusDotAriaLabel(ariaLabel?: string): string | undefined {
+function normalizeStatusDotAriaLabel(ariaLabel?: string): string | undefined {
   const normalized = ariaLabel?.trim()
   return normalized === '' ? undefined : normalized
 }
 
-export function summarizeStatusDot({
+function summarizeStatusDot({
   size = 'sm',
   class: classProp,
   ariaLabel,

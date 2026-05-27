@@ -422,7 +422,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("git_egress",
             `String
               (if Env_config_sandbox.Runtime.git_dispatch () then
-                 "docker_git_dispatch"
+                 "repo_cli_identity_dispatch"
                else
                  "container_network_policy"));
           ("credential_fallbacks_disabled", `Bool false);

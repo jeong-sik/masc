@@ -338,7 +338,7 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
 }
 
 function formatSeconds(value: number): string {
-  if (!Number.isFinite(value)) return '--'
+  if (!Number.isFinite(value)) return MISSING_DATA_DASH
   return value >= 60 ? `${(value / 60).toFixed(1)}m` : `${value.toFixed(value % 1 === 0 ? 0 : 1)}s`
 }
 
@@ -390,10 +390,10 @@ function BoolBadge({ value }: { value: boolean }) {
 
 function formatHookDestructiveTools(value: string[] | string): string {
   if (Array.isArray(value)) {
-    return value.length > 0 ? value.join(', ') : '--'
+    return value.length > 0 ? value.join(', ') : MISSING_DATA_DASH
   }
   const text = value.trim()
-  return text !== '' ? text : '--'
+  return text !== '' ? text : MISSING_DATA_DASH
 }
 
 function ModelList({ models }: { models: string[] }) {
@@ -569,12 +569,12 @@ function cascadeCatalogSourceLabel(c: KeeperConfig): string {
     case 'json':
       return 'retired json source'
     default:
-      return '--'
+      return MISSING_DATA_DASH
   }
 }
 
 function cascadeSelectionSummary(c: KeeperConfig): string {
-  const selected = c.execution.selected_cascade_name || '--'
+  const selected = c.execution.selected_cascade_name || MISSING_DATA_DASH
   const canonical = c.execution.selected_cascade_canonical || selected
   const manifest = c.sources.default_manifest_path
   const catalog = c.sources.cascade_catalog_source_path
@@ -859,8 +859,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             </label>
           `
         : null}
-      <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || '--'} />
-      <${ConfigRow} label="선택 cascade" value=${c.execution.selected_cascade_name || '--'} />
+      <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
+      <${ConfigRow} label="선택 cascade" value=${c.execution.selected_cascade_name || MISSING_DATA_DASH} />
       ${c.execution.selected_cascade_canonical
         && c.execution.selected_cascade_canonical !== c.execution.selected_cascade_name
         ? html`<${ConfigRow}
@@ -890,7 +890,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
 
       <${MajorSectionHeader} title="실행" />
-      <${ConfigRow} label="활성 런타임" value=${c.execution.active_model ? 'runtime' : '--'} />
+      <${ConfigRow} label="활성 런타임" value=${c.execution.active_model ? 'runtime' : MISSING_DATA_DASH} />
       <${ConfigRow} label="runtime timeout" value=${perProviderTimeoutLabel(c.execution)} />
       <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         cascade fallback 중 마지막 runtime을 제외한 runtime들에만 적용됩니다.
@@ -902,7 +902,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
 
       <${SectionHeader} title="컴팩션" />
-      <${ConfigRow} label="프로필" value=${c.compaction.profile || '--'} />
+      <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
       ${rd ? html`
         <${InlineNumberRow} label="비율 게이트 (%)" value=${Math.round(rd.compaction_ratio_gate * 100)}
           onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)}
@@ -966,25 +966,25 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
         <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
 
-        <${ConfigRow} label="effective_sandbox_image" value=${c.effective_sandbox_image || '--'} />
+        <${ConfigRow} label="effective_sandbox_image" value=${c.effective_sandbox_image || MISSING_DATA_DASH} />
         <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
         <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
-        <${ConfigRow} label="private_workspace_root" value=${c.private_workspace_root || '--'} />
+        <${ConfigRow} label="private_workspace_root" value=${c.private_workspace_root || MISSING_DATA_DASH} />
       `}
 
       ${c.sandbox_environment ? html`
         <${SectionHeader} title="샌드박스 환경" />
         <${ConfigRow} label="docker_status" value=${dockerStatusLabel(c)} />
-        <${ConfigRow} label="config_base_path" value=${c.sandbox_environment.base_path || '--'} />
-        <${ConfigRow} label="project_root" value=${c.sandbox_environment.project_root || '--'} />
+        <${ConfigRow} label="config_base_path" value=${c.sandbox_environment.base_path || MISSING_DATA_DASH} />
+        <${ConfigRow} label="project_root" value=${c.sandbox_environment.project_root || MISSING_DATA_DASH} />
         <${BoolRow} label="docker_playground" value=${c.sandbox_environment.docker_playground_enabled} />
-        <${ConfigRow} label="docker_container" value=${c.sandbox_environment.docker_container_name || '--'} />
-        <${ConfigRow} label="container_playground_root" value=${c.sandbox_environment.container_playground_root || '--'} />
-        <${ConfigRow} label="sandbox_docker_image" value=${c.sandbox_environment.docker_image || '--'} />
-        <${ConfigRow} label="sandbox_memory" value=${c.sandbox_environment.memory || '--'} />
+        <${ConfigRow} label="docker_container" value=${c.sandbox_environment.docker_container_name || MISSING_DATA_DASH} />
+        <${ConfigRow} label="container_playground_root" value=${c.sandbox_environment.container_playground_root || MISSING_DATA_DASH} />
+        <${ConfigRow} label="sandbox_docker_image" value=${c.sandbox_environment.docker_image || MISSING_DATA_DASH} />
+        <${ConfigRow} label="sandbox_memory" value=${c.sandbox_environment.memory || MISSING_DATA_DASH} />
         <${ConfigRow} label="sandbox_pids_limit" value=${String(c.sandbox_environment.pids_limit ?? MISSING_DATA_DASH)} />
-        <${ConfigRow} label="sandbox_tmpfs_size" value=${c.sandbox_environment.tmpfs_size || '--'} />
-        <${ConfigRow} label="sandbox_seccomp_profile" value=${c.sandbox_environment.seccomp_profile || '--'} />
+        <${ConfigRow} label="sandbox_tmpfs_size" value=${c.sandbox_environment.tmpfs_size || MISSING_DATA_DASH} />
+        <${ConfigRow} label="sandbox_seccomp_profile" value=${c.sandbox_environment.seccomp_profile || MISSING_DATA_DASH} />
         <${BoolRow} label="require_rootless" value=${c.sandbox_environment.require_rootless} />
         <${BoolRow} label="require_userns" value=${c.sandbox_environment.require_userns} />
         ${c.sandbox_last_error ? html`
@@ -1016,8 +1016,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${BoolRow} label="일시정지" value=${c.runtime.paused} />
       <${BoolRow} label="자동 부팅 등록" value=${c.runtime.registered} />
       <${BoolRow} label="킵얼라이브 실행" value=${c.runtime.keepalive_running} />
-      <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || '--'} />
-      <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
+      <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || MISSING_DATA_DASH} />
+      <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || MISSING_DATA_DASH} />
       <${BoolRow} label="프레즌스 킵얼라이브" value=${c.runtime.presence_keepalive} />
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 

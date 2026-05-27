@@ -1,5 +1,7 @@
 // Unified time formatting utilities.
 
+import { UNKNOWN_STATUS_LABEL } from './format-string'
+
 export const SECONDS_PER_MINUTE = 60
 export const SECONDS_PER_HOUR = 3600
 export const SECONDS_PER_DAY = 86400
@@ -55,9 +57,9 @@ export function formatElapsed(value?: number | null): string {
   return `${Math.round(value / SECONDS_PER_HOUR)}시간`
 }
 
-/** Format duration in seconds as Korean text — includes days. Returns '확인 필요' for invalid. */
+/** Format duration in seconds as Korean text — includes days. Returns UNKNOWN_STATUS_LABEL for invalid. */
 export function formatDuration(seconds?: number | null): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '확인 필요'
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return UNKNOWN_STATUS_LABEL
   if (seconds < SECONDS_PER_MINUTE) return `${Math.round(seconds)}초`
   if (seconds < SECONDS_PER_HOUR) return `${Math.round(seconds / SECONDS_PER_MINUTE)}분`
   if (seconds < SECONDS_PER_DAY) return `${Math.round(seconds / SECONDS_PER_HOUR)}시간`
@@ -65,9 +67,9 @@ export function formatDuration(seconds?: number | null): string {
 }
 
 /** Format duration in seconds as Korean text with compound units — "2시간 30분", "1시간 0분".
- *  Returns '확인 필요' for invalid. */
+ *  Returns UNKNOWN_STATUS_LABEL for invalid. */
 export function formatDurationCompound(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '확인 필요'
+  if (!Number.isFinite(seconds) || seconds < 0) return UNKNOWN_STATUS_LABEL
   const totalMinutes = Math.floor(seconds / SECONDS_PER_MINUTE)
   const totalHours = Math.floor(totalMinutes / 60)
 

@@ -454,9 +454,15 @@ module Router = struct
     | `Method_not_allowed
     | `Not_found ]
 
+  type prefix_node = {
+    children: (char, prefix_node) Hashtbl.t;
+    mutable routes: route list;
+  }
+
   type method_routes = {
     exact_by_path: (string, route) Hashtbl.t;
     mutable prefix_routes: route list;
+    prefix_root: prefix_node;
   }
 
   type t = {
@@ -470,8 +476,15 @@ module Router = struct
     mutable route_count: int;
   }
 
+  let create_prefix_node () =
+    { children = Hashtbl.create 4; routes = [] }
+
   let create_method_routes () =
-    { exact_by_path = Hashtbl.create 128; prefix_routes = [] }
+    {
+      exact_by_path = Hashtbl.create 128;
+      prefix_routes = [];
+      prefix_root = create_prefix_node ();
+    }
 
   let create () =
     {
@@ -500,6 +513,26 @@ module Router = struct
     in
     loop [] routes
 
+  let insert_prefix_trie (route : route) (root : prefix_node) =
+    let path = route.path in
+    let path_len = String.length path in
+    let rec loop (node : prefix_node) idx =
+      if idx = path_len then
+        node.routes <- insert_prefix_route route node.routes
+      else
+        let ch = path.[idx] in
+        let child =
+          match Hashtbl.find_opt node.children ch with
+          | Some child -> child
+          | None ->
+              let child = create_prefix_node () in
+              Hashtbl.add node.children ch child;
+              child
+        in
+        loop child (idx + 1)
+    in
+    loop root 0
+
   let method_routes router = function
     | `GET -> Some router.get
     | `POST -> Some router.post
@@ -513,7 +546,8 @@ module Router = struct
     | Exact -> Hashtbl.replace method_routes.exact_by_path route.path route
     | Prefix ->
         method_routes.prefix_routes <-
-          insert_prefix_route route method_routes.prefix_routes
+          insert_prefix_route route method_routes.prefix_routes;
+        insert_prefix_trie route method_routes.prefix_root
 
   let add_kind kind ~path ~methods ~handler router =
     let route = { kind; path; methods; handler } in
@@ -564,9 +598,21 @@ module Router = struct
     add_kind Prefix ~path:prefix ~methods:[`PUT] ~handler routes
 
   let resolve_prefix routes req_path =
-    List.find_opt
-      (fun route -> String.starts_with req_path ~prefix:route.path)
-      routes.prefix_routes
+    let path_len = String.length req_path in
+    let rec loop (node : prefix_node) idx best =
+      let best =
+        match node.routes with
+        | route :: _ -> Some route
+        | [] -> best
+      in
+      if idx = path_len then
+        best
+      else
+        match Hashtbl.find_opt node.children req_path.[idx] with
+        | Some child -> loop child (idx + 1) best
+        | None -> best
+    in
+    loop routes.prefix_root 0 None
 
   let resolve router request =
     let req_path = Request.path request in

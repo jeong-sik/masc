@@ -17,14 +17,14 @@ require_server
 
 # Test 1: Health check
 echo "--- SSE Transport E2E ---"
-if curl -sf "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
+if curl -sf "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1; then
   pass "health endpoint responds"
 else
   fail "health endpoint" "no response"
 fi
 
 # Test 2: SSE endpoint sends correct headers
-headers=$(curl -sf -I -m 3 "${MASC_BASE_URL}/sse" 2>&1 || true)
+headers=$(curl -sf -I -m 3 "${MASC_HTTP_BASE_URL}/sse" 2>&1 || true)
 if echo "$headers" | grep -qi "text/event-stream"; then
   pass "SSE content-type: text/event-stream"
 else
@@ -39,7 +39,7 @@ init_req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersi
 init_deadline=$(( $(date +%s) + 15 ))
 init_resp=""
 while [[ "$(date +%s)" -lt "$init_deadline" ]]; do
-  init_resp=$(curl -sf -X POST "${MASC_BASE_URL}/mcp" \
+  init_resp=$(curl -sf -X POST "${MASC_HTTP_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "${MCP_ACCEPT}" \
     -d "$init_req" 2>&1 || true)
@@ -62,7 +62,7 @@ session_deadline=$(( $(date +%s) + 15 ))
 SESSION_ID=""
 while [[ "$(date +%s)" -lt "$session_deadline" ]]; do
   SESSION_ID="$(
-    curl -sf -i -X POST "${MASC_BASE_URL}/mcp" \
+    curl -sf -i -X POST "${MASC_HTTP_BASE_URL}/mcp" \
       -H "Content-Type: application/json" \
       -H "${MCP_ACCEPT}" \
       -d "$init_req" 2>&1 \
@@ -74,7 +74,7 @@ while [[ "$(date +%s)" -lt "$session_deadline" ]]; do
   sleep 1
 done
 tools_req='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-tools_resp=$(curl -sf -X POST "${MASC_BASE_URL}/mcp" \
+tools_resp=$(curl -sf -X POST "${MASC_HTTP_BASE_URL}/mcp" \
   -H "Content-Type: application/json" \
   -H "${MCP_ACCEPT}" \
   -H "Mcp-Session-Id: ${SESSION_ID}" \

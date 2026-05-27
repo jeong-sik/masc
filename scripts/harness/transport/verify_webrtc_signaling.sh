@@ -16,7 +16,7 @@ require_server
 
 echo "--- WebRTC Signaling E2E ---"
 
-health_resp="$(curl -fsS "${MASC_BASE_URL}/health")"
+health_resp="$(curl -fsS "${MASC_HTTP_BASE_URL}/health")"
 webrtc_enabled="$(
   HEALTH_JSON="$health_resp" python3 - <<'PY'
 import json, os
@@ -32,7 +32,7 @@ else
 fi
 
 offer_resp="$(
-  curl -fsS -X POST "${MASC_BASE_URL}/webrtc/offer" \
+  curl -fsS -X POST "${MASC_HTTP_BASE_URL}/webrtc/offer" \
     -H "Content-Type: application/json" \
     -d '{"agent_name":"e2e-tester","ice_candidates":["candidate:842163049 1 udp 1677729535 127.0.0.1 50000 typ srflx raddr 0.0.0.0 rport 9"],"dtls_fingerprint":"sha256:abc"}'
 )"
@@ -51,7 +51,7 @@ else
 fi
 
 answer_resp="$(
-  curl -fsS -X POST "${MASC_BASE_URL}/webrtc/answer" \
+  curl -fsS -X POST "${MASC_HTTP_BASE_URL}/webrtc/answer" \
     -H "Content-Type: application/json" \
     -d "{\"offer_id\":\"${offer_id}\",\"agent_name\":\"e2e-answerer\",\"ice_candidates\":[\"candidate:1 1 udp 2130706431 127.0.0.1 50001 typ host\"]}"
 )"
@@ -70,7 +70,7 @@ else
 fi
 
 dup_resp="$(
-  curl -fsS -X POST "${MASC_BASE_URL}/webrtc/answer" \
+  curl -fsS -X POST "${MASC_HTTP_BASE_URL}/webrtc/answer" \
     -H "Content-Type: application/json" \
     -d "{\"offer_id\":\"${offer_id}\",\"agent_name\":\"e2e-dup\"}" 2>&1 || true
 )"
@@ -81,7 +81,7 @@ else
 fi
 
 invalid_resp="$(
-  curl -fsS -X POST "${MASC_BASE_URL}/webrtc/answer" \
+  curl -fsS -X POST "${MASC_HTTP_BASE_URL}/webrtc/answer" \
     -H "Content-Type: application/json" \
     -d '{"offer_id":"nonexistent-id","agent_name":"e2e-invalid"}' 2>&1 || true
 )"

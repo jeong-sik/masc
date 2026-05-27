@@ -15,7 +15,7 @@ require_server
 
 echo "--- WebSocket Transport E2E ---"
 
-ws_discovery="$(curl -fsS "${MASC_BASE_URL}/ws" 2>&1 || true)"
+ws_discovery="$(curl -fsS "${MASC_HTTP_BASE_URL}/ws" 2>&1 || true)"
 read -r ws_enabled ws_port ws_url <<EOF
 $(WS_DISCOVERY="$ws_discovery" python3 - <<'PY'
 import json, os
@@ -34,7 +34,7 @@ else
 fi
 
 read_sse_external_subscriber_count() {
-  curl -fsS "${MASC_BASE_URL}/metrics" 2>/dev/null \
+  curl -fsS "${MASC_HTTP_BASE_URL}/metrics" 2>/dev/null \
     | awk '$1=="masc_sse_external_subscribers_total" { print int($2); found=1; exit } END { if (!found) print -1 }' \
     2>/dev/null || echo "-1"
 }
@@ -196,7 +196,7 @@ else
 fi
 rm -f "$ws_output" "$ws_handshake"
 
-if curl -fsS "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
+if curl -fsS "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1; then
   pass "server healthy after WebSocket test"
 else
   fail "server health" "health check failed after WebSocket test"

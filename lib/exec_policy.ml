@@ -871,7 +871,9 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
       match br with
       | Command_not_allowed name -> Some name
       | Direct_dune_invocation -> Some "dune"
-      | _ -> None
+      | Empty_command | Chain_or_redirect | Injection | Process_substitution
+      | Unsafe_redirect | Pipes_not_allowed ->
+        None
     in
     let evidence : Yojson.Safe.t =
       `Assoc

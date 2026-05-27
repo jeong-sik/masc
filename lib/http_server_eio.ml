@@ -536,7 +536,7 @@ module Router = struct
     | `PUT -> Some router.put
     | `DELETE -> Some router.delete
     | `OPTIONS -> Some router.options
-    | _ -> None
+    | `HEAD | `CONNECT | `TRACE | `Other _ -> None
 
   let add_to_method_routes kind route method_routes =
     match kind with

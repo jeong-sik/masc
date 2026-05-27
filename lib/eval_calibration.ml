@@ -413,7 +413,10 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
           else
             match ev, hv with
             | Anti_rationalization.Approve, Reject_label -> (fp + 1, fn, ag)
-            | _ -> (fp, fn + 1, ag)
+            | Anti_rationalization.Approve, Approve_label
+            | Anti_rationalization.Reject _, Approve_label
+            | Anti_rationalization.Reject _, Reject_label ->
+              (fp, fn + 1, ag)
     ) verdict_hashes (0, 0, 0)
   in
   let labeled_total = false_pos + false_neg + agree in

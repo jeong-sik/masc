@@ -326,7 +326,7 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Saf
               ] )
         | Error msg ->
           false, Tool_args.error_assoc [ "message", `String msg ])
-     | _ ->
+     | None, _ | _, None ->
        ( false
        , Tool_args.error_assoc
            [ "message", `String "agent_name and shard_name are required" ] ))

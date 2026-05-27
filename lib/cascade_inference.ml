@@ -144,7 +144,7 @@ let cap_max_tokens_to_cascade_ceiling ~cascade_name ~source max_tokens =
   match Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name with
   | Some ceiling ->
     cap_max_tokens_to_ceiling ~cascade_name ~source ~ceiling max_tokens
-  | _ -> max_tokens
+  | None -> max_tokens
 
 (** Resolve a max_tokens value: cascade config (capped) -> capped fallback. *)
 let resolve_max_tokens

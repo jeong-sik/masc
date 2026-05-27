@@ -20,10 +20,20 @@ let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
       (`Assoc ([ "ok", `Bool false; "error", `String (Masc_domain.masc_error_to_string e) ] @ typed_fields))
 ;;
 
-let workflow_rejection_error_json ?(rule_id = "keeper_task_argument_rejected") message =
+let workflow_rejection_error_json
+      ?(rule_id = "keeper_task_argument_rejected")
+      ?(alternatives = [])
+      message
+  =
+  (* RFC-0195 P0: [alternatives] is a typed list of tool names the
+     LLM can call instead.  Empty list omits the field; non-empty
+     surfaces it directly in the JSON payload so the LLM does not
+     have to parse prose [hint] strings to discover next-tool
+     candidates. *)
   Tool_task_payloads.workflow_rejection_payload_json
     ~rule_id
     ~scope_policy:"block_scope"
+    ~alternatives
     message
 ;;
 
@@ -763,6 +773,7 @@ let handle_keeper_task_tool
     if task_id = ""
     then
       workflow_rejection_error_json
+        ~alternatives:[ "keeper_task_claim"; "keeper_tasks_list" ]
         "task_id is required. Use the task_id you got from keeper_task_claim."
     else if result_text = ""
     then
@@ -777,6 +788,7 @@ let handle_keeper_task_tool
          keeper-vocabulary error). Enforce the schema here so the
          error names the field the keeper actually sent. *)
       workflow_rejection_error_json
+        ~alternatives:[ "keeper_task_done"; "keeper_task_submit_for_verification" ]
         "result is required. Audit trail: describe what you completed. \
          Example: result='Refactored module X, all tests green, no flake'."
     else (
@@ -820,18 +832,23 @@ let handle_keeper_task_tool
     if task_id = ""
     then
       workflow_rejection_error_json
+        ~alternatives:[ "keeper_task_claim"; "keeper_tasks_list" ]
         "task_id is required. Use the task_id you got from keeper_task_claim."
     else if notes = ""
     then
       workflow_rejection_error_json
+        ~alternatives:[ "keeper_task_submit_for_verification" ]
         "notes is required. Include verification evidence and test summary."
     else if pr_url = ""
     then
       workflow_rejection_error_json
+        ~alternatives:
+          [ "keeper_task_submit_for_verification"; "keeper_task_done" ]
         "pr_url is required. Include the PR opened for this task."
     else if not (Tool_task_completion_review.pr_url_has_pull_ref pr_url)
     then
       workflow_rejection_error_json
+        ~alternatives:[ "keeper_task_submit_for_verification" ]
         "pr_url must be a GitHub pull request URL or PR # reference. \
          Do not submit placeholders like 'draft', 'none', or 'pending'."
     else (

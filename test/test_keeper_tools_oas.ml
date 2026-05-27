@@ -1277,6 +1277,48 @@ let test_tool_result_error_json_preserves_structured_workflow_rejection () =
     (json_string "scope_policy" diagnosis)
 ;;
 
+(* RFC-0195 P0: workflow_rejection_payload_json must surface a typed
+   [alternatives] field when callers provide one, and must omit the
+   field when the list is empty (the default). *)
+let test_workflow_rejection_alternatives_field_emitted () =
+  let message =
+    Tool_task_payloads.workflow_rejection_payload_json
+      ~rule_id:"task_done_result_missing"
+      ~alternatives:[ "keeper_task_done"; "keeper_task_submit_for_verification" ]
+      "result is required"
+  in
+  let json = parse message in
+  let alternatives_field = Yojson.Safe.Util.member "alternatives" json in
+  match alternatives_field with
+  | `List items ->
+    check
+      (list string)
+      "alternatives surfaces both typed tool names"
+      [ "keeper_task_done"; "keeper_task_submit_for_verification" ]
+      (List.map
+         (function
+           | `String name -> name
+           | _ -> Alcotest.fail "alternatives entries must be strings")
+         items)
+  | _ ->
+    Alcotest.fail "alternatives field missing or wrong shape"
+;;
+
+let test_workflow_rejection_alternatives_field_omitted_when_empty () =
+  let message =
+    Tool_task_payloads.workflow_rejection_payload_json
+      ~rule_id:"some_rule"
+      "some error"
+  in
+  let json = parse message in
+  let alternatives_field = Yojson.Safe.Util.member "alternatives" json in
+  check
+    bool
+    "empty alternatives must not emit the field"
+    true
+    (alternatives_field = `Null)
+;;
+
 let test_failure_boundary_ignores_error_text_without_failure_class () =
   let decision =
     Keeper_tools_oas_failure_boundary.classify_raw_failure

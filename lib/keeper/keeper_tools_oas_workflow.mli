@@ -73,11 +73,18 @@ val workflow_rejection_payload_json
   -> ?tool_suggestion:string
   -> ?hint:string
   -> ?scope_policy:workflow_rejection_scope_policy
+  -> ?alternatives:string list
   -> ?extra_fields:(string * Yojson.Safe.t) list
   -> error_class:workflow_rejection_error_class
   -> recoverability:workflow_rejection_recoverability
   -> string
   -> string
+(** [alternatives] is the typed list of tool names the caller can use
+    instead.  RFC-0195 P0: surface a typed [alternatives] field on
+    every workflow_rejection emit so the LLM receives concrete next-
+    tool candidates rather than parsing prose hints.  Empty list (default)
+    omits the field entirely; existing callers that omit this argument
+    are unaffected. *)
 
 (** Extract [workflow_rejection_info] from a raw JSON string. *)
 val workflow_rejection_info_of_raw : string -> workflow_rejection_info option

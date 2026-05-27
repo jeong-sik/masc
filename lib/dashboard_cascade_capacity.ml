@@ -30,7 +30,7 @@ let client_capacity_entry_to_json ((url, info) : string * Cascade_throttle.capac
     ]
 ;;
 
-let client_capacity_json () =
+let client_capacity_json_compute () =
   let entries = Cascade_client_capacity.snapshot () in
   (* Stable ordering by (kind, key) so the dashboard table doesn't
      reshuffle on every poll.  Hashtbl iteration is unordered, so we
@@ -56,9 +56,17 @@ let client_capacity_json () =
           ~scope:"cascade_client_capacity"
           ~producer:"Cascade_client_capacity.register"
           ~store_kind:"process_registry"
-          ~cache_policy:"uncached; reads the live process-local registry" () )
+          ~cache_policy:"2s ttl + stale-while-revalidate via Dashboard_cache" () )
     ; "entries", `List (List.map client_capacity_entry_to_json sorted)
     ]
+;;
+
+(* Snapshot of a live process-local registry; measured 4s/call against a
+   populated registry. Short TTL keeps dashboard reads near-live while
+   absorbing burst polls. *)
+let client_capacity_json () =
+  Dashboard_cache.get_or_compute "cascade:client_capacity" ~ttl:2.0
+    client_capacity_json_compute
 ;;
 
 (* ── Client capacity history projection ─────────────────── *)

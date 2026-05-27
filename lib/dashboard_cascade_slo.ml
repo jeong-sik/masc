@@ -22,7 +22,7 @@ let compute_slo_counts (events : Cascade_strategy_trace.event list) =
     events
 ;;
 
-let slo_json () =
+let slo_json_compute () =
   let events = Cascade_strategy_trace.snapshot ~limit:slo_sample_limit () in
   let total, ordered, exhausted = compute_slo_counts events in
   let ordered_ratio =
@@ -66,4 +66,11 @@ let slo_json () =
     ; "status", `String status
     ; "violations", `List violations
     ]
+;;
+
+(* Strategy trace events folded over [slo_sample_limit]; measured 3s/call
+   against a busy trace ring. Short TTL because SLO status is polled by
+   the dashboard top bar at a high cadence. *)
+let slo_json () =
+  Dashboard_cache.get_or_compute "cascade:slo" ~ttl:5.0 slo_json_compute
 ;;

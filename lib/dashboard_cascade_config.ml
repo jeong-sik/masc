@@ -421,7 +421,9 @@ let save_config_file path content =
    sibling -- there isn't one -- and [raw_json_editable] is gone from the
    schema along with the JSON-native authoring mode it described.
    [raw_json] is rendered in memory from the TOML SSOT on each request. *)
-let raw_config_json () =
+let raw_config_cache_key = "cascade:config:raw"
+
+let raw_config_json_compute () =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
   let source : Cascade_toml_materializer.source_info = source_info () in
   let source_read_error = ref None in
@@ -470,6 +472,14 @@ let raw_config_json () =
     ]
 ;;
 
+(* Wrap [raw_config_json_compute] with [Dashboard_cache]: TOML→JSON render
+   measured at 21s/call on a populated cascade. Long TTL is safe because
+   writes go through [save_raw_config_json] which invalidates the entry. *)
+let raw_config_json () =
+  Dashboard_cache.get_or_compute raw_config_cache_key ~ttl:60.0
+    raw_config_json_compute
+;;
+
 (* RFC-0058 §9 Phase 9.3: dashboard save accepts only TOML payloads now;
    the JSON-native save branch is gone. The save persists the TOML file
    and invalidates the cascade loader's cache. Subsequent reads re-render
@@ -488,6 +498,7 @@ let save_raw_config_json raw_json =
             [Cascade_catalog_runtime] both key their caches on
             [source.source_path] (the TOML path). *)
          invalidate_cascade_config source.source_path;
+         Dashboard_cache.invalidate raw_config_cache_key;
          Ok (config_json ())
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn

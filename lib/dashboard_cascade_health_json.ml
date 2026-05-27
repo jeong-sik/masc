@@ -71,7 +71,7 @@ let declared_provider_schemes_of_config ?config_path () : string list =
     Errors from the aggregator (corrupt jsonl, missing directory) are
     caught and the perf fields fall back to [null]; a broken log must
     not take down the dashboard. *)
-let health_json ?(window_minutes = 30) ?(base_path : string option) () =
+let health_json_compute ?(window_minutes = 30) ?(base_path : string option) () =
   let config_path = Cascade_runtime.cascade_config_path () in
   let declared = declared_provider_schemes_set ?config_path () in
   let tracked = Health.all_providers Health.global in
@@ -151,4 +151,17 @@ let health_json ?(window_minutes = 30) ?(base_path : string option) () =
       ( "recommendations"
       , `List (List.map recommendation_to_json (low_trust_recommendations tracked)) )
     ]
+;;
+
+(* Recompute is dominated by [Model_inference_metrics.compute] which scans
+   the full inference log over [window_minutes]; measured 1s/call on a
+   busy cluster. TTL keyed on (window_minutes, base_path) so different
+   dashboards see independent caches. *)
+let health_json ?(window_minutes = 30) ?(base_path : string option) () =
+  let key =
+    Printf.sprintf "cascade:health:%d:%s" window_minutes
+      (Option.value ~default:"" base_path)
+  in
+  Dashboard_cache.get_or_compute key ~ttl:10.0 (fun () ->
+    health_json_compute ~window_minutes ?base_path ())
 ;;

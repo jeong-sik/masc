@@ -102,6 +102,13 @@ let interpolate_printf_message message details =
     List.fold_left replace_first_placeholder message replacements
 
 let render_agent_tools_message ~message ~details =
+  let detail_segments keys =
+    keys
+    |> List.filter_map (fun key ->
+         match first_detail_label details [ key ] with
+         | Some value -> Some (Printf.sprintf "%s=%s" key value)
+         | None -> None)
+  in
   match
     first_detail_label details [ "tool_name"; "tool" ],
     first_detail_label details [ "fixes"; "count" ]
@@ -110,9 +117,21 @@ let render_agent_tools_message ~message ~details =
     when String.equal message "correction_pipeline fixed tool input fields"
          || String.equal message
               "tool %s: correction_pipeline fixed %d field(s)" ->
+      let detail =
+        detail_segments
+          [ "fields"
+          ; "stages"
+          ; "input_keys"
+          ; "corrected_keys"
+          ; "added_fields"
+          ; "changed_fields"
+          ]
+      in
       Some
-        (Printf.sprintf "tool %s: correction_pipeline fixed %s field(s)"
-           tool_name fixes)
+        (String.concat " "
+           (Printf.sprintf "tool %s: correction_pipeline fixed %s field(s)"
+              tool_name fixes
+            :: detail))
   | _ -> None
 
 let render_record_message (record : Agent_sdk.Log.record) : string =

@@ -255,6 +255,20 @@ let test_oas_mainline_warns_are_promoted_in_bridge () =
     (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
        {|Warn, "agent_tools", "ApprovalRequired but no approval callback — executing"|})
 
+let test_correction_pipeline_log_preserves_detail_fields () =
+  List.iter
+    (fun (key, pattern) ->
+      check bool ("bridge renders correction detail " ^ key) true
+        (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
+           pattern))
+    [ "fields", {|[ "fields"|}
+    ; "stages", {|; "stages"|}
+    ; "input_keys", {|; "input_keys"|}
+    ; "corrected_keys", {|; "corrected_keys"|}
+    ; "added_fields", {|; "added_fields"|}
+    ; "changed_fields", {|; "changed_fields"|}
+    ]
+
 let tool_policy_unloaded_metric accessor =
   Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_unloaded_query
     ~labels:[("accessor", accessor)]
@@ -326,6 +340,8 @@ let () =
             test_keeper_mainline_failures_log_at_error;
           test_case "oas mainline warns are promoted in bridge" `Quick
             test_oas_mainline_warns_are_promoted_in_bridge;
+          test_case "correction pipeline log preserves detail fields" `Quick
+            test_correction_pipeline_log_preserves_detail_fields;
           test_case "tool policy pre-init accessors emit metric" `Quick
             test_tool_policy_unloaded_accessors_emit_metric;
           test_case "tool policy init failure emits metric" `Quick

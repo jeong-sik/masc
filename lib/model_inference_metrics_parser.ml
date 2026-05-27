@@ -91,7 +91,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
           List.filter_map
             (function
               | `String s when String.length s > 0 -> Some s
-              | _ -> None)
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> None)
             xs
         | _ -> []
       in

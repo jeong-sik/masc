@@ -681,7 +681,7 @@ let keeper_state_snapshot_of_json (json : Yojson.Safe.t) : keeper_state_snapshot
     match Json_util.assoc_member_opt key json with
     | Some (`List items) ->
       List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> []
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
   in
   let snapshot =
     { goal = string_opt "goal"

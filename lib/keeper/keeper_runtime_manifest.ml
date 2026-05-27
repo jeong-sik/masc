@@ -285,7 +285,7 @@ let assoc_has_key key fields =
 let with_clock_refs ~clock_refs decision =
   match clock_refs with
   | `Assoc [] -> decision
-  | _ -> (
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc (_ :: _) -> (
     match decision with
     | `Assoc fields when assoc_has_key "clock_refs" fields -> decision
     | `Assoc fields -> `Assoc (fields @ [ ("clock_refs", clock_refs) ])
@@ -815,7 +815,7 @@ let append_unfinished_provider_attempt_finished_best_effort
       match started.decision with
       | `Assoc fields ->
         List.filter (fun (k, _) -> not (String.equal k "clock_refs")) fields
-      | _ -> []
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
     in
     let terminal_fields =
       [

@@ -95,11 +95,32 @@ let select_project_snapshot_json ~state ~sw ~clock ?timing req
       (Server_timing.Custom "snapshot_read")
       (fun () -> snap.namespace_truth)
   | _ ->
+    (* Fallback: [Dashboard_snapshot.refresh_loop] publishes [`Null] for
+       [namespace_truth] whenever
+       [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches]
+       returns [None] — which is gated on [execution_cache] holding a
+       success entry.  On a live fleet that condition flips frequently
+       (LRU pressure evicts the entry, refresh tick lands while
+       execution_cache is computing, etc.).  Without this cache layer
+       every concurrent /dashboard/namespace-truth fiber re-runs the
+       full compute on the main HTTP domain — measured at 287-916ms on
+       a live build.
+
+       The compute does not consume [req] meaningfully
+       ([dashboard_namespace_truth_http_json] takes [_request]), so a
+       single [base_path]-keyed cache slot suffices.  TTL 2s matches the
+       refresh_loop interval so a stale cache entry is replaced within
+       one tick of the snapshot refresh recovering. *)
+    let cache_key =
+      Printf.sprintf "namespace_truth:fallback:%s"
+        state.Mcp_server.room_config.Coord.base_path
+    in
     Server_timing.measure
       timing_obj
       Server_timing.Project_snapshot_runtime
       (fun () ->
-        Server_dashboard_http_namespace_truth
-          .dashboard_namespace_truth_http_json
-          ~state ~sw ~clock req)
+        Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+          Server_dashboard_http_namespace_truth
+            .dashboard_namespace_truth_http_json
+            ~state ~sw ~clock req))
 ;;

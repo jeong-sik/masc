@@ -130,7 +130,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
         | None -> kvs
       in
       `Assoc kvs
-    | other -> other
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as other -> other
   in
   let args = normalize_args args in
   let unknown = match args with
@@ -651,7 +651,7 @@ let handle_tasks ~tool_name ~start_time ctx args =
   let status =
     match args |> Json_util.assoc_member_opt "status" |> Option.value ~default:`Null with
     | `String s when not (String.equal s "") -> Some s
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
   in
   Tool_result.ok ~tool_name ~start_time (Coord.list_tasks ctx.config ~include_done ~include_cancelled ?status)
 

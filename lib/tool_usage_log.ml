@@ -88,7 +88,7 @@ let ts_of_record = function
                   match List.assoc_opt "ts_iso" fields with
                   | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
                   | _ -> None))))
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let latest_ts_of_entries entries =
   List.fold_left
@@ -279,7 +279,7 @@ let extract_caller (result : Tool_result.result) : string option =
       (match List.assoc_opt "agent_name" fields with
        | Some (`String s) -> Some s
        | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 (* Log only handled System_internal dispatches. Non-handled outcomes are
    represented by dispatch telemetry, not tool-usage rows. *)
@@ -368,7 +368,7 @@ let attach_source_metadata ~masc_root json =
   let metadata_fields =
     match source_metadata_json ~masc_root with
     | `Assoc fields -> fields
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
   in
   match json with
   | `Assoc fields ->
@@ -377,4 +377,4 @@ let attach_source_metadata ~masc_root json =
          (fun acc (key, value) -> (key, value) :: List.remove_assoc key acc)
          fields
          metadata_fields)
-  | other -> other
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as other -> other

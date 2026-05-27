@@ -393,9 +393,9 @@ let read_api_key_env_field json key =
            if trimmed_s <> ""
            then Some (String.lowercase_ascii (String.trim k), trimmed_s)
            else None
-         | _ -> None)
+         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None)
       pairs
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ -> []
 ;;
 
 let resolve_api_key_env ~config_path ~name =
@@ -447,6 +447,8 @@ type strategy_config =
     (** Hard-skip threshold for 5xx events.
       When [None], falls back to env var, then default 4. *)
   }
+
+
 
 
 let empty_strategy_config =

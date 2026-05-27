@@ -119,35 +119,35 @@ let entry_of_json = function
     let ts =
       match get "ts" (`Float 0.0) with
       | `Float f -> f
-      | _ -> 0.0
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `String _ | `List _ | `Assoc _ -> 0.0
     in
     let cmd_hash =
       match get "cmd_hash" (`String "") with
       | `String s -> s
-      | _ -> ""
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> ""
     in
     let cmd_prefix =
       match get "cmd_prefix" (`String "") with
       | `String s -> s
-      | _ -> ""
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> ""
     in
     let semantic_kind =
       match get "semantic_kind" (`String "Unknown") with
       | `String s -> s
-      | _ -> "Unknown"
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> "Unknown"
     in
     let duration_ms =
       match get "duration_ms" (`Int 0) with
       | `Int i -> i
-      | _ -> 0
+      | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> 0
     in
     let success =
       match get "success" (`Bool true) with
       | `Bool b -> b
-      | _ -> true
+      | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> true
     in
     Some { ts; cmd_hash; cmd_prefix; semantic_kind; duration_ms; success }
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 (* --- path resolution --- *)

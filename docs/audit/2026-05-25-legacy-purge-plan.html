@@ -864,6 +864,12 @@
             <td>Backstop <code>rg "bool \\* string option|send_once : unit -&gt; bool" lib/keeper/keeper_alerting*</code> is clean after the change.</td>
           </tr>
           <tr>
+            <td><code>Tool_local_runtime_verify</code> legacy single-host probe fallback</td>
+            <td><span class="status now">draft PR #18949</span></td>
+            <td>Delete the old <code>runtime_verify_json_legacy</code> backend so runtime verification no longer falls back to <code>Env_config.Local_runtime.server_url</code> when OAS discovery is absent.</td>
+            <td>Discovery absence now fails closed with <code>runtime_blocker = "oas_discovery_unavailable"</code>; the compatibility-only fallback test surface is replaced with a fail-closed assertion.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>

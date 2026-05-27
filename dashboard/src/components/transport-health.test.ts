@@ -7,7 +7,7 @@ import {
   formatHitRate,
   formatAvgBufferedBytes,
   shouldRefreshFromEvent,
-  formatLatency,
+  formatLatencyFromSeconds,
   formatFloat,
   formatIdle,
   compactId,
@@ -540,7 +540,7 @@ describe('shouldRefreshFromEvent', () => {
   })
 })
 
-describe('formatLatency', () => {
+describe('formatLatencyFromSeconds', () => {
   it.each([
     [0, '-'],
     [0.0000005, '1us'],
@@ -548,8 +548,8 @@ describe('formatLatency', () => {
     [0.5, '500.0ms'],
     [1.234, '1.23s'],
     [60, '60.00s'],
-  ] as const)('formatLatency(%s) → %s', (input, expected) => {
-    expect(formatLatency(input)).toBe(expected)
+  ] as const)('formatLatencyFromSeconds(%s) → %s', (input, expected) => {
+    expect(formatLatencyFromSeconds(input)).toBe(expected)
   })
 })
 

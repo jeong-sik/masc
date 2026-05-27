@@ -81,6 +81,32 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
 
+let json_value_shape_for_log = function
+  | `Assoc fields -> Printf.sprintf "object:%d" (List.length fields)
+  | `List values -> Printf.sprintf "array:%d" (List.length values)
+  | `String "" -> "string:empty"
+  | `String value -> Printf.sprintf "string:%d" (String.length value)
+  | `Bool _ -> "bool"
+  | `Int _ | `Intlit _ -> "int"
+  | `Float _ -> "number"
+  | `Null -> "null"
+
+let tool_input_shape_for_log = function
+  | `Assoc fields ->
+    fields
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    |> List.map (fun (key, value) -> key ^ "=" ^ json_value_shape_for_log value)
+    |> String.concat ","
+  | other -> json_value_shape_for_log other
+
+let one_line_preview_for_log text =
+  text
+  |> String.map (function
+    | '\n' | '\r' | '\t' -> ' '
+    | c -> c)
+  |> String_util.utf8_safe ~max_bytes:240 ~suffix:"..."
+  |> String_util.to_string
+
 let failure_class_of_tool_error_json json =
   let direct = Safe_ops.json_string_opt "failure_class" json in
   let nested =
@@ -490,8 +516,18 @@ let make_hooks
           | Ok { Agent_sdk.Types.content; _ } -> "ok", String.length content
           | Error { Agent_sdk.Types.message; _ } -> "error", String.length message
         in
-        Log.Keeper.info "keeper:%s tool_call tool=%s params=[%s] outcome=%s out_len=%d"
-          (!meta_ref).name tool_name input_keys outcome out_len;
+        let input_shape = tool_input_shape_for_log input in
+        let error_preview =
+          match output with
+          | Ok _ -> "-"
+          | Error _ ->
+            output_text
+            |> Observability_redact.redact_preview ~max_len:240
+            |> one_line_preview_for_log
+        in
+        Log.Keeper.info
+          "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s out_len=%d error_preview=%s"
+          (!meta_ref).name tool_name input_keys input_shape outcome out_len error_preview;
         (* Persistent tool call I/O log for dashboard inspector.
            tool_start_time is keeper-local (one ref per make_hooks call).
            Tool calls within Agent.run are sequential, so no race. *)

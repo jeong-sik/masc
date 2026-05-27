@@ -716,8 +716,9 @@ let append_memory_notes_from_reply
   let selection = memory_candidates_from_snapshot snapshot in
   let notes = selection.selected in
   if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then
-    Eio.traceln "[keeper_memory] %s: memory_candidates dropped total_cap=%d kind=%s"
-      meta.name
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "memory_candidates dropped total_cap=%d kind=%s"
       selection.dropped_by_total_cap
       (String.concat ","
          (List.map (fun (k, c) -> Printf.sprintf "%s:%d" k c) selection.dropped_by_kind));

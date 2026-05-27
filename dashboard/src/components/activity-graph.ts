@@ -19,7 +19,7 @@ import {
   buildActionTimelineGroups,
   buildCategoryCounts,
   buildRawCategoryCounts,
-  categoryLabel,
+  activityCategoryLabel,
   eventDetail,
   eventKindLabel as activityEventKindLabel,
   type ActionTimelineFilter,
@@ -217,7 +217,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${actionCategoryClass(group)}">
-                        ${categoryLabel(group.category)}
+                        ${activityCategoryLabel(group.category)}
                       </span>
                       ${group.actor ? html`<span class="text-2xs font-medium text-[var(--color-fg-primary)]">${group.actor}</span>` : null}
                       ${group.subjectId ? html`<span class="text-2xs text-[var(--color-fg-muted)] font-mono">${group.subjectId}</span>` : null}

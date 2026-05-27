@@ -135,8 +135,8 @@ let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx
   : Tool_result.result
   =
   (* Original used [let*! target = get_string_required] which
-     wrapped "agent_name is required" via legacy
-     [Tool_result.quick_error] — raw message, no envelope.  Existing
+     wrapped "agent_name is required" as a raw message with no envelope.
+     Existing
      test [test_get_metrics_missing_agent_name] parses
      [result.message] as JSON expecting [status = "error"], i.e.
      it was already broken on the raw-message path.  Promote here

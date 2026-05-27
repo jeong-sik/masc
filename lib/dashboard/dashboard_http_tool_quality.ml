@@ -172,15 +172,30 @@ let output_text_of_record record =
      | Some (`Assoc [("_blob", `Assoc blob)]) ->
        (match List.assoc_opt "preview" blob with
         | Some (`String p) -> p
-        | _ -> "")
-     | _ -> "")
-  | _ -> ""
+        | Some (`Null)
+        | Some (`Bool _)
+        | Some (`Int _)
+        | Some (`Intlit _)
+        | Some (`Float _)
+        | Some (`Assoc _)
+        | Some (`List _)
+        | None -> "")
+     | Some (`Null)
+     | Some (`Bool _)
+     | Some (`Int _)
+     | Some (`Intlit _)
+     | Some (`Float _)
+     | Some (`Assoc _)
+     | Some (`List _)
+     | None -> "")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    ""
 
 let failure_category_of_record record ~semantic_outcome =
   let output = output_text_of_record record in
-  match semantic_outcome with
-  | "policy_denied" | "structured_error" -> semantic_outcome
-  | _ -> classify_failure_output output
+  if semantic_outcome = "policy_denied" || semantic_outcome = "structured_error"
+  then semantic_outcome
+  else classify_failure_output output
 
 let recovery_hint_of_output output =
   match Yojson.Safe.from_string output with
@@ -573,7 +588,8 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
          let fields =
            match row with
            | `Assoc fields -> fields
-           | _ -> []
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+             []
          in
          (!count_ref, `Assoc (("repeated_failure_count", `Int !count_ref) :: fields))
          :: acc)

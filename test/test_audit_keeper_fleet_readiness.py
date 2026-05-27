@@ -524,7 +524,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
     def test_action_metric_git_push_drives_lifecycle_evidence(self):
         row = {
             "ts_unix": 30.0,
-            "metric_event": "github_pr_work_action",
+            "metric_event": "repo_pr_work_action",
             "tool_name": "tool_execute",
             "pr_work_action": "GIT_PUSH",
             "pr_work_action_source": "tool_execute",
@@ -539,7 +539,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
     def test_action_metric_brokered_route_counts_as_docker_backed(self):
         row = {
-            "metric_event": "github_pr_work_action",
+            "metric_event": "repo_pr_work_action",
             "tool_name": "tool_execute",
             "pr_work_action": "PR_CREATE",
             "pr_work_action_source": "tool_execute",
@@ -554,7 +554,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
     def test_action_metric_does_not_treat_sandbox_as_docker_route(self):
         row = {
-            "metric_event": "github_pr_work_action",
+            "metric_event": "repo_pr_work_action",
             "tool_name": "tool_execute",
             "pr_work_action": "GIT_PUSH",
             "pr_work_action_source": "tool_execute",
@@ -676,7 +676,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             rows = [
                 {
                     "ts_unix": 25.0,
-                    "metric_event": "github_pr_work_action",
+                    "metric_event": "repo_pr_work_action",
                     "tool_name": "tool_execute",
                     "pr_work_action": "PR_CREATE",
                     "pr_work_action_source": "tool_execute",
@@ -685,7 +685,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 },
                 {
                     "ts_unix": 30.0,
-                    "metric_event": "github_pr_work_action",
+                    "metric_event": "repo_pr_work_action",
                     "tool_name": "tool_execute",
                     "pr_work_action": "GIT_PUSH",
                     "pr_work_action_source": "tool_execute",
@@ -694,7 +694,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 },
                 {
                     "ts_unix": 35.0,
-                    "metric_event": "github_pr_review_action",
+                    "metric_event": "repo_pr_review_action",
                     "tool_name": "tool_execute",
                     "pr_review_action": "APPROVE",
                     "pr_review_action_success": True,
@@ -702,7 +702,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 },
                 {
                     "ts_unix": 40.0,
-                    "metric_event": "github_pr_work_action",
+                    "metric_event": "repo_pr_work_action",
                     "tool_name": "tool_execute",
                     "pr_work_action": "GIT_PUSH",
                     "pr_work_action_source": "tool_execute",
@@ -759,7 +759,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 json.dumps(
                     {
                         "ts_unix": old_ts,
-                        "metric_event": "github_pr_work_action",
+                        "metric_event": "repo_pr_work_action",
                         "tool_name": "tool_execute",
                         "pr_work_action": "GIT_PUSH",
                         "pr_work_action_source": "tool_execute",
@@ -773,7 +773,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 json.dumps(
                     {
                         "ts_unix": recent_ts,
-                        "metric_event": "github_pr_work_action",
+                        "metric_event": "repo_pr_work_action",
                         "tool_name": "tool_execute",
                         "pr_work_action": "PR_CREATE",
                         "pr_work_action_source": "tool_execute",
@@ -1207,7 +1207,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             metric_rows = [
                 {
                     "ts_unix": 55.0,
-                    "metric_event": "github_pr_work_action",
+                    "metric_event": "repo_pr_work_action",
                     "tool_name": "tool_execute",
                     "pr_work_action": "PR_CREATE",
                     "pr_work_action_source": "tool_execute",
@@ -1217,7 +1217,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 },
                 {
                     "ts_unix": 65.0,
-                    "metric_event": "github_pr_work_action",
+                    "metric_event": "repo_pr_work_action",
                     "tool_name": "tool_execute",
                     "pr_work_action": "PR_CREATE",
                     "pr_work_action_source": "tool_execute",
@@ -1259,7 +1259,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     for row in [
                         {
                             "ts_unix": 10.0,
-                            "metric_event": "github_pr_work_action",
+                            "metric_event": "repo_pr_work_action",
                             "tool_name": "tool_execute",
                             "pr_work_action": "GIT_PUSH",
                             "pr_work_action_source": "tool_execute",
@@ -1269,7 +1269,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         },
                         {
                             "ts_unix": 20.0,
-                            "metric_event": "github_pr_work_action",
+                            "metric_event": "repo_pr_work_action",
                             "tool_name": "tool_execute",
                             "pr_work_action": "GIT_PUSH",
                             "pr_work_action_source": "tool_execute",
@@ -1279,7 +1279,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         },
                         {
                             "ts_unix": 30.0,
-                            "metric_event": "github_pr_work_action",
+                            "metric_event": "repo_pr_work_action",
                             "tool_name": "tool_execute",
                             "pr_work_action": "PR_CREATE",
                             "pr_work_action_source": "tool_execute",
@@ -1290,7 +1290,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         },
                         {
                             "ts_unix": 40.0,
-                            "metric_event": "github_pr_review_action",
+                            "metric_event": "repo_pr_review_action",
                             "tool_name": "tool_execute",
                             "pr_review_action": "APPROVE",
                             "pr_review_action_success": True,
@@ -1299,7 +1299,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         },
                         {
                             "ts_unix": 50.0,
-                            "metric_event": "github_pr_review_action",
+                            "metric_event": "repo_pr_review_action",
                             "tool_name": "tool_execute",
                             "pr_review_action": "APPROVE",
                             "pr_review_action_success": True,
@@ -1314,7 +1314,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 json.dumps(
                     {
                         "ts_unix": 25.0,
-                        "metric_event": "github_pr_work_action",
+                        "metric_event": "repo_pr_work_action",
                         "tool_name": "tool_execute",
                         "pr_work_action": "PR_CREATE",
                         "pr_work_action_source": "tool_execute",

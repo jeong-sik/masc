@@ -146,6 +146,22 @@ let test_agent_max_turns () =
     ~expected_kind:"server_error"
     ~expected_code:(Some "max_turns_exceeded") ()
 
+let test_agent_execution_timeout () =
+  check_mapping
+    ~label:"Agent AgentExecutionTimeout"
+    ~input:
+      (E.Agent
+         (E.AgentExecutionTimeout
+            { elapsed_sec = 572.5
+            ; timeout_sec = 555.0
+            ; turn_count = 24
+            ; max_turns = 340
+            }))
+    ~expected_status:`Gateway_timeout
+    ~expected_kind:"server_error"
+    ~expected_code:(Some "agent_execution_timeout")
+    ()
+
 let test_agent_guardrail () =
   check_mapping
     ~label:"Agent GuardrailViolation"
@@ -294,6 +310,10 @@ let () =
     ; ( "agent"
       , [ Alcotest.test_case "TokenBudgetExceeded → 400" `Quick test_agent_token_budget
         ; Alcotest.test_case "MaxTurnsExceeded → 500"    `Quick test_agent_max_turns
+        ; Alcotest.test_case
+            "AgentExecutionTimeout → 504"
+            `Quick
+            test_agent_execution_timeout
         ; Alcotest.test_case "GuardrailViolation → 400"  `Quick test_agent_guardrail
         ] )
     ; ( "provider"

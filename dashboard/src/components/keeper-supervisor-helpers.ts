@@ -1,11 +1,20 @@
 // Pure helpers for keeper-supervisor-diagnostics.
 // Kept separate so they are unit-testable without preact rendering.
+//
+// `SupervisorCrashCategory` is the production UI variant of crash-reason
+// classification. A separate RFC-0174 source (`LibCrashCategory` /
+// `classifyCrashReasonLib`) lives in `lib/keeper-classifiers.ts` and
+// diverges on the unmatched fallback (`'unknown'` there vs `'other'`
+// here). The two are intentional homonyms — the RFC-0174 source has no
+// production callsite today, so this variant is the de-facto production
+// SSOT, with `'other'` chosen as a UI-friendly bucket label. See the
+// lib file for the migration trade-off.
 
 import type { KeeperSupervisorCrashLogEntry } from '../types'
 
-export type CrashCategory = 'heartbeat' | 'turn' | 'fiber' | 'exception' | 'other'
+export type SupervisorCrashCategory = 'heartbeat' | 'turn' | 'fiber' | 'exception' | 'other'
 
-export const CRASH_CATEGORY_KEYS: readonly CrashCategory[] = [
+export const CRASH_CATEGORY_KEYS: readonly SupervisorCrashCategory[] = [
   'heartbeat',
   'turn',
   'fiber',
@@ -18,21 +27,21 @@ export const CRASH_CATEGORY_KEYS: readonly CrashCategory[] = [
 // "turn_execution_failed", "fiber_crash", "Exception: …" — the prefix
 // determines the cohort. Kept as an explicit prefix→category map so new
 // prefixes require an entry here rather than falling through silently.
-const CRASH_PREFIX_MAP: ReadonlyArray<{ readonly prefix: string; readonly category: CrashCategory }> = [
+const CRASH_PREFIX_MAP: ReadonlyArray<{ readonly prefix: string; readonly category: SupervisorCrashCategory }> = [
   { prefix: 'heartbeat', category: 'heartbeat' },
   { prefix: 'turn', category: 'turn' },
   { prefix: 'fiber', category: 'fiber' },
   { prefix: 'exception', category: 'exception' },
 ]
 
-export function categorizeCrashReason(reason: string | null | undefined): CrashCategory {
+export function categorizeCrashReason(reason: string | null | undefined): SupervisorCrashCategory {
   if (!reason) return 'other'
   const lower = reason.toLowerCase()
   // Defensive exact-match: if backend emits the category name directly
   // (e.g. "heartbeat" instead of "heartbeat_timeout"), prefer that
   // over prefix heuristic so "heartbeat" does not collide with an
   // unrelated longer prefix.
-  if (CRASH_CATEGORY_KEYS.includes(lower as CrashCategory)) return lower as CrashCategory
+  if (CRASH_CATEGORY_KEYS.includes(lower as SupervisorCrashCategory)) return lower as SupervisorCrashCategory
   for (const { prefix, category } of CRASH_PREFIX_MAP) {
     if (lower.startsWith(prefix)) return category
   }
@@ -44,8 +53,8 @@ export function categorizeCrashReason(reason: string | null | undefined): CrashC
  */
 export function groupCrashCohorts(
   crash_log: readonly KeeperSupervisorCrashLogEntry[],
-): Partial<Record<CrashCategory, number>> {
-  const cohorts: Partial<Record<CrashCategory, number>> = {}
+): Partial<Record<SupervisorCrashCategory, number>> {
+  const cohorts: Partial<Record<SupervisorCrashCategory, number>> = {}
   for (const e of crash_log) {
     const key = categorizeCrashReason(e.reason)
     cohorts[key] = (cohorts[key] ?? 0) + 1
@@ -59,7 +68,7 @@ export function groupCrashCohorts(
  */
 export function filterCrashLog(
   crash_log: readonly KeeperSupervisorCrashLogEntry[],
-  category: 'all' | CrashCategory,
+  category: 'all' | SupervisorCrashCategory,
 ): KeeperSupervisorCrashLogEntry[] {
   if (category === 'all') return crash_log.slice()
   return crash_log.filter((e) => categorizeCrashReason(e.reason) === category)

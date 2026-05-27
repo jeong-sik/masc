@@ -3,6 +3,18 @@
 open Tool_args
 include Keeper_config_rp_helpers
 
+(** Upper bound for keeper time configs expressed in seconds.  Repeated
+    seven times as the bare literal [172800] across this file before
+    the extraction; [Masc_time_constants.day_int * 2] makes the "2 days"
+    intent explicit and satisfies sw-dev §"Magic Number 금지". *)
+let two_days_seconds_int = Masc_time_constants.day_int * 2
+
+(** One-day upper bound expressed in seconds.  Same anti-pattern as
+    [two_days_seconds_int]: the bare literal [86400] appeared twice as
+    a [~max_v] bound for [keeper.proactive.min_interval_sec] without
+    naming the "1 day" intent at the call site. *)
+let one_day_seconds_int = Masc_time_constants.day_int
+
 (** Default cascade name for keeper turns. Resolved through the live
     [Cascade_catalog_runtime] snapshot so the answer reflects the
     currently-installed catalog rather than module-init state. Falls
@@ -140,8 +152,8 @@ let keeper_compact_max_tokens () : int =
 let keeper_continuity_compaction_cooldown_sec_rp =
   _rp_int ~key:"keeper.compaction.cooldown_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
-                          ~default:15 ~min_v:0 ~max_v:172800)
-    ~min_v:0 ~max_v:172800
+                          ~default:15 ~min_v:0 ~max_v:two_days_seconds_int)
+    ~min_v:0 ~max_v:two_days_seconds_int
     ~description:"Compaction cooldown (seconds)" ()
 let keeper_continuity_compaction_cooldown_sec () : int =
   Runtime_params.get keeper_continuity_compaction_cooldown_sec_rp
@@ -149,8 +161,8 @@ let keeper_continuity_compaction_cooldown_sec () : int =
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
-                          ~default:60 ~min_v:0 ~max_v:172800)
-    ~min_v:0 ~max_v:172800
+                          ~default:60 ~min_v:0 ~max_v:two_days_seconds_int)
+    ~min_v:0 ~max_v:two_days_seconds_int
     ~description:"Bootstrap proactive warmup delay (seconds)" ()
 let keeper_bootstrap_proactive_warmup_sec () : int =
   Runtime_params.get keeper_bootstrap_proactive_warmup_sec_rp
@@ -194,8 +206,8 @@ let keeper_proactive_min_cooldown_sec () : int =
 let keeper_proactive_min_interval_sec_rp =
   _rp_int ~key:"keeper.proactive.min_interval_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC"
-                          ~default:900 ~min_v:60 ~max_v:86400)
-    ~min_v:60 ~max_v:86400
+                          ~default:900 ~min_v:60 ~max_v:one_day_seconds_int)
+    ~min_v:60 ~max_v:one_day_seconds_int
     ~description:"Minimum proactive turn interval (seconds). Keeper fires a \
                   housekeeping turn at least this often, even with no observable \
                   work signals." ()
@@ -235,7 +247,7 @@ let normalize_compaction_token_gate (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:5000000
 
 let normalize_continuity_compaction_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:172800
+  clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
 
 (** Default number of recent tool results to keep verbatim during
     OAS context compaction (consumed by
@@ -415,10 +427,10 @@ let resolve_compaction_policy
   (base_profile, ratio, message_gate, token_gate)
 
 let normalize_proactive_idle_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:172800
+  clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
 
 let normalize_proactive_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:172800
+  clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
 
 
 let keeper_batch_limit_rp =

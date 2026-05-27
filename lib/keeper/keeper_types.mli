@@ -182,6 +182,7 @@ type blocker_class = Keeper_meta_contract.blocker_class =
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
+  | Oas_agent_execution_timeout
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded
@@ -227,6 +228,11 @@ val cascade_attempt_record_to_json :
 val cascade_attempt_record_of_json :
   Yojson.Safe.t -> cascade_attempt_record option
 
+type tool_call_summary = {
+  tool_name : string;
+  outcome : string;
+}
+
 type agent_runtime_state = {
   usage: usage_metrics;
   compaction_rt: compaction_runtime;
@@ -251,6 +257,7 @@ type agent_runtime_state = {
   last_blocker: blocker_info option;
   last_cascade_attempt: cascade_attempt_record option;
   last_need: string;
+  last_turn_tool_calls: tool_call_summary list;
 }
 
 (** {1 Keeper meta} *)

@@ -51,6 +51,13 @@ let parse_weighted_entry_diag = Cascade_config_parser.parse_weighted_entry_diag
 let parse_weighted_entry_with_drop_metric =
   Cascade_config_parser.parse_weighted_entry_with_drop_metric
 let parse_weighted_entries = Cascade_config_parser.parse_weighted_entries
+type parse_error = Cascade_config_parser.parse_error =
+  | Invalid_spec of string
+  | Unknown_provider of { provider : string; spec : string }
+  | Provider_unavailable of { provider : string; env_var : string }
+  | Custom_empty_model of { spec : string }
+
+let parse_error_to_string = Cascade_config_parser.parse_error_to_string
 let parse_model_string_result = Cascade_config_parser.parse_model_string_result
 let expand_auto_models = Cascade_config_parser.expand_auto_models
 let expand_weighted_auto_entries =

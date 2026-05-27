@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { EmptyState } from './empty-state'
+import { EmptyState } from './feedback-state'
 import { loadMermaid, type MermaidApi } from './mermaid-loader'
 
 let mermaidConfigured = false

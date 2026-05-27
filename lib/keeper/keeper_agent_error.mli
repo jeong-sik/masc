@@ -40,6 +40,7 @@ val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
     outcomes. *)
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
+  | Oas_agent_execution_timeout
   | Oas_turn_budget_exhausted
   | Oas_idle_budget_exhausted
   | Oas_exit_condition_reached

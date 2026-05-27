@@ -17,7 +17,7 @@ let pr_review_action ?(success = true) action =
     [
       ("ts_unix", `Float 2.0);
       ("channel", `String "tool_event");
-      ("metric_event", `String "github_pr_review_action");
+      ("metric_event", `String "repo_pr_review_action");
       ("pr_review_action", `String action);
       ("pr_review_action_success", `Bool success);
       ("tool_call_count", `Int 0);
@@ -29,7 +29,7 @@ let pr_work_action ?(success = true) action =
     [
       ("ts_unix", `Float 3.0);
       ("channel", `String "tool_event");
-      ("metric_event", `String "github_pr_work_action");
+      ("metric_event", `String "repo_pr_work_action");
       ("pr_work_action", `String action);
       ("pr_work_action_success", `Bool success);
       ("tool_call_count", `Int 0);

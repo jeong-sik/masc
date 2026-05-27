@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import { CollapsibleSection } from './common/collapsible'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { agentJournalEntries, journalKindIcon } from './agent-detail-state'
 import { trimText } from '../lib/truncate'

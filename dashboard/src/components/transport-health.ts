@@ -207,7 +207,15 @@ export function statusDot(status: StatusTone): string {
   return 'bg-[var(--color-status-err)]'
 }
 
-export function toneClass(status: StatusTone): string {
+// Renamed from `toneClass` to encode the direction of the conversion.
+// `lib/tone.ts` ships a separate `toneClass(string): 'ok' | 'warn' | 'bad'`
+// — a classifier going from free-form status strings to a closed tone
+// label — which is the *inverse* direction of this function (closed
+// `StatusTone` enum to a text-color Tailwind class). The two used to
+// share a name and could be confused on import; the new name pairs
+// nominally with the sibling `statusDot(StatusTone): bg-class` helper
+// just above.
+export function toneTextClass(status: StatusTone): string {
   if (status === 'ok') return 'text-[var(--color-status-ok)]'
   if (status === 'warn') return 'text-[var(--color-status-warn)]'
   return 'text-[var(--color-status-err)]'
@@ -421,7 +429,7 @@ export function TransportHealthPanel() {
           </div>
           <div class="mt-1 text-sm text-text-body">
             primary path: <span class="font-mono text-text-strong">${data.summary.primary_path}</span>
-            <span class=${`ml-2 text-2xs uppercase tracking-wider ${toneClass(sseStatus)}`}>${data.summary.queue_pressure}</span>
+            <span class=${`ml-2 text-2xs uppercase tracking-wider ${toneTextClass(sseStatus)}`}>${data.summary.queue_pressure}</span>
           </div>
           ${truthLine
             ? html`<div class="mt-1 text-2xs text-text-muted">${truthLine}</div>`

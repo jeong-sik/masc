@@ -149,4 +149,36 @@ describe('CommandPalette', () => {
       expect(palette?.data?.some((item) => item.id === 'nav-session-sess-1')).toBe(true)
     })
   })
+
+  it('labels mission entities as command targets, not live runtime counts', async () => {
+    missionAgentBriefs.value = [
+      { agent_name: 'worker-a', display_name: 'Worker A', status: 'active' },
+    ]
+    missionKeeperBriefs.value = [
+      { name: 'keeper-a', status: 'paused' },
+      { name: 'keeper-b', status: 'busy' },
+    ]
+    missionSnapshot.value = {
+      sessions: [
+        { session_id: 'sess-1', goal: 'review', status: 'running' },
+      ],
+    }
+
+    const { CommandPalette } = await loadPalette()
+    render(html`<${CommandPalette} />`, container)
+
+    await waitFor(() => {
+      const palette = container.querySelector('ninja-keys') as (HTMLElement & {
+        data?: Array<{ id: string; section?: string; keywords?: string }>
+      }) | null
+      expect(palette?.data?.find((item) => item.id === 'nav-agent-worker-a')?.section)
+        .toBe('Agent targets (1)')
+      expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.section)
+        .toBe('Keeper targets (2)')
+      expect(palette?.data?.find((item) => item.id === 'nav-session-sess-1')?.section)
+        .toBe('Session targets (1)')
+      expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.keywords)
+        .toContain('명령 대상 에이전트 1 / 키퍼 2 / 세션 1')
+    })
+  })
 })

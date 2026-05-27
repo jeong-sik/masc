@@ -4,6 +4,7 @@ import { navigate, route } from '../../router'
 import { requestConfirm } from './confirm-dialog'
 import { runGarbageCollection, cleanupZombies } from '../flow-control/flow-control-state'
 import { missionSnapshot, missionAgentBriefs, missionKeeperBriefs } from '../../mission-signals'
+import { formatCommandTargetSection, formatCommandTargetSummary } from '../../runtime-counts'
 
 interface CommandPaletteAction {
   id: string
@@ -143,31 +144,36 @@ export function CommandPalette() {
 
     // Add Agents dynamically
     const agents = missionAgentBriefs.value || []
+    const keepers = missionKeeperBriefs.value || []
+    const sessions = missionSnapshot.value?.sessions ?? []
+    const commandTargetSummary = formatCommandTargetSummary({
+      agents: agents.length,
+      keepers: keepers.length,
+      sessions: sessions.length,
+    })
     const agentActions: CommandPaletteAction[] = agents.map(agent => ({
       id: `nav-agent-${agent.agent_name}`,
       title: `에이전트 상세: ${agent.display_name || agent.agent_name}`,
-      section: 'Agents',
-      keywords: `worker detail status ${agent.status || ''}`,
+      section: formatCommandTargetSection('agent', agents.length),
+      keywords: `worker detail status command target mission ${commandTargetSummary} ${agent.status || ''}`,
       handler: () => navigate('overview', { section: 'worker', operation_id: agent.agent_name })
     }))
 
     // Add Keepers dynamically
-    const keepers = missionKeeperBriefs.value || []
     const keeperActions: CommandPaletteAction[] = keepers.map(keeper => ({
       id: `nav-keeper-${keeper.name}`,
       title: `키퍼 상세: ${keeper.name}`,
-      section: 'Keepers',
-      keywords: `bot detail status ${keeper.status || ''}`,
+      section: formatCommandTargetSection('keeper', keepers.length),
+      keywords: `bot detail status command target mission ${commandTargetSummary} ${keeper.status || ''}`,
       handler: () => navigate('overview', { section: 'keeper', operation_id: keeper.name })
     }))
 
     // Add Sessions dynamically
-    const sessions = missionSnapshot.value?.sessions ?? []
     const sessionActions: CommandPaletteAction[] = sessions.map(s => ({
       id: `nav-session-${s.session_id}`,
       title: `세션 확인: ${s.goal || s.session_id}`,
-      section: 'Sessions',
-      keywords: `task run ${s.status || ''}`,
+      section: formatCommandTargetSection('session', sessions.length),
+      keywords: `task run command target mission ${commandTargetSummary} ${s.status || ''}`,
       handler: () => navigate('workspace', { section: 'session', session_id: s.session_id })
     }))
 
@@ -180,7 +186,7 @@ export function CommandPalette() {
   return html`
     <ninja-keys
       ref=${ref}
-      placeholder="명령어 또는 에이전트/세션 검색... (⌘/Ctrl+K)"
+      placeholder="명령어 또는 command target 검색... (⌘/Ctrl+K)"
       hideBreadcrumbs
       style="
         --ninja-modal-background: var(--color-bg-surface);

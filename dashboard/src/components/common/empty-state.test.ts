@@ -2,9 +2,9 @@
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { EmptyState } from './empty-state'
+import { EmptyState } from './feedback-state'
 
-describe('EmptyState (via empty-state re-export)', () => {
+describe('EmptyState', () => {
   it('renders with default props', () => {
     const container = document.createElement('div')
     render(h(EmptyState), container)

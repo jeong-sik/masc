@@ -20,16 +20,6 @@ let keeper_chat_stream_error_json message =
         `Assoc [ ("message", `String message) ] );
     ]
 
-(* Empty needle preserves the legacy "matches all" semantic; non-empty
-   matching delegates to the SSOT helper, which scans byte-wise with
-   inline [Char.lowercase_ascii] and avoids the two
-   [String.lowercase_ascii] allocations plus the per-position
-   [String.sub] of the old form. *)
-let contains_casefold haystack needle =
-  String.length needle = 0
-  || String_util.contains_substring_ci haystack needle
-
-
 (* No external timeout for keeper_msg. Keeper has its own internal limits
    (max_turns, max_cost_usd, max_tokens) that control call duration.
    A fixed external timeout conflicts with multi-turn tool-use loops and
@@ -54,13 +44,12 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
       | None -> (false, "masc_keeper_msg dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Coord.Not_initialized ->
+        (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
     | exn ->
         let err = Printexc.to_string exn in
-        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-          (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
-        else (
-          Log.Mcp.error "tools/call crashed: %s" err;
-          (false, Printf.sprintf "Internal error: %s" err))
+        Log.Mcp.error "tools/call crashed: %s" err;
+        (false, Printf.sprintf "Internal error: %s" err)
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
@@ -282,13 +271,12 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
       | None -> (false, "masc_keeper_msg stream dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Coord.Not_initialized ->
+        (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
     | exn ->
         let err = Printexc.to_string exn in
-        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-          (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
-        else (
-          Log.Mcp.error "tools/call crashed (stream): %s" err;
-          (false, Printf.sprintf "Internal error: %s" err))
+        Log.Mcp.error "tools/call crashed (stream): %s" err;
+        (false, Printf.sprintf "Internal error: %s" err)
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in

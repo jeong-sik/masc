@@ -159,17 +159,26 @@ val order_weighted_entries :
     round-robined independently before the usual weight/health ordering is
     applied. *)
 
-(** Like {!parse_model_string} but returns a [Result] with a diagnostic
-    error message explaining why parsing failed (unknown provider, missing
+(** Like {!parse_model_string} but returns a [Result] with a typed
+    failure mode explaining why parsing failed (unknown provider, missing
     API key, bad format).  Intended for MCP tool boundaries where callers
-    need to report the reason back to the user.
+    need to report the reason back to the user — call
+    {!parse_error_to_string} to render the human-facing message.
 
     @since 0.81.0 *)
+type parse_error = Cascade_config_parser.parse_error =
+  | Invalid_spec of string
+  | Unknown_provider of { provider : string; spec : string }
+  | Provider_unavailable of { provider : string; env_var : string }
+  | Custom_empty_model of { spec : string }
+
+val parse_error_to_string : parse_error -> string
+
 val parse_model_string_result :
   ?temperature:float ->
   ?max_tokens:int ->
   ?system_prompt:string ->
-  string -> (Llm_provider.Provider_config.t, string) result
+  string -> (Llm_provider.Provider_config.t, parse_error) result
 
 (** Expand provider:auto specs that map to multiple models.
     Direct API providers project their candidate list from OAS runtime

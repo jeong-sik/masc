@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest'
 import {
   configuredCountSourceLabel,
   formatActiveOverConfigured,
+  formatCommandTargetSection,
+  formatCommandTargetSummary,
+  expectedKeeperDetailRows,
+  expectedRuntimeDetailRows,
+  formatKeeperCountBreakdown,
+  formatKeeperRosterCount,
+  formatRuntimeRosterCount,
+  keeperDetailRows,
   resolveRuntimeCounts,
+  runtimeDetailRows,
   runtimeCountSourceLabel,
   shouldShowExecutionFallbackState,
 } from './runtime-counts'
@@ -216,6 +225,46 @@ describe('formatActiveOverConfigured', () => {
       configured: { keepers: 0, totalRuntimes: 0, source: 'none' as const },
     }
     expect(formatActiveOverConfigured(counts)).toBe('활성 0 / 설정 0')
+  })
+})
+
+describe('runtime count role helpers', () => {
+  const counts = {
+    live: { agents: 4, keepers: 4, pausedKeepers: 12, tasks: 0, totalRuntimes: 8, available: true },
+    configured: { keepers: 16, totalRuntimes: 8, source: 'namespace-truth' as const },
+  }
+
+  it('keeps detail rows distinct from active runtime totals', () => {
+    expect(keeperDetailRows(counts)).toBe(16)
+    expect(runtimeDetailRows(counts)).toBe(20)
+  })
+
+  it('keeps configured keeper inventory as the expected detail-row floor', () => {
+    const partialCounts = {
+      live: { agents: 4, keepers: 4, pausedKeepers: 0, tasks: 0, totalRuntimes: 8, available: true },
+      configured: { keepers: 16, totalRuntimes: 8, source: 'namespace-truth' as const },
+    }
+    expect(expectedKeeperDetailRows(partialCounts)).toBe(16)
+    expect(expectedRuntimeDetailRows(partialCounts)).toBe(20)
+  })
+
+  it('formats the keeper count roles without losing paused inventory', () => {
+    expect(formatKeeperCountBreakdown({
+      liveKeepers: 4,
+      pausedKeepers: 12,
+      configuredKeepers: 16,
+    })).toBe('키퍼 활성 4 / 일시정지 12 / 설정 16')
+  })
+
+  it('formats roster chips with detail rows, active runtimes, and configured inventory', () => {
+    expect(formatKeeperRosterCount(counts)).toBe('상세 16 / 활성 4 / 일시정지 12 / 설정 16')
+    expect(formatRuntimeRosterCount(counts)).toBe('상세 20 / 활성 8 / 키퍼 설정 16')
+  })
+
+  it('formats command target sections as mission targets, not live runtime counts', () => {
+    expect(formatCommandTargetSection('keeper', 16)).toBe('Keeper targets (16)')
+    expect(formatCommandTargetSummary({ agents: 4, keepers: 16, sessions: 0 }))
+      .toBe('명령 대상 에이전트 4 / 키퍼 16 / 세션 0')
   })
 })
 

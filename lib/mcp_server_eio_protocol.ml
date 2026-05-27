@@ -765,7 +765,7 @@ let handle_request
                 |> Option.value ~default:`Null
               | method_ -> make_error_typed ~id Mcp_error_code.Method_not_found ("Method not found: " ^ method_)
             with
-            | Invalid_argument msg when contains_casefold msg "masc not initialized" ->
+            | Coord.Not_initialized ->
               make_error_typed
                 ~id
                 Mcp_error_code.Internal_error

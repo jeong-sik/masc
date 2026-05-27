@@ -16,7 +16,7 @@ import { executionLoaded, keepers, refreshExecution } from '../store'
 import { compositeTick } from '../composite-signals'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { Kbd } from './common/kbd'
 
 import {

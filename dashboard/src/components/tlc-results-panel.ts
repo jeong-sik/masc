@@ -19,7 +19,7 @@ import {
 } from '../api/dashboard'
 import { Btn } from './btn'
 import { Card } from './common/card'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { FilterChips } from './common/filter-chips'
 import { StatusChip } from './common/status-chip'

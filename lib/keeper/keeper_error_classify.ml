@@ -53,9 +53,7 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
 let is_structural_oas_timeout_message message =
-  let lower = String.lowercase_ascii message in
-  string_contains_substring ~needle:"(budget=" lower
-  || string_contains_substring ~needle:"turn wall-clock budget exhausted" lower
+  Keeper_oas_timeout_message.is_structural message
 
 let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with

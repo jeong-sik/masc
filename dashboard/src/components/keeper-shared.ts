@@ -3,7 +3,7 @@ import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
 import { useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
-import { relativeTime } from '../lib/format-time'
+import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -143,7 +143,7 @@ function continuityStateLabel(state?: KeeperDiagnostic['continuity_state']): str
 function formatTime(timestamp?: string | null): string | null {
   if (!timestamp) return null
   const result = relativeTime(timestamp)
-  return result === '정보 없음' ? null : result
+  return result === NO_TIME_INFO ? null : result
 }
 
 function formatEligible(seconds?: number | null): string | null {

@@ -438,26 +438,44 @@ let parse_weighted_entries
        label (List.length entries));
   List.rev parsed
 
+(* Typed failure mode for [parse_model_string_result].  See .mli for
+   the rationale (RFC-0088 §"String/Substring 분류기" anti-pattern
+   removal: a downstream caller had been scanning the error string for
+   "unavailable" to filter out the [Provider_unavailable] case). *)
+type parse_error =
+  | Invalid_spec of string
+  | Unknown_provider of { provider : string; spec : string }
+  | Provider_unavailable of { provider : string; env_var : string }
+  | Custom_empty_model of { spec : string }
+
+let parse_error_to_string = function
+  | Invalid_spec s ->
+    Printf.sprintf "invalid model spec %S: expected \"provider:model_id\"" s
+  | Unknown_provider { provider; spec } ->
+    Printf.sprintf "unknown provider %S in model spec %S" provider spec
+  | Provider_unavailable { provider; env_var } ->
+    Printf.sprintf "provider %S unavailable (missing env var %S)" provider env_var
+  | Custom_empty_model { spec } ->
+    Printf.sprintf "invalid custom model spec %S: empty model after @" spec
+
 let parse_model_string_result
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
-    ?system_prompt (s : string) : (Llm_provider.Provider_config.t, string) result =
+    ?system_prompt (s : string) : (Llm_provider.Provider_config.t, parse_error) result =
   let s = String.trim s in
   match split_provider_model s with
-  | None ->
-    Error (Printf.sprintf "invalid model spec %S: expected \"provider:model_id\"" s)
+  | None -> Error (Invalid_spec s)
   | Some ("custom", model_id) ->
     (match make_custom_config ~temperature ~max_tokens ?system_prompt model_id with
      | Some cfg -> Ok cfg
-     | None ->
-       Error (Printf.sprintf "invalid custom model spec %S: empty model after @" s))
+     | None -> Error (Custom_empty_model { spec = s }))
   | Some (provider_name, model_id) ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None ->
-      Error (Printf.sprintf "unknown provider %S in model spec %S" provider_name s)
+      Error (Unknown_provider { provider = provider_name; spec = s })
     | Some entry when not (entry.is_available ()) ->
-      Error (Printf.sprintf "provider %S unavailable (missing env var %S)"
-               provider_name entry.defaults.api_key_env)
+      Error (Provider_unavailable
+               { provider = provider_name; env_var = entry.defaults.api_key_env })
     | Some entry ->
       Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
             ~provider_name ~model_id entry)

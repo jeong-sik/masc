@@ -81,7 +81,7 @@ let invalid_status_json ~path ~error =
 let first_existing_path paths =
   List.find_opt Fs_compat.file_exists paths
 
-let status_json ~base_path () =
+let status_json_compute ~base_path () =
   match first_existing_path (status_path_candidates ~base_path) with
   | None -> missing_status_json ~base_path
   | Some path -> (
@@ -95,3 +95,24 @@ let status_json ~base_path () =
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> invalid_status_json ~path ~error:(Printexc.to_string exn))
+
+(* /api/v1/dashboard/goal-loop/status walked
+   [status_path_candidates] with [Fs_compat.file_exists] per candidate
+   and then [Fs_compat.load_file] + [Yojson.Safe.from_string] on the
+   first hit — all synchronous on the calling fiber's Eio domain.
+
+   The status file is rewritten by the goal-loop worker, not the HTTP
+   handler, so a short stale-while-revalidate window does not change
+   correctness — the worker keeps publishing fresh status, and the
+   cache hands the HTTP fiber the most-recent parsed result instead of
+   blocking it on disk + JSON parse.
+
+   Same pattern as the rest of the dashboard hot path (PR #18991 /
+   #18993 / #18994 / #19007 / #19015 / #19023 / #19024).  TTL 5s
+   because goal-loop status is the most live-feeling of the dashboard
+   surfaces and the parse cost is small. *)
+let status_json ~base_path () =
+  let cache_key = Printf.sprintf "goal_loop_status:%s" base_path in
+  Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      status_json_compute ~base_path ()))

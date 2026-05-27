@@ -220,5 +220,6 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
          | Some (state : Social.social_state) ->
              Option.value ~default:"" state.need
          | None -> meta.runtime.last_need);
+      last_turn_tool_calls = [];
     };
   }

@@ -3,13 +3,13 @@ import {
   keeperPriority,
   isOfflineStatus,
   isAttentionCodeSatisfied,
-  classifyCrashReason,
+  classifyCrashReasonLib,
   isApproveVerdict,
   verdictWithoutRejectPrefix,
   verdictToneClass,
   railStatusMessage,
 } from './keeper-classifiers'
-import type { KeeperPriority, CrashCategory } from './keeper-classifiers'
+import type { KeeperPriority, LibCrashCategory } from './keeper-classifiers'
 
 describe('keeperPriority', () => {
   it.each(['active', 'running', 'thinking', 'tool_use', 'claimed', 'in_progress'] as const)
@@ -56,7 +56,7 @@ describe('isAttentionCodeSatisfied', () => {
   })
 })
 
-describe('classifyCrashReason', () => {
+describe('classifyCrashReasonLib', () => {
   it.each([
     ['heartbeat', 'heartbeat'],
     ['heartbeat_timeout', 'heartbeat'],
@@ -69,12 +69,12 @@ describe('classifyCrashReason', () => {
     ['exception_io', 'exception'],
   ] as const)
   ('classifies "%s" as %s', (input, expected) => {
-    expect(classifyCrashReason(input)).toBe<CrashCategory>(expected)
+    expect(classifyCrashReasonLib(input)).toBe<LibCrashCategory>(expected)
   })
 
   it('returns unknown for unrecognized reason', () => {
-    expect(classifyCrashReason('random_error')).toBe<CrashCategory>('unknown')
-    expect(classifyCrashReason('')).toBe<CrashCategory>('unknown')
+    expect(classifyCrashReasonLib('random_error')).toBe<LibCrashCategory>('unknown')
+    expect(classifyCrashReasonLib('')).toBe<LibCrashCategory>('unknown')
   })
 })
 

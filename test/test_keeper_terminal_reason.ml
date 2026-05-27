@@ -100,6 +100,18 @@ let test_timeout () =
     (code (mk_api (Agent_sdk.Retry.Timeout { message = "x" })))
 ;;
 
+let test_structural_oas_timeout () =
+  let err =
+    mk_api
+      (Agent_sdk.Retry.Timeout
+         { message =
+             "Turn wall-clock budget exhausted during cascade attempt \
+              (budget=554.9s)"
+         })
+  in
+  check string "code" "api_error_oas_agent_execution_timeout" (code err)
+;;
+
 let outcome_code err =
   Masc_mcp.Keeper_execution_receipt.outcome_kind_to_string
     (KAE.receipt_outcome_kind_of_sdk_error err)
@@ -115,6 +127,17 @@ let test_layered_termination_semantics () =
     "provider timeout stays provider layer"
     "provider_wall_clock_timeout"
     (termination_semantics_code (mk_api (Agent_sdk.Retry.Timeout { message = "x" })));
+  check
+    string
+    "structural timeout stays OAS execution layer"
+    "oas_agent_execution_timeout"
+    (termination_semantics_code
+       (mk_api
+          (Agent_sdk.Retry.Timeout
+             { message =
+                 "Turn wall-clock budget exhausted during cascade attempt \
+                  (budget=554.9s)"
+             })));
   check
     string
     "max_turns stays OAS turn budget"
@@ -224,6 +247,21 @@ let test_agent_max_turns_exceeded () =
     "max_turns_exceeded"
     "agent_error_max_turns_exceeded:turns=1,limit=1"
     (code (mk_agent (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 })))
+;;
+
+let test_agent_execution_timeout () =
+  check
+    string
+    "agent_execution_timeout"
+    "agent_error_execution_timeout:elapsed_sec=572.5,timeout_sec=555.0,turn_count=24,max_turns=340"
+    (code
+       (mk_agent
+          (Agent_sdk.Error.AgentExecutionTimeout
+             { elapsed_sec = 572.5
+             ; timeout_sec = 555.0
+             ; turn_count = 24
+             ; max_turns = 340
+             })))
 ;;
 
 let test_agent_exit_condition_met () =
@@ -372,7 +410,7 @@ let test_non_agent_variants_unchanged () =
 ;;
 
 (* No two distinct API variants share a code — that's the whole point.
-   Encode it as a property: the 9 returned codes are pairwise distinct. *)
+   Encode it as a property: the returned codes are pairwise distinct. *)
 
 let test_all_api_codes_distinct () =
   let codes =
@@ -388,13 +426,20 @@ let test_all_api_codes_distinct () =
            (Agent_sdk.Retry.NetworkError
               { message = ""; kind = Llm_provider.Http_client.Connection_refused }))
     ; code (mk_api (Agent_sdk.Retry.Timeout { message = "" }))
+    ; code
+        (mk_api
+           (Agent_sdk.Retry.Timeout
+              { message =
+                  "Turn wall-clock budget exhausted during cascade attempt \
+                   (budget=554.9s)"
+              }))
     ]
   in
   let unique = List.sort_uniq String.compare codes |> List.length in
-  check int "9 variants -> 9 distinct codes" 9 unique
+  check int "10 api cases -> 10 distinct codes" 10 unique
 ;;
 
-(* Same property for Agent variants: 11 distinct codes. *)
+(* Same property for Agent variants. *)
 
 let test_all_agent_codes_distinct () =
   let codes =
@@ -406,6 +451,14 @@ let test_all_agent_codes_distinct () =
               ; violation_detail = None
               }))
     ; code (mk_agent (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 }))
+    ; code
+        (mk_agent
+           (Agent_sdk.Error.AgentExecutionTimeout
+              { elapsed_sec = 572.5
+              ; timeout_sec = 555.0
+              ; turn_count = 24
+              ; max_turns = 340
+              }))
     ; code (mk_agent (Agent_sdk.Error.ExitConditionMet { turn = 5 }))
     ; code (mk_agent (Agent_sdk.Error.UnrecognizedStopReason { reason = "x" }))
     ; code
@@ -428,7 +481,7 @@ let test_all_agent_codes_distinct () =
     ]
   in
   let unique = List.sort_uniq String.compare codes |> List.length in
-  check int "11 agent variants -> 11 distinct codes" 11 unique
+  check int "12 agent variants -> 12 distinct codes" 12 unique
 ;;
 
 let test_structured_required_tool_no_tool_call () =
@@ -447,7 +500,7 @@ let test_structured_required_tool_no_tool_call () =
   check
     (option string)
     "next action"
-    (Some "inspect_provider_tool_contract")
+    (Some "inspect_model_tool_call_contract")
     (terminal_next_action terminal)
 ;;
 
@@ -479,7 +532,7 @@ let test_structured_max_tokens_ceiling_violation () =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Max_tokens_ceiling_violation
          { cascade_name =
-             Cascade_name.of_string_exn "keeper_unified"
+             Cascade_name.of_string_exn "tier-group.keeper_unified"
          ; requested_max_tokens = 65_536
          ; provider_ceiling = 40_960
          ; reason = "requested_exceeds_provider_ceiling"
@@ -649,8 +702,9 @@ let () =
         ; test_case "InvalidRequest" `Quick test_invalid_request
         ; test_case "NotFound" `Quick test_not_found
         ; test_case "ContextOverflow" `Quick test_context_overflow
-        ; test_case "NetworkError" `Quick test_network_error
-        ; test_case "Timeout" `Quick test_timeout
+       ; test_case "NetworkError" `Quick test_network_error
+       ; test_case "Timeout" `Quick test_timeout
+       ; test_case "structural OAS timeout" `Quick test_structural_oas_timeout
         ] )
     ; ( "regression"
       , [ test_case
@@ -690,7 +744,7 @@ let () =
             `Quick
             test_all_api_codes_distinct
         ; test_case
-            "all 11 agent codes are pairwise distinct"
+            "all 12 agent codes are pairwise distinct"
             `Quick
             test_all_agent_codes_distinct
         ] )
@@ -704,6 +758,7 @@ let () =
             `Quick
             test_agent_completion_contract_violation_with_detail
         ; test_case "MaxTurnsExceeded" `Quick test_agent_max_turns_exceeded
+        ; test_case "AgentExecutionTimeout" `Quick test_agent_execution_timeout
         ; test_case "ExitConditionMet" `Quick test_agent_exit_condition_met
         ; test_case "UnrecognizedStopReason" `Quick test_agent_unrecognized_stop_reason
         ; test_case "TokenBudgetExceeded" `Quick test_agent_token_budget_exceeded

@@ -186,9 +186,9 @@ let test_voice_speak_kr () =
 (* Scenarios: github                                                *)
 (* ================================================================ *)
 
-let test_github_pr_en () =
+let test_repo_pr_en () =
   let idx = build_keeper_index () in
-  ignore (assert_retrieves ~label:"github_pr_en" idx
+  ignore (assert_retrieves ~label:"repo_pr_en" idx
     "check the status of open pull requests" "tool_execute")
 
 let test_github_issue_kr () =
@@ -335,7 +335,7 @@ let () =
         ] );
       ( "github",
         [
-          Alcotest.test_case "github PR (en)" `Quick test_github_pr_en;
+          Alcotest.test_case "github PR (en)" `Quick test_repo_pr_en;
           Alcotest.test_case "github issue (kr)" `Quick test_github_issue_kr;
         ] );
       ( "masc_tools",

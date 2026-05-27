@@ -11,7 +11,7 @@ import {
 } from '../api/dashboard'
 import { ActionButton } from './common/button'
 import { Card } from './common/card'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
 import { StatTile } from './common/stat-tile'

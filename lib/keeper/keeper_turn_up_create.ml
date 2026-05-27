@@ -545,6 +545,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
 	          last_blocker = None;
 	          last_cascade_attempt = None;
 	          last_need = "";
+	          last_turn_tool_calls = [];
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
       oas_env = p.profile_defaults.oas_env;

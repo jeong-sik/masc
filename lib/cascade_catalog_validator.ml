@@ -17,9 +17,6 @@ let has_suffix ~suffix s =
      guard preserves the prior validator contract. *)
   String.length s > String.length suffix && String.ends_with ~suffix s
 
-let is_provider_unavailable_error msg =
-  String_util.contains_substring msg "unavailable"
-
 let split_provider_model (s : string) : (string * string) option =
   match String.index_opt s ':' with
   | None -> None
@@ -480,14 +477,14 @@ let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
     |> List.filter_map (fun spec ->
            match Cascade_config.parse_model_string_result spec with
            | Ok _ -> None
-           | Error msg when is_provider_unavailable_error msg -> None
+           | Error (Cascade_config.Provider_unavailable _) -> None
            (* Declarative provider bindings can materialize to runtime-only
               provider keys that are already represented by validated
               provider_cfg candidates. Do not reclassify those as invalid. *)
            | Error _
              when List.exists (String.equal spec) candidate_model_strings ->
                None
-           | Error msg -> Some (spec, msg))
+           | Error err -> Some (spec, Cascade_config.parse_error_to_string err))
   in
   let invalid_model_issue =
     if invalid_specs = [] then

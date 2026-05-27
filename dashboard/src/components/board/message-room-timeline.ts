@@ -5,8 +5,7 @@ import { ActionButton } from '../common/button'
 import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
-import { stripStateBlocks } from '../../keeper-message'
-import { SYSTEM_MESSAGE_FROM, boardMessageRowKey } from '../../lib/board-utils'
+import { SYSTEM_MESSAGE_FROM, boardMessageRowKey, previewBoardMessage } from '../../lib/board-utils'
 import { navigate } from '../../router'
 import { messages } from '../../store'
 import type { Message } from '../../types'
@@ -93,12 +92,8 @@ export function buildMessageRoomModel(messageList: readonly Message[]): MessageR
   }
 }
 
-function previewContent(message: Message): string {
-  return stripStateBlocks(message.content).trim() || message.content.trim() || '(empty)'
-}
-
 function TimelineMessage({ row }: { row: TimelineRow }) {
-  const preview = previewContent(row.message)
+  const preview = previewBoardMessage(row.message)
   return html`
     <article class="grid grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3.5 py-3">
       <div class="pt-0.5 text-right text-3xs font-semibold tabular-nums uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">

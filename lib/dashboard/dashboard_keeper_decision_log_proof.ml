@@ -11,7 +11,7 @@ type turn_span_stat = {
   latest_ts : float option;
 }
 
-let seconds_per_hour = 3600.0
+let seconds_per_hour = Masc_time_constants.hour
 let persistent_turn_window_hours = 24.0
 let recent_turn_max_age_hours = 24.0
 let decision_tail_max_bytes = 512 * 1024

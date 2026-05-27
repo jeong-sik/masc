@@ -31,7 +31,7 @@ type entry =
 let mu = Eio.Mutex.create ()
 let pending : (string, entry) Hashtbl.t = Hashtbl.create 16
 let counter = Atomic.make 0
-let max_age_sec = 3600.0
+let max_age_sec = Masc_time_constants.hour
 
 let request_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests"

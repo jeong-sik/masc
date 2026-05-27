@@ -75,7 +75,7 @@ let tail_decision_log_lines_or_empty path ~max_bytes ~max_lines =
 ;;
 
 let recent_decision_timestamps config ~keeper_name ~now =
-  let cutoff = now -. (float_of_int summary_window_days *. 86400.0) in
+  let cutoff = now -. (float_of_int summary_window_days *. Masc_time_constants.day) in
   candidate_decision_keeper_names keeper_name
   |> List.concat_map (fun candidate ->
     let path = keeper_decision_log_path config candidate in
@@ -518,7 +518,7 @@ let risk_band_of_metrics
   else "high"
 ;;
 
-let summary_cutoff now = now -. (float_of_int summary_window_days *. 86400.0)
+let summary_cutoff now = now -. (float_of_int summary_window_days *. Masc_time_constants.day)
 
 let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
   let supported_claims = ref 0 in

@@ -12,6 +12,7 @@ import {
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { formatCost, formatMsCompact } from '../lib/format-number'
+import { errorToString } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { keepers } from '../store'
 import type { Keeper } from '../types'
@@ -57,7 +58,7 @@ async function settleSource<T>(
     return {
       ok: false,
       label,
-      error: err instanceof Error ? err.message : String(err),
+      error: errorToString(err),
     }
   }
 }

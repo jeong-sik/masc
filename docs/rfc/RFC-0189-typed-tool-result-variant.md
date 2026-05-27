@@ -179,8 +179,9 @@ server edge last (highest blast radius).
 
 ### 3.3 What's *not* changing in PR-1a
 
-- The legacy record `t` and all its constructors (`ok`, `error`, `of_exn`,
-  `quick_ok`, `quick_error`) remain. Behaviour unchanged.
+- At PR-1a time, the legacy record `t` and all its constructors (`ok`,
+  `error`, `of_exn`, `quick_ok`, `quick_error`) were intentionally left in
+  place. The later PR-2/cleanup path removes that compatibility surface.
 - `classify_from_structured_failure_message` is annotated as "scheduled
   for removal in PR-2" but kept live so the legacy `error` constructor
   observes its current behaviour.

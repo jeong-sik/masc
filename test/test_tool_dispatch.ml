@@ -4,6 +4,19 @@ module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Tool_result
 module Types = Masc_domain
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
+let tool_error ?(tool_name = "") message =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time:0.0
+    ~data:(`String message)
+    message
+;;
+
 (** Helper: create a minimal tool_schema for registration. *)
 let make_schema ?(props = []) name =
   let prop_entries =
@@ -16,10 +29,10 @@ let make_schema ?(props = []) name =
       `Assoc [ "type", `String "object"; "properties", `Assoc prop_entries ] }
 
 (** Helper: a handler that returns a successful result with "ok:<name>". *)
-let echo_handler ~name ~args:_ = Some (Tool_result.quick_ok ~tool_name:name ("ok:" ^ name))
+let echo_handler ~name ~args:_ = Some (tool_ok ~tool_name:name ("ok:" ^ name))
 
 (** Helper: a handler that returns (false, "fail"). *)
-let fail_handler ~name:_ ~args:_ = Some (Tool_result.quick_error "fail")
+let fail_handler ~name:_ ~args:_ = Some (tool_error "fail")
 
 (** Helper: register a tool in handler, tag, and schema registries.
     The validation pre-hook is fail-closed for schema-less tools. *)
@@ -157,7 +170,7 @@ let () =
               let received_args = ref `Null in
               let capture_handler ~name:_ ~args =
                 received_args := args;
-                Some (Tool_result.quick_ok "captured")
+                Some (tool_ok "captured")
               in
               register_full
                 ~tool_name:tool

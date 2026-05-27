@@ -8,6 +8,7 @@ import {
   normalizeKeeperBdiSnapshot,
   pinInspectorKeeper,
 } from './inspector-keeper-bdi'
+import { routeHashParams } from './ide-test-helpers'
 import { clearPins } from './multi-keeper-pin-store'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
@@ -373,6 +374,3 @@ describe('InspectorKeeperBDI', () => {
   })
 })
 
-function routeHashParams(): URLSearchParams {
-  return new URLSearchParams(window.location.hash.split('?')[1] ?? '')
-}

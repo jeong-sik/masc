@@ -5,6 +5,7 @@ import { act } from 'preact/test-utils'
 import { fireEvent } from '@testing-library/preact'
 import { activeKeeperName } from '../../keeper-state'
 import { IdeInterject, interjectContextRouteLinks } from './ide-interject'
+import { routeHashParams } from './ide-test-helpers'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 describe('IdeInterject', () => {
@@ -174,6 +175,3 @@ describe('IdeInterject', () => {
   })
 })
 
-function routeHashParams(): URLSearchParams {
-  return new URLSearchParams(window.location.hash.split('?')[1] ?? '')
-}

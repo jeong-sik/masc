@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
-  appendLiveToolCall,
   closeSessionTrace,
   getTraceEvents,
   getFilteredEvents,
@@ -18,6 +17,7 @@ import {
   _liveTraceFeeds as liveTraceFeeds,
   _traceSlots as traceSlots,
 } from './session-trace-state'
+import { appendLiveToolCall } from './session-trace-live-store'
 
 // Reset trace slots before each test
 beforeEach(() => {

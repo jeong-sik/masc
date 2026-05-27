@@ -280,7 +280,6 @@
   keeper_memory_recall
   keeper_status_bridge
   keeper_runtime_trust_timeline
-  keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
   keeper_hooks_oas_cost_events
   keeper_hooks_oas_idle

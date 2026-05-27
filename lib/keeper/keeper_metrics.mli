@@ -80,7 +80,6 @@ type t =
   | MetaJsonFailures
   | ToolsOasFailures
   | ToolsOasDeterministicFailures
-  | OasHookOutputParseFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | CircuitBreakerTrips

@@ -308,17 +308,17 @@ function CharacterPlate({ name }: { name: string }) {
       <div class="w-full mt-2">
         ${isKeeper ? html`
           <${StatGrid} cols=${4} items=${[
-            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', hint: keeper.context_tokens != null && keeper.context_max != null ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` : undefined, variant: 'gold' },
-            { label: '세대', value: generation ?? 0, variant: 'gold' },
-            { label: '턴', value: keeper.turn_count ?? 0, variant: 'gold' },
-            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, hint: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled), variant: 'gold' },
+            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', delta: keeper.context_tokens != null && keeper.context_max != null ? { direction: 'flat' as const, text: `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` } : undefined },
+            { label: '세대', value: generation ?? 0 },
+            { label: '턴', value: keeper.turn_count ?? 0 },
+            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, delta: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ? { direction: 'flat' as const, text: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) } : undefined },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[
-            { label: '완료', value: summary ? summary.tasks_completed : 'N/A', variant: 'gold' },
-            { label: '수임', value: summary ? summary.tasks_claimed : 'N/A', variant: 'gold' },
-            { label: '메시지', value: summary ? summary.messages_sent : 'N/A', variant: 'gold' },
-            { label: '활동', value: summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A', variant: 'gold' },
+            { label: '완료', value: summary ? summary.tasks_completed : 'N/A' },
+            { label: '수임', value: summary ? summary.tasks_claimed : 'N/A' },
+            { label: '메시지', value: summary ? summary.messages_sent : 'N/A' },
+            { label: '활동', value: summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A' },
           ]} />
         `}
       </div>

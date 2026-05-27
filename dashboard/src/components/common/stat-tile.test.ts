@@ -11,38 +11,12 @@ describe('StatTile', () => {
     expect(container.textContent).toContain('99.9%')
   })
 
-  it('renders hint when provided', () => {
-    const container = document.createElement('div')
-    render(h(StatTile, { label: 'A', value: '1', hint: 'last hour' }), container)
-    expect(container.textContent).toContain('last hour')
-  })
-
-  it('applies default variant styles', () => {
+  it('uses brass KPI status by default', () => {
     const container = document.createElement('div')
     render(h(StatTile, { label: 'A', value: '1' }), container)
     const el = container.querySelector('div')
-    expect(el?.classList.contains('bg-[var(--color-bg-elevated)]')).toBe(true)
-  })
-
-  it('applies gold variant styles', () => {
-    const container = document.createElement('div')
-    render(h(StatTile, { label: 'A', value: '1', variant: 'gold' }), container)
-    const el = container.querySelector('div')
-    expect(el?.classList.contains('bg-[var(--color-brass-soft)]')).toBe(true)
-  })
-
-  it('applies accent variant styles', () => {
-    const container = document.createElement('div')
-    render(h(StatTile, { label: 'A', value: '1', variant: 'accent' }), container)
-    const el = container.querySelector('div')
-    expect(el?.classList.contains('bg-[var(--color-state-active-bg)]')).toBe(true)
-  })
-
-  it('applies warn variant styles', () => {
-    const container = document.createElement('div')
-    render(h(StatTile, { label: 'A', value: '1', variant: 'warn' }), container)
-    const el = container.querySelector('div')
-    expect(el?.classList.contains('text-[var(--color-warn-fg)]')).toBe(true)
+    expect(el?.classList.contains('kpi-cell')).toBe(true)
+    expect(el?.classList.contains('is-brass')).toBe(true)
   })
 
   it('applies kpi-cell status class when status is provided', () => {
@@ -81,13 +55,12 @@ describe('StatTile', () => {
     expect(val?.textContent).toBe('999')
   })
 
-  it('status overrides variant styling', () => {
+  it('applies explicit ok status class', () => {
     const container = document.createElement('div')
-    render(h(StatTile, { label: 'A', value: '1', variant: 'gold', status: 'ok' }), container)
+    render(h(StatTile, { label: 'A', value: '1', status: 'ok' }), container)
     const el = container.querySelector('div')
     expect(el?.classList.contains('kpi-cell')).toBe(true)
     expect(el?.classList.contains('is-ok')).toBe(true)
-    expect(el?.classList.contains('bg-[var(--color-brass-soft)]')).toBe(false)
   })
 })
 

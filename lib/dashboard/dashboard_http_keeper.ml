@@ -188,7 +188,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
 	                                    match v with
 	                                    | `String s when String.trim s <> "" -> Some s
 	                                    | _ -> None)
-	                         | _ -> []
+	                         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 	                       in
 	                       let reason = Safe_ops.json_string_opt "skill_reason" j in
 	                       (Some primary, secondary, reason)
@@ -267,12 +267,12 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let conversation_tail_count =
             match conversation_tail with
             | `List xs -> List.length xs
-            | _ -> 0
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> 0
           in
           let conversation_items =
             match conversation_tail with
             | `List xs -> xs
-            | _ -> []
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
           in
           let recent_preview_for_role role_name =
             let role_name = String.lowercase_ascii role_name in
@@ -296,7 +296,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let k2k_count =
             match k2k_recent with
             | `List xs -> List.length xs
-            | _ -> 0
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> 0
           in
           let keepalive_running = runtime_keepalive_running config m in
           let registry_entry =
@@ -460,7 +460,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
 	                (match List.assoc_opt "source" fields with
 	                 | Some s -> s
 	                 | None -> `Null)
-	            | _ -> `Null
+	            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Null
 	          in
 	          let summary =
 	            let compact_ratio_gate = m.compaction.ratio_gate in
@@ -534,7 +534,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                         (match List.assoc_opt "agent_name" fields with
                          | Some (`String n) -> n = m.name || n = m.agent_name
                          | _ -> false)
-                      | _ -> false
+                      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
                     ) all_events in
                     `List (List.filteri (fun i _ -> i < 10) keeper_events)
                   in
@@ -745,14 +745,14 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                       | None -> (match List.assoc_opt "total_files" fields with
                                  | Some n -> n
                                  | None -> `Int 0))
-                 | _ -> `Int 0));
+                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Int 0));
               ("memory_top_kind",
                 (match memory_bank_json with
                  | `Assoc fields ->
                      (match List.assoc_opt "top_kind" fields with
                       | Some (`String _ as s) -> s
                       | _ -> `Null)
-                 | _ -> `Null));
+                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Null));
               ("memory_recent_note", Json_util.string_opt_to_json memory_recent_note);
               ("recent_input_preview", Json_util.string_opt_to_json (recent_preview_for_role "user"));
               ("recent_output_preview", Json_util.string_opt_to_json (recent_preview_for_role "assistant"));
@@ -848,7 +848,7 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
                      ("trust", Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row));
                    ])
         | _ -> [])
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
   in
   let now = Unix.gettimeofday () in
   let keeper_names = keeper_names config in

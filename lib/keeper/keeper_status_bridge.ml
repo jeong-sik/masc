@@ -226,10 +226,21 @@ let runtime_blocker_surface_of_progress_snapshot
                    ; "실제 막힘"
                    ]
             then
+              (* The outer [if lines = [] then None] guard (line 168)
+                 already returns early on an empty narrative; the
+                 [[]] arm below is unreachable here but typed for
+                 exhaustiveness so a future refactor that drops the
+                 outer guard does not silently fall through to a
+                 Sys_error from [List.hd]. *)
+              let first_line =
+                match lines with
+                | [] -> ""
+                | h :: _ -> h
+              in
               surface
                 "synthetic_stall"
                 (line_with [ Keeper_synthetic_marker.marker_prefix ]
-                 |> Option.value ~default:(List.hd lines))
+                 |> Option.value ~default:first_line)
             else (
               match
                 line_with

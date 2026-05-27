@@ -828,6 +828,29 @@ let docker_preflight ~timeout_sec () =
       })
 ;;
 
+(* Preflight result cache. POST /api/v1/keepers/<name>/boot was hitting
+   the 12s HTTP timeout because every boot re-ran [ensure_keeper_sandbox_runtime]
+   plus [ensure_keeper_sandbox_image_present] inline — docker daemon ping
+   + image presence probe. Docker daemon state and the resolved image
+   presence change on minute scale, so caching the Ok result for 10s
+   collapses bursts (cluster start, dashboard "boot" button retries) into
+   one probe.
+
+   Errors are NOT cached: surface immediately and re-probe on the next
+   call so an operator fixing docker between boot attempts sees the new
+   state without waiting for cache expiry. *)
+let preflight_cache_ttl = 10.0
+
+let preflight_cache_result : (float * (unit, string) result) Atomic.t =
+  Atomic.make (0.0, Ok ())
+
+let preflight_cache_lookup ~now =
+  let ts, result = Atomic.get preflight_cache_result in
+  if ts > 0.0 && now -. ts < preflight_cache_ttl
+  then Some result
+  else None
+;;
+
 let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
   match sandbox_profile with
   | Keeper_types.Local -> Ok ()
@@ -835,20 +858,30 @@ let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
     if not (Env_config_sandbox.Preflight.enabled ())
     then Ok ()
     else (
-      let timeout_sec = docker_preflight_timeout ~timeout_sec in
-      let image = Env_config_sandbox.Runtime.docker_image () in
-      match ensure_keeper_sandbox_runtime ~timeout_sec with
-      | Error message ->
-        Error
-          (Printf.sprintf "Docker sandbox startup preflight failed: %s" message)
-      | Ok _ ->
-        (match ensure_keeper_sandbox_image_present ~image ~timeout_sec with
-         | Ok () -> Ok ()
-         | Error message ->
-           Error
-             (Printf.sprintf
-                "Docker sandbox startup preflight failed: %s"
-                message)))
+      let now = Unix.gettimeofday () in
+      match preflight_cache_lookup ~now with
+      | Some cached -> cached
+      | None ->
+        let timeout_sec = docker_preflight_timeout ~timeout_sec in
+        let image = Env_config_sandbox.Runtime.docker_image () in
+        let result =
+          match ensure_keeper_sandbox_runtime ~timeout_sec with
+          | Error message ->
+            Error
+              (Printf.sprintf "Docker sandbox startup preflight failed: %s" message)
+          | Ok _ ->
+            (match ensure_keeper_sandbox_image_present ~image ~timeout_sec with
+             | Ok () -> Ok ()
+             | Error message ->
+               Error
+                 (Printf.sprintf
+                    "Docker sandbox startup preflight failed: %s"
+                    message))
+        in
+        (match result with
+         | Ok () -> Atomic.set preflight_cache_result (now, result)
+         | Error _ -> ());
+        result)
 ;;
 
 module For_testing = struct

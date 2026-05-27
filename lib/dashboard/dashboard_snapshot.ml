@@ -15,6 +15,10 @@ type t = {
   telemetry_summary : Yojson.Safe.t;
   activity_events_default : Yojson.Safe.t;
   (* RFC-0201 Step 1 — see [.mli] for contract. *)
+  activity_graph_default : Yojson.Safe.t;
+  activity_swimlane_default : Yojson.Safe.t;
+  (* RFC-0201 Step 2 + 3 — see [.mli] for contract.  Returned as-is to
+     default-shape callers; results are aggregated and not sliceable. *)
 }
 
 (* Lock-free publish slot.  Holds [None] before the first publish so
@@ -76,6 +80,12 @@ let bootstrap ~(config : Coord.config) : t =
      bootstrap path light and let the refresh fiber populate on its
      first interval (~2s after start), same as [namespace_truth]. *)
   let activity_events_default = `Null in
+  (* RFC-0201 Step 2 + 3 — same pattern as activity_events_default:
+     leave [`Null] in bootstrap so the synchronous request-fiber
+     path stays light; the refresh fiber populates on its first
+     interval. *)
+  let activity_graph_default = `Null in
+  let activity_swimlane_default = `Null in
   let t =
     {
       generated_at = Unix.gettimeofday ();
@@ -85,6 +95,8 @@ let bootstrap ~(config : Coord.config) : t =
       namespace_truth;
       telemetry_summary;
       activity_events_default;
+      activity_graph_default;
+      activity_swimlane_default;
     }
   in
   (* Publish only if the slot is still empty — never overwrite a
@@ -159,6 +171,25 @@ let refresh_loop
         Activity_graph.json_response config ~kinds:[] ~after_seq:0
           ~limit:1000 ())
     in
+    let activity_graph_default =
+      (* RFC-0201 Step 2.  Dashboard panel calls
+         [fetchActivityGraph()] without query params (see
+         dashboard/src/api/actions.ts:54), so the server applies the
+         compute defaults: [kinds=[]], [limit=500],
+         [timeline_limit=80], [since_ms=None].  Snapshot that
+         exact shape; handlers return it as-is for matching queries
+         (the result is aggregated and not sliceable). *)
+      safe "activity_graph_default" (fun () ->
+        Activity_graph.graph_json config ~kinds:[] ~limit:500
+          ~timeline_limit:80 ())
+    in
+    let activity_swimlane_default =
+      (* RFC-0201 Step 3.  Same shape as activity_graph_default —
+         dashboard's [fetchSwimlane()] sends no params (actions.ts:77),
+         so snapshot [limit=500], [since_ms=None]. *)
+      safe "activity_swimlane_default" (fun () ->
+        Activity_graph.agent_spans_json config ~limit:500 ())
+    in
     {
       generated_at = Unix.gettimeofday ();
       generation = next_generation ();
@@ -167,6 +198,8 @@ let refresh_loop
       namespace_truth;
       telemetry_summary;
       activity_events_default;
+      activity_graph_default;
+      activity_swimlane_default;
     }
   in
   let rec loop () =
@@ -190,7 +223,9 @@ let refresh_loop
 let publish_for_test t = Atomic.set slot (Some t)
 
 let make_for_test ~shell ~tools ~namespace_truth ~telemetry_summary
-      ?(activity_events_default = `Null) () =
+      ?(activity_events_default = `Null)
+      ?(activity_graph_default = `Null)
+      ?(activity_swimlane_default = `Null) () =
   {
     generated_at = Unix.gettimeofday ();
     generation = next_generation ();
@@ -199,6 +234,8 @@ let make_for_test ~shell ~tools ~namespace_truth ~telemetry_summary
     namespace_truth;
     telemetry_summary;
     activity_events_default;
+    activity_graph_default;
+    activity_swimlane_default;
   }
 ;;
 

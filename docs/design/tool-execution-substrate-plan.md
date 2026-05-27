@@ -252,7 +252,7 @@ tool hint surfaces:
 - dedicated PR comment wrapper
 - dedicated PR review wrapper
 - dedicated PR close wrapper
-- gh-specific PR wrapper
+- gh-specific repository mutation wrapper
 - gh-specific commit wrapper
 - GitHub comment wrapper
 

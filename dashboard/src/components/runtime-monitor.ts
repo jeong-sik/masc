@@ -21,6 +21,7 @@ import { Table, type TableColumn } from './common/table'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import { formatTimeHms } from '../lib/format-time'
 
 /**
@@ -161,7 +162,7 @@ function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
   const success = metric.success_count ?? metric.entry_count ?? 0
   const errors = metric.error_count ?? 0
   const total = success + errors
-  if (total === 0) return '--'
+  if (total === 0) return MISSING_DATA_DASH
   const pct = (success / total) * 100
   return `${pct.toFixed(1)}%`
 }
@@ -226,7 +227,7 @@ function metricMissingLabel(metric: DashboardRuntimeModelMetric): string {
   if (metric.primary_coverage_reason === 'text_only_unmetered') return 'n/a'
   if (metric.coverage_status === 'none') return 'missing'
   if (metric.coverage_status === 'partial') return 'partial'
-  return '--'
+  return MISSING_DATA_DASH
 }
 
 function fmtCoverageAwareNumber(
@@ -235,12 +236,12 @@ function fmtCoverageAwareNumber(
   digits = 0,
 ): string {
   const formatted = formatNumber(value, digits)
-  return formatted !== '--' ? formatted : metricMissingLabel(metric)
+  return formatted !== MISSING_DATA_DASH ? formatted : metricMissingLabel(metric)
 }
 
 function fmtCoverageAwareCost(metric: DashboardRuntimeModelMetric, value?: number | null): string {
   const formatted = formatCost(value)
-  return formatted !== '--' ? formatted : metricMissingLabel(metric)
+  return formatted !== MISSING_DATA_DASH ? formatted : metricMissingLabel(metric)
 }
 
 function recentEntryMissingLabel(
@@ -269,7 +270,7 @@ function fmtRecentEntryNumber(
   digits = 0,
 ): string {
   const formatted = formatNumber(value, digits)
-  return formatted !== '--' ? formatted : recentEntryMissingLabel(entry)
+  return formatted !== MISSING_DATA_DASH ? formatted : recentEntryMissingLabel(entry)
 }
 
 function fmtRecentEntryCost(
@@ -277,7 +278,7 @@ function fmtRecentEntryCost(
   value?: number | null,
 ): string {
   const formatted = formatCost(value)
-  return formatted !== '--' ? formatted : recentEntryMissingLabel(entry)
+  return formatted !== MISSING_DATA_DASH ? formatted : recentEntryMissingLabel(entry)
 }
 
 function recentEntryDetail(
@@ -309,7 +310,7 @@ const recentEntryColumns: TableColumn<RecentEntry>[] = [
       const detail = recentEntryDetail(re)
       return html`
         <div>
-          <div>${re.ts_unix > 0 ? formatTimeHms(re.ts_unix) : '--'}</div>
+          <div>${re.ts_unix > 0 ? formatTimeHms(re.ts_unix) : MISSING_DATA_DASH}</div>
           ${detail ? html`<div class="text-3xs text-[var(--color-fg-muted)] mt-0.5">${detail}</div>` : null}
         </div>
       `

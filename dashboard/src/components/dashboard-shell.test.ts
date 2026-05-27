@@ -68,9 +68,12 @@ describe('dashboardHealthChips', () => {
 
     expect(chips.map(chip => chip.key)).toEqual([
       'source-mismatch',
+      'keeper-count-basis',
       'paused-keepers',
       'execution-error',
     ])
+    expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
+      .toBe('키퍼 활성 1 / 일시정지 1 / 설정 2')
   })
 
   it('returns a healthy chip when no runtime risk is visible', () => {

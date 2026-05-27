@@ -313,11 +313,17 @@ let parse_provider (id : string) (tbl : Otoml.t)
         (match parse_credential cred_tbl (path ^ ".credentials") with
          | Ok c -> Some c
          | Error errs ->
-           Logs.warn (fun m ->
-             m
-               "cascade_declarative_parser: %s"
-               (let e = List.hd errs in
-                Printf.sprintf "%s: %s" e.path e.message));
+           (* [parse_credential] always wraps its single failure through
+              the [error] helper (line 18) which builds a 1-element
+              list, so the [[]] branch is unreachable.  Typed for
+              exhaustiveness so a future change to the error-shape
+              contract does not silently lose the diagnostic. *)
+           let detail =
+             match errs with
+             | [] -> "<empty error list>"
+             | e :: _ -> Printf.sprintf "%s: %s" e.path e.message
+           in
+           Logs.warn (fun m -> m "cascade_declarative_parser: %s" detail);
            None)
       | None -> None
     in

@@ -19,6 +19,7 @@ NEVER request files without first checking the active schema and choosing a visi
 LLM-native tool names map to keeper capabilities: Execute backs command execution, ReadFile backs single-file reads, and SearchFiles backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, and other keeper_* / masc_* names are JSON tools, not programs in Execute.
 After pushing a prepared branch for assigned code work, create or update the forge PR through Execute as an ordinary typed-argv CLI call from scoped repo cwd. Forge PR creation is not a keeper-native tool concept.
+Do NOT invent dedicated forge tools for PR comments, PR reviews, PR close/reopen actions, commits, or issue mutation. Use Execute with typed `gh`/`git` argv from the scoped repo/worktree.
 Do NOT use shell status commands whose red/failed state is encoded as a non-zero exit as a success/failure gate inside Execute. Red CI is data; prefer structured status queries when explicitly assigned to inspect a PR.
 Do NOT use shell redirects or chaining. Prefer SearchFiles/ReadFile for repo inspection, and only use an Execute pipeline through the `pipeline` field when every stage belongs in Execute.
 Do NOT use Execute for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `SearchFiles { pattern: "term", path: "lib", glob: "*.ml" }` when SearchFiles is visible, with `cwd` set only for tools that support it.
@@ -79,7 +80,7 @@ File operations:
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
 - Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline: [{ executable, argv }, ...]`. For git or repo/forge CLIs, always set cwd to `repos/REPO` or a worktree path; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: prefer structured status queries over status commands that fail on red checks.
 - Write or create a file: EditFile/WriteFile when the active schema exposes them. Writable scope: your sandbox only.
-- Forge PR/issue work: there are no hidden keeper-native forge tools. If an assigned task explicitly requires a forge operation and Execute is visible, use the ordinary CLI through typed `executable`/`argv` from a scoped repo/worktree cwd. Create or edit PRs only after pushing from the prepared repo worktree.
+- Forge PR/issue work: there are no hidden keeper-native forge tools. If an assigned task explicitly requires a forge operation and Execute is visible, use the ordinary CLI through typed `executable`/`argv` from a scoped repo/worktree cwd. Create, edit, comment, review, close, or inspect PRs only through typed `gh`/`git` argv after pushing from the prepared repo worktree.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:

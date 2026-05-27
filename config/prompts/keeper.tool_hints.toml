@@ -61,7 +61,7 @@ description = "search files without Execute pipes, redirects, grep/head chains, 
 [[hints]]
 name = "Execute"
 call = "`Execute` { executable: \"git\", argv: [\"status\", \"--short\"], cwd: \"repos/REPO\" }"
-description = "run one typed argv command; set cwd for git, never type keeper_* names as commands, and use the pipeline field instead of shell syntax"
+description = "run one typed argv command; set cwd for git/gh, never type keeper_* names as commands, and use the pipeline field instead of shell syntax"
 
 [[hints]]
 name = "SearchWeb"

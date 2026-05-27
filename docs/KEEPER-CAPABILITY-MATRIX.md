@@ -92,7 +92,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify` |
 | 코드 작성 / 수정 | `ReadFile` / `SearchFiles` -> `EditFile` / `WriteFile`, then `Execute` with typed `git` argv |
 | 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
-| GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
+| GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`; there are no dedicated keeper-native forge tools for comments, reviews, close/reopen actions, commits, or issue mutation. |
 
 The goal lifecycle surface is configured as the `masc.goal` policy group and is
 routed to `dispatch`, `coding`, `research`, and `delivery` presets. Social and

@@ -373,6 +373,8 @@ Expected state:
 
 ### PR-F: GitHub Workflow Guidance Cleanup
 
+Status: implemented in this PR as the active-guidance cleanup slice.
+
 Delete or rewrite any docs, prompts, or hints that imply dedicated GitHub tools
 for PR comments, PR review, PR close, commits, or issue mutation.
 
@@ -383,18 +385,24 @@ Replacement guidance:
 - Use runbooks or skills for multi-step workflows.
 - Use tasks/board/goals tools only for MASC-owned state.
 
+The keeper capabilities prompt and capability matrix now explicitly state that
+forge comments, reviews, close/reopen actions, commits, and issue mutation are
+ordinary typed `gh`/`git` CLI workflows through `Execute`, not keeper-native
+tool concepts.
+
 Validation:
 
 ```bash
+bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail
 rg -n "pr_comment|pr_review|pr_close|gh_pr|gh_commit|github_comment" \
   lib/keeper/agent_tool_descriptor.* config/prompts config/tool_policy.toml \
   docs/KEEPER-CAPABILITY-MATRIX.md docs/rfc/RFC-0179-descriptor-ecosystem-coverage.md
 ```
 
-The only accepted active-surface hits should be ratchet tests or this decision
-plan. Broader scans currently find `pr_review_*` dashboard/reporting metrics
-and tests. Those are work-category names, not active tool names, and should be
-classified separately instead of deleted by string match.
+Expected active-surface hits: zero. Broader scans may still find historical
+docs, tests, dashboard/reporting metrics, or this decision plan. Those are not
+active tool names and should be classified separately instead of deleted by
+string match.
 
 ## Review Checklist for Future Tool Additions
 

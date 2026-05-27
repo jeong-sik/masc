@@ -86,6 +86,7 @@ val action_radius_json_for_call :
     from a keeper tool call and its current sandbox context. *)
 
 val route_evidence_json_of_tool_io :
+  success:bool option ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   output_text:string ->
@@ -95,7 +96,9 @@ val route_evidence_json_of_tool_io :
     fields such as [descriptor_id], [public_name], [canonical_name], [executor],
     [backend], [sandbox], and policy labels. Runtime route/status fields such
     as [via], [sandbox_profile], [git_creds_enabled], [network_mode], [status],
-    and redacted command/cwd/path are added when present. *)
+    and redacted command/cwd/path are added when present. When [success] is
+    available, the evidence also records the observed policy decision fields
+    derived from the descriptor policy and structured runtime output. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl

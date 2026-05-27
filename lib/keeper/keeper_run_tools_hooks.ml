@@ -206,6 +206,7 @@ let assemble_hooks
             ~tool_name ~input ~output_text ~success ~duration_ms ~provider ~typed_outcome ->
           let route_evidence =
             Keeper_tool_call_log.route_evidence_json_of_tool_io
+              ~success:(Some success)
               ~tool_name
               ~input
               ~output_text

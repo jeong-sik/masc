@@ -53,8 +53,9 @@ let parse_tool_output_json_sanitized =
   Keeper_tool_call_log_route_evidence.parse_tool_output_json_sanitized
 ;;
 
-let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
+let route_evidence_json_of_tool_io ~success ~tool_name ~input ~output_text =
   Keeper_tool_call_log_route_evidence.route_evidence_json_of_tool_io
+    ~success
     ~max_output_len
     ~tool_name
     ~input
@@ -722,7 +723,11 @@ let log_call
       in
       let route_evidence_field =
         match
-          route_evidence_json_of_tool_io ~tool_name ~input:safe_input ~output_text
+          route_evidence_json_of_tool_io
+            ~success:(Some success)
+            ~tool_name
+            ~input:safe_input
+            ~output_text
         with
         | Some evidence -> [ "route_evidence", evidence ]
         | None -> []

@@ -219,6 +219,19 @@ let test_blocked_structured_output_keeps_semantic_category () =
     Alcotest.(check (option string)) "semantic outcome"
       (Some "blocked")
       (Safe_ops.json_string_opt "semantic_outcome" entry);
+    let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+    Alcotest.(check (option string)) "policy decision denies blocked command"
+      (Some "deny")
+      (Safe_ops.json_string_opt "policy_decision" evidence);
+    Alcotest.(check (option string)) "decision source is shell gate"
+      (Some "shell_gate")
+      (Safe_ops.json_string_opt "decision_source" evidence);
+    Alcotest.(check (option string)) "decision reason keeps structured error"
+      (Some "tool_execute_command_shape_blocked")
+      (Safe_ops.json_string_opt "decision_reason" evidence);
+    Alcotest.(check (option string)) "shell risk class defaults when absent"
+      (Some "unknown")
+      (Safe_ops.json_string_opt "shell_ir_risk_class" evidence);
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
     let failure_category =
       summary
@@ -410,7 +423,7 @@ let test_route_evidence_stored_for_git_push () =
                `String "repos/masc-mcp-keeper-direct-proof-20260506-1039" );
            ])
       ~output_text:
-        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","effective_sandbox_image":"masc-keeper-sandbox:local","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","effective_sandbox_image":"masc-keeper-sandbox:local","classification":{"risk_class":"R1"},"status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
       ~success:true
       ~duration_ms:42.0
       ();
@@ -448,6 +461,18 @@ let test_route_evidence_stored_for_git_push () =
       Alcotest.(check (option string)) "network mode captured"
         (Some "bridge")
         (Safe_ops.json_string_opt "network_mode" evidence);
+      Alcotest.(check (option string)) "policy decision captured"
+        (Some "allow")
+        (Safe_ops.json_string_opt "policy_decision" evidence);
+      Alcotest.(check (option string)) "decision source captured"
+        (Some "descriptor_policy")
+        (Safe_ops.json_string_opt "decision_source" evidence);
+      Alcotest.(check (option string)) "decision reason captured"
+        (Some "descriptor_allows_tool")
+        (Safe_ops.json_string_opt "decision_reason" evidence);
+      Alcotest.(check (option string)) "shell ir risk class captured"
+        (Some "R1")
+        (Safe_ops.json_string_opt "shell_ir_risk_class" evidence);
       let status = Yojson.Safe.Util.member "status" evidence in
       Alcotest.(check (option string)) "status label"
         (Some "success")
@@ -536,7 +561,17 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
         (Safe_ops.json_string_opt "backend" evidence);
       Alcotest.(check (option string)) "sandbox"
         (Some "backend_selected")
-        (Safe_ops.json_string_opt "sandbox" evidence)
+        (Safe_ops.json_string_opt "sandbox" evidence);
+      Alcotest.(check (option string)) "policy decision"
+        (Some "allow")
+        (Safe_ops.json_string_opt "policy_decision" evidence);
+      Alcotest.(check (option string)) "decision source"
+        (Some "descriptor_policy")
+        (Safe_ops.json_string_opt "decision_source" evidence);
+      Alcotest.(check bool) "non-shell route omits shell risk" true
+        (match Yojson.Safe.Util.member "shell_ir_risk_class" evidence with
+         | `Null -> true
+         | _ -> false)
     | _ -> Alcotest.fail "expected exactly one entry")
 
 let test_route_evidence_records_internal_descriptor () =
@@ -643,7 +678,17 @@ let test_non_object_input_still_logs_action_radius () =
       Alcotest.(check bool) "input preserved as string" true
         (match Yojson.Safe.Util.member "input" entry with
          | `String "raw pre-tool gate payload" -> true
-         | _ -> false)
+         | _ -> false);
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "approval asks instead of failing opaque"
+        (Some "ask")
+        (Safe_ops.json_string_opt "policy_decision" evidence);
+      Alcotest.(check (option string)) "approval source"
+        (Some "approval_queue")
+        (Safe_ops.json_string_opt "decision_source" evidence);
+      Alcotest.(check (option string)) "approval reason"
+        (Some "governance_approval")
+        (Safe_ops.json_string_opt "decision_reason" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
 let find_bucket name json =

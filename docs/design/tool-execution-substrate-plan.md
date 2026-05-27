@@ -308,6 +308,8 @@ scripts/dune-local.sh build test/test_tool_task_coverage.exe test/test_distribut
 
 ### PR-D: Actual Policy Decision Evidence
 
+Status: implemented in this PR as the first policy-observation slice.
+
 Extend per-tool call evidence beyond static descriptor metadata:
 
 - `policy_decision`: `allow`, `deny`, `ask`, or `escalate`
@@ -316,13 +318,21 @@ Extend per-tool call evidence beyond static descriptor metadata:
 - `decision_reason`
 - `shell_ir_risk_class` for `Shell_ir` executor routes
 
-Turn-level receipts should aggregate this, but the per-call JSONL remains the
-authoritative source.
+The implementation keeps the per-call JSONL as the authoritative source. It
+derives actual decision evidence from descriptor metadata plus structured tool
+output: successful descriptor-backed calls record `allow`, deterministic command
+shape blocks record `deny` from `shell_gate`, approval-required responses record
+`ask` from `approval_queue`, and Shell IR routes carry the observed
+`classification.risk_class` when present.
+
+Turn-level receipts should aggregate this in a follow-up slice, but no receipt
+summary should replace the per-call evidence row.
 
 Validation:
 
 ```bash
-scripts/dune-local.sh build test/test_keeper_tool_alias.exe test/test_execution_receipt*.exe
+scripts/dune-local.sh build test/test_keeper_tool_call_log.exe
+./_build/default/test/test_keeper_tool_call_log.exe
 ```
 
 ### PR-E: Shell IR Closeout Audit

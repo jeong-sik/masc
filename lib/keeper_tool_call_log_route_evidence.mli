@@ -3,7 +3,8 @@
 val parse_tool_output_json_sanitized : string -> (Yojson.Safe.t, string) result
 
 val route_evidence_json_of_tool_io
-  :  max_output_len:int
+  :  success:bool option
+  -> max_output_len:int
   -> tool_name:string
   -> input:Yojson.Safe.t
   -> output_text:string

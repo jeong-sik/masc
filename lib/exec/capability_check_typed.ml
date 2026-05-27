@@ -233,5 +233,51 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Hostname, args) ]
   | Shell_ir_typed.W (Whoami ()) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Whoami, []) ]
+  | Shell_ir_typed.W (Du { path; human_readable; summary; max_depth }) ->
+    let flag_args =
+      (if human_readable then [ arg "-h" ] else [])
+      @ (if summary then [ arg "-s" ] else [])
+      @ (match max_depth with
+         | None -> []
+         | Some d -> [ arg ("--max-depth=" ^ string_of_int d) ])
+    in
+    let path_args = match path with None -> [] | Some p -> [ arg p ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Du, flag_args @ path_args) ]
+  | Shell_ir_typed.W (Df { path; human_readable; filesystem_type }) ->
+    let flag_args =
+      (if human_readable then [ arg "-h" ] else [])
+      @ (match filesystem_type with
+         | None -> []
+         | Some t -> [ arg "-t"; arg t ])
+    in
+    let path_args = match path with None -> [] | Some p -> [ arg p ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Df, flag_args @ path_args) ]
+  | Shell_ir_typed.W (File { path; mime; brief }) ->
+    let flag_args =
+      (if brief then [ arg "-b" ] else [])
+      @ (if mime then [ arg "-i" ] else [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.File, flag_args @ [ arg path ]) ]
+  | Shell_ir_typed.W (Printf { format; args = fmt_args }) ->
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Printf, arg format :: List.map arg fmt_args)
+    ]
+  | Shell_ir_typed.W (Uname { all; kernel_name; release; machine }) ->
+    let args =
+      (if all then [ arg "-a" ] else [])
+      @ (if kernel_name then [ arg "-s" ] else [])
+      @ (if release then [ arg "-r" ] else [])
+      @ (if machine then [ arg "-m" ] else [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Uname, args) ]
+  | Shell_ir_typed.W (Ps { all; full; user }) ->
+    let flag_args =
+      (if all then [ arg "-e" ] else [])
+      @ (if full then [ arg "-f" ] else [])
+      @ (match user with None -> [] | Some u -> [ arg "-u"; arg u ])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ps, flag_args) ]
+  | Shell_ir_typed.W (Tty ()) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tty, []) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

@@ -86,6 +86,13 @@ let constructor_label = function
      | Shell_ir_typed.Stat _ -> "Stat"
      | Shell_ir_typed.Hostname _ -> "Hostname"
      | Shell_ir_typed.Whoami _ -> "Whoami"
+     | Shell_ir_typed.Du _ -> "Du"
+     | Shell_ir_typed.Df _ -> "Df"
+     | Shell_ir_typed.File _ -> "File"
+     | Shell_ir_typed.Printf _ -> "Printf"
+     | Shell_ir_typed.Uname _ -> "Uname"
+     | Shell_ir_typed.Ps _ -> "Ps"
+     | Shell_ir_typed.Tty _ -> "Tty"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

@@ -59,6 +59,13 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Stat { format = None; path = "/tmp" })
   ; W (Hostname { short = false })
   ; W (Whoami ())
+  ; W (Du { path = None; human_readable = false; summary = false; max_depth = None })
+  ; W (Df { path = None; human_readable = false; filesystem_type = None })
+  ; W (File { path = "/tmp"; mime = false; brief = false })
+  ; W (Printf { format = "%s"; args = [] })
+  ; W (Uname { all = false; kernel_name = false; release = false; machine = false })
+  ; W (Ps { all = false; full = false; user = None })
+  ; W (Tty ())
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -146,9 +153,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    36
+    43
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 36 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 43 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -199,6 +206,13 @@ let test_of_simple_round_trip () =
     ; W (Stat { format = Some "16%N"; path = "/tmp/x" })
     ; W (Hostname { short = true })
     ; W (Whoami ())
+    ; W (Du { path = Some "/tmp"; human_readable = true; summary = true; max_depth = Some 2 })
+    ; W (Df { path = Some "/"; human_readable = true; filesystem_type = Some "ext4" })
+    ; W (File { path = "/bin/ls"; mime = true; brief = true })
+    ; W (Printf { format = "hello %s %d"; args = [ "world"; "42" ] })
+    ; W (Uname { all = true; kernel_name = true; release = true; machine = true })
+    ; W (Ps { all = true; full = true; user = Some "root" })
+    ; W (Tty ())
     ]
   in
   List.iter
@@ -288,6 +302,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Git_diff"; "Git_log"; "Git_commit"; "Git_push"; "Git_pull"
     ; "Pwd"; "Echo"; "Which"; "Sort"; "Cut"; "Tr"; "Date"
     ; "Env"; "Printenv"; "Uniq"; "Basename"; "Dirname"; "Test"; "Stat"; "Hostname"; "Whoami"
+    ; "Du"; "Df"; "File"; "Printf"; "Uname"; "Ps"; "Tty"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

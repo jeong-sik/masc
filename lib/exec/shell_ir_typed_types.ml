@@ -184,6 +184,44 @@ and (_, _, _, _) command =
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Hostname : { short : bool } -> (unit, string, [ `Safe ], [ `Host ]) command
   | Whoami : unit -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Du :
+      { path : string option
+      ; human_readable : bool
+      ; summary : bool
+      ; max_depth : int option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Df :
+      { path : string option
+      ; human_readable : bool
+      ; filesystem_type : string option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | File :
+      { path : string
+      ; mime : bool
+      ; brief : bool
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Printf :
+      { format : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Uname :
+      { all : bool
+      ; kernel_name : bool
+      ; release : bool
+      ; machine : bool
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Ps :
+      { all : bool
+      ; full : bool
+      ; user : string option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Tty : unit -> (unit, string, [ `Safe ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

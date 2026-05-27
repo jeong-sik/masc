@@ -252,5 +252,52 @@ let pp fmt = function
   | W (Hostname { short }) ->
     Format.fprintf fmt "Hostname(short=%b)" short
   | W (Whoami ()) -> Format.fprintf fmt "Whoami"
+  | W (Du { path; human_readable; summary; max_depth }) ->
+    Format.fprintf
+      fmt
+      "Du(path=%a, h=%b, s=%b, max_depth=%a)"
+      (Format.pp_print_option Format.pp_print_string)
+      path
+      human_readable
+      summary
+      (Format.pp_print_option Format.pp_print_int)
+      max_depth
+  | W (Df { path; human_readable; filesystem_type }) ->
+    Format.fprintf
+      fmt
+      "Df(path=%a, h=%b, fs_type=%a)"
+      (Format.pp_print_option Format.pp_print_string)
+      path
+      human_readable
+      (Format.pp_print_option Format.pp_print_string)
+      filesystem_type
+  | W (File { path; mime; brief }) ->
+    Format.fprintf fmt "File(path=%s, mime=%b, brief=%b)" path mime brief
+  | W (Printf { format; args }) ->
+    Format.fprintf
+      fmt
+      "Printf(format=%s, args=%a)"
+      format
+      (Format.pp_print_list
+         ~pp_sep:(fun fmt () -> Format.fprintf fmt " ")
+         Format.pp_print_string)
+      args
+  | W (Uname { all; kernel_name; release; machine }) ->
+    Format.fprintf
+      fmt
+      "Uname(a=%b, s=%b, r=%b, m=%b)"
+      all
+      kernel_name
+      release
+      machine
+  | W (Ps { all; full; user }) ->
+    Format.fprintf
+      fmt
+      "Ps(all=%b, full=%b, user=%a)"
+      all
+      full
+      (Format.pp_print_option Format.pp_print_string)
+      user
+  | W (Tty ()) -> Format.fprintf fmt "Tty"
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

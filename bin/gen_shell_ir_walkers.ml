@@ -1249,6 +1249,299 @@ match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Whoami ()))
 | _ -> None|}
     }
+  ; { name = "Du"
+    ; anon_pattern = "Du _"
+    ; bind_pattern = "Du { path; human_readable; summary; max_depth }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let flag_args =
+    (if human_readable then [ Shell_ir.Lit ("-h", Shell_ir.default_meta) ] else [])
+    @ (if summary then [ Shell_ir.Lit ("-s", Shell_ir.default_meta) ] else [])
+    @ (match max_depth with
+       | None -> []
+       | Some d ->
+         [ Shell_ir.Lit
+             ("--max-depth=" ^ string_of_int d, Shell_ir.default_meta)
+         ])
+  in
+  let path_args =
+    match path with
+    | None -> []
+    | Some p -> [ Shell_ir.Lit (p, Shell_ir.default_meta) ]
+  in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Du
+  ; args = flag_args @ path_args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Du"
+    ; parse_body =
+        Some
+          {|
+let rec parse human_readable summary max_depth = function
+  | [] ->
+    Some
+      (Shell_ir_typed_types.W
+         (Shell_ir_typed_types.Du
+            { path = None; human_readable; summary; max_depth }))
+  | "-h" :: rest -> parse true summary max_depth rest
+  | "-s" :: rest -> parse human_readable true max_depth rest
+  | arg :: rest ->
+    (match String.split_on_char '=' arg with
+     | [ "--max-depth"; n ] ->
+       (match int_of_string_opt n with
+        | Some d -> parse human_readable summary (Some d) rest
+        | None -> None)
+     | _ ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then None
+       else
+         Some
+           (Shell_ir_typed_types.W
+              (Shell_ir_typed_types.Du
+                 { path = Some arg
+                 ; human_readable
+                 ; summary
+                 ; max_depth
+                 })))
+in
+parse false false None args|}
+    }
+  ; { name = "Df"
+    ; anon_pattern = "Df _"
+    ; bind_pattern = "Df { path; human_readable; filesystem_type }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let flag_args =
+    (if human_readable then [ Shell_ir.Lit ("-h", Shell_ir.default_meta) ] else [])
+    @ (match filesystem_type with
+       | None -> []
+       | Some t ->
+         [ Shell_ir.Lit ("-t", Shell_ir.default_meta)
+         ; Shell_ir.Lit (t, Shell_ir.default_meta)
+         ])
+  in
+  let path_args =
+    match path with
+    | None -> []
+    | Some p -> [ Shell_ir.Lit (p, Shell_ir.default_meta) ]
+  in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Df
+  ; args = flag_args @ path_args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Df"
+    ; parse_body =
+        Some
+          {|
+let rec parse human_readable fs_type = function
+  | [] ->
+    Some
+      (Shell_ir_typed_types.W
+         (Shell_ir_typed_types.Df
+            { path = None; human_readable; filesystem_type = fs_type }))
+  | "-h" :: rest -> parse true fs_type rest
+  | "-t" :: t :: rest -> parse human_readable (Some t) rest
+  | arg :: _ ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else
+      Some
+        (Shell_ir_typed_types.W
+           (Shell_ir_typed_types.Df
+              { path = Some arg; human_readable; filesystem_type = fs_type }))
+in
+parse false None args|}
+    }
+  ; { name = "File"
+    ; anon_pattern = "File _"
+    ; bind_pattern = "File { path; mime; brief }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let flag_args =
+    (if brief then [ Shell_ir.Lit ("-b", Shell_ir.default_meta) ] else [])
+    @ (if mime then [ Shell_ir.Lit ("-i", Shell_ir.default_meta) ] else [])
+  in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.File
+  ; args = flag_args @ [ Shell_ir.Lit (path, Shell_ir.default_meta) ]
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "File"
+    ; parse_body =
+        Some
+          {|
+let rec parse mime brief = function
+  | [] -> None
+  | [ path ] ->
+    Some
+      (Shell_ir_typed_types.W
+         (Shell_ir_typed_types.File { path; mime; brief }))
+  | "-b" :: rest -> parse mime true rest
+  | "-i" :: rest -> parse true brief rest
+  | arg :: _ ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else
+      Some
+        (Shell_ir_typed_types.W
+           (Shell_ir_typed_types.File { path = arg; mime; brief }))
+in
+parse false false args|}
+    }
+  ; { name = "Printf"
+    ; anon_pattern = "Printf _"
+    ; bind_pattern = "Printf { format; args = fmt_args }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Printf
+  ; args =
+      Shell_ir.Lit (format, Shell_ir.default_meta)
+      :: List.map
+           (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta))
+           fmt_args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Printf"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [] -> None
+| format :: rest ->
+  Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printf { format; args = rest }))
+|}
+    }
+  ; { name = "Uname"
+    ; anon_pattern = "Uname _"
+    ; bind_pattern = "Uname { all; kernel_name; release; machine }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let args =
+    (if all then [ Shell_ir.Lit ("-a", Shell_ir.default_meta) ] else [])
+    @ (if kernel_name
+       then [ Shell_ir.Lit ("-s", Shell_ir.default_meta) ]
+       else [])
+    @ (if release
+       then [ Shell_ir.Lit ("-r", Shell_ir.default_meta) ]
+       else [])
+    @ (if machine
+       then [ Shell_ir.Lit ("-m", Shell_ir.default_meta) ]
+       else [])
+  in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Uname
+  ; args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Uname"
+    ; parse_body =
+        Some
+          {|
+let rec parse all kn rel mach = function
+  | [] ->
+    Some
+      (Shell_ir_typed_types.W
+         (Shell_ir_typed_types.Uname
+            { all; kernel_name = kn; release = rel; machine = mach }))
+  | "-a" :: rest -> parse true kn rel mach rest
+  | "-s" :: rest -> parse all true rel mach rest
+  | "-r" :: rest -> parse all kn true mach rest
+  | "-m" :: rest -> parse all kn rel true rest
+  | arg :: _ ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else None
+in
+parse false false false false args|}
+    }
+  ; { name = "Ps"
+    ; anon_pattern = "Ps _"
+    ; bind_pattern = "Ps { all; full; user }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let flag_args =
+    (if all then [ Shell_ir.Lit ("-e", Shell_ir.default_meta) ] else [])
+    @ (if full then [ Shell_ir.Lit ("-f", Shell_ir.default_meta) ] else [])
+    @ (match user with
+       | None -> []
+       | Some u ->
+         [ Shell_ir.Lit ("-u", Shell_ir.default_meta)
+         ; Shell_ir.Lit (u, Shell_ir.default_meta)
+         ])
+  in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Ps
+  ; args = flag_args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Ps"
+    ; parse_body =
+        Some
+          {|
+let rec parse all full user = function
+  | [] ->
+    Some
+      (Shell_ir_typed_types.W
+         (Shell_ir_typed_types.Ps { all; full; user }))
+  | "-e" :: rest | "-A" :: rest -> parse true full user rest
+  | "-f" :: rest -> parse all true user rest
+  | "-u" :: u :: rest -> parse all full (Some u) rest
+  | arg :: _ ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else None
+in
+parse false false None args|}
+    }
+  ; { name = "Tty"
+    ; anon_pattern = "Tty _"
+    ; bind_pattern = "Tty ()"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Tty
+  ; args = []
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Tty"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tty ()))
+| _ -> None|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"
@@ -1345,6 +1638,57 @@ let emit_parse_functions buf spec =
 ;;
 
 let emit_of_simple buf spec =
+  (* Collect entries that have parse_body, grouped by bin_variant.
+     Git entries are special-cased for subcommand dispatch. *)
+  let git_entries =
+    List.filter_map
+      (fun c ->
+         match c.bin_variant, c.parse_body with
+         | Some "Git", Some _ ->
+           (* Strip "Git_" prefix to get the subcommand name used in args *)
+           let subcmd =
+             if String.starts_with ~prefix:"Git_" c.name
+             then String.sub c.name 4 (String.length c.name - 4)
+             else c.name
+           in
+           Some (subcmd, c.name)
+         | _ -> None)
+      spec
+  in
+  let non_git_with_parse =
+    List.filter_map
+      (fun c ->
+         match c.bin_variant, c.parse_body with
+         | Some v, Some _ when v <> "Git" -> Some (v, c.name)
+         | _ -> None)
+      spec
+  in
+  let spec_variants =
+    List.filter_map (fun c -> c.bin_variant) spec
+    |> List.sort_uniq String.compare
+  in
+  (* All Exec_program.known variants — keep in sync with exec_program.mli *)
+  let all_known_variants =
+    [ "Ls"; "Cat"; "Pwd"; "Echo"; "Head"; "Tail"; "Rg"; "Grep"; "Find"
+    ; "Which"; "Test"; "Basename"; "Dirname"; "Stat"; "Du"; "Df"; "Sort"
+    ; "Uniq"; "Wc"; "Cut"; "Tr"; "File"; "Printf"; "Date"; "Env"; "Printenv"
+    ; "Hostname"; "Whoami"; "Uname"; "Ps"; "Tty"
+    ; "Git"; "Docker"; "Curl"; "Wget"; "Ssh"; "Scp"; "Tar"; "Rsync"
+    ; "Make"; "Cmake"; "Dune_local_sh"; "Diff"; "Patch"; "Mkdir"
+    ; "Npm"; "Node"; "Npx"; "Yarn"; "Pnpm"; "Pip"; "Python"; "Python3"
+    ; "Pytest"; "Pyright"; "Ruff"; "Opam"; "Ocamlfind"; "Tsc"; "Cargo"
+    ; "Rustc"; "Go"; "Gofmt"; "Gradle"; "Java"; "Javac"; "Mvn"; "Ninja"
+    ; "Sed"; "Uv"; "Gh"; "Glab"; "Terminal_notifier"; "Osascript"
+    ; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
+    ; "Sudo"; "Su"; "Chmod"; "Chown"; "Rm"; "Dd"; "Mkfs"
+    ]
+  in
+  let unhandled =
+    List.filter
+      (fun v -> not (List.mem v spec_variants))
+      all_known_variants
+  in
+  (* Header *)
   Buffer.add_string
     buf
     "let gen_of_simple (s : Shell_ir.simple) : Shell_ir_typed_types.wrapped =\n\
@@ -1370,104 +1714,41 @@ let emit_of_simple buf spec =
     \    | None -> generic ()\n\
     \    | Some lit_argv ->\n\
     \      let parsed : Shell_ir_typed_types.wrapped option =\n\
-    \        match Exec_program.known s.Shell_ir.bin with\n\
-    \        | Some Exec_program.Ls -> gen_parse_Ls lit_argv\n\
-    \        | Some Exec_program.Cat -> gen_parse_Cat lit_argv\n\
-    \        | Some Exec_program.Rg -> gen_parse_Rg lit_argv\n\
-    \        | Some Exec_program.Git ->\n\
-    \          (match lit_argv with\n\
-    \           | \"status\" :: rest -> gen_parse_Git_status rest\n\
-    \           | \"clone\" :: rest -> gen_parse_Git_clone rest\n\
-    \           | \"diff\" :: rest -> gen_parse_Git_diff rest\n\
-    \           | \"log\" :: rest -> gen_parse_Git_log rest\n\
-    \           | \"commit\" :: rest -> gen_parse_Git_commit rest\n\
-    \           | \"push\" :: rest -> gen_parse_Git_push rest\n\
-    \           | \"pull\" :: rest -> gen_parse_Git_pull rest\n\
-    \           | _ -> None)\n\
-    \        | Some Exec_program.Curl -> gen_parse_Curl lit_argv\n\
-    \        | Some Exec_program.Rm -> gen_parse_Rm lit_argv\n\
-    \        | Some Exec_program.Sudo -> gen_parse_Sudo lit_argv\n\
-    \        | Some Exec_program.Find -> gen_parse_Find lit_argv\n\
-    \        | Some Exec_program.Head -> gen_parse_Head lit_argv\n\
-    \        | Some Exec_program.Tail -> gen_parse_Tail lit_argv\n\
-    \        | Some Exec_program.Grep -> gen_parse_Grep lit_argv\n\
-    \        | Some Exec_program.Mkdir -> gen_parse_Mkdir lit_argv\n\
-    \        | Some Exec_program.Wc -> gen_parse_Wc lit_argv\n\
-    \        | Some Exec_program.Pwd -> gen_parse_Pwd lit_argv\n\
-    \        | Some Exec_program.Echo -> gen_parse_Echo lit_argv\n\
-    \        | Some Exec_program.Which -> gen_parse_Which lit_argv\n\
-    \        | Some Exec_program.Sort -> gen_parse_Sort lit_argv\n\
-    \        | Some Exec_program.Cut -> gen_parse_Cut lit_argv\n\
-    \        | Some Exec_program.Tr -> gen_parse_Tr lit_argv\n\
-    \        | Some Exec_program.Date -> gen_parse_Date lit_argv\n\
-    \        | Some Exec_program.Env -> gen_parse_Env lit_argv\n\
-    \        | Some Exec_program.Printenv -> gen_parse_Printenv lit_argv\n\
-    \        | Some Exec_program.Uniq -> gen_parse_Uniq lit_argv\n\
-    \        | Some Exec_program.Basename -> gen_parse_Basename lit_argv\n\
-    \        | Some Exec_program.Dirname -> gen_parse_Dirname lit_argv\n\
-    \        | Some Exec_program.Test -> gen_parse_Test lit_argv\n\
-    \        | Some Exec_program.Stat -> gen_parse_Stat lit_argv\n\
-    \        | Some Exec_program.Hostname -> gen_parse_Hostname lit_argv\n\
-    \        | Some Exec_program.Whoami -> gen_parse_Whoami lit_argv\n\
-    \        | Some\n\
-    \            ( Exec_program.Du\n\
-    \            | Exec_program.Df\n\
-    \            | Exec_program.File\n\
-    \            | Exec_program.Printf\n\
-    \            | Exec_program.Uname\n\
-    \            | Exec_program.Ps\n\
-    \            | Exec_program.Tty\n\
-    \            | Exec_program.Docker\n\
-    \            | Exec_program.Wget\n\
-    \            | Exec_program.Ssh\n\
-    \            | Exec_program.Scp\n\
-    \            | Exec_program.Tar\n\
-    \            | Exec_program.Rsync\n\
-    \            | Exec_program.Make\n\
-    \            | Exec_program.Cmake\n\
-    \            | Exec_program.Dune_local_sh\n\
-    \            | Exec_program.Diff\n\
-    \            | Exec_program.Patch\n\
-    \            | Exec_program.Npm\n\
-    \            | Exec_program.Node\n\
-    \            | Exec_program.Npx\n\
-    \            | Exec_program.Yarn\n\
-    \            | Exec_program.Pnpm\n\
-    \            | Exec_program.Pip\n\
-    \            | Exec_program.Python\n\
-    \            | Exec_program.Python3\n\
-    \            | Exec_program.Pytest\n\
-    \            | Exec_program.Pyright\n\
-    \            | Exec_program.Ruff\n\
-    \            | Exec_program.Opam\n\
-    \            | Exec_program.Ocamlfind\n\
-    \            | Exec_program.Tsc\n\
-    \            | Exec_program.Cargo\n\
-    \            | Exec_program.Rustc\n\
-    \            | Exec_program.Go\n\
-    \            | Exec_program.Gofmt\n\
-    \            | Exec_program.Gradle\n\
-    \            | Exec_program.Java\n\
-    \            | Exec_program.Javac\n\
-    \            | Exec_program.Mvn\n\
-    \            | Exec_program.Ninja\n\
-    \            | Exec_program.Sed\n\
-    \            | Exec_program.Uv\n\
-    \            | Exec_program.Gh\n\
-    \            | Exec_program.Glab\n\
-    \            | Exec_program.Terminal_notifier\n\
-    \            | Exec_program.Osascript\n\
-    \            | Exec_program.Play\n\
-    \            | Exec_program.Rec\n\
-    \            | Exec_program.Ffplay\n\
-    \            | Exec_program.Mpg123\n\
-    \            | Exec_program.Open\n\
-    \            | Exec_program.Su\n\
-    \            | Exec_program.Chmod\n\
-    \            | Exec_program.Chown\n\
-    \            | Exec_program.Dd\n\
-    \            | Exec_program.Mkfs ) -> None\n\
-    \        | None -> None\n\
+    \        match Exec_program.known s.Shell_ir.bin with\n";
+  (* Git subcommand dispatch *)
+  Buffer.add_string buf "        | Some Exec_program.Git ->\n";
+  Buffer.add_string buf "          (match lit_argv with\n";
+  List.iter
+    (fun (subcmd_name, ctor_name) ->
+       let parse_fn = Printf.sprintf "gen_parse_%s" ctor_name in
+       Buffer.add_string
+         buf
+         (Printf.sprintf
+            "           | %S :: rest -> %s rest\n" subcmd_name parse_fn))
+    git_entries;
+  Buffer.add_string buf "           | _ -> None)\n";
+  (* Non-Git entries with parse_body — auto-generated from spec *)
+  List.iter
+    (fun (variant, parse_name) ->
+       Buffer.add_string
+         buf
+         (Printf.sprintf
+            "        | Some Exec_program.%s -> gen_parse_%s lit_argv\n"
+            variant parse_name))
+    non_git_with_parse;
+  (* Untyped variants — grouped into None *)
+  (match unhandled with
+   | [] -> ()
+   | _ ->
+     Buffer.add_string buf "        | Some\n";
+     Buffer.add_string buf "            ( ";
+     Buffer.add_string buf
+       (String.concat "\n            | "
+          (List.map (fun v -> Printf.sprintf "Exec_program.%s" v) unhandled));
+     Buffer.add_string buf " ) -> None\n");
+  Buffer.add_string
+    buf
+    "        | None -> None\n\
     \      in\n\
     \      match parsed with\n\
     \      | Some w -> w\n\

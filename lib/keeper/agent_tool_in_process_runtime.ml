@@ -310,11 +310,36 @@ let handle_masc_persona ~name ~args =
    TEL-OK: descriptor projection — telemetry lives in
    [Keeper_approval_queue] (queue mutation events + Prometheus counters
    in the resolve path). *)
+(* Closed sum type for the approval cluster — same pattern as
+   [Agent_tool_task_runtime.task_op].  String → typed conversion happens
+   exactly once at the entry boundary; the downstream dispatch is
+   exhaustive. *)
+type approval_op = Pending | Get | Resolve
+
+let approval_op_of_name = function
+  | "masc_approval_pending" -> Some Pending
+  | "masc_approval_get" -> Some Get
+  | "masc_approval_resolve" -> Some Resolve
+  | _ -> None
+;;
+
 let handle_masc_approval ~name ~args =
-  match name with
-  | "masc_approval_pending" ->
-    Yojson.Safe.to_string (Keeper_approval_queue.list_pending_json ())
-  | "masc_approval_get" ->
+  match approval_op_of_name name with
+  | None ->
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error"
+         , `String
+             (Printf.sprintf
+                "descriptor projection: masc_approval cluster did not \
+                 recognise %S"
+                name)
+         ])
+  | Some op ->
+    match op with
+    | Pending ->
+      Yojson.Safe.to_string (Keeper_approval_queue.list_pending_json ())
+    | Get ->
     let id = Safe_ops.json_string ~default:"" "id" args |> String.trim in
     if String.equal id ""
     then Yojson.Safe.to_string (`Assoc [ "error", `String "id is required" ])
@@ -332,7 +357,7 @@ let handle_masc_approval ~name ~args =
                      approving/rejecting."
                     id)
              ]))
-  | "masc_approval_resolve" ->
+    | Resolve ->
     let id = Safe_ops.json_string ~default:"" "id" args |> String.trim in
     let decision_str = Safe_ops.json_string ~default:"approve" "decision" args in
     if String.equal id ""
@@ -363,16 +388,6 @@ let handle_masc_approval ~name ~args =
              [ "error"
              , `String (Keeper_approval_queue.resolve_error_to_string err)
              ]))
-  | other ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_approval cluster did not \
-                 recognise %S"
-                other)
-         ])
 ;;
 
 let handle_masc_local_runtime ~name ~args =

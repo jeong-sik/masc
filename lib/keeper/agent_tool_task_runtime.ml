@@ -340,14 +340,46 @@ let sync_keeper_meta_current_task
          meta.name task_id msg)
 ;;
 
+(* Cluster sub-dispatch via closed sum type — string [name] is converted
+   into [task_op] exactly once at the entry boundary; downstream match
+   is exhaustive, so adding a new op forces the compiler to flag every
+   site that did not handle it.  Removes the substring-classifier
+   anti-pattern (CLAUDE.md §2) from this cluster. *)
+type task_op =
+  | Tasks_list
+  | Tasks_audit
+  | Task_force_release
+  | Task_force_done
+  | Broadcast
+  | Task_create
+  | Task_claim
+  | Task_done
+  | Task_submit_for_verification
+
+let task_op_of_name = function
+  | "keeper_tasks_list" -> Some Tasks_list
+  | "keeper_tasks_audit" -> Some Tasks_audit
+  | "keeper_task_force_release" -> Some Task_force_release
+  | "keeper_task_force_done" -> Some Task_force_done
+  | "keeper_broadcast" -> Some Broadcast
+  | "keeper_task_create" -> Some Task_create
+  | "keeper_task_claim" -> Some Task_claim
+  | "keeper_task_done" -> Some Task_done
+  | "keeper_task_submit_for_verification" -> Some Task_submit_for_verification
+  | _ -> None
+;;
+
 let handle_keeper_task_tool
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  match name with
-  | "keeper_tasks_list" ->
+  match task_op_of_name name with
+  | None -> error_json ~fields:[ "tool", `String name ] "unknown_task_tool"
+  | Some op ->
+    match op with
+    | Tasks_list ->
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
@@ -359,7 +391,7 @@ let handle_keeper_task_tool
      | exception Yojson.Json_error _ ->
        let lines = String.split_on_char '\n' result in
        String.concat "\n" (List.filteri (fun i _ -> i < limit + 2) lines))
-  | "keeper_tasks_audit" ->
+    | Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans = Coord.audit_orphan_tasks config in
     let orphans = List.filteri (fun i _ -> i < limit) orphans in
@@ -393,7 +425,7 @@ let handle_keeper_task_tool
                 then Keeper_tool_outcome.No_progress { reason = No_work_available }
                 else Keeper_tool_outcome.Progress) )
          ])
-  | "keeper_task_force_release" ->
+    | Task_force_release ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
     if task_id = ""
@@ -425,7 +457,7 @@ let handle_keeper_task_tool
       keeper_task_result_json
         ~typed_outcome:(Some Keeper_tool_outcome.Progress)
         (Coord.force_release_task_r config ~agent_name:agent ~task_id ()))
-  | "keeper_task_force_done" ->
+    | Task_force_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
     if task_id = ""
@@ -451,7 +483,7 @@ let handle_keeper_task_tool
            ~task_id
            ~notes
            ())
-  | "keeper_broadcast" ->
+    | Broadcast ->
     let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
     if message = ""
     then error_json "message is required. Good: message='Build complete, all tests pass.'."
@@ -465,7 +497,7 @@ let handle_keeper_task_tool
            ; "broadcast", `String message
            ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
            ]))
-  | "keeper_task_create" ->
+    | Task_create ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
     let priority = Safe_ops.json_int ~default:3 "priority" args |> max 1 |> min 5 in
@@ -506,7 +538,7 @@ let handle_keeper_task_tool
                     ( "typed_outcome"
                     , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
                   ]))))
-  | "keeper_task_claim" ->
+    | Task_claim ->
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let claim_goal_scope =
       Keeper_runtime_contract.resolve_claim_goal_scope
@@ -725,7 +757,7 @@ let handle_keeper_task_tool
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))
-  | "keeper_task_done" ->
+    | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
     if task_id = ""
@@ -781,7 +813,7 @@ let handle_keeper_task_tool
         ~ok:transition_result.Tool_result.success
         ~message:transition_result.Tool_result.message
         ())
-  | "keeper_task_submit_for_verification" ->
+    | Task_submit_for_verification ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
     let pr_url = Safe_ops.json_string ~default:"" "pr_url" args |> String.trim in
@@ -840,5 +872,4 @@ let handle_keeper_task_tool
         ~ok:transition_result.Tool_result.success
         ~message:transition_result.Tool_result.message
         ())
-  | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

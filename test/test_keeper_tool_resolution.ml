@@ -4,12 +4,12 @@ module TR = Masc_mcp.Keeper_tool_resolution
 
 (* ── resolve returns correct tried_source for each admission path ── *)
 
-let test_alias_route_admits_execute () =
+let test_public_descriptor_admits_execute () =
   match TR.resolve "Execute" with
-  | TR.Alias_to { canonical; via = TR.Alias_route } ->
-      check string "canonical is Execute" "Execute" canonical
+  | TR.Alias_to { canonical; via = TR.Public_descriptor } ->
+      check string "canonical is tool_execute" "tool_execute" canonical
   | other ->
-      fail (Printf.sprintf "expected Alias_to via Alias_route, got: %s"
+      fail (Printf.sprintf "expected Alias_to via Public_descriptor, got: %s"
               (match other with
                | TR.Resolved { via; _ } -> "Resolved via " ^ TR.string_of_tried_source via
                | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
@@ -269,7 +269,7 @@ let test_full_probe_overlap () =
 let () =
   Alcotest.run "test_tool_resolution"
     [ "resolve", [
-        test_case "Execute resolves via Alias_route" `Quick test_alias_route_admits_execute;
+        test_case "Execute resolves via public descriptor" `Quick test_public_descriptor_admits_execute;
         test_case "keeper_board_post resolves via Tool_name_variant" `Quick test_tool_name_variant_admits_keeper_board_post;
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;

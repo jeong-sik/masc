@@ -15,7 +15,7 @@
 type tried_source =
   | Dispatch_table              (** S1: Tool_dispatch.is_registered *)
   | Tool_name_variant           (** S2: Tool_name.of_string *)
-  | Alias_route                 (** S3: Keeper_tool_alias.route *)
+  | Public_descriptor           (** S3: Agent_tool_descriptor.find_public *)
   | Alias_internal              (** S4: Keeper_tool_alias.is_known_internal *)
   | Alias_masc_to_internal      (** S5: Keeper_tool_alias.public_masc_to_internal *)
   | Registry_internal_candidate (** S6: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
@@ -37,7 +37,7 @@ let tool_schema_names schemas =
 let string_of_tried_source = function
   | Dispatch_table -> "dispatch_table"
   | Tool_name_variant -> "tool_name_variant"
-  | Alias_route -> "alias_route"
+  | Public_descriptor -> "public_descriptor"
   | Alias_internal -> "alias_internal"
   | Alias_masc_to_internal -> "alias_masc_to_internal"
   | Registry_internal_candidate -> "registry_internal_candidate"
@@ -57,62 +57,82 @@ let resolve name =
     Resolved { canonical = normalized; via = Dispatch_table; surface = None }
   else if Option.is_some (Tool_name.of_string normalized) then
     Resolved { canonical = normalized; via = Tool_name_variant; surface = None }
-  else if Option.is_some (Keeper_tool_alias.route normalized) then
-    Alias_to { from_ = normalized; canonical = normalized; via = Alias_route }
-  else if Keeper_tool_alias.is_known_internal normalized then
-    Resolved { canonical = normalized; via = Alias_internal; surface = None }
-  else begin
-    match Keeper_tool_alias.public_masc_to_internal normalized with
-    | Some internal ->
-        Alias_to { from_ = normalized; canonical = internal; via = Alias_masc_to_internal }
+  else
+    match Agent_tool_descriptor.find_public normalized with
+    | Some descriptor ->
+        Alias_to
+          { from_ = normalized
+          ; canonical = descriptor.Agent_tool_descriptor.internal_name
+          ; via = Public_descriptor
+          }
     | None ->
-      if List.mem normalized (Keeper_tool_registry.keeper_internal_candidate_tool_names) then
-        Resolved { canonical = normalized; via = Registry_internal_candidate; surface = None }
-      else if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
-        Resolved { canonical = normalized; via = Registry_core_tools; surface = None }
-      else if List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas) then
-        Resolved { canonical = normalized; via = Shard_schema; surface = None }
-      else begin
-        (* RFC-0084 §1.3 + §6 D2 — surface coverage gate.
-           [Tool_catalog_surfaces.surface] has 8 variants. 7 are
-           admit-checked here; [Keeper_denied] is excluded (must-deny
-           semantics — checked separately in PR-7 capability gate, not
-           an admission source). *)
-        let surfaces_to_check =
-          [ Tool_catalog_surfaces.Public_mcp
-          ; Tool_catalog_surfaces.Spawned_agent
-          ; Tool_catalog_surfaces.Local_worker
-          ; Tool_catalog_surfaces.Session_min
-          ; Tool_catalog_surfaces.Admin
-          ; Tool_catalog_surfaces.Keeper_internal
-          ; Tool_catalog_surfaces.System_internal
-          ]
-        in
-        let _excluded_must_deny : Tool_catalog_surfaces.surface list =
-          (* PR-7 will route [Keeper_denied] through the capability gate
-             before admission; do not list it as an admit surface here. *)
-          [ Tool_catalog_surfaces.Keeper_denied ]
-        in
-        let rec check_surfaces = function
-          | [] ->
-              let tried =
-                [ Dispatch_table; Tool_name_variant; Alias_route
-                ; Alias_internal; Alias_masc_to_internal
-                ; Registry_internal_candidate; Registry_core_tools
-                ; Shard_schema
-                ]
-                @ List.map (fun s -> Surface s) surfaces_to_check
-              in
-              Unknown { name; tried }
-          | surface :: rest ->
-              if Tool_catalog_surfaces.is_on_surface surface normalized then
-                Resolved { canonical = normalized; via = Surface surface; surface = Some surface }
-              else
-                check_surfaces rest
-        in
-        check_surfaces surfaces_to_check
-      end
-  end
+        if Keeper_tool_alias.is_known_internal normalized then
+          Resolved { canonical = normalized; via = Alias_internal; surface = None }
+        else begin
+          match Keeper_tool_alias.public_masc_to_internal normalized with
+          | Some internal ->
+              Alias_to
+                { from_ = normalized; canonical = internal; via = Alias_masc_to_internal }
+          | None ->
+              if List.mem normalized Keeper_tool_registry.keeper_internal_candidate_tool_names
+              then
+                Resolved
+                  { canonical = normalized; via = Registry_internal_candidate; surface = None }
+              else if List.mem normalized (Keeper_tool_registry.effective_core_tools ())
+              then
+                Resolved
+                  { canonical = normalized; via = Registry_core_tools; surface = None }
+              else if
+                List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
+              then Resolved { canonical = normalized; via = Shard_schema; surface = None }
+              else begin
+                (* RFC-0084 §1.3 + §6 D2 — surface coverage gate.
+                   [Tool_catalog_surfaces.surface] has 8 variants. 7 are
+                   admit-checked here; [Keeper_denied] is excluded (must-deny
+                   semantics — checked separately in PR-7 capability gate, not
+                   an admission source). *)
+                let surfaces_to_check =
+                  [ Tool_catalog_surfaces.Public_mcp
+                  ; Tool_catalog_surfaces.Spawned_agent
+                  ; Tool_catalog_surfaces.Local_worker
+                  ; Tool_catalog_surfaces.Session_min
+                  ; Tool_catalog_surfaces.Admin
+                  ; Tool_catalog_surfaces.Keeper_internal
+                  ; Tool_catalog_surfaces.System_internal
+                  ]
+                in
+                let _excluded_must_deny : Tool_catalog_surfaces.surface list =
+                  (* PR-7 will route [Keeper_denied] through the capability gate
+                     before admission; do not list it as an admit surface here. *)
+                  [ Tool_catalog_surfaces.Keeper_denied ]
+                in
+                let rec check_surfaces = function
+                  | [] ->
+                      let tried =
+                        [ Dispatch_table
+                        ; Tool_name_variant
+                        ; Public_descriptor
+                        ; Alias_internal
+                        ; Alias_masc_to_internal
+                        ; Registry_internal_candidate
+                        ; Registry_core_tools
+                        ; Shard_schema
+                        ]
+                        @ List.map (fun s -> Surface s) surfaces_to_check
+                      in
+                      Unknown { name; tried }
+                  | surface :: rest ->
+                      if Tool_catalog_surfaces.is_on_surface surface normalized then
+                        Resolved
+                          { canonical = normalized
+                          ; via = Surface surface
+                          ; surface = Some surface
+                          }
+                      else check_surfaces rest
+                in
+                check_surfaces surfaces_to_check
+              end
+        end
 
 (* ── Phase 5: full-probe (no short-circuit) ────────────────────────── *)
 
@@ -126,8 +146,8 @@ let all_admitting_sources name =
     sources := Dispatch_table :: !sources;
   if Option.is_some (Tool_name.of_string normalized) then
     sources := Tool_name_variant :: !sources;
-  if Option.is_some (Keeper_tool_alias.route normalized) then
-    sources := Alias_route :: !sources;
+  if Option.is_some (Agent_tool_descriptor.find_public normalized) then
+    sources := Public_descriptor :: !sources;
   if Keeper_tool_alias.is_known_internal normalized then
     sources := Alias_internal :: !sources;
   (match Keeper_tool_alias.public_masc_to_internal normalized with
@@ -210,11 +230,7 @@ let canonical_tool_name_observed name =
 ;;
 
 let public_aliases_for_internal_name internal_name =
-  Keeper_tool_alias.public_names ()
-  |> List.filter (fun public ->
-    match Keeper_tool_alias.route public with
-    | Some route -> String.equal route.internal_name internal_name
-    | None -> false)
+  Agent_tool_descriptor_resolution.public_names_for_internal internal_name
 ;;
 
 let public_alias_guidance_for_internal_call
@@ -223,7 +239,7 @@ let public_alias_guidance_for_internal_call
   : string option
   =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match Keeper_tool_alias.route stripped with
+  match Agent_tool_descriptor.find_public stripped with
   | Some _ -> None
   | None ->
     let canonical = canonical_tool_name stripped in

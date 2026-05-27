@@ -50,7 +50,7 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, None -> "none"
 
 let canonical_tool_name_for_lane_check name =
-  match Keeper_tool_alias.canonical_internal_name name with
+  match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
   | Some internal -> internal
   | None -> name
 

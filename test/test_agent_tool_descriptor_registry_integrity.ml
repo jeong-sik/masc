@@ -319,13 +319,13 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
        ~tool_name:"WriteFile"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   Alcotest.(check bool)
-    "WriteFile public alias is playground-boundary exempt from descriptor effect"
+    "WriteFile public alias follows descriptor checkpoint policy"
     true
     (Registry.is_main_worktree_boundary_exempt_with_input
        ~tool_name:"WriteFile"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   Alcotest.(check bool)
-    "Execute public alias is playground-boundary exempt from descriptor effect"
+    "Execute public alias follows descriptor checkpoint policy"
     true
     (Registry.is_main_worktree_boundary_exempt_with_input
        ~tool_name:"Execute"

@@ -114,7 +114,11 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
 ;;
 
 let of_code ?source ?summary ?next_action code =
-  let source = Option.value ~default:"legacy_code" source in
+  let source =
+    match source with
+    | Some source -> source
+    | None -> "wire_code"
+  in
   make ~source ?summary ?next_action code
 ;;
 

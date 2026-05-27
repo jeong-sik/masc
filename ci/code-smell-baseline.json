@@ -28,7 +28,7 @@
         },
         {
           "file": "lib/server/server_routes_http_routes_dashboard.ml",
-          "value": 1078
+          "value": 1072
         },
         {
           "file": "lib/types/types_core.ml",
@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3090,
+      "baseline": 3085,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -1502,7 +1502,7 @@
         },
         {
           "file": "lib/keeper/keeper_repo_readiness.ml",
-          "value": 5
+          "value": 3
         },
         {
           "file": "lib/keeper/keeper_routine_allowlist.ml",
@@ -2322,7 +2322,7 @@
         },
         {
           "file": "lib/server/server_auth.ml",
-          "value": 9
+          "value": 8
         },
         {
           "file": "lib/server/server_bootstrap_http.ml",
@@ -2494,7 +2494,7 @@
         },
         {
           "file": "lib/server/server_mcp_transport_http_headers.ml",
-          "value": 9
+          "value": 8
         },
         {
           "file": "lib/server/server_mcp_transport_http_protocol.ml",
@@ -2602,7 +2602,7 @@
         },
         {
           "file": "lib/server/server_routes_http_runtime.ml",
-          "value": 7
+          "value": 6
         },
         {
           "file": "lib/server/server_routes_http_sidecar_paths.ml",
@@ -3073,7 +3073,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 63,
+      "baseline": 61,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3127,10 +3127,6 @@
         {
           "file": "lib/goal/goal_janitor.ml",
           "value": 1
-        },
-        {
-          "file": "lib/keeper/agent_tool_execute_path.ml",
-          "value": 2
         },
         {
           "file": "lib/keeper/agent_tool_shared_runtime.ml",
@@ -3274,7 +3270,7 @@
         },
         {
           "file": "lib/tool_inline_dispatch_extra.ml",
-          "value": 2
+          "value": 4
         },
         {
           "file": "lib/tool_registry.ml",

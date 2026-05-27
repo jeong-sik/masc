@@ -1081,8 +1081,8 @@ export function RuntimeLensSection({
         <${SignalRow} label="runtime proof" value=${`${proof.status} / ${proof.matched_tool_call_count} calls`} />
         <${SignalRow} label="sandbox proof" value=${proof.docker_visible ? formatLensList(proof.sandbox_profiles, 'docker') : 'not observed'} />
         <${SignalRow}
-          label="GitHub proof"
-          value=${`${proof.git_credentials_enabled ? 'git creds' : 'no git creds'} / ${proof.github_identity_materialized ? 'identity materialized' : 'identity missing'}`}
+          label="repo CLI proof"
+          value=${`${proof.git_credentials_enabled ? 'git creds' : 'no git creds'} / ${proof.repo_cli_identity_materialized ? 'identity materialized' : 'identity missing'}`}
         />
         <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
         <${SignalRow} label="network proof" value=${formatLensList(proof.network_modes)} />

@@ -1725,6 +1725,8 @@
 
 (include stanzas/test_keeper_tool_policy_paths.inc)
 
+(include stanzas/test_keeper_tool_success_harness.inc)
+
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)

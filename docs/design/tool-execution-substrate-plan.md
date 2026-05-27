@@ -404,6 +404,41 @@ docs, tests, dashboard/reporting metrics, or this decision plan. Those are not
 active tool names and should be classified separately instead of deleted by
 string match.
 
+### PR-G: Keeper Success Harness
+
+Status: implemented in this PR as a deterministic contract harness.
+
+Add `test_keeper_tool_success_harness.exe`, a small scenario harness that proves
+the primitive tool set supports realistic keeper work without reintroducing
+micro-tools or legacy public names. The harness constructs a JSON summary:
+
+- `schema = keeper-tool-success-harness/v1`
+- `passed` / `failed` counts
+- per-scenario `route_evidence`
+
+Covered scenarios:
+
+- source read: `SearchFiles` / `ReadFile` public names exist and `Read` is a
+  routing miss
+- edit/test: typed `Execute` routes through `Shell_ir`, records `allow`, and
+  carries Shell IR risk class
+- GitHub PR comment: no forge micro-tool routes exist; forge work stays on
+  typed `Execute` `gh` / `git`
+- web evidence: `SearchWeb` and `FetchWeb` route to their web descriptors
+- legacy-name recovery: `Bash`, `Grep`, `Edit`, `Write`, `WebSearch`, and
+  `WebFetch` are routing misses
+- deterministic rejection: blocked raw command shape records `deny` from
+  `shell_gate`
+- sandbox path mismatch: out-of-scope write records `deny` from
+  `path_validator`
+
+Validation:
+
+```bash
+scripts/dune-local.sh build test/test_keeper_tool_success_harness.exe
+./_build/default/test/test_keeper_tool_success_harness.exe
+```
+
 ## Review Checklist for Future Tool Additions
 
 Before adding any new public or internal tool, answer:

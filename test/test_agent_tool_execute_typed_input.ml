@@ -658,6 +658,127 @@ let test_env_key_invalid () =
     (typed_ok input)
 ;;
 
+(* RFC-0198 Phase A: redirection-shape argv tokens.  Validation must
+   reject these with the typed [Argv_contains_shell_redirection] error
+   so the caller (LLM) receives a typed alternative instead of the
+   runtime "unknown primary" failure observed in fleet (2026-05-27
+   18:56 KST find: 2>/dev/null primary error). *)
+let expect_redirection_rejected ~token input =
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Argv_contains_shell_redirection { token = t; _ }) ->
+    Alcotest.(check string) "rejected token text" token t
+  | Error other ->
+    Alcotest.failf
+      "expected Argv_contains_shell_redirection for %S, got %a"
+      token
+      Execute_input.pp_validation_error
+      other
+  | Ok () -> Alcotest.failf "expected %S to be rejected" token
+;;
+
+let test_shell_redirection_token_rejected () =
+  (* Each fixture sends [find] (allowlisted, evidence shape from
+     fleet log) with a redirection-shape token at argv[N].  Every
+     shape must surface as a typed-rejection. *)
+  List.iter
+    (fun (token, argv) ->
+      let input =
+        Execute_input.Exec
+          { executable = "find"; argv; cwd = None; env = [] }
+      in
+      expect_redirection_rejected ~token input)
+    [ "2>/dev/null", [ "."; "-name"; "*.ml"; "2>/dev/null" ]
+    ; ">", [ "."; "-name"; "*.ml"; ">" ]
+    ; ">>", [ "."; "-name"; "*.ml"; ">>" ]
+    ; "2>", [ "."; "-name"; "*.ml"; "2>" ]
+    ; "2>&1", [ "."; "-name"; "*.ml"; "2>&1" ]
+    ; ">&2", [ "."; "-name"; "*.ml"; ">&2" ]
+    ; "<", [ "."; "-name"; "*.ml"; "<" ]
+    ; "0<", [ "."; "-name"; "*.ml"; "0<" ]
+    ; "<&0", [ "."; "-name"; "*.ml"; "<&0" ]
+    ; "&1", [ "."; "-name"; "*.ml"; "&1" ]
+    ; ">>/tmp/out", [ "."; "-name"; "*.ml"; ">>/tmp/out" ]
+    ; ">./relative.log", [ "."; "-name"; "*.ml"; ">./relative.log" ]
+    ]
+;;
+
+(* Regression guard: tokens that *contain* shell metacharacters as
+   payload data must remain allowed.  RFC-0091 PR-1's design constraint
+   (.mli §"Design constraints") explicitly accepts these as literal
+   execve arguments. *)
+let test_legitimate_metachar_still_allowed () =
+  List.iter
+    (fun (rationale, argv) ->
+      let input =
+        Execute_input.Exec
+          { executable = "find"; argv; cwd = None; env = [] }
+      in
+      match Execute_input.validate ~mode:Execute_input.Dev_full input with
+      | Ok () -> ()
+      | Error err ->
+        Alcotest.failf
+          "regression: %s argv=%s wrongly rejected: %a"
+          rationale
+          (String.concat " " argv)
+          Execute_input.pp_validation_error
+          err)
+    [ "find-glob literal '*.ml'", [ "."; "-name"; "*.ml" ]
+    ; "find-name with literal '$HOME'", [ "."; "-name"; "$HOME" ]
+    ; "find-name with literal semicolon", [ "."; "-name"; ";abc" ]
+    ; "find-name with literal pipe", [ "."; "-name"; "|abc" ]
+    ; "find-name with literal '>' inside payload", [ "."; "-name"; "a>b" ]
+    ; "find-name with literal '<' inside payload", [ "."; "-name"; "a<b" ]
+    ; "find-name with literal '&' inside payload", [ "."; "-name"; "a&b" ]
+    ; "find-name with '>foo' (no leading fd, but path payload-looking)", [ "."; "-name"; "X>foo" ]
+    ; "ampersand by itself is execve-literal", [ "."; "-name"; "&" ]
+    ]
+;;
+
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0
+  then true
+  else if nlen > hlen
+  then false
+  else
+    let rec scan i =
+      if i + nlen > hlen
+      then false
+      else if String.sub haystack i nlen = needle
+      then true
+      else scan (i + 1)
+    in
+    scan 0
+;;
+
+let test_redirection_rejected_emits_typed_alternative () =
+  (* The error message must steer the caller toward typed alternatives
+     (Phase B redirect fields or Pipeline mode), not toward the
+     deprecated "split into Pipeline stages" prose used for
+     control-character rejection. *)
+  let input =
+    Execute_input.Exec
+      { executable = "find"
+      ; argv = [ "."; "-name"; "*.ml"; "2>/dev/null" ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Argv_contains_shell_redirection _ as err) ->
+    let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
+    Alcotest.(check bool)
+      "error mentions discard_stderr typed field"
+      true
+      (contains_substring msg "discard_stderr");
+    Alcotest.(check bool)
+      "error mentions Phase B RFC marker"
+      true
+      (contains_substring msg "RFC-0198")
+  | _ -> Alcotest.fail "expected Argv_contains_shell_redirection"
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
@@ -744,6 +865,18 @@ let suite =
           test_pipe_character_in_exec_argv_is_literal
       ; Alcotest.test_case "cwd_not_absolute" `Quick test_cwd_not_absolute
       ; Alcotest.test_case "env_key_invalid" `Quick test_env_key_invalid
+      ; Alcotest.test_case
+          "rfc_0198_shell_redirection_token_rejected"
+          `Quick
+          test_shell_redirection_token_rejected
+      ; Alcotest.test_case
+          "rfc_0198_legitimate_metachar_still_allowed"
+          `Quick
+          test_legitimate_metachar_still_allowed
+      ; Alcotest.test_case
+          "rfc_0198_redirection_rejected_emits_typed_alternative"
+          `Quick
+          test_redirection_rejected_emits_typed_alternative
       ])
 ;;
 

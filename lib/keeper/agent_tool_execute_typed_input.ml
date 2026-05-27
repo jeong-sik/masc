@@ -32,6 +32,11 @@ type validation_error =
       index : int;
       token : string;
     }
+  | Argv_contains_shell_redirection of {
+      executable : string;
+      index : int;
+      token : string;
+    }
   | Cwd_not_absolute of string
   | Pipeline_empty
   | Pipeline_too_short
@@ -228,11 +233,64 @@ let shell_metachar_in_token token =
     token
 ;;
 
+(* RFC-0198 Phase A.  Detects argv tokens whose entire shape matches a
+   shell redirection operator.  These cannot do anything useful inside
+   execve argv — the child sees them as literal text, which most
+   programs ([find], [grep], [test]) misparse and fail at runtime
+   ([find: 2>/dev/null: unknown primary]).  Rejecting at validation
+   surfaces the contract violation as a typed alternative pointing at
+   RFC-0198 Phase B typed redirect fields or Pipeline mode.
+
+   Conservative recognizer: only matches tokens that are *exclusively*
+   a redirection operator (with optional leading fd digit and attached
+   path).  Tokens that merely *contain* [>] or [<] as part of payload
+   data ([find -name '*>foo'], [grep '<<<']) pass through unchanged. *)
+let is_digit c = c >= '0' && c <= '9'
+let is_path_start c = c = '/' || c = '.' || c = '~'
+
+let looks_like_shell_redirection token =
+  let len = String.length token in
+  if len = 0
+  then false
+  else
+    let op_start =
+      (* Skip optional leading fd digit like [2>] or [0<]. *)
+      if is_digit token.[0] then 1 else 0
+    in
+    if op_start >= len
+    then false
+    else
+      let c = token.[op_start] in
+      if c = '>' || c = '<'
+      then
+        let rest = op_start + 1 in
+        if rest >= len
+        then true (* [>], [<], [2>], [0<] *)
+        else
+          let nxt = token.[rest] in
+          if c = '>' && nxt = '>'
+          then
+            if rest + 1 >= len
+            then true (* [>>] alone *)
+            else
+              let nxt2 = token.[rest + 1] in
+              nxt2 = '&' || is_path_start nxt2 (* [>>&N], [>>/...], [>>./...] *)
+          else
+            (* [>X] / [<X] where X = &digit, /, ., ~ *)
+            (nxt = '&' && rest + 1 < len && is_digit token.[rest + 1])
+            || is_path_start nxt
+      else if op_start = 0 && c = '&' && len >= 2 && is_digit token.[1]
+      then true (* [&1], [&2] — fd reference standalone *)
+      else false
+;;
+
 let check_argv ~executable argv =
   let rec loop i = function
     | [] -> Ok ()
-    | token :: rest when shell_metachar_in_token token ->
+    | token :: _ when shell_metachar_in_token token ->
       Error (Argv_contains_shell_metachar { executable; index = i; token })
+    | token :: _ when looks_like_shell_redirection token ->
+      Error (Argv_contains_shell_redirection { executable; index = i; token })
     | _ :: rest -> loop (i + 1) rest
   in
   loop 0 argv
@@ -431,6 +489,16 @@ let pp_validation_error ppf = function
       ppf
       "executable %S argv[%d]=%S contains shell metacharacter; \
        split into Pipeline stages instead"
+      executable
+      index
+      token
+  | Argv_contains_shell_redirection { executable; index; token } ->
+    Format.fprintf
+      ppf
+      "executable %S argv[%d]=%S is a shell redirection operator; argv \
+       tokens are passed verbatim to execve and never interpreted as \
+       redirection. Use the typed redirect fields (RFC-0198 Phase B: \
+       discard_stderr/stdout/stderr) or split into a Pipeline."
       executable
       index
       token

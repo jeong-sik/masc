@@ -64,6 +64,19 @@ type validation_error =
       index : int;
       token : string;
     }
+  | Argv_contains_shell_redirection of {
+      executable : string;
+      index : int;
+      token : string;
+    }
+      (** RFC-0198 Phase A.  Token shape matches a shell redirection
+          operator ([>], [>>], [2>], [2>>], [<], [0<], [2>&1], [>/path],
+          [&1]).  These are shell-syntax constructs that have no meaning
+          inside execve argv — the typed schema rejects them so the
+          caller (LLM) receives a typed alternative pointing at
+          {!RFC-0198 Phase B} typed redirect fields or {!Pipeline} mode,
+          instead of the runtime [find]/[grep] "unknown primary" failure
+          that previously surfaced via [exec exit 1]. *)
   | Cwd_not_absolute of string
   | Pipeline_empty
   | Pipeline_too_short

@@ -6,6 +6,7 @@ import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { stripStateBlocks } from '../../keeper-message'
+import { SYSTEM_MESSAGE_FROM } from '../../lib/board-utils'
 import { navigate } from '../../router'
 import { messages } from '../../store'
 import type { Message } from '../../types'
@@ -109,7 +110,7 @@ function TimelineMessage({ row }: { row: TimelineRow }) {
       </div>
       <div class="min-w-0">
         <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? 'system'}</span>
+          <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
           ${row.message.timestamp
             ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
             : null}

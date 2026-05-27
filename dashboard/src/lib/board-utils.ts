@@ -1,5 +1,15 @@
 // Board display utilities — shared between memory.ts and memory-post-detail.ts
 
+/**
+ * User-visible fallback shown when a board message arrives without a
+ * `from` field — three board panels (state-block-messages,
+ * mention-inbox, message-room-timeline) used to inline the literal
+ * `'system'` in `row.message.from ?? 'system'`. Captured here so a
+ * future relabel (e.g. localising to `'시스템'` or distinguishing
+ * automation from system) updates every panel in one place.
+ */
+export const SYSTEM_MESSAGE_FROM = 'system'
+
 import { navigate } from '../router'
 import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'

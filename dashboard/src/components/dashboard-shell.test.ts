@@ -74,6 +74,26 @@ describe('dashboardHealthChips', () => {
     ])
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('키퍼 활성 1 / 일시정지 1 / 설정 2')
+    expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
+      .toBe('활성=shell runtime, paused=상세 행 lifecycle, 설정=shell keeper inventory.')
+  })
+
+  it('uses namespace truth as the configured keeper count authority in health chips', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { agents: 0, keepers: 2, configured_keepers: 2 },
+      namespaceTruthCounts: { agents: 0, keepers: 16, tasks: 0, total_runtimes: 16 },
+      namespaceTruthConfiguredKeepers: 16,
+      keepers: [],
+      runtimeResolution: null,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
+      .toBe('키퍼 활성 2 / 설정 16')
+    expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
+      .toBe('활성=shell runtime, paused=상세 행 lifecycle, 설정=project snapshot keeper inventory.')
   })
 
   it('returns a healthy chip when no runtime risk is visible', () => {

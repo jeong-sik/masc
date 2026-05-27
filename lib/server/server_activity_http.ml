@@ -40,6 +40,13 @@ let last_event_id request =
       | None -> 0)
   | None -> 0
 
+(* Dashboard panel polls /api/v1/activity/events ~every refresh tick with the
+   same default query (no [after_seq] cursor — see dashboard ide-activity-panel).
+   [Activity_graph.json_response] hits JSONL on disk ([activity-events/YYYY-MM/DD.jsonl]).
+   Wrap with [Dashboard_cache] (2s TTL — short enough for near-live feel,
+   long enough to collapse concurrent panel reloads) and offload compute via
+   [Domain_pool_ref.submit_io_or_inline] so the HTTP main domain keeps serving
+   while disk read + JSON build runs on a worker. *)
 let events_http_json ~deps ~state request =
 
   let kinds = kind_filters deps request in
@@ -50,8 +57,14 @@ let events_http_json ~deps ~state request =
     deps.int_query_param request "limit" ~default:200
     |> clamp ~min_v:1 ~max_v:1000
   in
-  Activity_graph.json_response state.Mcp_server.room_config ~kinds
-    ~after_seq ~limit ()
+  let cache_key =
+    Printf.sprintf "activity:events:%s:%d:%d"
+      (String.concat "," kinds) after_seq limit
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Activity_graph.json_response state.Mcp_server.room_config ~kinds
+        ~after_seq ~limit ()))
 
 let parse_since_ms (raw : string) : int option =
   let len = String.length raw in
@@ -76,18 +89,27 @@ let graph_http_json ~deps ~state request =
     deps.int_query_param request "timeline_limit" ~default:80
     |> clamp ~min_v:10 ~max_v:200
   in
-  let since_ms =
-    match deps.query_param request "since" with
-    | Some raw ->
-        (match parse_since_ms raw with
-         | Some delta_ms ->
-             let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
-             Some (now_ms - delta_ms)
-         | None -> None)
-    | None -> None
+  let since_raw =
+    deps.query_param request "since" |> Option.value ~default:""
   in
-  Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
-    ~timeline_limit ?since_ms ()
+  (* Cache key uses [since_raw] (request param) not [since_ms] (now-derived) so
+     two requests within the TTL window with the same "5m" window hit the same
+     entry. Concrete [since_ms] is computed inside the compute closure on miss. *)
+  let cache_key =
+    Printf.sprintf "activity:graph:%s:%d:%d:%s"
+      (String.concat "," kinds) limit timeline_limit since_raw
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let since_ms =
+        match parse_since_ms since_raw with
+        | Some delta_ms ->
+            let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+            Some (now_ms - delta_ms)
+        | None -> None
+      in
+      Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
+        ~timeline_limit ?since_ms ()))
 
 let swimlane_http_json ~deps ~state request =
 
@@ -95,18 +117,23 @@ let swimlane_http_json ~deps ~state request =
     deps.int_query_param request "limit" ~default:500
     |> clamp ~min_v:1 ~max_v:2000
   in
-  let since_ms =
-    match deps.query_param request "since" with
-    | Some raw ->
-        (match parse_since_ms raw with
-         | Some delta_ms ->
-             let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
-             Some (now_ms - delta_ms)
-         | None -> None)
-    | None -> None
+  let since_raw =
+    deps.query_param request "since" |> Option.value ~default:""
   in
-  Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
-    ?since_ms ()
+  let cache_key =
+    Printf.sprintf "activity:swimlane:%d:%s" limit since_raw
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let since_ms =
+        match parse_since_ms since_raw with
+        | Some delta_ms ->
+            let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+            Some (now_ms - delta_ms)
+        | None -> None
+      in
+      Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
+        ?since_ms ()))
 
 let stream_headers ~deps origin =
   Httpun.Headers.of_list

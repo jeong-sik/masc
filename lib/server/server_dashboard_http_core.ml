@@ -740,8 +740,22 @@ let dashboard_shell_http_json
   let cache_key = dashboard_shell_cache_key ~light config in
   let compute () =
     (* Shell endpoint is read-only; use config directly without isolation
-       since state is not available in this context. *)
-    dashboard_shell_payload_json ?timing ~light config
+       since state is not available in this context.
+
+       The payload compute runs status / agents / tasks / keepers /
+       meta_cognition projections (the latter scans board_posts.jsonl and
+       evaluates belief/tension/desire rules — frequently 8s+ on a hot
+       room).  Under cache miss this used to run inline on the calling
+       fiber's Eio main domain, blocking every other HTTP fiber for the
+       duration — the same Eio cooperative scheduling violation that
+       PRs #18991 / #18993 / #18994 / #19007 / #19015 / #19023 / #19024 /
+       #19025 / #19031 fixed for the other dashboard projections.
+
+       [Domain_pool_ref.submit_io_or_inline] runs the compute on a
+       worker domain when the pool is wired, so the main HTTP domain
+       keeps serving requests during the cold-shell refresh. *)
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      dashboard_shell_payload_json ?timing ~light config)
   in
   let clock_opt =
     match clock with

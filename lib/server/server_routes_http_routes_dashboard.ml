@@ -66,9 +66,15 @@ let rec add_routes ~sw ~clock router =
            Server_utils.int_query_param req "limit" ~default:50
            |> Server_utils.clamp ~min_v:1 ~max_v:200
          in
+         let cache_key =
+           Printf.sprintf "nudges:%s:%d"
+             state.Mcp_server.room_config.base_path limit
+         in
          let json =
-           Dashboard_operator_nudges.json
-             ~config:state.Mcp_server.room_config ~limit ()
+           Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Dashboard_operator_nudges.json
+                 ~config:state.Mcp_server.room_config ~limit ()))
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
@@ -469,7 +475,15 @@ let rec add_routes ~sw ~clock router =
      before SSE attaches + explicit tab-refresh). *)
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = operator_snapshot_http_json ~state ~sw ~clock req in
+         let cache_key =
+           Printf.sprintf "operator_snapshot:%s"
+             state.Mcp_server.room_config.base_path
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               operator_snapshot_http_json ~state ~sw ~clock req))
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -520,7 +534,15 @@ let rec add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/dashboard/planning" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_planning_http_json ~config:state.Mcp_server.room_config in
+         let cache_key =
+           Printf.sprintf "planning:%s"
+             state.Mcp_server.room_config.base_path
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_planning_http_json ~config:state.Mcp_server.room_config))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/bootstrap" (fun request reqd ->
@@ -537,7 +559,15 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config in
+         let cache_key =
+           Printf.sprintf "goals_tree:%s"
+             state.Mcp_server.room_config.base_path
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals/detail" (fun request reqd ->
@@ -551,9 +581,15 @@ let rec add_routes ~sw ~clock router =
            respond_json_with_cors ~status:`Bad_request req reqd
              {|{"ok":false,"error":"goal_id query param is required"}|}
          else
+           let cache_key =
+             Printf.sprintf "goal_detail:%s:%s"
+               state.Mcp_server.room_config.base_path goal_id
+           in
            let json =
-             dashboard_goal_detail_http_json
-               ~config:state.Mcp_server.room_config ~goal_id
+             Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+               Domain_pool_ref.submit_io_or_inline (fun () ->
+                 dashboard_goal_detail_http_json
+                   ~config:state.Mcp_server.room_config ~goal_id))
            in
            Http.Response.json ~compress:true ~request:req
              (Yojson.Safe.to_string json) reqd
@@ -564,12 +600,26 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_mission_http_json ~state ~sw ~clock req in
+         let cache_key =
+           Printf.sprintf "mission:%s" state.Mcp_server.room_config.base_path
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_mission_http_json ~state ~sw ~clock req))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/session" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_session_http_json ~state ~sw ~clock req in
+         let cache_key =
+           Printf.sprintf "session:%s" state.Mcp_server.room_config.base_path
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_session_http_json ~state ~sw ~clock req))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->

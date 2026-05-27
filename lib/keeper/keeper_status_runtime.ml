@@ -194,7 +194,7 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
             (match role, ts_unix with
             | Some role, Some ts -> update_last role ts content acc
             | _ -> acc)
-        | _ -> acc)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> acc)
       (None, None) history_items
   in
   match last_user, last_assistant with

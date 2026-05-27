@@ -320,7 +320,7 @@ let normalize_disk_recommended_action judgment =
                     (key, value))
                 fields)
        | other -> other)
-  | _ -> judgment
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> judgment
 
 let load_judgments_into_table jsons =
   let table = Hashtbl.create 32 in
@@ -457,8 +457,8 @@ let parse_string_list json key =
              | `String value ->
                  let trimmed = String.trim value in
                  if trimmed = "" then None else Some trimmed
-             | _ -> None)
-  | _ -> []
+             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 
 let normalize_text = Dashboard_http_helpers.normalize_text
 
@@ -501,7 +501,7 @@ let parse_recommended_action json =
                    (Json_util.get_string_with_default action_json ~key:"reason" ~default:"")) );
             ("payload_preview", m "payload_preview" action_json);
           ])
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 type governance_response_parse_failure =
   | Lenient_fallback of string
@@ -522,7 +522,7 @@ let parse_lenient_governance_json raw_text =
           | Yojson.Json_error _ -> Error (Lenient_fallback raw)
           | Failure _ -> Error (Lenient_fallback raw))
       | None -> Error (Lenient_fallback raw))
-  | _ -> Ok parsed
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> Ok parsed
 
 let parse_required_guardrail_state json =
   match Json_util.assoc_member_opt "guardrail_state" json with
@@ -553,7 +553,7 @@ let parse_required_guardrail_state json =
              "invalid guardrail_state: expected requires_human_gate bool, \
               pending_confirm_token string|null, ready_to_execute bool")
   | None | Some `Null -> Error "missing guardrail_state"
-  | _ -> Error "invalid guardrail_state: expected object"
+  | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> Error "invalid guardrail_state: expected object"
 
 let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
   let target_kind =

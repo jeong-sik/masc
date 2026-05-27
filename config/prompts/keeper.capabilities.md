@@ -103,7 +103,7 @@ PR workflow (write/execute-capable schema required):
 5. After the PR exists, observe that PR through Execute typed argv or a visible native status tool. Do not turn this into open-ended PR discovery.
    Do not probe repo CLI identity. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not mark PRs ready, merge PRs, or bypass draft state unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
-7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... pr_url=... notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.
+7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... evidence_refs=["artifact:..."] notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search
@@ -126,7 +126,7 @@ Task management:
 - Create tasks: keeper_task_create when available; otherwise use masc_add_task (single) or masc_batch_add_tasks (multiple)
 - Claim next available: masc_claim_next
 - Claim specific and complete: keeper_task_claim, keeper_task_done
-- For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and pr_url
+- For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and evidence_refs
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Active-tool contract:

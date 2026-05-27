@@ -11,6 +11,16 @@ open Server_routes_http_keeper_stream
 
 include Server_routes_http_routes_dashboard_setup
 
+(* Dashboard cache TTL tiers — grouped by data volatility.
+   config: feature flags + provider rollups (30s)
+   standard: typical dashboard surfaces (5s)
+   live: frequently-changing data (3s)
+   realtime: near-realtime feeds (2s) *)
+let config_cache_ttl_s = 30.0
+let standard_cache_ttl_s = 5.0
+let live_cache_ttl_s = 3.0
+let realtime_cache_ttl_s = 2.0
+
 let dashboard_error_json ?ok message =
   let fields = [ ("error", `String message) ] in
   let fields =
@@ -87,7 +97,7 @@ let rec add_routes ~sw ~clock router =
              state.Mcp_server.room_config.base_path limit
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_operator_nudges.json
                  ~config:state.Mcp_server.room_config ~limit ()))
@@ -198,7 +208,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let cache_key = "provider_logs" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Provider_logs.dashboard_provider_logs_json ()))
          in
@@ -259,7 +269,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let cache_key = "config_introspect" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Env_config_introspect.to_json ()))
          in
@@ -269,7 +279,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let cache_key = "excuse_patterns" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                let patterns = Anti_rationalization.load_excuse_patterns () in
                let json_items =
@@ -369,7 +379,7 @@ let rec add_routes ~sw ~clock router =
              config.base_path include_memory_entries
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_memory_subsystems_http_json ~config
                  ~include_memory_entries req))
@@ -393,7 +403,7 @@ let rec add_routes ~sw ~clock router =
             domain via [Domain_pool_ref]. *)
          let cache_key = "dashboard.doctor:" ^ self_bin in
          let payload =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                try
                  let buf, _status =
@@ -486,7 +496,7 @@ let rec add_routes ~sw ~clock router =
              state.Mcp_server.room_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                operator_snapshot_http_json ~state ~sw ~clock req))
          in
@@ -536,7 +546,7 @@ let rec add_routes ~sw ~clock router =
              state.Mcp_server.room_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_planning_http_json ~config:state.Mcp_server.room_config))
          in
@@ -560,7 +570,7 @@ let rec add_routes ~sw ~clock router =
              state.Mcp_server.room_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config))
          in
@@ -582,7 +592,7 @@ let rec add_routes ~sw ~clock router =
                state.Mcp_server.room_config.base_path goal_id
            in
            let json =
-             Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
                Domain_pool_ref.submit_io_or_inline (fun () ->
                  dashboard_goal_detail_http_json
                    ~config:state.Mcp_server.room_config ~goal_id))
@@ -599,7 +609,7 @@ let rec add_routes ~sw ~clock router =
            Printf.sprintf "mission:%s" state.Mcp_server.room_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_mission_http_json ~state ~sw ~clock req))
          in
@@ -611,7 +621,7 @@ let rec add_routes ~sw ~clock router =
            Printf.sprintf "session:%s" state.Mcp_server.room_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_session_http_json ~state ~sw ~clock req))
          in
@@ -642,7 +652,7 @@ let rec add_routes ~sw ~clock router =
              state.Mcp_server.room_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_mission_briefing_http_json ~state ~sw ~clock req))
          in
@@ -656,7 +666,7 @@ let rec add_routes ~sw ~clock router =
              (Option.value ~default:"-" surface_id)
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_surface_readiness.json ?surface_id ()))
          in
@@ -691,7 +701,7 @@ let rec add_routes ~sw ~clock router =
             6× longer TTL still serves near-live data; under 30s window the
             poll just hit the previous compute and never wait 30s again. *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_http_tool_quality.aggregate ~n ?window_hours ()))
          in
@@ -736,7 +746,7 @@ let rec add_routes ~sw ~clock router =
               | None -> "-")
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_keeper_feature_proof.json
                  ~config ~n ?window_hours ?success_threshold_pct ()))
@@ -747,7 +757,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let cache_key = "transport_health" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_transport_health_http_json ~state))
          in
@@ -769,7 +779,7 @@ let rec add_routes ~sw ~clock router =
              (Option.value ~default:"-" until)
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_harness_health.json ~config:state.Mcp_server.room_config
                  ?since ?until ()))
@@ -806,7 +816,7 @@ let rec add_routes ~sw ~clock router =
              limit
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
          match agent_name with
            | Some name when String.trim name <> "" ->

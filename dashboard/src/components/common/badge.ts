@@ -18,11 +18,6 @@ export interface CountBadgeProps {
   children?: ComponentChildren
 }
 
-type CountBadgeSummaryInput = Pick<CountBadgeProps, 'tone' | 'class'> & {
-  /** Back-compat alias for older pure callers. `class` wins when both exist. */
-  className?: string
-}
-
 const TONE_CLASSES: Record<BadgeTone, string> = {
   default: 'bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]',
   warn: 'bg-[var(--warn-12)] text-[var(--color-status-warn)]',
@@ -40,13 +35,11 @@ export function countBadgeClasses(tone: BadgeTone = 'default', extra?: string): 
 export function summarizeCountBadge({
   tone = 'default',
   class: classProp,
-  className,
-}: CountBadgeSummaryInput): CountBadgeSummary {
-  const customClass = classProp ?? className
+}: Pick<CountBadgeProps, 'tone' | 'class'>): CountBadgeSummary {
   return {
     tone,
-    hasCustomClass: customClass !== undefined && customClass !== '',
-    customClassLength: customClass?.length ?? 0,
+    hasCustomClass: classProp !== undefined && classProp !== '',
+    customClassLength: classProp?.length ?? 0,
   }
 }
 

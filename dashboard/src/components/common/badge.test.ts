@@ -43,10 +43,6 @@ describe('summarizeCountBadge (pure)', () => {
     })
   })
 
-  it('keeps className as a fallback alias but lets class win', () => {
-    expect(summarizeCountBadge({ className: 'ml-2' }).customClassLength).toBe(4)
-    expect(summarizeCountBadge({ class: 'ring-1', className: 'ml-2' }).customClassLength).toBe(6)
-  })
 })
 
 describe('CountBadge', () => {

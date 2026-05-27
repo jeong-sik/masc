@@ -52,11 +52,6 @@ export interface KbdProps {
   testId?: string
 }
 
-type KbdSummaryInput = Pick<KbdProps, 'size' | 'class' | 'title'> & {
-  /** Back-compat alias for older pure callers. `class` wins when both exist. */
-  className?: string
-}
-
 const BASE =
   'inline-flex items-center justify-center rounded-xs border border-b-2 font-mono text-center text-3xs ' +
   'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)]'
@@ -77,16 +72,14 @@ export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
 export function summarizeKbd({
   size = 'md',
   class: classProp,
-  className,
   title,
-}: KbdSummaryInput): KbdSummary {
-  const customClass = classProp ?? className
+}: Pick<KbdProps, 'size' | 'class' | 'title'>): KbdSummary {
   return {
     size,
     hasTitle: title !== undefined && title !== '',
-    hasCustomClass: customClass !== undefined && customClass !== '',
+    hasCustomClass: classProp !== undefined && classProp !== '',
     titleLength: title?.length ?? 0,
-    classNameLength: customClass?.length ?? 0,
+    classNameLength: classProp?.length ?? 0,
   }
 }
 

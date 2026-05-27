@@ -2345,6 +2345,201 @@ let rec parse subcmd extra = function
 in
 parse None [] args|}
     }
+  ; { name = "Yarn"
+    ; anon_pattern = "Yarn _"
+    ; bind_pattern = "Yarn { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Yarn
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Yarn"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Yarn { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Pnpm"
+    ; anon_pattern = "Pnpm _"
+    ; bind_pattern = "Pnpm { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pnpm
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pnpm"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pnpm { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Uv"
+    ; anon_pattern = "Uv _"
+    ; bind_pattern = "Uv { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Uv
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Uv"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uv { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Glab"
+    ; anon_pattern = "Glab _"
+    ; bind_pattern = "Glab { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Glab
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Glab"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Glab { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Pytest"
+    ; anon_pattern = "Pytest _"
+    ; bind_pattern = "Pytest { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pytest
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pytest"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Terminal_notifier"
+    ; anon_pattern = "Terminal_notifier _"
+    ; bind_pattern = "Terminal_notifier { title; message }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Terminal_notifier
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) [ title; message ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Terminal_notifier"
+    ; parse_body =
+        Some
+          {|
+let rec parse title message = function
+  | [] ->
+    (match title, message with
+     | Some t, Some m ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Terminal_notifier { title = t; message = m }))
+     | _ -> None)
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse title message rest
+    else (match title with
+          | None -> parse (Some arg) message rest
+          | Some _ -> (match message with
+                       | None -> parse title (Some arg) rest
+                       | Some _ -> None))
+in
+parse None None args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"

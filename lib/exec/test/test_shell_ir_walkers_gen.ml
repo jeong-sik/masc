@@ -88,6 +88,12 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Docker { subcommand = "run"; args = [ "-d"; "nginx" ] })
   ; W (Opam { subcommand = "install"; args = [ "dune" ] })
   ; W (Npx { subcommand = "tsc"; args = [ "--noEmit" ] })
+  ; W (Yarn { subcommand = "install"; args = [ "--frozen-lockfile" ] })
+  ; W (Pnpm { subcommand = "run"; args = [ "build" ] })
+  ; W (Uv { subcommand = "pip"; args = [ "install"; "requests" ] })
+  ; W (Glab { subcommand = "mr"; args = [ "list"; "--state"; "opened" ] })
+  ; W (Pytest { subcommand = ""; args = [ "-v"; "tests/" ] })
+  ; W (Terminal_notifier { title = "Done"; message = "Build finished" })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -169,15 +175,15 @@ let test_to_simple_parallel_equivalence () =
 ;;
 
 let test_constructor_count () =
-  (* Baseline: 20 constructors as of 2026-05-28. If this fails, either
+  (* Baseline: 71 constructors as of 2026-05-28. If this fails, either
      a constructor was added to shell_ir_typed.ml without updating the
      spec in bin/gen_shell_ir_walkers.ml (regression) or the count is
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    65
+    71
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 65 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 71 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -257,6 +263,12 @@ let test_of_simple_round_trip () =
     ; W (Docker { subcommand = "build"; args = [ "-t"; "myapp"; "." ] })
     ; W (Opam { subcommand = "switch"; args = [ "create"; "5.2.0" ] })
     ; W (Npx { subcommand = "jest"; args = [ "--coverage" ] })
+    ; W (Yarn { subcommand = "add"; args = [ "lodash" ] })
+    ; W (Pnpm { subcommand = "dev"; args = [] })
+    ; W (Uv { subcommand = "sync"; args = [] })
+    ; W (Glab { subcommand = "ci"; args = [ "status" ] })
+    ; W (Pytest { subcommand = ""; args = [ "--cov" ] })
+    ; W (Terminal_notifier { title = "Test"; message = "All passed" })
     ]
   in
   List.iter
@@ -350,6 +362,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Wget"; "Ssh"; "Scp"; "Tar"; "Make"; "Diff"; "Sed"
     ; "Rsync"; "Node"; "Python"; "Python3"; "Pip"; "Patch"; "Npm"
     ; "Cargo"; "Go"; "Gh"; "Chmod"; "Chown"; "Docker"; "Opam"; "Npx"
+    ; "Yarn"; "Pnpm"; "Uv"; "Glab"; "Pytest"; "Terminal_notifier"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

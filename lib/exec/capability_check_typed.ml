@@ -347,5 +347,17 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Opam, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Npx { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Npx, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Yarn { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Yarn, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Pnpm { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pnpm, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Uv { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Uv, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Glab { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Glab, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Pytest { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pytest, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Terminal_notifier { title; message }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Terminal_notifier, [ arg title; arg message ]) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

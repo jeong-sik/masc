@@ -115,6 +115,12 @@ let constructor_label = function
      | Shell_ir_typed.Docker _ -> "Docker"
      | Shell_ir_typed.Opam _ -> "Opam"
      | Shell_ir_typed.Npx _ -> "Npx"
+     | Shell_ir_typed.Yarn _ -> "Yarn"
+     | Shell_ir_typed.Pnpm _ -> "Pnpm"
+     | Shell_ir_typed.Uv _ -> "Uv"
+     | Shell_ir_typed.Glab _ -> "Glab"
+     | Shell_ir_typed.Pytest _ -> "Pytest"
+     | Shell_ir_typed.Terminal_notifier _ -> "Terminal_notifier"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

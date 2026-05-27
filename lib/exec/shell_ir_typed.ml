@@ -382,5 +382,22 @@ let pp fmt = function
   | W (Npx { subcommand; args }) ->
     Format.fprintf fmt "Npx(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
+  | W (Yarn { subcommand; args }) ->
+    Format.fprintf fmt "Yarn(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Pnpm { subcommand; args }) ->
+    Format.fprintf fmt "Pnpm(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Uv { subcommand; args }) ->
+    Format.fprintf fmt "Uv(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Glab { subcommand; args }) ->
+    Format.fprintf fmt "Glab(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Pytest { subcommand; args }) ->
+    Format.fprintf fmt "Pytest(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Terminal_notifier { title; message }) ->
+    Format.fprintf fmt "Terminal_notifier(title=%s, message=%s)" title message
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

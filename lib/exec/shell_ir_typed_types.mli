@@ -331,6 +331,36 @@ and (_, _, _, _) command =
       ; args : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Yarn :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Pnpm :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Uv :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Glab :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Pytest :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Terminal_notifier :
+      { title : string
+      ; message : string
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

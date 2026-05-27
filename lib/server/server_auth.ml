@@ -582,7 +582,13 @@ let cors_headers origin =
 
 let respond_json_with_cors ?(status = `OK) request reqd body =
   let origin = get_origin request in
-  Http_server_eio.Response.json ~status ~extra_headers:(cors_headers origin) body reqd
+  Http_server_eio.Response.json ~status ~request
+    ~extra_headers:(cors_headers origin) body reqd
+
+let respond_json_value_with_cors ?(status = `OK) request reqd value =
+  let origin = get_origin request in
+  Http_server_eio.Response.json_value ~status ~request
+    ~extra_headers:(cors_headers origin) value reqd
 
 let public_read_cors_headers request =
   match public_read_cors_origin_opt request with
@@ -591,7 +597,11 @@ let public_read_cors_headers request =
 
 let respond_public_read_json ?(status = `OK) request reqd body =
   Http_server_eio.Response.json ~status
-    ~extra_headers:(public_read_cors_headers request) body reqd
+    ~request ~extra_headers:(public_read_cors_headers request) body reqd
+
+let respond_public_read_json_value ?(status = `OK) request reqd value =
+  Http_server_eio.Response.json_value ~status
+    ~request ~extra_headers:(public_read_cors_headers request) value reqd
 
 let auth_error_json err =
   Yojson.Safe.to_string

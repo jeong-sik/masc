@@ -171,8 +171,7 @@ let add_routes router =
              let json =
                list_response ?kind_filter ?created_by_filter ?query ()
              in
-             respond_public_read_json ~status:`OK request reqd
-               (Yojson.Safe.to_string json))
+             respond_public_read_json_value ~status:`OK request reqd json)
            request reqd)
   |> Http.Router.prefix_get "/api/v1/multimodal/get/"
        (fun request reqd ->
@@ -184,19 +183,13 @@ let add_routes router =
                  ~prefix:"/api/v1/multimodal/get/" path
              with
              | None ->
-                 respond_public_read_json ~status:`Bad_request
-                   request reqd
-                   (Yojson.Safe.to_string
-                      (`Assoc
-                        [
-                          ("error", `String "id required");
-                        ]))
+                 respond_public_read_json_value ~status:`Bad_request request
+                   reqd (`Assoc [ ("error", `String "id required") ])
              | Some id_str ->
                  let json, status =
                    artifact_response ~id_str
                  in
-                 respond_public_read_json ~status request reqd
-                   (Yojson.Safe.to_string json))
+                 respond_public_read_json_value ~status request reqd json)
            request reqd)
   |> Http.Router.prefix_get "/api/v1/multimodal/provenance/"
        (fun request reqd ->
@@ -208,17 +201,11 @@ let add_routes router =
                  ~prefix:"/api/v1/multimodal/provenance/" path
              with
              | None ->
-                 respond_public_read_json ~status:`Bad_request
-                   request reqd
-                   (Yojson.Safe.to_string
-                      (`Assoc
-                        [
-                          ("error", `String "id required");
-                        ]))
+                 respond_public_read_json_value ~status:`Bad_request request
+                   reqd (`Assoc [ ("error", `String "id required") ])
              | Some id_str ->
                  let json, status =
                    provenance_response ~id_str
                  in
-                 respond_public_read_json ~status request reqd
-                   (Yojson.Safe.to_string json))
+                 respond_public_read_json_value ~status request reqd json)
            request reqd)

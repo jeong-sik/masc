@@ -704,7 +704,6 @@ export function toolSummary(row: FleetRow): { label: string; title: string } {
 
 export interface FleetSummaryCounts {
   live: number
-  toolCovered: number
   toolTelemetryCovered: number
   toolActive: number
   toolQuiet: number
@@ -751,8 +750,6 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
   ).length
   return {
     live,
-    // Back-compat alias: coverage means "tool telemetry is known", not active usage.
-    toolCovered: toolTelemetryCovered,
     toolTelemetryCovered,
     toolActive,
     toolQuiet,

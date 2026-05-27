@@ -368,7 +368,10 @@ let case_for_name name =
         merge_expectation generic_case.expectation
           (extra_guard_fragments_for_name name);
     }
-  else if string_starts_with ~prefix:"keeper_" name then
+  else if
+    string_starts_with ~prefix:"keeper_" name
+    || string_starts_with ~prefix:"tool_" name
+  then
     {
       init_mode = Init_joined;
       prepare = (fun fixture -> prepare_keeper_name fixture name);

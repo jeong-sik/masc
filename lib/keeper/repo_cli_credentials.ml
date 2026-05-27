@@ -31,7 +31,7 @@ type keeper_binding = {
 
 let bundle_root (config : Coord.config) ~(repo_cli_identity : string) =
   Filename.concat
-    (Filename.concat (Coord.masc_dir config) "github-identities")
+    (Filename.concat (Coord.masc_dir config) "repo-cli-identities")
     repo_cli_identity
 
 let root_bundle_root config =
@@ -115,15 +115,15 @@ let binding_of_mapped_credential
     ~(keeper_name : string)
     ~(defaults : Keeper_types_profile.keeper_profile_defaults)
     (cred : Repo_manager_types.credential) =
-  match defaults.github_identity, defaults.git_identity_mode with
-  | Some expected, Some "github_identity"
+  match defaults.repo_cli_identity, defaults.git_identity_mode with
+  | Some expected, Some "repo_cli_identity"
     when not (credential_matches_explicit_repo_cli_identity ~expected cred) ->
       let gh_config_dir =
         Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir
       in
       Error
         (Printf.sprintf
-           "keeper %s declares github_identity %s but credential mapping selected credential_id=%s username=%s gh_config_dir=%s. Update keeper_repo_mappings.toml or the keeper TOML so both credential SSOTs agree."
+           "keeper %s declares repo_cli_identity %s but credential mapping selected credential_id=%s username=%s gh_config_dir=%s. Update keeper_repo_mappings.toml or the keeper TOML so both credential SSOTs agree."
            keeper_name expected cred.id cred.username gh_config_dir)
   | _ -> (
       match cred.gh_config_dir with
@@ -148,7 +148,7 @@ let binding_of_mapped_credential
             let git_identity_mode =
               match defaults.git_identity_mode with
               | Some "keeper_alias" -> "keeper_alias"
-              | _ -> "github_identity"
+              | _ -> "repo_cli_identity"
             in
             Ok
               (binding_of_repo_cli_identity

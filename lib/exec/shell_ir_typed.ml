@@ -399,5 +399,29 @@ let pp fmt = function
       (Format.pp_print_list Format.pp_print_string) args
   | W (Terminal_notifier { title; message }) ->
     Format.fprintf fmt "Terminal_notifier(title=%s, message=%s)" title message
+  | W (Ruff { subcommand; args }) ->
+    Format.fprintf fmt "Ruff(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Pyright { subcommand; args }) ->
+    Format.fprintf fmt "Pyright(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Tsc { subcommand; args }) ->
+    Format.fprintf fmt "Tsc(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Ocamlfind { subcommand; args }) ->
+    Format.fprintf fmt "Ocamlfind(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Rustc { subcommand; args }) ->
+    Format.fprintf fmt "Rustc(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Gofmt { subcommand; args }) ->
+    Format.fprintf fmt "Gofmt(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Gradle { subcommand; args }) ->
+    Format.fprintf fmt "Gradle(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Ninja { subcommand; args }) ->
+    Format.fprintf fmt "Ninja(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

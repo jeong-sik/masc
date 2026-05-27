@@ -359,5 +359,21 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Pytest, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Terminal_notifier { title; message }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Terminal_notifier, [ arg title; arg message ]) ]
+  | Shell_ir_typed.W (Ruff { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ruff, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Pyright { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pyright, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Tsc { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tsc, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Ocamlfind { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ocamlfind, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Rustc { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rustc, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Gofmt { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gofmt, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Gradle { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gradle, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Ninja { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ninja, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

@@ -2540,6 +2540,262 @@ let rec parse title message = function
 in
 parse None None args|}
     }
+  ; { name = "Ruff"
+    ; anon_pattern = "Ruff _"
+    ; bind_pattern = "Ruff { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ruff
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Ruff"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ruff { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Pyright"
+    ; anon_pattern = "Pyright _"
+    ; bind_pattern = "Pyright { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pyright
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pyright"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Tsc"
+    ; anon_pattern = "Tsc _"
+    ; bind_pattern = "Tsc { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Tsc
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Tsc"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Ocamlfind"
+    ; anon_pattern = "Ocamlfind _"
+    ; bind_pattern = "Ocamlfind { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ocamlfind
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Ocamlfind"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ocamlfind { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Rustc"
+    ; anon_pattern = "Rustc _"
+    ; bind_pattern = "Rustc { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Rustc
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Rustc"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Gofmt"
+    ; anon_pattern = "Gofmt _"
+    ; bind_pattern = "Gofmt { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Gofmt
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Gofmt"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Gradle"
+    ; anon_pattern = "Gradle _"
+    ; bind_pattern = "Gradle { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Gradle
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Gradle"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gradle { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Ninja"
+    ; anon_pattern = "Ninja _"
+    ; bind_pattern = "Ninja { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ninja
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Ninja"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"

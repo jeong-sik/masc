@@ -121,6 +121,14 @@ let constructor_label = function
      | Shell_ir_typed.Glab _ -> "Glab"
      | Shell_ir_typed.Pytest _ -> "Pytest"
      | Shell_ir_typed.Terminal_notifier _ -> "Terminal_notifier"
+     | Shell_ir_typed.Ruff _ -> "Ruff"
+     | Shell_ir_typed.Pyright _ -> "Pyright"
+     | Shell_ir_typed.Tsc _ -> "Tsc"
+     | Shell_ir_typed.Ocamlfind _ -> "Ocamlfind"
+     | Shell_ir_typed.Rustc _ -> "Rustc"
+     | Shell_ir_typed.Gofmt _ -> "Gofmt"
+     | Shell_ir_typed.Gradle _ -> "Gradle"
+     | Shell_ir_typed.Ninja _ -> "Ninja"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

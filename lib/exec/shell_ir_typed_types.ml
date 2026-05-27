@@ -371,6 +371,46 @@ and (_, _, _, _) command =
       ; message : string
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Ruff :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Pyright :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Tsc :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Ocamlfind :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Rustc :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Gofmt :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Gradle :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Ninja :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

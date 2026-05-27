@@ -94,6 +94,14 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Glab { subcommand = "mr"; args = [ "list"; "--state"; "opened" ] })
   ; W (Pytest { subcommand = ""; args = [ "-v"; "tests/" ] })
   ; W (Terminal_notifier { title = "Done"; message = "Build finished" })
+  ; W (Ruff { subcommand = "check"; args = [ "--fix" ] })
+  ; W (Pyright { subcommand = ""; args = [ "--project"; "." ] })
+  ; W (Tsc { subcommand = ""; args = [ "--noEmit" ] })
+  ; W (Ocamlfind { subcommand = "list"; args = [ "-desc" ] })
+  ; W (Rustc { subcommand = ""; args = [ "--edition"; "2021" ] })
+  ; W (Gofmt { subcommand = ""; args = [ "-w"; "main.go" ] })
+  ; W (Gradle { subcommand = "build"; args = [ "--no-daemon" ] })
+  ; W (Ninja { subcommand = ""; args = [ "-j4" ] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -181,9 +189,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    71
+    79
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 71 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 79 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -269,6 +277,14 @@ let test_of_simple_round_trip () =
     ; W (Glab { subcommand = "ci"; args = [ "status" ] })
     ; W (Pytest { subcommand = ""; args = [ "--cov" ] })
     ; W (Terminal_notifier { title = "Test"; message = "All passed" })
+    ; W (Ruff { subcommand = "format"; args = [ "--check"; "src/" ] })
+    ; W (Pyright { subcommand = ""; args = [ "--strict" ] })
+    ; W (Tsc { subcommand = ""; args = [ "--project"; "tsconfig.json" ] })
+    ; W (Ocamlfind { subcommand = "query"; args = [ "eio" ] })
+    ; W (Rustc { subcommand = ""; args = [ "-O"; "src/main.rs" ] })
+    ; W (Gofmt { subcommand = ""; args = [ "-l"; "." ] })
+    ; W (Gradle { subcommand = "test"; args = [ "--info" ] })
+    ; W (Ninja { subcommand = ""; args = [ "-C"; "build" ] })
     ]
   in
   List.iter
@@ -363,6 +379,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Rsync"; "Node"; "Python"; "Python3"; "Pip"; "Patch"; "Npm"
     ; "Cargo"; "Go"; "Gh"; "Chmod"; "Chown"; "Docker"; "Opam"; "Npx"
     ; "Yarn"; "Pnpm"; "Uv"; "Glab"; "Pytest"; "Terminal_notifier"
+    ; "Ruff"; "Pyright"; "Tsc"; "Ocamlfind"; "Rustc"; "Gofmt"; "Gradle"; "Ninja"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

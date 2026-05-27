@@ -928,7 +928,7 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
             pending_count: 1,
             pending_first: {
               id: 'appr_2cae9bec14f6',
-              tool_name: 'masc_worktree_create',
+              tool_name: 'Execute',
               task_id: 'task-187',
               blocker_class: 'blocked_before_worktree',
             },
@@ -938,7 +938,7 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
     ])
     expect(keeper?.trust?.approval_state?.pending_first).toEqual({
       id: 'appr_2cae9bec14f6',
-      tool_name: 'masc_worktree_create',
+      tool_name: 'Execute',
       task_id: 'task-187',
       blocker_class: 'blocked_before_worktree',
     })

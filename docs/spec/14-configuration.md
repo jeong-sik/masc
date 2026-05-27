@@ -297,7 +297,7 @@ type tier = Essential | Standard | Full
 
 | Tier | 도구 수 | 용도 |
 |------|---------|------|
-| Essential | ~21 | 핵심 워크플로우 (`join`, `add_task`, `broadcast`, `heartbeat`, `worktree_create` 등) |
+| Essential | ~21 | 핵심 워크플로우 (`join`, `add_task`, `broadcast`, `heartbeat`, repo worktree workflow 등) |
 | Standard | ~50 | Essential + Board, Governance V2, Handover, Spawn |
 | Full | 전체 | 모든 등록 도구 |
 

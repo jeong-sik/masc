@@ -440,30 +440,27 @@ type mode =
 
 ---
 
-## 9. Git Operations (`coord_git`)
+## 9. Repo Worktree Workflow
 
 에이전트별 git worktree 격리.
 
-### 9.1 Worktree Create
+### 9.1 Worktree Preparation
 
-```
-Coord_git.create ~agent_name ~task_id ~base_branch
-```
+Worktree preparation is an ordinary repository workflow. Agents use typed
+`Execute` with explicit `git` argv from a scoped repository cwd; coordination
+state may record the resulting path, but there is no standalone coordination tool
+for this workflow.
 
 1. git 저장소 검증 (`.git` 존재 확인)
 2. worktree 경로 생성: `.worktrees/{agent_name}-{task_id}`
 3. branch 이름: `{agent_name}/{task_id}`
-4. `git fetch origin` -> `git worktree add` (base branch에서 분기)
+4. typed `Execute` runs `git fetch origin` -> `git worktree add` (base branch에서 분기)
 5. 에이전트 `current_task` 갱신
 6. 태스크 backlog에 `worktree_info` 연결 (`link_task` 옵션)
 
-### 9.2 Worktree Remove
+### 9.2 Worktree Cleanup
 
-```
-Coord_git.remove ~agent_name ~task_id
-```
-
-- `git worktree remove --force`
+- typed `Execute` may run `git worktree remove --force`
 - 로컬 브랜치 삭제
 
 ### 9.3 Task Worktree Metadata

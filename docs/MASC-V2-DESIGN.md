@@ -264,8 +264,8 @@ git worktree prune
 {"seq":2,"type":"agent_leave","agent":"agent-llm-a","reason":"session_end","ts":"..."}
 
 // Worktree lifecycle
-{"seq":3,"type":"worktree_create","agent":"agent-llm-a","branch":"agent-llm-a/PK-123","ts":"..."}
-{"seq":4,"type":"worktree_remove","agent":"agent-llm-a","branch":"agent-llm-a/PK-123","ts":"..."}
+{"seq":3,"type":"worktree_prepared","agent":"agent-llm-a","branch":"agent-llm-a/PK-123","ts":"..."}
+{"seq":4,"type":"worktree_cleaned","agent":"agent-llm-a","branch":"agent-llm-a/PK-123","ts":"..."}
 
 // Task lifecycle
 {"seq":5,"type":"task_claim","agent":"agent-llm-a","task":"PK-123","ts":"..."}

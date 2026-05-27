@@ -78,7 +78,7 @@ Source-level boundary tests prevent regressions in layer ownership:
 The boundary test intentionally fails if:
 
 - tool code reintroduces Docker path literals or profile detection;
-- coord worktree helpers reintroduce Docker container-root construction
+- coord repo-path helpers reintroduce Docker container-root construction
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification or parses
   raw shell commands directly;

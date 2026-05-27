@@ -182,7 +182,7 @@ let manual_help_entry name =
             "Returns the canonical short description, visibility metadata, and detailed help for a specific tool.";
           doc_refs = [ "docs/COMMAND-PLANE-RUNBOOK.md" ];
           prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
-          examples = [ "name='keeper_task_done'"; "name='masc_worktree_create'" ];
+          examples = [ "name='keeper_task_done'"; "name='masc_plan_set_task'" ];
           alternatives = [];
         }
   | "masc_tool_admin_snapshot" ->
@@ -332,28 +332,6 @@ let manual_help_entry name =
               "task_id='task-123'";
             ];
           alternatives = [];
-        }
-  | "masc_worktree_create" ->
-      Some
-        {
-          name;
-          short_description = "Create a git worktree linked to a MASC task.";
-          when_to_use =
-            "Use at the start of a task that needs an isolated working tree (3+ file modifications, multi-agent coordination, branch-based PR workflow).";
-          key_constraints =
-            [
-              "Branch name must follow the repo convention (feature/PK-… or fix/…).";
-              "Worktree path is repo-local under .worktrees/ — never absolute or outside the repo root.";
-            ];
-          details_markdown =
-            "Backed by git worktree add; the resulting path is recorded against the task so coordination tools can surface it.";
-          doc_refs = [ "instructions/workflow-git.md" ];
-          prompt_hints = [];
-          examples =
-            [
-              "branch='feat/rfc-0195-descriptor-enrichment' base='origin/main'";
-            ];
-          alternatives = [ "masc_worktree_remove" ];
         }
   | "masc_plan_set_task" ->
       Some

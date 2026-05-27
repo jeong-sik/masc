@@ -154,10 +154,10 @@ let test_synonym_code_read () =
   check bool "synonym: tool_read_file via 'read source'" true
     (has_tool "tool_read_file" result)
 
-let test_synonym_worktree_create () =
+let test_synonym_worktree_prepare () =
   let result = Tool_prefilter.filter
     ~tools:extended_tools ~query:"create a new worktree" ~k:3 in
-  check bool "synonym: tool_execute via 'create worktree'" true
+  check bool "synonym: tool_execute via worktree preparation request" true
     (has_tool "tool_execute" result)
 
 let test_synonym_web_search () =
@@ -260,7 +260,7 @@ let () =
           test_case "claim_next via synonym" `Quick test_synonym_claim_next;
           test_case "code_search via synonym" `Quick test_synonym_code_search;
           test_case "code_read via synonym" `Quick test_synonym_code_read;
-          test_case "worktree_create via synonym" `Quick test_synonym_worktree_create;
+          test_case "worktree preparation via synonym" `Quick test_synonym_worktree_prepare;
           test_case "web_search via synonym" `Quick test_synonym_web_search;
         ] );
       ( "zero_result",

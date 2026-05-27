@@ -194,7 +194,7 @@ code_refs:
 - `GET /api/v1/dashboard/execution`
 - `GET /api/v1/dashboard/governance`
 - `GET /api/v1/dashboard/proof`
-  - compatibility proof index over verification requests, TLA result refs, keeper feature proof, safe autonomy, execution trust, and surface readiness routes
+  - compatibility proof index over verification requests, TLA result refs, keeper feature proof, execution trust, and surface readiness routes
 - `GET /api/v1/dashboard/goals`
 - `GET /api/v1/dashboard/config`
 - `GET /api/v1/dashboard/feature-health`

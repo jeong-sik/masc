@@ -214,8 +214,6 @@ check_http "attribution summary 200" "$BASE/api/v1/attribution/summary" "200"
 check_json "attribution summary has gates" "$BASE/api/v1/attribution/summary" "'gates' in d" '^True$'
 check_http "attribution recent 200" "$BASE/api/v1/attribution/recent?limit=1" "200"
 check_json "attribution recent exposes events" "$BASE/api/v1/attribution/recent?limit=1" "'events' in d and 'count' in d" '^True$'
-check_http "safe autonomy 200" "$BASE/api/v1/dashboard/safe-autonomy" "200"
-check_json "safe autonomy exposes scorecard" "$BASE/api/v1/dashboard/safe-autonomy" "'summary' in d and 'domains' in d and 'per_keeper' in d" '^True$'
 check_http "dashboard governance 200" "$BASE/api/v1/dashboard/governance" "200"
 check_json "dashboard governance exposes judge and queue" "$BASE/api/v1/dashboard/governance" "'summary' in d and 'judge' in d and 'approval_queue' in d" '^True$'
 check_http "dashboard proof 200" "$BASE/api/v1/dashboard/proof" "200"

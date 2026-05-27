@@ -77,3 +77,20 @@ export function isFiniteMetricValue(value: number | null | undefined): value is 
 export function clampPct(value: number): number {
   return Math.max(0, Math.min(100, value))
 }
+
+/**
+ * Clamp a value into the unit interval `[0, 1]`. Used for ratios,
+ * probabilities, and normalised cursor positions before they get
+ * multiplied into a wider range (× 100 for a percentage, × pixel
+ * width for a coordinate, etc.).
+ *
+ * Four callsites previously inlined `Math.max(0, Math.min(1, ...))`
+ * (`board-curation-panel.ts` quality display, `observatory/cursor-store.ts`
+ * pointer position, `memory-subsystems.ts` weight opacity + chart Y).
+ *
+ * Does not handle `NaN`: a `NaN` input returns `NaN`. Pair with
+ * `isFiniteMetricValue` when the source might be invalid.
+ */
+export function clampUnitInterval(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}

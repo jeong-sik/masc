@@ -9,10 +9,11 @@ import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { MISSING_DATA_DASH } from '../../lib/format-string'
+import { clampUnitInterval } from '../../lib/format-number'
 
 function percent(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return MISSING_DATA_DASH
-  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
+  return `${Math.round(clampUnitInterval(value) * 100)}%`
 }
 
 function postIdList(ids: readonly string[]) {

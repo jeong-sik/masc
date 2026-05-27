@@ -6,6 +6,7 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { MermaidGraph } from './common/mermaid-graph'
 import { Select } from './common/select'
+import { clampUnitInterval } from '../lib/format-number'
 import {
   fetchMemorySubsystems,
   type MemorySubsystemsResponse,
@@ -160,7 +161,7 @@ const weightBarClass = (w: number) => weightTier(w).tw
 // Floor 0.25 keeps low-weight cells distinguishable from empty (undefined)
 // cells drawn at var(--color-bg-panel-alt). Floor and range are arbitrary — picked by eye,
 // not derived from a perceptual model. Tune if empty/low contrast is wrong.
-const weightOpacity = (w: number) => 0.25 + 0.75 * Math.sqrt(Math.max(0, Math.min(1, w)))
+const weightOpacity = (w: number) => 0.25 + 0.75 * Math.sqrt(clampUnitInterval(w))
 
 /**
  * Pure filter for the Hebbian synapses table rows.
@@ -344,7 +345,7 @@ function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
   const points = chronological
     .map(([, weight], i) => {
       const x = (i / (n - 1)) * (sw - 2) + 1
-      const y = sh - 1 - Math.max(0, Math.min(1, weight)) * (sh - 2)
+      const y = sh - 1 - clampUnitInterval(weight) * (sh - 2)
       return `${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(' ')

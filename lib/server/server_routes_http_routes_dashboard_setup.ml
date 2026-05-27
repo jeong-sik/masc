@@ -69,13 +69,19 @@ let dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.dashboard_
 let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
 
 let executable_file_exists path =
+  (* RFC-0145 — narrow from a wildcard catch-all to the only exceptions
+     [Sys.is_directory] and [Unix.access] raise when the path is
+     missing, not a directory, or not executable.  Other runtime
+     exceptions propagate so we do not silently report a healthy
+     filesystem as non-executable. *)
   try
     Sys.file_exists path
     && not (Sys.is_directory path)
     &&
     (Unix.access path [ Unix.X_OK ];
      true)
-  with _ -> false
+  with
+  | Sys_error _ | Unix.Unix_error _ -> false
 
 let append_unique candidate acc =
   match candidate with

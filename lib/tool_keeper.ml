@@ -745,5 +745,18 @@ let () =
               ?net
               args)
        | _ -> eio_required "masc_keeper_msg")
+    | "masc_keeper_up" ->
+      (match sw, clock with
+       | Some sw, Some clock ->
+         Some
+           (Tool_keeper_ops.keeper_up_body
+              ~config
+              ~agent_name
+              ~sw
+              ~clock
+              ?proc_mgr
+              ?net
+              args)
+       | _ -> eio_required "masc_keeper_up")
     | _ -> None
 ;;

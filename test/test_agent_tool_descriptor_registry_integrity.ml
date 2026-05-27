@@ -317,6 +317,7 @@ let cluster_projection_table =
   ; "masc_keeper_repair", "tool_masc_keeper_dispatch"
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
   ; "masc_keeper_msg", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_up", "tool_masc_keeper_dispatch"
   ; "masc_surface_audit", "tool_masc_surface_audit"
   ]
 ;;

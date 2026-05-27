@@ -393,6 +393,24 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           (true, Yojson.Safe.to_string json)
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
+
+(* RFC-0182 Phase 5 PR-B.2: ctx-free body for [masc_keeper_up].  Same
+   pattern as [keeper_msg_body] — construct a fresh keeper context
+   from threaded Eio resources and delegate to the existing
+   [Turn.handle_keeper_up] (via execute_keeper_up). *)
+let keeper_up_body
+      ~(config : Coord.config)
+      ~(agent_name : string)
+      ~(sw : Eio.Switch.t)
+      ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+      ?proc_mgr
+      ?net
+      args : tool_result =
+  let keeper_ctx : _ Keeper_types.context =
+    { config; agent_name; sw; clock; proc_mgr; net }
+  in
+  with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)
+;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_status_body ~(config : Coord.config) ~(agent_name : string) args : tool_result =
   match prepare_passive_keeper_identity_config ~config ~agent_name args with

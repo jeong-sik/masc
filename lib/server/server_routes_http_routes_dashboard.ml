@@ -11,17 +11,11 @@ open Server_routes_http_keeper_stream
 
 include Server_routes_http_routes_dashboard_setup
 
-(* Dashboard cache TTL tiers — grouped by data volatility.
-   config: feature flags + provider rollups (30s)
-   standard: typical dashboard surfaces (5s)
-   live: frequently-changing data (3s)
-   realtime: near-realtime feeds (2s)
-   feature_health: minute-scale flags, 3.5s compute cost (60s) *)
-let config_cache_ttl_s = 30.0
-let standard_cache_ttl_s = 5.0
-let live_cache_ttl_s = 3.0
-let realtime_cache_ttl_s = 2.0
-let feature_health_cache_ttl_s = 60.0
+let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
+let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
+let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 
 let dashboard_error_json ?ok message =
   let fields = [ ("error", `String message) ] in

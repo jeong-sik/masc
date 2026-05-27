@@ -7,9 +7,7 @@ include Server_dashboard_http_namespace_truth
 open Masc_domain
 open Server_utils
 
-(* Board/governance surface cache TTL — 10 seconds.  These surfaces
-   involve policy evaluation and are moderately dynamic. *)
-let board_governance_cache_ttl_s = 10.0
+let board_governance_cache_ttl_s = Server_dashboard_http_core_cache.board_governance_cache_ttl_s
 
 (* Wire task mutation hook: invalidate execution cache on any task
    add/transition so the dashboard serves fresh backlog data. *)

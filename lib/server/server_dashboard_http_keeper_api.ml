@@ -5,8 +5,8 @@
 
 include Server_dashboard_http_keeper_api_post
 
-(* Cache TTL — standard SWR window for keeper tool-stats. *)
-let standard_cache_ttl_s = 5.0
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
@@ -145,7 +145,6 @@ let handle_keeper_get_subroutes state req request reqd =
               | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
               | None -> None
             in
-            let freshness_slo_s = 300.0 in
             let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
             let coverage_gaps =
               Telemetry_coverage_gap.read_recent ~masc_root ~n:32
@@ -239,7 +238,6 @@ let handle_keeper_get_subroutes state req request reqd =
             | None -> acc)
           None entries
       in
-      let freshness_slo_s = 300.0 in
       let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
       let latest_age_s =
         match latest_ts with

@@ -44,7 +44,7 @@ let operator_generated_at_iso json =
 
 let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
-let standard_cache_ttl_s = 5.0
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
 let operator_cache_json ?cache_key ~scope json =
   let diagnostic_field key =

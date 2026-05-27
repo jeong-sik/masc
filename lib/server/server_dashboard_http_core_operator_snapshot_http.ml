@@ -27,9 +27,7 @@
     Pairs with `Server_dashboard_http_core_operator_digest_http`
     (#17389) for symmetric snapshot+digest handler extraction. *)
 
-(* Cache TTL — standard SWR window (matches [standard_cache_ttl_s] in
-   [server_routes_http_routes_dashboard.ml]). *)
-let standard_cache_ttl_s = 5.0
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
 open Server_utils
 open Server_auth

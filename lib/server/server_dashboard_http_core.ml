@@ -5,13 +5,8 @@ open Server_auth
 (* Re-export cache types and helpers from sub-module *)
 include Server_dashboard_http_cache
 
-(* Deep dashboard surface cache TTL — 2 minutes.  Used for mission
-   and execution surfaces that involve multi-step compute. *)
-let deep_surface_cache_ttl_s = 120.0
-
-(* Shell dashboard surface cache TTL — 15 seconds.  Shell state
-   changes more frequently than deep surfaces. *)
-let shell_surface_cache_ttl_s = 15.0
+let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
+let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
 
 type dashboard_compute_mode =
       Server_dashboard_http_runtime_support.dashboard_compute_mode =

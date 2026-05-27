@@ -7,6 +7,42 @@
 
 let dashboard_request_timeout_s = 30.0
 
+(** Standard SWR cache TTL — 5 seconds. Used by most dashboard
+    endpoints for stale-while-revalidate caching. *)
+let standard_cache_ttl_s = 5.0
+
+(** Deep dashboard surface cache TTL — 2 minutes. Used for mission
+    and execution surfaces that involve multi-step compute. *)
+let deep_surface_cache_ttl_s = 120.0
+
+(** Shell dashboard surface cache TTL — 15 seconds. Shell state
+    changes more frequently than deep surfaces. *)
+let shell_surface_cache_ttl_s = 15.0
+
+(** Keeper freshness SLO — 5 minutes. Data older than this is
+    reported as stale in keeper tool-stats and tool-calls. *)
+let freshness_slo_s = 300.0
+
+(** Config cache TTL — 30 seconds. Feature flags and provider rollups
+    that change infrequently. *)
+let config_cache_ttl_s = 30.0
+
+(** Live cache TTL — 3 seconds. Frequently-changing data such as
+    active keeper state and agent status. *)
+let live_cache_ttl_s = 3.0
+
+(** Realtime cache TTL — 2 seconds. Near-realtime feeds where
+    staleness is immediately visible. *)
+let realtime_cache_ttl_s = 2.0
+
+(** Feature health cache TTL — 60 seconds. Minute-scale flags with
+    ~3.5s compute cost. *)
+let feature_health_cache_ttl_s = 60.0
+
+(** Board governance cache TTL — 10 seconds. Board curation and
+    governance surfaces. *)
+let board_governance_cache_ttl_s = 10.0
+
 (** Track whether shell cache has been populated at least once.
     Atomic.t for cross-domain visibility: read from executor pool
     worker domains via namespace-truth and warmup helpers. *)

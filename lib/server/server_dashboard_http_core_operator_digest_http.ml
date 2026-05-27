@@ -25,9 +25,7 @@
     Pure helper move (no callback injection). All references reach
     existing siblings or top-level libraries. *)
 
-(* Cache TTL — standard SWR window (matches [standard_cache_ttl_s] in
-   [server_routes_http_routes_dashboard.ml]). *)
-let standard_cache_ttl_s = 5.0
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
 open Server_utils
 open Server_auth

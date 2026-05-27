@@ -5,8 +5,7 @@
 
 module Http = Http_server_eio
 
-(* Cache TTL — standard SWR window for task history. *)
-let standard_cache_ttl_s = 5.0
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
 (* Duplicated locally to avoid sibling -> parent cycle. The parent file
    keeps its own copy because three sites there call it; both copies

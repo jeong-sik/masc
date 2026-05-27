@@ -4,13 +4,8 @@
 open Server_utils
 open Server_dashboard_http_core
 
-(* Deep dashboard surface cache TTL — 2 minutes.  Duplicated from
-   [server_dashboard_http_core.ml] because the .mli doesn't export
-   local values. *)
-let deep_surface_cache_ttl_s = 120.0
-
-(* Shell/execution-trust surface cache TTL — 15 seconds. *)
-let shell_surface_cache_ttl_s = 15.0
+let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
+let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
 
 (* Routed through Env_config_runtime.Dashboard so operators can raise
    the ceiling on slow-disk deployments without a rebuild. The outer

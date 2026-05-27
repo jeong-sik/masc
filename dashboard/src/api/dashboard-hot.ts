@@ -1,13 +1,9 @@
-import { get, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import { get, NAMESPACE_TRUTH_GET_TIMEOUT_MS, type AbortableRequestOptions } from './core'
 import type {
   DashboardBootstrapResponse,
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
 } from '../types'
-
-type AbortableRequestOptions = {
-  signal?: AbortSignal
-}
 
 type DashboardShellRequestOptions = AbortableRequestOptions & {
   light?: boolean

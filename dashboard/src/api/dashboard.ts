@@ -11,7 +11,7 @@ import {
 } from './board'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
-import { currentDashboardActor, get, post, withRetries } from './core'
+import { currentDashboardActor, get, post, withRetries, type AbortableRequestOptions } from './core'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import {
   parseAgentRelationsResponse,
@@ -126,10 +126,6 @@ export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
 
 // --- Dashboard projections ---
-
-type AbortableRequestOptions = {
-  signal?: AbortSignal
-}
 
 export type DashboardFeedRetention = Record<string, unknown> & {
   scope?: string

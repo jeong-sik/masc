@@ -267,7 +267,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
              Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
           else if effective_activity_age_s >= keeper_action_stale_sec then
             (Exec_warning, Tone_warn,
-             Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. 3600.0))
+             Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. Masc_time_constants.hour))
           else
             (Exec_healthy, Tone_ok, "정상 동작 중")
   in

@@ -13,7 +13,7 @@ open Dashboard_http_helpers
 let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.config)
     : Yojson.Safe.t =
   let window_hours = 1.0 in
-  let since = now_ts -. (window_hours *. 3600.0) in
+  let since = now_ts -. (window_hours *. Masc_time_constants.hour) in
   let entries =
     try Audit_log.read_entries ~n:50_000 config
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -118,7 +118,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
     let new_posts_24h =
       List.fold_left
         (fun acc (p : Board.post) ->
-          if p.created_at >= (now_ts -. (24.0 *. 3600.0)) then acc + 1 else acc)
+          if p.created_at >= (now_ts -. Masc_time_constants.day) then acc + 1 else acc)
         0 posts
     in
     let unanswered_posts =

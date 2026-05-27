@@ -83,7 +83,7 @@ let max_runtime_events = 12
 let max_recent_verdicts = 8
 let max_signal_scan = 500
 let runtime_stale_after_s = 30. *. 60.
-let evaluator_stale_after_s = 12. *. 3600.
+let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
 
 (** Runtime health warning thresholds. Distinct from compaction thresholds.
     Values sourced from [Env_config_keeper.DashboardHealth]. *)

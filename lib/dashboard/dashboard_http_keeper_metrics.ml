@@ -236,7 +236,7 @@ let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
 let keeper_metrics_24h_json
     ~(metrics_lines : string list)
     ~(now_ts : float) : Yojson.Safe.t * Yojson.Safe.t =
-  let window_sec = 24.0 *. 3600.0 in
+  let window_sec = Masc_time_constants.day in
   let start_ts = now_ts -. window_sec in
   let lines = metrics_lines in
   let buckets : (int, keeper_24h_bucket_stats) Hashtbl.t = Hashtbl.create 64 in
@@ -253,7 +253,7 @@ let keeper_metrics_24h_json
         then begin
           incr sample_points;
           let bucket_ts =
-            int_of_float (floor (ts_unix /. 3600.0) *. 3600.0)
+            int_of_float (floor (ts_unix /. Masc_time_constants.hour) *. Masc_time_constants.hour)
           in
           let b =
             match Hashtbl.find_opt buckets bucket_ts with

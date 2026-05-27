@@ -148,7 +148,7 @@ let last_warn_log_at = Atomic.make 0.0
 let log_throttled_warn (mk_msg : unit -> string) =
   let now = Time_compat.now () in
   let last = Atomic.get last_warn_log_at in
-  if now -. last >= 3600.0 && Atomic.compare_and_set last_warn_log_at last now
+  if now -. last >= Masc_time_constants.hour && Atomic.compare_and_set last_warn_log_at last now
   then Log.Server.warn "%s" (mk_msg ())
 ;;
 

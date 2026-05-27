@@ -37,10 +37,6 @@ import {
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
 
-// Re-export to preserve the public path used by existing callers. The
-// canonical source now lives in `./ide-state` to avoid circular imports.
-export { activeIdeFile }
-
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok'

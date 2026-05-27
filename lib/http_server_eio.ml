@@ -149,35 +149,58 @@ let safe_respond_with_string reqd response body =
 module Response = struct
   let html_cache_control = "no-store, max-age=0, must-revalidate"
 
+  let text_plain_content_type = "text/plain; charset=utf-8"
+  let html_content_type = "text/html; charset=utf-8"
+  let json_content_type = "application/json; charset=utf-8"
+
+  let content_headers ?(before_headers = []) ?(after_headers = [])
+      ?(tail_headers = []) ~content_type body =
+    let content_length = string_of_int (String.length body) in
+    let base_headers_rev = [
+      ("content-length", content_length);
+      ("content-type", content_type);
+    ] in
+    match before_headers, after_headers, tail_headers with
+    | [], [], [] -> Httpun.Headers.of_rev_list base_headers_rev
+    | _ ->
+        let rev_headers = List.rev before_headers in
+        let rev_headers =
+          List.rev_append
+            [("content-type", content_type); ("content-length", content_length)]
+            rev_headers
+        in
+        let rev_headers = List.rev_append after_headers rev_headers in
+        Httpun.Headers.of_rev_list (List.rev_append tail_headers rev_headers)
+
+  let response ?before_headers ?after_headers ?tail_headers ~content_type status body =
+    Httpun.Response.create
+      ~headers:(content_headers ?before_headers ?after_headers ?tail_headers ~content_type body)
+      status
+
+  let static_response ~content_type status body =
+    response ~content_type status body, body
+
+  let not_found_response =
+    static_response ~content_type:text_plain_content_type `Not_found "404 Not Found"
+
+  let method_not_allowed_response =
+    static_response ~content_type:text_plain_content_type `Method_not_allowed
+      "405 Method Not Allowed"
+
   let text ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list ([
-      ("content-type", "text/plain; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ]) in
-    let response = Httpun.Response.create ~headers status in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~content_type:text_plain_content_type status body)
+      body
 
   let html ?(status = `OK) ?(headers = []) body reqd =
-    let base_headers = [
-      ("content-type", "text/html; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ] in
-    let response = Httpun.Response.create
-      ~headers:(Httpun.Headers.of_list (base_headers @ headers))
-      status
-    in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~after_headers:headers ~content_type:html_content_type status body)
+      body
 
   let bytes ?(status = `OK) ?(headers = []) ~content_type body reqd =
-    let base_headers = [
-      ("content-type", content_type);
-      ("content-length", string_of_int (String.length body));
-    ] in
-    let response = Httpun.Response.create
-      ~headers:(Httpun.Headers.of_list (base_headers @ headers))
-      status
-    in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~after_headers:headers ~content_type status body)
+      body
 
   (** JSON response with optional zstd compression (dictionary-enhanced)
 
@@ -198,13 +221,10 @@ module Response = struct
         ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
         body
     in
-    let base_headers = [
-      ("content-type", "application/json; charset=utf-8");
-      ("content-length", string_of_int (String.length final_body));
-    ] in
-    let headers = extra_headers @ base_headers @ compression_headers in
-    let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
-    safe_respond_with_string reqd response final_body
+    safe_respond_with_string reqd
+      (response ~before_headers:extra_headers ~tail_headers:compression_headers
+         ~content_type:json_content_type status final_body)
+      final_body
 
   let json_value ?status ?compress ?extra_headers ?request value reqd =
     json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
@@ -223,12 +243,9 @@ module Response = struct
 
   (** Legacy JSON response without compression check (backwards compatible) *)
   let json_raw ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ]) in
-    let response = Httpun.Response.create ~headers status in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~content_type:json_content_type status body)
+      body
 
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).
@@ -241,10 +258,12 @@ module Response = struct
     let if_none_match = Httpun.Headers.get request.Httpun.Request.headers "if-none-match" in
     match if_none_match with
     | Some inm when String.equal inm etag_value ->
-        let headers = Httpun.Headers.of_list [
-          ("etag", etag_value);
-          ("cache-control", html_cache_control);
-        ] in
+        let headers =
+          Httpun.Headers.of_rev_list [
+            ("cache-control", html_cache_control);
+            ("etag", etag_value);
+          ]
+        in
         let response = Httpun.Response.create ~headers `Not_modified in
         safe_respond_with_string reqd response ""
     | _ ->
@@ -254,21 +273,22 @@ module Response = struct
             ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
             body
         in
-        let base_headers = [
-          ("content-type", "text/html; charset=utf-8");
-          ("content-length", string_of_int (String.length final_body));
+        let extra_headers = [
           ("etag", etag_value);
           ("cache-control", html_cache_control);
         ] in
-        let headers = base_headers @ compression_headers in
-        let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
-        safe_respond_with_string reqd response final_body
+        safe_respond_with_string reqd
+          (response ~after_headers:extra_headers ~tail_headers:compression_headers
+             ~content_type:html_content_type status final_body)
+          final_body
 
   let not_found reqd =
-    text ~status:`Not_found "404 Not Found" reqd
+    let response, body = not_found_response in
+    safe_respond_with_string reqd response body
 
   let method_not_allowed reqd =
-    text ~status:`Method_not_allowed "405 Method Not Allowed" reqd
+    let response, body = method_not_allowed_response in
+    safe_respond_with_string reqd response body
 
   let internal_error msg reqd =
     text ~status:`Internal_server_error ("500 Internal Server Error: " ^ msg) reqd
@@ -298,11 +318,10 @@ module Request = struct
          | None -> default_max_body_bytes)
 
   let respond_error reqd status body =
-    let headers = Httpun.Headers.of_list [
-      ("content-type", "text/plain; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-      ("connection", "close");
-    ] in
+    let headers =
+      Response.content_headers ~tail_headers:[("connection", "close")]
+        ~content_type:Response.text_plain_content_type body
+    in
     let response = Httpun.Response.create ~headers status in
     safe_respond_with_string reqd response body
 

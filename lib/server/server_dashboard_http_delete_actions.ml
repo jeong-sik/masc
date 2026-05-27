@@ -33,6 +33,20 @@ type keeper_purge_cleanup_result =
   ; agent_cleanup_results : agent_purge_cleanup_result list
   }
 
+let invalid_request field =
+  Printf.sprintf "invalid request: requires {\"%s\":\"...\"}" field
+;;
+
+let respond_ok ~request reqd =
+  Http.Response.json_value ~compress:true ~request (`Assoc [ ("ok", `Bool true) ]) reqd
+;;
+
+let respond_error ?(status = `Bad_request) ~request reqd message =
+  Http.Response.json_value ~status ~request
+    (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
+    reqd
+;;
+
 let rec rm_rf path =
   if Fs_compat.file_exists path
   then if Sys.is_directory path
@@ -301,21 +315,15 @@ let add_delete_action_routes router =
              let json = Yojson.Safe.from_string body_str in
              match Safe_ops.json_string_opt "post_id" json with
              | None ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   {|{"ok":false,"error":"invalid request: requires {\"post_id\":\"...\"}"}|} reqd
+                 respond_error ~request:req reqd (invalid_request "post_id")
              | Some post_id ->
              match Board_dispatch.delete_post ~post_id with
-             | Ok () ->
-                 Http.Response.json ~compress:true ~request:req
-                   {|{"ok":true}|} reqd
+             | Ok () -> respond_ok ~request:req reqd
              | Error err ->
-                 Http.Response.json ~status:`Not_found ~request:req
-                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                      (String.escaped (Board_types.show_board_error err)))
-                   reqd
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_types.show_board_error err)
            with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid request: requires {\"post_id\":\"...\"}"}|} reqd
+             respond_error ~request:req reqd (invalid_request "post_id")
          )
        ) request reqd)
 
@@ -327,22 +335,17 @@ let add_delete_action_routes router =
              let json = Yojson.Safe.from_string body_str in
              match Safe_ops.json_string_opt "task_id" json with
              | None ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   {|{"ok":false,"error":"invalid request: requires {\"task_id\":\"...\"}"}|} reqd
+                 respond_error ~request:req reqd (invalid_request "task_id")
              | Some task_id ->
              let config = state.Mcp_server.room_config in
              match Task_dispatch.delete_task config ~task_id with
-             | Ok () ->
-                 Http.Response.json ~compress:true ~request:req
-                   {|{"ok":true}|} reqd
+             | Ok () -> respond_ok ~request:req reqd
              | Error err ->
-                 Http.Response.json ~status:`Not_found ~request:req
-                   (Printf.sprintf {|{"ok":false,"error":"task delete failed: %s"}|}
-                      (String.escaped (Masc_domain.masc_error_to_string err)))
-                   reqd
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Printf.sprintf "task delete failed: %s"
+                      (Masc_domain.masc_error_to_string err))
            with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid request: requires {\"task_id\":\"...\"}"}|} reqd
+             respond_error ~request:req reqd (invalid_request "task_id")
          )
        ) request reqd)
 
@@ -354,21 +357,15 @@ let add_delete_action_routes router =
              let json = Yojson.Safe.from_string body_str in
              match Safe_ops.json_string_opt "goal_id" json with
              | None ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   {|{"ok":false,"error":"invalid request: requires {\"goal_id\":\"...\"}"}|} reqd
+                 respond_error ~request:req reqd (invalid_request "goal_id")
              | Some goal_id ->
              let config = state.Mcp_server.room_config in
              match Goal_store.delete_goal config ~goal_id with
-             | Ok () ->
-                 Http.Response.json ~compress:true ~request:req
-                   {|{"ok":true}|} reqd
+             | Ok () -> respond_ok ~request:req reqd
              | Error msg ->
-                 Http.Response.json ~status:`Not_found ~request:req
-                   (Printf.sprintf {|{"ok":false,"error":"%s"}|} (String.escaped msg))
-                   reqd
+                 respond_error ~status:`Not_found ~request:req reqd msg
            with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid request: requires {\"goal_id\":\"...\"}"}|} reqd
+             respond_error ~request:req reqd (invalid_request "goal_id")
          )
        ) request reqd)
 
@@ -380,9 +377,7 @@ let add_delete_action_routes router =
              let json = Yojson.Safe.from_string body_str in
              match Safe_ops.json_string_opt "agent_name" json with
              | None ->
-               Http.Response.json ~status:`Bad_request ~request:req
-                 {|{"ok":false,"error":"invalid request: requires {\"agent_name\":\"...\"}"}|}
-                 reqd
+               respond_error ~request:req reqd (invalid_request "agent_name")
              | Some requested_name ->
                let config = state.Mcp_server.room_config in
                (match resolve_keeper_purge_target config requested_name with
@@ -391,23 +386,21 @@ let add_delete_action_routes router =
                   let purge_result =
                     purge_keeper_artifacts config requested_name keeper_target
                   in
-                  Http.Response.json ~compress:true ~request:req
-                    (Yojson.Safe.to_string
-                       (`Assoc
-                          [
-                            ("ok", `Bool true);
-                            ("target_kind", `String "keeper");
-                            ("agent_name", `String keeper_target.agent_name);
-                            ("keeper_name", `String keeper_target.keeper_name);
-                            ("removed_keeper_toml", `Bool toml_deleted);
-                            ( "keeper_pending_confirms_removed",
-                              `Int purge_result.keeper_pending_confirms_removed
-                            );
-                            ( "cleanup_results",
-                              `List
-                                (List.map agent_purge_cleanup_result_to_json
-                                   purge_result.agent_cleanup_results) );
-                          ]))
+                  Http.Response.json_value ~compress:true ~request:req
+                    (`Assoc
+                       [
+                         ("ok", `Bool true);
+                         ("target_kind", `String "keeper");
+                         ("agent_name", `String keeper_target.agent_name);
+                         ("keeper_name", `String keeper_target.keeper_name);
+                         ("removed_keeper_toml", `Bool toml_deleted);
+                         ( "keeper_pending_confirms_removed",
+                           `Int purge_result.keeper_pending_confirms_removed );
+                         ( "cleanup_results",
+                           `List
+                             (List.map agent_purge_cleanup_result_to_json
+                                purge_result.agent_cleanup_results) );
+                       ])
                     reqd
                 | None -> (
                   match resolve_plain_agent_target config requested_name with
@@ -416,27 +409,23 @@ let add_delete_action_routes router =
                       purge_agent_filesystem_artifacts config
                         [ requested_name; agent_name ]
                     in
-                    Http.Response.json ~compress:true ~request:req
-                      (Yojson.Safe.to_string
-                         (`Assoc
-                            [
-                              ("ok", `Bool true);
-                              ("target_kind", `String "agent");
-                              ("agent_name", `String agent_name);
-                              ( "cleanup_results",
-                                `List
-                                  (List.map agent_purge_cleanup_result_to_json
-                                     cleanup_results) );
-                            ]))
+                    Http.Response.json_value ~compress:true ~request:req
+                      (`Assoc
+                         [
+                           ("ok", `Bool true);
+                           ("target_kind", `String "agent");
+                           ("agent_name", `String agent_name);
+                           ( "cleanup_results",
+                             `List
+                               (List.map agent_purge_cleanup_result_to_json
+                                  cleanup_results) );
+                         ])
                       reqd
                   | None ->
-                    Http.Response.json ~status:`Not_found ~request:req
-                      {|{"ok":false,"error":"agent or keeper not found"}|}
-                      reqd))
+                    respond_error ~status:`Not_found ~request:req reqd
+                      "agent or keeper not found"))
            with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid request: requires {\"agent_name\":\"...\"}"}|}
-               reqd
+             respond_error ~request:req reqd (invalid_request "agent_name")
          )
        ) request reqd)
 
@@ -446,10 +435,12 @@ let add_delete_action_routes router =
          let config = state.Mcp_server.room_config in
          let sweep_config = Goal_janitor.runtime_config () in
          let result = Goal_janitor.run ~config:sweep_config config in
-         Http.Response.json ~compress:true ~request
-           (Yojson.Safe.to_string
-              (`Assoc [("ok", `Bool true);
-                       ("result", Goal_janitor.sweep_result_to_yojson result)]))
+         Http.Response.json_value ~compress:true ~request
+           (`Assoc
+              [
+                ("ok", `Bool true);
+                ("result", Goal_janitor.sweep_result_to_yojson result);
+              ])
            reqd
        ) request reqd)
 
@@ -477,30 +468,29 @@ let add_delete_action_routes router =
                Board_moderation.flag_reason_of_string reason_str
                |> Option.value ~default:Board_moderation.Spam
              in
-             (match Safe_ops.json_string_opt "target_id" json with
-              | None ->
-                  Http.Response.json ~status:`Bad_request ~request:req
-                    {|{"ok":false,"error":"invalid request: requires {\"target_id\":\"...\"}"}|} reqd
-              | Some target_id ->
+            (match Safe_ops.json_string_opt "target_id" json with
+             | None ->
+                  respond_error ~request:req reqd (invalid_request "target_id")
+             | Some target_id ->
                   let reporter =
                     Safe_ops.json_string_opt "reporter" json
                     |> Option.value ~default:"operator"
                   in
-                  (match Board_moderation.flag ~target_kind ~target_id ~reporter ~reason with
-                   | Error msg ->
-                       Http.Response.json ~status:`Conflict ~request:req
-                         (Yojson.Safe.to_string
-                            (`Assoc [("ok", `Bool false); ("error", `String msg)]))
+                   (match Board_moderation.flag ~target_kind ~target_id ~reporter ~reason with
+                    | Error msg ->
+                       Http.Response.json_value ~status:`Conflict ~request:req
+                         (`Assoc [("ok", `Bool false); ("error", `String msg)])
                          reqd
-                   | Ok entry ->
-                       Http.Response.json ~compress:true ~request:req
-                         (Yojson.Safe.to_string
-                            (`Assoc [("ok", `Bool true);
-                                     ("entry", Board_moderation.queue_entry_to_json entry)]))
+                    | Ok entry ->
+                       Http.Response.json_value ~compress:true ~request:req
+                         (`Assoc
+                            [
+                              ("ok", `Bool true);
+                              ("entry", Board_moderation.queue_entry_to_json entry);
+                            ])
                          reqd))
            with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid JSON body"}|} reqd
+             respond_error ~request:req reqd "invalid JSON body"
          )
        ) request reqd)
 
@@ -519,8 +509,7 @@ let add_delete_action_routes router =
            ("entries", `List (List.map Board_moderation.queue_entry_to_json entries));
            ("count",   `Int (List.length entries));
          ] in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/board/moderation/action" (fun request reqd ->
@@ -541,20 +530,22 @@ let add_delete_action_routes router =
                Safe_ops.json_string_opt "action" json
                |> Option.value ~default:""
              in
-             (match Board_moderation.action_kind_of_string action_str with
-              | None ->
-                  Http.Response.json ~status:`Bad_request ~request:req
-                    (Yojson.Safe.to_string
-                       (`Assoc [("ok", `Bool false);
-                                ("error",
-                                 `String ("unknown action: " ^ action_str ^
-                                          "; valid: approve, remove, hide, warn"))]))
+               (match Board_moderation.action_kind_of_string action_str with
+                | None ->
+                  Http.Response.json_value ~status:`Bad_request ~request:req
+                    (`Assoc
+                       [
+                         ("ok", `Bool false);
+                         ( "error",
+                           `String
+                             ("unknown action: " ^ action_str
+                            ^ "; valid: approve, remove, hide, warn") );
+                       ])
                     reqd
               | Some action ->
                   (match Safe_ops.json_string_opt "target_id" json with
                    | None ->
-                       Http.Response.json ~status:`Bad_request ~request:req
-                         {|{"ok":false,"error":"invalid request: requires {\"target_id\":\"...\"}"}|} reqd
+                       respond_error ~request:req reqd (invalid_request "target_id")
                    | Some target_id ->
                        let reason =
                          Option.bind
@@ -570,9 +561,10 @@ let add_delete_action_routes router =
                        (match Board_moderation.record_action ~target_kind ~target_id
                                 ~actor ~action ?reason ?note () with
                         | Error msg ->
-                            Http.Response.json ~status:`Internal_server_error ~request:req
-                              (Yojson.Safe.to_string
-                                 (`Assoc [("ok", `Bool false); ("error", `String msg)]))
+                            Http.Response.json_value
+                              ~status:`Internal_server_error ~request:req
+                              (`Assoc
+                                 [("ok", `Bool false); ("error", `String msg)])
                               reqd
                         | Ok entry ->
                             (* If the action is Remove, also delete from board *)
@@ -595,14 +587,16 @@ let add_delete_action_routes router =
                               | None      -> []
                               | Some warn -> [("delete_warning", `String warn)]
                             in
-                            Http.Response.json ~compress:true ~request:req
-                              (Yojson.Safe.to_string
-                                 (`Assoc ([("ok",    `Bool true);
-                                           ("entry", Board_moderation.audit_entry_to_json entry)]
-                                          @ extra)))
+                            Http.Response.json_value ~compress:true ~request:req
+                              (`Assoc
+                                 ([ ("ok", `Bool true);
+                                    ( "entry",
+                                      Board_moderation.audit_entry_to_json entry
+                                    );
+                                  ]
+                                  @ extra))
                               reqd)))
            with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid JSON body"}|} reqd
+             respond_error ~request:req reqd "invalid JSON body"
          )
        ) request reqd)

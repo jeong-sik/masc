@@ -15,6 +15,7 @@ import {
 } from './ide-context-lens'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
+import { routeLinkLabels } from './ide-context-route-helpers'
 
 const MAX_TERMINAL_LINES = 5000
 
@@ -192,10 +193,6 @@ function ExecuteOutputContextLinks({
       `)}
     </div>
   `
-}
-
-function routeLinkLabels(links: ReadonlyArray<IdeContextRouteLink>): string {
-  return links.map(link => link.label).join(', ')
 }
 
 function ExecuteOutputSummaryStrip({

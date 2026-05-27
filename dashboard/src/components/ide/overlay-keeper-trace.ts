@@ -14,6 +14,7 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import { focusIdeContextAnchor } from './ide-state'
+import { routeLinkLabels } from './ide-context-route-helpers'
 
 /**
  * RFC-0028 PR-β: keeper-trace gutter chip overlay.
@@ -334,9 +335,6 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
   `
 }
 
-function routeLinkLabels(routeLinks: ReadonlyArray<IdeContextRouteLink>): string {
-  return routeLinks.map(link => link.label).join(', ')
-}
 
 function traceRouteSummary(routeLinks: ReadonlyArray<IdeContextRouteLink>): string {
   return `Linked context: ${routeLinkLabels(routeLinks)}`

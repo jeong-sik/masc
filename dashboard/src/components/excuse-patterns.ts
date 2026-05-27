@@ -5,6 +5,7 @@ import { LoadingState } from './common/feedback-state'
 import { fetchExcusePatterns, updateExcusePatterns } from '../api/dashboard'
 import type { ExcusePattern } from '../api/dashboard'
 import { createAsyncResource } from '../lib/async-state'
+import { errorToString } from '../lib/format-string'
 
 const patternsResource = createAsyncResource<ExcusePattern[]>()
 const saving = signal(false)
@@ -38,7 +39,7 @@ function handleSave(event: Event) {
       saving.value = false
     })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errorToString(err)
     saveMessage.value = `잘못된 형식: ${msg}`
   }
 }

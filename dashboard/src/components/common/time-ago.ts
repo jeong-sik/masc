@@ -83,5 +83,3 @@ export function TimeAgo({ timestamp, mode = 'relative', class: cx }: TimeAgoProp
   const cls = cx ? `time-ago ${cx}` : 'time-ago'
   return html`<time class=${cls} datetime=${iso} title=${tooltip} aria-label=${label}>${text}</time>`
 }
-
-export { formatTimeAgo }

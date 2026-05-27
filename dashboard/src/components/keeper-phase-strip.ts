@@ -45,7 +45,7 @@ export function eventLabel(event: unknown): string {
   return '?'
 }
 
-async function loadAll() {
+export async function refreshKeeperPhaseTimeline() {
   const names = keepers.value.map(k => k.name)
   if (names.length === 0) return
   loading.value = true
@@ -136,7 +136,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
 }
 
 export function KeeperPhaseTimeline() {
-  useEffect(() => { void loadAll() }, [])
+  useEffect(() => { void refreshKeeperPhaseTimeline() }, [])
 
   const data = transitionData.value
   const isLoading = loading.value
@@ -157,7 +157,7 @@ export function KeeperPhaseTimeline() {
         <button
           type="button"
           class="text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] transition-colors"
-          onClick=${() => { void loadAll() }}
+          onClick=${() => { void refreshKeeperPhaseTimeline() }}
         >새로고침</button>
       </div>
       ${keeperList.map(k => {
@@ -174,5 +174,3 @@ export function KeeperPhaseTimeline() {
     </div>
   `
 }
-
-export { loadAll as refreshKeeperPhaseTimeline }

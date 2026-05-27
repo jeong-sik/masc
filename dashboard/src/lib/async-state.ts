@@ -89,7 +89,7 @@ export function createAsyncResource<T>(): AsyncResource<T> {
         promise = fn()
       } catch (e) {
         if (gen === generation) {
-          state.value = failed(e instanceof Error ? e.message : String(e))
+          state.value = failed(toErrorMessage(e))
         }
         return Promise.resolve()
       }
@@ -99,7 +99,7 @@ export function createAsyncResource<T>(): AsyncResource<T> {
           if (gen === generation) state.value = loaded(data)
         })
         .catch(e => {
-          if (gen === generation) state.value = failed(e instanceof Error ? e.message : String(e))
+          if (gen === generation) state.value = failed(toErrorMessage(e))
         })
         .finally(() => {
           if (gen === generation) inflight = null

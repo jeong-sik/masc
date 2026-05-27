@@ -1,5 +1,5 @@
-(** Tool_task_payloads — pure JSON payload builders and verifier-name
-    guards for task tools.
+(** Tool_task_payloads — pure JSON payload builders and task-policy
+    helpers for task tools.
 
     No [context], no IO, no broadcast. Extracted from {!Tool_task} so
     the payload contracts (field names, nullability, cross-model
@@ -8,12 +8,35 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
-let is_verifier_agent_name agent_name =
-  let normalized = String.lowercase_ascii (String.trim agent_name) in
-  String.equal normalized "verifier"
-  || String.equal normalized "keeper-verifier-agent"
+let transition_action_denylist_prefix = "masc_transition:"
 
-let verifier_transition_action_allowed = function
+let normalize_transition_action raw =
+  String.trim raw |> String.lowercase_ascii
+
+let transition_action_denylist_entry action =
+  transition_action_denylist_prefix ^ normalize_transition_action action
+
+let is_transition_action_denylist_entry raw =
+  let normalized = normalize_transition_action raw in
+  String.length normalized > String.length transition_action_denylist_prefix
+  && String.sub normalized 0 (String.length transition_action_denylist_prefix)
+     = transition_action_denylist_prefix
+
+let transition_action_denied_by_denylist ~tool_denylist ~action =
+  let expected = transition_action_denylist_entry action in
+  List.exists
+    (fun entry -> String.equal (normalize_transition_action entry) expected)
+    tool_denylist
+
+let transition_action_policy_applies tool_denylist =
+  List.exists is_transition_action_denylist_entry tool_denylist
+
+let transition_action_allowed_actions ~tool_denylist =
+  Masc_domain.valid_task_action_strings
+  |> List.filter (fun action ->
+    not (transition_action_denied_by_denylist ~tool_denylist ~action))
+
+let is_verdict_transition_action = function
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->
     true
@@ -26,14 +49,19 @@ let verifier_transition_action_allowed = function
   | Masc_domain.Submit_pr_evidence ->
     false
 
-let verifier_transition_rejection ~agent_name ~action =
+let transition_action_policy_rejection ~agent_name ~action ~allowed_actions =
+  let allowed =
+    match allowed_actions with
+    | [] -> "(none)"
+    | xs -> String.concat "|" xs
+  in
   Printf.sprintf
-    "Verifier action guard: agent '%s' may only call masc_transition(action=approve|reject). Got action=%s. Inspect task history/status for completed tasks, and reject insufficient or analysis-only evidence instead of claiming, starting, releasing, submitting, cancelling, or marking tasks done."
-    agent_name action
+    "Transition action policy guard: agent '%s' may only call masc_transition(action=%s). Got action=%s. Inspect task history/status before claiming, starting, releasing, submitting, cancelling, marking tasks done, or making a verification verdict."
+    agent_name allowed action
 
-let verifier_terminal_verdict_noop_message ~task_id ~action ~status =
+let terminal_verdict_noop_message ~task_id ~action ~status =
   Printf.sprintf
-    "Verifier stale verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op. Do not retry this verdict; inspect task history or list awaiting_verification tasks instead."
+    "Stale verification verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op. Do not retry this verdict; inspect task history or list awaiting_verification tasks instead."
     task_id status action
 
 let workflow_rejection_payload_json

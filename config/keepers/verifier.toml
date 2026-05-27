@@ -17,6 +17,13 @@ tool_denylist = [
   "masc_batch_add_tasks",
   "masc_claim_next",
   "masc_deliver",
+  "masc_transition:claim",
+  "masc_transition:start",
+  "masc_transition:done",
+  "masc_transition:cancel",
+  "masc_transition:release",
+  "masc_transition:submit_for_verification",
+  "masc_transition:submit_pr_evidence",
 ]
 repo_cli_identity = "reviewer-keepers-nonoperator-0506b"
 git_identity_mode = "repo_cli_identity"

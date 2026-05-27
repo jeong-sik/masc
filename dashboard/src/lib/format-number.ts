@@ -2,20 +2,20 @@
 
 /** Format a 0–1 ratio as percentage string. Returns fallback for null/NaN. */
 export function formatPct(value: number | null | undefined, fallback = '-'): string {
-  if (value == null || !Number.isFinite(value)) return fallback
+  if (!isFiniteMetricValue(value)) return fallback
   return `${Math.round(value * 100)}%`
 }
 
 /** Format a 0–1 ratio as percentage with 1 decimal. Returns fallback for null/NaN. */
 export function formatPct1(value: number | null | undefined, fallback = '-'): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  if (!isFiniteMetricValue(value)) return fallback
   return `${(value * 100).toFixed(1)}%`
 }
 
 /** Abbreviate large token counts: 1234567 → "1.2M", 4500 → "4.5K".
  *  Distinguishes 0 (valid data) from undefined (no data). */
 export function formatTokens(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '-'
+  if (!isFiniteMetricValue(n)) return '-'
   if (n === 0) return '0'
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
@@ -25,7 +25,7 @@ export function formatTokens(n: number | null | undefined): string {
 /** Format a number with locale-aware grouping and configurable decimals.
  *  Returns fallback for null/NaN/undefined. */
 export function formatNumber(value: number | null | undefined, digits = 0, fallback = '--'): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  if (!isFiniteMetricValue(value)) return fallback
   return value.toLocaleString('ko-KR', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -35,7 +35,7 @@ export function formatNumber(value: number | null | undefined, digits = 0, fallb
 /** Format a USD cost value. Sub-cent values get 4 decimals; otherwise 2.
  *  Returns fallback for null/NaN/undefined. */
 export function formatCost(value: number | null | undefined, fallback = '--'): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  if (!isFiniteMetricValue(value)) return fallback
   if (value === 0) return '$0'
   if (value < 0.01) return `$${value.toFixed(4)}`
   return `$${value.toFixed(2)}`
@@ -44,9 +44,22 @@ export function formatCost(value: number | null | undefined, fallback = '--'): s
 /** Format millisecond duration as compact string: "3ms", "1.5s", "2.3m".
  *  Returns fallback for null/NaN/undefined/negative. */
 export function formatMsCompact(ms: number | null | undefined, fallback = ''): string {
-  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return fallback
+  if (!isFiniteMetricValue(ms) || ms < 0) return fallback
   const rounded = Math.round(ms)
   if (rounded < 1000) return `${rounded}ms`
   if (rounded < 60_000) return `${(rounded / 1000).toFixed(1)}s`
   return `${(rounded / 60_000).toFixed(1)}m`
+}
+
+/**
+ * Type predicate for "a finite numeric metric value". Narrows
+ * `number | null | undefined` (the wire shape for nullable metrics)
+ * down to `number` so callers can plot or compare directly.
+ *
+ * `keeper-detail-charts.ts` and `keeper-detail-telemetry.ts` shipped
+ * this body file-internal with the same signature; the inline copies
+ * are deleted in the same change that exports this helper.
+ */
+export function isFiniteMetricValue(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
 }

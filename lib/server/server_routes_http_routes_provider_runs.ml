@@ -175,23 +175,20 @@ let dashboard_stress_json ~config req =
 let respond_dashboard_heuristics request reqd =
   with_public_read (fun _state req reqd ->
     let json = dashboard_heuristics_json req in
-    Http.Response.json ~compress:true ~request:req
-      (Yojson.Safe.to_string json) reqd
+    Http.Response.json_value ~compress:true ~request:req json reqd
   ) request reqd
 
 let respond_dashboard_heuristics_coverage request reqd =
   with_public_read (fun _state req reqd ->
     let json = dashboard_heuristics_coverage_json req in
-    Http.Response.json ~compress:true ~request:req
-      (Yojson.Safe.to_string json) reqd
+    Http.Response.json_value ~compress:true ~request:req json reqd
   ) request reqd
 
 let respond_dashboard_stress request reqd =
   with_public_read (fun state req reqd ->
     let config = state.Mcp_server.room_config in
     let json = dashboard_stress_json ~config req in
-    Http.Response.json ~compress:true ~request:req
-      (Yojson.Safe.to_string json) reqd
+    Http.Response.json_value ~compress:true ~request:req json reqd
   ) request reqd
 
 let add_routes ~sw router =
@@ -199,8 +196,7 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_provider_runs.provider_inventory_json () in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/models/metrics" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -225,8 +221,7 @@ let add_routes ~sw router =
                in
                Model_inference_metrics.to_json agg)
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/agent-runs" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -244,47 +239,40 @@ let add_routes ~sw router =
                    ~prompt
                with
                | Ok payload ->
-                   respond_json_with_cors ~status:`Created request reqd
-                     (Yojson.Safe.to_string payload)
+                   respond_json_value_with_cors ~status:`Created request reqd payload
                | Error message ->
-                   respond_json_with_cors ~status:`Bad_request request reqd
-                     (Yojson.Safe.to_string
-                        (`Assoc [ ("error", `String message) ]))
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (`Assoc [ ("error", `String message) ])
              with
              | Yojson.Json_error error ->
-                 respond_json_with_cors ~status:`Bad_request request reqd
-                   (Yojson.Safe.to_string
-                      (`Assoc
-                        [
-                          ( "error",
-                            `String ("invalid json: " ^ error) );
-                        ]))
+                 respond_json_value_with_cors ~status:`Bad_request request reqd
+                   (`Assoc
+                      [
+                        ( "error",
+                          `String ("invalid json: " ^ error) );
+                      ])
              | Yojson.Safe.Util.Type_error (error, _) ->
-                 respond_json_with_cors ~status:`Bad_request request reqd
-                   (Yojson.Safe.to_string
-                      (`Assoc
-                        [
-                          ( "error",
-                            `String ("invalid request shape: " ^ error) );
-                        ])))
+                 respond_json_value_with_cors ~status:`Bad_request request reqd
+                   (`Assoc
+                      [
+                        ( "error",
+                          `String ("invalid request shape: " ^ error) );
+                      ]))
        ) request reqd)
   |> Http.Router.prefix_get "/api/v1/agent-runs/" (fun request reqd ->
        with_read_auth (fun _state req reqd ->
          let req_path = Http.Request.path req in
          match extract_path_param ~prefix:"/api/v1/agent-runs/" req_path with
          | None ->
-             respond_json_with_cors ~status:`Bad_request request reqd
-               (Yojson.Safe.to_string
-                  (`Assoc [ ("error", `String "run_id is required") ]))
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc [ ("error", `String "run_id is required") ])
          | Some run_id ->
              (match Dashboard_provider_runs.run_status_json run_id with
              | Ok payload ->
-                 respond_json_with_cors request reqd
-                   (Yojson.Safe.to_string payload)
+                 respond_json_value_with_cors request reqd payload
              | Error message ->
-                 respond_json_with_cors ~status:`Not_found request reqd
-                   (Yojson.Safe.to_string
-                      (`Assoc [ ("error", `String message) ])))
+                 respond_json_value_with_cors ~status:`Not_found request reqd
+                   (`Assoc [ ("error", `String message) ]))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -302,8 +290,7 @@ let add_routes ~sw router =
            Dashboard_http_keeper.keeper_cost_aggregates_json
              ~config ~keepers ~window_minutes:window
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -317,8 +304,7 @@ let add_routes ~sw router =
                Model_inference_metrics.compute_cost_latency_json
                  ~base_path ~window_minutes:window)
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -336,8 +322,7 @@ let add_routes ~sw router =
            Dashboard_http_keeper.keeper_decisions_json
              ~config ~keepers ~limit ()
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions-log" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -355,8 +340,7 @@ let add_routes ~sw router =
            Dashboard_http_keeper.keeper_decisions_log_json
              ~config ~keepers ~limit ()
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-memory-log" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -374,8 +358,7 @@ let add_routes ~sw router =
            Dashboard_http_keeper.keeper_memory_log_json
              ~config ~keepers ~limit ()
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/heuristics" respond_dashboard_heuristics
   |> Http.Router.get "/api/v1/heuristics" respond_dashboard_heuristics

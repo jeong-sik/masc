@@ -53,6 +53,7 @@ let make_request ?(title="Fix login bug") ?(desc="Users cannot login") ?(agent="
     task_description = desc;
     completion_notes = notes;
     agent_name = agent;
+    task_id = "test-task-ar";
   }
 
 (* ================================================================ *)

@@ -53,6 +53,7 @@ let make_request ~notes : AR.review_request =
     task_title = "test task";
     task_description = "test description";
     completion_notes = notes;
+    task_id = "test-task-10113";
   }
 
 (* The advisory text must contain the flagged phrase verbatim and

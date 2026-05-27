@@ -22,6 +22,7 @@ type review_request =
   ; task_description : string
   ; completion_notes : string
   ; agent_name : string
+  ; task_id : string
   }
 
 type verdict =
@@ -581,6 +582,7 @@ let review
         ~labels:[ "pattern", pattern; "decision", "terminal_reject" ]
         ();
       Log.Task.info
+        ~keeper_name:req.task_id
         "[anti-rationalization] agent=%s task=%s excuse_pattern=%s \
          gate2_fail_closed=true → terminal reject"
         req.agent_name
@@ -609,6 +611,7 @@ let review
             ~labels:[ "pattern", pattern; "decision", "advisory_to_llm" ]
             ();
           Log.Task.info
+        ~keeper_name:req.task_id
             "[anti-rationalization] agent=%s task=%s excuse_pattern=%s (advisory; \
              deferring to LLM evaluator with context)"
             req.agent_name
@@ -632,6 +635,7 @@ let review
             then None
             else (
               Log.Task.info
+        ~keeper_name:req.task_id
                 "[anti-rationalization] contract unmet (legacy): agent=%s task=%s \
                  unmet=[%s]"
                 req.agent_name
@@ -657,6 +661,7 @@ let review
          (match generator_cascade with
           | Some gc when gc = evaluator_cascade ->
             Log.Task.warn
+        ~keeper_name:req.task_id
               "[anti-rationalization] same cascade for generator (%s) and evaluator (%s) \
                — cross-model separation not active"
               gc
@@ -676,6 +681,7 @@ let review
                 | Reject r -> "Rejected: " ^ r)
            | Error msg ->
              Log.Task.warn
+        ~keeper_name:req.task_id
                "[anti-rationalization] structured verdict parse failed: %s"
                msg;
              Tool_result.error
@@ -703,12 +709,12 @@ let review
             let v, gate, fallback_reason =
               match !verdict_ref with
               | Some v ->
-                Log.Task.info "[anti-rationalization] verdict via structured tool call";
+                Log.Task.info ~keeper_name:req.task_id "[anti-rationalization] verdict via structured tool call";
                 v, Structured_tool, None
               | None ->
                 (* LLM responded with text — lenient fallback *)
                 let text = Agent_sdk_response.text_of_response result.response in
-                Log.Task.info "[anti-rationalization] verdict via text fallback";
+                Log.Task.info ~keeper_name:req.task_id "[anti-rationalization] verdict via text fallback";
                 (match parse_verdict text with
                  | Ok v -> v, Llm_text_fallback, None
                  | Error "empty review output" ->
@@ -720,6 +726,7 @@ let review
                  completing keeper for an evaluator-side gap. Observed
                  35 rejects in 2 days (#8688, <base-path>/.masc/tool_calls). *)
                    Log.Task.warn
+        ~keeper_name:req.task_id
                      "[anti-rationalization] evaluator returned empty text (approving by \
                       liveness)";
                    Approve, Fallback, Some "evaluator returned empty response"
@@ -727,6 +734,7 @@ let review
                    (* ADR D3: parse failure is NOT silently approved.
                  Use Reject instead of Approve for unknown format. *)
                    Log.Task.warn
+        ~keeper_name:req.task_id
                      "[anti-rationalization] verdict parse failed: %s (rejecting)"
                      parse_err;
                    ( Reject (sprintf "review format unrecognized: %s" parse_err)
@@ -736,6 +744,7 @@ let review
             (match v with
              | Reject reason ->
                Log.Task.info
+        ~keeper_name:req.task_id
                  "[anti-rationalization] LLM rejected: agent=%s task=%s cascade=%s \
                   reason=%s"
                  req.agent_name
@@ -744,6 +753,7 @@ let review
                  reason
              | Approve ->
                Log.Task.info
+        ~keeper_name:req.task_id
                  "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
                  req.agent_name
                  req.task_title
@@ -830,6 +840,7 @@ let review
                     ]
                   ();
                 Log.Task.error
+        ~keeper_name:req.task_id
                   "[anti-rationalization] cascade %s permanently dead AND gate-2 \
                    advisory pattern=%s active: rejecting (safety net) rather than \
                    laundering excuse phrase through liveness.  OPERATOR ACTION \
@@ -859,6 +870,7 @@ let review
                   }
               | None ->
                 Log.Task.error
+        ~keeper_name:req.task_id
                   "[anti-rationalization] cascade %s has zero callable providers — \
                    ALL keepers using this evaluator are blocked from task \
                    completion.  Approving by liveness; OPERATOR ACTION REQUIRED: \
@@ -895,6 +907,7 @@ let review
                   ~labels:[ "pattern", pattern; "decision", "advisory_safety_net_reject" ]
                   ();
                 Log.Task.warn
+        ~keeper_name:req.task_id
                   "[anti-rationalization] LLM unavailable + gate-2 advisory pattern=%s \
                    active: rejecting (safety net) (cascade=%s err=%s)"
                   pattern
@@ -916,6 +929,7 @@ let review
                   }
               | None, Env_config.AntiRationalization.Open ->
                 Log.Task.warn
+        ~keeper_name:req.task_id
                   "[anti-rationalization] LLM unavailable: %s (approving by default; \
                    mode=open MASC_ANTI_RATIONALIZATION_FAIL_MODE=open)"
                   msg;
@@ -928,6 +942,7 @@ let review
                   }
               | None, Env_config.AntiRationalization.Closed ->
                 Log.Task.warn
+        ~keeper_name:req.task_id
                   "[anti-rationalization] LLM unavailable: %s (rejecting by default; \
                    mode=closed MASC_ANTI_RATIONALIZATION_FAIL_MODE=closed)"
                   msg;

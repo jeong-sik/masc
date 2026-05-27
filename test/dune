@@ -935,6 +935,7 @@
   test_cdal_verifiable_markers
   test_cdal_eval_v1
   test_keeper_cdal_contract
+  test_evidence_claim_schema
   test_cdal_friction_projection
   test_cdal_verdict_gate
   test_cdal_mode_enforcer
@@ -1155,6 +1156,7 @@
   test_cdal_verifiable_markers
   test_cdal_eval_v1
   test_keeper_cdal_contract
+  test_evidence_claim_schema
   test_cdal_friction_projection
   test_cdal_verdict_gate
   test_cdal_mode_enforcer

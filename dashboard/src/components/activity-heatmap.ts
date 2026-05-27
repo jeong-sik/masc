@@ -10,16 +10,12 @@ import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import type { ActivityGraphResponse } from '../types'
 import {
-  intensityColor,
   canvasWidth,
   canvasHeight,
   drawHeatmap,
   hitTest,
   DAY_LABELS,
 } from './activity-heatmap-draw'
-
-// Re-export for test consumers that assert on pure functions.
-export { intensityColor, canvasWidth, canvasHeight, hitTest }
 
 interface HeatmapProps {
   data: ActivityGraphResponse

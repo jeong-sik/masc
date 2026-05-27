@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { formatPct1, formatTokens } from '../lib/format-number'
-import { formatDurationCompound as formatDuration } from '../lib/format-time'
+import { formatDurationCompound } from '../lib/format-time'
 import { Eyebrow } from './common/eyebrow'
 import { StatTile } from './common/stat-tile'
 import type { Keeper, KeeperMetricPoint } from '../types'
@@ -100,7 +100,7 @@ export function OperationalHealth({ keeper }: { keeper: Keeper }) {
         ${lastCompAgo != null ? html`
           <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE['default']} flex flex-col gap-0.5">
             <${Eyebrow}>마지막 압축</${Eyebrow}>
-            <span class="text-xs font-mono text-[var(--color-fg-secondary)]">${formatDuration(lastCompAgo)} 전</span>
+            <span class="text-xs font-mono text-[var(--color-fg-secondary)]">${formatDurationCompound(lastCompAgo)} 전</span>
           </div>
         ` : null}
       </div>

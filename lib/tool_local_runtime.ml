@@ -91,7 +91,7 @@ let handle_runtime_status _ctx args : Core.tool_result =
   let include_models =
     match Json_util.assoc_member_opt "include_models" args with
     | Some (`Bool flag) -> flag
-    | _ -> true
+    | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> true
   in
   ok_response
     ~tool_name
@@ -167,7 +167,8 @@ let handle_runtime_bench _ctx args : Core.tool_result =
   let prompt =
     match Json_util.assoc_member_opt "prompt" args with
     | Some (`String value) when not (String.equal (String.trim value) "") -> String.trim value
-    | _ -> "Reply with exactly one short word: ready"
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None ->
+      "Reply with exactly one short word: ready"
   in
   match
     run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt
@@ -227,17 +228,18 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
         match Json_util.assoc_member_opt "think" args with
         | Some (`Bool true) -> Ok Tool_local_runtime_probe.Think_enabled
         | Some (`Bool false) -> Ok Tool_local_runtime_probe.Think_disabled
-        | _ -> Ok Tool_local_runtime_probe.Think_auto)
+        | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None ->
+          Ok Tool_local_runtime_probe.Think_auto)
   in
   let generate_when_unloaded =
     match Json_util.assoc_member_opt "generate_when_unloaded" args with
     | Some (`Bool flag) -> flag
-    | _ -> true
+    | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> true
   in
   let run_generate =
     match Json_util.assoc_member_opt "run_generate" args with
     | Some (`Bool flag) -> flag
-    | _ -> true
+    | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> true
   in
   match think_mode with
   | Error msg ->

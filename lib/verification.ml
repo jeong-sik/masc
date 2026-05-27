@@ -50,7 +50,7 @@ let criterion_of_yojson = function
             | _ -> Error "custom requires 'description' string field")
        | Some (`String t) -> Error (Printf.sprintf "unknown criterion type: %s" t)
        | _ -> Error "criterion requires 'type' field")
-  | _ -> Error "criterion must be a JSON object"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "criterion must be a JSON object"
 
 (** Verification verdict *)
 type verdict =
@@ -136,7 +136,8 @@ let request_status_to_yojson = function
       let base = verdict_to_yojson v in
       (match base with
        | `Assoc fields -> `Assoc (("status", `String "completed") :: fields)
-       | _ -> `Assoc [("status", `String "completed")])
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+         `Assoc [("status", `String "completed")])
 
 let request_status_of_yojson = function
   | `Assoc fields ->
@@ -305,7 +306,7 @@ let evaluate_criterion output criterion =
   | Schema_match _schema ->
       (match output with
        | `Null -> Fail "output is null"
-       | _ -> Pass)
+       | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> Pass)
   | Contains needle ->
       if contains_nonempty_literal ~needle output_str
       then Pass

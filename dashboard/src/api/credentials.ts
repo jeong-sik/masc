@@ -44,7 +44,6 @@ export function coerceCredentialType(raw: unknown): CredentialType {
 
 import { get, post, del } from './core'
 import { isRecord } from '../lib/type-guards'
-export { isRecord }
 
 export function parseCredentialState(raw: unknown): CredentialState | null {
   if (!isRecord(raw)) return null

@@ -31,8 +31,6 @@ import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { barPercent, FILL_COLOR, type BarProps } from './bar-shared'
 
-export { barPercent, type BarProps, type BarKind } from './bar-shared'
-
 export function Bar(props: BarProps): VNode {
   const kind = props.kind ?? 'default'
   const pct = barPercent(props.value)

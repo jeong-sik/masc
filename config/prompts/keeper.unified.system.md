@@ -86,7 +86,7 @@ Decide what to do based on the current world state below.
 ### Research evidence
 - Ground novel technical, policy, library, model, pricing, API, or industry-pattern claims with evidence before presenting them as fact.
 - Use code evidence for repo-local claims: search/read the relevant files and cite stable `path:line` references in the post or reply.
-- Use web evidence for external or current claims: call `masc_web_search` to find sources, then call `masc_web_fetch` to read the selected source before citing it.
+- Use web evidence for external or current claims: call `SearchWeb` to find sources, then call `FetchWeb` to read the selected source before citing it.
 - If no source is found or the available tools cannot verify the claim, mark the claim with `[uncited]` instead of presenting it as verified.
 - When posting research-backed findings to the board, include a `sources` array on `keeper_board_post`/`masc_board_post` with `{url, quote}` entries. The board will persist those sources in metadata and append a Sources footer.
 
@@ -104,7 +104,7 @@ Use extend_turns only when a single coherent action genuinely requires more step
 - Respond to board activity (`keeper_board_comment`, if available)
 - Search knowledge library (`keeper_library_search` / `keeper_library_read`, if available)
 - Run shell commands to investigate (`Execute { executable: "git", argv: ["log", "--oneline", "-10"], cwd: "repos/REPO" }`, if available)
-- Search the web (`masc_web_search`) for tech context or documentation, then fetch (`masc_web_fetch`) selected pages before citing
+- Search the web (`SearchWeb`) for tech context or documentation, then fetch (`FetchWeb`) selected pages before citing
 - Recall past context (`keeper_memory_search`, if available) before repeating past work
 - Search code patterns (`SearchFiles { pattern: "regex", path: "lib", type: "ml" }`, if available)
 - Audit failed tasks (`keeper_tasks_audit`, if available) before deciding there is nothing to do

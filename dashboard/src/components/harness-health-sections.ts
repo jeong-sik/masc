@@ -154,8 +154,6 @@ export function statusCardClass(status: RailStatus): string {
   }
 }
 
-export const formatTimestamp = formatTimestampKo
-
 export function freshnessLabel(ts: number | null | undefined, fallback = '기록 없음'): string {
   if (ts == null) return fallback
   return formatTimeAgo(ts)
@@ -387,7 +385,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
               <div>
                 <${ItemTitle}>${item.task_title || item.task_id}</${ItemTitle}>
                 <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
-                  ${item.agent_name || '(unknown agent)'} · ${item.gate || '(unknown gate)'} · ${item.evaluator_cascade || '(unknown cascade)'} · ${formatTimestamp(item.timestamp)}
+                  ${item.agent_name || '(unknown agent)'} · ${item.gate || '(unknown gate)'} · ${item.evaluator_cascade || '(unknown cascade)'} · ${formatTimestampKo(item.timestamp)}
                 </div>
               </div>
               <${StatusDot} size="md" class=${verdictTone(item.verdict)} />
@@ -432,7 +430,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
           <${SurfaceCard} variant="compact">
             <div class="flex items-start justify-between gap-3">
               <${ItemTitle}>${item.keeper_name}</${ItemTitle}>
-              <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>
+              <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestampKo(item.timestamp)}</div>
             </div>
             <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
               <span>컨텍스트 ${Math.round(item.context_ratio * 100)}%</span>
@@ -484,7 +482,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
           <${SurfaceCard} variant="compact">
             <div class="flex items-start justify-between gap-3">
               <${ItemTitle}>${item.keeper_name}</${ItemTitle}>
-              <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>
+              <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestampKo(item.timestamp)}</div>
             </div>
             <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
               <span>${item.generation}세대</span>

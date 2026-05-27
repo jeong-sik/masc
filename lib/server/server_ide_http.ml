@@ -170,10 +170,10 @@ let add_routes router =
          let json =
            `List (List.map Ide_annotation_types.annotation_to_json annotations)
          in
-         Http.Response.json
+         Http.Response.json_value
            ~compress:true
            ~request
-           (Yojson.Safe.to_string (json_ok json))
+           (json_ok json)
            reqd)
       request
       reqd)
@@ -260,23 +260,22 @@ let add_routes router =
                   ()
               with
               | Ok annotation ->
-                Http.Response.json
+                Http.Response.json_value
                   ~status:`Created
                   ~request
-                  (Yojson.Safe.to_string
-                     (json_ok (Ide_annotation_types.annotation_to_json annotation)))
+                  (json_ok (Ide_annotation_types.annotation_to_json annotation))
                   reqd
               | Error msg ->
-                Http.Response.json
+                Http.Response.json_value
                   ~status:`Bad_request
                   ~request
-                  (Yojson.Safe.to_string (json_error msg))
+                  (json_error msg)
                   reqd)
            | _ ->
-             Http.Response.json
+             Http.Response.json_value
                ~status:`Bad_request
                ~request
-               (Yojson.Safe.to_string (json_error "Missing required fields"))
+               (json_error "Missing required fields")
                reqd))
       request
       reqd)
@@ -308,20 +307,20 @@ let add_routes router =
          in
          if id = "" || keeper_id = ""
          then
-           Http.Response.json
+           Http.Response.json_value
              ~status:`Bad_request
              ~request
-             (Yojson.Safe.to_string (json_error "Missing id or keeper_id"))
+             (json_error "Missing id or keeper_id")
              reqd
          else (
            let partition = resolve_partition_for_query ~state ~uri in
            match Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id () with
            | Ok () -> Http.Response.json ~status:`No_content ~request "{}" reqd
            | Error msg ->
-             Http.Response.json
+             Http.Response.json_value
                ~status:`Forbidden
                ~request
-               (Yojson.Safe.to_string (json_error msg))
+               (json_error msg)
                reqd))
       request
       reqd)
@@ -351,10 +350,10 @@ let add_routes router =
              ()
          in
          let json = `List (List.map Ide_annotation_types.region_to_json regions) in
-         Http.Response.json
+         Http.Response.json_value
            ~compress:true
            ~request
-           (Yojson.Safe.to_string (json_ok json))
+           (json_ok json)
            reqd)
       request
       reqd)
@@ -364,10 +363,10 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let snapshot = build_presence_snapshot state in
-         Http.Response.json
+         Http.Response.json_value
            ~compress:true
            ~request
-           (Yojson.Safe.to_string (json_ok snapshot))
+           (json_ok snapshot)
            reqd)
       request
       reqd)

@@ -89,7 +89,20 @@ let add_task_requiring_tools ctx ~title tools =
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result)
 
-let register_test_keeper ctx ~keeper_name ~agent_name =
+let verifier_transition_action_denylist =
+  List.map
+    (fun action -> "masc_transition:" ^ action)
+    [
+      "claim";
+      "start";
+      "done";
+      "cancel";
+      "release";
+      "submit_for_verification";
+      "submit_pr_evidence";
+    ]
+
+let register_test_keeper ?(tool_denylist = []) ctx ~keeper_name ~agent_name =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -97,6 +110,8 @@ let register_test_keeper ctx ~keeper_name ~agent_name =
           ("name", `String keeper_name);
           ("agent_name", `String agent_name);
           ("trace_id", `String ("test-trace-" ^ keeper_name));
+          ( "tool_denylist",
+            `List (List.map (fun tool -> `String tool) tool_denylist) );
         ])
   with
   | Ok meta ->
@@ -1020,6 +1035,8 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
 
 let () = test "handle_transition_verifier_blocks_non_verdict_actions" (fun () ->
   let ctx = make_test_ctx_with_agent "verifier" in
+  register_test_keeper ctx ~keeper_name:"verifier" ~agent_name:"verifier"
+    ~tool_denylist:verifier_transition_action_denylist;
   let _ =
     Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Verifier must not claim") ])
@@ -1038,7 +1055,7 @@ let () = test "handle_transition_verifier_blocks_non_verdict_actions" (fun () ->
       assert (not (Tool_result.is_success result));
       assert
         ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
-      assert (str_contains (Tool_result.message result) "Verifier action guard");
+      assert (str_contains (Tool_result.message result) "Transition action policy guard");
       assert (str_contains (Tool_result.message result) "approve|reject"))
     [ "claim"; "done"; "submit_for_verification" ];
   assert_task_todo ctx;
@@ -1046,6 +1063,8 @@ let () = test "handle_transition_verifier_blocks_non_verdict_actions" (fun () ->
 
 let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
+  register_test_keeper ctx ~keeper_name:"verifier" ~agent_name:"verifier"
+    ~tool_denylist:verifier_transition_action_denylist;
   let verifier_ctx = { ctx with Tool_task.agent_name = "verifier" } in
   let _ = Coord.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
   let _ = Coord.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
@@ -2268,7 +2287,8 @@ let make_review_request () : Anti_rationalization.review_request =
   { task_title = "Fix login bug";
     task_description = "desc";
     completion_notes = "notes";
-    agent_name = "dreamer" }
+    agent_name = "dreamer";
+    task_id = "test-task-1" }
 
 let make_review_result
     ?(verdict = Anti_rationalization.Approve)

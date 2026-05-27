@@ -33,8 +33,6 @@ import { html } from 'htm/preact'
 import { cloneElement, toChildArray, type VNode, type ComponentChildren } from 'preact'
 import { resolveStripCols, type KpiStripVariant } from './kpi-shared'
 
-export { resolveStripCols, type KpiStripVariant } from './kpi-shared'
-
 export interface KpiStripProps {
   /** Strip layout variant. Drives the column count + density. */
   variant?: KpiStripVariant

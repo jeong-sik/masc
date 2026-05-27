@@ -77,14 +77,12 @@ let add_routes router =
          with_public_read
            (fun _state _req reqd ->
              let json = levels_response () in
-             respond_public_read_json ~status:`OK request reqd
-               (Yojson.Safe.to_string json))
+             respond_public_read_json_value ~status:`OK request reqd json)
            request reqd)
   |> Http.Router.prefix_get "/api/v1/resilience/strategies"
        (fun request reqd ->
          with_public_read
            (fun _state _req reqd ->
              let json = strategies_response () in
-             respond_public_read_json ~status:`OK request reqd
-               (Yojson.Safe.to_string json))
+             respond_public_read_json_value ~status:`OK request reqd json)
            request reqd)

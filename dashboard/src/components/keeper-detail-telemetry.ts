@@ -1,14 +1,11 @@
 import { html } from 'htm/preact'
-import { formatTokens } from '../lib/format-number'
+import { formatTokens, isFiniteMetricValue } from '../lib/format-number'
 import { SPARKLINE_W, SPARKLINE_H, SPARKLINE_PAD } from '../lib/sparkline-config'
 import { CopyIdButton } from './common/copy-id-button'
 import { Eyebrow } from './common/eyebrow'
 import type { Keeper, KeeperMetricPoint } from '../types'
 import { MutedSpan, DetailRow, DetailCard } from './keeper-detail-kpi'
 
-function isFiniteMetricValue(value: number | null | undefined): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
-}
 
 function miniSparkline(
   data: Array<number | null | undefined>,

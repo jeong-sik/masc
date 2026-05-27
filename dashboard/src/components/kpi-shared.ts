@@ -118,5 +118,3 @@ export const DELTA_COLOR_BY_DIRECTION: Record<'pos' | 'neg', string> = {
   pos: 'var(--color-status-ok)',
   neg: 'var(--color-status-err)',
 }
-
-export { MONO_STACK } from './common/font-stacks'

@@ -812,7 +812,7 @@ let docker_preflight ~timeout_sec () =
       ; credential_fallbacks_disabled = false
       ; git_egress =
           (if Env_config_sandbox.Runtime.git_dispatch ()
-           then "docker_git_dispatch"
+           then "repo_cli_identity_dispatch"
            else "container_network_policy")
       ; image
       ; docker_runtime_ok

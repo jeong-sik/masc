@@ -122,8 +122,7 @@ let json_error message =
   `Assoc [("ok", `Bool false); ("error", `String message)]
 
 let json_response ~status req reqd json =
-  Http.Response.json ~status ~request:req
-    (Yojson.Safe.to_string json) reqd
+  Http.Response.json_value ~status ~request:req json reqd
 
 (* Strip CR/LF and other control characters from a value before placing
    it into an HTTP response header. RFC 7230 §3.2.4 prohibits CR/LF in
@@ -150,8 +149,8 @@ let source_header source =
   [("X-Workspace-Source", v)]
 
 let json_response_with_source ~status ~source req reqd json =
-  Http.Response.json ~status ~extra_headers:(source_header source)
-    ~request:req (Yojson.Safe.to_string json) reqd
+  Http.Response.json_value ~status ~extra_headers:(source_header source)
+    ~request:req json reqd
 
 (* --- Safe path --- *)
 

@@ -101,6 +101,25 @@ done
 
 **대응 PR**: #19109 (hour_int + 10 int sites + hotfix), #19113 (defense-in-depth 1줄 중복), #19116 (post-#19109).
 
+### 2.5b Silent breakage 두 번째 발생 (2026-05-27 추가) — Step 8
+
+PR #19145 (RFC-0197 per-candidate watchdog) 머지 후 `lib/keeper/keeper_turn_driver_try_cascade.ml:604` 가 `Agent_sdk.Error.Api (Agent_sdk.Error.Timeout {...})` 사용.  `Timeout` constructor 는 `Retry.api_error` variant 라 `Agent_sdk.Error` 모듈에 직접 export 안 됨 → `dune build lib/` fail. 그러나 후속 PR #19146..#19159 (10+ 머지) 가 keeper 영역 안 건드림 → `Build and Test` CI job 가 `Detect Changed Surfaces` gate 통과로 SKIPPED → **main HEAD 가 ~3시간 silent broken**.
+
+**Root cause (반복 패턴)**: §2.5 의 *sub-library dune dep* 안티패턴과 *변형* — 이번엔 *type alias namespace*. `type api_error = Retry.api_error` alias 가 constructor *namespace export 자동화 안 함*. OCaml constructor resolution 은 outer constructor payload type 이 inner namespace 를 *pin* 하지만 명시적 outer prefix (`Agent_sdk.Error.Timeout`) 는 *직접 export* 요구.
+
+**대응 PR**: #19163 (1-line surgical prefix drop, WORKAROUND-WAIVED).
+
+**SOP 보강 (Step 8 신규)**: keeper / cdal / server / cascade core 영역 변경 PR 은 *push 전 manual full `dune build lib/`*. CI `Build and Test` SKIPPED 상태 의심 (체크리스트 §4 의 Step 7 보강).
+
+```bash
+# core 영역 (keeper, cdal, server, cascade) 변경 시 mandatory
+# CI 의 'Detect Changed Surfaces' gate 가 surface 못 잡을 위험 영역
+core_dirs="lib/keeper lib/cdal lib/server lib/cascade lib/coord"
+if git diff --stat origin/main..HEAD | grep -qE "^${core_dirs// /\\|}"; then
+  dune build lib/ --root . || echo "MISSING: core 영역 변경 — main HEAD broken 위험"
+fi
+```
+
 ### 2.6 In-flight PR 추적 stale 위험
 
 /loop standing prompt 의 in-flight PR 목록 (#18793, #1787, #18816) 이 16+ iter 동안 머지/closed 진행. iter 58/59 시점에 셋 다 종결 (#18793 CLOSED, #1787/#18816 MERGED) — 그러나 prompt 는 stale.
@@ -154,6 +173,7 @@ done
 - [ ] **Partial SSOT 일관성**: 같은 표현식 안에 multiple unit (예: `h * 3600 + m * 60`) 가 있고 한쪽 SSOT entry 만 있으면 partial 적용 + PR body 에 명시.
 - [ ] **In-flight 점검**: iter 시작 시 standing prompt 의 in-flight PR 상태 1회 확인. 종결 PR retire.
 - [ ] **Saturation 신호 탐지**: 새 PR scope 가 0/1 사이트로 줄어들면 시리즈 종결 검토.
+- [ ] **Core 영역 manual build (Step 8, 2026-05-27 추가)**: `lib/keeper`, `lib/cdal`, `lib/server`, `lib/cascade`, `lib/coord` 중 하나라도 변경 시 push 전 `dune build lib/` 직접 실행.  CI `Build and Test` 가 `Detect Changed Surfaces` SKIPPED 로 surface 못 잡는 영역.  근거: PR #19099 (sub-library dune dep, §2.5) + PR #19145 (constructor namespace prefix, §2.5b) 두 번 같은 silent main breakage 패턴 발생.
 
 ---
 
@@ -165,8 +185,8 @@ done
 | PR MERGED | 31 |
 | Sites removed | 107 |
 | SSOT entries 신설 | 1 (`hour_int`) |
-| Main breakage 발생 | 1 (PR #19099, 7시간 silent) |
-| Main breakage hotfix PR | 2 (#19109, #19113 defense) |
+| Main breakage 발생 | 2 (PR #19099 7시간 silent + PR #19145 ~3시간 silent) |
+| Main breakage hotfix PR | 3 (#19109 + #19113 defense + #19163) |
 | Worktrees 정리 | 6 |
 | In-flight PR 종결 | 3 (#18793 CLOSED, #1787/#18816 MERGED) |
 

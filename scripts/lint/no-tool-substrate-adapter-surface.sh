@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Guard the Keeper tool execution substrate against two regressions:
+# Guard the Keeper tool execution substrate against three regressions:
 #
 #   1. Descriptor executor variants that turn gh/git/OAS bridge adapters into
 #      first-class tool concepts. Those belong behind Shell_ir or runtime
 #      plumbing, not in the descriptor executor enum.
 #   2. GitHub/PR micro-tool names returning to active descriptor, prompt,
 #      policy, or capability-matrix surfaces.
+#   3. Internal web MCP names appearing in keeper-facing prompts or workflow
+#      guidance where the model-facing aliases are SearchWeb / FetchWeb.
 #
 # The scan is intentionally narrow. It does not scan timeout/runtime plumbing
 # such as Timeout_policy.Layer.Oas_bridge, and it does not scan dashboard
@@ -59,12 +61,18 @@ SURFACE_SCAN_FILES=(
   "docs/KEEPER-USER-MANUAL.md"
 )
 
+KEEPER_PROMPT_SCAN_FILES=(
+  "docs/KEEPER-CAPABILITY-MATRIX.md"
+)
+
 while IFS= read -r prompt_file; do
   SURFACE_SCAN_FILES+=("$prompt_file")
+  KEEPER_PROMPT_SCAN_FILES+=("$prompt_file")
 done < <(find config/prompts -type f | sort)
 
 EXECUTOR_PATTERN='\b(Gh_cli|Git_cli|Oas_bridge)\b'
 MICRO_TOOL_PATTERN='\b(pr_comment|pr_review|pr_close|gh_pr|gh_commit|github_comment|github_pr|keeper_pr_[A-Za-z0-9_]*|github_pr_[A-Za-z0-9_]*)\b'
+INTERNAL_WEB_TOOL_PATTERN='\b(masc_web_search|masc_web_fetch)\b'
 
 current_tmp="$(mktemp -t tool-substrate-adapter-surface.current.XXXXXX)"
 allow_tmp="$(mktemp -t tool-substrate-adapter-surface.allow.XXXXXX)"
@@ -92,6 +100,7 @@ scan_pattern() {
 {
   scan_pattern "executor_adapter" "$EXECUTOR_PATTERN" "${EXECUTOR_SCAN_FILES[@]}"
   scan_pattern "micro_tool" "$MICRO_TOOL_PATTERN" "${SURFACE_SCAN_FILES[@]}"
+  scan_pattern "internal_web_tool" "$INTERNAL_WEB_TOOL_PATTERN" "${KEEPER_PROMPT_SCAN_FILES[@]}"
 } | sort -u >"$current_tmp"
 
 if [[ -f "$ALLOWLIST" ]]; then
@@ -130,6 +139,7 @@ if [[ -s "$new_tmp" ]]; then
   sed 's/^/  - /' "$new_tmp" >&2
   echo "  Keep gh/git work behind Execute/Shell_ir, and model PR work as ordinary CLI/worktree operations." >&2
   echo "  Do not add dedicated PR/GitHub micro-tools to active descriptor, prompt, policy, or capability surfaces." >&2
+  echo "  Use SearchWeb / FetchWeb in keeper-facing prompts; keep masc_web_* names in MCP compatibility docs only." >&2
   fail=1
 fi
 

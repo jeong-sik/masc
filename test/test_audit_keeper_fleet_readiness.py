@@ -422,26 +422,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             {str(keepers_dir / "alpha.decisions.jsonl")},
         )
 
-    def test_pr_action_metric_paths_returns_newest_date_split_first(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            metrics_root = root / ".masc" / "keepers" / "alpha" / "pr-action-metrics"
-            for relative_path in (
-                "2026-04/30.jsonl",
-                "2026-05/05.jsonl",
-                "2026-05/06.jsonl",
-            ):
-                path = metrics_root / relative_path
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("{}\n", encoding="utf-8")
-
-            paths = audit.pr_action_metric_paths(root, "alpha")
-
-        self.assertEqual(
-            [path.relative_to(metrics_root).as_posix() for path in paths],
-            ["2026-05/06.jsonl", "2026-05/05.jsonl", "2026-04/30.jsonl"],
-        )
-
     def test_decision_lifecycle_evidence_ignores_git_push_markers(self):
         row = {
             "event": "tool_exec",
@@ -519,52 +499,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
 
         self.assertEqual(evidence, set())
-        self.assertEqual(docker_evidence, set())
-
-    def test_action_metric_git_push_drives_lifecycle_evidence(self):
-        row = {
-            "ts_unix": 30.0,
-            "metric_event": "repo_pr_work_action",
-            "tool_name": "tool_execute",
-            "pr_work_action": "GIT_PUSH",
-            "pr_work_action_source": "tool_execute",
-            "pr_work_action_success": True,
-            "route": {"via": "docker"},
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_action_metric(row)
-
-        self.assertEqual(evidence, {"git_push:tool_execute"})
-        self.assertEqual(docker_evidence, {"git_push:tool_execute"})
-
-    def test_action_metric_brokered_route_counts_as_docker_backed(self):
-        row = {
-            "metric_event": "repo_pr_work_action",
-            "tool_name": "tool_execute",
-            "pr_work_action": "PR_CREATE",
-            "pr_work_action_source": "tool_execute",
-            "pr_work_action_success": True,
-            "route_via": "brokered",
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_action_metric(row)
-
-        self.assertEqual(evidence, {"pr_create:tool_execute"})
-        self.assertEqual(docker_evidence, {"pr_create:tool_execute"})
-
-    def test_action_metric_does_not_treat_sandbox_as_docker_route(self):
-        row = {
-            "metric_event": "repo_pr_work_action",
-            "tool_name": "tool_execute",
-            "pr_work_action": "GIT_PUSH",
-            "pr_work_action_source": "tool_execute",
-            "pr_work_action_success": True,
-            "sandbox_profile": "docker",
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_action_metric(row)
-
-        self.assertEqual(evidence, {"git_push:tool_execute"})
         self.assertEqual(docker_evidence, set())
 
     def test_tool_call_log_drives_native_pr_create_lifecycle_evidence(self):
@@ -664,136 +598,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "pr_approve:tool_execute",
             },
         )
-        self.assertEqual(docker_evidence, set())
-
-    def test_scan_keeper_evidence_reads_pr_action_metrics(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            metrics_dir = (
-                root / ".masc" / "keepers" / "alpha" / "pr-action-metrics" / "2026-05"
-            )
-            metrics_dir.mkdir(parents=True)
-            rows = [
-                {
-                    "ts_unix": 25.0,
-                    "metric_event": "repo_pr_work_action",
-                    "tool_name": "tool_execute",
-                    "pr_work_action": "PR_CREATE",
-                    "pr_work_action_source": "tool_execute",
-                    "pr_work_action_success": True,
-                    "route_via": "brokered",
-                },
-                {
-                    "ts_unix": 30.0,
-                    "metric_event": "repo_pr_work_action",
-                    "tool_name": "tool_execute",
-                    "pr_work_action": "GIT_PUSH",
-                    "pr_work_action_source": "tool_execute",
-                    "pr_work_action_success": True,
-                    "route": {"via": "docker"},
-                },
-                {
-                    "ts_unix": 35.0,
-                    "metric_event": "repo_pr_review_action",
-                    "tool_name": "tool_execute",
-                    "pr_review_action": "APPROVE",
-                    "pr_review_action_success": True,
-                    "execution_via": "docker",
-                },
-                {
-                    "ts_unix": 40.0,
-                    "metric_event": "repo_pr_work_action",
-                    "tool_name": "tool_execute",
-                    "pr_work_action": "GIT_PUSH",
-                    "pr_work_action_source": "tool_execute",
-                    "pr_work_action_success": False,
-                    "via": "docker",
-                },
-            ]
-            (metrics_dir / "06.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in rows),
-                encoding="utf-8",
-            )
-
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root, "alpha"
-            )
-
-        self.assertEqual(latest_ts, 40.0)
-        self.assertEqual(tools, {"tool_execute"})
-        self.assertEqual(
-            evidence,
-            {
-                "pr_create:tool_execute",
-                "git_push:tool_execute",
-                "pr_approve:tool_execute",
-            },
-        )
-        self.assertEqual(docker_evidence, evidence)
-
-    def test_pr_action_metric_paths_are_newest_first_and_cutoff(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            metrics_dir = root / ".masc" / "keepers" / "alpha" / "pr-action-metrics"
-            old_path = metrics_dir / "2026-04" / "30.jsonl"
-            new_path = metrics_dir / "2026-05" / "06.jsonl"
-            mid_path = metrics_dir / "2026-05" / "05.jsonl"
-            for path in (old_path, new_path, mid_path):
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("{}\n", encoding="utf-8")
-
-            paths = audit.pr_action_metric_paths(root, "alpha", min_day_key=20260501)
-
-        self.assertEqual(paths, [new_path, mid_path])
-
-    def test_scan_keeper_evidence_skips_old_pr_action_metric_rows(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            metrics_dir = root / ".masc" / "keepers" / "alpha" / "pr-action-metrics"
-            old_dir = metrics_dir / "2026-05"
-            old_dir.mkdir(parents=True)
-            now = 1_778_064_000.0
-            old_ts = now - (48 * 3600.0)
-            recent_ts = now - 60.0
-            (old_dir / "04.jsonl").write_text(
-                json.dumps(
-                    {
-                        "ts_unix": old_ts,
-                        "metric_event": "repo_pr_work_action",
-                        "tool_name": "tool_execute",
-                        "pr_work_action": "GIT_PUSH",
-                        "pr_work_action_source": "tool_execute",
-                        "pr_work_action_success": True,
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            (old_dir / "06.jsonl").write_text(
-                json.dumps(
-                    {
-                        "ts_unix": recent_ts,
-                        "metric_event": "repo_pr_work_action",
-                        "tool_name": "tool_execute",
-                        "pr_work_action": "PR_CREATE",
-                        "pr_work_action_source": "tool_execute",
-                        "pr_work_action_success": True,
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root,
-                "alpha",
-                max_silence_hours=24.0,
-                now=now,
-            )
-
-        self.assertEqual(latest_ts, recent_ts)
-        self.assertEqual(tools, {"tool_execute"})
-        self.assertEqual(evidence, {"pr_create:tool_execute"})
         self.assertEqual(docker_evidence, set())
 
     def test_product_and_design_evidence_use_explicit_board_domains(self):
@@ -1173,10 +977,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             root = Path(tmp)
             calls_dir = root / ".masc" / "tool_calls" / "2026-05"
             calls_dir.mkdir(parents=True)
-            metrics_dir = (
-                root / ".masc" / "keepers" / "alpha" / "pr-action-metrics" / "2026-05"
-            )
-            metrics_dir.mkdir(parents=True)
             rows = [
                 {
                     "ts": 50.0,
@@ -1199,36 +999,28 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
                 },
+                {
+                    "ts": 65.0,
+                    "keeper": "alpha",
+                    "tool": "tool_execute",
+                    "input": {
+                        "cmd": (
+                            "gh pr create --head "
+                            "keeper/alpha-docker-pr-proof-current-run"
+                        )
+                    },
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "pr_url": "https://github.com/acme/repo/pull/42",
+                            "via": "docker",
+                        }
+                    ),
+                    "success": True,
+                },
             ]
             (calls_dir / "06.jsonl").write_text(
                 "".join(json.dumps(row) + "\n" for row in rows),
-                encoding="utf-8",
-            )
-            metric_rows = [
-                {
-                    "ts_unix": 55.0,
-                    "metric_event": "repo_pr_work_action",
-                    "tool_name": "tool_execute",
-                    "pr_work_action": "PR_CREATE",
-                    "pr_work_action_source": "tool_execute",
-                    "pr_work_action_success": True,
-                    "pr_work_ref": "keeper/alpha-docker-pr-proof-old-run",
-                    "route_via": "docker",
-                },
-                {
-                    "ts_unix": 65.0,
-                    "metric_event": "repo_pr_work_action",
-                    "tool_name": "tool_execute",
-                    "pr_work_action": "PR_CREATE",
-                    "pr_work_action_source": "tool_execute",
-                    "pr_work_action_success": True,
-                    "pr_work_ref": "keeper/alpha-docker-pr-proof-current-run",
-                    "pr_url": "https://github.com/acme/repo/pull/42",
-                    "route_via": "docker",
-                },
-            ]
-            (metrics_dir / "06.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in metric_rows),
                 encoding="utf-8",
             )
 
@@ -1237,94 +1029,88 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             )
 
         self.assertEqual(latest_ts, 65.0)
-        self.assertEqual(tools, {"tool_execute", "tool_execute"})
+        self.assertEqual(tools, {"tool_execute"})
         self.assertEqual(evidence, {"git_push:tool_execute", "pr_create:tool_execute"})
         self.assertEqual(docker_evidence, evidence)
 
     def test_run_id_filter_counts_redacted_approval_by_correlated_pr_number(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            alpha_metrics_dir = (
-                root / ".masc" / "keepers" / "alpha" / "pr-action-metrics" / "2026-05"
-            )
-            bravo_metrics_dir = (
-                root / ".masc" / "keepers" / "bravo" / "pr-action-metrics" / "2026-05"
-            )
-            alpha_metrics_dir.mkdir(parents=True)
-            bravo_metrics_dir.mkdir(parents=True)
+            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
+            calls_dir.mkdir(parents=True)
             current_run = "current-run"
-            (alpha_metrics_dir / "06.jsonl").write_text(
+            (calls_dir / "06.jsonl").write_text(
                 "".join(
                     json.dumps(row) + "\n"
                     for row in [
                         {
-                            "ts_unix": 10.0,
-                            "metric_event": "repo_pr_work_action",
-                            "tool_name": "tool_execute",
-                            "pr_work_action": "GIT_PUSH",
-                            "pr_work_action_source": "tool_execute",
-                            "pr_work_action_success": True,
-                            "pr_work_command": "git push origin alpha-old-run",
-                            "route_via": "docker",
+                            "ts": 10.0,
+                            "keeper": "alpha",
+                            "tool": "tool_execute",
+                            "input": {"cmd": "git push origin alpha-old-run"},
+                            "output": json.dumps({"ok": True, "via": "docker"}),
+                            "success": True,
                         },
                         {
-                            "ts_unix": 20.0,
-                            "metric_event": "repo_pr_work_action",
-                            "tool_name": "tool_execute",
-                            "pr_work_action": "GIT_PUSH",
-                            "pr_work_action_source": "tool_execute",
-                            "pr_work_action_success": True,
-                            "pr_work_command": f"git push origin alpha-{current_run}",
-                            "route_via": "docker",
+                            "ts": 20.0,
+                            "keeper": "alpha",
+                            "tool": "tool_execute",
+                            "input": {"cmd": f"git push origin alpha-{current_run}"},
+                            "output": json.dumps({"ok": True, "via": "docker"}),
+                            "success": True,
                         },
                         {
-                            "ts_unix": 30.0,
-                            "metric_event": "repo_pr_work_action",
-                            "tool_name": "tool_execute",
-                            "pr_work_action": "PR_CREATE",
-                            "pr_work_action_source": "tool_execute",
-                            "pr_work_action_success": True,
-                            "pr_work_ref": f"keeper-alpha/{current_run}",
-                            "pr_url": "https://github.com/acme/repo/pull/100",
-                            "route_via": "docker",
+                            "ts": 30.0,
+                            "keeper": "alpha",
+                            "tool": "tool_execute",
+                            "input": {
+                                "cmd": f"gh pr create --head keeper-alpha/{current_run}"
+                            },
+                            "output": json.dumps(
+                                {
+                                    "ok": True,
+                                    "pr_url": "https://github.com/acme/repo/pull/100",
+                                    "via": "docker",
+                                }
+                            ),
+                            "success": True,
                         },
                         {
-                            "ts_unix": 40.0,
-                            "metric_event": "repo_pr_review_action",
-                            "tool_name": "tool_execute",
-                            "pr_review_action": "APPROVE",
-                            "pr_review_action_success": True,
+                            "ts": 40.0,
+                            "keeper": "alpha",
+                            "tool": "tool_execute",
+                            "input": {"cmd": "gh pr review 999 --approve"},
+                            "output": json.dumps({"ok": True, "via": "docker"}),
+                            "success": True,
                             "pr_number": 999,
-                            "route_via": "docker",
                         },
                         {
-                            "ts_unix": 50.0,
-                            "metric_event": "repo_pr_review_action",
-                            "tool_name": "tool_execute",
-                            "pr_review_action": "APPROVE",
-                            "pr_review_action_success": True,
+                            "ts": 50.0,
+                            "keeper": "alpha",
+                            "tool": "tool_execute",
+                            "input": {"cmd": "gh pr review 101 --approve"},
+                            "output": json.dumps({"ok": True, "via": "docker"}),
+                            "success": True,
                             "pr_number": 101,
-                            "route_via": "docker",
+                        },
+                        {
+                            "ts": 25.0,
+                            "keeper": "bravo",
+                            "tool": "tool_execute",
+                            "input": {
+                                "cmd": f"gh pr create --head keeper-bravo/{current_run}"
+                            },
+                            "output": json.dumps(
+                                {
+                                    "ok": True,
+                                    "pr_url": "https://github.com/acme/repo/pull/101",
+                                    "via": "docker",
+                                }
+                            ),
+                            "success": True,
                         },
                     ]
                 ),
-                encoding="utf-8",
-            )
-            (bravo_metrics_dir / "06.jsonl").write_text(
-                json.dumps(
-                    {
-                        "ts_unix": 25.0,
-                        "metric_event": "repo_pr_work_action",
-                        "tool_name": "tool_execute",
-                        "pr_work_action": "PR_CREATE",
-                        "pr_work_action_source": "tool_execute",
-                        "pr_work_action_success": True,
-                        "pr_work_ref": f"keeper-bravo/{current_run}",
-                        "pr_url": "https://github.com/acme/repo/pull/101",
-                        "route_via": "docker",
-                    }
-                )
-                + "\n",
                 encoding="utf-8",
             )
 
@@ -1338,10 +1124,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
         self.assertEqual(run_pr_numbers, {100, 101})
         self.assertEqual(latest_ts, 50.0)
-        self.assertEqual(
-            tools,
-            {"tool_execute", "tool_execute", "tool_execute"},
-        )
+        self.assertEqual(tools, {"tool_execute"})
         self.assertEqual(
             evidence,
             {

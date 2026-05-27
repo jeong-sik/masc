@@ -128,8 +128,6 @@ let test_documented_callback_label_vocabulary () =
       "gate_tool_call_log";
       "after_turn_sse_broadcast";
       "post_tool_log_write";
-      "pr_review_action_metrics_append";
-      "pr_work_action_metrics_append";
       "on_tool_executed";
       "on_error";
       "on_tool_error";

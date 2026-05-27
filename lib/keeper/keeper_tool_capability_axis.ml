@@ -8,10 +8,7 @@
 type t =
   | Claim_task
   | Board_activity
-  | Pr_work_action
-  | Pr_work_shell_command
-  | Pr_work_git_action
-  | Docker_route_pr_work_action
+  | Shell_command_input
 
 let keeper_name (tool : Tool_name.Keeper.t) =
   Tool_name.to_string (Tool_name.Keeper tool)
@@ -50,19 +47,14 @@ let board_activity_tool_names =
   ]
 ;;
 
-let pr_work_shell_command_tool_names =
+let shell_command_input_tool_names =
   [ keeper_name Tool_name.Keeper.Execute ]
 ;;
-
-let pr_work_git_action_tool_names = [ keeper_name Tool_name.Keeper.Execute ]
 
 let tool_names = function
   | Claim_task -> claim_task_tool_names
   | Board_activity -> board_activity_tool_names
-  | Pr_work_shell_command -> pr_work_shell_command_tool_names
-  | Pr_work_git_action -> pr_work_git_action_tool_names
-  | Pr_work_action | Docker_route_pr_work_action ->
-    pr_work_git_action_tool_names @ pr_work_shell_command_tool_names
+  | Shell_command_input -> shell_command_input_tool_names
 ;;
 
 let supports capability name =
@@ -132,7 +124,7 @@ let shell_command_input_candidates tool_name input =
       let command = String.trim value in
       if String.equal command "" || List.mem command acc then acc else acc @ [ command ]
   in
-  if supports Pr_work_shell_command tool_name
+  if supports Shell_command_input tool_name
   then
     match canonical_tool_name tool_name with
     | "tool_execute" ->

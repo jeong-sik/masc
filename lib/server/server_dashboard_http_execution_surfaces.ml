@@ -8,6 +8,12 @@ let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cac
 let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 
+(* Transport health probe timeout — env-overridable with sane bounds.
+   SSOT: env_config_snapshot.ml also registers the same env var. *)
+let transport_health_timeout_default_s = 8.0
+let transport_health_timeout_min_s = 3.0
+let transport_health_timeout_max_s = 30.0
+
 (* Routed through Env_config_runtime.Dashboard so operators can raise
    the ceiling on slow-disk deployments without a rebuild. The outer
    wrapper at [server_runtime_bootstrap.ml] uses the matching
@@ -654,9 +660,9 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:8.0
-      ~min_v:3.0
-      ~max_v:30.0
+      ~default:transport_health_timeout_default_s
+      ~min_v:transport_health_timeout_min_s
+      ~max_v:transport_health_timeout_max_s
   in
   let compute () =
     mark_cached_surface_attempt transport_health_cache;
@@ -814,9 +820,9 @@ let dashboard_transport_health_http_json ~state =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:8.0
-      ~min_v:3.0
-      ~max_v:30.0
+      ~default:transport_health_timeout_default_s
+      ~min_v:transport_health_timeout_min_s
+      ~max_v:transport_health_timeout_max_s
   in
   let json = cached_surface_json transport_health_cache in
   extend_projection_diagnostics

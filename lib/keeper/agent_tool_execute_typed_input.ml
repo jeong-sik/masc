@@ -199,7 +199,12 @@ let of_json (json : Yojson.Safe.t) =
   let* env = optional_env ~path:"$" fields in
   match executable_present, pipeline_value with
   | true, Some _ ->
-    Error "$.executable and $.pipeline are mutually exclusive typed Execute fields"
+    Error
+      "$.executable and $.pipeline are mutually exclusive typed Execute \
+       fields. Pick exactly one form and drop the other: either {executable, \
+       argv} for a single process OR {pipeline} for a multi-stage Shell IR \
+       pipeline. To pipe through a process, put it in pipeline; do not \
+       combine."
   | true, None ->
     let* executable = required_string ~path:"$" fields "executable" in
     let* argv = optional_string_list ~path:"$" fields "argv" in

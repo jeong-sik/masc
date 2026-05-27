@@ -151,17 +151,24 @@ let tool_execute_schema : Masc_domain.tool_schema =
           , `List
               [ `Assoc
                   [ "required", `List [ `String "executable" ]
+                  ; ( "not"
+                    , `Assoc [ "required", `List [ `String "pipeline" ] ] )
                   ; ( "description"
                     , `String
-                        "Single-process form: provide executable (and optional \
-                         argv). Must not include pipeline." )
+                        "Single-process form: include 'executable' (and \
+                         optional 'argv').  DO NOT also include 'pipeline' \
+                         in the same call." )
                   ]
               ; `Assoc
                   [ "required", `List [ `String "pipeline" ]
+                  ; ( "not"
+                    , `Assoc
+                        [ "required", `List [ `String "executable" ] ] )
                   ; ( "description"
                     , `String
-                        "Pipeline form: provide pipeline array of exec stages. \
-                         Must not include executable." )
+                        "Pipeline form: include 'pipeline' array of exec \
+                         stages.  DO NOT also include 'executable' in the \
+                         same call." )
                   ]
               ] )
         ]

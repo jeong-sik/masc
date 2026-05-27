@@ -361,6 +361,10 @@ val register_runtime_meta_write_sync : (Coord.config -> keeper_meta -> unit) -> 
 
 (** {1 JSON field scrubbing} *)
 
+val config_field_names : string list
+(** Config field names owned by TOML only — never written to JSON.
+    Re-exported from {!Keeper_meta_json_scrub}. *)
+
 val drop_assoc_keys : string list -> Yojson.Safe.t -> Yojson.Safe.t
 val reject_removed_keeper_meta_fields : Yojson.Safe.t -> (unit, string) result
 val scrub_persisted_keeper_meta_json :

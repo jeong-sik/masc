@@ -2298,3 +2298,8 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_tool_resource_gate.inc)
+
+(executable
+ (name test_config_runtime_split)
+ (modules test_config_runtime_split)
+ (libraries masc_test_deps))

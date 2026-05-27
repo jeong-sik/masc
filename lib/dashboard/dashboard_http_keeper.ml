@@ -578,6 +578,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ("trust_observatory", trust_observatory);
                 ]
               in
+              let profile = Dashboard_execution_helpers.get_agent_profile m.name in
 	            `Assoc ([
               ("name", `String m.name);
               ("pipeline_stage", `String
@@ -600,8 +601,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 | Some keeper_id ->
                     `String (Keeper_id.Uid.to_string keeper_id)
                 | None -> `Null );
-              ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
-              ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
+              ("emoji", `String profile.emoji);
+              ("koreanName", `String profile.korean_name);
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
               ( "current_task_id",

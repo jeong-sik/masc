@@ -172,13 +172,6 @@ let handle_request
     request_str
 ;;
 
-(** Re-export transport mode from protocol for backward compatibility *)
-type transport_mode = Mcp_server_eio_protocol.transport_mode =
-  | Framed
-  | LineDelimited
-
-let detect_mode = Mcp_server_eio_protocol.detect_mode
-
 let run_stdio ~sw ~env state =
   let handle_request ~clock ~sw ~mcp_session_id state request_str =
     handle_request ~clock ~sw ~mcp_session_id state request_str

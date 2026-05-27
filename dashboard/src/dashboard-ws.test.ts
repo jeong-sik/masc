@@ -13,9 +13,9 @@ import {
   dashboardSlicesForRoute,
   disconnectDashboardWS,
   flushPendingInbound,
-  parseWebSocketSseFrames,
   subscribeDashboardRoute,
 } from './dashboard-ws'
+import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import { clearStoredToken, setStoredToken } from './api/core'
 import {
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,

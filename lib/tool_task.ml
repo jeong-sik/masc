@@ -230,7 +230,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   | None ->
   match client_side_transition_gate_error ~task_opt ~action ~action_s with
   | Some err ->
-    log_task_transition_failed (Masc_domain.Task err);
+    log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
     result_to_response ~tool_name ~start_time (Error (Masc_domain.Task err))
   | None ->
   match handoff_context with
@@ -258,7 +258,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   match completion_state_error with
   | Some err ->
-    log_task_transition_failed err;
+    log_task_transition_failed ~agent_name:ctx.agent_name err;
     result_to_response ~tool_name ~start_time (Error err)
   | None ->
   let completion_owned_by_caller =
@@ -604,7 +604,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                  ~task_id ())
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
-       log_task_transition_failed err);
+       log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
   (match result, action with
    | Ok _, Masc_domain.Done_action ->

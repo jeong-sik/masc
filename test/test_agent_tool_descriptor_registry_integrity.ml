@@ -27,6 +27,49 @@ module Tool_board_registry = Masc_mcp.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
 
+(* RFC-0190 — Descriptor as Visibility/Metadata SSOT.
+
+   [Tool_catalog_surfaces.public_mcp_surface_tools] is the operator-facing
+   MCP surface set. Its end-state under RFC-0190 P4 is to be computed as
+   [filter (visibility = Public_mcp) all_descriptors], deleting the hand
+   list entirely.
+
+   Until RFC-0190 P1-P3 land, 9 surface entries have no descriptor at all
+   because their handlers live in [Tool_inline_dispatch] (MCP server-level
+   inline path), not in the [runtime_handler] enum the descriptor system
+   dispatches through.  These 9 are enumerated below as the
+   [rfc_0190_pending_inline_migration] allowlist.
+
+   This invariant test exists to ratchet that allowlist toward empty:
+   - Adding a new surface entry without a descriptor fails the test.
+   - Adding a descriptor for any of the 9 allowlist entries fails the
+     test (allowlist must shrink), forcing the allowlist edit to live in
+     the same PR as the descriptor add.
+
+   When the allowlist hits zero, RFC-0190 P4 lands [public_mcp_surface_tools]
+   as a function over [all_descriptors] and this test is rewritten to
+   forbid any pending entries. *)
+let rfc_0190_pending_inline_migration =
+  [ "masc_start"
+  ; "masc_join"
+  ; "masc_leave"
+  ; "masc_broadcast"
+  ; "masc_messages"
+  ; "masc_who"
+  ; "masc_keeper_sandbox_status"
+  ; "masc_persona_generate"
+  ; "masc_keeper_create_from_persona"
+  ]
+;;
+
+let descriptor_internal_name_set () =
+  let tbl = Hashtbl.create 256 in
+  List.iter
+    (fun d -> Hashtbl.replace tbl d.Descriptor.internal_name ())
+    (all_descriptors ());
+  tbl
+;;
+
 let find_duplicates ~key (xs : Descriptor.t list) : (string * int) list =
   let counts = Hashtbl.create 64 in
   List.iter
@@ -336,6 +379,53 @@ let test_rfc_0182_clusters_have_descriptor_projection () =
     cluster_projection_table
 ;;
 
+(* RFC-0190 — every entry of [public_mcp_surface_tools] must either have
+   a descriptor or be on the [rfc_0190_pending_inline_migration]
+   allowlist. New surface additions without a descriptor are rejected. *)
+let test_rfc_0190_surface_covered_by_descriptor_or_allowlist () =
+  let descriptor_names = descriptor_internal_name_set () in
+  let allowlist =
+    let tbl = Hashtbl.create 16 in
+    List.iter (fun n -> Hashtbl.replace tbl n ()) rfc_0190_pending_inline_migration;
+    tbl
+  in
+  let surface = Tool_catalog_surfaces.public_mcp_surface_tools in
+  let missing =
+    List.filter
+      (fun name ->
+         (not (Hashtbl.mem descriptor_names name))
+         && not (Hashtbl.mem allowlist name))
+      surface
+  in
+  if missing <> []
+  then
+    Alcotest.failf
+      "public_mcp_surface_tools has %d entries with no descriptor and no \
+       RFC-0190 allowlist slot: %s. Either add a descriptor (preferred, \
+       see RFC-0190 P1-P3) or extend [rfc_0190_pending_inline_migration] \
+       with explicit justification."
+      (List.length missing)
+      (String.concat ", " missing)
+;;
+
+(* RFC-0190 — the allowlist is the *missing* set, not a permanent
+   carve-out.  When a descriptor lands for an allowlist entry, the
+   allowlist edit must land in the same PR.  This test catches the
+   stale-allowlist case. *)
+let test_rfc_0190_allowlist_has_no_descriptor () =
+  let descriptor_names = descriptor_internal_name_set () in
+  let stale =
+    List.filter (Hashtbl.mem descriptor_names) rfc_0190_pending_inline_migration
+  in
+  if stale <> []
+  then
+    Alcotest.failf
+      "rfc_0190_pending_inline_migration lists %d entries that now have \
+       descriptors and must be removed from the allowlist: %s"
+      (List.length stale)
+      (String.concat ", " stale)
+;;
+
 let () =
   Alcotest.run
     "agent_tool_descriptor_registry_integrity"
@@ -359,6 +449,16 @@ let () =
             "tool_shard/approval/persona/keeper/surface_audit project to descriptors"
             `Quick
             test_rfc_0182_clusters_have_descriptor_projection
+        ] )
+    ; ( "rfc-0190-surface-projection"
+      , [ test_case
+            "public_mcp_surface_tools is descriptor-backed or allowlisted"
+            `Quick
+            test_rfc_0190_surface_covered_by_descriptor_or_allowlist
+        ; test_case
+            "rfc_0190_pending_inline_migration shrinks when a descriptor lands"
+            `Quick
+            test_rfc_0190_allowlist_has_no_descriptor
         ] )
     ; ( "policy-projection"
       , [ test_case

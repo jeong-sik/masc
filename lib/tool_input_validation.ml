@@ -34,7 +34,7 @@ let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
   match args with
   | `Assoc fields ->
     `Assoc (List.filter (fun (key, _) -> not (is_internal_marker_key key)) fields)
-  | _ -> args
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args
 ;;
 
 let required_names schema =
@@ -43,15 +43,15 @@ let required_names schema =
     List.filter_map
       (function
         | `String name -> Some name
-        | _ -> None)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None)
       items
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 ;;
 
 let has_enum schema =
   match Json_util.assoc_member_opt "enum" schema with
   | Some (`List (_ :: _)) -> true
-  | _ -> false
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List [] | `Assoc _) | None -> false
 ;;
 
 let optional_enum_fields schema =
@@ -64,7 +64,7 @@ let optional_enum_fields schema =
          then Some name
          else None)
       props
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 ;;
 
 let normalize_blank_optional_enum_args ?schema args =
@@ -80,7 +80,7 @@ let normalize_blank_optional_enum_args ?schema args =
               match value with
               | `String raw when List.mem key optional_enums && String.trim raw = "" ->
                 false
-              | _ -> true)
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> true)
            fields)
   | _ -> args
 ;;
@@ -98,19 +98,19 @@ let schema_has_properties = function
        (match List.assoc_opt "oneOf" fields with
         | Some (`List (_ :: _)) -> true
         | _ -> false))
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
 let property_names schema =
   match Json_util.assoc_member_opt "properties" schema with
   | Some (`Assoc props) -> List.map fst props
-  | _ -> []
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> []
 ;;
 
 let forbids_additional_properties schema =
   match Json_util.assoc_member_opt "additionalProperties" schema with
   | Some (`Bool false) -> true
-  | _ -> false
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> false
 ;;
 
 let unsupported_arg_names schema = function
@@ -167,20 +167,20 @@ let one_of_branch_constraints schema =
                         (match List.assoc_opt "const" prop_fields with
                          | Some const_value -> Some (name, const_value)
                          | None -> None)
-                      | _ -> None)
+                      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
                    props
-               | _ -> []
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
              in
              let forbidden_required =
                match Json_util.assoc_member_opt "not" branch with
                | Some (`Assoc _ as not_schema) -> required_names not_schema
-               | _ -> []
+               | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> []
              in
              Some { required; consts; forbidden_required })
         branches
     in
     if List.length constraints = List.length branches then constraints else []
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 ;;
 
 let branch_label b =
@@ -238,7 +238,7 @@ let one_of_required_shape_error schema = function
           (Printf.sprintf
              "arguments match multiple mutually exclusive schemas: %s"
              options))
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let schema_shape_error schema args =
@@ -266,7 +266,7 @@ let retired_transition_alias_names ~name = function
 
 let empty_tool_args = function
   | `Null | `Assoc [] -> true
-  | _ -> false
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc (_ :: _) -> false
 ;;
 
 let emit_validation_telemetry ~tool ~result ~reason =

@@ -7,8 +7,7 @@ import type { GovernanceFilter } from './governance-utils'
 import { createAsyncResource, getData } from '../lib/async-state'
 
 // ── Main governance resource ──
-const governanceResource = createAsyncResource<DashboardGovernanceResponse>()
-export { governanceResource }
+export const governanceResource = createAsyncResource<DashboardGovernanceResponse>()
 
 export const governanceLoading = computed(() => governanceResource.state.value.status === 'loading')
 export const governanceError = signal('')

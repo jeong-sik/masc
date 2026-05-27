@@ -278,7 +278,7 @@
       <h2>Executive Goal</h2>
       <p>
         현재 문제는 keeper 실패가 여러 callsite에서 서로 다른 언어로 해석된다는 점이다.
-        <code>keeper_bash</code> workflow rejection, <code>provider_timeout</code>, stale watchdog,
+        <code>tool_execute</code> workflow rejection, <code>provider_timeout</code>, stale watchdog,
         supervisor auto-pause, dashboard blocked count가 서로 다른 정책 계층처럼 동작하면서
         operator에게는 모두 "keeper가 막힘/죽음"으로 보인다.
       </p>
@@ -307,7 +307,7 @@
         <div class="panel">
           <h3>Immediate Mitigations In Flight</h3>
           <ul>
-            <li><span class="done">Done / PR</span> <code>#16154</code>: deterministic <code>keeper_bash</code> guard rejection을 <code>workflow_rejection</code>으로 분류해 circuit breaker에서 제외.</li>
+            <li><span class="done">Done / PR</span> <code>#16154</code>: deterministic <code>tool_execute</code> guard rejection을 <code>workflow_rejection</code>으로 분류해 circuit breaker에서 제외.</li>
             <li><span class="done">Done / PR</span> <code>#16159</code>: repeated <code>provider_timeout</code> strike가 <code>Keeper_fiber_crash</code>로 승격되는 직접 경로 제거.</li>
             <li><span class="done">Done / OAS PR</span> <code>oas#1632</code>: provider timeout을 <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code> 같은 typed evidence로 보존.</li>
             <li><span class="done">Done / MASC PR</span> <code>#16191</code>: downstream OAS pin을 <code>main@308152ee</code> (<code>v0.196.1</code>)로 올리고 API surface fingerprint를 갱신.</li>
@@ -519,7 +519,7 @@ type decision = {
             <td>P0-A</td>
             <td><span class="status done">merged</span></td>
             <td>Existing noisy paths stop killing keepers directly.</td>
-            <td><code>keeper_shell_bash.ml</code>, <code>keeper_heartbeat_loop.ml</code>, <code>keeper_turn_slot.ml</code></td>
+            <td><code>agent_tool_execute_runtime.ml</code>, <code>keeper_heartbeat_loop.ml</code>, <code>keeper_turn_slot.ml</code></td>
             <td>workflow rejection skips breaker; OAS timeout strike limit soft-backoffs without crash.</td>
           </tr>
           <tr>

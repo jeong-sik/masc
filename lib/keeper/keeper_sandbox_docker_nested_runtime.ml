@@ -15,7 +15,7 @@
    Extracted from [Keeper_sandbox_docker] (godfile decomp). Pure shell
    tokenizer + classifier - no I/O, no shared state. *)
 
-module Command_words = Keeper_shell_command_words
+module Command_words = Agent_tool_execute_command_words
 
 let nested_container_runtime_tokens = [ "docker"; "podman"; "nerdctl"; "buildah" ]
 

@@ -4,7 +4,7 @@
     cooldown has elapsed, creates a new session with the current context
     carried forward to the next generation.
 
-    Extracted from Keeper_exec_context as part of #4955 god-file split.
+    Extracted from Keeper_context_runtime as part of #4955 god-file split.
 
     Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.
     Authoritative spec mirror is

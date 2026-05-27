@@ -890,10 +890,10 @@ describe('IdeShell', () => {
     expect(overlay).toBeNull()
   })
 
-  it('opens the keeper shell drawer from the terminal route param', async () => {
+  it('opens the Execute output drawer from the terminal route param', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
-        'event: shell\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"bgt-1","stdout_since":"hello\\\\n","stderr_since":"","closed":true}\n\n',
+        'event: output\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"bgt-1","stdout_since":"hello\\\\n","stderr_since":"","closed":true}\n\n',
         {
           status: 200,
           headers: { 'Content-Type': 'text/event-stream' },
@@ -911,9 +911,9 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     await waitFor(() => expect(container.textContent).toContain('hello'))
-    expect(container.querySelector('[data-testid="keeper-shell-drawer"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="execute-output-drawer"]')).not.toBeNull()
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/dashboard/keeper-shell/sangsu',
+      '/api/dashboard/execute-output/sangsu',
       expect.objectContaining({
         headers: expect.objectContaining({ Accept: 'text/event-stream' }),
       }),

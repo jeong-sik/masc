@@ -26,14 +26,14 @@ let prepare_resume_checkpoint_for_dispatch
       (ctx_work : Keeper_types.working_context)
   : pre_dispatch_checkpoint_hygiene_result
   =
-  let before_tokens = Keeper_exec_context.token_count ctx_work in
+  let before_tokens = Keeper_context_runtime.token_count ctx_work in
   let pre_dispatch_meta =
     { meta with compaction = { meta.compaction with cooldown_sec = 0 } }
   in
   let compacted_ctx, trigger, decision =
     Keeper_compact_policy.compact_if_needed_typed ~meta:pre_dispatch_meta ~now_ts ctx_work
   in
-  let after_tokens = Keeper_exec_context.token_count compacted_ctx in
+  let after_tokens = Keeper_context_runtime.token_count compacted_ctx in
   let applied = Option.is_some trigger in
   let meaningful_reduction = after_tokens < before_tokens in
   let checkpoint_opt, save_error =
@@ -42,7 +42,7 @@ let prepare_resume_checkpoint_for_dispatch
     else if not applied
     then
       ( Some
-          (Keeper_exec_context.resume_checkpoint_of_context
+          (Keeper_context_runtime.resume_checkpoint_of_context
              ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
              compacted_ctx),
         None )

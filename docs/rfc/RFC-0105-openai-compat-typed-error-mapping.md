@@ -131,7 +131,7 @@ The envelope's `code` field is hardcoded `null`. Even if a typed
 
 RFC-0098 §8 originally listed three call sites:
 
-1. `keeper_exec_proactive.ml:185` — no longer exists in main (moved to
+1. The retired proactive exec call site — no longer exists in main (moved to
    typed `Agent_sdk.Error.t`).
 2. `Llm_orchestration.run_prompt_cascade` — same.
 3. `server_mcp_transport_http` mapping — turned out to need no work

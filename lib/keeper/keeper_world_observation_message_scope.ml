@@ -2,7 +2,7 @@
 
 open Keeper_types
 open Keeper_memory
-open Keeper_exec_context
+open Keeper_context_runtime
 
 let scope_message_feed_enabled (meta : keeper_meta) : bool =
   meta.room_signal_prompt_enabled

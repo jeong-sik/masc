@@ -1,7 +1,7 @@
 (** See .mli for contract.
 
-    The current Docker invocation mirrors the hardened-keeper bash sandbox in
-    [agent_tool_shell_runtime.ml] (read-only rootfs, no caps, no network) with the
+    The current Docker invocation mirrors the hardened-Execute sandbox in
+    [agent_tool_command_runtime.ml] (read-only rootfs, no caps, no network) with the
     playground mounted read-only and the default read program reduced to a
     single [cat]. The argv assembly is duplicated rather than shared so a
     future surgical change to either path does not need to wade through the
@@ -48,7 +48,7 @@ let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
          "container_path_of_host: %s is not inside playground %s"
          host_norm host_root)
 
-(* Argv prefix kept private — distinct from agent_tool_shell_runtime's bash
+(* Argv prefix kept private — distinct from agent_tool_command_runtime's bash
    argv to avoid coupling the two surfaces. The trailing
    [program ; arg1 ; ... ] is appended by the caller via
    [build_docker_argv ~command_argv]. *)

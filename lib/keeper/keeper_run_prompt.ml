@@ -15,7 +15,7 @@ type turn_prompt_context =
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_sdk.Types.message list
   ; estimated_input_tokens : int
-  ; ctx_work : Keeper_exec_context.working_context
+  ; ctx_work : Keeper_context_runtime.working_context
   }
 
 let prompt_injection_prefixes =
@@ -131,7 +131,7 @@ let build_turn_context
       } =
     build_turn_prompt
       ~base_system_prompt
-      ~messages:(Keeper_exec_context.messages_of_context ctx_work)
+      ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
   let dynamic_context =
     let recent_failure_context =
@@ -191,7 +191,7 @@ let build_turn_context
   let user_msg = Agent_sdk.Types.user_msg user_message in
   let history_messages =
     Keeper_context_core.repair_broken_tool_call_pairs
-      (Keeper_exec_context.messages_of_context ctx_work)
+      (Keeper_context_runtime.messages_of_context ctx_work)
   in
   let estimated_input_tokens =
     (* Prompt build runs before the LLM call, so the actual input-token
@@ -210,10 +210,10 @@ let build_turn_context
     max prompt_metrics.Keeper_agent_prompt_metrics.estimated_total_tokens
         composition.Keeper_agent_prompt_metrics.display_total_tokens
   in
-  let ctx_work = Keeper_exec_context.append ctx_work user_msg in
+  let ctx_work = Keeper_context_runtime.append ctx_work user_msg in
   if not is_retry
   then
-    Keeper_exec_context.persist_message
+    Keeper_context_runtime.persist_message
       ~source:history_user_source session user_msg;
   { turn_system_prompt
   ; dynamic_context

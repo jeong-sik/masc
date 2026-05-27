@@ -84,7 +84,7 @@ let finalize
         ]
       [ Agent_sdk.Types.Text response_text ]
   in
-  Keeper_exec_context.persist_message
+  Keeper_context_runtime.persist_message
     ~source:history_assistant_source
     session
     assistant_msg;

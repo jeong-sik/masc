@@ -113,13 +113,13 @@ Decomposed by shape:
 | `lib/keeper/keeper_hooks_oas.ml` | 48 | `runtime_lane_label` |
 | `lib/keeper/keeper_hooks_oas_types.ml` | 11 | `runtime_lane_label` |
 | `lib/keeper/keeper_unified_metrics_support.ml` | 79, 187 | `runtime_lane_label`, literal |
-| `lib/keeper/keeper_exec_status.ml` | 13, 219 | array literal members |
+| `lib/keeper/keeper_status_runtime.ml` | 13, 219 | array literal members |
 
 **Group C — string-set membership (not redaction, but adjacent)**:
 
 | File | Line | Shape |
 |---|---|---|
-| `lib/keeper/keeper_exec_status.ml` | 219 | `[ "error"; "failed"; "timeout"; "graphql"; "model"; "runtime"; "provider" ]` — *NOT a redaction label*. Heuristic substring classifier. Out of scope for RFC-0132; tracked under RFC-0089 string-classifier policy. |
+| `lib/keeper/keeper_status_runtime.ml` | 219 | `[ "error"; "failed"; "timeout"; "graphql"; "model"; "runtime"; "provider" ]` — *NOT a redaction label*. Heuristic substring classifier. Out of scope for RFC-0132; tracked under RFC-0089 string-classifier policy. |
 
 Sites in `keeper_unified_metrics.mli` (lines 113, 141) are doc-comment mentions of the redacted lane, not emit sites — they remain as documentation referencing `Boundary_redaction.runtime_provider_label`.
 
@@ -235,7 +235,7 @@ Add a ppx or `dune` lint rule (following RFC-0126 Phase 2 lint stack pattern):
 
 - AST walker rejects string literals equal to `"runtime"` *outside* `lib/types_boundary/boundary_redaction.ml`.
 - Exception list: doc comments and test fixtures (matched by file path: `*.mli` doc comments, `test/**`).
-- Group C site (`keeper_exec_status.ml:219` heuristic classifier) is allow-listed with a `(* ALLOWLIST: RFC-0132 / RFC-0089 *)` comment that the lint rule recognizes.
+- Group C site (`keeper_status_runtime.ml:219` heuristic classifier) is allow-listed with a `(* ALLOWLIST: RFC-0132 / RFC-0089 *)` comment that the lint rule recognizes.
 
 Once PR-3 is merged, any future PR that adds an inline `"runtime"` literal at an emit site **fails the build** before review.
 
@@ -268,7 +268,7 @@ Once PR-3 is merged, any future PR that adds an inline `"runtime"` literal at an
 | PR-1 | Alcotest: `runtime_provider_label \|> to_string = "runtime"` and `runtime_model_label \|> to_string = "runtime"`. Compile-time: attempting `let x : Boundary_redaction.public_label = "foo"` outside the module fails the build. |
 | PR-2 | For each of the 23 sites: dashboard SSE / OAS bridge / keeper telemetry output byte-equality regression test. The boundary-emit byte stream must be identical to pre-codemod main. Regression count target: 0. |
 | PR-3 | Adding a test fixture that places `let _ = "runtime"` at `lib/cascade/foo.ml` causes a build failure with the lint rule error message. Removing the fixture restores the build. |
-| Overall | After PR-3 merge, `rg -n '"runtime"' lib/cascade/ lib/keeper/` should return only: (a) `boundary_redaction.ml` source, (b) `keeper_exec_status.ml:219` allow-listed heuristic, (c) `.mli` doc comments. Total expected hits: ≤ 4. |
+| Overall | After PR-3 merge, `rg -n '"runtime"' lib/cascade/ lib/keeper/` should return only: (a) `boundary_redaction.ml` source, (b) `keeper_status_runtime.ml:219` allow-listed heuristic, (c) `.mli` doc comments. Total expected hits: ≤ 4. |
 
 ---
 
@@ -294,7 +294,7 @@ None. RFC-0132 is a root fix. No deprecated path is created; no symptom-suppress
 
 1. **Naming.** Is `Boundary_redaction` the right module name, or should it be `Redaction_label` / `Public_surface_label`? Naming is reversible in PR-1 review.
 2. **Should `public_label` be polymorphic over the label kind** (`provider` / `model`)? The current design has them be equal strings, so a plain private alias suffices. If divergence is anticipated, a tagged variant (`Provider | Model`) would be safer. Defer this decision to PR-1 review.
-3. **Group C (`keeper_exec_status.ml:219`).** Is the heuristic string list actually load-bearing, or can it be migrated to a typed sum (RFC-0089 territory)? Out of scope for RFC-0132 but worth a follow-up RFC if the list grows.
+3. **Group C (`keeper_status_runtime.ml:219`).** Is the heuristic string list actually load-bearing, or can it be migrated to a typed sum (RFC-0089 territory)? Out of scope for RFC-0132 but worth a follow-up RFC if the list grows.
 
 ---
 

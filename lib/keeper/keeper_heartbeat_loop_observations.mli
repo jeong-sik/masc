@@ -30,7 +30,7 @@ type cascade_backpressure_decision =
 val cascade_backpressure_observation_reasons : reason:string -> string list
 
 val cascade_backpressure_decision
-  :  cascade_resilience:Keeper_exec_preflight.cascade_resilience option
+  :  cascade_resilience:Keeper_cascade_resilience.cascade_resilience option
   -> should_run_turn:bool
   -> cascade_name:string
   -> cascade_status:Keeper_health_probe.health_status

@@ -29,7 +29,7 @@ After that work landed, an audit (2026-05-26) of the broader tool ecosystem foun
 | `keeper_*` internal coordination | ~37 | 0 |
 | **Total** | **~286** | **7 (~2.5%)** |
 
-The 26 legacy match arms in `Keeper_exec_tools.execute_keeper_tool_call` (lines 427-503) dispatch the bulk of coordination tools (`keeper_time_now`, `keeper_broadcast`, `keeper_task_*` cluster of 9, `keeper_voice_*` cluster of 6, `keeper_memory_*`, `keeper_library_*`, `keeper_board_*`, etc.) by string match. They do not flow through `Agent_tool_runtime.handle_internal`.
+The 26 legacy match arms in `Agent_tool_dispatch_runtime.execute_keeper_tool_call` (lines 427-503) dispatch the bulk of coordination tools (`keeper_time_now`, `keeper_broadcast`, `keeper_task_*` cluster of 9, `keeper_voice_*` cluster of 6, `keeper_memory_*`, `keeper_library_*`, `keeper_board_*`, etc.) by string match. They do not flow through `Agent_tool_runtime.handle_internal`.
 
 PR #18677 (merged 2026-05-26) removed three executor enum cases (`In_process`, `Gh_cli`, `Oas_bridge`) on YAGNI grounds because no descriptor used them. That decision was correct *for the current 7-descriptor scope* but contradicts any extension of the spine to coordination tools — most of which would target `In_process`.
 
@@ -80,7 +80,7 @@ Trade-offs:
 
 ### Option C — Leave coordination tools out of descriptor model
 
-Coordination tools (`keeper_*`, `masc_*` non-Remote_mcp) stay in `Keeper_exec_tools` legacy match chain forever. Descriptor model is *intentionally* LLM-native-only.
+Coordination tools (`keeper_*`, `masc_*` non-Remote_mcp) stay in `Agent_tool_dispatch_runtime` legacy match chain forever. Descriptor model is *intentionally* LLM-native-only.
 
 Trade-offs:
 - ✅ No architectural churn. Status quo holds.
@@ -131,7 +131,7 @@ Trade-offs:
    ```
 4. New `lib/keeper/agent_tool_in_process_runtime.{ml,mli}` with `handle_time_now : context -> args:Yojson.Safe.t -> string`.
 5. Wire `handle_in_process` in `agent_tool_runtime.ml`.
-6. Remove legacy match arm for `"keeper_time_now"` from `Keeper_exec_tools:448-451`.
+6. Remove legacy match arm for `"keeper_time_now"` from `Agent_tool_dispatch_runtime:448-451`.
 7. Test: descriptor route for `keeper_time_now`, parity with legacy output JSON.
 
 ### PR-3..N — cluster migrations
@@ -147,7 +147,7 @@ Each cluster (task, board, voice, memory, library) becomes one PR. Cluster size 
 ## 6. Out of scope
 
 - Migration of all ~106 `masc_*` MCP tools — these are predominantly external coordination via Coord runtime, not single-keeper dispatch. Separate RFC.
-- Renaming `Keeper_exec_tools` after legacy chain shrinks. The chain may end up empty after full cluster migration — at that point a follow-up RFC retires the module.
+- Renaming `Agent_tool_dispatch_runtime` after legacy chain shrinks. The chain may end up empty after full cluster migration — at that point a follow-up RFC retires the module.
 - `Gh_cli` / `Oas_bridge` re-introduction. Neither has a concrete near-term consumer. YAGNI holds for them until a real PR-N targets them.
 
 ## 7. Open questions

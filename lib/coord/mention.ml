@@ -134,7 +134,7 @@ let resolve_targets mode ~available_agents =
    Without this cache, [any_mentioned ~targets content] for N
    targets re-ran [Re.compile] N times per call.  Per-keeper
    message-policy evaluation (keeper_memory_policy /
-   keeper_exec_context / keeper_prompt) re-paid that on every
+   keeper_context_runtime / keeper_prompt) re-paid that on every
    message, so with 14 keepers × per-message direct-mention checks
    the compile cost was a sustained tax.
 

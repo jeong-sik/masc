@@ -42,7 +42,7 @@ let normalize_git_identity_mode_opt = function
   | Some raw -> (
       match String.trim (String.lowercase_ascii raw) with
       | "keeper_alias" -> Some "keeper_alias"
-      | "github_identity" -> Some "github_identity"
+      | "repo_cli_identity" -> Some "repo_cli_identity"
       | _ -> None)
 
 let normalize_social_model_opt = function
@@ -61,7 +61,7 @@ let lower_string_list_opt = function
   | xs -> Some (List.map String.lowercase_ascii xs)
 
 let valid_tool_preset_raw_strings =
-  [ "minimal"; "social"; "messaging"; "dispatch"; "coding"; "research"; "delivery"; "full" ]
+  [ "minimal"; "social"; "messaging"; "dispatch"; "research"; "delivery"; "full" ]
 
 let normalize_tool_preset_raw raw =
   let normalized = String.trim (String.lowercase_ascii raw) in

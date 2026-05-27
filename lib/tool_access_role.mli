@@ -22,5 +22,5 @@ val policy_for_role : Masc_domain.agent_role -> Tool_access_policy.t
     - Unregistered/unmapped tool names are not allowed by the policy
 
     Note: Keeper_denied and Keeper_internal filtering is handled separately
-    by keeper_exec_tools and the mode gate (allow_direct_call), not by
+    by agent_tool_dispatch_runtime and the mode gate (allow_direct_call), not by
     role policies. *)

@@ -112,9 +112,9 @@ let test_git_reset_hard_is_r2 () =
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "reset --hard is R2" true (Risk.is_r2 envelope)
 
-(* --- classify: gh R2 operations --- *)
+(* --- classify: repo-hosting CLI R2 operations --- *)
 
-let test_classify_gh_r2 () =
+let test_classify_repo_hosting_cli_r2 () =
   let cmds =
     [ simple_ir "gh" [ "pr"; "merge"; "123" ];
       simple_ir "gh" [ "repo"; "delete"; "owner/repo" ];
@@ -130,9 +130,9 @@ let test_classify_gh_r2 () =
          (Risk.is_r2 envelope))
     cmds
 
-(* --- classify: gh R1 operations --- *)
+(* --- classify: repo-hosting CLI R1 operations --- *)
 
-let test_classify_gh_r1 () =
+let test_classify_repo_hosting_cli_r1 () =
   let cmds =
     [ simple_ir "gh" [ "pr"; "create"; "--title"; "t" ];
       simple_ir "gh" [ "issue"; "close"; "123" ];
@@ -148,24 +148,24 @@ let test_classify_gh_r1 () =
          (Risk.is_r1 envelope))
     cmds
 
-(* --- classify: gh api mutations --- *)
+(* --- classify: repo-hosting CLI API mutations --- *)
 
-let test_classify_gh_api_delete_r2 () =
+let test_classify_repo_hosting_cli_api_delete_r2 () =
   let ir = simple_ir "gh" [ "api"; "-X"; "DELETE"; "/repos/o/r" ] in
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "DELETE is R2" true (Risk.is_r2 envelope)
 
-let test_classify_gh_api_post_r1 () =
+let test_classify_repo_hosting_cli_api_post_r1 () =
   let ir = simple_ir "gh" [ "api"; "-X"; "POST"; "/repos/o/r/issues" ] in
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "POST is R1" true (Risk.is_r1 envelope)
 
-let test_classify_gh_api_get_r0 () =
+let test_classify_repo_hosting_cli_api_get_r0 () =
   let ir = simple_ir "gh" [ "api"; "/repos/o/r" ] in
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "GET is R0" true (Risk.is_r0 envelope)
 
-let test_classify_gh_api_graphql_r1 () =
+let test_classify_repo_hosting_cli_api_graphql_r1 () =
   let ir = simple_ir "gh" [ "api"; "graphql" ] in
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "graphql is R1" true (Risk.is_r1 envelope)
@@ -181,9 +181,9 @@ let test_classify_pipeline_first_stage_destructive () =
   Alcotest.(check bool) "pipeline with destructive first stage"
     true (Risk.is_destructive envelope)
 
-(* --- classify: gh read-only prefix equivalence (P9a) --- *)
+(* --- classify: repo-hosting CLI read-only prefix equivalence (P9a) --- *)
 
-let test_classify_gh_read_only_prefixes_equivalence () =
+let test_classify_repo_hosting_cli_read_only_prefixes_equivalence () =
   let prefixes =
     [ [ "pr"; "list" ]
     ; [ "pr"; "view"; "123" ]
@@ -227,13 +227,13 @@ let () =
   test_classify_destructive ();
   test_git_reset_soft_is_r1 ();
   test_git_reset_hard_is_r2 ();
-  test_classify_gh_r2 ();
-  test_classify_gh_r1 ();
-  test_classify_gh_api_delete_r2 ();
-  test_classify_gh_api_post_r1 ();
-  test_classify_gh_api_get_r0 ();
-  test_classify_gh_api_graphql_r1 ();
+  test_classify_repo_hosting_cli_r2 ();
+  test_classify_repo_hosting_cli_r1 ();
+  test_classify_repo_hosting_cli_api_delete_r2 ();
+  test_classify_repo_hosting_cli_api_post_r1 ();
+  test_classify_repo_hosting_cli_api_get_r0 ();
+  test_classify_repo_hosting_cli_api_graphql_r1 ();
   test_classify_pipeline_first_stage_destructive ();
-  test_classify_gh_read_only_prefixes_equivalence ();
+  test_classify_repo_hosting_cli_read_only_prefixes_equivalence ();
   test_classify_unknown_read ();
   print_endline "test_shell_ir_risk: 15/15 passed"

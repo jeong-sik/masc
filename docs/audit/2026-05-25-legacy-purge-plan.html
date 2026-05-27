@@ -320,7 +320,7 @@
           <tr>
             <td>Keeper bash <code>stages</code> input alias</td>
             <td><span class="status done">draft PR #18402</span></td>
-            <td>Remove the hidden <code>stages</code> alias for <code>keeper_bash</code> JSON input. Public input now uses <code>pipeline</code> only; timeout/resource-gate inspection and typed-input detection no longer preserve the alias path.</td>
+            <td>Remove the hidden <code>stages</code> alias for <code>tool_execute</code> JSON input. Public input now uses <code>pipeline</code> only; timeout/resource-gate inspection and typed-input detection no longer preserve the alias path.</td>
             <td>Backstop grep is clean for the removed alias helper and compatibility wording. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
@@ -468,9 +468,9 @@
             <td>Receipt regression now asserts the provider/model fields are absent, not merely null-compatible. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td><code>keeper_bash</code> <code>stages</code> alias hints</td>
+            <td><code>tool_execute</code> <code>stages</code> alias hints</td>
             <td><span class="status done">merged #18445</span></td>
-            <td>Remove the remaining public hints that treated top-level <code>stages</code> as a live <code>keeper_bash</code> pipeline alias: resource-axis classification, descriptor expectations, Docker-route error wording, and the Legendary Bash runbook.</td>
+            <td>Remove the remaining public hints that treated top-level <code>stages</code> as a live <code>tool_execute</code> pipeline alias: resource-axis classification, descriptor expectations, Docker-route error wording, and the Legendary Bash runbook.</td>
             <td>Targeted grep is clean for the retired slash-form pipeline phrase, the old descriptor presence assertion, and the stale descriptor branch-count assertion. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
@@ -578,8 +578,8 @@
           <tr>
             <td><code>keeper_meta</code> blocker and identity sidecars</td>
             <td><span class="status done">merged #18640</span></td>
-            <td>Stop treating old <code>last_blocker</code>/<code>last_blocker_class</code> pairs and embedded meta <code>github_identity</code> as readable keeper state. <code>github_identity</code> belongs to keeper TOML + credential mapping + playground credential env, not runtime meta. Health output moves to the structured <code>last_blocker</code> object instead of class/detail sidecar fields.</td>
-            <td>Roundtrip tests keep only structured blocker JSON. Legacy blocker string/pair and meta <code>github_identity</code> rows are rejection tests; existing sandbox tests keep proving TOML/mapping-driven <code>github_identity</code> env injection.</td>
+            <td>Stop treating old <code>last_blocker</code>/<code>last_blocker_class</code> pairs and embedded meta <code>repo_cli_identity</code> as readable keeper state. <code>repo_cli_identity</code> belongs to keeper TOML + credential mapping + playground credential env, not runtime meta. Health output moves to the structured <code>last_blocker</code> object instead of class/detail sidecar fields.</td>
+            <td>Roundtrip tests keep only structured blocker JSON. Legacy blocker string/pair and meta <code>repo_cli_identity</code> rows are rejection tests; existing sandbox tests keep proving TOML/mapping-driven <code>repo_cli_identity</code> env injection.</td>
           </tr>
           <tr>
             <td><code>Keeper_types</code> hidden support include</td>
@@ -638,7 +638,7 @@
           <tr>
             <td>Keeper compatibility alias bundle</td>
             <td><span class="status done">merged #18654</span></td>
-            <td>Remove the <code>MASC_KEEPER_AUTOBOT_MAX</code> typo env alias, ignored sandbox <code>~in_playground</code> argument, stale GH/worktree boundary docs, dashboard worktree-status SSE residue, and LLM-native file/search descriptor compatibility args.</td>
+            <td>Remove the <code>MASC_KEEPER_AUTOBOT_MAX</code> typo env alias, ignored sandbox <code>~in_playground</code> argument, stale repo-checkout boundary docs, dashboard worktree-status SSE residue, and LLM-native file/search descriptor compatibility args.</td>
             <td>Merged as <code>eb085cc5a</code>; negative tests now pin the removed aliases as absent or rejected.</td>
           </tr>
           <tr>
@@ -708,21 +708,21 @@
             <td>Merged as <code>12acddd4c</code>. Remaining references are explicit retired-surface history or negative tests for deleted names.</td>
           </tr>
           <tr>
-            <td>Keeper prompt / GitHub identity residue</td>
+            <td>Keeper prompt / repo CLI identity residue</td>
             <td><span class="status done">merged #18757</span></td>
-            <td>Remove keeper-specific GitHub identity operator actions, dashboard adapters, split script/test scaffolding, and stale retired tool-name references in prompt continuity, proof artifacts, changelog, docs, and cockpit seed data.</td>
-            <td>Merged as <code>4e03613d5</code>. Backstop grep is clean for retired PR helper, keeper-specific GitHub identity, legacy code helper, and GitHub CLI adapter tokens outside this audit plan.</td>
+            <td>Remove keeper-specific repo CLI identity operator actions, dashboard adapters, split script/test scaffolding, and stale retired tool-name references in prompt continuity, proof artifacts, changelog, docs, and cockpit seed data.</td>
+            <td>Merged as <code>4e03613d5</code>. Backstop grep is clean for deleted helper-family and identity-adapter tokens outside this audit plan.</td>
           </tr>
           <tr>
-            <td>Generic GitHub identity operator actions</td>
+            <td>Generic repo CLI identity operator actions</td>
             <td><span class="status done">merged #18764</span></td>
-            <td>Remove <code>github_identity_login_prepare</code> / <code>github_identity_status</code> from the generic operator action enum, available-action catalog, approval policy, execution handlers, and current RFC text. GitHub credentials should be bootstrap/config materialization, not a runtime operator-control workaround.</td>
+            <td>Remove <code>repo_cli_identity_login_prepare</code> / <code>repo_cli_identity_status</code> from the generic operator action enum, available-action catalog, approval policy, execution handlers, and current RFC text. GitHub credentials should be bootstrap/config materialization, not a runtime operator-control workaround.</td>
             <td>Merged as <code>b3e993c70</code>. Static grep is clean for the live tool/action names outside negative tests, and the branch is included in <code>origin/main</code>.</td>
           </tr>
           <tr>
             <td><code>Keeper_coordination</code> exec-context relay facade</td>
             <td><span class="status done">merged #18773</span></td>
-            <td>Remove the checkpoint, compaction, trace-id, board-write, and model-label re-export relay from <code>Keeper_coordination</code>. <code>Keeper_execution</code> now binds those public helpers directly to <code>Keeper_exec_context</code>, while <code>Keeper_coordination</code> keeps only room/cursor ownership.</td>
+            <td>Remove the checkpoint, compaction, trace-id, board-write, and model-label re-export relay from <code>Keeper_coordination</code>. <code>Keeper_execution</code> now binds those public helpers directly to <code>Keeper_context_runtime</code>, while <code>Keeper_coordination</code> keeps only room/cursor ownership.</td>
             <td>Merged as <code>8b98a8e96</code>. Backstop grep is clean for the removed <code>Keeper_coordination</code> relay symbols and the old <code>include Keeper_coordination</code> path.</td>
           </tr>
           <tr>

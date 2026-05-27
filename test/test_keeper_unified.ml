@@ -13,7 +13,7 @@ module KCC = Masc_mcp.Keeper_contract_classifier
 module KTCL = Masc_mcp.Keeper_tool_call_log
 module KTQ = Masc_mcp.Keeper_tool_query
 module KTR = Masc_mcp.Keeper_tool_response
-module KEC = Masc_mcp.Keeper_exec_context
+module KEC = Masc_mcp.Keeper_context_runtime
 module KSM = Masc_mcp.Keeper_social_model
 module KP = Masc_mcp.Keeper_state_machine
 module KD = Masc_mcp.Keeper_deliberation
@@ -116,7 +116,7 @@ let () =
   Config_dir_resolver.reset ();
   let prompts_dir = Filename.concat base_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
-  ignore (Result.get_ok (Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path));
+  ignore (Result.get_ok (Masc_mcp.Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Masc_mcp.Prompt_defaults.init ()
 ;;
 
@@ -1354,7 +1354,7 @@ let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
 ;;
 
 let healthy_cascade_resilience cascade_name
-  : Masc_mcp.Keeper_exec_preflight.cascade_resilience
+  : Masc_mcp.Keeper_cascade_resilience.cascade_resilience
   =
   { ok = true
   ; cascade_name
@@ -2343,9 +2343,9 @@ let test_prompt_includes_operational_tool_guidance () =
        "Execute { executable: \"git\", argv: [\"log\", \"--oneline\", \"-5\"]");
   check
     bool
-    "system prompt avoids tool_workspace_inspect rg recipe"
+    "system prompt avoids tool_search_files rg recipe"
     false
-    (contains_substring sys "tool_workspace_inspect op=rg");
+    (contains_substring sys "tool_search_files op=rg");
   check
     bool
     "system prompt avoids private tool_execute call shape"
@@ -2418,7 +2418,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     true
     (contains_substring
        prompt
-       "Do not call `tool_execute` or `tool_workspace_inspect` unless the active schema \
+       "Do not call `tool_execute` or `tool_search_files` unless the active schema \
         literally lists that exact name");
   check
     bool
@@ -2450,7 +2450,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "gh pr create path not documented"
     false
-    (contains_substring prompt "tool_workspace_inspect op=gh cmd='pr create --draft");
+    (contains_substring prompt "tool_search_files op=gh cmd='pr create --draft");
   check
     bool
     "legacy pr workflow removed from prompt"
@@ -2489,7 +2489,7 @@ let test_world_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "cd repos/<REPO_NAME> && git status")
 ;;
 
-let test_system_prompt_prefers_bash_and_gh_pr_lane () =
+let test_system_prompt_routes_gh_through_execute_shell_ir () =
   let sys =
     Masc_mcp.Keeper_prompt.build_keeper_system_prompt
       ~goal:"test goal"
@@ -2511,9 +2511,11 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
        "Use only the exact tool schemas currently shown to you by the runtime");
   check
     bool
-    "mentions keeper-scoped gh identity"
+    "mentions shell-ir scoped github access"
     true
-    (contains_substring sys "GitHub CLI work uses a keeper-scoped gh identity");
+    (contains_substring
+       sys
+       "GitHub and PR commands are ordinary Execute typed-argv calls routed through Shell IR/policy");
   check
     bool
     "does not advertise removed github helper"
@@ -3150,16 +3152,16 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
 ;;
 
 let test_tool_guidance_uses_registered_keeper_tool_schemas () =
-  Masc_mcp.Keeper_exec_tools.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  Masc_mcp.Agent_tool_dispatch_runtime.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let module Guidance = Masc_mcp.Keeper_tool_guidance in
   let social_meta =
     { minimal_meta with tool_access = Preset { preset = Social; also_allow = [] } }
   in
   let coding_meta =
-    { minimal_meta with tool_access = Preset { preset = Coding; also_allow = [] } }
+    { minimal_meta with tool_access = Preset { preset = Delivery; also_allow = [] } }
   in
-  let social_allowed = Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names social_meta in
-  let coding_allowed = Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names coding_meta in
+  let social_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names social_meta in
+  let coding_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names coding_meta in
   let social_guidance =
     Guidance.render_preferred_tools ~allowed_tool_names:social_allowed
   in
@@ -3252,7 +3254,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_board_list");
   check
     bool
-    "tool_workspace_inspect schema no longer documents gh claim prerequisite"
+    "tool_search_files schema no longer documents gh claim prerequisite"
     false
     (source_file_contains
        "lib/tool_shard_types_schemas_shell.ml"
@@ -3270,7 +3272,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     false
     (source_file_contains
        "lib/keeper/keeper_agent_run.ml"
-       "Use tool_execute, tool_workspace_inspect, tool_read_file")
+       "Use tool_execute, tool_search_files, tool_read_file")
 ;;
 
 let test_tool_guidance_guard_falls_back_when_prompt_registry_empty () =
@@ -4334,11 +4336,11 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4543,11 +4545,11 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4625,11 +4627,11 @@ let test_append_metrics_snapshot_counts_only_mode_violation_refs () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4693,11 +4695,11 @@ let test_append_metrics_snapshot_nulls_unreported_usage () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4794,11 +4796,11 @@ let test_append_metrics_snapshot_persists_cache_usage () =
          ~context_max:100_000
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4904,11 +4906,11 @@ let test_append_metrics_snapshot_marks_untrusted_usage () =
          ~context_max:100_000
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4979,7 +4981,7 @@ let test_append_decision_record_persists_tool_calls () =
          }
        in
        let tool_calls : KAR.tool_call_detail list =
-         [ { tool_name = "tool_workspace_inspect"
+         [ { tool_name = "tool_search_files"
            ; provider = "cli_tool_a"
            ; outcome = "ok"
            ; typed_outcome = None
@@ -4988,7 +4990,7 @@ let test_append_decision_record_persists_tool_calls () =
            ; route_evidence =
                Some
                  (`Assoc
-                     [ "tool_name", `String "tool_workspace_inspect"
+                     [ "tool_name", `String "tool_search_files"
                      ; "command", `String "git_status"
                      ; "cwd", `String "repos/masc-mcp"
                      ; "via", `String "docker"
@@ -5010,7 +5012,7 @@ let test_append_decision_record_persists_tool_calls () =
        let result =
          make_run_result
            ~text:"Checked GitHub and reported blocker."
-           ~tools:[ "tool_workspace_inspect"; "keeper_board_post" ]
+           ~tools:[ "tool_search_files"; "keeper_board_post" ]
            ~tool_calls
            ~model:"cli_tool_a:gpt-5.4"
            ~input_tok:40
@@ -5088,7 +5090,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          (list string)
          "tools used persisted"
-         [ "tool_workspace_inspect"; "keeper_board_post" ]
+         [ "tool_search_files"; "keeper_board_post" ]
          Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);
        check
          (option string)
@@ -5124,7 +5126,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          string
          "first tool name"
-         "tool_workspace_inspect"
+         "tool_search_files"
          Yojson.Safe.Util.(
            List.nth recorded_tool_calls 0 |> member "tool_name" |> to_string);
        check
@@ -5325,7 +5327,7 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
          ~latency_ms:19
          ~outcome:"error"
          ~error:
-           "tool_workspace_inspect failed: unsupported_op: gh is not a tool_workspace_inspect operation"
+           "tool_search_files failed: unsupported_op: gh is not a tool_search_files operation"
          ();
        let json =
          read_jsonl_line (Masc_mcp.Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
@@ -6089,7 +6091,7 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
     true
     (source_file_contains
        "lib/keeper/keeper_turn.ml"
-       "Keeper_exec_preflight.cascade_resilience_error_message")
+       "Keeper_cascade_resilience.cascade_resilience_error_message")
 ;;
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =
@@ -7246,7 +7248,7 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
        "Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call");
   check
     bool
-    "keeper bash hint forbids shell existence tests"
+    "Execute hint forbids shell existence tests"
     true
     (contains_substring sys "shell existence tests")
 ;;
@@ -7264,12 +7266,12 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash globs use public search tools"
     true
-    (contains_substring sys "Use SearchFiles or `tool_workspace_inspect file_pattern=glob`");
+    (contains_substring sys "Use SearchFiles or `tool_search_files file_pattern=glob`");
   check
     bool
     "bash globs can use public file search"
     true
-    (contains_substring sys "tool_workspace_inspect file_pattern=glob")
+    (contains_substring sys "tool_search_files file_pattern=glob")
 ;;
 
 let test_sanitize_text_utf8_replaces_control_chars () =
@@ -7351,7 +7353,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
       ; content =
           [ ToolUse
               { id = "call\001id"
-              ; name = "keeper\127shell"
+              ; name = "tool\127execute"
               ; input =
                   `Assoc
                     [ "pattern\000", `String "bad\127bytes"
@@ -7377,7 +7379,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
     (match assistant_msg.Agent_sdk.Types.content with
      | [ Agent_sdk.Types.ToolUse { id; name; input } ] ->
        check string "tool use id sanitized" "call id" id;
-       check string "tool use name sanitized" "keeper shell" name;
+       check string "tool use name sanitized" "tool execute" name;
        (match input with
         | `Assoc [ (key, `String value); ("nested", `List [ `String nested_value ]) ] ->
           check string "tool use json key sanitized" "pattern " key;
@@ -9839,7 +9841,7 @@ let test_social_model_magentic_ledger_stalled_state_carries_until_delta () =
 
 let test_keeper_allowed_tools_exclude_heartbeat () =
   let allowed =
-    Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names minimal_policy_meta
+    Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names minimal_policy_meta
   in
   check
     bool
@@ -10462,20 +10464,20 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_workspace_inspect" ]
-       ~allowed_tool_names:[ "tool_workspace_inspect"; "tool_execute" ]
+       ~required_tool_names:[ "tool_search_files" ]
+       ~allowed_tool_names:[ "tool_search_files"; "tool_execute" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for tool_workspace_inspect to avoid raw require_specific_tool \
+          "expected Any for tool_search_files to avoid raw require_specific_tool \
            MCP-prefix mismatches, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_workspace_inspect"; "tool_execute"; "keeper_board_post" ]
-       ~allowed_tool_names:[ "tool_workspace_inspect"; "tool_execute"; "keeper_board_post" ]
+       ~required_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
+       ~allowed_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
@@ -10485,7 +10487,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_workspace_inspect"; "tool_execute"; "keeper_board_post" ]
+       ~required_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
        ~allowed_tool_names:[ "SearchFiles"; "Execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
@@ -10497,14 +10499,14 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_workspace_inspect" ]
+       ~required_tool_names:[ "tool_search_files" ]
        ~allowed_tool_names:[ "SearchFiles" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for internal tool_workspace_inspect required tool exposed as public alias, \
+          "expected Any for internal tool_search_files required tool exposed as public alias, \
            got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
@@ -11061,7 +11063,7 @@ let () =
         ; test_case
             "prefers submit over legacy workflow"
             `Quick
-            test_system_prompt_prefers_bash_and_gh_pr_lane
+            test_system_prompt_routes_gh_through_execute_shell_ir
         ; test_case
             "includes autonomous trigger section"
             `Quick

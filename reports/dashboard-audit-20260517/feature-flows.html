@@ -76,13 +76,13 @@
     <section>
       <h2>4. `.masc-ide` Metadata Production</h2>
       <pre class="flow">Keeper writes/edits code
-  -> keeper_exec_fs.track_write_region()
+  -> agent_tool_filesystem_runtime.track_write_region()
   -> Ide_meta_sync.on_tool_call_complete()
   -> Ide_meta_sync.flush_regions()
   -> append .masc-ide/regions.jsonl after local implementation patch
 
 Keeper calls keeper_ide_annotate
-  -> keeper_exec_ide.handle_keeper_ide_annotate()
+  -> agent_tool_ide_runtime.handle_ide_annotate()
   -> Ide_annotations.create()
   -> append .masc-ide/annotations.jsonl
 
@@ -91,8 +91,8 @@ Dashboard reads
   -> GET /api/v1/ide/regions reads regions.jsonl
   -> generated regions now share the reader contract</pre>
       <p class="evidence">
-        Evidence: `keeper_exec_fs.ml:219-282`, `ide_meta_sync.ml:73-87`, `ide_region_tracker.ml:156-160`,
-        `keeper_exec_ide.ml:13-79`, `server_ide_http.ml:256-286`.
+        Evidence: `agent_tool_filesystem_runtime.ml:299-309`, `ide_meta_sync.ml:73-87`, `ide_region_tracker.ml:156-160`,
+        `agent_tool_ide_runtime.ml:13-79`, `server_ide_http.ml:256-286`.
       </p>
     </section>
 

@@ -14,9 +14,9 @@
     > [MASC_EXEC_TIMEOUT_DEFAULT_SEC] > [global_default_sec]. *)
 
 type caller =
-  | Shell                     (** agent_tool_shell_runtime hot-path subprocess (60s) *)
+  | Shell                     (** agent_tool_command_runtime hot-path subprocess (60s) *)
   | Fs                        (** agent_tool_filesystem_runtime file ops (30s) *)
-  | Preflight                 (** keeper_exec_preflight checks (10s) *)
+  | Preflight                 (** keeper_cascade_resilience checks (10s) *)
   | Repo_readiness            (** keeper_repo_readiness git status (10s) *)
   | Sandbox                   (** keeper_sandbox_control / keeper_sandbox_docker probes (2s) *)
   | Dispatch                  (** exec_dispatch routine execution (120s) *)

@@ -81,5 +81,5 @@ GET /api/v1/legendary_bash/counters
 
 The payload contains only live observer families:
 
-- `gh_exit_*`
+- `repo_cli_exit_*` / `repo_cli_signaled_*` / `repo_cli_stopped_*`
 - `shell_gate_*`

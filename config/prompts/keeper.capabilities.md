@@ -108,7 +108,7 @@ PR workflow (write/execute-capable schema required):
 3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
 4. `Execute executable="gh" argv=["pr","create",...]` or `Execute executable="gh" argv=["pr","edit",...]` — open or update the PR after push.
 5. After the PR exists, observe through `Execute` with `executable="gh"` and typed `argv` for `pr list` / `pr view`.
-   Do not probe GitHub identity with `gh auth status`. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
+   Do not probe repo CLI identity with `gh auth status`. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not call `gh pr ready`, `gh pr merge`, or `gh api ... draft=false` unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
 7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... pr_url=... notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.
 

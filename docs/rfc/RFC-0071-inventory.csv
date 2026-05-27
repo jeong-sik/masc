@@ -403,7 +403,6 @@ lib/keeper/agent_tool_memory_runtime.ml,34,None,unclassified
 lib/keeper/agent_tool_memory_runtime.ml,368,None,unclassified
 lib/keeper/agent_tool_memory_runtime.ml,523,None,unclassified
 lib/keeper/agent_tool_persona_runtime.ml,138,None,unclassified
-lib/keeper/agent_tool_preflight_runtime.ml,119,false,unclassified
 lib/keeper/keeper_status_metrics.ml,508,None,unclassified
 lib/keeper/keeper_status_metrics.ml,556,None,unclassified
 lib/keeper/keeper_status_runtime.ml,96,None,unclassified
@@ -512,10 +511,6 @@ lib/keeper/agent_tool_execute_runtime.ml,150,false,unclassified
 lib/keeper/agent_tool_execute_runtime.ml,274,None,unclassified
 lib/keeper/agent_tool_execute_runtime.ml,729,false,unclassified
 lib/keeper/agent_tool_execute_runtime.ml,744,false,unclassified
-lib/keeper/keeper_shell_docker.ml,214,false,unclassified
-lib/keeper/keeper_shell_docker.ml,221,false,unclassified
-lib/keeper/keeper_shell_docker.ml,253,None,unclassified
-lib/keeper/keeper_shell_docker.ml,256,None,unclassified
 lib/keeper_skill_routing/keeper_skill_routing.ml,111,None,unclassified
 lib/keeper/keeper_social_model.ml,164,None,unclassified
 lib/keeper/keeper_stale_watchdog.ml,257,None,unclassified

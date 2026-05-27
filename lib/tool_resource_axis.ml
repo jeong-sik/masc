@@ -139,7 +139,7 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   let open Tool_name.Keeper in
   match tool with
   | Tool_name.Keeper.Execute -> typed_execute_args_class args
-  | Workspace_inspect -> classify_structured_shell_op args
+  | Search_files -> classify_structured_shell_op args
   | Fs_edit -> Filesystem_write
   | Fs_read | Tool_search -> Filesystem_read
   | Memory_write | Handoff -> Filesystem_write

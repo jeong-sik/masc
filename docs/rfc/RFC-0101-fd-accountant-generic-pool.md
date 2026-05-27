@@ -30,7 +30,7 @@ PR [[#15727]] (merged 2026-05-17) introduced `lib/docker_spawn_throttle.ml(i)` �
 
 ### 1.2 Sandbox / keeper bash exec spawns popen pipes
 
-`lib/keeper/agent_tool_execute_runtime.ml` + `lib/keeper/keeper_shell_docker.ml` spawn shells via popen / Eio.Process. Each spawn = stdin/stdout/stderr pipes + cgroup FD when inside docker. `#15727` Layer A bounds *docker run* but not the inner *exec* spawns that happen after the container is up (relevant to the RFC-0097 "container reuse" model where one container hosts many exec calls).
+`lib/keeper/agent_tool_execute_runtime.ml` plus the sandbox Execute runner spawn commands via popen / Eio.Process. Each spawn = stdin/stdout/stderr pipes + cgroup FD when inside docker. `#15727` Layer A bounds *docker run* but not the inner *exec* spawns that happen after the container is up (relevant to the RFC-0097 "container reuse" model where one container hosts many exec calls).
 
 ### 1.3 Log writers fan out
 
@@ -167,7 +167,7 @@ This couples FD pressure → session shedding. The 5-second debounce avoids flap
 | PR-1 (this) | RFC body | review + merge |
 | PR-2 | `lib/server/fd_accountant.ml(i)` + multi-kind Eio.Pool + `Docker_spawn_throttle` delegation. Inert: docker behavior unchanged. | `test_fd_accountant.ml` 256-connection round-trip; existing docker spawn tests unchanged |
 | PR-3 | Provider HTTP wrap in `oas/lib/llm_provider/backend_*.ml` (small cross-repo PR pair) | benchmark: pressure-during-cascade-storm holds `Provider_http` count ≤ 16 |
-| PR-4 | Sandbox exec wrap (`keeper_shell_*.ml`) + log writer wrap (largest writers only). | `Sandbox_exec` and `Log_writer` series visible in Prometheus dashboard |
+| PR-4 | Sandbox exec wrap (agent Execute runtime / sandbox runner) + log writer wrap (largest writers only). | `Sandbox_exec` and `Log_writer` series visible in Prometheus dashboard |
 | PR-5 | `/metrics` exposure + dashboard panel + startup nofile log | operator can see snapshot via `curl /metrics \| grep masc_fd_` |
 | PR-6 | RFC-0099 Backpressure evict signal compose | pressure → evict observable in `Session_lifecycle_event` stream |
 
@@ -203,7 +203,7 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 - [x] **PR-1** (#15803): RFC body merged.
 - [x] **PR-2** (#15816): `lib/server/fd_accountant.ml(i)` multi-kind generic pool (`Docker_spawn` / `Provider_http` / `Provider_cli` / `Sandbox_exec` / `Log_writer`) + `Docker_spawn_throttle.with_slot` delegation (public API preserved, wire-inert) — tests include cap-bounds fan-in and provider transport wrapping.
 - [x] **PR-3** (oas #1618): provider HTTP wrap via dependency-injection hook (`Fd_throttle_hook` in oas + `Provider_throttle.with_permit_priority` composes), since oas cannot depend on masc-mcp directly. RFC §3.3 originally specified direct `Fd_accountant` call from `backend_*.ml`; DI pattern replaces that. Embedder (masc-mcp) wires `Fd_throttle_hook.set_handler (fun thunk -> Fd_accountant.with_slot ~kind:Provider_http thunk)` at bootstrap (follow-up commit, not in PR-3 itself).
-- [ ] **PR-4**: sandbox exec wrap (`keeper_shell_*.ml`) + log writer wrap (largest writers only).
+- [ ] **PR-4**: sandbox exec wrap (agent Execute runtime / sandbox runner) + log writer wrap (largest writers only).
 - [ ] **PR-5**: `Fd_accountant.fd_snapshot` → Prometheus `/metrics` + dashboard `System Health` panel + startup nofile-limit log.
 - [ ] **PR-6**: compose with [[RFC-0099]] `Backpressure` evict signal — `pressure_active = true > 5 s` → `Session_lifecycle_event.Evict { reason = Backpressure }` publish.
 - [x] **Status promoted to `Active`** at PR-2 merge (this closeout commit). `Implemented` promotion deferred until PR-5 (operator-visibility surface) at minimum. The wire-up commit on the masc-mcp side that calls `Fd_throttle_hook.set_handler` is intentionally separated from this closeout and tracked as a follow-up.

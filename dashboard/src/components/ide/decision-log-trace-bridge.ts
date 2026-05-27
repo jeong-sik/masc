@@ -1,4 +1,5 @@
 import { pushTrace } from './keeper-trace-store'
+import { unixishToMs } from '../../lib/format-time'
 import {
   normalizeTraceProducerContext,
   type KeeperTraceProducerContextInput,
@@ -64,11 +65,6 @@ export interface DecisionLogProducerInput {
   readonly choice?: string | null
   readonly reason?: string | null
   readonly context?: KeeperTraceProducerContextInput | null
-}
-
-function unixishToMs(ts: number | null): number {
-  if (ts === null || !Number.isFinite(ts)) return Number.NaN
-  return ts > 1_000_000_000_000 ? ts : ts * 1000
 }
 
 function dedupKey(decision: DecisionLogProducerInput): string {

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { fetchBoard } from '../../api/board'
 import type { BoardPost } from '../../types/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
+import { unixishToMs } from '../../lib/format-time'
 import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
 import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
@@ -104,11 +105,6 @@ async function fetchCascadeReplayEvents(): Promise<ReadonlyArray<CascadeStrategy
 
 function parseIsoToMs(iso: string): number {
   return new Date(iso).getTime()
-}
-
-function unixishToMs(ts: number | null): number {
-  if (ts === null || !Number.isFinite(ts)) return Number.NaN
-  return ts > 1_000_000_000_000 ? ts : ts * 1000
 }
 
 function boardKindFromPost(post: BoardPost): ThreadKind {

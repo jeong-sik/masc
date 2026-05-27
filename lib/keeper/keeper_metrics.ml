@@ -89,7 +89,6 @@ type t =
   | MetaJsonFailures
   | ToolsOasFailures
   | ToolsOasDeterministicFailures
-  | OasHookOutputParseFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | CircuitBreakerTrips
@@ -325,7 +324,6 @@ let to_string = function
   | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
   | ToolsOasDeterministicFailures ->
     "masc_keeper_tools_oas_deterministic_failures_total"
-  | OasHookOutputParseFailures -> "masc_keeper_oas_hook_output_parse_failures_total"
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
   | AgentToolDispatchRuntimeFailures -> "masc_agent_tool_dispatch_runtime_failures_total"
   | CircuitBreakerTrips -> "masc_keeper_circuit_breaker_trips_total"

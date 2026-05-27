@@ -226,10 +226,6 @@ let register
     "Total keeper OAS deterministic tool failures, labeled by tool and reason"
     `Counter;
   add
-    Keeper_metrics.(to_string OasHookOutputParseFailures)
-    "Total keeper OAS hook tool-output JSON parse failures, labeled by surface"
-    `Counter;
-  add
     Keeper_metrics.(to_string TurnUpUpdateFailures)
     "Total keeper turn-up update failures (prompt cap/sandbox validation/preflight), \
      labeled by keeper and site"

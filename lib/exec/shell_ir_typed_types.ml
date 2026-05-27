@@ -263,6 +263,44 @@ and (_, _, _, _) command =
       ; in_place : bool
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Rsync :
+      { source : string
+      ; dest : string
+      ; flags : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Node :
+      { script : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Python :
+      { script : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Python3 :
+      { script : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Pip :
+      { subcommand : string
+      ; packages : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Patch :
+      { file : string option
+      ; patchfile : string option
+      ; strip : int
+      ; reverse : bool
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Npm :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

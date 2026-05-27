@@ -338,5 +338,27 @@ let pp fmt = function
     Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b)" file1 file2 unified
   | W (Sed { expression; file; in_place }) ->
     Format.fprintf fmt "Sed(expression=%s, file=%s, in_place=%b)" expression file in_place
+  | W (Rsync { source; dest; flags }) ->
+    Format.fprintf fmt "Rsync(source=%s, dest=%s, flags=%a)" source dest
+      (Format.pp_print_list Format.pp_print_string) flags
+  | W (Node { script; args }) ->
+    Format.fprintf fmt "Node(script=%s, args=%a)" script
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Python { script; args }) ->
+    Format.fprintf fmt "Python(script=%s, args=%a)" script
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Python3 { script; args }) ->
+    Format.fprintf fmt "Python3(script=%s, args=%a)" script
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Pip { subcommand; packages }) ->
+    Format.fprintf fmt "Pip(subcommand=%s, packages=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) packages
+  | W (Patch { file; patchfile; strip; reverse }) ->
+    Format.fprintf fmt "Patch(file=%a, patchfile=%a, strip=%d, reverse=%b)"
+      (Format.pp_print_option Format.pp_print_string) file
+      (Format.pp_print_option Format.pp_print_string) patchfile strip reverse
+  | W (Npm { subcommand; args }) ->
+    Format.fprintf fmt "Npm(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

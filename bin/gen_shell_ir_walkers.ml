@@ -1836,6 +1836,249 @@ let rec parse in_place expr file = function
 in
 parse false None None args|}
     }
+  ; { name = "Rsync"
+    ; anon_pattern = "Rsync _"
+    ; bind_pattern = "Rsync { source; dest; flags }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args = flags @ [ source; dest ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Rsync
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Rsync"
+    ; parse_body =
+        Some
+          {|
+let rec parse flags src dst = function
+  | [] ->
+    (match src, dst with
+     | Some s, Some d ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; flags = List.rev flags }))
+     | _ -> None)
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse (arg :: flags) src dst rest
+    else (
+      match src with
+      | None -> parse flags (Some arg) dst rest
+      | Some _ ->
+        match dst with
+        | None -> parse flags src (Some arg) rest
+        | Some _ -> None)
+in
+parse [] None None args|}
+    }
+  ; { name = "Node"
+    ; anon_pattern = "Node _"
+    ; bind_pattern = "Node { script; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = script :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Node
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Node"
+    ; parse_body =
+        Some
+          {|
+let rec parse script extra = function
+  | [] ->
+    (match script with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match script with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse script (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Python"
+    ; anon_pattern = "Python _"
+    ; bind_pattern = "Python { script; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = script :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Python
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Python"
+    ; parse_body =
+        Some
+          {|
+let rec parse script extra = function
+  | [] ->
+    (match script with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match script with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse script (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Python3"
+    ; anon_pattern = "Python3 _"
+    ; bind_pattern = "Python3 { script; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = script :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Python3
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Python3"
+    ; parse_body =
+        Some
+          {|
+let rec parse script extra = function
+  | [] ->
+    (match script with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match script with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse script (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Pip"
+    ; anon_pattern = "Pip _"
+    ; bind_pattern = "Pip { subcommand; packages }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args = subcommand :: packages in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pip
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pip"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd pkgs = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pip { subcommand = s; packages = List.rev pkgs }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) pkgs rest
+     | Some _ -> parse subcmd (arg :: pkgs) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Patch"
+    ; anon_pattern = "Patch _"
+    ; bind_pattern = "Patch { file; patchfile; strip; reverse }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let strip_args = if strip = 0 then [] else [ "-p" ^ string_of_int strip ] in
+      let rev_args = if reverse then [ "-R" ] else [] in
+      let file_args = match file with None -> [] | Some f -> [ f ] in
+      let patch_args = match patchfile with None -> [] | Some p -> [ "-i"; p ] in
+      let args = strip_args @ rev_args @ patch_args @ file_args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Patch
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Patch"
+    ; parse_body =
+        Some
+          {|
+let rec parse file patchfile strip reverse = function
+  | [] ->
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file; patchfile; strip; reverse }))
+  | "-R" :: rest -> parse file patchfile strip true rest
+  | "-i" :: p :: rest -> parse file (Some p) strip reverse rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then (
+      (* Try to parse -pN *)
+      if String.length arg > 2 && arg.[1] = 'p'
+      then (
+        match int_of_string_opt (String.sub arg 2 (String.length arg - 2)) with
+        | Some n -> parse file patchfile n reverse rest
+        | None -> parse file patchfile strip reverse rest)
+      else parse file patchfile strip reverse rest)
+    else (
+      match file with
+      | None -> parse (Some arg) patchfile strip reverse rest
+      | Some _ -> None)
+in
+parse None None 0 false args|}
+    }
+  ; { name = "Npm"
+    ; anon_pattern = "Npm _"
+    ; bind_pattern = "Npm { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Npm
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Npm"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npm { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"

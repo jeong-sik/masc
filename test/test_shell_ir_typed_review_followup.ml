@@ -100,6 +100,13 @@ let constructor_label = function
      | Shell_ir_typed.Make _ -> "Make"
      | Shell_ir_typed.Diff _ -> "Diff"
      | Shell_ir_typed.Sed _ -> "Sed"
+     | Shell_ir_typed.Rsync _ -> "Rsync"
+     | Shell_ir_typed.Node _ -> "Node"
+     | Shell_ir_typed.Python _ -> "Python"
+     | Shell_ir_typed.Python3 _ -> "Python3"
+     | Shell_ir_typed.Pip _ -> "Pip"
+     | Shell_ir_typed.Patch _ -> "Patch"
+     | Shell_ir_typed.Npm _ -> "Npm"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

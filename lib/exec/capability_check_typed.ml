@@ -311,5 +311,25 @@ let of_command = function
   | Shell_ir_typed.W (Sed { expression; file; in_place }) ->
     let flag_args = if in_place then [ arg "-i" ] else [] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sed, flag_args @ [ arg "-e"; arg expression; arg file ]) ]
+  | Shell_ir_typed.W (Rsync { source; dest; flags }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rsync, List.map arg flags @ [ arg source; arg dest ]) ]
+  | Shell_ir_typed.W (Node { script; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Node, arg script :: List.map arg args) ]
+  | Shell_ir_typed.W (Python { script; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python, arg script :: List.map arg args) ]
+  | Shell_ir_typed.W (Python3 { script; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python3, arg script :: List.map arg args) ]
+  | Shell_ir_typed.W (Pip { subcommand; packages }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pip, arg subcommand :: List.map arg packages) ]
+  | Shell_ir_typed.W (Patch { file; patchfile; strip; reverse }) ->
+    let flag_args =
+      (if reverse then [ arg "-R" ] else [])
+      @ (match patchfile with None -> [] | Some p -> [ arg "-i"; arg p ])
+      @ [ arg "-p"; arg (string_of_int strip) ]
+    in
+    let file_args = match file with None -> [] | Some f -> [ arg f ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Patch, flag_args @ file_args) ]
+  | Shell_ir_typed.W (Npm { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Npm, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

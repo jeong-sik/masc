@@ -73,6 +73,13 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Make { target = None; jobs = None })
   ; W (Diff { file1 = "a"; file2 = "b"; unified = false })
   ; W (Sed { expression = "s/x/y/"; file = "/tmp/x"; in_place = false })
+  ; W (Rsync { source = "/tmp/a"; dest = "/tmp/b"; flags = [ "-avz" ] })
+  ; W (Node { script = "app.js"; args = [ "--port"; "3000" ] })
+  ; W (Python { script = "main.py"; args = [ "-v" ] })
+  ; W (Python3 { script = "main.py"; args = [ "-v" ] })
+  ; W (Pip { subcommand = "install"; packages = [ "requests"; "flask" ] })
+  ; W (Patch { file = Some "foo.c"; patchfile = Some "fix.patch"; strip = 1; reverse = false })
+  ; W (Npm { subcommand = "install"; args = [ "--save-dev" ] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -160,9 +167,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    50
+    57
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 50 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 57 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -227,6 +234,13 @@ let test_of_simple_round_trip () =
     ; W (Make { target = Some "install"; jobs = Some 4 })
     ; W (Diff { file1 = "old.ml"; file2 = "new.ml"; unified = true })
     ; W (Sed { expression = "s/foo/bar/g"; file = "input.txt"; in_place = true })
+    ; W (Rsync { source = "src/"; dest = "dest/"; flags = [ "-av"; "--delete" ] })
+    ; W (Node { script = "server.js"; args = [ "8080" ] })
+    ; W (Python { script = "train.py"; args = [ "--epochs"; "10" ] })
+    ; W (Python3 { script = "train.py"; args = [ "--epochs"; "10" ] })
+    ; W (Pip { subcommand = "install"; packages = [ "numpy" ] })
+    ; W (Patch { file = None; patchfile = Some "fix.patch"; strip = 0; reverse = true })
+    ; W (Npm { subcommand = "run"; args = [ "build" ] })
     ]
   in
   List.iter
@@ -318,6 +332,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Env"; "Printenv"; "Uniq"; "Basename"; "Dirname"; "Test"; "Stat"; "Hostname"; "Whoami"
     ; "Du"; "Df"; "File"; "Printf"; "Uname"; "Ps"; "Tty"
     ; "Wget"; "Ssh"; "Scp"; "Tar"; "Make"; "Diff"; "Sed"
+    ; "Rsync"; "Node"; "Python"; "Python3"; "Pip"; "Patch"; "Npm"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

@@ -68,19 +68,19 @@ let n_dropped = Atomic.make 0
 
 let report_err_ = function
   | `Sysbreak -> Log.warn "opentelemetry: ctrl-c captured, stopping"
-  | `Failure msg -> Format.eprintf "@[<2>opentelemetry: export failed: %s@]@." msg
+  | `Failure msg -> Log.warn "opentelemetry: export failed: %s" msg
   | `Status (code, { Opentelemetry.Proto.Status.code = scode; message; details }) ->
-    let pp_details out l =
-      List.iter (fun s -> Format.fprintf out "%S;@ " (Bytes.unsafe_to_string s)) l
+    let details_str =
+      List.map (fun s -> Bytes.unsafe_to_string s) details
+      |> String.concat "; "
     in
-    Format.eprintf
-      "@[<2>opentelemetry: export failed with@ http code=%d@ status {@[code=%ld;@ \
-       message=%S;@ details=[@[%a@]]@]}@]@."
+    Log.warn
+      "opentelemetry: export failed with http code=%d status={code=%ld; message=%S; \
+       details=[%s]}"
       code
       scode
       (Bytes.unsafe_to_string message)
-      pp_details
-      details
+      details_str
 ;;
 
 module Httpc : sig
@@ -314,7 +314,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       List.iter
         (fun f ->
            try f () with
-           | e -> Printf.eprintf "on tick callback raised: %s\n" (Printexc.to_string e))
+           | e -> Log.warn "opentelemetry: on tick callback raised: %s" (Printexc.to_string e))
         (AList.get @@ Atomic.get on_tick_cbs_)
     ;;
   end in
@@ -356,10 +356,9 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
           (if Config.Env.get_debug ()
            then
              let@ () = Lock.with_lock in
-             Format.eprintf
-               "send spans %a@."
-               (Format.pp_print_list Trace.pp_resource_spans)
-               l);
+             Log.debug "opentelemetry: send spans %s"
+               (Format.asprintf "%a"
+                  (Format.pp_print_list Trace.pp_resource_spans) l));
           push_trace l;
           ret ())
     }
@@ -413,10 +412,9 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
           (if Config.Env.get_debug ()
            then
              let@ () = Lock.with_lock in
-             Format.eprintf
-               "send metrics %a@."
-               (Format.pp_print_list Metrics.pp_resource_metrics)
-               m);
+             Log.debug "opentelemetry: send metrics %s"
+               (Format.asprintf "%a"
+                  (Format.pp_print_list Metrics.pp_resource_metrics) m));
           let m = List.rev_append (additional_metrics ()) m in
           push_metrics m;
           ret ())
@@ -429,10 +427,9 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
           (if Config.Env.get_debug ()
            then
              let@ () = Lock.with_lock in
-             Format.eprintf
-               "send logs %a@."
-               (Format.pp_print_list Logs.pp_resource_logs)
-               m);
+             Log.debug "opentelemetry: send logs %s"
+               (Format.asprintf "%a"
+                  (Format.pp_print_list Logs.pp_resource_logs) m));
           push_logs m;
           ret ())
     }

@@ -33,6 +33,12 @@ let safe_is_dir path =
   try Sys.file_exists path && Sys.is_directory path with
   | Sys_error _ -> false
 
+let normalize_path path =
+  Keeper_alerting_path.normalize_path_for_check path
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let same_path a b = String.equal (normalize_path a) (normalize_path b)
+
 let safe_repo_component s =
   s <> "" && s <> "." && s <> ".."
   && not (String.contains s '/')
@@ -143,7 +149,14 @@ let inspect
     let inside =
       run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]
     in
-    if not inside.ok then
+    let top =
+      if inside.ok then
+        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+          [ "rev-parse"; "--show-toplevel" ]
+      else { inside with ok = false; output = "" }
+    in
+    if (not inside.ok) || (not top.ok) || not (same_path clone_path top.output)
+    then
       common_fields "not_git_repo" false
         "This sandbox repo directory is not a git clone; reclone it under repos/."
         [
@@ -151,6 +164,7 @@ let inspect
           "is_git_repo", `Bool false;
           "has_origin", `Bool false;
           "git_error", `String inside.output;
+          "git_toplevel", (if top.ok then `String top.output else `Null);
         ]
     else
       let status =

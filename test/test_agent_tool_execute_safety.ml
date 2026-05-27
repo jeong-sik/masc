@@ -293,15 +293,232 @@ let make_docker_meta name =
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_docker_meta failed: " ^ err)
 
+let make_local_meta name =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String ("agent-" ^ name));
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "sandbox test");
+        ("sandbox_profile", `String "local");
+        ("network_mode", `String "inherit");
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_local_meta failed: " ^ err)
+
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   f ()
 
+let read_file path =
+  In_channel.with_open_bin path In_channel.input_all
+
+let run_process ~cwd prog argv =
+  let out = Filename.temp_file "tool-execute-safety-out" ".txt" in
+  let err = Filename.temp_file "tool-execute-safety-err" ".txt" in
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process prog (Array.of_list (prog :: argv)) Unix.stdin out_fd
+          err_fd)
+  in
+  let _, status = Unix.waitpid [] pid in
+  let stdout = read_file out in
+  let stderr = read_file err in
+  Sys.remove out;
+  Sys.remove err;
+  (status, stdout, stderr)
+
+let run_process_ok ~cwd prog argv =
+  match run_process ~cwd prog argv with
+  | Unix.WEXITED 0, _, _ -> ()
+  | status, stdout, stderr ->
+    Alcotest.failf "command failed: %s status=%s stdout=%s stderr=%s" prog
+      (Masc_mcp.Keeper_sandbox_exec_failure.status_label status)
+      stdout stderr
+
 let parse_error_field raw =
   Yojson.Safe.from_string raw
   |> Json.member "error"
   |> Json.to_string_option
+
+let test_tool_execute_rejects_parent_git_repo_cwd () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  run_process_ok ~cwd:base "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let config = Coord.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let repo_dir =
+    Filename.concat base ".masc/playground/sangsu/repos/masc-mcp"
+  in
+  ensure_dir repo_dir;
+  let args =
+    `Assoc
+      [ "cwd", `String "repos/masc-mcp"
+      ; "executable", `String "cat"
+      ; "argv", `List [ `String "lib/foo.ml" ]
+      ]
+  in
+  match
+    Masc_mcp.Agent_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
+  with
+  | Ok cwd -> Alcotest.failf "expected repo cwd rejection, got %s" cwd
+  | Error err ->
+    Alcotest.(check bool) "sandbox_repo_not_ready"
+      true
+      (String_util.contains_substring err "sandbox_repo_not_ready");
+    Alcotest.(check bool) "parent git top-level is surfaced"
+      true
+      (String_util.contains_substring err base)
+
+let test_tool_execute_rejects_parent_git_repo_path_arg () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  run_process_ok ~cwd:base "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let config = Coord.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir repo_dir;
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; "argv", `List [ `String "./repos/masc-mcp/.missing.ml" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "sandbox_repo_not_ready"
+      true
+      (String_util.contains_substring err "sandbox_repo_not_ready");
+    Alcotest.(check bool) "cat did not reach runtime missing-file error"
+      false
+      (String_util.contains_substring err "No such file or directory")
+  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Coord.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir repo_dir;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat playground "note.txt")
+       "literal repos/masc-mcp mention\n");
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "rg"
+           ; "argv", `List [ `String "repos/masc-mcp"; `String "." ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "rg pattern succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "pattern was not treated as stale repo path" false
+    (raw |> String_util.contains_substring "sandbox_repo_not_ready")
+
+let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  run_process_ok ~cwd:base "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let config = Coord.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  ensure_dir (Filename.concat playground "repos/masc-mcp");
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; "argv", `List [ `String "--work-tree=./repos/masc-mcp"; `String "status" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "sandbox_repo_not_ready"
+      true
+      (String_util.contains_substring err "sandbox_repo_not_ready")
+  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_tool_execute_rejects_stale_worktree_path_arg () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Coord.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir repo_dir;
+  run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
+  ensure_dir (Filename.concat repo_dir ".worktrees/task");
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; "argv", `List [ `String "./repos/masc-mcp/.worktrees/task/.missing.ml" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "sandbox_repo_not_ready"
+      true
+      (String_util.contains_substring err "sandbox_repo_not_ready");
+    Alcotest.(check bool) "stale worktree root is surfaced"
+      true
+      (String_util.contains_substring err ".worktrees/task")
+  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
 let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
   let elapsed = Agent_tool_command_runtime.For_testing.elapsed_duration_ms in
@@ -1079,6 +1296,26 @@ let () =
             "path traversal blocked after canonicalization"
             `Quick
             test_playground_guard_traversal
+        ; Alcotest.test_case
+            "repo cwd rejects parent git checkout"
+            `Quick
+            test_tool_execute_rejects_parent_git_repo_cwd
+        ; Alcotest.test_case
+            "repo path arg rejects parent git checkout"
+            `Quick
+            test_tool_execute_rejects_parent_git_repo_path_arg
+        ; Alcotest.test_case
+            "rg pattern under repos is not a repo path"
+            `Quick
+            test_tool_execute_rg_pattern_under_repos_is_not_repo_path
+        ; Alcotest.test_case
+            "inline git work-tree path rejects parent git checkout"
+            `Quick
+            test_tool_execute_rejects_inline_git_work_tree_path_arg
+        ; Alcotest.test_case
+            "stale worktree path arg rejects parent clone"
+            `Quick
+            test_tool_execute_rejects_stale_worktree_path_arg
         ] )
     ; ( "edge"
       , [ Alcotest.test_case

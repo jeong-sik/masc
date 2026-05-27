@@ -23,6 +23,153 @@ let resolve_tool_read_cwd
     in
     Error (Printf.sprintf "cwd_not_directory: %s (%s)" cwd detail)
 
+let normalize_repo_cwd_path path =
+  Keeper_alerting_path.normalize_path_for_check path
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let repo_path_context ~(config : Coord.config) ~(meta : keeper_meta) cwd =
+  let playground =
+    keeper_playground_root ~config ~meta
+    |> normalize_repo_cwd_path
+  in
+  let repos_root = Filename.concat playground "repos" |> normalize_repo_cwd_path in
+  let cwd = normalize_repo_cwd_path cwd in
+  if String.equal cwd repos_root then None
+  else
+    let prefix = repos_root ^ "/" in
+    if not (String.starts_with ~prefix cwd) then None
+    else
+      let suffix =
+        String.sub cwd (String.length prefix) (String.length cwd - String.length prefix)
+      in
+      match String.split_on_char '/' suffix with
+      | repo_name :: ".worktrees" :: task_name :: _
+        when Keeper_repo_readiness.safe_repo_component repo_name
+             && Keeper_repo_readiness.safe_repo_component task_name ->
+        let repo_root = Filename.concat repos_root repo_name in
+        let worktree_root =
+          Filename.concat (Filename.concat repo_root ".worktrees") task_name
+        in
+        Some (repo_name, repo_root, worktree_root, [ worktree_root ])
+      | repo_name :: _ when Keeper_repo_readiness.safe_repo_component repo_name ->
+        let repo_root = Filename.concat repos_root repo_name in
+        Some (repo_name, repo_root, repo_root, [ repo_root ])
+      | _ -> None
+
+let repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel =
+  Printf.sprintf
+    "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not an \
+     independent git checkout (git_toplevel=%s). Repair or reclone the sandbox \
+     repo under repos/%s, then retry with cwd=\"repos/%s\" or \
+     cwd=\"repos/%s/.worktrees/<task>\"."
+    repo_name
+    repo_root
+    (Option.value ~default:"<none>" git_toplevel)
+    repo_name
+    repo_name
+    repo_name
+
+let validate_repo_path_ready
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(probe_path : string)
+      cwd
+  =
+  match repo_path_context ~config ~meta cwd with
+  | None -> Ok ()
+  | Some (repo_name, repo_root, _path_root, accepted_toplevels) ->
+    if not (safe_is_dir probe_path) then
+      Error
+        (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:None)
+    else
+      let top =
+        Keeper_repo_readiness.run_git
+          ~timeout_sec:Keeper_repo_readiness.read_only_probe_timeout_sec
+          ~clone_path:probe_path
+          [ "rev-parse"; "--show-toplevel" ]
+      in
+      let top_opt = if top.ok then Some top.output else None in
+      let top_matches =
+        top.ok
+        && List.exists
+             (fun expected ->
+                String.equal
+                  (normalize_repo_cwd_path top.output)
+                  (normalize_repo_cwd_path expected))
+             accepted_toplevels
+      in
+      if top_matches then Ok ()
+      else
+        Error
+          (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:top_opt)
+
+let validate_repo_cwd_ready ~(config : Coord.config) ~(meta : keeper_meta) cwd =
+  validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd
+
+let validate_repo_path_args_ready
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      (ir : Masc_exec.Shell_ir.t)
+  =
+  let path_args_of_simple simple =
+    let command_name =
+      Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+      |> Filename.basename
+    in
+    match Exec_policy.simple_literal_args simple with
+    | None -> []
+    | Some args -> Exec_policy.path_argument_values command_name args
+  in
+  let rec path_args = function
+    | Masc_exec.Shell_ir.Simple simple ->
+      path_args_of_simple simple
+    | Masc_exec.Shell_ir.Pipeline stages ->
+      List.concat_map path_args stages
+  in
+  let validate_target seen raw =
+    let trimmed = String.trim raw in
+    if trimmed = "" then Ok seen
+    else
+      let target =
+        if Filename.is_relative trimmed then Filename.concat cwd trimmed else trimmed
+      in
+      match repo_path_context ~config ~meta target with
+      | None -> Ok seen
+      | Some (_repo_name, repo_root, path_root, _accepted_toplevels) ->
+        let key = normalize_repo_cwd_path path_root in
+        if List.mem key seen then Ok seen
+        else (
+          match
+            validate_repo_path_ready
+              ~config
+              ~meta
+              ~probe_path:path_root
+              target
+          with
+          | Ok () -> Ok (key :: seen)
+          | Error _ as err -> err)
+  in
+  let validate_seen (expect_separated_path, seen) raw =
+    let trimmed = String.trim raw in
+    if expect_separated_path
+    then Result.map (fun seen -> false, seen) (validate_target seen trimmed)
+    else (
+      match Exec_policy_path_arg_descriptor.path_value_of_flagged_token trimmed with
+      | Some path -> Result.map (fun seen -> false, seen) (validate_target seen path)
+      | None when Exec_policy_path_arg_descriptor.is_path_flag trimmed ->
+        Ok (true, seen)
+      | None -> Result.map (fun seen -> false, seen) (validate_target seen trimmed))
+  in
+  path_args ir
+  |> List.fold_left
+       (fun acc raw ->
+          match acc with
+          | Error _ as err -> err
+          | Ok seen -> validate_seen seen raw)
+       (Ok (false, []))
+  |> Result.map (fun _ -> ())
+
 let resolve_tool_write_cwd
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -36,7 +183,10 @@ let resolve_tool_write_cwd
   in
   match resolved with
   | Error _ as err -> err
-  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
+  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd ->
+    (match validate_repo_cwd_ready ~config ~meta cwd with
+     | Ok () -> Ok cwd
+     | Error _ as err -> err)
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 (* Docker playground path mapping: host → container.

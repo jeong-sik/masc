@@ -12,6 +12,17 @@ val resolve_tool_write_cwd :
   args:Yojson.Safe.t ->
   (string, string) result
 
+val validate_repo_path_args_ready :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  Masc_exec.Shell_ir.t ->
+  (unit, string) result
+(** Reject typed Execute path arguments that point into a sandbox [repos/<repo>]
+    directory unless that repo is an independent git checkout. This catches
+    commands run from the playground root with arguments like
+    [./repos/masc-mcp/lib/foo.ml]. *)
+
 val auto_correct_path :
   meta:Keeper_types.keeper_meta -> string -> string option
 (** Auto-correct common LLM-hallucinated path prefixes

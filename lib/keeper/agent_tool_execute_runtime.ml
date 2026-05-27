@@ -222,7 +222,11 @@ let handle_tool_execute_typed
           let dispatch_result =
             Agent_tool_execute_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
-                Ok ())
+                Agent_tool_execute_path.validate_repo_path_args_ready
+                  ~config
+                  ~meta
+                  ~cwd
+                  ir)
               ~allowed_commands
               ~keeper_id:meta.name
               ~base_path:root

@@ -64,6 +64,8 @@ val validate_command_tool_execute :
 
 val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
+val path_argument_values : string -> string list -> string list
+
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
 val validate_shell_ir_paths :

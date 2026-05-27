@@ -13,6 +13,7 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide-context-lens'
+import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
 
 type BranchTone = 'current' | 'dirty' | 'conflict' | 'stale'
 
@@ -381,20 +382,6 @@ const LANE_STATUS_DOT: Record<KeeperPresenceStatus, { color: string; label: stri
   idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
 }
 
-const LANE_CONTEXT_BADGE_STYLE = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  height: '17px',
-  padding: '0 5px',
-  border: '1px solid var(--color-border-muted)',
-  borderRadius: 'var(--r-1)',
-  background: 'var(--color-bg-subtle)',
-  color: 'var(--color-fg-muted)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: 'var(--fs-9)',
-  whiteSpace: 'nowrap',
-} as const
-
 function LaneRow(
   lane: IdeWorktreeLane,
   presence: KeeperPresenceSnapshot | null,
@@ -450,7 +437,7 @@ function LaneRow(
             data-context-route-count=${routeLinks.length}
             title=${`Linked context: ${routeLabels}`}
             aria-label=${`${lane.label} lane has ${routeLinks.length} linked context routes: ${routeLabels}`}
-            style=${LANE_CONTEXT_BADGE_STYLE}
+            style=${IDE_CONTEXT_BADGE_STYLE}
           >
             CTX ${routeLinks.length}
           </span>

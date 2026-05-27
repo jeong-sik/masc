@@ -700,6 +700,7 @@ let claim_next_r
   in
   match with_file_lock_r config backlog_path claim_under_lock with
   | Ok result -> result
+  | Error err when Masc_domain.is_retryable err -> Claim_next_transient_error err
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;
 
@@ -724,6 +725,8 @@ let claim_next config ~agent_name =
       scope_excluded_count
       required_tool_excluded_count
       verification_blocked_count
+  | Claim_next_transient_error e ->
+    Printf.sprintf "Error: %s" (Masc_domain.masc_error_to_string e)
   | Claim_next_error e -> Printf.sprintf "Error: %s" e
 ;;
 

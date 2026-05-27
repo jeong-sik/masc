@@ -708,6 +708,11 @@ let test_claim_next_preserves_existing_alias_owned_task () =
          (Printf.sprintf
             "expected existing claim, got no_eligible excluded=%d"
             excluded_count)
+     | Coord.Claim_next_transient_error err ->
+       fail
+         (Printf.sprintf
+            "claim_next transient failure: %s"
+            (Masc_domain.masc_error_to_string err))
      | Coord.Claim_next_error err ->
        fail (Printf.sprintf "claim_next failed: %s" err));
     match task_by_title config "Still todo" with

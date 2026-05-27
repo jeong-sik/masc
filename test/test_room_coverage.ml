@@ -719,6 +719,8 @@ let test_claim_next_ignores_legacy_auto_cycle_text () =
       Alcotest.fail "legacy auto-cycle text should be claimable"
     | Coord.Claim_next_no_unclaimed ->
       Alcotest.fail "expected one claimable task"
+    | Coord.Claim_next_transient_error err ->
+      Alcotest.fail (Masc_domain.masc_error_to_string err)
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -755,6 +757,8 @@ let test_claim_next_ignores_routing_handoff_text () =
       Alcotest.fail "normal unblocked task should remain claimable"
     | Coord.Claim_next_no_unclaimed ->
       Alcotest.fail "expected normal unblocked task"
+    | Coord.Claim_next_transient_error err ->
+      Alcotest.fail (Masc_domain.masc_error_to_string err)
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -792,6 +796,8 @@ let test_claim_next_does_not_deprioritize_legacy_text () =
     | Coord.Claim_next_no_eligible _ ->
       Alcotest.fail "normal unblocked task should be claimed before fallback"
     | Coord.Claim_next_no_unclaimed -> Alcotest.fail "expected claimable tasks"
+    | Coord.Claim_next_transient_error err ->
+      Alcotest.fail (Masc_domain.masc_error_to_string err)
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -889,6 +895,8 @@ let test_claim_next_allows_failed_verification_repair () =
       Alcotest.fail "failed verification should not permanently block repair"
     | Coord.Claim_next_no_unclaimed ->
       Alcotest.fail "expected failed verification task to remain in backlog"
+    | Coord.Claim_next_transient_error err ->
+      Alcotest.fail (Masc_domain.masc_error_to_string err)
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 

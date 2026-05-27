@@ -46,6 +46,44 @@ let result_to_response ~tool_name ~start_time = function
         ~tool_name ~start_time
         (Masc_domain.masc_error_to_string e)
 
+let json_string_opt = function
+  | None -> `Null
+  | Some value -> `String value
+
+let json_float_opt = function
+  | None -> `Null
+  | Some value -> `Float value
+
+let claim_next_transient_error_data err =
+  match err with
+  | Masc_domain.System
+      (Masc_domain.System_error.LockContention
+         { key; attempts; owner; acquired_at; expires_at }) ->
+    `Assoc
+      [ "error_kind", `String "distributed_lock_contention"
+      ; "retryable", `Bool true
+      ; "retry_after_ms", `Int 1000
+      ; "lock_key", `String key
+      ; "attempts", `Int attempts
+      ; "holder_owner", json_string_opt owner
+      ; "holder_acquired_at_unix", json_float_opt acquired_at
+      ; "holder_expires_at_unix", json_float_opt expires_at
+      ]
+  | _ ->
+    `Assoc
+      [ "error_kind", `String "transient_claim_next_error"
+      ; "retryable", `Bool true
+      ; "retry_after_ms", `Int 1000
+      ]
+
+let claim_next_transient_error_response ~tool_name ~start_time err =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Transient_error
+    ~start_time
+    ~data:(claim_next_transient_error_data err)
+    (Printf.sprintf "Error: %s" (Masc_domain.masc_error_to_string err))
+
 let log_task_transition_failed ~agent_name err =
   let message = Masc_domain.masc_error_to_string err in
   match err with
@@ -544,6 +582,8 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time
       (Printf.sprintf "Error: %s" e)
+  | Coord.Claim_next_transient_error err ->
+    claim_next_transient_error_response ~tool_name ~start_time err
 
 let handle_release ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
@@ -595,4 +635,3 @@ let transition_known_args =
     "evaluator_cascade";
     "handoff_context";
   ]
-

@@ -615,6 +615,7 @@ let handle_keeper_task_tool
          auto_started_ok := true
      | Coord.Claim_next_no_unclaimed
      | Coord.Claim_next_no_eligible _
+     | Coord.Claim_next_transient_error _
      | Coord.Claim_next_error _ -> ());
     let accountability_warning =
       if
@@ -663,6 +664,8 @@ let handle_keeper_task_tool
              ~verification_blocked_count
              ~scope_excluded_count
              ~required_tool_excluded_count)
+      | Coord.Claim_next_transient_error e ->
+        Printf.sprintf "Error: %s" (Masc_domain.masc_error_to_string e)
       | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =
@@ -716,7 +719,9 @@ let handle_keeper_task_tool
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
               ?fallback_reason:claim_goal_scope.fallback_reason ()
           , [] )
-      | Coord.Claim_next_no_unclaimed | Coord.Claim_next_error _ ->
+      | Coord.Claim_next_no_unclaimed
+      | Coord.Claim_next_transient_error _
+      | Coord.Claim_next_error _ ->
           ( active_goal_scope_json ~meta ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
               ?fallback_reason:claim_goal_scope.fallback_reason ()
@@ -747,17 +752,27 @@ let handle_keeper_task_tool
                        ; verification_blocked_count
                        ; required_tool_excluded_count
                        ; all_goals_excluded
-                       }
+                 }
                  }) )
       | _ -> None
     in
+    let result_status_fields =
+      match result with
+      | Coord.Claim_next_transient_error err ->
+        [ "ok", `Bool false
+        ; "error", `String message
+        ; ( "failure_class"
+          , `String
+              (Tool_result.tool_failure_class_to_string Tool_result.Transient_error)
+          )
+        ; "data", Tool_task.claim_next_transient_error_data err
+        ]
+      | _ -> [ "result", `String message ]
+    in
     Yojson.Safe.to_string
       (`Assoc
-         ([
-            ("result", `String message);
-            ("claim_scope", claim_scope);
-            ("auto_started", `Bool !auto_started_ok);
-          ]
+         (result_status_fields
+          @ [ ("claim_scope", claim_scope); ("auto_started", `Bool !auto_started_ok) ]
          @ (match typed_outcome_field with
             | Some field -> [ field ]
             | None -> [])

@@ -143,8 +143,8 @@ val with_distributed_lock :
   'a
 
 (** Result-returning variant of [with_distributed_lock].  Exhausted
-    acquisition is returned as retryable [System_error.IoError] instead
-    of raising. *)
+    acquisition is returned as retryable [System_error.LockContention]
+    with best-effort holder diagnostics instead of raising. *)
 val with_distributed_lock_r :
   ?clock:_ Eio.Time.clock ->
   config ->

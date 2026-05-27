@@ -641,6 +641,12 @@
             <td><code>scripts/dune-local.sh build test/test_keeper_tool_alias.exe test/test_keeper_tool_matrix.exe</code></td>
           </tr>
           <tr>
+            <td><span class="status done">PR-C.1</span> Claim lock contention</td>
+            <td>Keep backlog lock contention out of workflow-rejection paths.</td>
+            <td>Typed <code>Claim_next_transient_error</code>, holder diagnostics on <code>LockContention</code>, and <code>failure_class=transient_error</code> for <code>masc_claim_next</code>.</td>
+            <td><code>test_tool_task_coverage.exe test coverage 49</code> and <code>test_distributed_lock_acquire_failed_counter.exe</code>.</td>
+          </tr>
+          <tr>
             <td><span class="status next">PR-D</span> Decision evidence</td>
             <td>Make each tool call diagnosable from one receipt row.</td>
             <td><code>policy_decision</code>, <code>decision_source</code>, <code>decision_reason</code>, and Shell IR risk class in per-call evidence.</td>
@@ -812,6 +818,12 @@
             <td>Keepers call missing tools and waste turns.</td>
             <td>Prompt/matrix alignment tests and hard-cut surface checks.</td>
             <td>Prompt registry and tool alias tests.</td>
+          </tr>
+          <tr>
+            <td>Transient infra contention is reported as workflow rejection.</td>
+            <td>Keepers stop or self-correct when they should retry after lock pressure drops.</td>
+            <td>Keep lock contention typed through <code>Claim_next_transient_error</code> and return transient tool failures with holder diagnostics.</td>
+            <td>Task claim runtime and tool result tests.</td>
           </tr>
           <tr>
             <td>Hooks become hidden policy owners.</td>

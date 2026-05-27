@@ -288,6 +288,24 @@ Validation:
 scripts/dune-local.sh build test/test_keeper_tool_alias.exe test/test_keeper_tool_matrix.exe
 ```
 
+### PR-C.1: Claim Lock Contention Hardening
+
+Status: implemented in this PR as a runtime robustness slice.
+
+Preserve distributed backlog lock contention as a typed transient tool failure
+instead of flattening it through `Claim_next_error` and reclassifying it as a
+workflow rejection. The tool result now carries `failure_class=transient_error`,
+retry metadata, the lock key, attempt count, and best-effort current-holder
+diagnostics.
+
+Validation:
+
+```bash
+scripts/dune-local.sh build test/test_tool_task_coverage.exe test/test_distributed_lock_acquire_failed_counter.exe
+./_build/default/test/test_tool_task_coverage.exe test coverage 49
+./_build/default/test/test_distributed_lock_acquire_failed_counter.exe
+```
+
 ### PR-D: Actual Policy Decision Evidence
 
 Extend per-tool call evidence beyond static descriptor metadata:

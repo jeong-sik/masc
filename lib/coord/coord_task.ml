@@ -240,6 +240,7 @@ type claim_next_result = Masc_domain.claim_next_result =
       ; receipt_required_tool_blocked : bool
       ; agent_tool_names_known : bool
       }
+  | Claim_next_transient_error of Masc_domain.masc_error
   | Claim_next_error of string
 
 let link_task_execution_artifacts_r

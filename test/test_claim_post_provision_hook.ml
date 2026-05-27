@@ -92,6 +92,10 @@ let test_claim_next_hook_failure_is_observed () =
   | Coord.Claim_next_no_eligible { excluded_count; _ } ->
     failf "claim_next unexpectedly found no eligible task; excluded=%d"
       excluded_count
+  | Coord.Claim_next_transient_error err ->
+    failf
+      "claim_next transient failure: %s"
+      (Masc_domain.masc_error_to_string err)
   | Coord.Claim_next_error msg ->
     failf "claim_next unexpectedly failed: %s" msg
 
@@ -116,6 +120,10 @@ let test_claim_next_admission_filter_blocks_claim () =
      failf "admission filter should block claim, got %s" task_id
    | Coord.Claim_next_no_unclaimed ->
      fail "expected no_eligible, got no_unclaimed"
+   | Coord.Claim_next_transient_error err ->
+     failf
+       "claim_next transient failure: %s"
+       (Masc_domain.masc_error_to_string err)
    | Coord.Claim_next_error msg ->
      failf "claim_next unexpectedly failed: %s" msg);
   check int "admission filter called once" 1 !admission_calls;

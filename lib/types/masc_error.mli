@@ -60,7 +60,13 @@ module System_error : sig
     | InvalidFilePath of string
     | StorageError of string
     | ValidationError of string
-    | LockContention of { key : string; attempts : int }
+    | LockContention of
+        { key : string
+        ; attempts : int
+        ; owner : string option
+        ; acquired_at : float option
+        ; expires_at : float option
+        }
       (** Distributed lock acquire budget exhausted under transient
           fleet contention.  Carries the structured key + attempt count
           so callers can dispatch on the typed variant instead of

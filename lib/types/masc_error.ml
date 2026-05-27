@@ -171,12 +171,34 @@ module System_error = struct
     | InvalidFilePath of string
     | StorageError of string
     | ValidationError of string
-    | LockContention of { key : string; attempts : int }
+    | LockContention of
+        { key : string
+        ; attempts : int
+        ; owner : string option
+        ; acquired_at : float option
+        ; expires_at : float option
+        }
       (** Distributed lock acquire budget exhausted under transient
           fleet contention.  Carries the structured key + attempt count
           so callers can dispatch on the typed variant instead of
           substring-matching the IoError message (RFC-0088
           "String/Substring 분류기" anti-pattern removal). *)
+
+  let optional_float label = function
+    | None -> []
+    | Some value -> [ Printf.sprintf "%s=%.3f" label value ]
+
+  let lock_holder_suffix ~owner ~acquired_at ~expires_at =
+    let parts =
+      (match owner with
+       | None -> []
+       | Some value -> [ "owner=" ^ value ])
+      @ optional_float "acquired_at_unix" acquired_at
+      @ optional_float "expires_at_unix" expires_at
+    in
+    match parts with
+    | [] -> ""
+    | _ -> "; holder(" ^ String.concat ", " parts ^ ")"
 
   let to_string = function
     | NotInitialized -> "[SystemError] MASC not initialized. Use masc_init first."
@@ -186,11 +208,13 @@ module System_error = struct
     | InvalidFilePath reason -> Printf.sprintf "[SystemError] Invalid file path: %s" reason
     | StorageError msg -> Printf.sprintf "[SystemError] Storage error: %s" msg
     | ValidationError msg -> Printf.sprintf "[SystemError] Validation error: %s" msg
-    | LockContention { key; attempts } ->
+    | LockContention { key; attempts; owner; acquired_at; expires_at } ->
         Printf.sprintf
           "[SystemError] Failed to acquire distributed lock for key: %s \
-           (%d attempts exhausted; transient contention, retry later)"
-          key attempts
+           (%d attempts exhausted; transient contention, retry later%s)"
+          key
+          attempts
+          (lock_holder_suffix ~owner ~acquired_at ~expires_at)
 end
 
 type t =

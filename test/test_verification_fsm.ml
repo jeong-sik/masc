@@ -180,6 +180,9 @@ let expect_claim_next_claimed result ~task_id ~released_task_id =
       Alcotest.fail "expected claim_next to claim a task, got no_unclaimed"
   | Coord.Claim_next_no_eligible _ ->
       Alcotest.fail "expected claim_next to claim a task, got no_eligible"
+  | Coord.Claim_next_transient_error err ->
+      Alcotest.failf "expected claim_next to claim a task, got transient error: %s"
+        (Masc_domain.masc_error_to_string err)
   | Coord.Claim_next_error message ->
       Alcotest.failf "expected claim_next to claim a task, got error: %s"
         message
@@ -192,6 +195,10 @@ let expect_claim_next_no_eligible result =
   | Coord.Claim_next_claimed { task_id; _ } ->
       Alcotest.failf "expected claim_next to report no_eligible, got %s"
         task_id
+  | Coord.Claim_next_transient_error err ->
+      Alcotest.failf
+        "expected claim_next to report no_eligible, got transient error: %s"
+        (Masc_domain.masc_error_to_string err)
   | Coord.Claim_next_error message ->
       Alcotest.failf "expected claim_next to report no_eligible, got error: %s"
         message
@@ -204,6 +211,10 @@ let expect_claim_next_no_unclaimed result =
   | Coord.Claim_next_claimed { task_id; _ } ->
       Alcotest.failf "expected claim_next to report no_unclaimed, got %s"
         task_id
+  | Coord.Claim_next_transient_error err ->
+      Alcotest.failf
+        "expected claim_next to report no_unclaimed, got transient error: %s"
+        (Masc_domain.masc_error_to_string err)
   | Coord.Claim_next_error message ->
       Alcotest.failf "expected claim_next to report no_unclaimed, got error: %s"
         message

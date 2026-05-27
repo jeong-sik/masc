@@ -1562,6 +1562,34 @@ let () =
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () =
+  test "claim_next_lock_contention_response_is_transient" (fun () ->
+    let err =
+      Types.System
+        (Types.System_error.LockContention
+           { key = "tasks:.backlog"
+           ; attempts = 50
+           ; owner = Some "host-1234"
+           ; acquired_at = Some 1.0
+           ; expires_at = Some 121.0
+           })
+    in
+    let result =
+      Tool_task.claim_next_transient_error_response
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        err
+    in
+    assert (not (Tool_result.is_success result));
+    assert (Tool_result.failure_class result = Some Tool_result.Transient_error);
+    let open Yojson.Safe.Util in
+    assert (Tool_result.data result |> member "error_kind" |> to_string
+            = "distributed_lock_contention");
+    assert (Tool_result.data result |> member "lock_key" |> to_string
+            = "tasks:.backlog");
+    assert (Tool_result.data result |> member "holder_owner" |> to_string
+            = "host-1234"))
+
+let () =
   test "handle_claim_next_reports_internal_errors_as_tool_failure" (fun () ->
     let ctx = make_test_ctx () in
     let add_result =

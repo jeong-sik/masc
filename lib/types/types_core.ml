@@ -1071,4 +1071,5 @@ type claim_next_result =
       ; receipt_required_tool_blocked : bool
       ; agent_tool_names_known : bool
       }
+  | Claim_next_transient_error of Masc_error.t
   | Claim_next_error of string

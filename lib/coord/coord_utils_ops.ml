@@ -541,6 +541,70 @@ let backoff_with_jitter delay =
     let st = Domain.DLS.get backoff_rng_key in
     Random.State.float st delay
 
+type lock_contention_snapshot =
+  { holder_owner : string option
+  ; holder_acquired_at : float option
+  ; holder_expires_at : float option
+  }
+
+let empty_lock_contention_snapshot =
+  { holder_owner = None; holder_acquired_at = None; holder_expires_at = None }
+
+let lock_contention_snapshot config key =
+  let parse_float = function
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | `Intlit value | `String value -> float_of_string_opt value
+    | _ -> None
+  in
+  let parse_string = function
+    | `String value -> Some value
+    | _ -> None
+  in
+  match backend_get config ~key:("locks:" ^ key) with
+  | Ok (Some raw) ->
+    (try
+       match Yojson.Safe.from_string (String.trim raw) with
+       | `Assoc fields ->
+         { holder_owner = Option.bind (List.assoc_opt "owner" fields) parse_string
+         ; holder_acquired_at =
+             Option.bind (List.assoc_opt "acquired_at" fields) parse_float
+         ; holder_expires_at =
+             Option.bind (List.assoc_opt "expires_at" fields) parse_float
+         }
+       | _ -> empty_lock_contention_snapshot
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | _ -> empty_lock_contention_snapshot)
+  | Ok None | Error _ -> empty_lock_contention_snapshot
+
+let lock_contention_error config ~key ~attempts =
+  let snapshot = lock_contention_snapshot config key in
+  System
+    (System_error.LockContention
+       { key
+       ; attempts
+       ; owner = snapshot.holder_owner
+       ; acquired_at = snapshot.holder_acquired_at
+       ; expires_at = snapshot.holder_expires_at
+       })
+
+let log_lock_contention_exhausted config ~key ~attempts ~requester =
+  let snapshot = lock_contention_snapshot config key in
+  let opt_string = Option.value ~default:"unknown" in
+  let opt_float =
+    Option.fold ~none:"unknown" ~some:(Printf.sprintf "%.3f")
+  in
+  Log.Coord.warn
+    "distributed lock acquire failed: key=%s attempts=%d requester=%s holder_owner=%s \
+     holder_acquired_at_unix=%s holder_expires_at_unix=%s"
+    key
+    attempts
+    requester
+    (opt_string snapshot.holder_owner)
+    (opt_float snapshot.holder_acquired_at)
+    (opt_float snapshot.holder_expires_at)
+
 let with_distributed_lock ?clock config _path key f =
   let owner = config.backend_config.node_id in
   let ttl_seconds = config.lock_expiry_minutes * 60 in
@@ -572,10 +636,17 @@ let with_distributed_lock ?clock config _path key f =
        metric.  Hook is wired by [lib/coord.ml] at startup. *)
     (Atomic.get Coord_hooks.distributed_lock_acquire_failed_fn)
       ~key ~attempts:50;
+    log_lock_contention_exhausted config ~key ~attempts:50 ~requester:owner;
+    let snapshot = lock_contention_snapshot config key in
     invalid_arg
-      (Printf.sprintf
-         "Failed to acquire distributed lock for key: %s (50 attempts exhausted)"
-         key)
+      (System_error.to_string
+         (System_error.LockContention
+            { key
+            ; attempts = 50
+            ; owner = snapshot.holder_owner
+            ; acquired_at = snapshot.holder_acquired_at
+            ; expires_at = snapshot.holder_expires_at
+            }))
   end
 
 let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
@@ -613,7 +684,8 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
     (Atomic.get Coord_hooks.distributed_lock_acquire_failed_fn)
       ~key ~attempts:50;
     ignore path;
-    Error (System (System_error.LockContention { key; attempts = 50 }))
+    log_lock_contention_exhausted config ~key ~attempts:50 ~requester:owner;
+    Error (lock_contention_error config ~key ~attempts:50)
   end
 
 let with_file_lock_impl ?clock config path f =

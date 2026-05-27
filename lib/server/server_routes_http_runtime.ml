@@ -799,7 +799,19 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock =
         warm_delay_s = 0.5;
         warn_first_failure = false;
       }
-    ~compute:(fun () -> compute_full_health_snapshot_for_refresh request)
+    (* /health probe (5KB probe payload) was measured at 4-8s cold.
+       Even though [Proactive_refresh] runs [compute] on its own
+       fiber, that fiber lives on the Eio main domain — so the 6-10s
+       fleet meta scan inside [compute_full_health_snapshot_for_refresh]
+       blocked every other HTTP fiber for the duration (Eio cooperative
+       scheduling: no yield points inside the synchronous compute).
+
+       Offload to a worker domain via [Domain_pool_ref].  The probe
+       payload is served from the cached snapshot; refresh runs off
+       the main domain so concurrent HTTP requests are not stalled. *)
+    ~compute:(fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        compute_full_health_snapshot_for_refresh request))
     ~on_result:store_full_health_snapshot
 
 module For_testing = struct

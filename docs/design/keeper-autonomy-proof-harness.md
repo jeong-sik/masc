@@ -60,7 +60,7 @@ Step 2 — join against turn boundary to recover `turn_id`.
 
 Step 3 — map raw error message to typed outcome using:
 - new `Keeper_path_check_error.parse_prefix` (PR #15684) for path-error class
-- `Keeper_failure_circuit_breaker.classify_error` for policy / approval / shell-exit class (substring grep — separate cleanup once that module's TLA+ mirror is updated)
+- `Keeper_failure_circuit_breaker.classify_error` for path rejection / policy / approval / shell-exit class (typed path-prefix parser for path rejection; remaining shell-exit fallback is string-based)
 - explicit `[approval-required]` / `[policy-denied]` log markers for #13567 class
 
 Step 4 — emit `proof_receipt` JSON to `<base-path>/.masc/proof/<date>.jsonl`. Append-only, never edited.

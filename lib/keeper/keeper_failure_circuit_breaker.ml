@@ -9,8 +9,8 @@
     tool calls close it immediately and observers auto-close it after
     [cooling_reset_sec].
 
-    Error classes are coarse categories (path_not_found, cwd_not_directory,
-    path_not_in_allowed_paths/path_outside_sandbox) — not exact error strings. This prevents
+    Error classes are coarse categories (path-not-found, cwd-not-directory,
+    typed path rejection, shell exit, other) — not exact error strings. This prevents
     near-miss variants from resetting the counter.
 
     Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern applied

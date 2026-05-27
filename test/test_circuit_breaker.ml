@@ -1,7 +1,18 @@
 open Alcotest
 
 module CB = Masc_mcp.Keeper_failure_circuit_breaker
+module KAP = Masc_mcp.Keeper_alerting_path
 module PCE = Masc_mcp.Keeper_path_check_error
+
+let path_not_found_msg raw =
+  KAP.rejection_to_user_message (KAP.Not_found_relative { raw })
+;;
+
+let path_not_allowed_msg raw =
+  KAP.rejection_to_user_message (KAP.Outside_sandbox { raw })
+;;
+
+let json_error error = Yojson.Safe.to_string (`Assoc [ "ok", `Bool false; "error", `String error ])
 
 let contains haystack needle =
   let nl = String.length needle and hl = String.length haystack in
@@ -15,13 +26,23 @@ let contains haystack needle =
 
 let test_classify_path_not_found () =
   check bool "path_not_found from prefix" true
-    (CB.classify_error "path_not_found_under_allowed_roots: /foo" = CB.Path_not_found);
+    (CB.classify_error (path_not_found_msg "/foo") = CB.Path_not_found);
+  check bool "path_not_found from JSON error field" true
+    (CB.classify_error (json_error (path_not_found_msg "/foo")) = CB.Path_not_found);
   check bool "path_not_found from NSFD" true
     (CB.classify_error "No such file or directory" = CB.Path_not_found)
 
 let test_classify_path_not_allowed () =
-  check bool "path_not_allowed" true
-    (CB.classify_error "path_not_in_allowed_paths: /x" = CB.Path_not_allowed)
+  check bool "path_not_allowed from typed rejection" true
+    (CB.classify_error (path_not_allowed_msg "/x") = CB.Path_not_allowed);
+  check bool "path_not_allowed from JSON error field" true
+    (CB.classify_error (json_error (path_not_allowed_msg "/x")) = CB.Path_not_allowed);
+  check bool "outside project root is path_not_allowed" true
+    (CB.classify_error
+       (KAP.rejection_to_user_message (KAP.Outside_project_root { raw = "../x" }))
+     = CB.Path_not_allowed);
+  check bool "legacy path_not_in_allowed no longer drives KCB" true
+    (CB.classify_error "path_not_in_allowed_paths: /x" = CB.Other)
 
 let test_classify_typed_path_check_prefixes () =
   let cwd_msg =
@@ -43,16 +64,16 @@ let test_classify_other () =
 
 let test_no_hint_under_threshold () =
   CB.record_success ~keeper_name:"t1";
-  let r1 = CB.maybe_enrich_error ~keeper_name:"t1" ~error_msg:"path_not_found: /a" in
+  let r1 = CB.maybe_enrich_error ~keeper_name:"t1" ~error_msg:(path_not_found_msg "/a") in
   check bool "1st: no hint" true (not (contains r1 "CIRCUIT BREAKER"));
-  let r2 = CB.maybe_enrich_error ~keeper_name:"t1" ~error_msg:"path_not_found: /b" in
+  let r2 = CB.maybe_enrich_error ~keeper_name:"t1" ~error_msg:(path_not_found_msg "/b") in
   check bool "2nd: no hint" true (not (contains r2 "CIRCUIT BREAKER"))
 
 let test_hint_at_threshold () =
   CB.record_success ~keeper_name:"t2";
-  ignore (CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:"path_not_found: /a");
-  ignore (CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:"path_not_found: /b");
-  let r3 = CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:"path_not_found: /c" in
+  ignore (CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:(path_not_found_msg "/a"));
+  ignore (CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:(path_not_found_msg "/b"));
+  let r3 = CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:(path_not_found_msg "/c") in
   check bool "3rd: HAS hint" true (contains r3 "CIRCUIT BREAKER");
   check bool "mentions playground" true (contains r3 "playground");
   check bool "mentions typed public Execute ls" true
@@ -60,21 +81,21 @@ let test_hint_at_threshold () =
 
 let test_reset_on_success () =
   CB.record_success ~keeper_name:"t3";
-  ignore (CB.maybe_enrich_error ~keeper_name:"t3" ~error_msg:"path_not_found: /a");
-  ignore (CB.maybe_enrich_error ~keeper_name:"t3" ~error_msg:"path_not_found: /b");
+  ignore (CB.maybe_enrich_error ~keeper_name:"t3" ~error_msg:(path_not_found_msg "/a"));
+  ignore (CB.maybe_enrich_error ~keeper_name:"t3" ~error_msg:(path_not_found_msg "/b"));
   CB.record_success ~keeper_name:"t3";
-  let r = CB.maybe_enrich_error ~keeper_name:"t3" ~error_msg:"path_not_found: /c" in
+  let r = CB.maybe_enrich_error ~keeper_name:"t3" ~error_msg:(path_not_found_msg "/c") in
   check bool "after reset: no hint" true (not (contains r "CIRCUIT BREAKER"))
 
 let test_class_change_resets () =
-  ignore (CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:"path_not_found: /a");
-  ignore (CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:"path_not_found: /b");
-  ignore (CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:"path_not_in_allowed_paths: /x");
-  let r = CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:"path_not_in_allowed_paths: /y" in
+  ignore (CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:(path_not_found_msg "/a"));
+  ignore (CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:(path_not_found_msg "/b"));
+  ignore (CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:(path_not_allowed_msg "/x"));
+  let r = CB.maybe_enrich_error ~keeper_name:"t4" ~error_msg:(path_not_allowed_msg "/y") in
   check bool "class switch: no hint at 2nd" true (not (contains r "CIRCUIT BREAKER"))
 
 let test_snapshot () =
-  ignore (CB.maybe_enrich_error ~keeper_name:"t5" ~error_msg:"path_not_found: /a");
+  ignore (CB.maybe_enrich_error ~keeper_name:"t5" ~error_msg:(path_not_found_msg "/a"));
   match CB.snapshot_json () with
   | `List entries -> check bool "has entries" true (List.length entries > 0)
   | _ -> Alcotest.fail "expected list"
@@ -169,7 +190,7 @@ let test_classify_snapshot_round_trip () =
   (* Force a keeper with count>0 into the real state, snapshot, classify. *)
   CB.record_success ~keeper_name:"rt1";
   ignore (CB.maybe_enrich_error
-            ~keeper_name:"rt1" ~error_msg:"path_not_found: /x");
+            ~keeper_name:"rt1" ~error_msg:(path_not_found_msg "/x"));
   let json = CB.snapshot_json () in
   match CB.classify_snapshot_json json with
   | Error msg -> Alcotest.fail ("round-trip failed: " ^ msg)
@@ -192,7 +213,7 @@ let test_display_state_of_matches_snapshot () =
   let name = "p2-alpha" in
   CB.record_success ~keeper_name:name;
   ignore (CB.maybe_enrich_error
-            ~keeper_name:name ~error_msg:"path_not_found: /a");
+            ~keeper_name:name ~error_msg:(path_not_found_msg "/a"));
   let direct = CB.display_state_of ~keeper_name:name in
   check string "direct lookup = warning" "warning" (display_state_str direct);
   let json = CB.snapshot_json () in
@@ -206,19 +227,16 @@ let test_display_state_of_clears_after_success () =
   let name = "p2-beta" in
   CB.record_success ~keeper_name:name;
   ignore (CB.maybe_enrich_error
-            ~keeper_name:name ~error_msg:"path_not_found: /a");
+            ~keeper_name:name ~error_msg:(path_not_found_msg "/a"));
   CB.record_success ~keeper_name:name;
   let s = CB.display_state_of ~keeper_name:name in
   check string "after success, back to clean" "clean" (display_state_str s)
 
 let trip_keeper name =
   CB.record_success ~keeper_name:name;
-  ignore (CB.maybe_enrich_error
-            ~keeper_name:name ~error_msg:"path_not_found: /a");
-  ignore (CB.maybe_enrich_error
-            ~keeper_name:name ~error_msg:"path_not_found: /b");
-  ignore (CB.maybe_enrich_error
-            ~keeper_name:name ~error_msg:"path_not_found: /c")
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:(path_not_found_msg "/a"));
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:(path_not_found_msg "/b"));
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:(path_not_found_msg "/c"))
 
 let test_display_state_of_success_closes_trip () =
   let name = "p2-trip-success-closes" in

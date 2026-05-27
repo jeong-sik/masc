@@ -102,11 +102,30 @@ export function idString(value: unknown): string | undefined {
   return isPositiveSafeInteger(value) ? String(value) : undefined
 }
 
+/**
+ * Parse a `^[1-9]\d*$` string into a positive safe-integer `number`,
+ * returning `undefined` on any non-matching input (empty, sign,
+ * leading zero, decimal, non-digit) and on regex-passes-but-not-safe
+ * inputs like `'9999999999999999999'` (digit string too long to fit
+ * a safe JS integer).
+ *
+ * Two call sites previously inlined the regex test + parseInt only:
+ * `positiveLine` here (string branch) and `ide-shell.routeFocusLine`.
+ * The latter additionally guarded the parsed value with
+ * `isPositiveSafeInteger`; the former did not, so the unsafe-integer
+ * edge case silently returned a non-safe number through `positiveLine`.
+ * Centralising the parser closes that gap.
+ */
+export function parsePositiveLineString(raw: string): number | undefined {
+  if (!/^[1-9]\d*$/.test(raw)) return undefined
+  const value = Number.parseInt(raw, 10)
+  return isPositiveSafeInteger(value) ? value : undefined
+}
+
 export function positiveLine(value: unknown): number | undefined {
   if (isPositiveSafeInteger(value)) return value
   if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
+  return parsePositiveLineString(value.trim())
 }
 
 export interface CodeLocation {

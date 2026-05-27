@@ -176,15 +176,14 @@ end
 (** Read request body - H2 uses async body reading with callback *)
 let read_body_async reqd callback =
   let body = H2.Reqd.request_body reqd in
-  let buf = Buffer.create 4096 in
+  let buf = Http_body_buffer.create 4096 in
   let rec read_loop () =
     H2.Body.Reader.schedule_read body
       ~on_eof:(fun () ->
-        let body_str = Buffer.contents buf in
+        let body_str = Http_body_buffer.contents buf in
         callback body_str)
       ~on_read:(fun bigstring ~off ~len ->
-        let bytes = Bigstringaf.substring bigstring ~off ~len in
-        Buffer.add_string buf bytes;
+        Http_body_buffer.add_bigstring buf bigstring ~off ~len;
         read_loop ())
   in
   read_loop ()

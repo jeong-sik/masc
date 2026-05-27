@@ -365,12 +365,11 @@ module Request = struct
            | Some len when len > 0 && len < max_body_bytes -> len
            | _ -> 1024
          in
-         let buf = Buffer.create initial_capacity in
-         let seen_bytes = ref 0 in
+         let buf = Http_body_buffer.create initial_capacity in
          let rec read_loop () =
            Httpun.Body.Reader.schedule_read body
              ~on_eof:(fun () ->
-               let body_str = Buffer.contents buf in
+               let body_str = Http_body_buffer.contents buf in
                try on_body body_str with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
@@ -378,14 +377,12 @@ module Request = struct
              ~on_read:(fun buffer ~off ~len ->
                if !stopped then ()
                else
-                 let next_bytes = !seen_bytes + len in
+                 let next_bytes = Http_body_buffer.length buf + len in
                  if next_bytes > max_body_bytes then begin
                    stop ();
                    on_error (`Too_large max_body_bytes)
                  end else begin
-                   seen_bytes := next_bytes;
-                   let chunk = Bigstringaf.substring buffer ~off ~len in
-                   Buffer.add_string buf chunk;
+                   Http_body_buffer.add_bigstring buf buffer ~off ~len;
                    read_loop ()
                  end)
          in

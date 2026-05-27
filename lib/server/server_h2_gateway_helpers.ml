@@ -88,13 +88,12 @@ let h2_respond_removed_surface h2_reqd ~surface ~extra_headers =
 
 let h2_read_body h2_reqd callback =
   let body = H2.Reqd.request_body h2_reqd in
-  let buf = Buffer.create 4096 in
+  let buf = Http_body_buffer.create 4096 in
   let rec read_loop () =
     H2.Body.Reader.schedule_read body
-      ~on_eof:(fun () -> callback (Buffer.contents buf))
+      ~on_eof:(fun () -> callback (Http_body_buffer.contents buf))
       ~on_read:(fun bigstring ~off ~len ->
-        let chunk = Bigstringaf.substring bigstring ~off ~len in
-        Buffer.add_string buf chunk;
+        Http_body_buffer.add_bigstring buf bigstring ~off ~len;
         read_loop ())
   in
   read_loop ()

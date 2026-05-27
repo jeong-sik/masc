@@ -1151,13 +1151,13 @@ let () =
          `kubectl`, `ssh` calls with no redirect hint, which kept small-LLM
          keepers retrying the same blocked command. The new branches return a
          concrete alternative tool or an escalation path. *)
-      Alcotest.test_case "gh → Execute redirect" `Quick (fun () ->
+      Alcotest.test_case "gh -> Execute redirect" `Quick (fun () ->
         let msg =
           Worker_dev_tools.block_reason_to_string
             (Worker_dev_tools.Command_not_allowed "gh")
         in
         Alcotest.(check bool) "mentions Execute" true
-          (contains_substring msg "typed Execute GitHub path");
+          (contains_substring msg "Use Execute from a repo worktree");
         Alcotest.(check bool) "mentions masc_board_" true
           (contains_substring msg "masc_board_"));
       Alcotest.test_case "docker → escalation hint" `Quick (fun () ->

@@ -145,45 +145,6 @@ let log_tool
     ?goal_ids
     ()
 
-let docker_bash_output ?(success = true) () =
-  if success then
-    {|{"ok":true,"sandbox_profile":"docker","via":"docker","git_creds_enabled":true}|}
-  else
-    {|{"ok":false,"error":"fixture_failure","sandbox_profile":"docker","via":"docker","git_creds_enabled":true}|}
-
-let log_docker_bash ?(keeper_name = "alpha") ?(success = true) command =
-  Keeper_tool_call_log.log_call
-    ~keeper_name
-    ~tool_name:"tool_execute"
-    ~input:
-      (`Assoc [
-        ("cmd", `String command);
-        ("git_creds_enabled", `Bool true);
-      ])
-    ~output_text:(docker_bash_output ~success ())
-    ~success
-    ~duration_ms:1.0
-    ~sandbox_profile:"docker"
-    ~network_mode:"inherit"
-    ()
-
-let log_tool_execute_with_identity ?(keeper_name = "alpha") () =
-  Keeper_tool_call_log.log_call
-    ~keeper_name
-    ~tool_name:"tool_execute"
-    ~input:
-      (`Assoc [
-        ("title", `String "proof: Docker credential PR lifecycle");
-        ("draft", `Bool true);
-      ])
-    ~output_text:
-      {|{"ok":true,"tool":"tool_execute","operation":"pr_create","sandbox_profile":"docker","via":"docker","credential":{"credential_scope":"keeper_identity","git_identity_mode":"repo_cli_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
-    ~success:true
-    ~duration_ms:1.0
-    ~sandbox_profile:"docker"
-    ~network_mode:"inherit"
-    ()
-
 let write_decision_lines config keeper_name rows =
   let path = KTS.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -264,23 +225,12 @@ let json_string_values field json =
   Yojson.Safe.Util.(json |> member field |> to_list)
   |> List.filter_map Yojson.Safe.Util.to_string_option
 
-let json_has_field field = function
-  | `Assoc fields -> List.exists (fun (name, _) -> String.equal name field) fields
-  | _ -> false
-
 let keeper_evidence_tool tool_name id json =
   keeper_evidence id json
   |> Yojson.Safe.Util.member "per_tool"
   |> Yojson.Safe.Util.to_list
   |> List.find_opt (fun item ->
     Safe_ops.json_string_opt "name" item = Some tool_name)
-
-let keeper_evidence_stage stage_id json =
-  keeper_evidence "docker_git_pr_workflow" json
-  |> Yojson.Safe.Util.member "stages"
-  |> Yojson.Safe.Util.to_list
-  |> List.find_opt (fun item ->
-    Safe_ops.json_string_opt "id" item = Some stage_id)
 
 let scheduled_decision_log keeper_name json =
   keeper_evidence "scheduled_proactive_autonomy" json
@@ -432,83 +382,6 @@ let test_approval_latest_success_proves_recovery () =
     (Safe_ops.json_float_opt "latest_success_ts" evidence <> None);
   check bool "latest failure timestamp exposed" true
     (Safe_ops.json_float_opt "latest_failure_ts" evidence <> None)
-
-let test_docker_git_pr_workflow_reports_partial_chain () =
-  with_store @@ fun config ->
-  ignore
-    (persist_keeper config ~name:"alpha" ~total_turns:3
-       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
-       ~board_reactive_turn_count:1 ~proactive_count_total:1);
-  log_docker_bash
-    "git clone https://github.com/jeong-sik/masc-mcp.git /workspace/masc-mcp";
-  log_docker_bash "git checkout -b fix/keeper-proof";
-  log_docker_bash "git commit -m 'mention gh pr create'";
-  log_docker_bash ~success:false "git push origin fix/keeper-proof";
-  log_tool "tool_execute";
-  let json =
-    Dashboard_keeper_feature_proof.json
-      ~config
-      ~n:100
-      ~success_threshold_pct:80.0
-      ()
-  in
-  check string "partial Docker git PR workflow is warn" "warn"
-    (feature_status "docker_git_pr_workflow" json);
-  let stage_passed id =
-    match keeper_evidence_stage id json with
-    | Some row -> Safe_ops.json_bool ~default:false "passed" row
-    | None -> false
-  in
-  check bool "clone stage passes" true (stage_passed "docker_clone");
-  check bool "branch stage passes" true (stage_passed "branch_create");
-  check bool "commit stage passes" true (stage_passed "commit");
-  check bool "push stage fails without success evidence" false
-    (stage_passed "push");
-  let push_failures =
-    match keeper_evidence_stage "push" json with
-    | Some row -> Safe_ops.json_int ~default:0 "failures" row
-    | None -> 0
-  in
-  check int "push failure evidence is retained" 1 push_failures;
-  (match keeper_evidence_stage "push" json with
-   | Some row ->
-     check bool "public push stage omits raw failure sample" false
-       (json_has_field "sample_failure" row)
-   | None -> fail "missing push stage evidence");
-  check bool "PR creation remains missing" false (stage_passed "pr_create");
-  check (list string) "workflow evidence is keeper-originated"
-    ["alpha"]
-    (json_string_values "observed_keepers"
-       (keeper_evidence "docker_git_pr_workflow" json))
-
-let test_tool_execute_identity_output_counts_as_pr_stage () =
-  with_store @@ fun config ->
-  ignore
-    (persist_keeper config ~name:"alpha" ~total_turns:3
-       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
-       ~board_reactive_turn_count:1 ~proactive_count_total:1);
-  log_docker_bash
-    "git clone https://github.com/jeong-sik/masc-mcp.git /workspace/masc-mcp";
-  log_docker_bash "git checkout -b fix/keeper-proof";
-  log_docker_bash "git commit -m 'proof: keeper lifecycle'";
-  log_docker_bash "git push origin fix/keeper-proof";
-  log_tool_execute_with_identity ();
-  let json =
-    Dashboard_keeper_feature_proof.json
-      ~config
-      ~n:100
-      ~success_threshold_pct:80.0
-      ()
-  in
-  check string "complete Docker git PR workflow passes" "pass"
-    (feature_status "docker_git_pr_workflow" json);
-  let stage_passed id =
-    match keeper_evidence_stage id json with
-    | Some row -> Safe_ops.json_bool ~default:false "passed" row
-    | None -> false
-  in
-  check bool "PR creation stage passes from keeper identity credential output" true
-    (stage_passed "pr_create")
 
 let test_decision_log_counts_as_scheduled_proof () =
   with_store @@ fun config ->
@@ -788,10 +661,6 @@ let () =
             test_operator_tool_calls_do_not_satisfy_keeper_tool_proof;
           test_case "approval latest success proves recovery" `Quick
             test_approval_latest_success_proves_recovery;
-          test_case "Docker git PR workflow reports partial chain" `Quick
-            test_docker_git_pr_workflow_reports_partial_chain;
-          test_case "keeper PR identity output counts as PR stage" `Quick
-            test_tool_execute_identity_output_counts_as_pr_stage;
           test_case "decision log counts as scheduled proof" `Quick
             test_decision_log_counts_as_scheduled_proof;
           test_case "scheduled proof uses enabled population" `Quick

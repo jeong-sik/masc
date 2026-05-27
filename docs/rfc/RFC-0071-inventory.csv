@@ -249,9 +249,6 @@ lib/dashboard/dashboard_http_tool_quality.ml,109,None,unclassified
 lib/dashboard/dashboard_http_tool_quality.ml,292,false,unclassified
 lib/dashboard/dashboard_keeper_decision_log_proof.ml,99,false,unclassified
 lib/dashboard/dashboard_keeper_decision_log_proof.ml,157,false,unclassified
-lib/dashboard/dashboard_keeper_git_pr_proof.ml,55,None,unclassified
-lib/dashboard/dashboard_keeper_git_pr_proof.ml,65,None,unclassified
-lib/dashboard/dashboard_keeper_git_pr_proof.ml,206,(),unclassified
 lib/dashboard/dashboard_keeper_tool_failure_proof.ml,54,None,unclassified
 lib/dashboard/dashboard_keeper_tool_failure_proof.ml,71,None,unclassified
 lib/dashboard/dashboard_keeper_tool_failure_proof.ml,189,(),unclassified

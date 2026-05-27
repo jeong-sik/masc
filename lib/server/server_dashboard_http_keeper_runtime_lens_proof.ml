@@ -13,7 +13,6 @@ type runtime_lens_proof_acc =
   ; mutable docker_visible : bool
   ; mutable git_credentials_enabled : bool
   ; mutable repo_cli_identity_materialized : bool
-  ; mutable pr_create_observed : bool
   ; tools : (string, unit) Hashtbl.t
   ; successful_tools : (string, unit) Hashtbl.t
   ; failed_tools : (string, unit) Hashtbl.t
@@ -29,7 +28,6 @@ let runtime_lens_proof_acc () =
   ; docker_visible = false
   ; git_credentials_enabled = false
   ; repo_cli_identity_materialized = false
-  ; pr_create_observed = false
   ; tools = Hashtbl.create 8
   ; successful_tools = Hashtbl.create 8
   ; failed_tools = Hashtbl.create 8
@@ -179,9 +177,6 @@ let runtime_lens_accumulate_tool_proof acc json =
   runtime_lens_collect_profile acc json;
   let output_opt = parse_tool_output_json_opt json in
   let text = runtime_lens_tool_text json in
-  if String.equal tool "tool_execute"
-     && String_util.contains_substring text "gh pr create"
-  then acc.pr_create_observed <- true;
   if runtime_lens_call_has_docker_proof json output_opt text
   then acc.docker_visible <- true;
   if runtime_lens_call_has_git_credentials output_opt text
@@ -224,7 +219,6 @@ let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
     ; ("docker_visible", `Bool acc.docker_visible)
     ; ("git_credentials_enabled", `Bool acc.git_credentials_enabled)
     ; ("repo_cli_identity_materialized", `Bool acc.repo_cli_identity_materialized)
-    ; ("pr_create_observed", `Bool acc.pr_create_observed)
     ; ( "latest_at",
         match acc.latest_ts with
         | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)

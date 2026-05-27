@@ -83,15 +83,6 @@ export const OAS_TELEMETRY_REPLAY_LIMIT = envInt('VITE_OAS_TELEMETRY_REPLAY_LIMI
 export const TRIM_TEXT_DEFAULT = 120
 export const TRUNCATE_DEFAULT = 260
 
-// --- Heatmap color scale (5-level: empty → max intensity) ---
-export const HEATMAP_COLORS = [
-  'var(--color-bg-3)', // 0 events
-  '#0e4a5c', // 1-25%
-  '#0e6e7e', // 26-50%
-  '#14919b', // 51-75%
-  'var(--color-cyan)', // 76-100%
-] as const
-
 // --- TLA+ verification panel poll interval ---
 export const TLA_POLL_INTERVAL_MS = 60_000
 

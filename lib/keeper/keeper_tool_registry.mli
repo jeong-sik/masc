@@ -55,10 +55,10 @@ val has_mutating_side_effect : string -> bool
 val is_read_only_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
-(** Input-aware mutation-boundary exemption. Read-only calls and tools whose
-    descriptor/catalog effect domain is coordination or playground-scoped do not
-    open the main-worktree checkpoint boundary. *)
-val is_main_worktree_boundary_exempt_with_input :
+(** Input-aware follow-up checkpoint decision. Read-only calls and tools whose
+    descriptor/catalog effect domain is coordination or playground-scoped can
+    continue without opening a repo checkpoint gate. *)
+val allows_followup_checkpoint_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
 (** Tools whose mutations are safe to leave un-reconciled after

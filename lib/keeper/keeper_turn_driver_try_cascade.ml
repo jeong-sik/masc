@@ -68,6 +68,12 @@ type try_cascade_ctx =
   ; (* Provider health error recording *)
     record_provider_health_error :
       Cascade_runtime_candidate.t -> Provider_error.t -> unit
+  ; (* RFC-0192: keeper-level total budget for cascade-tier wait. Threaded
+       from [Keeper_agent_run.admission_wait_timeout_sec] through
+       [run_named] to drive per-attempt deadline composition in
+       {!Cascade_tier_wait_scheduler.try_admission_or_wait}. [None] =
+       no deadline; legacy env amplifier behaviour. *)
+    wait_timeout_sec : float option
   }
 
 (* Manifest ID helpers — pure functions taking manifest context. *)
@@ -522,6 +528,7 @@ let rec run
       Keeper_turn_driver_admission.with_keeper_cascade_tier_admission
         ~tier_id:tier_admission_id
         ~admission_policy:ctx.tier_admission_policy
+        ?wait_timeout_sec:ctx.wait_timeout_sec
         (fun () ->
            Eio.Switch.run (fun provider_attempt_sw ->
         Option.iter

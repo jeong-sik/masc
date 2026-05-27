@@ -751,6 +751,7 @@ let run_named
     record_provider_health_result;
     filter_provider_health_fail_open;
     record_provider_health_error;
+    wait_timeout_sec;
   } in
   let try_cascade
         ?(on_success = fun ~provider_key:_ -> ())

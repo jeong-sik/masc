@@ -13,12 +13,23 @@ val with_keeper_cascade_tier_admission :
   ?wait_scheduler:Cascade_tier_wait_scheduler.t ->
   ?enabled:bool ->
   ?sw:Eio.Switch.t ->
+  ?wait_timeout_sec:float ->
   tier_id:Cascade_tier_admission.tier_id ->
   admission_policy:Cascade_tier_admission.admission_policy ->
   (unit -> 'a) ->
   ('a, Cascade_saturation_signal.t) result
 (** When [?sw] is provided and wait is enabled (env flag), uses bounded
-    wait with backoff.  Otherwise falls back to non-blocking admission. *)
+    wait with backoff.  Otherwise falls back to non-blocking admission.
+
+    RFC-0192 § 2: when [?wait_timeout_sec] is provided, the value is
+    converted to a {!Cascade_deadline.t} relative to the wait scheduler's
+    clock and passed to {!Cascade_tier_wait_scheduler.try_admission_or_wait}
+    as the deadline. The per-attempt timeout becomes
+    [min (env amplifier) (deadline - now)] — fixing the per-attempt fresh
+    timeout accumulation that issue #18845 documents.
+
+    Backward-compat: omitting [?wait_timeout_sec] (or when the scheduler
+    has no clock) yields the legacy [env amplifier] behaviour. *)
 
 val cascade_tier_admission_blocked_decision :
   Cascade_saturation_signal.t -> Yojson.Safe.t

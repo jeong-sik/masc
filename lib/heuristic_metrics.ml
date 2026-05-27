@@ -202,11 +202,21 @@ let reset_for_test () =
 
 let ensure_dir path =
   let dir = Filename.dirname path in
+  (* TOCTOU between [Sys.file_exists] and [mkdir] is benign — another
+     fiber may have created the directory in between.  Catch the typed
+     [EEXIST] errno rather than substring-matching [Sys_error msg], so a
+     translation of the libc message can never silently disable this
+     classifier (RFC-0088 "String/Substring 분류기" anti-pattern). *)
   if not (Sys.file_exists dir)
   then (
-    try Sys.mkdir dir 0o755 with
-    | Sys_error msg when String_util.contains_substring msg "exists" -> ()
-    | Sys_error msg -> Log.warn ~ctx:"heuristic_metrics" "cannot mkdir %s: %s" dir msg)
+    try Unix.mkdir dir 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    | Unix.Unix_error (err, _, _) ->
+      Log.warn
+        ~ctx:"heuristic_metrics"
+        "cannot mkdir %s: %s"
+        dir
+        (Unix.error_message err))
 ;;
 
 let do_flush () =

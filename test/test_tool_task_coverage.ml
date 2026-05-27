@@ -1665,71 +1665,17 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
-let () = test "transition_submit_for_verification_requires_evidence_ref" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx () in
-    let add_result =
-      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc [ ("title", `String "Needs real verification evidence") ])
-    in
-    if not add_result.Tool_result.success then failwith add_result.Tool_result.message;
-    let claim_result =
-      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc [ ("task_id", `String "task-001"); ("action", `String "claim") ])
-    in
-    if not claim_result.Tool_result.success then failwith claim_result.Tool_result.message;
-    let submit_result =
-      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_for_verification");
-            ("notes", `String "Implementation complete.");
-          ])
-    in
-    assert (not submit_result.Tool_result.success);
-    assert
-      (Tool_result.failure_class submit_result = Some Tool_result.Workflow_rejection);
-    assert
-      (str_contains submit_result.Tool_result.message
-         "requires verification evidence");
-    assert_task_claimed_by ctx ctx.agent_name)
-  )
-
-let () = test "transition_submit_for_verification_rejects_placeholder_evidence_ref" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx () in
-    let add_result =
-      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc [ ("title", `String "Reject placeholder evidence") ])
-    in
-    if not add_result.Tool_result.success then failwith add_result.Tool_result.message;
-    let claim_result =
-      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc [ ("task_id", `String "task-001"); ("action", `String "claim") ])
-    in
-    if not claim_result.Tool_result.success then failwith claim_result.Tool_result.message;
-    let submit_result =
-      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_for_verification");
-            ("notes", `String "Implementation complete.");
-            ( "handoff_context",
-              `Assoc
-                [
-                  ("summary", `String "Implementation complete.");
-                  ("evidence_refs", `List [ `String "none" ]);
-                ] );
-          ])
-    in
-    assert (not submit_result.Tool_result.success);
-    assert
-      (str_contains submit_result.Tool_result.message
-         "requires verification evidence");
-    assert_task_claimed_by ctx ctx.agent_name)
-  )
+(* RFC-0109 Phase E (#18822, 2026-05-27) retired the transition-layer
+   substring evidence gate. The two tests that previously locked in
+   the substring-reject behaviour
+   ([transition_submit_for_verification_requires_evidence_ref] and
+   [transition_submit_for_verification_rejects_placeholder_evidence_ref])
+   have been removed: their intent was the exact behaviour Phase E
+   removes.  Phase E semantics is now pinned by
+   [test/test_coord_task_verification_phase_e.ml] (5 cases) and by
+   the typed CDAL verdict consultation in
+   [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
+   Cluster A.1 for the triage record. *)
 
 let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
@@ -1758,27 +1704,14 @@ let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun
     | None -> failwith "expected handoff_context to receive pr_url evidence")
 )
 
-let () = test "transition_submit_for_verification_todo_still_requires_evidence" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
-    let result =
-      Tool_task.handle_transition
-        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_for_verification");
-            ("notes", `String "Implementation is complete.");
-          ])
-    in
-    assert (not result.Tool_result.success);
-    assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
-    assert (str_contains result.Tool_result.message "requires verification evidence");
-    assert_task_todo ctx)
-)
+(* RFC-0109 Phase E (#18822): the transition-layer substring gate that
+   produced the "requires verification evidence" message no longer
+   exists; this test's [str_contains "requires verification evidence"]
+   assertion was the third lock-in of the retired behaviour and has
+   been removed.  The remaining intent — contracted-task submit
+   rejection when no CDAL verdict and no substantive evidence — is
+   covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
+   arm. See issue #18830 Cluster A.1. *)
 
 (* Regression: the transport-level [pr_url] alias must be hoisted onto
    the typed [handoff_context.evidence_refs] domain, not concatenated

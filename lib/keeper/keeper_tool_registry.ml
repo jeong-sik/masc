@@ -115,14 +115,14 @@ let keeper_read_only_tools =
   |> List.sort_uniq String.compare
 ;;
 
-let keeper_read_only_set : (string, unit) Hashtbl.t =
+let keeper_read_only_lookup : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length keeper_read_only_tools) in
   List.iter (fun name -> Hashtbl.replace tbl name ()) keeper_read_only_tools;
   tbl
 ;;
 
 let is_keeper_read_only_tool (name : string) : bool =
-  Hashtbl.mem keeper_read_only_set name
+  Hashtbl.mem keeper_read_only_lookup name
 ;;
 
 let is_effectively_read_only_tool (name : string) : bool =

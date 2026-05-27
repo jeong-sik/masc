@@ -643,7 +643,17 @@ let execute_tool_eio
               | Some blocked, _ -> Some blocked
               | None, coerced_args ->
                 (match internal_keeper_meta_of_agent () with
-                 | Error msg -> Some (Tool_result.error ~tool_name:name ~start_time msg)
+                 | Error msg ->
+                   (* RFC-0189: agent_name has no matching registered
+                      keeper (or base_path mismatch).  Caller can
+                      address by registering the keeper / fixing the
+                      agent invocation context.  Same semantic family
+                      as tool_task_handlers' "Agent '%s' is not a
+                      member of this room" — [Workflow_rejection]. *)
+                   Some
+                     (Tool_result.error
+                        ~failure_class:(Some Tool_result.Workflow_rejection)
+                        ~tool_name:name ~start_time msg)
                  | Ok meta ->
                    let ctx_work =
                      Keeper_exec_context.create

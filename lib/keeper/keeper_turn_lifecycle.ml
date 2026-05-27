@@ -20,10 +20,6 @@ let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
     stop_keepalive ~base_path:config.base_path requested_name;
-    (match Keeper_identity.keeper_name_from_agent_name requested_name with
-     | Some resolved_name when not (String.equal resolved_name requested_name) ->
-         stop_keepalive ~base_path:config.base_path resolved_name
-     | _ -> ());
     match read_meta_resolved config requested_name with
     | Error e -> (false, e)
     | Ok None -> (true, Printf.sprintf "keeper already absent: %s" requested_name)

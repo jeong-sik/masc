@@ -1642,7 +1642,7 @@
 
 (include stanzas/test_keeper_failure_policy.inc)
 
-(include stanzas/test_keeper_exec_shell_cwd_response.inc)
+(include stanzas/test_agent_tool_shell_runtime_cwd_response.inc)
 
 (include stanzas/test_keeper_exec_tools.inc)
 

@@ -149,12 +149,14 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_task_done"
     ; description =
-        "Mark your claimed task as complete with a result summary. The task must be \
-         claimed by you. If the task was previously submitted for verification \
-         (keeper_task_submit_for_verification), the result MUST include a pr_url \
-         field linking to the PR or evidence artifact — the call will be rejected \
-         otherwise. For tasks still in progress, use keeper_task_submit_for_verification \
-         first."
+        "Mark your claimed task as complete with a result summary. The task must \
+         be claimed by you. For tasks with a verification contract the call is \
+         routed through Submit_for_verification and the Cdal evidence gate; \
+         supply either (a) pr_url with the draft/open PR URL, or (b) notes \
+         that mention every contract.required_evidence entry verbatim and at \
+         least one concrete artefact reference (file path, PR number, commit \
+         hash, trace id). Pure-placeholder notes ('done', 'ok', etc.) keep \
+         the gate closed. Tasks without a contract bypass the gate."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -173,6 +175,28 @@ let taskboard_tools : Masc_domain.tool_schema list =
                         , `String
                             "What was done: files changed, tests run, outcome observed" )
                       ; "minLength", `Int 1
+                      ] )
+                ; ( "notes"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Verification handoff notes (>= 20 chars). For \
+                             contracted tasks: summarise what changed AND \
+                             mention each contract.required_evidence entry \
+                             verbatim. Ignored when the task has no contract."
+                        )
+                      ] )
+                ; ( "pr_url"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Draft or open PR URL. Hoisted into \
+                             handoff_context.evidence_refs by the transport \
+                             layer; satisfies the Cdal evidence gate for \
+                             contracted tasks."
+                        )
                       ] )
                 ] )
           ; "required", `List [ `String "task_id"; `String "result" ]

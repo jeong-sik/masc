@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 01:34:21 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 10:22:36 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -768,10 +768,46 @@
             <td>Merged as <code>6be6aa25c</code>. The <code>lib/</code> and test backstop greps are clean for direct <code>Tool_dispatch.is_*</code> and <code>Tool_dispatch.init_*_set</code> usage. Dispatch now owns routing only; capability truth is catalog-backed.</td>
           </tr>
           <tr>
-            <td><code>Tool_dispatch</code> observer vocabulary</td>
+            <td>Tool dispatch post-hook vocabulary</td>
             <td><span class="status done">merged #18826</span></td>
-            <td>Rename the current typed observer API to explicit dispatch observers, rename the output-validation transformer entrypoint to <code>transform_result</code>, and delete PR-I migration-only tests that string-count the retired registration era.</td>
-            <td>Merged as <code>0fde5e4a2</code>. Backstop grep was clean for retired hook tokens repo-wide and for deleted migration test names; downstream fallout is tracked separately in the candidate queue.</td>
+            <td>Rename the typed post-hook API to dispatch-observer vocabulary and remove PR-I migration-string tests that preserved the old rollout mental model.</td>
+            <td>Merged as <code>0fde5e4a2</code>. Backstop greps remove <code>post_hook_typed</code>, <code>typed_post_hooks</code>, and deleted PR-I test names.</td>
+          </tr>
+          <tr>
+            <td>Post-turn lifecycle facade</td>
+            <td><span class="status now">draft PR #18833</span></td>
+            <td>Delete the post-turn lifecycle wrapper layer so keeper post-turn work is wired through the direct modules instead of a broad compatibility facade.</td>
+            <td>Fast checks passed; Build/TLA were still pending at the latest live poll.</td>
+          </tr>
+          <tr>
+            <td>Typed Execute input normalizers</td>
+            <td><span class="status now">draft PR #18843</span></td>
+            <td>Stop repairing malformed typed Execute payloads by promoting empty executables, rewriting <code>find -type</code>, or stripping duplicate argv0 tokens.</td>
+            <td>Negative tests now pin strict rejection/preservation semantics. Local static checks passed; focused Dune remained blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_dispatch</code> handler-registry token fallback</td>
+            <td><span class="status now">draft PR #18848</span></td>
+            <td>Remove the handler-registry fallback from token minting and did-you-mean discovery. Handler-only registration remains executable internal state only; tool authorization/discovery now comes from static routes or the tag registry.</td>
+            <td>New negative test proves handler-only registration stays <code>is_registered</code> but cannot mint a token and does not appear in <code>all_registered_names</code> / suggestions.</td>
+          </tr>
+          <tr>
+            <td>Keeper meta alias read fallback</td>
+            <td><span class="status now">draft PR #18848</span></td>
+            <td>Remove alias-candidate reads from <code>Keeper_meta_store.read_meta_resolved</code> and <code>read_meta_if_changed</code>. Meta reads now address only the canonical keeper filename component; callers that still accept aliases must normalize before calling the store.</td>
+            <td><code>test_keeper_meta_listing</code> now asserts separator and agent-name aliases do not resolve through the meta store. Misleading “also tried” error text was removed from status/name resolution paths.</td>
+          </tr>
+          <tr>
+            <td>Keeper public agent-name alias acceptance</td>
+            <td><span class="status now">draft PR #18848</span></td>
+            <td>Stop accepting <code>keeper-*-agent</code> / separator variants as public keeper targets for status, down, probe, and recover paths. Canonical keeper names are the only live target identity.</td>
+            <td>Operator-control tests now assert aliases are rejected or do not pause the canonical keeper. The unused alias resolver and the extra <code>keeper_down</code> alias <code>stop_keepalive</code> branch were deleted.</td>
+          </tr>
+          <tr>
+            <td>Runtime trust persisted terminal-code normalization</td>
+            <td><span class="status now">draft PR #18848</span></td>
+            <td>Delete <code>normalize_persisted_terminal_reason_code</code>; persisted terminal reason wires now surface as-is instead of rewriting old <code>completed</code> values to <code>success</code>.</td>
+            <td><code>test_keeper_unified</code> now pins the strict behavior: old persisted <code>completed</code> remains <code>completed</code> and is summarized as an unknown terminal reason.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -807,10 +843,10 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td>Post-observer merge fallout sweep</td>
-            <td>After the observer vocabulary purge lands, any remaining Tool/Cascade/Memory compatibility wording should be either live contract or retired-history archive, not active implementation guidance.</td>
-            <td>Run a fresh grep pass for <code>legacy</code>, <code>compat</code>, <code>fallback</code>, and raw marker terms in active <code>lib/</code> / non-archive docs, then cut the next branch only for code paths that still preserve obsolete behavior.</td>
-            <td>Prefer absence/routing tests over migration-string ratchets; delete tests that only prove old transition steps stayed removed.</td>
+            <td><code>Tool_result.to_legacy</code> projection boundary</td>
+            <td>Typed-result work is still carrying many local comments and handler lifts that preserve tuple/string-era result shapes. That keeps dispatch, board, coord, library, and in-process runtimes mentally tied to the old envelope.</td>
+            <td>After the RFC-0189 typed-result PR stack lands, cut remaining per-module <code>to_legacy</code> lifts to the single MCP boundary and delete compatibility comments/tests that assert old message regeneration.</td>
+            <td>Backstop <code>rg "to_legacy|legacy \\[Tool_result|legacy projection"</code> per module; keep only boundary tests that prove the final MCP envelope.</td>
           </tr>
         </tbody>
       </table>

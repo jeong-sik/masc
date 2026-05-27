@@ -1441,7 +1441,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   new fields — one per `Parsed.reason_too_complex` variant plus
   dedicated `too_complex_parse_error`, `too_complex_parse_aborted`,
   and `too_complex_other` buckets.  The shadow-observer in
-  `keeper_exec_shell.ml` feeds the `parse_tag` string (e.g.
+  `agent_tool_shell_runtime.ml` feeds the `parse_tag` string (e.g.
   `"too_complex:redirect"`) through the new
   `Legendary_counters.incr_too_complex_by_tag` routing table
   whenever `diff=Shadow_cannot_parse`; unknown tags collapse into
@@ -1774,7 +1774,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   script `scripts/sweep-tool-error-signatures.sh` (#8767) buckets daily
   `tool_calls/*.jsonl` failures by normalized signature so the impact
   of prompt changes is measurable. Shipped:
-  - `keeper_exec_shell` — raise gh op timeout floor 5s → 15s (#8712),
+  - `agent_tool_shell_runtime` — raise gh op timeout floor 5s → 15s (#8712),
     hint on gh `Could not resolve to a Repository` from playground cwd
     (#8734), Good:/Bad: examples for 5 readonly-shell categories
     (#8704).

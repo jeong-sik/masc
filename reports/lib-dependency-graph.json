@@ -249,7 +249,7 @@
       "Keeper_exec_memory",
       "Keeper_exec_preflight",
       "Keeper_exec_shared",
-      "Keeper_exec_shell",
+      "Agent_tool_shell_runtime",
       "Keeper_exec_status",
       "Keeper_exec_task",
       "Keeper_exec_tools",
@@ -1054,7 +1054,7 @@
         "Keeper_exec_persona",
         "Keeper_exec_preflight",
         "Keeper_exec_shared",
-        "Keeper_exec_shell",
+        "Agent_tool_shell_runtime",
         "Keeper_exec_status",
         "Keeper_exec_status_metrics",
         "Keeper_exec_task",
@@ -3315,7 +3315,7 @@
       "Tool_name",
       "Voice_bridge"
     ],
-    "Keeper_exec_shell": [
+    "Agent_tool_shell_runtime": [
       "Keeper_shell_bash",
       "Keeper_shell_gh_context"
     ],
@@ -3357,7 +3357,7 @@
       "Keeper_exec_memory",
       "Keeper_exec_preflight",
       "Keeper_exec_shared",
-      "Keeper_exec_shell",
+      "Agent_tool_shell_runtime",
       "Keeper_exec_task",
       "Keeper_exec_voice",
       "Keeper_failure_circuit_breaker",

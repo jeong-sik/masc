@@ -487,7 +487,7 @@ A0 이후 이 9개 타입에 arm을 추가할 때:
 - `lib/coord/*`, `lib/swarm/*`, `lib/autoresearch/*`, `lib/auto_responder.ml`
 
 #### A4c — Keeper (4일, 31 사이트, 48h shadow)
-- `lib/keeper/keeper_exec_shell.ml` (19) 외
+- `lib/keeper/agent_tool_shell_runtime.ml` (19) 외
 
 #### A4d — 잔존 Unix.* + deprecation (2일, 9 + 삭제)
 - `lib/spawn.ml`, `worker_runtime_docker.ml` 등 + `retired_file_write_tool.ml:36-48` allowlist 삭제, `worker_dev_tools.ml:76-150,283-300` 삭제, `eval_gate.ml:100-130` `@@deprecated`

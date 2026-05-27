@@ -153,7 +153,7 @@
    keeper_shell_readonly_policy keeper_shell_command_parse keeper_shell_command_words keeper_workspace_read_ops
    keeper_shell_bash
    keeper_workspace_ops
-   keeper_exec_shell
+   agent_tool_shell_runtime
    github_credentials
    keeper_credential_provider
    keeper_host_config_provider

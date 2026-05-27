@@ -3,6 +3,7 @@ open Alcotest
 module KTP = Masc_mcp.Keeper_types_profile
 module KT = Masc_mcp.Keeper_types
 module KPolicy = Masc_mcp.Keeper_tool_policy
+module TaskPayloads = Masc_mcp.Tool_task_payloads
 
 (** Validate that every .toml file in config/keepers/ parses successfully
     with the OCaml TOML parser.  This catches syntax that is valid standard
@@ -250,7 +251,29 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
           "masc_batch_add_tasks";
           "masc_claim_next";
           "masc_deliver";
-        ]
+        ];
+      List.iter
+        (fun action ->
+          check bool ("verifier blocks transition action " ^ action) true
+            (TaskPayloads.transition_action_denied_by_denylist
+               ~tool_denylist:denylist
+               ~action))
+        [
+          "claim";
+          "start";
+          "done";
+          "cancel";
+          "release";
+          "submit_for_verification";
+          "submit_pr_evidence";
+        ];
+      List.iter
+        (fun action ->
+          check bool ("verifier allows transition action " ^ action) false
+            (TaskPayloads.transition_action_denied_by_denylist
+               ~tool_denylist:denylist
+               ~action))
+        [ "approve"; "reject" ]
 
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)
 let with_temp_toml content f =

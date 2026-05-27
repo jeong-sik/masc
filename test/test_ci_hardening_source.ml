@@ -1716,6 +1716,19 @@ let test_tool_execution_substrate_ratchet_contracts () =
      && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "pr_review"
      && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "gh_commit")
 
+let test_keeper_behavior_hardcoding_ratchet_contracts () =
+  check bool "keeper behavior hardcoding ratchet script exists" true
+    (Sys.file_exists
+       (source_path "scripts/lint/no-keeper-behavior-hardcoding.sh"));
+  check bool "keeper behavior hardcoding ratchet is wired to fundamental check" true
+    (file_contains_pattern ".github/workflows/fundamental-check.yml"
+       "scripts/lint/no-keeper-behavior-hardcoding.sh");
+  check bool "task transition behavior avoids verifier identity hardcoding" true
+    (file_not_contains_pattern "lib/tool_task_payloads.ml" "is_verifier_agent_name"
+     && file_not_contains_pattern "lib/tool_task_payloads.ml"
+          "keeper-verifier-agent"
+     && file_not_contains_pattern "lib/tool_task.ml" "is_verifier_agent_name")
+
 let test_public_execute_guidance_contracts () =
   let raw_command prefix = "command='" ^ prefix in
   let raw_execute_with_command prefix = "Execute with " ^ raw_command prefix in
@@ -2824,6 +2837,8 @@ let () =
             test_dedicated_forge_pr_tool_contracts_removed;
           test_case "tool execution substrate ratchet contracts" `Quick
             test_tool_execution_substrate_ratchet_contracts;
+          test_case "keeper behavior hardcoding ratchet contracts" `Quick
+            test_keeper_behavior_hardcoding_ratchet_contracts;
           test_case "public Execute alias contracts" `Quick
             test_public_execute_alias_contracts;
           test_case "public Execute guidance contracts" `Quick

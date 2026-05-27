@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { CAPTION_CLASS } from './section-cap'
 
 export type EyebrowTone = 'muted' | 'disabled'
 
@@ -9,15 +10,13 @@ export interface EyebrowSummary {
   readonly classNameLength: number
 }
 
-const BASE = 'text-3xs uppercase tracking-wider'
-
 const TONE_CLASSES: Record<EyebrowTone, string> = {
   muted: 'text-[var(--color-fg-muted)]',
   disabled: 'text-[var(--color-fg-disabled)]',
 }
 
 export function eyebrowClasses(tone: EyebrowTone = 'muted', extra?: string): string {
-  return [BASE, TONE_CLASSES[tone], extra].filter(Boolean).join(' ')
+  return [CAPTION_CLASS, TONE_CLASSES[tone], extra].filter(Boolean).join(' ')
 }
 
 export function summarizeEyebrow({

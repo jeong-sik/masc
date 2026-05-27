@@ -39,7 +39,15 @@ import type { ComponentChildren } from 'preact'
 type SectionCapTone = 'muted' | 'dim'
 type SectionCapWeight = 'normal' | 'semibold'
 
-const BASE = 'text-3xs uppercase tracking-wider'
+/**
+ * Shared tiny-caps heading className. SectionCap is the primitive owner;
+ * Eyebrow imports from here so a `text-3xs` -> `text-2xs` (or tracking
+ * adjustment) on the design-system side touches one site, not two.
+ *
+ * Keys at a glance: `tiny`(`text-3xs`) + `uppercase` + `wider`
+ * (Tailwind's standard 0.05em tracking).
+ */
+export const CAPTION_CLASS = 'text-3xs uppercase tracking-wider'
 
 const TONE: Record<SectionCapTone, string> = {
   muted: 'text-text-muted',
@@ -60,7 +68,7 @@ export function sectionCapClasses(
   weight: SectionCapWeight = 'normal',
   extra?: string,
 ): string {
-  const parts = [BASE, TONE[tone]]
+  const parts = [CAPTION_CLASS, TONE[tone]]
   const w = WEIGHT[weight]
   if (w !== '') parts.push(w)
   if (extra !== undefined && extra !== '') parts.push(extra)

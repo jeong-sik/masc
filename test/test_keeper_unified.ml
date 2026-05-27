@@ -2348,6 +2348,11 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "tool_execute {");
   check
     bool
+    "system prompt avoids internal pipeline stages field"
+    false
+    (contains_substring sys "pipeline`/`stages");
+  check
+    bool
     "dedicated PR creation tool not documented"
     false
     (contains_substring sys "tool_execute draft=true")
@@ -2409,6 +2414,16 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "tool_execute examples:");
   check
     bool
+    "capabilities avoids internal pipeline stages field"
+    false
+    (contains_substring prompt "pipeline`/`stages");
+  check
+    bool
+    "tool hints avoid internal pipeline stages field"
+    false
+    (source_file_contains "config/prompts/keeper.tool_hints.toml" "pipeline/stages");
+  check
+    bool
     "capabilities tells model not to invent hidden tools"
     true
     (contains_substring
@@ -2441,6 +2456,11 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     true
     (contains_substring prompt
        "Read/observe aliases are passive: SearchFiles, ReadFile");
+  check
+    bool
+    "capabilities avoids legacy LS alias"
+    false
+    (contains_substring prompt "LS, Glob");
   check
     bool
     "gh pr create path not documented"

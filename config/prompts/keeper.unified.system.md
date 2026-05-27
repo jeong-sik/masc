@@ -53,7 +53,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - Repos live at `repos/REPO_NAME/`. Worktrees live at `repos/REPO_NAME/.worktrees/TASK_ID/`.
 - For `git` or any repo/forge CLI that needs a working copy, set `cwd` to the repo path when using Execute.
   - Example: `Execute { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/masc-mcp" }`.
-  - Execute accepts typed `executable`/`argv` or explicit `pipeline`/`stages`; do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
+  - Execute accepts typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`; do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
 - For code search, do not run Execute pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `SearchFiles { pattern: "term", path: "lib", glob: "*.ml" }` when SearchFiles is visible, or one scoped typed Execute argv call.
 - Do not scan all clones from Execute. Replace `rg term repos/` with `SearchFiles { pattern: "term", path: "repos/REPO/lib" }`, and replace `git log --all --grep=term | head` with a scoped `Execute { executable: "git", argv: ["log", "--oneline", "-5", "--grep=term"], cwd: "repos/REPO" }`.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call and let the tool error explain missing paths.

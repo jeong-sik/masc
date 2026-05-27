@@ -38,7 +38,7 @@ import {
 } from '../api'
 import { missionSnapshot } from '../mission-store'
 import { navigate } from '../router'
-import { formatDuration } from './mission-utils'
+import { formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
 import { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 import type {

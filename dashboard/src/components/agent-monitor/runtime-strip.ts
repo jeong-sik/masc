@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { PipelineStageBadge } from '../keeper-pipeline-stage'
 import { findKeeper } from '../../lib/keeper-utils'
-import { formatDuration } from '../mission-utils'
+import { formatDuration } from '../../lib/format-time'
 import { keeperActivityDisplay, keeperDisplayModel } from '../../lib/keeper-runtime-display'
 
 function ctxBarClass(ratio: number | null | undefined): string {

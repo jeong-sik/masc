@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 11:51:24 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 13:20:47 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -840,6 +840,18 @@
             <td>The targeted code backstop is clean for <code>type tool_result = bool * string</code> and <code>typed_result_of_tuple</code> in <code>lib/keeper</code> and <code>lib/tool_keeper*</code>. Local stream/test response pairs remain local projections, not keeper tool API contracts. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td><code>Tool_bridge.of_oas_tool_result</code> reverse tuple projection</td>
+            <td><span class="status now">draft PR #18936</span></td>
+            <td>Remove the unused OAS-to-<code>bool * string</code> helper so the bridge only converts typed MASC results into typed OAS results, not back into legacy tuple shape.</td>
+            <td>There are no active callers. Backstop <code>rg "of_oas_tool_result|Agent_sdk.Types.tool_result -&gt; bool \\* string" lib test</code> is clean after deleting the implementation and interface entry.</td>
+          </tr>
+          <tr>
+            <td>Unused session/progress/subscription tuple tool handlers</td>
+            <td><span class="status now">draft PR #18939</span></td>
+            <td>Delete the unused public helpers that returned <code>bool * string</code> instead of migrating them into another compatibility shape. The live inline tool path already has typed dispatch.</td>
+            <td>Remove <code>handle_mcp_session_tool</code>, <code>handle_progress_tool</code>, and <code>handle_subscription_tool</code> plus tests that existed only to preserve those helper contracts. Progress validation tests now call validation functions directly.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -873,20 +885,6 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td><code>Tool_bridge.of_oas_tool_result</code></td>
-            <td>The OAS boundary still exposes a reverse projection from <code>Agent_sdk.Types.tool_result</code> to <code>bool * string</code>, inviting new callers to collapse structured OAS errors back into message strings.</td>
-            <td>Remove the tuple projection and update callers to consume OAS <code>Ok</code> / <code>Error</code> directly or convert straight into <code>Tool_result.result</code>.</td>
-            <td>Backstop <code>rg "of_oas_tool_result|Agent_sdk.Types.tool_result -&gt; bool \\* string" lib test</code>.</td>
-          </tr>
-          <tr>
-            <td>2</td>
-            <td>Session/progress/subscription tool handlers returning <code>bool * string</code></td>
-            <td><code>session</code>, <code>progress</code>, and <code>subscriptions</code> still advertise tuple tool-handler contracts, which keeps a parallel result convention next to typed dispatch.</td>
-            <td>Promote these local handlers to <code>Tool_result.result</code> and project only at the final MCP/HTTP response boundary if needed.</td>
-            <td>Backstop <code>rg "handle_.*tool.*bool \\* string|: bool \\* string" lib/session* lib/progress* lib/subscriptions*</code>.</td>
-          </tr>
-          <tr>
-            <td>3</td>
             <td>Keeper alerting channel status tuples</td>
             <td><code>Keeper_alerting</code> uses <code>bool * string option</code> status returns, which is not the tool-result contract but still makes success/error semantics easy to flatten.</td>
             <td>Replace with a small local variant such as <code>Sent | Skipped of string | Failed of string</code> if the channel call sites benefit from stricter states.</td>

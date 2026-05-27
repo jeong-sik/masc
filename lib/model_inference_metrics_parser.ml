@@ -324,7 +324,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; is_error = false
              })
        | _ -> Error No_telemetry_object)
-    | _ -> Error Not_assoc)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error Not_assoc)
 ;;
 
 (* ── costs.jsonl parser ─────────────────────────────────── *)
@@ -508,5 +508,5 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          ; coverage_stage = Some "costs_jsonl"
          ; is_error = false
          }))
-  | _ -> Error Not_assoc
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error Not_assoc
 ;;

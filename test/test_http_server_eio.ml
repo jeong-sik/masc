@@ -8,38 +8,38 @@ open Masc_mcp.Http_server_eio
 (* ===== Unit Tests for Router ===== *)
 
 let test_router_empty () =
-  let routes = Router.empty in
-  Alcotest.(check int) "empty router" 0 (List.length routes)
+  let routes = Router.create () in
+  Alcotest.(check int) "empty router" 0 (Router.route_count routes)
 ;;
 
 let test_router_add_get () =
   let handler _req _reqd = () in
-  let routes = Router.empty |> Router.get "/test" handler in
-  Alcotest.(check int) "one route" 1 (List.length routes)
+  let routes = Router.create () |> Router.get "/test" handler in
+  Alcotest.(check int) "one route" 1 (Router.route_count routes)
 ;;
 
 let test_router_add_post () =
   let handler _req _reqd = () in
-  let routes = Router.empty |> Router.post "/api" handler in
-  Alcotest.(check int) "one route" 1 (List.length routes)
+  let routes = Router.create () |> Router.post "/api" handler in
+  Alcotest.(check int) "one route" 1 (Router.route_count routes)
 ;;
 
 let test_router_add_multiple () =
   let handler _req _reqd = () in
   let routes =
-    Router.empty
+    Router.create ()
     |> Router.get "/health" handler
     |> Router.post "/api/call" handler
     |> Router.any "/any" handler
   in
-  Alcotest.(check int) "three routes" 3 (List.length routes)
+  Alcotest.(check int) "three routes" 3 (Router.route_count routes)
 ;;
 
 let test_router_prefix_specificity () =
   let generic_handler _req _reqd = () in
   let asset_handler _req _reqd = () in
   let routes =
-    Router.empty
+    Router.create ()
     |> Router.prefix_get "/dashboard/assets/" asset_handler
     |> Router.prefix_get "/dashboard/" generic_handler
   in
@@ -48,11 +48,31 @@ let test_router_prefix_specificity () =
   | `Matched route ->
     Alcotest.(check string)
       "longest prefix route should win"
-      "PREFIX:/dashboard/assets/"
+      "/dashboard/assets/"
       route.path
   | `Method_not_allowed ->
     Alcotest.fail "expected a matched prefix route, got method_not_allowed"
   | `Not_found -> Alcotest.fail "expected a matched prefix route, got not_found"
+;;
+
+let test_router_indexed_prefix_fallback_after_exact_method_miss () =
+  let exact_handler _req _reqd = () in
+  let prefix_handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Router.get "/api/v1/items/42" exact_handler
+    |> Router.prefix_post "/api/v1/items/" prefix_handler
+  in
+  let request = Httpun.Request.create `POST "/api/v1/items/42" in
+  match Router.resolve routes request with
+  | `Matched route ->
+    Alcotest.(check string)
+      "indexed router preserves prefix fallback"
+      "/api/v1/items/"
+      route.path
+  | `Method_not_allowed ->
+    Alcotest.fail "expected prefix fallback, got method_not_allowed"
+  | `Not_found -> Alcotest.fail "expected prefix fallback, got not_found"
 ;;
 
 let test_frontend_transport_routes_present () =
@@ -60,13 +80,13 @@ let test_frontend_transport_routes_present () =
     Masc_mcp.Server_routes_http_routes_frontend.add_routes
       ~port:8935
       ~host:"127.0.0.1"
-      Router.empty
+      (Router.create ())
   in
   let has_route meth path =
     List.exists
       (fun (route : Router.route) ->
          String.equal route.path path && List.mem meth route.methods)
-      routes
+      (Router.routes routes)
   in
   Alcotest.(check bool) "GET /ws route" true (has_route `GET "/ws");
   Alcotest.(check bool)
@@ -167,7 +187,7 @@ let test_parse_host_port_rejects_userinfo_in_host_header () =
 let test_default_config () =
   Alcotest.(check int) "default port" 8935 default_config.port;
   Alcotest.(check string) "default host" "127.0.0.1" default_config.host;
-  Alcotest.(check int) "default max_connections" 128 default_config.max_connections
+  Alcotest.(check int) "default max_connections" 512 default_config.max_connections
 ;;
 
 let test_custom_config () =
@@ -282,6 +302,9 @@ let router_tests =
   ; "add POST route", `Quick, test_router_add_post
   ; "add multiple routes", `Quick, test_router_add_multiple
   ; "prefix specificity", `Quick, test_router_prefix_specificity
+  ; ( "indexed prefix fallback after exact method miss"
+    , `Quick
+    , test_router_indexed_prefix_fallback_after_exact_method_miss )
   ; "frontend transport routes present", `Quick, test_frontend_transport_routes_present
   ; ( "frontend canonical localhost redirect"
     , `Quick

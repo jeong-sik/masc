@@ -16,7 +16,7 @@ let make_routes ~port ~host ~sw ~clock =
      the callback. *)
   Server_routes_http_routes_multimodal.bind_workspace_getter
     Multimodal.Workspace_holder.get;
-  Http.Router.empty
+  Http.Router.create ()
   |> Server_routes_http_routes_frontend.add_routes ~port ~host
   |> Server_routes_http_routes_room.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 10:22:36 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 10:43:17 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -808,6 +808,12 @@
             <td><span class="status now">draft PR #18848</span></td>
             <td>Delete <code>normalize_persisted_terminal_reason_code</code>; persisted terminal reason wires now surface as-is instead of rewriting old <code>completed</code> values to <code>success</code>.</td>
             <td><code>test_keeper_unified</code> now pins the strict behavior: old persisted <code>completed</code> remains <code>completed</code> and is summarized as an unknown terminal reason.</td>
+          </tr>
+          <tr>
+            <td>Typed Execute normalization safety nets</td>
+            <td><span class="status now">draft PR #18843</span></td>
+            <td>Remove parser/lowering paths that silently repaired malformed typed Execute input: empty <code>executable</code> promoted from <code>argv[0]</code>, <code>find -type ...</code> rewritten to <code>find . -type ...</code>, simultaneous <code>executable</code> + <code>pipeline</code> accepted by precedence, and duplicate executable tokens stripped before Shell IR lowering.</td>
+            <td><code>Agent_tool_execute_typed_input.of_json</code> now preserves caller-authored exec/pipeline stages, rejects <code>executable</code> with <code>pipeline</code>, and passes argv through to Shell IR. <code>Keeper_tool_capability_axis</code> also stops hiding duplicate executable tokens when extracting command text.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>

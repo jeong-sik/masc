@@ -172,48 +172,6 @@ let parse_pipeline ~path (json : Yojson.Safe.t) =
     result_errorf "%s must be array, got %s" path (json_type_name value)
 ;;
 
-let normalize_stage { executable; argv } =
-  let executable = String.trim executable in
-  let stage =
-    match executable, argv with
-    | "", first :: rest when not (String.equal (String.trim first) "") ->
-      { executable = String.trim first; argv = rest }
-    | _ -> { executable; argv }
-  in
-  let executable = stage.executable in
-  let argv =
-    let is_find_executable name =
-      String.equal (Filename.basename (String.trim name)) "find"
-    in
-    let is_find_global_option = function
-      | "-E" | "-H" | "-L" | "-P" | "-X" | "-d" | "-s" | "-x" -> true
-      | _ -> false
-    in
-    let is_find_expression_start = function
-      | "!" | "(" | "-and" | "-or" | "-not" | "-name" | "-iname" | "-path"
-      | "-ipath" | "-regex" | "-iregex" | "-type" | "-empty" | "-perm"
-      | "-user" | "-group" | "-size" | "-mtime" | "-mmin" | "-newer"
-      | "-maxdepth" | "-mindepth" | "-prune" | "-print" | "-print0" ->
-        true
-      | _ -> false
-    in
-    let normalize_find_argv argv =
-      let rec split_global_options acc = function
-        | option :: rest when is_find_global_option option ->
-          split_global_options (option :: acc) rest
-        | rest -> List.rev acc, rest
-      in
-      let global_options, rest = split_global_options [] argv in
-      match rest with
-      | first :: _ when is_find_expression_start first ->
-        global_options @ ("." :: rest)
-      | _ -> argv
-    in
-    if is_find_executable executable then normalize_find_argv stage.argv else stage.argv
-  in
-  { executable; argv }
-;;
-
 let of_json (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields = assoc_fields ~path:"$" json in
@@ -240,16 +198,15 @@ let of_json (json : Yojson.Safe.t) =
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
   match executable_present, pipeline_value with
-  | true, _ ->
-    (* executable takes precedence when both are provided;
-       this is the typed-input contract advertised in the schema. *)
+  | true, Some _ ->
+    Error "$.executable and $.pipeline are mutually exclusive typed Execute fields"
+  | true, None ->
     let* executable = required_string ~path:"$" fields "executable" in
     let* argv = optional_string_list ~path:"$" fields "argv" in
-    let stage = normalize_stage { executable; argv } in
-    Ok (Exec { executable = stage.executable; argv = stage.argv; cwd; env })
+    Ok (Exec { executable; argv; cwd; env })
   | false, Some (path, value) ->
     let* stages = parse_pipeline ~path value in
-    Ok (Pipeline { stages = List.map normalize_stage stages; cwd; env })
+    Ok (Pipeline { stages; cwd; env })
   | false, None -> Error "$.executable or $.pipeline is required"
 ;;
 
@@ -329,7 +286,7 @@ let check_exec ~mode ~executable ~argv ~cwd ~env =
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
     in
-    let* () = check_wrapper_exec_target ~mode ~executable ~argv in
+    let* () = check_wrapper_exec_target ~mode ~executable:trimmed ~argv in
     let* () = check_cwd cwd in
     let* () = check_env env in
     Ok ()
@@ -363,15 +320,9 @@ let shell_bin ~mode ~argv executable =
       Error (Executable_not_allowlisted { name = trimmed; mode })
 ;;
 
-let strip_leading_executable executable = function
-  | arg :: rest when String.equal arg executable -> rest
-  | argv -> argv
-;;
-
 let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env = []) { executable; argv } =
   let ( let* ) = Result.bind in
   let* bin = shell_bin ~mode ~argv executable in
-  let normalized_argv = strip_leading_executable executable argv in
   Ok
     (Agent_tool_execute_shell_ir.simple_bin
        ?cwd_raw:cwd
@@ -379,7 +330,7 @@ let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env 
        ~sandbox
        ~env
        bin
-       normalized_argv)
+       argv)
 ;;
 
 let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =

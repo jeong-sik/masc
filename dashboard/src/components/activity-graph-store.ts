@@ -19,8 +19,6 @@ export function loadGraphForRange(since: TimeRangePreset) {
   })
 }
 
-export function loadGraph() {
+export function refreshActivityGraph() {
   return loadGraphForRange(activityRange())
 }
-
-export { loadGraph as refreshActivityGraph }

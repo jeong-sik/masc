@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 13:20:47 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 13:30:53 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -847,15 +847,21 @@
           </tr>
           <tr>
             <td><code>Tool_bridge.of_oas_tool_result</code> reverse tuple projection</td>
-            <td><span class="status now">draft PR #18936</span></td>
+            <td><span class="status done">merged #18936</span></td>
             <td>Remove the unused OAS-to-<code>bool * string</code> helper so the bridge only converts typed MASC results into typed OAS results, not back into legacy tuple shape.</td>
             <td>There are no active callers. Backstop <code>rg "of_oas_tool_result|Agent_sdk.Types.tool_result -&gt; bool \\* string" lib test</code> is clean after deleting the implementation and interface entry.</td>
           </tr>
           <tr>
             <td>Unused session/progress/subscription tuple tool handlers</td>
-            <td><span class="status now">draft PR #18939</span></td>
+            <td><span class="status done">merged #18939</span></td>
             <td>Delete the unused public helpers that returned <code>bool * string</code> instead of migrating them into another compatibility shape. The live inline tool path already has typed dispatch.</td>
             <td>Remove <code>handle_mcp_session_tool</code>, <code>handle_progress_tool</code>, and <code>handle_subscription_tool</code> plus tests that existed only to preserve those helper contracts. Progress validation tests now call validation functions directly.</td>
+          </tr>
+          <tr>
+            <td>Keeper alerting channel send result tuples</td>
+            <td><span class="status now">draft PR #18944</span></td>
+            <td>Replace <code>bool * string option</code> alert send returns with <code>Alert_sent</code> / <code>Alert_failed</code>, keeping the existing channel result record as the fanout summary.</td>
+            <td>Backstop <code>rg "bool \\* string option|send_once : unit -&gt; bool" lib/keeper/keeper_alerting*</code> is clean after the change.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -890,11 +896,7 @@
         </thead>
         <tbody>
           <tr>
-            <td>1</td>
-            <td>Keeper alerting channel status tuples</td>
-            <td><code>Keeper_alerting</code> uses <code>bool * string option</code> status returns, which is not the tool-result contract but still makes success/error semantics easy to flatten.</td>
-            <td>Replace with a small local variant such as <code>Sent | Skipped of string | Failed of string</code> if the channel call sites benefit from stricter states.</td>
-            <td>Backstop <code>rg "bool \\* string option" lib/keeper/keeper_alerting*</code>; skip if the variant adds more ceremony than clarity.</td>
+            <td colspan="5">No queued tuple-result candidate remains in this narrow Tool/Keeper result purge queue. Next broad scan should switch to Cascade fallback naming or Memory compatibility surfaces.</td>
           </tr>
         </tbody>
       </table>

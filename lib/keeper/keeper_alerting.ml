@@ -48,11 +48,22 @@ let alert_retry_delay_seconds (attempt : int) : float =
   let factor = pow2 (max 0 (attempt - 1)) 1 in
   float_of_int (base_ms * factor) /. 1000.0
 
+type alert_send_result =
+  | Alert_sent of string option
+  | Alert_failed of string option
+
+let alert_send_success = function
+  | Alert_sent _ -> true
+  | Alert_failed _ -> false
+
+let alert_send_detail = function
+  | Alert_sent detail | Alert_failed detail -> detail
+
 let run_alert_channel_with_retry
     (ctx : _ context)
     ~(channel : string)
     ~(enabled : bool)
-    ~(send_once : unit -> bool * string option) : alert_channel_result =
+    ~(send_once : unit -> alert_send_result) : alert_channel_result =
   if not enabled then
     {
       channel;
@@ -64,7 +75,9 @@ let run_alert_channel_with_retry
   else
     let max_attempts = 1 + max 0 Env_config.KeeperAlert.max_retries in
     let rec loop attempt last_error =
-      let (ok, detail_opt) = send_once () in
+      let send_result = send_once () in
+      let ok = alert_send_success send_result in
+      let detail_opt = alert_send_detail send_result in
       let detail =
         match detail_opt with
         | Some s when String.trim s <> "" -> Some (short_preview ~max_len:Keeper_config.alert_error_detail_max_chars s)
@@ -269,7 +282,7 @@ let keeper_alert_text
     message_preview reply_preview
 
 let post_keeper_alert_board
-    ~(alert_text : string) : bool * string option =
+    ~(alert_text : string) : alert_send_result =
   let author = let v = String.trim Env_config.KeeperAlert.board_author in
     if v = "" then "keeper-alert-bot" else v in
   let hearth_opt = let v = String.trim Env_config.KeeperAlert.board_hearth in
@@ -287,14 +300,14 @@ let post_keeper_alert_board
       ~post_kind:Board.System_post ?meta_json
       ~visibility ~ttl_hours:24 ?hearth:hearth_opt ()
   with
-  | Ok _ -> (true, Some "board_posted")
-  | Error e -> (false, Some (Board.show_board_error e))
+  | Ok _ -> Alert_sent (Some "board_posted")
+  | Error e -> Alert_failed (Some (Board.show_board_error e))
 
 let post_keeper_alert_slack
-    ~(alert_text : string) : bool * string option =
+    ~(alert_text : string) : alert_send_result =
   let webhook = String.trim Env_config.KeeperAlert.slack_webhook_url in
   if webhook = "" then
-    (false, Some "missing_webhook")
+    Alert_failed (Some "missing_webhook")
   else
     let payload = `Assoc [ ("text", `String alert_text) ] |> Yojson.Safe.to_string in
     let argv = [
@@ -317,13 +330,13 @@ let post_keeper_alert_slack
         argv
     in
     match status with
-    | Unix.WEXITED 0 -> (true, Some "slack_posted")
+    | Unix.WEXITED 0 -> Alert_sent (Some "slack_posted")
     | Unix.WEXITED n ->
-        (false, Some (Printf.sprintf "curl_exit_%d: %s" n (short_preview ~max_len:200 out)))
+        Alert_failed (Some (Printf.sprintf "curl_exit_%d: %s" n (short_preview ~max_len:200 out)))
     | Unix.WSIGNALED n ->
-        (false, Some (Printf.sprintf "curl_signaled_%d" n))
+        Alert_failed (Some (Printf.sprintf "curl_signaled_%d" n))
     | Unix.WSTOPPED n ->
-        (false, Some (Printf.sprintf "curl_stopped_%d" n))
+        Alert_failed (Some (Printf.sprintf "curl_stopped_%d" n))
 
 let slack_alert_token () : string option =
   let pick name =
@@ -392,20 +405,20 @@ let slack_ok_or_error (json : Yojson.Safe.t) : (unit, string) result =
 
 let post_keeper_alert_slack_dm
     ~(alert_text : string)
-    ~(user_id : string) : bool * string option =
+    ~(user_id : string) : alert_send_result =
   let target = String.trim user_id in
   if target = "" then
-    (false, Some "missing_dm_user_id")
+    Alert_failed (Some "missing_dm_user_id")
   else
     match slack_alert_token () with
-    | None -> (false, Some "missing_slack_token")
+    | None -> Alert_failed (Some "missing_slack_token")
     | Some token ->
         let open_payload = `Assoc [ ("users", `String target) ] in
         match slack_api_post_json ~token ~endpoint:"conversations.open" ~payload:open_payload with
-        | Error e -> (false, Some ("dm_open_failed: " ^ e))
+        | Error e -> Alert_failed (Some ("dm_open_failed: " ^ e))
         | Ok open_json ->
             (match slack_ok_or_error open_json with
-             | Error e -> (false, Some ("dm_open_failed: " ^ e))
+             | Error e -> Alert_failed (Some ("dm_open_failed: " ^ e))
              | Ok () ->
                  let channel_id =
                    let open Yojson.Safe.Util in
@@ -414,18 +427,18 @@ let post_keeper_alert_slack_dm
                    | _ -> None
                  in
                  (match channel_id with
-                  | None -> (false, Some "dm_open_failed: missing_channel_id")
+                  | None -> Alert_failed (Some "dm_open_failed: missing_channel_id")
                   | Some cid ->
                       let post_payload = `Assoc [
                         ("channel", `String cid);
                         ("text", `String alert_text);
                       ] in
                       (match slack_api_post_json ~token ~endpoint:"chat.postMessage" ~payload:post_payload with
-                       | Error e -> (false, Some ("dm_post_failed: " ^ e))
+                       | Error e -> Alert_failed (Some ("dm_post_failed: " ^ e))
                        | Ok post_json ->
                            (match slack_ok_or_error post_json with
-                            | Ok () -> (true, Some ("dm_sent:" ^ cid))
-                            | Error e -> (false, Some ("dm_post_failed: " ^ e))))))
+                            | Ok () -> Alert_sent (Some ("dm_sent:" ^ cid))
+                            | Error e -> Alert_failed (Some ("dm_post_failed: " ^ e))))))
 
 let split_csv_nonempty (raw : string) : string list =
   raw
@@ -435,10 +448,10 @@ let split_csv_nonempty (raw : string) : string list =
 
 let post_keeper_alert_github
     ~(title : string)
-    ~(body : string) : bool * string option =
+    ~(body : string) : alert_send_result =
   let repo = String.trim Env_config.KeeperAlert.github_repo in
   if repo = "" then
-    (false, Some "missing_repo")
+    Alert_failed (Some "missing_repo")
   else
     let labels = split_csv_nonempty Env_config.KeeperAlert.github_label in
     let args = [
@@ -458,13 +471,13 @@ let post_keeper_alert_github
         args
     in
     match status with
-    | Unix.WEXITED 0 -> (true, Some (short_preview ~max_len:200 out))
+    | Unix.WEXITED 0 -> Alert_sent (Some (short_preview ~max_len:200 out))
     | Unix.WEXITED n ->
-        (false, Some (Printf.sprintf "repo_cli_exit_%d: %s" n (short_preview ~max_len:200 out)))
+        Alert_failed (Some (Printf.sprintf "repo_cli_exit_%d: %s" n (short_preview ~max_len:200 out)))
     | Unix.WSIGNALED n ->
-        (false, Some (Printf.sprintf "repo_cli_signaled_%d" n))
+        Alert_failed (Some (Printf.sprintf "repo_cli_signaled_%d" n))
     | Unix.WSTOPPED n ->
-        (false, Some (Printf.sprintf "repo_cli_stopped_%d" n))
+        Alert_failed (Some (Printf.sprintf "repo_cli_stopped_%d" n))
 
 let maybe_emit_interesting_alert
     (ctx : _ context)

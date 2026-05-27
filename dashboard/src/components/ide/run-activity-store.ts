@@ -8,6 +8,7 @@
 
 import { signal } from '@preact/signals'
 import { hasNonEmptyStringField, isPositiveSafeInteger, isRecord } from '../common/normalize'
+import { isStringArray } from '../../lib/type-guards'
 
 const DEFAULT_MAX_EVENTS = 200
 const RUN_ACTIVITY_VERBS = [
@@ -148,9 +149,6 @@ function validEventForRun(event: unknown, runId: string): event is RunActivityEv
   return Number.isFinite(event.timestamp_ms)
 }
 
-function isStringArray(value: unknown): value is ReadonlyArray<string> {
-  return Array.isArray(value) && value.every(item => typeof item === 'string')
-}
 
 function isRunActivityContext(value: unknown): value is RunActivityContext {
   if (!isRecord(value)) return false

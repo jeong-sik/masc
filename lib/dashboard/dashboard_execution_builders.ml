@@ -158,7 +158,7 @@ let worker_state_of_agent
         else
           Option.value ~default:"Idle / waiting for assignment" recent_output_preview
   in
-  let (emoji, korean_name) = get_agent_identity agent.name in
+  let profile = get_agent_profile agent.name in
   {
     tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
@@ -188,8 +188,8 @@ let worker_state_of_agent
           ("active_task_count", `Int active_task_count);
           ("related_session_id", json_string_option related_session_id);
           ("related_operation_id", json_string_option related_operation_id);
-          ("emoji", `String emoji);
-          ("korean_name", `String korean_name);
+          ("emoji", `String profile.emoji);
+          ("korean_name", `String profile.korean_name);
           ("model", `Null);
           ("recent_output_preview", json_string_option recent_output_preview);
           ("recent_event", json_string_option recent_output_preview);
@@ -309,7 +309,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     |> option_or_else (fun () -> audit.latest_action_source)
   in
   let skill_route_summary = skill_route_summary_of_keeper keeper in
-  let (emoji, korean_name) = get_agent_identity name in
+  let profile = get_agent_profile name in
   {
     tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
@@ -373,8 +373,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
               match String_util.trim_to_option (string_field "active_model" keeper) with
               | Some value -> `String value
               | None -> `Null );
-            ("emoji", `String emoji);
-            ("korean_name", `String korean_name);
+            ("emoji", `String profile.emoji);
+            ("korean_name", `String profile.korean_name);
             ("skill_reason", json_string_option (String_util.trim_to_option (string_field "goal" keeper)));
           ]);
   }

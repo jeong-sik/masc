@@ -627,7 +627,7 @@ let test_dispatch_preset_routes_pm_tools () =
   check bool "dispatch includes code read" true
     (List.mem "tool_read_file" allowed);
   check bool "dispatch includes code search" true
-    (List.mem "tool_workspace_inspect" allowed);
+    (List.mem "tool_search_files" allowed);
   check bool "dispatch excludes fs edit" false
     (List.mem "tool_edit_file" allowed);
   check bool "dispatch excludes code write" false

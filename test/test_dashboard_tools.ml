@@ -407,7 +407,7 @@ let test_dashboard_tools_projection () =
              | `String value -> String.equal value surface
              | _ -> false)
       in
-      let hidden_tool = find_tool "tool_workspace_inspect" in
+      let hidden_tool = find_tool "tool_search_files" in
       let public_tool = find_tool "masc_status" in
       let spawned_agent_tool = find_tool "masc_workflow_guide" in
       let local_worker_tool = find_tool "tool_execute" in

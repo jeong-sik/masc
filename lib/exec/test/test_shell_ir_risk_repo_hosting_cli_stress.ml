@@ -24,7 +24,7 @@ let cases : case list = [
   { label = "flag-no-space-XDELETE";     input = "api -XDELETE /repos/o/r";        expected = E_R2 };
   { label = "flag-equals-method";        input = "api --method=DELETE /repos/o/r"; expected = E_R2 };
   { label = "flag-lowercase-method";     input = "api -X delete /repos/o/r";       expected = E_R2 };
-  (* `workflow delete` doesn't exist in gh CLI; the real destructive
+  (* `workflow delete` doesn't exist in the repo-hosting CLI; the real destructive
      workflow subcmd is `disable`. Boolean-bypass coverage is provided
      by `repo --jq . delete o/r` below. *)
   { label = "flag-bool-prefix-disable";  input = "workflow -q disable some-wf";    expected = E_R2 };

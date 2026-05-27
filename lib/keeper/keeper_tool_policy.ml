@@ -281,7 +281,7 @@ let last_turn_safe_tool_names () =
                 "keeper_time_now"; "keeper_tool_search";
                 "keeper_broadcast"; "keeper_tasks_list"; "keeper_task_done";
                 "keeper_task_submit_for_verification"; "masc_tasks";
-                "masc_transition"; "tool_read_file"; "tool_workspace_inspect";
+                "masc_transition"; "tool_read_file"; "tool_search_files";
                 "tool_execute"; "masc_web_search"; "masc_web_fetch" ]
     "last_turn_safe"
 

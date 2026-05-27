@@ -11,7 +11,7 @@ type sandbox_profile =
         Network defaults to [Network_none]; the internal git/gh
         dispatcher (see [Agent_tool_execute_command_semantics.stages_target_repo_commands])
         uses network egress plus read-only mounts from the selected
-        root/keeper GitHub identity bundle for the duration of a git/gh
+        root/keeper repo CLI identity bundle for the duration of a git/gh
         command. *)
 
 module Sandbox_profile_tla = struct

@@ -104,8 +104,8 @@ This RFC chooses the structural fix: **closed sum types + exhaustive match**. Ne
 | **2** | 50+ `Tool_*.dispatch` signatures → `Tool_result.t option` (Big Bang) | #14482 | Merged |
 | **3** | `execute_tool_eio` / `dispatch_by_tag` return `Tool_result.t` directly; remove `tuple_of_tool_result` reverse adapter | #14486 | Merged |
 | **4c-1** | 9 core tool handlers (`tool_args`, `retired_file_tool`, `retired_file_write_tool`, `tool_control`, `tool_library`, `tool_plan`, `tool_run`, `tool_task`, retired repo-isolation handler) + keeper dispatch handlers migrated | #14528 | Merged |
-| **4c-2** | `wrap_result` removal in `tool_operator`, `tool_misc` + sub-modules, `tool_autoresearch`, `tool_agent_timeline`, `tool_inline_dispatch` | — | TBD |
-| **4d** | Standalone handlers (`progress`, `session`, `subscriptions`, `tool_deep_review`, `tool_bridge`); delete `Tool_result.wrap`, `Tool_result.to_legacy_compat`, `Coord_types.tool_result` | — | TBD |
+| **4c-2** | `wrap_result` removal in `tool_operator`, `tool_misc` + sub-modules, `tool_autoresearch`, `tool_agent_timeline`, `tool_inline_dispatch` | superseded by RFC-0189 PR-2 | Removed |
+| **4d** | Standalone handlers (`progress`, `session`, `subscriptions`, `tool_deep_review`, `tool_bridge`); delete remaining Tool_result compatibility adapters and `Coord_types.tool_result` | superseded by RFC-0189 PR-2 | Removed |
 
 ## 6. Test Strategy
 
@@ -120,8 +120,8 @@ Dashboards and Prometheus exporters that already consumed keeper blocker-class s
 
 ## 8. Risks
 
-- **Wire format compat**: legacy `(ok, message)` projection remains at the gRPC bridge. If an external consumer parsed the prose `message`, semantics are unchanged (string content identical). The structural improvement is internal.
-- **Phase 4 incomplete**: `wrap_result` / `to_legacy_compat` / `Coord_types.tool_result` still exist for un-migrated handlers. Their deletion is gated on 4c-2 + 4d.
+- **Wire format compat**: external MCP/gRPC envelopes remain explicit boundary projections. Internal handlers no longer carry tuple-era or compatibility result adapters.
+- **Phase 4 complete by RFC-0189 PR-2**: remaining handler migrations and compatibility adapter deletion moved to the typed-result SSOT stack.
 - **TLA+ bug model**: not yet authored. Phase 0 catch-all replacement is invariant-violation evidence by construction (compile-time exhaustive match), so an explicit TLA+ spec was not blocking. Could be authored as a closeout artifact.
 
 ## 9. Open Questions

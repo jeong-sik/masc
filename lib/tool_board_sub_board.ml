@@ -8,13 +8,12 @@
 open Tool_args
 
 (* RFC-0189 PR-1b.3 — handlers return typed [Tool_result.result].
-   Boundary to legacy [Tool_result.result] in [Tool_board_dispatch] via
-   [to_legacy]. Sub-board Board_dispatch errors (slug already exists,
-   owner not found, sub_board not found, etc.) are predominantly
-   caller-input violations → [Workflow_rejection]. A future RFC may
-   route through [Tool_board_format.board_error_failure_class] for
-   per-variant routing, but for the current sub_board error vocabulary
-   a uniform Workflow_rejection matches observed semantics. *)
+   Sub-board Board_dispatch errors (slug already exists, owner not found,
+   sub_board not found, etc.) are predominantly caller-input violations →
+   [Workflow_rejection]. A future RFC may route through
+   [Tool_board_format.board_error_failure_class] for per-variant routing,
+   but for the current sub_board error vocabulary a uniform
+   Workflow_rejection matches observed semantics. *)
 
 let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
   let slug = get_string_opt args "slug" |> Option.value ~default:"" in

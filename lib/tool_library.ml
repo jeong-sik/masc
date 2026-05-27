@@ -207,8 +207,7 @@ let query_required ~tool_name ~start_time =
 let missing_required ~tool_name ~start_time field =
   workflow_err ~tool_name ~start_time (sprintf "%s is required" field)
 
-(* RFC-0189 follow-up — preserve the legacy [Tool_result.ok] message
-   round-trip contract.
+(* RFC-0189 follow-up — preserve [Tool_result.message] round-trips.
 
    The original PR-1b.7 [text_ok] wrapped [body] as
    [`Assoc [ "text", `String body ]].  That works only when callers
@@ -217,13 +216,9 @@ let missing_required ~tool_name ~start_time field =
    object — i.e. [{"text":"...escaped body..."}] — instead of the
    raw Markdown / JSON envelope they expect.
 
-   Legacy [Tool_result.ok body] called
-   [structured_payload_of_message]: when [body] parses as JSON it
-   becomes [data], otherwise [data = `String body].  In both cases
-   [to_legacy] regenerates [result.message] as the original [body]
-   string (round-trip safe).  Replicating that behaviour here keeps
-   every accessor — [data] *and* [message] — compatible with the
-   pre-RFC-0189 contract. *)
+   [structured_payload_of_message] keeps JSON bodies structured and
+   plain text as [`String body], so both [data] and [message] stay
+   round-trip safe. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with

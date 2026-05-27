@@ -800,10 +800,7 @@ let search_impl ~query ~limit =
 
 (* When [body] is a JSON envelope string (from
    [Tool_args.ok_response] / [result_json]) we parse-and-store the
-   structured payload so [to_legacy] regenerates the same
-   [result.message] envelope clients (and tests) expect.  Plain
-   strings fall back to [`String body], matching the legacy
-   [Tool_result.ok] auto-detection. *)
+   structured payload. Plain strings fall back to [`String body]. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with

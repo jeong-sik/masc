@@ -502,12 +502,12 @@ A0 이후 이 9개 타입에 arm을 추가할 때:
 **Files**:
 - `lib/tool_dispatch.ml:14` — `type handler = ... -> Tool_result.t option`
 - `lib/tool_dispatch.ml:50-54` — `| Ask of Verdict.approval_request` 추가
-- `lib/tool_result.ml:62-68` — `to_legacy_compat [@@alert deprecated]`
+- `lib/tool_types/tool_result.ml` — typed `Tool_result.result` SSOT; compatibility converters removed by RFC-0189 PR-2
 - 14 tuple 사이트 전원 제거
 - `rollback/revert-rfc-v5-A5.patch` + runbook 사전 작성
 
 **Exit criteria**:
-- `rg '\(bool \* string\)' lib/ | rg -v CHANGELOG | rg -v to_legacy_compat` = 0
+- `rg '\(bool \* string\)' lib/ | rg -v CHANGELOG` = 0
 - 3개월 유예 deprecated warning 활성
 
 ### A6 — Drawer 자동 e2e (2-3일, A5와 병행)
@@ -549,7 +549,7 @@ clean.cfg + buggy.cfg 쌍. buggy는 TLC fail 강제. CI:
 rg -e 'Process_eio\.run_argv' \
    -e 'Unix\.(create_process|open_process|system)' \
    lib/ | grep -v lib/exec/exec_gate | wc -l  # 0
-rg '\(bool \* string\)' lib/ | rg -v CHANGELOG | rg -v to_legacy_compat | wc -l  # 0
+rg '\(bool \* string\)' lib/ | rg -v CHANGELOG | wc -l  # 0
 rg 'MASC_AUTO_APPROVE' lib/ | wc -l  # 0
 ```
 
@@ -565,7 +565,7 @@ rg 'MASC_AUTO_APPROVE' lib/ | wc -l  # 0
 | R7 | In-flight gate flip race | 중 | 중 | TLA+ InFlightContinuity + arrival-time 구현 |
 | R8 | Fiber cancel Promise.u leak | 중 | 중 | `Eio.Switch.on_release` cleanup + TLA+ liveness |
 | R9 | TLA+ spec checkbox | 중 | 중 | outcome trichotomy CI gate |
-| R10 | A5 rollback 곤란 | 낮 | 치명 | `to_legacy_compat @@alert deprecated` 3개월 + pre-drafted revert patch |
+| R10 | A5 rollback 곤란 | 낮 | 치명 | typed-result PR stack + pre-drafted revert patch |
 | R11 | eval_gate.ml 기존 방어 삭제로 regression | 중 | 중 | secondary-only `@@deprecated`로 **유지**, primary는 `Approval_policy.decide` |
 | R12 | `lib/exec/`가 masc-mcp 다른 모듈과 엉킴 | 중 | 중 | sub-tree 경계 + dune internal library. public interface 최소화 (Exec.run / Exec.classify만 export) |
 | R13 | unknown utility (awk/sed/find/curl 등)를 LLM 대량 emit → Ask flood | 중 | 중 | T0에서 unknown bin 빈도 집계. threshold 초과 시 Phase B utility typing trigger, 아니면 per-agent TOML allow-safe로 흡수 |
@@ -576,7 +576,7 @@ rg 'MASC_AUTO_APPROVE' lib/ | wc -l  # 0
 | Metric | Before | After | 측정 |
 |--------|-------|-------|-----|
 | exec entry 사이트 | **87** | **1** (`lib/exec/exec_gate.ml`) | invariants CI |
-| `(bool * string)` tuple 파일 | 14 | 0 (`to_legacy_compat @@alert`) | rg |
+| `(bool * string)` tuple 파일 | 14 | 0 | rg |
 | Typed_tool producer | **1** | 2-4 (Exec_gate 인접) | rg |
 | Bypass corpus 차단율 | ~60% (regex/substring) | 100% (subset 내, 나머지 Parse_aborted → Ask/Deny) | fuzz |
 | eval_gate.ml 역할 | primary defense | **secondary-only**, primary = Approval_policy | `@@deprecated` mark |
@@ -614,7 +614,7 @@ T0 tap (5 cal days) ─┐
 7. **A4 4 sub-phase + shadow 24-48h** (big-bang 금지)
 8. **OAS 무관**: bash execution gate는 MASC 내부 문제. OAS approval hook은 MCP tool approval path 전용(layer 다름). A3 exec gate가 OAS import 신규 추가 금지. pin bump / cross-repo PR / bridge 모듈 전부 **없음**
 9. **TLA+**: outcome trichotomy, clean+buggy 쌍, CI gate
-10. **Rollback**: `to_legacy_compat @@alert deprecated` 3개월 + pre-drafted revert patch
+10. **Rollback**: typed-result PR stack + pre-drafted revert patch
 11. **Drawer test**: 자동 e2e
 12. **Path_containment**: `Retired_file_tool.normalize_path` primitive 재사용, 자체 canonicalization 0
 13. **In-flight race**: arrival-time flip + TLA+ 포함

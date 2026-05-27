@@ -25,8 +25,7 @@ module Float = Stdlib.Float
 open Tool_args
 
 (* RFC-0189 PR-1b.2 — handlers in this module return the typed
-   [Tool_result.result] variant directly. Boundary back to
-   [Tool_result.result] is in [Tool_board_dispatch] via [to_legacy]. *)
+   [Tool_result.result] variant directly. *)
 
 let handle_post_create ~tool_name ~start_time args : Tool_result.result =
   let title = get_string_opt args "title" in

@@ -69,7 +69,7 @@ masc-mcp `lib/tool_dispatch.ml`에는 2개의 entry function이 있고, `lib/kee
 **Entry 1 — `Tool_dispatch.dispatch`** (`lib/tool_dispatch.ml:117-130`):
 
 ```ocaml
-let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
+let dispatch ~(token : Tool_token.t) ~args : Tool_result.result option =
   let name = token.name in
   match Hashtbl.find_opt registry name with
   | Some handler ->
@@ -92,7 +92,7 @@ let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
 **Entry 2 — `Tool_dispatch.dispatch_structured`** (`lib/tool_dispatch.ml:140-145`):
 
 ```ocaml
-let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
+let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.result option =
   let name = token.name in
   match run_pre_hooks ~name ~args with
   | (Some _ as blocked, _) -> blocked
@@ -288,14 +288,14 @@ not capability authority.
 ```ocaml
 (* lib/dispatch_outcome.ml — new *)
 type t =
-  | Handled of Tool_result.t
+  | Handled of Tool_result.result
   | Rejected_by_capability of { tool : Tool_name.t; missing : Capability.t list }
   | Rejected_by_pre_hook of { tool : Tool_name.t; reason : string }
   | No_handler of { tool_name_raw : string; tried_sources : Tool_resolution.tried_source list }
   | Handler_error of { tool : Tool_name.t; exn : exn; backtrace : string }
 ```
 
-Dispatch observer signature: `Dispatch_outcome.t -> Tool_result.t option -> unit`. Observer sites pattern-match on the typed outcome; result transformation is kept in `Tool_dispatch.set_result_transformer`.
+Dispatch observer signature: `Dispatch_outcome.t -> Tool_result.result option -> unit`. Observer sites pattern-match on the typed outcome; result transformation is kept in `Tool_dispatch.set_result_transformer`.
 
 ### §3.4 `Host_config.t` (PR-12)
 

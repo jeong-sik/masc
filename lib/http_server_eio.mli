@@ -260,9 +260,10 @@ module Router : sig
     | `Not_found
     ]
 
-  (** Indexed dispatch table.  Route registration updates exact path buckets
-      and a longest-prefix ordered prefix table at build time, so request
-      dispatch does not scan/sort the full endpoint list. *)
+  (** Indexed dispatch table.  Route registration updates method-specific
+      exact path tables and longest-prefix ordered prefix tables at build time,
+      so request dispatch does not scan/sort the full endpoint list or perform
+      per-candidate method-list membership checks. *)
   type t
 
   val create : unit -> t
@@ -299,10 +300,11 @@ module Router : sig
   val prefix_put : string -> request_handler -> t -> t
 
   (** [resolve routes request] returns [`Matched route] when
-      either an exact path+method match exists OR (no exact
-      match) the longest prefix match exists.  Returns
-      [`Method_not_allowed] when path matches but method does
-      not, [`Not_found] otherwise. *)
+      either an exact path+method match exists OR the
+      longest prefix match for that method exists.  Returns
+      [`Method_not_allowed] when an exact path exists but no
+      route for the request method exists, [`Not_found]
+      otherwise. *)
   val resolve : t -> Httpun.Request.t -> resolution
 
   (** [dispatch routes request reqd] wires {!resolve} to the

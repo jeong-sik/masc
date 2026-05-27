@@ -9,6 +9,12 @@ include Keeper_config_rp_helpers
     intent explicit and satisfies sw-dev §"Magic Number 금지". *)
 let two_days_seconds_int = Masc_time_constants.day_int * 2
 
+(** One-day upper bound expressed in seconds.  Same anti-pattern as
+    [two_days_seconds_int]: the bare literal [86400] appeared twice as
+    a [~max_v] bound for [keeper.proactive.min_interval_sec] without
+    naming the "1 day" intent at the call site. *)
+let one_day_seconds_int = Masc_time_constants.day_int
+
 (** Default cascade name for keeper turns. Resolved through the live
     [Cascade_catalog_runtime] snapshot so the answer reflects the
     currently-installed catalog rather than module-init state. Falls
@@ -200,8 +206,8 @@ let keeper_proactive_min_cooldown_sec () : int =
 let keeper_proactive_min_interval_sec_rp =
   _rp_int ~key:"keeper.proactive.min_interval_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC"
-                          ~default:900 ~min_v:60 ~max_v:86400)
-    ~min_v:60 ~max_v:86400
+                          ~default:900 ~min_v:60 ~max_v:one_day_seconds_int)
+    ~min_v:60 ~max_v:one_day_seconds_int
     ~description:"Minimum proactive turn interval (seconds). Keeper fires a \
                   housekeeping turn at least this often, even with no observable \
                   work signals." ()

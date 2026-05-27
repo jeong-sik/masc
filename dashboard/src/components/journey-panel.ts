@@ -11,7 +11,7 @@ import {
   fetchKeeperRuntimeTrace,
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
-import { formatCost } from '../lib/format-number'
+import { formatCost, formatMsCompact } from '../lib/format-number'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { keepers } from '../store'
 import type { Keeper } from '../types'
@@ -33,7 +33,6 @@ import {
 import {
   durationColor,
   formatArgs,
-  formatDuration,
   normalizeToolName,
   toolCategory,
 } from './tool-call-shared'
@@ -128,7 +127,7 @@ function formatTimestamp(ms: number | null): string {
 
 function formatMaybeDuration(ms: number | null): string {
   return typeof ms === 'number' && Number.isFinite(ms) && ms > 0
-    ? formatDuration(ms)
+    ? formatMsCompact(ms)
     : 'not recorded'
 }
 

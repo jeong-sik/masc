@@ -6,8 +6,8 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
-import { toolCategory, formatDuration, durationColor, normalizeToolName } from './tool-call-shared'
-import { formatCost } from '../lib/format-number'
+import { toolCategory, durationColor, normalizeToolName } from './tool-call-shared'
+import { formatCost, formatMsCompact } from '../lib/format-number'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
@@ -301,7 +301,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
               </div>
               <span class="w-8 text-right text-2xs font-mono text-[var(--color-fg-muted)]">${stat.call_count}</span>
               <span class="w-14 text-right text-3xs font-mono ${durationColor(stat.avg_duration_ms)}">
-                ${formatDuration(stat.avg_duration_ms)}
+                ${formatMsCompact(stat.avg_duration_ms)}
               </span>
             </div>
           `
@@ -332,8 +332,8 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
             <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
               <span class="text-2xs font-mono text-[var(--color-fg-muted)]">${normalizeToolName(stat.name)}</span>
               <div class="flex items-center gap-3">
-                <span class="text-3xs text-[var(--color-fg-disabled)]">avg ${formatDuration(stat.avg_duration_ms)}</span>
-                <span class="text-2xs font-mono font-medium ${durationColor(stat.p95_duration_ms)}">p95 ${formatDuration(stat.p95_duration_ms)}</span>
+                <span class="text-3xs text-[var(--color-fg-disabled)]">avg ${formatMsCompact(stat.avg_duration_ms)}</span>
+                <span class="text-2xs font-mono font-medium ${durationColor(stat.p95_duration_ms)}">p95 ${formatMsCompact(stat.p95_duration_ms)}</span>
               </div>
             </div>
           `)}

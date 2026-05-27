@@ -35,18 +35,41 @@ type exec_stage = {
   argv : string list;
 }
 
+type redirect_target =
+  | Inherit
+      (** default; child inherits the parent's file descriptor *)
+  | Discard
+      (** discard output / read empty input — equivalent to [/dev/null] *)
+  | File of string
+      (** absolute filesystem path.  stdout/stderr open for writing,
+          stdin opens for reading.  RFC-0198 Phase B: the typed
+          alternative to shell redirection syntax (which is rejected
+          by Phase A's recognizer in [check_argv]). *)
+
 type execute_input =
   | Exec of {
       executable : string;
       argv : string list;
       cwd : string option;
       env : (string * string) list;
+      stdin : redirect_target;
+      stdout : redirect_target;
+      stderr : redirect_target;
     }
+      (** [stdin], [stdout], [stderr] default to {!Inherit} when absent
+          from JSON.  RFC-0198 Phase B introduced them so the LLM can
+          express "discard stderr" or "write stdout to an absolute path"
+          via typed schema, instead of attempting shell redirection
+          syntax inside an execve-style argv (which silently leaks as
+          a runtime [find: 2>/dev/null: unknown primary] failure). *)
   | Pipeline of {
       stages : exec_stage list;
       cwd : string option;
       env : (string * string) list;
     }
+      (** Per-stage redirects are intentionally not exposed here — pipe
+          construction owns the inter-stage fd plumbing.  Out-of-stage
+          redirects on the pipeline's endpoints are a deferred extension. *)
 
 type allowlist_mode =
   | Dev_full
@@ -64,6 +87,26 @@ type validation_error =
       index : int;
       token : string;
     }
+  | Argv_contains_shell_redirection of {
+      executable : string;
+      index : int;
+      token : string;
+    }
+      (** RFC-0198 Phase A.  Token shape matches a shell redirection
+          operator ([>], [>>], [2>], [2>>], [<], [0<], [2>&1], [>/path],
+          [&1]).  These are shell-syntax constructs that have no meaning
+          inside execve argv — the typed schema rejects them so the
+          caller (LLM) receives a typed alternative pointing at
+          {!RFC-0198 Phase B} typed redirect fields or {!Pipeline} mode,
+          instead of the runtime [find]/[grep] "unknown primary" failure
+          that previously surfaced via [exec exit 1]. *)
+  | Redirect_path_not_absolute of {
+      fd : int;
+      path : string;
+    }
+      (** RFC-0198 Phase B.  A {!File} redirect target must be an
+          absolute filesystem path; relative paths are rejected to
+          mirror {!Cwd_not_absolute} semantics. *)
   | Cwd_not_absolute of string
   | Pipeline_empty
   | Pipeline_too_short

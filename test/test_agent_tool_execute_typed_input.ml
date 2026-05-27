@@ -13,7 +13,15 @@ let typed_ok input =
 ;;
 
 let mk_exec executable argv =
-  Execute_input.Exec { executable; argv; cwd = None; env = [] }
+  Execute_input.Exec
+    { executable
+    ; argv
+    ; cwd = None
+    ; env = []
+    ; stdin = Execute_input.Inherit
+    ; stdout = Execute_input.Inherit
+    ; stderr = Execute_input.Inherit
+    }
 ;;
 
 let parse_json_exn json =
@@ -340,7 +348,7 @@ let test_of_json_exec () =
           ])
   in
   match input with
-  | Execute_input.Exec { executable; argv; cwd; env } ->
+  | Execute_input.Exec { executable; argv; cwd; env; _ } ->
     Alcotest.(check string) "executable" "rg" executable;
     Alcotest.(check (list string)) "argv" [ "pattern"; "lib/" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
@@ -358,7 +366,7 @@ let test_of_json_keeps_empty_exec_for_validation () =
           ])
   in
   match input with
-  | Execute_input.Exec { executable; argv; cwd; env } ->
+  | Execute_input.Exec { executable; argv; cwd; env; _ } ->
     Alcotest.(check string) "empty executable is not promoted" "" executable;
     Alcotest.(check (list string))
       "argv0 command remains caller-authored"
@@ -556,6 +564,9 @@ let test_exec_lowering_preserves_duplicate_executable_argv () =
       ; argv = [ "git"; "status" ]
       ; cwd = None
       ; env = []
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
       }
   in
   match to_shell_ir_exn input with
@@ -620,6 +631,9 @@ let test_pipe_character_in_exec_argv_is_literal () =
       ; argv = [ "foo|bar" ]
       ; cwd = None
       ; env = []
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
       }
   in
   match to_shell_ir_exn input with
@@ -635,7 +649,14 @@ let test_pipe_character_in_exec_argv_is_literal () =
 let test_cwd_not_absolute () =
   let input =
     Execute_input.Exec
-      { executable = "ls"; argv = []; cwd = Some "relative/path"; env = [] }
+      { executable = "ls"
+      ; argv = []
+      ; cwd = Some "relative/path"
+      ; env = []
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
+      }
   in
   Alcotest.(check bool)
     "Cwd_not_absolute: relative cwd rejected"
@@ -650,12 +671,313 @@ let test_env_key_invalid () =
       ; argv = []
       ; cwd = None
       ; env = [ "FOO BAR", "value" ]
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
       }
   in
   Alcotest.(check bool)
     "Env_key_invalid: env key with space rejected"
     false
     (typed_ok input)
+;;
+
+(* RFC-0198 Phase A: redirection-shape argv tokens.  Validation must
+   reject these with the typed [Argv_contains_shell_redirection] error
+   so the caller (LLM) receives a typed alternative instead of the
+   runtime "unknown primary" failure observed in fleet (2026-05-27
+   18:56 KST find: 2>/dev/null primary error). *)
+let expect_redirection_rejected ~token input =
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Argv_contains_shell_redirection { token = t; _ }) ->
+    Alcotest.(check string) "rejected token text" token t
+  | Error other ->
+    Alcotest.failf
+      "expected Argv_contains_shell_redirection for %S, got %a"
+      token
+      Execute_input.pp_validation_error
+      other
+  | Ok () -> Alcotest.failf "expected %S to be rejected" token
+;;
+
+let test_shell_redirection_token_rejected () =
+  (* Each fixture sends [find] (allowlisted, evidence shape from
+     fleet log) with a redirection-shape token at argv[N].  Every
+     shape must surface as a typed-rejection. *)
+  List.iter
+    (fun (token, argv) ->
+      let input =
+        Execute_input.Exec
+          { executable = "find"
+          ; argv
+          ; cwd = None
+          ; env = []
+          ; stdin = Execute_input.Inherit
+          ; stdout = Execute_input.Inherit
+          ; stderr = Execute_input.Inherit
+          }
+      in
+      expect_redirection_rejected ~token input)
+    [ "2>/dev/null", [ "."; "-name"; "*.ml"; "2>/dev/null" ]
+    ; ">", [ "."; "-name"; "*.ml"; ">" ]
+    ; ">>", [ "."; "-name"; "*.ml"; ">>" ]
+    ; "2>", [ "."; "-name"; "*.ml"; "2>" ]
+    ; "2>&1", [ "."; "-name"; "*.ml"; "2>&1" ]
+    ; ">&2", [ "."; "-name"; "*.ml"; ">&2" ]
+    ; "<", [ "."; "-name"; "*.ml"; "<" ]
+    ; "0<", [ "."; "-name"; "*.ml"; "0<" ]
+    ; "<&0", [ "."; "-name"; "*.ml"; "<&0" ]
+    ; "&1", [ "."; "-name"; "*.ml"; "&1" ]
+    ; ">>/tmp/out", [ "."; "-name"; "*.ml"; ">>/tmp/out" ]
+    ; ">./relative.log", [ "."; "-name"; "*.ml"; ">./relative.log" ]
+    ]
+;;
+
+(* Regression guard: tokens that *contain* shell metacharacters as
+   payload data must remain allowed.  RFC-0091 PR-1's design constraint
+   (.mli §"Design constraints") explicitly accepts these as literal
+   execve arguments. *)
+let test_legitimate_metachar_still_allowed () =
+  List.iter
+    (fun (rationale, argv) ->
+      let input =
+        Execute_input.Exec
+          { executable = "find"
+          ; argv
+          ; cwd = None
+          ; env = []
+          ; stdin = Execute_input.Inherit
+          ; stdout = Execute_input.Inherit
+          ; stderr = Execute_input.Inherit
+          }
+      in
+      match Execute_input.validate ~mode:Execute_input.Dev_full input with
+      | Ok () -> ()
+      | Error err ->
+        Alcotest.failf
+          "regression: %s argv=%s wrongly rejected: %a"
+          rationale
+          (String.concat " " argv)
+          Execute_input.pp_validation_error
+          err)
+    [ "find-glob literal '*.ml'", [ "."; "-name"; "*.ml" ]
+    ; "find-name with literal '$HOME'", [ "."; "-name"; "$HOME" ]
+    ; "find-name with literal semicolon", [ "."; "-name"; ";abc" ]
+    ; "find-name with literal pipe", [ "."; "-name"; "|abc" ]
+    ; "find-name with literal '>' inside payload", [ "."; "-name"; "a>b" ]
+    ; "find-name with literal '<' inside payload", [ "."; "-name"; "a<b" ]
+    ; "find-name with literal '&' inside payload", [ "."; "-name"; "a&b" ]
+    ; "find-name with '>foo' (no leading fd, but path payload-looking)", [ "."; "-name"; "X>foo" ]
+    ; "ampersand by itself is execve-literal", [ "."; "-name"; "&" ]
+    ]
+;;
+
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0
+  then true
+  else if nlen > hlen
+  then false
+  else
+    let rec scan i =
+      if i + nlen > hlen
+      then false
+      else if String.sub haystack i nlen = needle
+      then true
+      else scan (i + 1)
+    in
+    scan 0
+;;
+
+let test_redirection_rejected_emits_typed_alternative () =
+  (* The error message must steer the caller toward typed alternatives
+     (Phase B redirect fields or Pipeline mode), not toward the
+     deprecated "split into Pipeline stages" prose used for
+     control-character rejection. *)
+  let input =
+    Execute_input.Exec
+      { executable = "find"
+      ; argv = [ "."; "-name"; "*.ml"; "2>/dev/null" ]
+      ; cwd = None
+      ; env = []
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
+      }
+  in
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Argv_contains_shell_redirection _ as err) ->
+    let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
+    Alcotest.(check bool)
+      "error mentions discard_stderr typed field"
+      true
+      (contains_substring msg "discard_stderr");
+    Alcotest.(check bool)
+      "error mentions Phase B RFC marker"
+      true
+      (contains_substring msg "RFC-0198")
+  | _ -> Alcotest.fail "expected Argv_contains_shell_redirection"
+;;
+
+(* RFC-0198 Phase B: typed [stdin]/[stdout]/[stderr] redirect fields. *)
+
+let mk_exec_with_redirects
+      ?(executable = "rg")
+      ?(argv = [ "pattern" ])
+      ?(cwd = Some "/tmp")
+      ?(env = [])
+      ?(stdin = Execute_input.Inherit)
+      ?(stdout = Execute_input.Inherit)
+      ?(stderr = Execute_input.Inherit)
+      ()
+  =
+  Execute_input.Exec
+    { executable; argv; cwd; env; stdin; stdout; stderr }
+;;
+
+let count_redirects ir =
+  match ir with
+  | Masc_exec.Shell_ir.Simple simple -> List.length simple.redirects
+  | Masc_exec.Shell_ir.Pipeline _ ->
+    Alcotest.fail "single Exec must not lower to Pipeline"
+;;
+
+let redirect_at ir n =
+  match ir with
+  | Masc_exec.Shell_ir.Simple simple -> List.nth simple.redirects n
+  | _ -> Alcotest.fail "expected Simple IR"
+;;
+
+let test_redirect_defaults_inherit_emits_no_ir_entries () =
+  match
+    Execute_input.to_shell_ir
+      ~mode:Execute_input.Dev_full
+      (mk_exec_with_redirects ())
+  with
+  | Ok ir ->
+    Alcotest.(check int)
+      "defaults emit zero redirect IR entries"
+      0
+      (count_redirects ir)
+  | Error err ->
+    Alcotest.failf
+      "default redirects should validate, got %a"
+      Execute_input.pp_validation_error
+      err
+;;
+
+let test_redirect_discard_combinations () =
+  let cases =
+    [ "stderr_discard_only", Execute_input.Inherit, Execute_input.Inherit, Execute_input.Discard, 1
+    ; "stdout_discard_only", Execute_input.Inherit, Execute_input.Discard, Execute_input.Inherit, 1
+    ; "stdin_discard_only",  Execute_input.Discard, Execute_input.Inherit, Execute_input.Inherit, 1
+    ; "stdout_stderr_discard", Execute_input.Inherit, Execute_input.Discard, Execute_input.Discard, 2
+    ; "all_three_discard", Execute_input.Discard, Execute_input.Discard, Execute_input.Discard, 3
+    ]
+  in
+  List.iter
+    (fun (name, stdin, stdout, stderr, expected_count) ->
+      let input = mk_exec_with_redirects ~stdin ~stdout ~stderr () in
+      match Execute_input.to_shell_ir ~mode:Execute_input.Dev_full input with
+      | Ok ir ->
+        Alcotest.(check int)
+          (Printf.sprintf "%s emits %d redirect IR entries" name expected_count)
+          expected_count
+          (count_redirects ir)
+      | Error err ->
+        Alcotest.failf
+          "case %S: validation failed: %a"
+          name
+          Execute_input.pp_validation_error
+          err)
+    cases
+;;
+
+let test_redirect_file_absolute_path_emits_ir () =
+  let input =
+    mk_exec_with_redirects
+      ~stdout:(Execute_input.File "/tmp/out.log")
+      ()
+  in
+  match Execute_input.to_shell_ir ~mode:Execute_input.Dev_full input with
+  | Ok ir ->
+    Alcotest.(check int) "file redirect emits 1 entry" 1 (count_redirects ir);
+    (match redirect_at ir 0 with
+     | Masc_exec.Redirect_scope.File { fd = 1; target; mode = Masc_exec.Redirect_scope.Write } ->
+       Alcotest.(check string)
+         "stdout file target path"
+         "/tmp/out.log"
+         (Masc_exec.Path_scope.raw target)
+     | _ -> Alcotest.fail "expected fd=1 Write to /tmp/out.log")
+  | Error err ->
+    Alcotest.failf "should validate, got %a" Execute_input.pp_validation_error err
+;;
+
+let test_redirect_file_relative_path_rejected () =
+  let input =
+    mk_exec_with_redirects
+      ~stderr:(Execute_input.File "relative/path.log")
+      ()
+  in
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Redirect_path_not_absolute { fd = 2; path }) ->
+    Alcotest.(check string) "rejected relative path" "relative/path.log" path
+  | Error other ->
+    Alcotest.failf
+      "expected Redirect_path_not_absolute, got %a"
+      Execute_input.pp_validation_error
+      other
+  | Ok () -> Alcotest.fail "relative redirect path should be rejected"
+;;
+
+let test_redirect_stderr_discard_equivalent_to_dev_null_redirect () =
+  (* Equivalence with Bash.parse_string "rg pattern 2>/dev/null":
+     both must produce a single redirect targeting /dev/null on fd=2
+     with Write mode. *)
+  let input = mk_exec_with_redirects ~stderr:Execute_input.Discard () in
+  match Execute_input.to_shell_ir ~mode:Execute_input.Dev_full input with
+  | Ok ir ->
+    (match redirect_at ir 0 with
+     | Masc_exec.Redirect_scope.File { fd = 2; target; mode = Masc_exec.Redirect_scope.Write } ->
+       Alcotest.(check string)
+         "discard_stderr targets /dev/null"
+         "/dev/null"
+         (Masc_exec.Path_scope.raw target)
+     | _ -> Alcotest.fail "expected fd=2 Write to /dev/null")
+  | Error err ->
+    Alcotest.failf "should validate, got %a" Execute_input.pp_validation_error err
+;;
+
+let test_of_json_parses_discard_stderr_shorthand () =
+  let json =
+    `Assoc
+      [ "executable", `String "rg"
+      ; "argv", `List [ `String "pattern" ]
+      ; "cwd", `String "/tmp"
+      ; "stderr", `Assoc [ "discard", `Bool true ]
+      ]
+  in
+  let input = parse_json_exn json in
+  match input with
+  | Execute_input.Exec { stderr = Execute_input.Discard; _ } -> ()
+  | _ -> Alcotest.fail "of_json must produce stderr=Discard"
+;;
+
+let test_of_json_rejects_redirect_with_both_discard_and_file () =
+  let json =
+    `Assoc
+      [ "executable", `String "rg"
+      ; "argv", `List [ `String "pattern" ]
+      ; "cwd", `String "/tmp"
+      ; ( "stderr"
+        , `Assoc
+            [ "discard", `Bool true; "file", `String "/tmp/out.log" ] )
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "of_json must reject conflicting discard+file"
+  | Error _ -> ()
 ;;
 
 let suite =
@@ -744,6 +1066,46 @@ let suite =
           test_pipe_character_in_exec_argv_is_literal
       ; Alcotest.test_case "cwd_not_absolute" `Quick test_cwd_not_absolute
       ; Alcotest.test_case "env_key_invalid" `Quick test_env_key_invalid
+      ; Alcotest.test_case
+          "rfc_0198_shell_redirection_token_rejected"
+          `Quick
+          test_shell_redirection_token_rejected
+      ; Alcotest.test_case
+          "rfc_0198_legitimate_metachar_still_allowed"
+          `Quick
+          test_legitimate_metachar_still_allowed
+      ; Alcotest.test_case
+          "rfc_0198_redirection_rejected_emits_typed_alternative"
+          `Quick
+          test_redirection_rejected_emits_typed_alternative
+      ; Alcotest.test_case
+          "rfc_0198_phaseb_defaults_inherit_emits_no_ir_entries"
+          `Quick
+          test_redirect_defaults_inherit_emits_no_ir_entries
+      ; Alcotest.test_case
+          "rfc_0198_phaseb_discard_combinations"
+          `Quick
+          test_redirect_discard_combinations
+      ; Alcotest.test_case
+          "rfc_0198_phaseb_file_absolute_path_emits_ir"
+          `Quick
+          test_redirect_file_absolute_path_emits_ir
+      ; Alcotest.test_case
+          "rfc_0198_phaseb_file_relative_path_rejected"
+          `Quick
+          test_redirect_file_relative_path_rejected
+      ; Alcotest.test_case
+          "rfc_0198_phaseb_stderr_discard_equivalent_to_dev_null"
+          `Quick
+          test_redirect_stderr_discard_equivalent_to_dev_null_redirect
+      ; Alcotest.test_case
+          "rfc_0198_phaseb_of_json_parses_discard_stderr"
+          `Quick
+          test_of_json_parses_discard_stderr_shorthand
+      ; Alcotest.test_case
+          "rfc_0198_phaseb_of_json_rejects_discard_and_file"
+          `Quick
+          test_of_json_rejects_redirect_with_both_discard_and_file
       ])
 ;;
 

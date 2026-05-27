@@ -18,12 +18,16 @@ val simple_bin :
   ?cwd_base:string ->
   ?sandbox:Masc_exec.Sandbox_target.t ->
   ?env:(string * string) list ->
+  ?redirects:Masc_exec.Redirect_scope.t list ->
   Masc_exec.Exec_program.t ->
   string list ->
   Masc_exec.Shell_ir.t
 (** Build a simple Shell IR command from an already-classified binary.
     Keeper typed-input lowerers use this entrypoint when the executable came
-    from JSON and must be classified before Shell IR construction. *)
+    from JSON and must be classified before Shell IR construction.
+    [redirects] defaults to [[]] when omitted; RFC-0198 Phase B uses this
+    parameter to thread typed stdin/stdout/stderr redirects from the JSON
+    boundary into the Shell IR. *)
 
 val pipeline : Masc_exec.Shell_ir.t list -> Masc_exec.Shell_ir.t
 (** Build an explicit Shell IR pipeline from already-lowered stages. *)

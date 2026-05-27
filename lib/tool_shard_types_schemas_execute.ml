@@ -103,13 +103,90 @@ let tool_execute_timeout_sec_field =
       ] )
 ;;
 
+(* RFC-0198 Phase B: typed redirect fields.  Each is an optional
+   object choosing exactly one of [{discard: true}] (equivalent to
+   [/dev/null]) or [{file: "/abs/path"}].  Absent keeps the default
+   [inherit] behaviour. *)
+let redirect_target_properties =
+  [ "discard", `Assoc [ "type", `String "boolean" ]
+  ; ( "file"
+    , `Assoc
+        [ "type", `String "string"
+        ; "minLength", `Float 1.
+        ; ( "description"
+          , `String
+              "Absolute filesystem path for the redirect target. \
+               Relative paths are rejected." )
+        ] )
+  ]
+;;
+
+let redirect_target_one_of : Yojson.Safe.t =
+  `List
+    [ `Assoc
+        [ "required", `List [ `String "discard" ]
+        ; "not", `Assoc [ "required", `List [ `String "file" ] ]
+        ]
+    ; `Assoc
+        [ "required", `List [ `String "file" ]
+        ; "not", `Assoc [ "required", `List [ `String "discard" ] ]
+        ]
+    ]
+;;
+
+let redirect_field ~name ~description =
+  ( name
+  , `Assoc
+      [ "type", `String "object"
+      ; "description", `String description
+      ; "properties", `Assoc redirect_target_properties
+      ; "additionalProperties", `Bool false
+      ; "oneOf", redirect_target_one_of
+      ] )
+;;
+
+let tool_execute_stdin_field =
+  redirect_field
+    ~name:"stdin"
+    ~description:
+      "Optional typed stdin redirect: {discard:true} feeds empty input, \
+       {file:\"/abs/path\"} reads from an absolute path. Default \
+       behaviour (field absent) inherits the parent's stdin."
+;;
+
+let tool_execute_stdout_field =
+  redirect_field
+    ~name:"stdout"
+    ~description:
+      "Optional typed stdout redirect: {discard:true} drops the output, \
+       {file:\"/abs/path\"} writes to an absolute path. Use this instead \
+       of putting shell syntax like '>/tmp/out' inside argv (which the \
+       typed gate rejects per RFC-0198 Phase A)."
+;;
+
+let tool_execute_stderr_field =
+  redirect_field
+    ~name:"stderr"
+    ~description:
+      "Optional typed stderr redirect: {discard:true} drops stderr \
+       (equivalent to '2>/dev/null'), {file:\"/abs/path\"} writes to an \
+       absolute path. Use this instead of putting '2>/dev/null' or \
+       similar into argv — the typed gate rejects redirection-shape \
+       argv tokens per RFC-0198 Phase A and surfaces this field as the \
+       alternative."
+;;
+
 let tool_execute_description =
   "Execute one command through the typed execution gates via typed argv. \
    Provide EITHER executable/argv OR pipeline, never both. Use executable/argv for one process, \
    or pipeline for explicit Shell IR pipelines. IMPORTANT: there is no 'cmd' \
    or 'command' field. Those fields are not supported and will be rejected. \
    Always use 'executable' (string) and 'argv' (string array) instead. \
-   Accepted fields: executable, argv, pipeline, env, cwd, timeout_sec. \
+   Accepted fields: executable, argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. \
+   For I/O redirection use the typed stdin/stdout/stderr objects \
+   ({\"discard\":true} or {\"file\":\"/abs/path\"}) — putting shell \
+   redirection syntax like '2>/dev/null' or '>/tmp/out' inside argv \
+   is rejected at the typed gate per RFC-0198 Phase A. \
    Shell metacharacters in argv are \
    data, not syntax. Good: executable='git' argv=['status','--short'], \
    pipeline=[{executable='git',...}, {executable='head',...}]. Runs in the \
@@ -138,6 +215,9 @@ let tool_execute_schema : Masc_domain.tool_schema =
     ; tool_execute_env_field
     ; tool_execute_cwd_field
     ; tool_execute_timeout_sec_field
+    ; tool_execute_stdin_field
+    ; tool_execute_stdout_field
+    ; tool_execute_stderr_field
     ]
   in
   { name = "tool_execute"

@@ -438,6 +438,11 @@ type usage_metrics =
   ; last_latency_ms : int
   }
 
+type tool_call_summary =
+  { tool_name : string
+  ; outcome : string
+  }
+
 type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
@@ -462,6 +467,7 @@ type agent_runtime_state =
   ; last_blocker : blocker_info option
   ; last_cascade_attempt : cascade_attempt_record option
   ; last_need : string
+  ; last_turn_tool_calls : tool_call_summary list
   }
 
 type keeper_meta =

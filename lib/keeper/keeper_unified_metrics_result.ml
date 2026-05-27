@@ -225,6 +225,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          tracks whether the keeper can make progress. *)
       last_blocker = None;
       last_need = Option.value ~default:"" social_state.need;
+      last_turn_tool_calls = [];
     };
   } in
   record_keeper_total_cost_usd

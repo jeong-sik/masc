@@ -568,6 +568,21 @@ let handle
     ~turn_mode_label
     ~lifecycle;
   let updated_meta = persist_success_meta ~config ~original_meta:meta ~updated_meta in
+  let tool_call_summaries =
+    let max_tool_calls = 10 in
+    result.Keeper_agent_run.tool_calls
+    |> List.map (fun (d : Keeper_agent_run.tool_call_detail) ->
+       ( { tool_name = d.tool_name; outcome = d.outcome }
+         : Keeper_types.tool_call_summary ))
+    |> fun l ->
+    let rec take n = function [] -> [] | h :: t -> if n <= 0 then [] else h :: take (n - 1) t in
+    take max_tool_calls l
+  in
+  let updated_meta =
+    { updated_meta with
+      runtime = { updated_meta.runtime with last_turn_tool_calls = tool_call_summaries }
+    }
+  in
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.Keeper_types.name
     ~turn_id:keeper_turn_id

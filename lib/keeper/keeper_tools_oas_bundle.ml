@@ -9,6 +9,22 @@
 
 open Keeper_tools_oas
 
+let task_state_hint ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : string =
+  match meta.current_task_id with
+  | None -> "No task currently assigned. Use masc_claim_next or masc_tasks to find one."
+  | Some tid ->
+    let task_id = Keeper_id.Task_id.to_string tid in
+    (match Coord_backlog.read_backlog_r config with
+     | Error _ -> Printf.sprintf "Current task: %s (status unavailable)" task_id
+     | Ok backlog ->
+       (match List.find_opt (fun (t : Masc_domain.task) -> t.id = task_id) backlog.tasks with
+        | None -> Printf.sprintf "Current task: %s (not found in backlog)" task_id
+        | Some task ->
+          let status = Masc_domain.task_status_to_string task.task_status in
+          let hint = Coord_task_classify.next_actions_hint task.task_status in
+          Printf.sprintf "Current task: %s, status=%s%s" task_id status hint))
+;;
+
 let make_tool_bundle
       ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
@@ -118,10 +134,15 @@ let make_tool_bundle
                ~failure_counts
                ()
            in
+           let description =
+             if String.equal td.name "masc_transition"
+             then td.description ^ "\n\n" ^ task_state_hint ~config ~meta
+             else td.description
+           in
            Some
              (Tool_bridge.oas_tool_of_masc
                 ~name:td.name
-                ~description:td.description
+                ~description
                 ~input_schema:td.input_schema
                 (fun input -> h input)))
          else None)

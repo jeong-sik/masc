@@ -143,7 +143,20 @@ export function shouldRefreshFromEvent(event: SSEEvent): boolean {
   return type.startsWith('client_input_')
 }
 
-export function formatLatency(seconds: number): string {
+/**
+ * Transport-domain latency formatter. Takes **seconds** (raw SSE/gRPC
+ * average values from the dashboard transport metrics).
+ *
+ * Distinct from `formatLatency(ms)` in `fleet-telemetry-utils.ts`, which
+ * takes **milliseconds**. Renamed from `formatLatency` to
+ * `formatLatencyFromSeconds` on 2026-05-27: same function name across the
+ * two modules with *different input units* was a 1000x silent-conversion
+ * trap (calling fleet's variant with a seconds value would format "1.5"
+ * as "1ms" instead of "1.5s"). Variable names like `broadcast_avg_seconds`
+ * carry the unit at the call site; this rename carries it at the function
+ * signature too.
+ */
+export function formatLatencyFromSeconds(seconds: number): string {
   if (seconds === 0) return '-'
   if (seconds < 0.001) return `${(seconds * 1_000_000).toFixed(0)}us`
   if (seconds < 1) return `${(seconds * 1000).toFixed(1)}ms`
@@ -470,7 +483,7 @@ export function TransportHealthPanel() {
                 <${MetricRow} label="릴레이 큐" value=${data.sse.relay_queue_depth} />
                 <${MetricRow} label="릴레이 재시도" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
                 <${MetricRow} label="릴레이 드롭" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
-                <${MetricRow} label="브로드캐스트 평균" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count}개 이벤트`} />
+                <${MetricRow} label="브로드캐스트 평균" value=${formatLatencyFromSeconds(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count}개 이벤트`} />
               </div>
             <//>
 
@@ -479,7 +492,7 @@ export function TransportHealthPanel() {
                 <${MetricRow} label="리스너" value=${data.grpc.listening ? '활성' : '중단'} />
                 <${MetricRow} label="구독자" value=${data.grpc.subscribers} />
                 <${MetricRow} label="활성 스트림" value=${data.grpc.active_streams} />
-                <${MetricRow} label="하트비트 평균" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
+                <${MetricRow} label="하트비트 평균" value=${formatLatencyFromSeconds(data.grpc.heartbeat_avg_seconds)} />
                 <${MetricRow} label="전달된 이벤트" value=${data.grpc.events_delivered} />
                 <${MetricRow}
                   label="드롭된 이벤트"

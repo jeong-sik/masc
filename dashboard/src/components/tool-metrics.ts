@@ -37,10 +37,22 @@ export function toolMatchesCategory(
   return toolCategory(item.name).label === category
 }
 
-export function filterTools<T extends Pick<ToolMetricsTopEntry, 'name'>>(
+/**
+ * SSOT for tool list filtering across the dashboard.
+ *
+ * Until 2026-05-27 `tool-quality-panel.ts` defined its own 2-arg variant
+ * (`filterTools(tools, query)`) — a strict subset of this 3-arg variant
+ * with `category` always implicitly `'all'`. Two definitions of the same
+ * operation could drift independently. The category parameter now defaults
+ * to `'all'` so the 2-arg call site keeps working through a re-export from
+ * `tool-quality-panel`, and the generic constraint is loosened to any
+ * `{ name: string }` so both `ToolMetricsTopEntry` and `ToolStat` callers
+ * type-check without coupling to a specific tool schema.
+ */
+export function filterTools<T extends { name: string }>(
   items: T[],
   query: string,
-  category: string,
+  category: string = 'all',
 ): T[] {
   const q = query.trim().toLowerCase()
   if (q === '' && category === 'all') return items

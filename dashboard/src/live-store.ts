@@ -217,7 +217,18 @@ export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
   return 'neutral'
 }
 
-export function eventKindLabel(entry: JournalEntry): string {
+/**
+ * Live-journal event kind 짧은 라벨. JournalEntry 의 eventType + kind
+ * 조합을 보고 단일 식별자로 압축한다 (예: `'keeper_heartbeat'` → `'heartbeat'`).
+ *
+ * Distinct from `eventKindLabel(kind: string)` in `activity-graph-groups.ts`,
+ * which is a *generic string → label* mapper for the activity graph. Same
+ * function name but different input shape (JournalEntry object vs raw
+ * string) was an import-site collision hazard. Renamed from `eventKindLabel`
+ * to `journalEventKindLabel` on 2026-05-27 so the live-journal variant
+ * carries its domain at the call site.
+ */
+export function journalEventKindLabel(entry: JournalEntry): string {
   const type = entry.eventType
   if (type === 'broadcast') return 'broadcast'
   if (type === 'agent_joined') return 'joined'

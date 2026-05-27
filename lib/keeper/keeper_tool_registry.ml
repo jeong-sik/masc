@@ -174,19 +174,21 @@ let catalog_checkpoint_decision tool_name =
      | _ -> None)
 ;;
 
-(* ── Input-aware checkpoint bypass ────────────────────────────
+(* ── Input-aware main-worktree boundary bypass ────────────────
    Some tools do mutate state, but they should not open the
-   follow-up checkpoint gate because they either:
+   per-turn checkpoint boundary because they either:
    - only touch MASC coordination state (tasks, board, broadcast), or
    - operate inside an explicit playground sandbox.
 
    Keep these tools mutating for reconcile/error handling; this predicate only
-   controls whether the per-turn checkpoint gate blocks follow-up tools.
+   controls whether the per-turn checkpoint boundary blocks follow-up tools.
 
    The effect-domain tag is resolved through the descriptor projection first,
-   so the gate no longer has to mirror tool names or infer semantics from
+   so the boundary no longer has to mirror tool names or infer semantics from
    prefixes. *)
-let allows_followup_checkpoint_with_input ~(tool_name : string) ~(input : Yojson.Safe.t)
+let is_main_worktree_boundary_exempt_with_input
+      ~(tool_name : string)
+      ~(input : Yojson.Safe.t)
   : bool
   =
   if is_read_only_with_input ~tool_name ~input

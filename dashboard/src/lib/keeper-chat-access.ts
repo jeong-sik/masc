@@ -1,18 +1,13 @@
 import type { DashboardShellAuthSummary } from '../types'
-import { dashboardAuthAccess } from './dashboard-auth-access'
+import {
+  dashboardAuthAccess,
+  cleanErrorMessage,
+  compactWhitespace,
+} from './dashboard-auth-access'
 
 interface KeeperDirectChatAccess {
   blocked: boolean
   message: string | null
-}
-
-function compactWhitespace(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
-}
-
-function cleanErrorMessage(value: string | null | undefined): string | null {
-  if (!value) return null
-  return value.replace(/^[^\w가-힣@]+/u, '').trim() || null
 }
 
 export function keeperDirectChatAccess(

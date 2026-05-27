@@ -64,18 +64,44 @@ function afterAction(): void {
 
 export type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
 
+/**
+ * Single source of truth for keeper-action 한국어 라벨.
+ *
+ * 같은 action 의 라벨이 file 내 4 표면(toast/bulk-toast/full-button/compact-button)
+ * 에 어형만 달리한 채 hardcoded 되어 있던 SSOT 위반을 통합했다. 어형 3 종이
+ * 다른 *이유* 가 있다 (raw 라벨 통합이 아니라 어형별 entry 를 가짐):
+ *
+ *   noun    — toast 메시지의 어미 합성용 ("${noun}됨", "${noun} 실패", "전체 ${noun}").
+ *   verb    — fleet-level row 의 full 버튼 텍스트. "하기" suffix 가 붙은 동사.
+ *   compact — KEEPER OPERATIONS 인라인 행에 들어가는 좁은 버튼 텍스트.
+ *
+ * RFC-0135 §1.2 와의 호환: `keeperPauseDisplay` 의 verb-suffix 규약 ("하기") 을
+ * 따른다. 한 라벨을 변경하려면 *모든 어형* 을 함께 검토해 라벨 어휘와 어형
+ * 규약이 분리되지 않게 한다.
+ */
+interface KeeperActionLabel {
+  /** "${name} ${noun}됨" / "${noun} 실패" / "전체 ${noun}" 의 어근. */
+  noun: string
+  /** Fleet-level full row 버튼 텍스트 (verb + 하기 suffix 규약). */
+  verb: string
+  /** KEEPER OPERATIONS 인라인 컴팩트 버튼 텍스트. */
+  compact: string
+}
+
+const KEEPER_ACTION_LABELS: Record<KeeperActionKey, KeeperActionLabel> = {
+  pause:    { noun: '일시정지', verb: '일시정지하기', compact: '멈춤' },
+  resume:   { noun: '재개',     verb: '재개하기',     compact: '재개' },
+  wakeup:   { noun: '깨우기',   verb: '깨우기',       compact: '깨움' },
+  boot:     { noun: '기동',     verb: '기동하기',     compact: '기동' },
+  shutdown: { noun: '종료',     verb: '종료하기',     compact: '종료' },
+}
+
 /** Execute a lifecycle action for a single keeper with toast feedback. */
 export async function runKeeperAction(
   name: string,
   action: KeeperActionKey,
 ): Promise<void> {
-  const labels: Record<KeeperActionKey, string> = {
-    pause: '일시정지',
-    resume: '재개',
-    wakeup: '깨우기',
-    boot: '기동',
-    shutdown: '종료',
-  }
+  const noun = KEEPER_ACTION_LABELS[action].noun
 
   // Optimistic UI: pause/resume/wakeup mutate `paused` + phase locally
   // before the POST returns so the row's button set flips instantly. On
@@ -95,15 +121,15 @@ export async function runKeeperAction(
       case 'shutdown': res = await shutdownKeeper(name); break
     }
     if (res.ok) {
-      showToast(`${name} ${labels[action]}됨`, 'success')
+      showToast(`${name} ${noun}됨`, 'success')
       afterAction()
     } else {
       revert?.()
-      showToast(res.error ?? `${labels[action]} 실패`, 'error')
+      showToast(res.error ?? `${noun} 실패`, 'error')
     }
   } catch {
     revert?.()
-    showToast(`${labels[action]} 실패`, 'error')
+    showToast(`${noun} 실패`, 'error')
   }
 }
 
@@ -156,7 +182,8 @@ export function KeeperActionButtons({
 
   // Verb labels match keeperPauseDisplay verb conventions. Compact mode
   // drops the "하기" suffix so the buttons fit inside a narrow row cell.
-  const label = (full: string, short: string): string => (compact ? short : full)
+  const text = (action: KeeperActionKey): string =>
+    compact ? KEEPER_ACTION_LABELS[action].compact : KEEPER_ACTION_LABELS[action].verb
 
   return html`
     <div
@@ -171,7 +198,7 @@ export function KeeperActionButtons({
             disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'boot')}
             title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
-          >${label('기동하기', '기동')}<//>`
+          >${text('boot')}<//>`
         : null}
       ${vis.canPause
         ? html`<${ActionButton}
@@ -180,7 +207,7 @@ export function KeeperActionButtons({
             disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'pause')}
             title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
-          >${label('일시정지하기', '멈춤')}<//>`
+          >${text('pause')}<//>`
         : null}
       ${vis.canResume
         ? html`<${ActionButton}
@@ -189,7 +216,7 @@ export function KeeperActionButtons({
             disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'resume')}
             title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
-          >${label('재개하기', '재개')}<//>`
+          >${text('resume')}<//>`
         : null}
       ${vis.canWake && !vis.canBoot
         ? html`<${ActionButton}
@@ -198,7 +225,7 @@ export function KeeperActionButtons({
             disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'wakeup')}
             title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 cascade/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
-          >${label('깨우기', '깨움')}<//>`
+          >${text('wakeup')}<//>`
         : null}
       ${vis.canShutdown
         ? html`<${ActionButton}
@@ -207,7 +234,7 @@ export function KeeperActionButtons({
             disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'shutdown')}
             title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
-          >${label('종료하기', '종료')}<//>`
+          >${text('shutdown')}<//>`
         : null}
     </div>
   `
@@ -264,11 +291,10 @@ async function runBulkKeeperDirective(
   action: BulkKeeperDirectiveAction,
 ): Promise<void> {
   if (names.length === 0) return
-  const labels: Record<BulkKeeperDirectiveAction, string> = {
-    pause: '일시정지',
-    resume: '재개',
-    wakeup: '깨우기',
-  }
+  // `BulkKeeperDirectiveAction` is a subset of `KeeperActionKey`, so the
+  // single SSOT covers both. Subset-cast here keeps the type-narrow without
+  // duplicating the label map.
+  const noun = KEEPER_ACTION_LABELS[action as KeeperActionKey].noun
   // Optimistic: apply patch to every requested name. If the server
   // reports partial failure we revert only the failed names.
   const reverts = applyOptimisticKeeperDirectives(names, action)
@@ -278,24 +304,24 @@ async function runBulkKeeperDirective(
   try {
     const res = await bulkKeeperDirective(names, action)
     if (res.ok && res.succeeded === res.requested) {
-      showToast(`${res.succeeded}개 keeper ${labels[action]}됨`, 'success')
+      showToast(`${res.succeeded}개 keeper ${noun}됨`, 'success')
       afterAction()
     } else if (res.ok && res.succeeded > 0) {
       const failedRows = res.results.filter(r => !r.ok)
       for (const row of failedRows) reverts.get(row.name)?.()
       const failed = failedRows.map(r => r.name).join(', ')
       showToast(
-        `${res.succeeded}/${res.requested} ${labels[action]}됨 — 실패: ${failed}`,
+        `${res.succeeded}/${res.requested} ${noun}됨 — 실패: ${failed}`,
         'warning',
       )
       afterAction()
     } else {
       revertAll()
-      showToast(`전체 ${labels[action]} 실패`, 'error')
+      showToast(`전체 ${noun} 실패`, 'error')
     }
   } catch {
     revertAll()
-    showToast(`전체 ${labels[action]} 실패`, 'error')
+    showToast(`전체 ${noun} 실패`, 'error')
   }
 }
 
@@ -375,14 +401,14 @@ export function KeeperActionPanel() {
                 disabled=${bulkBusy.value}
                 onClick=${async () => {
                   const ok = await requestConfirm({
-                    title: `${resumableNames.length}개 keeper 전체 재개`,
+                    title: `${resumableNames.length}개 keeper 전체 ${KEEPER_ACTION_LABELS.resume.noun}`,
                     message: 'paused → running 으로 전환합니다.',
-                    confirmText: '재개',
+                    confirmText: KEEPER_ACTION_LABELS.resume.noun,
                   })
                   if (ok) await runBulk(resumableNames, 'resume')
                 }}
-                title="현재 paused 인 ${resumableNames.length}개 keeper 를 한 번에 재개합니다."
-              >전체 재개 (${resumableNames.length})<//>`
+                title="현재 paused 인 ${resumableNames.length}개 keeper 를 한 번에 ${KEEPER_ACTION_LABELS.resume.verb}."
+              >전체 ${KEEPER_ACTION_LABELS.resume.noun} (${resumableNames.length})<//>`
             : null}
           ${pausableNames.length > 0
             ? html`<${ActionButton}
@@ -392,14 +418,14 @@ export function KeeperActionPanel() {
                 disabled=${bulkBusy.value}
                 onClick=${async () => {
                   const ok = await requestConfirm({
-                    title: `${pausableNames.length}개 keeper 전체 일시정지`,
+                    title: `${pausableNames.length}개 keeper 전체 ${KEEPER_ACTION_LABELS.pause.noun}`,
                     message: 'running → paused 로 전환합니다. 현재 turn 은 정상 종료됩니다.',
-                    confirmText: '일시정지',
+                    confirmText: KEEPER_ACTION_LABELS.pause.noun,
                   })
                   if (ok) await runBulk(pausableNames, 'pause')
                 }}
-                title="현재 running 인 ${pausableNames.length}개 keeper 를 한 번에 일시정지합니다."
-              >전체 일시정지 (${pausableNames.length})<//>`
+                title="현재 running 인 ${pausableNames.length}개 keeper 를 한 번에 ${KEEPER_ACTION_LABELS.pause.verb}."
+              >전체 ${KEEPER_ACTION_LABELS.pause.noun} (${pausableNames.length})<//>`
             : null}
         </div>
       </div>

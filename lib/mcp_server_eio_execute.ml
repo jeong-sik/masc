@@ -693,6 +693,11 @@ let execute_tool_eio
                          ?turn_sandbox_factory
                          ?turn_sandbox_factory_git
                          ~exec_cache
+                         (* RFC-0182 Phase 5 PR-A.2: thread Eio
+                            resources from execute_tool_eio scope. *)
+                         ~sw
+                         ~clock
+                         ?mcp_session_id
                          ~name
                          ~input:coerced_args
                          ())

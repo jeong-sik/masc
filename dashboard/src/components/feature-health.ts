@@ -106,7 +106,20 @@ export async function refreshFeatureHealth(): Promise<void> {
   await loadFeatureHealth()
 }
 
-export function statusLabel(status: FeatureStatus): string {
+/**
+ * Feature-health-domain status → 한국어 라벨.
+ *
+ * Distinct from `statusLabel` in `lib/status-label.ts` (which handles every
+ * runtime/agent status enum). FeatureStatus is a closed 4-enum
+ * (`'healthy' | 'warning' | 'inactive' | 'deprecated'`) with feature-flag
+ * semantics — 'warning' here means "실험적 (experimental)", not "경고"
+ * which is what lib/status-label maps it to.
+ *
+ * Renamed from `statusLabel` to `featureStatusLabel` on 2026-05-27 to close
+ * the SSOT collision: same function name with incompatible semantics across
+ * two modules was an operator-confusion source.
+ */
+export function featureStatusLabel(status: FeatureStatus): string {
   switch (status) {
     case 'healthy':
       return '정상'
@@ -138,7 +151,7 @@ function statusChipTone(status: FeatureStatus): FeatureHealthTone {
 
 function StatusPill({ status }: { status: FeatureStatus }) {
   return html`
-    <${StatusChip} tone=${statusChipTone(status)}>${statusLabel(status)}<//>
+    <${StatusChip} tone=${statusChipTone(status)}>${featureStatusLabel(status)}<//>
   `
 }
 

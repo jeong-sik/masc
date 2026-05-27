@@ -278,13 +278,13 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
   Alcotest.(check bool)
     "WriteFile public alias follows descriptor checkpoint policy"
     true
-    (Registry.allows_followup_checkpoint_with_input
+    (Registry.is_main_worktree_boundary_exempt_with_input
        ~tool_name:"WriteFile"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   Alcotest.(check bool)
     "Execute public alias follows descriptor checkpoint policy"
     true
-    (Registry.allows_followup_checkpoint_with_input
+    (Registry.is_main_worktree_boundary_exempt_with_input
        ~tool_name:"Execute"
        ~input:(`Assoc [ "executable", `String "git"; "argv", `List [ `String "status" ] ]))
 
@@ -316,6 +316,8 @@ let cluster_projection_table =
   ; "masc_keeper_status", "tool_masc_keeper_dispatch"
   ; "masc_keeper_repair", "tool_masc_keeper_dispatch"
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_msg", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_up", "tool_masc_keeper_dispatch"
   ; "masc_surface_audit", "tool_masc_surface_audit"
   ]
 ;;

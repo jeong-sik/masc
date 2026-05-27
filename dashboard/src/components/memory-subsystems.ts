@@ -16,11 +16,9 @@ import {
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { openAgentDetail } from './agent-detail-state'
 import { ringFocusClasses, ringSelectClasses } from './common/ring'
-
-const REFRESH_MS = 30_000
 
 type MemorySubsystemsFocus = 'entries' | 'episodes'
 
@@ -648,7 +646,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
       )
     }
     run()
-    const cleanup = setupVisibleAutoRefresh(run, REFRESH_MS)
+    const cleanup = setupVisibleAutoRefresh(run, DEFAULT_PANEL_REFRESH_MS)
     return () => {
       resource.cancel()
       cleanup()
@@ -972,7 +970,7 @@ export function KeeperMemoryPanel({ keeperName }: { readonly keeperName: string 
       )
     }
     run()
-    const cleanup = setupVisibleAutoRefresh(run, REFRESH_MS)
+    const cleanup = setupVisibleAutoRefresh(run, DEFAULT_PANEL_REFRESH_MS)
     return () => {
       resource.cancel()
       cleanup()

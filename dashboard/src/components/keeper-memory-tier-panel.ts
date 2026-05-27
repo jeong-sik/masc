@@ -15,10 +15,8 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { buildCompactionSpec } from './keeper-fsm-specs'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { toKeeperPhase } from '../keeper-store-normalize'
-
-const REFRESH_MS = 30_000
 
 interface KeeperMemoryTierPanelProps {
   keeperName: string
@@ -137,7 +135,7 @@ export function KeeperMemoryTierPanel({
     }
 
     refresh()
-    const cleanup = setupVisibleAutoRefresh(() => refresh(), REFRESH_MS)
+    const cleanup = setupVisibleAutoRefresh(() => refresh(), DEFAULT_PANEL_REFRESH_MS)
 
     return () => {
       controller.abort()

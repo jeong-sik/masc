@@ -1,5 +1,16 @@
 const AUTO_REFRESH_EVENT_DEDUPE_MS = 500
 
+/**
+ * Default polling interval for panel-level auto-refresh.
+ *
+ * Three sibling panels (ide-persistence, keeper-memory-tier,
+ * memory-subsystems) all picked 30s independently. Lifting it here
+ * makes the shared cadence visible — and if a panel needs a different
+ * interval it can pass its own value to `setupVisibleAutoRefresh`
+ * instead of overriding a const by accident.
+ */
+export const DEFAULT_PANEL_REFRESH_MS = 30_000
+
 export function formatAutoRefreshLabel(intervalMs: number): string {
   const seconds = Math.max(1, Math.round(intervalMs / 1000))
   if (seconds % 60 === 0) {

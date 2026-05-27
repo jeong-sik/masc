@@ -280,11 +280,15 @@ let buffer_cap = 64
 
 let ensure_dir path =
   let dir = Filename.dirname path in
+  (* See heuristic_metrics.ensure_dir — same RFC-0088 "String 분류기"
+     removal: typed [Unix.Unix_error EEXIST] instead of substring match
+     on the libc error message. *)
   if not (Sys.file_exists dir) then
-    try Sys.mkdir dir 0o755 with
-    | Sys_error msg when String_util.contains_substring msg "exists" -> ()
-    | Sys_error msg ->
-      Log.warn ~ctx:"agent_stress" "cannot mkdir %s: %s" dir msg
+    try Unix.mkdir dir 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    | Unix.Unix_error (err, _, _) ->
+      Log.warn ~ctx:"agent_stress" "cannot mkdir %s: %s" dir
+        (Unix.error_message err)
 
 let do_flush () =
   match !store_path_ref with

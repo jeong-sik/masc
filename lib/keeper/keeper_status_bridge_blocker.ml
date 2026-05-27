@@ -43,8 +43,13 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
+     | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
+       when Keeper_error_classify.is_structural_oas_timeout_message message ->
+       Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
        Some Completion_contract_violation
+     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
+       Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> Some Sdk_token_budget_exceeded
      | Agent_sdk.Error.Agent (CostBudgetExceeded _) -> Some Sdk_cost_budget_exceeded
@@ -57,7 +62,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
      | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met
      | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
-     | Agent_sdk.Error.Agent (AgentExecutionTimeout _) -> Some Sdk_max_turns_exceeded
      (* Provider-level [Api] errors are surfaced via OAS retry / cascade
          layers and do not map to a typed blocker_class by themselves. *)
      | Agent_sdk.Error.Api _
@@ -137,6 +141,11 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       if summary = ""
       then
         "Watchdog marked the turn stale; inspect watchdog timing and the underlying root cause separately."
+      else summary
+    | Oas_agent_execution_timeout ->
+      if summary = ""
+      then
+        "OAS Agent.run or the enclosing cascade-attempt watchdog hit its execution timeout; this is not a provider HTTP timeout."
       else summary
     | No_tool_capable_provider ->
       if summary = ""

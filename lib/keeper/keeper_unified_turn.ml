@@ -753,6 +753,7 @@ let run_keeper_cycle
                  raised for the operator. Approving the gate auto-resumes
                  the keeper; rejecting it leaves the keeper paused. *)
                       let committed_tools = committed_mutating_tools_snapshot () in
+                      let turn_event_summary = turn_event_bus in
                       let failure_reason =
                         Option.value
                           ~default:
@@ -783,10 +784,14 @@ let run_keeper_cycle
                           ~labels:[ "keeper", meta.name; "reason", "ambiguous_partial" ]
                           ();
                         Log.Keeper.warn
-                          "%s: ambiguous partial commit (tools=[%s], reason=%s); paused \
-                           keeper and opened continue gate id=%s"
+                          "%s: ambiguous partial commit \
+                           (committed_mutating_tools=[%s], turn_events=%d, \
+                           payload_kinds=[%s], reason=%s); paused keeper and opened \
+                           continue gate id=%s"
                           meta.name
                           (String.concat ", " committed_tools)
+                          turn_event_summary.event_count
+                          (String.concat ", " turn_event_summary.payload_kinds)
                           (Keeper_registry.failure_reason_to_string failure_reason)
                           approval_id;
                         err, paused_meta
@@ -905,12 +910,15 @@ let run_keeper_cycle
                       meta.name
                       (Some failure_reason);
                     let committed_tools = committed_mutating_tools_snapshot () in
+                    let turn_event_summary = turn_event_bus in
                     Log.Keeper.info
-                      "%s: reconcile-required failure latched as %s after committed \
-                       tools [%s]"
+                      "%s: reconcile-required failure latched as %s after \
+                       committed_mutating_tools [%s] (turn_events=%d, payload_kinds=[%s])"
                       meta.name
                       (Keeper_registry.failure_reason_to_string failure_reason)
-                      (String.concat ", " committed_tools));
+                      (String.concat ", " committed_tools)
+                      turn_event_summary.event_count
+                      (String.concat ", " turn_event_summary.payload_kinds));
                   Keeper_unified_turn_failure.record_failure_and_maybe_escalate
                     ~config
                     ~meta

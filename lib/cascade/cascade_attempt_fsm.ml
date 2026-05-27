@@ -806,6 +806,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   | None -> (
       match err with
       | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) -> true
+      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) -> false
       | Agent_sdk.Error.Api _ -> false
       | Agent_sdk.Error.Provider _ -> false
       | Agent_sdk.Error.Internal _ -> false

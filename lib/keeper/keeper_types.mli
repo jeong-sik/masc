@@ -182,6 +182,7 @@ type blocker_class = Keeper_meta_contract.blocker_class =
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
+  | Oas_agent_execution_timeout
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded

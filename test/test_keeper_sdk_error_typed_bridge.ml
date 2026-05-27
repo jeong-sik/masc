@@ -7,7 +7,7 @@
     [bin/masc-trace] / Prometheus labels do not drift.
 
     Coverage:
-    - all 9 [api_error] variants (RateLimited / Overloaded / ServerError /
+    - all [api_error] variants (RateLimited / Overloaded / ServerError /
       AuthError / InvalidRequest / NotFound / ContextOverflow /
       NetworkError / Timeout)
     - agent_error variants reached via [SdkE.Agent _] routing
@@ -42,6 +42,9 @@ let api_cases : (string * SdkE.api_error * string) list =
     , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_refused }
     , "api_error_network" )
   ; "Timeout", Retry.Timeout { message = "60s" }, "api_error_timeout"
+  ; ( "StructuralTimeout"
+    , Retry.Timeout { message = "Turn wall-clock budget exhausted during cascade attempt (budget=554.9s)" }
+    , "api_error_oas_agent_execution_timeout" )
   ]
 ;;
 
@@ -50,6 +53,15 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   [ ( "Agent/MaxTurnsExceeded"
     , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 })
     , "agent_error_max_turns_exceeded:turns=10,limit=10" )
+  ; ( "Agent/AgentExecutionTimeout"
+    , SdkE.Agent
+        (SdkE.AgentExecutionTimeout
+           { elapsed_sec = 572.5
+           ; timeout_sec = 555.0
+           ; turn_count = 24
+           ; max_turns = 340
+           })
+    , "agent_error_execution_timeout:elapsed_sec=572.5,timeout_sec=555.0,turn_count=24,max_turns=340" )
   ; ( "Agent/ExitConditionMet"
     , SdkE.Agent (SdkE.ExitConditionMet { turn = 5 })
     , "agent_error_exit_condition_met:turn=5" )

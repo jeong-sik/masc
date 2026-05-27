@@ -1,45 +1,6 @@
 module U = Yojson.Safe.Util
 include Dashboard_utils
-
-(* Types from Dashboard_mission_assembly, re-exported for backward compat. *)
-type session_context = Dashboard_mission_assembly.session_context = {
-  session_id : string;
-  goal : string;
-  created_by : string option;
-  origin_kind : string;
-  namespace : string option;
-  status : Dashboard_utils.session_lifecycle;
-  health : Dashboard_utils.health_level;
-  member_names : string list;
-  started_at : string option;
-  elapsed_sec : int option;
-  operation_id : string option;
-  blocker_summary : string option;
-  last_event_at : string option;
-  last_event_ts : float;
-  last_event_summary : string;
-  communication_summary : string;
-  active_count : int;
-  seen_count : int;
-  planned_count : int;
-  required_count : int;
-  counts_basis : string;
-  top_attention : Yojson.Safe.t option;
-  top_recommendation : Yojson.Safe.t option;
-}
-
-type attention_context = Dashboard_mission_assembly.attention_context = {
-  severity : string;
-  has_action : bool;
-  last_seen_ts : float;
-  related_session_ids : string list;
-  related_agent_names : string list;
-  json : Yojson.Safe.t;
-}
-
-let dedup_strings items =
-  List.sort_uniq String.compare
-    (List.filter_map String_util.trim_to_option items)
+include Dashboard_mission_agents
 
 let top_item items =
   match items with
@@ -75,43 +36,6 @@ let session_status_string session_json =
           String_util.trim_to_option (string_field "status" session_json)
           |> Option.value
                ~default:"<missing status field in summary / meta / session>")
-
-let session_recent_events session_json =
-  list_field "recent_events" session_json
-
-let event_detail_json event_json =
-  member_assoc "detail" event_json
-
-let event_summary event_json =
-  let detail = event_detail_json event_json in
-  let event_type =
-    String_util.trim_to_option (string_field "event_type" event_json)
-    |> Option.value ~default:"event"
-  in
-  let actor =
-    match String_util.trim_to_option (string_field "actor" detail) with
-    | Some value -> Some value
-    | None -> String_util.trim_to_option (string_field "agent" detail)
-  in
-  let task_title =
-    match String_util.trim_to_option (string_field "task_title" detail) with
-    | Some value -> Some value
-    | None -> String_util.trim_to_option (string_field "title" detail)
-  in
-  let result = String_util.trim_to_option (compact_text (string_field "result" detail)) in
-  let reason = String_util.trim_to_option (compact_text (string_field "reason" detail)) in
-  let output_preview =
-    String_util.trim_to_option (compact_text (string_field "output_preview" detail))
-  in
-  match task_title, result, reason, output_preview with
-  | Some title, _, _, _ ->
-      compact_text
-        (Printf.sprintf "%s%s" (match actor with Some value -> value ^ " · " | None -> "") title)
-  | None, Some value, _, _ -> value
-  | None, None, Some value, _ -> value
-  | None, None, None, Some value -> value
-  | None, None, None, None ->
-      String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
 
 let system_session_creator_prefixes =
   [ "keeper"; "dashboard"; "operator"; "system"; "keeper-system"; "ecosystem" ]

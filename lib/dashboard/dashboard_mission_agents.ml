@@ -44,7 +44,9 @@ let event_summary event_json =
 
 let session_recent_events session_json = list_field "recent_events" session_json
 
-(* Types duplicated from Dashboard_mission to avoid circular dependency. *)
+(* SSOT: these types are the canonical definitions.
+   Dashboard_mission_assembly includes this module;
+   Dashboard_mission includes Dashboard_mission_agents. *)
 type session_context = {
   session_id : string;
   goal : string;

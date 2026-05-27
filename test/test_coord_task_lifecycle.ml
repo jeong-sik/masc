@@ -334,7 +334,7 @@ let test_write_intent_detected () =
   in
   assert_equal_string_list
     ~ctx:"write-intent: fix+update detected"
-    ~expected:[ "keeper_fs_edit"; "tool_execute" ]
+    ~expected:[ "tool_edit_file"; "tool_execute" ]
     ~actual:contract.required_tools
 ;;
 
@@ -347,7 +347,7 @@ let test_write_intent_korean () =
   in
   assert_equal_string_list
     ~ctx:"write-intent: Korean 수정+변경 detected"
-    ~expected:[ "keeper_fs_edit"; "tool_execute" ]
+    ~expected:[ "tool_edit_file"; "tool_execute" ]
     ~actual:contract.required_tools
 ;;
 
@@ -360,7 +360,7 @@ let test_write_intent_pr () =
   in
   assert_equal_string_list
     ~ctx:"write-intent: PR detected"
-    ~expected:[ "keeper_fs_edit"; "tool_execute" ]
+    ~expected:[ "tool_edit_file"; "tool_execute" ]
     ~actual:contract.required_tools
 ;;
 

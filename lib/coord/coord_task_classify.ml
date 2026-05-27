@@ -321,7 +321,7 @@ let text_signals_write_intent ~title ~description =
 
 let infer_required_tools_from_text ~title ~description =
   if text_signals_write_intent ~title ~description
-  then [ "keeper_fs_edit"; "tool_execute" ]
+  then [ "tool_edit_file"; "tool_execute" ]
   else []
 
 let ensure_task_contract_for_verification ?contract ~title ~description () =

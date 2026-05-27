@@ -66,20 +66,20 @@ export function normalizeStatusDotAriaLabel(ariaLabel?: string): string | undefi
 
 export function summarizeStatusDot({
   size = 'sm',
-  className,
+  class: classProp,
   ariaLabel,
 }: {
   size?: StatusDotSize
-  className?: string
+  class?: string
   ariaLabel?: string
 }): StatusDotSummary {
   const hasAriaLabel = normalizeStatusDotAriaLabel(ariaLabel) !== undefined
   return {
     size,
     mode: hasAriaLabel ? 'semantic' : 'decorative',
-    hasCustomClass: className !== undefined && className !== '',
+    hasCustomClass: classProp !== undefined && classProp !== '',
     hasAriaLabel,
-    classNameLength: className?.length ?? 0,
+    classNameLength: classProp?.length ?? 0,
   }
 }
 
@@ -103,7 +103,7 @@ export function StatusDot({
   ariaLabel,
   testId,
 }: StatusDotProps) {
-  const summary = summarizeStatusDot({ size, className: cx, ariaLabel })
+  const summary = summarizeStatusDot({ size, class: cx, ariaLabel })
   const cls = statusDotClasses(size, cx)
   const normalizedAriaLabel = normalizeStatusDotAriaLabel(ariaLabel)
   const semantic = summary.mode === 'semantic'

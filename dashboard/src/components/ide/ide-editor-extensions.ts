@@ -10,6 +10,7 @@ import {
 import type { LineOwnership } from './keeper-line-ownership-store'
 import type { KeeperTraceContextFields, KeeperTraceEvent, KeeperTraceSource } from './keeper-trace-store'
 import { kSigil } from '../keeper-badge'
+import { isPositiveSafeInteger } from '../common/normalize'
 
 // ── Read-only lock ────────────────────────────────────────────────
 // Prevents all user input. CM6 6.x uses EditorState.changeFilter.
@@ -517,9 +518,7 @@ function selectTraceLineFromGutterClick(
   const stack = target.closest('.cm-trace-stack')
   if (!(stack instanceof HTMLElement) || stack.getAttribute('aria-hidden') === 'true') return false
   const lineFromMarker = Number(stack.dataset.line)
-  const line = Number.isSafeInteger(lineFromMarker) && lineFromMarker >= 1
-    ? lineFromMarker
-    : blockLine
+  const line = isPositiveSafeInteger(lineFromMarker) ? lineFromMarker : blockLine
   const traceLine = getTraceLines().find(candidate => candidate.line === line)
   const topEvent = traceLine?.events[0]
   if (!topEvent) return false
@@ -656,14 +655,10 @@ function traceEventFilePath(event: KeeperTraceEvent): string | null {
 
 function traceEventLine(event: KeeperTraceEvent): number | null {
   if (event.source === 'anchored-thread') {
-    return event.line !== null && Number.isSafeInteger(event.line) && event.line >= 1
-      ? event.line
-      : null
+    return isPositiveSafeInteger(event.line) ? event.line : null
   }
   if (event.source === 'activity-event') {
-    return Number.isSafeInteger(event.line) && event.line >= 1
-      ? event.line
-      : null
+    return isPositiveSafeInteger(event.line) ? event.line : null
   }
   if (
     event.source === 'cascade-hop'
@@ -671,7 +666,7 @@ function traceEventLine(event: KeeperTraceEvent): number | null {
     || event.source === 'decision-log'
   ) {
     const line = event.line
-    return line !== undefined && Number.isSafeInteger(line) && line >= 1
+    return isPositiveSafeInteger(line)
       ? line
       : null
   }

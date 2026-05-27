@@ -8,7 +8,7 @@
       "files": [
         {
           "file": "lib/keeper/agent_tool_descriptor.ml",
-          "value": 1143
+          "value": 1285
         },
         {
           "file": "lib/keeper/keeper_approval_queue.ml",
@@ -20,7 +20,7 @@
         },
         {
           "file": "lib/keeper/keeper_status_detail.ml",
-          "value": 1010
+          "value": 1017
         },
         {
           "file": "lib/server/server_dashboard_http_runtime_info.ml",
@@ -28,12 +28,12 @@
         },
         {
           "file": "lib/types/types_core.ml",
-          "value": 1050
+          "value": 1074
         }
       ]
     },
     "catch_all_arms": {
-      "baseline": 3122,
+      "baseline": 3128,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -750,7 +750,7 @@
         },
         {
           "file": "lib/dashboard/dashboard_keeper_git_pr_proof.ml",
-          "value": 10
+          "value": 11
         },
         {
           "file": "lib/dashboard/dashboard_keeper_tool_failure_proof.ml",
@@ -1069,12 +1069,36 @@
           "value": 11
         },
         {
+          "file": "lib/keeper/agent_tool_descriptor_resolution.ml",
+          "value": 1
+        },
+        {
           "file": "lib/keeper/agent_tool_descriptor.ml",
-          "value": 10
+          "value": 12
         },
         {
           "file": "lib/keeper/agent_tool_dispatch_runtime.ml",
           "value": 2
+        },
+        {
+          "file": "lib/keeper/agent_tool_execute_command_semantics.ml",
+          "value": 7
+        },
+        {
+          "file": "lib/keeper/agent_tool_execute_input.ml",
+          "value": 2
+        },
+        {
+          "file": "lib/keeper/agent_tool_execute_readonly_policy.ml",
+          "value": 5
+        },
+        {
+          "file": "lib/keeper/agent_tool_execute_runtime.ml",
+          "value": 2
+        },
+        {
+          "file": "lib/keeper/agent_tool_execute_typed_input.ml",
+          "value": 8
         },
         {
           "file": "lib/keeper/agent_tool_filesystem_runtime.ml",
@@ -1098,10 +1122,6 @@
         },
         {
           "file": "lib/keeper/agent_tool_voice_runtime.ml",
-          "value": 2
-        },
-        {
-          "file": "lib/keeper/github_credentials.ml",
           "value": 2
         },
         {
@@ -1402,7 +1422,7 @@
         },
         {
           "file": "lib/keeper/keeper_meta_store.ml",
-          "value": 3
+          "value": 1
         },
         {
           "file": "lib/keeper/keeper_meta_tool_access.ml",
@@ -1561,22 +1581,6 @@
           "value": 2
         },
         {
-          "file": "lib/keeper/keeper_shell_bash_typed_input.ml",
-          "value": 2
-        },
-        {
-          "file": "lib/keeper/keeper_shell_bash.ml",
-          "value": 2
-        },
-        {
-          "file": "lib/keeper/keeper_shell_command_semantics.ml",
-          "value": 7
-        },
-        {
-          "file": "lib/keeper/keeper_shell_readonly_policy.ml",
-          "value": 5
-        },
-        {
           "file": "lib/keeper/keeper_social_model.ml",
           "value": 1
         },
@@ -1657,10 +1661,6 @@
           "value": 2
         },
         {
-          "file": "lib/keeper/keeper_tool_bash_input.ml",
-          "value": 8
-        },
-        {
           "file": "lib/keeper/keeper_tool_capability_axis.ml",
           "value": 4
         },
@@ -1694,7 +1694,7 @@
         },
         {
           "file": "lib/keeper/keeper_tool_registry.ml",
-          "value": 3
+          "value": 1
         },
         {
           "file": "lib/keeper/keeper_tool_resolution.ml",
@@ -1710,7 +1710,7 @@
         },
         {
           "file": "lib/keeper/keeper_tools_oas_failure_boundary.ml",
-          "value": 4
+          "value": 7
         },
         {
           "file": "lib/keeper/keeper_tools_oas_handler_exec.ml",
@@ -1726,11 +1726,11 @@
         },
         {
           "file": "lib/keeper/keeper_tools_oas_workflow.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/keeper/keeper_tools_oas.ml",
-          "value": 2
+          "value": 5
         },
         {
           "file": "lib/keeper/keeper_trace_emit.ml",
@@ -1775,10 +1775,6 @@
         {
           "file": "lib/keeper/keeper_turn_fsm.ml",
           "value": 2
-        },
-        {
-          "file": "lib/keeper/keeper_turn_lifecycle.ml",
-          "value": 1
         },
         {
           "file": "lib/keeper/keeper_turn_liveness.ml",
@@ -1911,6 +1907,10 @@
         {
           "file": "lib/keeper/keeper_world_observation_message_scope.ml",
           "value": 1
+        },
+        {
+          "file": "lib/keeper/repo_cli_credentials.ml",
+          "value": 2
         },
         {
           "file": "lib/keeper/social_model/keeper_social_model_bdi_speech_v1.ml",
@@ -2158,7 +2158,7 @@
         },
         {
           "file": "lib/operator/operator_control.ml",
-          "value": 8
+          "value": 7
         },
         {
           "file": "lib/operator/operator_digest_guidance.ml",
@@ -2838,7 +2838,7 @@
         },
         {
           "file": "lib/tool_keeper.ml",
-          "value": 6
+          "value": 8
         },
         {
           "file": "lib/tool_library.ml",
@@ -2938,7 +2938,7 @@
         },
         {
           "file": "lib/tool_task_completion_review.ml",
-          "value": 2
+          "value": 1
         },
         {
           "file": "lib/tool_task_contract_gate.ml",
@@ -3109,7 +3109,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 64,
+      "baseline": 63,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3311,10 +3311,6 @@
         {
           "file": "lib/tool_inline_dispatch_extra.ml",
           "value": 4
-        },
-        {
-          "file": "lib/tool_keeper_ops.ml",
-          "value": 1
         },
         {
           "file": "lib/tool_registry.ml",

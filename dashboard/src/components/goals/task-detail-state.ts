@@ -9,7 +9,6 @@ import { buildTraceEvents, type UnifiedTraceEvent } from '../session-trace/sessi
 import { findKeeper } from '../../lib/keeper-utils'
 import { goalById } from './goal-helpers'
 import type { Goal, Task } from '../../types'
-export { selectedTask } from './task-detail-selection'
 
 // -- Activity filter (owned here, consumed by task-activity-list) ---
 

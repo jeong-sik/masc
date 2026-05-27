@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { formatTokens } from '../lib/format-number'
+import { formatTokens, isFiniteMetricValue } from '../lib/format-number'
 import { SPARKLINE_W, SPARKLINE_H, SPARKLINE_PAD } from '../lib/sparkline-config'
 import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
@@ -141,9 +141,6 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
 
 // ── Sparkline helpers ────────────────────────────────────
 
-function isFiniteMetricValue(value: number | null | undefined): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
-}
 
 export function miniSparkline(
   data: Array<number | null | undefined>,

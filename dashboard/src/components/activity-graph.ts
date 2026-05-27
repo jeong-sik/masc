@@ -33,7 +33,7 @@ import {
 import {
   activityRange,
   graphResource,
-  loadGraph,
+  refreshActivityGraph,
   loadGraphForRange,
 } from './activity-graph-store'
 import type { ActivityGraphResponse, ActivityGraphNode, ActionTimelineGroup } from '../types'
@@ -426,7 +426,7 @@ export function ObservatoryActivityPanels() {
           ? html`
               <${SectionCard} label="활동 분석" class="section" testId="activity_graph.error">
                 <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + state.error} compact />
-                <${ActionButton} variant="ghost" onClick=${() => { void loadGraph() }}>다시 시도<//>
+                <${ActionButton} variant="ghost" onClick=${() => { void refreshActivityGraph() }}>다시 시도<//>
               <//>
             `
           : !data

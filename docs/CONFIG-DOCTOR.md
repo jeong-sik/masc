@@ -91,8 +91,8 @@ Core fields:
 - `sandbox_preflight`: Docker keeper sandbox readiness (`docker` daemon,
   local image presence, required commands, hardening checks). The JSON also
   exposes `hard_mode`, `credential_fallbacks_disabled`, and `git_egress` so
-  operators can confirm whether git/gh traffic is legacy Docker dispatch or
-  hard-mode brokered structured tools.
+  operators can confirm whether repo CLI traffic uses identity dispatch or the
+  container network policy.
 
 Important interpretation:
 

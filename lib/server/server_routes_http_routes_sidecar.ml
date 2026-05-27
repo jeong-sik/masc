@@ -500,7 +500,7 @@ let clamp_lines = function
 ;;
 
 let respond_json request reqd ~status body =
-  respond_json_with_cors ~status request reqd (Yojson.Safe.to_string body)
+  respond_json_value_with_cors ~status request reqd body
 ;;
 
 let bad_request request reqd msg =

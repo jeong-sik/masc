@@ -10,13 +10,9 @@
 // KpiStrip provides KpiStripContext; KpiCell.solid reads it and
 // defaults `bare` to true when the cell is inside a strip. Caller
 // can still set `bare={false}` to opt out (test parity below).
-//
-// `resolveStripCols` is exported for direct testing (pure helper).
 
 import { createContext, useContext, type JSX } from 'solid-js'
 import { resolveStripCols, type KpiStripVariant } from './kpi-shared'
-
-export { resolveStripCols, type KpiStripVariant } from './kpi-shared'
 
 export interface KpiStripProps {
   variant?: KpiStripVariant

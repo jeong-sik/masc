@@ -843,47 +843,41 @@ let make_health_response_json ?(listener = "http/1.1") request =
 
 (** Health check handler *)
 let health_handler request reqd =
-  Http.Response.json
-    (Yojson.Safe.to_string (make_health_response_json request))
-    reqd
+  Http.Response.json_value (make_health_response_json request) reqd
 
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.
     Does not depend on server_state initialization.
     Kubernetes/Railway liveness probe target. *)
 let liveness_handler _request reqd =
   let startup = Server_startup_state.to_yojson () in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-         [
-           ("live", `Bool true);
-           ("startup", startup);
-         ])
-  in
-  Http.Response.json body reqd
+  Http.Response.json_value
+    (`Assoc
+       [
+         ("live", `Bool true);
+         ("startup", startup);
+       ])
+    reqd
 
 (** Readiness probe: responds 200 only when server_state is initialized. *)
 let readiness_handler _request reqd =
   let current = Server_startup_state.(!state) in
   if current.state_ready then
-    Http.Response.json
-      (Yojson.Safe.to_string
-         (`Assoc
-            [
-              ("ready", `Bool true);
-              ("phase", `String (Server_startup_state.phase_to_string current.phase));
-              ("backend_mode", `String current.backend_mode);
-            ]))
+    Http.Response.json_value
+      (`Assoc
+         [
+           ("ready", `Bool true);
+           ("phase", `String (Server_startup_state.phase_to_string current.phase));
+           ("backend_mode", `String current.backend_mode);
+         ])
       reqd
   else
-    Http.Response.json ~status:`Service_unavailable
-      (Yojson.Safe.to_string
-         (`Assoc
-            [
-              ("ready", `Bool false);
-              ("phase", `String (Server_startup_state.phase_to_string current.phase));
-              ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
-            ]))
+    Http.Response.json_value ~status:`Service_unavailable
+      (`Assoc
+         [
+           ("ready", `Bool false);
+           ("phase", `String (Server_startup_state.phase_to_string current.phase));
+           ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
+         ])
       reqd
 
 let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter

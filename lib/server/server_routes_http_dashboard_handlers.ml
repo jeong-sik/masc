@@ -21,7 +21,7 @@ let handle_broadcast state agent_name reqd body_str =
       | Some msg -> fields @ [ ("error", `String msg) ]
       | None -> fields
     in
-    Http.Response.json (Yojson.Safe.to_string (`Assoc fields)) reqd
+    Http.Response.json_value (`Assoc fields) reqd
   in
   try
     let json = Yojson.Safe.from_string body_str in
@@ -39,13 +39,12 @@ let handle_broadcast state agent_name reqd body_str =
 
 let handle_dashboard_link_previews state req reqd body_str =
   let respond_error message =
-    Http.Response.json ~status:`Bad_request ~request:req
-      (Yojson.Safe.to_string
-         (`Assoc
-           [
-             ("ok", `Bool false);
-             ("error", `String message);
-           ]))
+    Http.Response.json_value ~status:`Bad_request ~request:req
+      (`Assoc
+         [
+           ("ok", `Bool false);
+           ("error", `String message);
+         ])
       reqd
   in
   try
@@ -55,8 +54,7 @@ let handle_dashboard_link_previews state req reqd body_str =
         ~state ~args
     with
     | Ok json ->
-        Http.Response.json ~compress:true ~request:req
-          (Yojson.Safe.to_string json) reqd
+        Http.Response.json_value ~compress:true ~request:req json reqd
     | Error message -> respond_error message
   with Yojson.Json_error message ->
     respond_error ("invalid json: " ^ message)
@@ -68,8 +66,9 @@ let handle_dashboard_task_history state req reqd =
     | None -> ""
   in
   if task_id = "" then
-    Http.Response.json ~status:`Bad_request ~request:req
-      {|{"error":"task_id is required"}|} reqd
+    Http.Response.json_value ~status:`Bad_request ~request:req
+      (`Assoc [ ("error", `String "task_id is required") ])
+      reqd
   else
     let limit =
       Server_utils.int_query_param req "limit" ~default:50
@@ -85,7 +84,7 @@ let handle_dashboard_task_history state req reqd =
           Tool_task.task_history_events_json state.Mcp_server.room_config
             ~task_id ~limit))
     in
-    Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+    Http.Response.json_value ~compress:true ~request:req json reqd
 
 let handle_dashboard_rooms state req reqd =
   let limit =
@@ -98,5 +97,4 @@ let handle_dashboard_rooms state req reqd =
     | None -> trimmed_query_param req "agent"
   in
   let json = Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me ~limit () in
-  Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-
+  Http.Response.json_value ~compress:true ~request:req json reqd

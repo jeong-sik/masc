@@ -9,6 +9,7 @@
  auth_nickname
  plan_action_outcome
  prometheus_text
+ http_response_payload
  error_event_type
  keeper_alert_persist_kind
  keeper_metrics_sse_failure_kind

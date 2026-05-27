@@ -28,10 +28,31 @@ export function boardMessageRowKey(message: Message, index: number): string {
   return message.id ?? `${message.seq ?? 'message'}-${index}`
 }
 
+/**
+ * One-line preview text for a board `Message`.
+ *
+ * Prefers the state-stripped content (so a message that's *only* a
+ * state block falls through to either raw content or `'(empty)'`).
+ * The state-only case is what differentiates this fallback chain from
+ * the `state-block-messages` panel's variant, which intentionally
+ * surfaces `'(state-only message)'` instead because that view is
+ * specifically for state-block traffic.
+ *
+ * Two board panels (`mention-inbox`, `message-room-timeline`) shipped
+ * this exact body file-internal as `previewContent`. The third panel
+ * (`state-block-messages`) stays on its own variant — its empty branch
+ * is `'(state-only message)'` rather than `'(empty)'`, and the fallback
+ * chain skips the raw content step.
+ */
+export function previewBoardMessage(message: Message): string {
+  return stripStateBlocks(message.content).trim() || message.content.trim() || '(empty)'
+}
+
 import { navigate } from '../router'
 import type { Message } from '../types'
 import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
+import { stripStateBlocks } from '../keeper-message'
 import type { BoardActorIdentity, BoardContributorQuality } from '../types'
 
 /** Strip inline markdown formatting from title text (bold, italic, code). */

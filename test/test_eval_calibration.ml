@@ -34,7 +34,7 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
     ?(notes = "Implemented JWT refresh token rotation") ?(agent = "dreamer") ()
   : AR.review_request =
   { task_title = title; task_description = desc;
-    completion_notes = notes; agent_name = agent }
+    completion_notes = notes; agent_name = agent; task_id = "test-task-eval" }
 
 let make_result ?(verdict = AR.Approve) ?(cascade = "verifier")
     ?gen_cascade ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =

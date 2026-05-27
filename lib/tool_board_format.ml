@@ -259,7 +259,7 @@ let sources_footer sources =
          in
          Some ("- <" ^ url ^ ">" ^ quote)
        | _ -> None)
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   match List.filter_map line_of_source sources with
   | [] -> ""
@@ -486,7 +486,7 @@ let source_entries_arg args =
                    | Some value -> [ "quote", `String value ]
                    | None -> []))))
        | _ -> None)
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   match Option.value ~default:(`Null) (Json_util.assoc_member_opt "sources" args) with
   | `List values ->
@@ -546,7 +546,7 @@ let string_list_field fields key =
       | `String value ->
         let trimmed = String.trim value in
         if String.equal trimmed "" then None else Some trimmed
-      | _ -> None)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None)
   | _ -> []
 ;;
 
@@ -571,9 +571,9 @@ let object_list_arg args key =
        values
        |> List.filter_map (function
          | `Assoc fields -> Some fields
-         | _ -> None)
+         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
      | _ -> [])
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 ;;
 
 let provenance_arg args =
@@ -587,7 +587,7 @@ let provenance_arg args =
             "provenance must be an object (received %s)"
             (Json_util.kind_name other))
      | _ -> Ok (`Assoc []))
-  | _ -> Ok (`Assoc [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Ok (`Assoc [])
 ;;
 
 (** {1 Yojson-error boundary}

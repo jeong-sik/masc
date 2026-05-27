@@ -157,5 +157,58 @@ let pp fmt = function
       remote
       (Format.pp_print_option Format.pp_print_string)
       branch
+  | W (Pwd ()) -> Format.fprintf fmt "Pwd"
+  | W (Echo { args }) ->
+    Format.fprintf
+      fmt
+      "Echo(args=%a)"
+      (Format.pp_print_list
+         ~pp_sep:(fun fmt () -> Format.fprintf fmt " ")
+         Format.pp_print_string)
+      args
+  | W (Which { names }) ->
+    Format.fprintf
+      fmt
+      "Which(names=%a)"
+      (Format.pp_print_list
+         ~pp_sep:(fun fmt () -> Format.fprintf fmt " ")
+         Format.pp_print_string)
+      names
+  | W (Sort { reverse; numeric; unique; key; file }) ->
+    Format.fprintf
+      fmt
+      "Sort(reverse=%b, numeric=%b, unique=%b, key=%a, file=%a)"
+      reverse
+      numeric
+      unique
+      (Format.pp_print_option Format.pp_print_int)
+      key
+      (Format.pp_print_option Format.pp_print_string)
+      file
+  | W (Cut { delimiter; fields; file }) ->
+    Format.fprintf
+      fmt
+      "Cut(delimiter=%a, fields=%s, file=%a)"
+      (Format.pp_print_option Format.pp_print_string)
+      delimiter
+      fields
+      (Format.pp_print_option Format.pp_print_string)
+      file
+  | W (Tr { set1; set2; delete; squeeze }) ->
+    Format.fprintf
+      fmt
+      "Tr(set1=%s, set2=%a, delete=%b, squeeze=%b)"
+      set1
+      (Format.pp_print_option Format.pp_print_string)
+      set2
+      delete
+      squeeze
+  | W (Date { format; utc }) ->
+    Format.fprintf
+      fmt
+      "Date(format=%a, utc=%b)"
+      (Format.pp_print_option Format.pp_print_string)
+      format
+      utc
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

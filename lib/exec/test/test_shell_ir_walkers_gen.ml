@@ -43,6 +43,13 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Git_commit { message = "test"; amend = false })
   ; W (Git_push { force = false; force_with_lease = false; set_upstream = false; remote = None; branch = None })
   ; W (Git_pull { rebase = false; remote = None; branch = None })
+  ; W (Pwd ())
+  ; W (Echo { args = [ "hello" ] })
+  ; W (Which { names = [ "ocaml" ] })
+  ; W (Sort { reverse = false; numeric = false; unique = false; key = None; file = None })
+  ; W (Cut { delimiter = None; fields = "1"; file = None })
+  ; W (Tr { set1 = "a-z"; set2 = None; delete = false; squeeze = false })
+  ; W (Date { format = None; utc = false })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -130,9 +137,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    20
+    27
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 20 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 27 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -167,6 +174,13 @@ let test_of_simple_round_trip () =
     ; W (Git_commit { message = "feat: add feature"; amend = false })
     ; W (Git_push { force = false; force_with_lease = true; set_upstream = true; remote = Some "origin"; branch = Some "main" })
     ; W (Git_pull { rebase = true; remote = Some "origin"; branch = Some "develop" })
+    ; W (Pwd ())
+    ; W (Echo { args = [ "hello"; "world" ] })
+    ; W (Which { names = [ "ocaml"; "dune" ] })
+    ; W (Sort { reverse = true; numeric = true; unique = true; key = Some 2; file = Some "/tmp/x" })
+    ; W (Cut { delimiter = Some ":"; fields = "1,3"; file = Some "/etc/passwd" })
+    ; W (Tr { set1 = "a-z"; set2 = Some "A-Z"; delete = false; squeeze = true })
+    ; W (Date { format = Some "+%Y-%m-%d"; utc = true })
     ]
   in
   List.iter
@@ -254,6 +268,7 @@ let test_constructor_names_in_declaration_order () =
     [ "Ls"; "Cat"; "Rg"; "Git_status"; "Git_clone"; "Curl"; "Rm"; "Sudo"
     ; "Find"; "Head"; "Tail"; "Grep"; "Mkdir"; "Wc"
     ; "Git_diff"; "Git_log"; "Git_commit"; "Git_push"; "Git_pull"
+    ; "Pwd"; "Echo"; "Which"; "Sort"; "Cut"; "Tr"; "Date"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

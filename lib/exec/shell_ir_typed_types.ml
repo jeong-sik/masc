@@ -124,6 +124,39 @@ and (_, _, _, _) command =
       ; branch : string option
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Pwd : unit -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Echo :
+      { args : string list }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Which :
+      { names : string list }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Sort :
+      { reverse : bool
+      ; numeric : bool
+      ; unique : bool
+      ; key : int option
+      ; file : string option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Cut :
+      { delimiter : string option
+      ; fields : string
+      ; file : string option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Tr :
+      { set1 : string
+      ; set2 : string option
+      ; delete : bool
+      ; squeeze : bool
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Date :
+      { format : string option
+      ; utc : bool
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

@@ -70,6 +70,13 @@ let constructor_label = function
      | Shell_ir_typed.Git_commit _ -> "Git_commit"
      | Shell_ir_typed.Git_push _ -> "Git_push"
      | Shell_ir_typed.Git_pull _ -> "Git_pull"
+     | Shell_ir_typed.Pwd _ -> "Pwd"
+     | Shell_ir_typed.Echo _ -> "Echo"
+     | Shell_ir_typed.Which _ -> "Which"
+     | Shell_ir_typed.Sort _ -> "Sort"
+     | Shell_ir_typed.Cut _ -> "Cut"
+     | Shell_ir_typed.Tr _ -> "Tr"
+     | Shell_ir_typed.Date _ -> "Date"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)
@@ -124,11 +131,11 @@ let test_non_literal_arg_falls_through_to_generic () =
     true (is_generic result)
 
 let test_unhandled_safe_bin_falls_through_to_generic () =
-  (* `pwd` is safe-bin-kind but has no dedicated parser. *)
-  let simple = make_simple "pwd" [] in
+  (* `diff` is audited-bin-kind but has no dedicated typed parser. *)
+  let simple = make_simple "diff" [ "a"; "b" ] in
   let result = Shell_ir_typed.of_simple simple in
   check bool
-    "safe-bin without dedicated parser must fall through to Generic"
+    "audited-bin without dedicated parser must fall through to Generic"
     true (is_generic result)
 
 let test_docker_falls_through_to_generic () =

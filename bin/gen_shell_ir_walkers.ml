@@ -42,7 +42,7 @@ type ctor =
 (* Order mirrors lib/exec/shell_ir_typed.{ml,mli} declaration order
    (Ls, Cat, Rg, Git_status, Git_clone, Curl, Rm, Sudo, Find, Head,
    Tail, Grep, Mkdir, Wc, Git_diff, Git_log, Git_commit, Git_push,
-   Git_pull, Generic). *)
+   Git_pull, Pwd, Echo, Which, Sort, Cut, Tr, Date, Generic). *)
 let shell_ir_typed_spec : ctor list =
   [ { name = "Ls"
     ; anon_pattern = "Ls _"
@@ -792,6 +792,223 @@ let rec parse rebase remote branch = function
 in
 parse false None None args|}
     }
+  ; { name = "Pwd"
+    ; anon_pattern = "Pwd _"
+    ; bind_pattern = "Pwd ()"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pwd
+      ; args = []
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pwd"
+    ; parse_body =
+        Some
+          {|match args with
+| [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pwd ()))
+| _ -> None|}
+    }
+  ; { name = "Echo"
+    ; anon_pattern = "Echo _"
+    ; bind_pattern = "Echo { args = echo_args }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Echo
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) echo_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Echo"
+    ; parse_body =
+        Some
+          {|Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Echo { args = args }))|}
+    }
+  ; { name = "Which"
+    ; anon_pattern = "Which _"
+    ; bind_pattern = "Which { names }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Which
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) names
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Which"
+    ; parse_body =
+        Some
+          {|match args with
+| [] -> None
+| names -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Which { names }))|}
+    }
+  ; { name = "Sort"
+    ; anon_pattern = "Sort _"
+    ; bind_pattern = "Sort { reverse; numeric; unique; key; file }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if reverse then [ "-r" ] else [])
+        @ (if numeric then [ "-n" ] else [])
+        @ (if unique then [ "-u" ] else [])
+        @ (match key with None -> [] | Some k -> [ "-k"; string_of_int k ])
+      in
+      let file_args = match file with None -> [] | Some f -> [ f ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Sort
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ file_args)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Sort"
+    ; parse_body =
+        Some
+          {|
+let rec parse reverse numeric unique key file = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sort { reverse; numeric; unique; key; file }))
+  | "-r" :: rest | "--reverse" :: rest -> parse true numeric unique key file rest
+  | "-n" :: rest | "--numeric-sort" :: rest -> parse reverse true unique key file rest
+  | "-u" :: rest | "--unique" :: rest -> parse reverse numeric true key file rest
+  | "-k" :: n :: rest | "--key" :: n :: rest ->
+    (try parse reverse numeric unique (Some (int_of_string n)) file rest
+     with Failure _ -> None)
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse reverse numeric unique key file rest
+    else (
+      match file with
+      | None -> parse reverse numeric unique key (Some arg) rest
+      | Some _ -> None)
+in
+parse false false false None None args|}
+    }
+  ; { name = "Cut"
+    ; anon_pattern = "Cut _"
+    ; bind_pattern = "Cut { delimiter; fields; file }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (match delimiter with None -> [] | Some d -> [ "-d"; d ])
+        @ [ "-f"; fields ]
+      in
+      let file_args = match file with None -> [] | Some f -> [ f ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Cut
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ file_args)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Cut"
+    ; parse_body =
+        Some
+          {|
+let rec parse delimiter fields file = function
+  | [] ->
+    (match fields with
+     | Some f -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cut { delimiter; fields = f; file }))
+     | None -> None)
+  | "-d" :: d :: rest -> parse (Some d) fields file rest
+  | "-f" :: f :: rest -> parse delimiter (Some f) file rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse delimiter fields file rest
+    else (
+      match file with
+      | None -> parse delimiter fields (Some arg) rest
+      | Some _ -> None)
+in
+parse None None None args|}
+    }
+  ; { name = "Tr"
+    ; anon_pattern = "Tr _"
+    ; bind_pattern = "Tr { set1; set2; delete; squeeze }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if delete then [ "-d" ] else [])
+        @ (if squeeze then [ "-s" ] else [])
+      in
+      let set_args = match set2 with None -> [ set1 ] | Some s -> [ set1; s ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Tr
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ set_args)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Tr"
+    ; parse_body =
+        Some
+          {|
+let rec parse delete squeeze set1 set2 = function
+  | [] ->
+    (match set1 with
+     | Some s1 -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tr { set1 = s1; set2; delete; squeeze }))
+     | None -> None)
+  | "-d" :: rest -> parse true squeeze set1 set2 rest
+  | "-s" :: rest -> parse delete true set1 set2 rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse delete squeeze set1 set2 rest
+    else (
+      match set1 with
+      | None -> parse delete squeeze (Some arg) set2 rest
+      | Some _ ->
+        (match set2 with
+         | None -> parse delete squeeze set1 (Some arg) rest
+         | Some _ -> None))
+in
+parse false false None None args|}
+    }
+  ; { name = "Date"
+    ; anon_pattern = "Date _"
+    ; bind_pattern = "Date { format; utc }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args = if utc then [ "-u" ] else [] in
+      let format_args = match format with None -> [] | Some f -> [ f ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Date
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ format_args)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Date"
+    ; parse_body =
+        Some
+          {|
+let rec parse utc format = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Date { format; utc }))
+  | "-u" :: rest | "--utc" :: rest | "--universal" :: rest -> parse true format rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse utc format rest
+    else parse utc (Some arg) rest
+in
+parse false None args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"
@@ -936,23 +1153,23 @@ let emit_of_simple buf spec =
     \        | Some Exec_program.Grep -> gen_parse_Grep lit_argv\n\
     \        | Some Exec_program.Mkdir -> gen_parse_Mkdir lit_argv\n\
     \        | Some Exec_program.Wc -> gen_parse_Wc lit_argv\n\
+    \        | Some Exec_program.Pwd -> gen_parse_Pwd lit_argv\n\
+    \        | Some Exec_program.Echo -> gen_parse_Echo lit_argv\n\
+    \        | Some Exec_program.Which -> gen_parse_Which lit_argv\n\
+    \        | Some Exec_program.Sort -> gen_parse_Sort lit_argv\n\
+    \        | Some Exec_program.Cut -> gen_parse_Cut lit_argv\n\
+    \        | Some Exec_program.Tr -> gen_parse_Tr lit_argv\n\
+    \        | Some Exec_program.Date -> gen_parse_Date lit_argv\n\
     \        | Some\n\
-    \            ( Exec_program.Pwd\n\
-    \            | Exec_program.Echo\n\
-    \            | Exec_program.Which\n\
-    \            | Exec_program.Test\n\
+    \            ( Exec_program.Test\n\
     \            | Exec_program.Basename\n\
     \            | Exec_program.Dirname\n\
     \            | Exec_program.Stat\n\
     \            | Exec_program.Du\n\
     \            | Exec_program.Df\n\
-    \            | Exec_program.Sort\n\
     \            | Exec_program.Uniq\n\
-    \            | Exec_program.Cut\n\
-    \            | Exec_program.Tr\n\
     \            | Exec_program.File\n\
     \            | Exec_program.Printf\n\
-    \            | Exec_program.Date\n\
     \            | Exec_program.Env\n\
     \            | Exec_program.Printenv\n\
     \            | Exec_program.Hostname\n\

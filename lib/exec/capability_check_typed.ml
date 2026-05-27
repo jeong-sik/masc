@@ -167,5 +167,38 @@ let of_command = function
     [ Capability.Exec_program
         (Exec_program.of_known Exec_program.Git, arg "pull" :: flag_args @ positional)
     ]
+  | Shell_ir_typed.W (Pwd ()) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pwd, []) ]
+  | Shell_ir_typed.W (Echo { args = echo_args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Echo, List.map arg echo_args) ]
+  | Shell_ir_typed.W (Which { names }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Which, List.map arg names) ]
+  | Shell_ir_typed.W (Sort { reverse; numeric; unique; key; file }) ->
+    let flag_args =
+      (if reverse then [ arg "-r" ] else [])
+      @ (if numeric then [ arg "-n" ] else [])
+      @ (if unique then [ arg "-u" ] else [])
+      @ (match key with None -> [] | Some k -> [ arg "-k"; arg (string_of_int k) ])
+    in
+    let file_args = match file with None -> [] | Some f -> [ arg f ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Sort, flag_args @ file_args) ]
+  | Shell_ir_typed.W (Cut { delimiter; fields; file }) ->
+    let flag_args =
+      (match delimiter with None -> [] | Some d -> [ arg "-d"; arg d ])
+      @ [ arg "-f"; arg fields ]
+    in
+    let file_args = match file with None -> [] | Some f -> [ arg f ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Cut, flag_args @ file_args) ]
+  | Shell_ir_typed.W (Tr { set1; set2; delete; squeeze }) ->
+    let flag_args =
+      (if delete then [ arg "-d" ] else [])
+      @ (if squeeze then [ arg "-s" ] else [])
+    in
+    let set_args = match set2 with None -> [ arg set1 ] | Some s -> [ arg set1; arg s ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tr, flag_args @ set_args) ]
+  | Shell_ir_typed.W (Date { format; utc }) ->
+    let flag_args = if utc then [ arg "-u" ] else [] in
+    let format_args = match format with None -> [] | Some f -> [ arg f ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Date, flag_args @ format_args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

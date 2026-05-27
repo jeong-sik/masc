@@ -30,7 +30,7 @@ val keeper_metrics_store : Coord.config -> string -> Dated_jsonl.t
     are intentionally kept out of the primary metrics stream so bursts of
     tool-event action counters cannot evict full context snapshots from
     fixed-tail dashboard/status readers. *)
-val github_pr_action_metrics_store : Coord.config -> string -> Dated_jsonl.t
+val repo_pr_action_metrics_store : Coord.config -> string -> Dated_jsonl.t
 
 (** Date-split execution-receipt store:
     [.masc/keepers/<name>/execution-receipts/YYYY-MM/DD.jsonl]. *)

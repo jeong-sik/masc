@@ -42,7 +42,7 @@ let keeper_metrics_store config name : Dated_jsonl.t =
   in
   Eio_guard.with_mutex metrics_store_mu lookup
 
-let github_pr_action_metrics_store config name : Dated_jsonl.t =
+let repo_pr_action_metrics_store config name : Dated_jsonl.t =
   let dir =
     Filename.concat (keeper_dir_ config) (name ^ "/pr-action-metrics")
   in

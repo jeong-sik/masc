@@ -353,7 +353,7 @@ MASC_CRED_MATERIALIZER=on dune exec masc-mcp -- serve
 
 # Now keeper smoke
 keeper_name="anyang-keepers" \
-  dune exec scripts/integration/github_pr_create_smoke.exe
+  scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh
 # Expected: PR created, attributed to <username> from credential record.
 ```
 

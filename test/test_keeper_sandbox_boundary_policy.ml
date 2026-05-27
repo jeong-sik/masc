@@ -216,8 +216,8 @@ let test_sandbox_failure_recording_not_shell_docker_coupled () =
 let test_dedicated_remote_tool_layer_removed () =
   List.iter
     assert_source_absent
-    [ "lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"
-    ; "lib/keeper/" ^ "keeper_tool_" ^ "github_pr.mli"
+    [ "lib/keeper/" ^ "keeper_tool_" ^ "github_" ^ "pr.ml"
+    ; "lib/keeper/" ^ "keeper_tool_" ^ "github_" ^ "pr.mli"
     ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml"
     ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli"
     ]

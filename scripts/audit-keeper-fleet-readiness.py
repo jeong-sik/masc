@@ -1132,7 +1132,7 @@ def pr_lifecycle_evidence_from_action_metric(
             docker_evidence.add(item)
 
     metric_event = row.get("metric_event")
-    if metric_event == "github_pr_work_action":
+    if metric_event == "repo_pr_work_action":
         if not bool_field(row, "pr_work_action_success"):
             return evidence, docker_evidence
         action = row.get("pr_work_action")
@@ -1143,7 +1143,7 @@ def pr_lifecycle_evidence_from_action_metric(
                 add(f"pr_create:{source}")
             case "GIT_PUSH":
                 add(f"git_push:{source}")
-    elif metric_event == "github_pr_review_action":
+    elif metric_event == "repo_pr_review_action":
         if not bool_field(row, "pr_review_action_success"):
             return evidence, docker_evidence
         action = row.get("pr_review_action")

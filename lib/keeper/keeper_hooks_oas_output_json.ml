@@ -201,7 +201,7 @@ let nested_string_field_opt parent key json =
   | Some nested_json -> string_field_opt key nested_json
   | None -> None
 
-let github_pr_url_from_text raw =
+let repo_pr_url_from_text raw =
   let normalized =
     raw
     |> String.map (function
@@ -234,7 +234,7 @@ let pr_url_of_json json =
   ]
   |> List.find_map (function
        | None -> None
-       | Some value -> github_pr_url_from_text value)
+       | Some value -> repo_pr_url_from_text value)
 
 let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
   Keeper_tool_capability_axis.shell_command_input_candidates tool_name input

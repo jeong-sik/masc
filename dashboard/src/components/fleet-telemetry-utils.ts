@@ -293,6 +293,15 @@ export function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<strin
 
 type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 
+// Fleet offline status tokens — shared by `fleetBand()` and `statusClass()`.
+// Overlaps with `OFFLINE_DISPLAY_STATUSES` in keeper-classifiers.ts but
+// excludes `'inactive'`: fleet treats inactive as an attention signal
+// (line below), not a hard offline. This is an intentional semantic
+// divergence, not drift.
+const FLEET_OFFLINE_STATUSES: ReadonlySet<string> = new Set([
+  'offline', 'unbooted', 'stopped', 'dead', 'crashed',
+])
+
 function normalizedDiagnosticHealthState(row: FleetRow): string | null {
   return normalizeText(row.diagnostic_health_state)?.toLowerCase() ?? null
 }
@@ -311,11 +320,7 @@ export function fleetBand(row: FleetRow): FleetBand {
   if (
     !row.keepalive_running
     || isOfflineDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'offline'
-    || normalizedStatus === 'unbooted'
-    || normalizedStatus === 'stopped'
-    || normalizedStatus === 'dead'
-    || normalizedStatus === 'crashed'
+    || FLEET_OFFLINE_STATUSES.has(normalizedStatus)
   ) {
     return 'offline'
   }
@@ -503,11 +508,7 @@ export function statusClass(row: FleetRow): string {
   if (
     !row.keepalive_running
     || isOfflineDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'offline'
-    || normalizedStatus === 'stopped'
-    || normalizedStatus === 'unbooted'
-    || normalizedStatus === 'dead'
-    || normalizedStatus === 'crashed'
+    || FLEET_OFFLINE_STATUSES.has(normalizedStatus)
   ) {
     return 'text-[var(--bad-light)]'
   }

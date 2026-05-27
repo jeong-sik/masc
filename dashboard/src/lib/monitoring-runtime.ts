@@ -105,6 +105,7 @@ const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
   compacting: 'Compacting',
   handoff: 'HandingOff',
   failing: 'Failing',
+  overflowed: 'Overflowed',
   draining: 'Draining',
   paused: 'Paused',
   crashed: 'Crashed',

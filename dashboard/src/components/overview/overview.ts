@@ -31,6 +31,7 @@ import { openTaskDetail } from '../goals/task-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
+import { isAgentOffline } from '../../lib/agent-status'
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ export interface TaskAlert {
 /** Derive a list of failing / offline agent alerts from the live agent list. */
 export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
   return agentList
-    .filter(a => a.status === 'offline' || a.status === 'inactive')
+    .filter(a => isAgentOffline(a))
     .map(a => ({
       name: a.name,
       display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,

@@ -584,7 +584,8 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Task_submit_for_verification
     | Tool_name.Keeper.Tasks_audit
     | Tool_name.Keeper.Tasks_list -> "coordination"
-    | Tool_name.Keeper.Execute | Tool_name.Keeper.Search_files -> "shell"
+    | Tool_name.Keeper.Execute -> "execute"
+    | Tool_name.Keeper.Search_files -> "search_files"
     | Tool_name.Keeper.Fs_edit
     | Tool_name.Keeper.Fs_read
     | Tool_name.Keeper.Ide_annotate -> "fs"

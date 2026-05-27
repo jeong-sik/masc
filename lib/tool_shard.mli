@@ -59,8 +59,8 @@ val shard_board : shard
 val shard_filesystem : shard
 (** File I/O: read-only inspection. *)
 
-val shard_shell : shard
-(** Structured shell search access. *)
+val shard_search_files : shard
+(** SearchFiles structured repo inspection access. *)
 
 (** {1 Lookup} *)
 
@@ -70,7 +70,7 @@ val get_shard : string -> shard option
 (** {1 Tool Composition} *)
 
 val default_shard_names : string list
-(** Default shards for a new keeper: base, board, filesystem, shell,
+(** Default shards for a new keeper: base, board, filesystem, search_files,
     library, taskboard. *)
 
 val tools_of_shards : string list -> Masc_domain.tool_schema list

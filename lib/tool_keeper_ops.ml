@@ -428,36 +428,106 @@ let resolve_keeper_name_config ~(config : Coord.config) args =
 
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
+
+(* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor
+   projection.  Constructs a fresh [Keeper_types.context] from the
+   threaded Eio resources and delegates to the existing [Turn.preflight_*]
+   / [Turn.handle_keeper_msg] handlers. *)
+let keeper_msg_body
+      ~(config : Coord.config)
+      ~(agent_name : string)
+      ~(sw : Eio.Switch.t)
+      ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+      ?proc_mgr
+      ?net
+      args : tool_result =
+  let keeper_ctx : _ Keeper_types.context =
+    { config; agent_name; sw; clock; proc_mgr; net }
+  in
+  match resolve_keeper_name_config ~config args with
+  | Error err -> (false, err)
+  | Ok name ->
+      let resolved_args = with_keeper_name args name in
+      (match Turn.preflight_keeper_msg keeper_ctx resolved_args with
+       | Error err -> (false, err)
+       | Ok () ->
+         let timeout_sec =
+           match Turn.keeper_msg_timeout_override resolved_args with
+           | Ok value -> value
+           | Error _ -> None
+         in
+         let request_id =
+           Keeper_msg_async.submit
+             ?timeout_sec
+             ~clock
+             ~sw
+             ~base_path:config.base_path
+             ~keeper_name:name
+             ~f:(fun () ->
+               let ok, body = Turn.handle_keeper_msg keeper_ctx resolved_args in
+               if ok
+               then begin
+                 invalidate_keeper_list_cache ();
+                 invalidate_status_cache name
+               end;
+               (ok, body))
+             ()
+         in
+         let json =
+           `Assoc
+             [ "request_id", `String request_id
+             ; "keeper_name", `String name
+             ; "status", `String "queued"
+             ; ( "message"
+               , `String
+                   "Keeper turn submitted. Poll with keeper_msg_result." )
+             ]
+         in
+         (true, Yojson.Safe.to_string json))
+;;
+
 let handle_keeper_msg ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> (false, err)
   | Ok name ->
       let resolved_args = with_keeper_name args name in
       (match Turn.preflight_keeper_msg ctx resolved_args with
-      | Error err -> (false, err)
-      | Ok () ->
-      let timeout_sec =
-        match Turn.keeper_msg_timeout_override resolved_args with
-        | Ok value -> value
-        | Error _ -> None
-      in
-      let request_id = Keeper_msg_async.submit ?timeout_sec ~clock:ctx.clock ~sw:ctx.sw
-        ~base_path:ctx.config.base_path
-        ~keeper_name:name
-        ~f:(fun () ->
-          let ok, body = Turn.handle_keeper_msg ctx resolved_args in
-          if ok then begin
-            invalidate_keeper_list_cache ();
-            invalidate_status_cache name
-          end;
-          (ok, body))
-        ()
-      in
-      let json = `Assoc [
-        ("request_id", `String request_id); ("keeper_name", `String name);
-        ("status", `String "queued"); ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
-      ] in
-      (true, Yojson.Safe.to_string json))
+       | Error err -> (false, err)
+       | Ok () ->
+         let timeout_sec =
+           match Turn.keeper_msg_timeout_override resolved_args with
+           | Ok value -> value
+           | Error _ -> None
+         in
+         let request_id =
+           Keeper_msg_async.submit
+             ?timeout_sec
+             ~clock:ctx.clock
+             ~sw:ctx.sw
+             ~base_path:ctx.config.base_path
+             ~keeper_name:name
+             ~f:(fun () ->
+               let ok, body = Turn.handle_keeper_msg ctx resolved_args in
+               if ok
+               then begin
+                 invalidate_keeper_list_cache ();
+                 invalidate_status_cache name
+               end;
+               (ok, body))
+             ()
+         in
+         let json =
+           `Assoc
+             [ "request_id", `String request_id
+             ; "keeper_name", `String name
+             ; "status", `String "queued"
+             ; ( "message"
+               , `String
+                   "Keeper turn submitted. Poll with keeper_msg_result." )
+             ]
+         in
+         (true, Yojson.Safe.to_string json))
+;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_msg_result_body ~(config : Coord.config) args : tool_result =
   let request_id = get_string args "request_id" "" in

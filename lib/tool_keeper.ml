@@ -692,9 +692,22 @@ let () =
    remaining keeper tools (status, msg, clear, compact, repair,
    sandbox lifecycle) use the keeper Eio context and are gated on
    Phase 5 Eio plumbing scope. *)
+(* RFC-0182 Phase 5 PR-B: [eio_required] returns a typed "Eio context
+   required" failure when masc_keeper_msg / masc_keeper_up etc. are
+   invoked from a path that lacks ?sw / ?clock (e.g. OAS handler).
+   Production keeper dispatch from [Mcp_server_eio_execute] always
+   provides them via PR-A.2 plumbing. *)
+let eio_required tool_name =
+  Some
+    ( false
+    , Printf.sprintf
+        {|{"error":"%s requires Eio context (sw + clock); call via Mcp_server_eio_execute"}|}
+        tool_name )
+;;
+
 let () =
   Keeper_dispatch_ref.dispatch
-  := fun ~config ~agent_name ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ~name ~args () ->
+  := fun ~config ~agent_name ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ~name ~args () ->
     match name with
     | "masc_keeper_list" -> Some (keeper_list_body ~config args)
     | "masc_keeper_msg_result" ->
@@ -716,5 +729,21 @@ let () =
       Tool_keeper_ops.invalidate_keeper_list_cache ();
       Tool_keeper_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
       Some (Keeper_turn_lifecycle.handle_keeper_down_config ~config args)
+    (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools.  Require both
+       sw and clock from caller; gracefully fail when invoked from a
+       path without Eio context. *)
+    | "masc_keeper_msg" ->
+      (match sw, clock with
+       | Some sw, Some clock ->
+         Some
+           (Tool_keeper_ops.keeper_msg_body
+              ~config
+              ~agent_name
+              ~sw
+              ~clock
+              ?proc_mgr
+              ?net
+              args)
+       | _ -> eio_required "masc_keeper_msg")
     | _ -> None
 ;;

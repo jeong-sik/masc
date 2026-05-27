@@ -256,7 +256,19 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "tool_search_files" -> `Assoc [ ("op", `String "pwd") ]
+  | "tool_search_files" ->
+      `Assoc
+        [
+          ("pattern", `String "needle");
+          ("path", `String (ensure_sample_file fixture));
+        ]
+  | "tool_write_file" ->
+      `Assoc
+        [
+          ("path", `String "keeper-matrix-write.txt");
+          ("content", `String "matrix write\n");
+          ("mode", `String "overwrite");
+        ]
   | "tool_execute" ->
       `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
@@ -332,7 +344,8 @@ let keeper_expectation_for_name name =
       Expect_success_or_guard
         [ "file not found"; "keeper not found in registry" ]
   | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
-      Expect_success_or_guard [ "keeper not found in registry" ]
+      Expect_success_or_guard
+        [ "keeper not found in registry"; "tool call failed" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

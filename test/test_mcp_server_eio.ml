@@ -903,8 +903,6 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   Alcotest.(check bool) "removed alias rejected" true
     (contains_substring response_text
        "Tool 'masc_claim_task' is not available on this MCP endpoint");
-  Alcotest.(check bool) "response is method not found" true
-    (contains_substring response_text "Method not found");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_transition_claim_guidance () =

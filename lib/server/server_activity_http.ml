@@ -109,17 +109,14 @@ let events_http_json ~deps ~state request =
   match snapshot_hit with
   | Some json -> json
   | None ->
-    (* Fall through: non-default query OR snapshot not yet published.
-       Keep the PR #19150 cache+offload wrap so cold-start callers do
-       not stall the HTTP main domain. *)
-    let cache_key =
-      Printf.sprintf "activity:events:%s:%d:%d"
-        (String.concat "," kinds) after_seq limit
-    in
-    Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        Activity_graph.json_response state.Mcp_server.room_config ~kinds
-          ~after_seq ~limit ()))
+    (* RFC-0201 Step 5.  Cache wrap retired — non-default queries
+       (cursor / kinds filter) are operator-driven and rare, so a
+       per-key Dashboard_cache entry has marginal hit-rate value.
+       Offload via Domain_pool_ref still protects the HTTP main
+       domain from JSONL-scan stall. *)
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Activity_graph.json_response state.Mcp_server.room_config ~kinds
+        ~after_seq ~limit ())
 
 let parse_since_ms (raw : string) : int option =
   let len = String.length raw in
@@ -168,21 +165,17 @@ let graph_http_json ~deps ~state request =
   match snapshot_hit with
   | Some json -> json
   | None ->
-    let cache_key =
-      Printf.sprintf "activity:graph:%s:%d:%d:%s"
-        (String.concat "," kinds) limit timeline_limit since_raw
-    in
-    Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        let since_ms =
-          match parse_since_ms since_raw with
-          | Some delta_ms ->
-              let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
-              Some (now_ms - delta_ms)
-          | None -> None
-        in
-        Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
-          ~timeline_limit ?since_ms ()))
+    (* RFC-0201 Step 5 — cache wrap retired (see events_http_json). *)
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let since_ms =
+        match parse_since_ms since_raw with
+        | Some delta_ms ->
+            let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+            Some (now_ms - delta_ms)
+        | None -> None
+      in
+      Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
+        ~timeline_limit ?since_ms ())
 
 let swimlane_http_json ~deps ~state request =
 
@@ -207,20 +200,17 @@ let swimlane_http_json ~deps ~state request =
   match snapshot_hit with
   | Some json -> json
   | None ->
-    let cache_key =
-      Printf.sprintf "activity:swimlane:%d:%s" limit since_raw
-    in
-    Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        let since_ms =
-          match parse_since_ms since_raw with
-          | Some delta_ms ->
-              let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
-              Some (now_ms - delta_ms)
-          | None -> None
-        in
-        Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
-          ?since_ms ()))
+    (* RFC-0201 Step 5 — cache wrap retired (see events_http_json). *)
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let since_ms =
+        match parse_since_ms since_raw with
+        | Some delta_ms ->
+            let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+            Some (now_ms - delta_ms)
+        | None -> None
+      in
+      Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
+        ?since_ms ())
 
 let stream_headers ~deps origin =
   Httpun.Headers.of_list

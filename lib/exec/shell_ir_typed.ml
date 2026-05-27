@@ -210,5 +210,47 @@ let pp fmt = function
       (Format.pp_print_option Format.pp_print_string)
       format
       utc
+  | W (Env ()) -> Format.fprintf fmt "Env"
+  | W (Printenv { name }) ->
+    Format.fprintf
+      fmt
+      "Printenv(name=%a)"
+      (Format.pp_print_option Format.pp_print_string)
+      name
+  | W (Uniq { count; duplicates; unique; file }) ->
+    Format.fprintf
+      fmt
+      "Uniq(count=%b, duplicates=%b, unique=%b, file=%a)"
+      count
+      duplicates
+      unique
+      (Format.pp_print_option Format.pp_print_string)
+      file
+  | W (Basename { path; suffix }) ->
+    Format.fprintf
+      fmt
+      "Basename(path=%s, suffix=%a)"
+      path
+      (Format.pp_print_option Format.pp_print_string)
+      suffix
+  | W (Dirname { path }) -> Format.fprintf fmt "Dirname(path=%s)" path
+  | W (Test { expression }) ->
+    Format.fprintf
+      fmt
+      "Test(expression=%a)"
+      (Format.pp_print_list
+         ~pp_sep:(fun fmt () -> Format.fprintf fmt " ")
+         Format.pp_print_string)
+      expression
+  | W (Stat { format; path }) ->
+    Format.fprintf
+      fmt
+      "Stat(format=%a, path=%s)"
+      (Format.pp_print_option Format.pp_print_string)
+      format
+      path
+  | W (Hostname { short }) ->
+    Format.fprintf fmt "Hostname(short=%b)" short
+  | W (Whoami ()) -> Format.fprintf fmt "Whoami"
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

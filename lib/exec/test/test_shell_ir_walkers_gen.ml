@@ -50,6 +50,15 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Cut { delimiter = None; fields = "1"; file = None })
   ; W (Tr { set1 = "a-z"; set2 = None; delete = false; squeeze = false })
   ; W (Date { format = None; utc = false })
+  ; W (Env ())
+  ; W (Printenv { name = None })
+  ; W (Uniq { count = false; duplicates = false; unique = false; file = None })
+  ; W (Basename { path = "/tmp"; suffix = None })
+  ; W (Dirname { path = "/tmp" })
+  ; W (Test { expression = [ "-f"; "x" ] })
+  ; W (Stat { format = None; path = "/tmp" })
+  ; W (Hostname { short = false })
+  ; W (Whoami ())
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -137,9 +146,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    27
+    36
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 27 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 36 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -181,6 +190,15 @@ let test_of_simple_round_trip () =
     ; W (Cut { delimiter = Some ":"; fields = "1,3"; file = Some "/etc/passwd" })
     ; W (Tr { set1 = "a-z"; set2 = Some "A-Z"; delete = false; squeeze = true })
     ; W (Date { format = Some "+%Y-%m-%d"; utc = true })
+    ; W (Env ())
+    ; W (Printenv { name = Some "PATH" })
+    ; W (Uniq { count = true; duplicates = false; unique = true; file = Some "/tmp/x" })
+    ; W (Basename { path = "/tmp/foo.bar"; suffix = Some ".bar" })
+    ; W (Dirname { path = "/tmp/foo/bar" })
+    ; W (Test { expression = [ "-f"; "/tmp/x" ] })
+    ; W (Stat { format = Some "16%N"; path = "/tmp/x" })
+    ; W (Hostname { short = true })
+    ; W (Whoami ())
     ]
   in
   List.iter
@@ -269,6 +287,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Find"; "Head"; "Tail"; "Grep"; "Mkdir"; "Wc"
     ; "Git_diff"; "Git_log"; "Git_commit"; "Git_push"; "Git_pull"
     ; "Pwd"; "Echo"; "Which"; "Sort"; "Cut"; "Tr"; "Date"
+    ; "Env"; "Printenv"; "Uniq"; "Basename"; "Dirname"; "Test"; "Stat"; "Hostname"; "Whoami"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

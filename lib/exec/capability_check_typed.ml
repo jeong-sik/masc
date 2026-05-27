@@ -200,5 +200,38 @@ let of_command = function
     let flag_args = if utc then [ arg "-u" ] else [] in
     let format_args = match format with None -> [] | Some f -> [ arg f ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Date, flag_args @ format_args) ]
+  | Shell_ir_typed.W (Env ()) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Env, []) ]
+  | Shell_ir_typed.W (Printenv { name }) ->
+    let args = match name with None -> [] | Some n -> [ arg n ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Printenv, args) ]
+  | Shell_ir_typed.W (Uniq { count; duplicates; unique; file }) ->
+    let flag_args =
+      (if count then [ arg "-c" ] else [])
+      @ (if duplicates then [ arg "-d" ] else [])
+      @ (if unique then [ arg "-u" ] else [])
+    in
+    let file_args = match file with None -> [] | Some f -> [ arg f ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Uniq, flag_args @ file_args) ]
+  | Shell_ir_typed.W (Basename { path; suffix }) ->
+    let args =
+      arg path :: (match suffix with None -> [] | Some s -> [ arg s ])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Basename, args) ]
+  | Shell_ir_typed.W (Dirname { path }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Dirname, [ arg path ]) ]
+  | Shell_ir_typed.W (Test { expression }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Test, List.map arg expression) ]
+  | Shell_ir_typed.W (Stat { format; path }) ->
+    let args =
+      (match format with None -> [] | Some f -> [ arg "-f"; arg f ])
+      @ [ arg path ]
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Stat, args) ]
+  | Shell_ir_typed.W (Hostname { short }) ->
+    let args = if short then [ arg "-s" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Hostname, args) ]
+  | Shell_ir_typed.W (Whoami ()) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Whoami, []) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

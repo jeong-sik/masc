@@ -77,6 +77,15 @@ let constructor_label = function
      | Shell_ir_typed.Cut _ -> "Cut"
      | Shell_ir_typed.Tr _ -> "Tr"
      | Shell_ir_typed.Date _ -> "Date"
+     | Shell_ir_typed.Env _ -> "Env"
+     | Shell_ir_typed.Printenv _ -> "Printenv"
+     | Shell_ir_typed.Uniq _ -> "Uniq"
+     | Shell_ir_typed.Basename _ -> "Basename"
+     | Shell_ir_typed.Dirname _ -> "Dirname"
+     | Shell_ir_typed.Test _ -> "Test"
+     | Shell_ir_typed.Stat _ -> "Stat"
+     | Shell_ir_typed.Hostname _ -> "Hostname"
+     | Shell_ir_typed.Whoami _ -> "Whoami"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

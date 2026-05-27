@@ -42,7 +42,9 @@ type ctor =
 (* Order mirrors lib/exec/shell_ir_typed.{ml,mli} declaration order
    (Ls, Cat, Rg, Git_status, Git_clone, Curl, Rm, Sudo, Find, Head,
    Tail, Grep, Mkdir, Wc, Git_diff, Git_log, Git_commit, Git_push,
-   Git_pull, Pwd, Echo, Which, Sort, Cut, Tr, Date, Generic). *)
+   Git_pull, Pwd, Echo, Which, Sort, Cut, Tr, Date,
+   Env, Printenv, Uniq, Basename, Dirname, Test, Stat, Hostname, Whoami,
+   Generic). *)
 let shell_ir_typed_spec : ctor list =
   [ { name = "Ls"
     ; anon_pattern = "Ls _"
@@ -1009,6 +1011,244 @@ let rec parse utc format = function
 in
 parse false None args|}
     }
+  ; { name = "Env"
+    ; anon_pattern = "Env _"
+    ; bind_pattern = "Env ()"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Env
+  ; args = []
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Env"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Env ()))
+| _ -> None|}
+    }
+  ; { name = "Printenv"
+    ; anon_pattern = "Printenv _"
+    ; bind_pattern = "Printenv { name }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let args = match name with None -> [] | Some n -> [ Shell_ir.Lit (n, Shell_ir.default_meta) ] in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Printenv
+  ; args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Printenv"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = None }))
+| [ n ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = Some n }))
+| _ -> None|}
+    }
+  ; { name = "Uniq"
+    ; anon_pattern = "Uniq _"
+    ; bind_pattern = "Uniq { count; duplicates; unique; file }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let flag_args =
+    (if count then [ Shell_ir.Lit ("-c", Shell_ir.default_meta) ] else [])
+    @ (if duplicates then [ Shell_ir.Lit ("-d", Shell_ir.default_meta) ] else [])
+    @ (if unique then [ Shell_ir.Lit ("-u", Shell_ir.default_meta) ] else [])
+  in
+  let file_args = match file with None -> [] | Some f -> [ Shell_ir.Lit (f, Shell_ir.default_meta) ] in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Uniq
+  ; args = flag_args @ file_args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Uniq"
+    ; parse_body =
+        Some
+          {|
+let rec parse count duplicates unique file = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; file }))
+  | "-c" :: rest -> parse true duplicates unique file rest
+  | "-d" :: rest -> parse count true unique file rest
+  | "-u" :: rest -> parse count duplicates true file rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse count duplicates unique file rest
+    else parse count duplicates unique (Some arg) rest
+in
+parse false false false None args|}
+    }
+  ; { name = "Basename"
+    ; anon_pattern = "Basename _"
+    ; bind_pattern = "Basename { path; suffix }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let args =
+    Shell_ir.Lit (path, Shell_ir.default_meta)
+    :: (match suffix with None -> [] | Some s -> [ Shell_ir.Lit (s, Shell_ir.default_meta) ])
+  in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Basename
+  ; args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Basename"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = None }))
+| [ path; suffix ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = Some suffix }))
+| _ -> None|}
+    }
+  ; { name = "Dirname"
+    ; anon_pattern = "Dirname _"
+    ; bind_pattern = "Dirname { path }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Dirname
+  ; args = [ Shell_ir.Lit (path, Shell_ir.default_meta) ]
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Dirname"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dirname { path }))
+| _ -> None|}
+    }
+  ; { name = "Test"
+    ; anon_pattern = "Test _"
+    ; bind_pattern = "Test { expression }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Test
+  ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) expression
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Test"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [] -> None
+| expression -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Test { expression }))
+    |}
+    }
+  ; { name = "Stat"
+    ; anon_pattern = "Stat _"
+    ; bind_pattern = "Stat { format; path }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let args =
+    (match format with None -> [] | Some f -> [ Shell_ir.Lit ("-f", Shell_ir.default_meta); Shell_ir.Lit (f, Shell_ir.default_meta) ])
+    @ [ Shell_ir.Lit (path, Shell_ir.default_meta) ]
+  in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Stat
+  ; args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Stat"
+    ; parse_body =
+        Some
+          {|
+let rec parse format = function
+  | [] -> None
+  | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Stat { format; path }))
+  | "-f" :: f :: rest -> parse (Some f) rest
+  | arg :: _ ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Stat { format; path = arg }))
+in
+parse None args|}
+    }
+  ; { name = "Hostname"
+    ; anon_pattern = "Hostname _"
+    ; bind_pattern = "Hostname { short }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  let args = if short then [ Shell_ir.Lit ("-s", Shell_ir.default_meta) ] else [] in
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Hostname
+  ; args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Hostname"
+    ; parse_body =
+        Some
+          {|
+let rec parse short = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Hostname { short }))
+  | "-s" :: rest -> parse true rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse short rest
+    else parse short rest
+in
+parse false args|}
+    }
+  ; { name = "Whoami"
+    ; anon_pattern = "Whoami _"
+    ; bind_pattern = "Whoami ()"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+  { Shell_ir.bin = Exec_program.of_known Exec_program.Whoami
+  ; args = []
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }|}
+    ; bin_variant = Some "Whoami"
+    ; parse_body =
+        Some
+          {|
+match args with
+| [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Whoami ()))
+| _ -> None|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"
@@ -1160,20 +1400,20 @@ let emit_of_simple buf spec =
     \        | Some Exec_program.Cut -> gen_parse_Cut lit_argv\n\
     \        | Some Exec_program.Tr -> gen_parse_Tr lit_argv\n\
     \        | Some Exec_program.Date -> gen_parse_Date lit_argv\n\
+    \        | Some Exec_program.Env -> gen_parse_Env lit_argv\n\
+    \        | Some Exec_program.Printenv -> gen_parse_Printenv lit_argv\n\
+    \        | Some Exec_program.Uniq -> gen_parse_Uniq lit_argv\n\
+    \        | Some Exec_program.Basename -> gen_parse_Basename lit_argv\n\
+    \        | Some Exec_program.Dirname -> gen_parse_Dirname lit_argv\n\
+    \        | Some Exec_program.Test -> gen_parse_Test lit_argv\n\
+    \        | Some Exec_program.Stat -> gen_parse_Stat lit_argv\n\
+    \        | Some Exec_program.Hostname -> gen_parse_Hostname lit_argv\n\
+    \        | Some Exec_program.Whoami -> gen_parse_Whoami lit_argv\n\
     \        | Some\n\
-    \            ( Exec_program.Test\n\
-    \            | Exec_program.Basename\n\
-    \            | Exec_program.Dirname\n\
-    \            | Exec_program.Stat\n\
-    \            | Exec_program.Du\n\
+    \            ( Exec_program.Du\n\
     \            | Exec_program.Df\n\
-    \            | Exec_program.Uniq\n\
     \            | Exec_program.File\n\
     \            | Exec_program.Printf\n\
-    \            | Exec_program.Env\n\
-    \            | Exec_program.Printenv\n\
-    \            | Exec_program.Hostname\n\
-    \            | Exec_program.Whoami\n\
     \            | Exec_program.Uname\n\
     \            | Exec_program.Ps\n\
     \            | Exec_program.Tty\n\

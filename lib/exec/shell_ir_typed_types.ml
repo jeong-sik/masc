@@ -157,6 +157,33 @@ and (_, _, _, _) command =
       ; utc : bool
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Env : unit -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Printenv :
+      { name : string option }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Uniq :
+      { count : bool
+      ; duplicates : bool
+      ; unique : bool
+      ; file : string option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Basename :
+      { path : string
+      ; suffix : string option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Dirname : { path : string } -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Test :
+      { expression : string list }
+      -> (unit, unit, [ `Safe ], [ `Host ]) command
+  | Stat :
+      { format : string option
+      ; path : string
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Hostname : { short : bool } -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Whoami : unit -> (unit, string, [ `Safe ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

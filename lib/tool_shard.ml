@@ -185,7 +185,8 @@ let all_read_only_keeper_tools () : string list =
 
    Built from [all_shards] plus unsharded default tools that must remain
    available without creating another capability-family shard. Retired GitHub
-   PR helper schemas are intentionally excluded from this keeper-facing registry.
+   Dedicated repository mutation schemas are intentionally excluded from this
+   keeper-facing registry.
 
    Callers must still run [Config.dedupe_schemas] because a
    single tool can appear under multiple shards and the schema list may

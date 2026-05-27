@@ -55,6 +55,45 @@ let test_router_prefix_specificity () =
   | `Not_found -> Alcotest.fail "expected a matched prefix route, got not_found"
 ;;
 
+let test_router_prefix_trie_preserves_specificity () =
+  let dashboard_handler _req _reqd = () in
+  let board_handler _req _reqd = () in
+  let sub_board_handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Router.prefix_get "/dashboard/" dashboard_handler
+    |> Router.prefix_get "/api/v1/board/" board_handler
+    |> Router.prefix_get "/api/v1/board/sub-boards/" sub_board_handler
+  in
+  let request = Httpun.Request.create `GET "/api/v1/board/sub-boards/main" in
+  match Router.resolve routes request with
+  | `Matched route ->
+    Alcotest.(check string)
+      "longest prefix on the trie path should win"
+      "/api/v1/board/sub-boards/"
+      route.path
+  | `Method_not_allowed ->
+    Alcotest.fail "expected trie prefix match, got method_not_allowed"
+  | `Not_found -> Alcotest.fail "expected trie prefix match, got not_found"
+;;
+
+let test_router_prefix_trie_preserves_root_prefix () =
+  let root_handler _req _reqd = () in
+  let api_handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Router.prefix_get "/" root_handler
+    |> Router.prefix_get "/api/v1/" api_handler
+  in
+  let request = Httpun.Request.create `GET "/unknown/path" in
+  match Router.resolve routes request with
+  | `Matched route ->
+    Alcotest.(check string) "root prefix remains a fallback" "/" route.path
+  | `Method_not_allowed ->
+    Alcotest.fail "expected root prefix fallback, got method_not_allowed"
+  | `Not_found -> Alcotest.fail "expected root prefix fallback, got not_found"
+;;
+
 let test_router_indexed_prefix_fallback_after_exact_method_miss () =
   let exact_handler _req _reqd = () in
   let prefix_handler _req _reqd = () in
@@ -346,6 +385,12 @@ let router_tests =
   ; "add POST route", `Quick, test_router_add_post
   ; "add multiple routes", `Quick, test_router_add_multiple
   ; "prefix specificity", `Quick, test_router_prefix_specificity
+  ; ( "prefix trie preserves specificity"
+    , `Quick
+    , test_router_prefix_trie_preserves_specificity )
+  ; ( "prefix trie preserves root prefix"
+    , `Quick
+    , test_router_prefix_trie_preserves_root_prefix )
   ; ( "indexed prefix fallback after exact method miss"
     , `Quick
     , test_router_indexed_prefix_fallback_after_exact_method_miss )

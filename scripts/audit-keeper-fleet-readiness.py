@@ -2,7 +2,7 @@
 """Audit live keeper fleet readiness from on-disk MASC runtime state.
 
 This is intentionally read-only. It separates configuration readiness
-(Docker, repo CLI identity, PR-capable preset) from durable evidence
+(Docker, repo CLI identity, repo-mutation-capable preset) from durable evidence
 (recent turns, board actions, persisted PR references) so operators do not
 mistake a configured capability for proof that every keeper already used it.
 """

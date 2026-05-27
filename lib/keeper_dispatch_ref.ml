@@ -9,7 +9,7 @@ let dispatch
      -> agent_name:string
      -> name:string
      -> args:Yojson.Safe.t
-     -> (bool * string) option)
+     -> Tool_result.result option)
       ref
   =
   ref (fun ~config:_ ~agent_name:_ ~name:_ ~args:_ -> None)

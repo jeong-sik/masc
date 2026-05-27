@@ -7,6 +7,24 @@ open Keeper_runtime
 
 include Tool_keeper_ops
 
+let typed_result_of_tuple ~tool_name (ok, body) : Tool_result.result =
+  let start_time = Time_compat.now () in
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  if ok
+  then Tool_result.make_ok ~tool_name ~start_time ~data ()
+  else
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time
+      ~data
+      body
+;;
+
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.  Uses
    [Coord.config] only (no Eio fields), letting Tool_keeper register
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
@@ -681,9 +699,21 @@ let () =
   Persona_dispatch_ref.dispatch
   := fun ~name ~args ->
     match name with
-    | "masc_persona_list" -> Some (Keeper_persona.persona_list_handler args)
-    | "masc_persona_schema" -> Some (Keeper_persona.persona_schema_handler args)
-    | "masc_persona_save" -> Some (Keeper_persona.persona_save_handler args)
+    | "masc_persona_list" ->
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Keeper_persona.persona_list_handler args))
+    | "masc_persona_schema" ->
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Keeper_persona.persona_schema_handler args))
+    | "masc_persona_save" ->
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Keeper_persona.persona_save_handler args))
     | _ -> None
 ;;
 
@@ -696,25 +726,46 @@ let () =
   Keeper_dispatch_ref.dispatch
   := fun ~config ~agent_name ~name ~args ->
     match name with
-    | "masc_keeper_list" -> Some (keeper_list_body ~config args)
+    | "masc_keeper_list" ->
+      Some (typed_result_of_tuple ~tool_name:name (keeper_list_body ~config args))
     | "masc_keeper_msg_result" ->
-      Some (Tool_keeper_ops.keeper_msg_result_body ~config args)
-    | "masc_keeper_compact" -> Some (keeper_compact_body ~config args)
-    | "masc_keeper_clear" -> Some (keeper_clear_body ~config args)
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Tool_keeper_ops.keeper_msg_result_body ~config args))
+    | "masc_keeper_compact" ->
+      Some (typed_result_of_tuple ~tool_name:name (keeper_compact_body ~config args))
+    | "masc_keeper_clear" ->
+      Some (typed_result_of_tuple ~tool_name:name (keeper_clear_body ~config args))
     | "masc_keeper_sandbox_start" ->
-      Some (keeper_sandbox_start_body ~config args)
+      Some
+        (typed_result_of_tuple ~tool_name:name (keeper_sandbox_start_body ~config args))
     | "masc_keeper_sandbox_stop" ->
-      Some (keeper_sandbox_stop_body ~config args)
-    | "masc_keeper_reset" -> Some (keeper_reset_body ~config args)
+      Some
+        (typed_result_of_tuple ~tool_name:name (keeper_sandbox_stop_body ~config args))
+    | "masc_keeper_reset" ->
+      Some (typed_result_of_tuple ~tool_name:name (keeper_reset_body ~config args))
     | "masc_keeper_persona_audit" ->
-      Some (Tool_keeper_persona_audit.handle ~config args)
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Tool_keeper_persona_audit.handle ~config args))
     | "masc_keeper_status" ->
-      Some (Tool_keeper_ops.keeper_status_body ~config ~agent_name args)
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Tool_keeper_ops.keeper_status_body ~config ~agent_name args))
     | "masc_keeper_repair" ->
-      Some (Tool_keeper_ops.keeper_repair_body ~config ~agent_name args)
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Tool_keeper_ops.keeper_repair_body ~config ~agent_name args))
     | "masc_keeper_down" ->
       Tool_keeper_ops.invalidate_keeper_list_cache ();
       Tool_keeper_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
-      Some (Keeper_turn_lifecycle.handle_keeper_down_config ~config args)
+      Some
+        (typed_result_of_tuple
+           ~tool_name:name
+           (Keeper_turn_lifecycle.handle_keeper_down_config ~config args))
     | _ -> None
 ;;

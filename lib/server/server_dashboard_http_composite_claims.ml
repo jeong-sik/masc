@@ -32,7 +32,7 @@ let tool_call_output_text json =
     match json_assoc "_blob" output with
     | Some blob -> json_string "preview" blob
     | None -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ -> None
 ;;
 
 let parse_tool_call_output json =
@@ -127,7 +127,7 @@ let find_override_field_source field sources =
     List.find_opt
       (fun value -> json_string "field" value = Some field)
       values
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None
 ;;
 
 let composite_config_drift_json ~config ~keeper_name =
@@ -255,12 +255,12 @@ let composite_latest_activity_epoch snapshot execution =
   let live_turn_progress_epoch =
     match json_member "live_turn" snapshot with
     | `Assoc _ as live_turn -> json_number "last_progress_at" live_turn
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   let last_outcome_epoch =
     match json_member "last_outcome" snapshot with
     | `Assoc _ as last_outcome -> json_number "ended_at" last_outcome
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   let receipt_epoch =
     match json_string "recorded_at" execution with
@@ -281,7 +281,7 @@ let composite_snapshot_is_idle snapshot =
   let breaker_state =
     match json_member "circuit_breaker" snapshot with
     | `Assoc _ as breaker -> json_string "state" breaker
-    | _ -> Some "clean"
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Some "clean"
   in
   json_string_eq "turn_phase" snapshot "idle"
   && json_string_eq "stage" decision "undecided"
@@ -324,14 +324,14 @@ let composite_execution_claim_no_eligible execution =
   match json_member "claim_scope" execution with
   | `Assoc _ as claim_scope ->
     string_opt_is_any (json_string "status" claim_scope) [ "no_eligible" ]
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
 let composite_execution_config_drift execution =
   match json_member "config_drift" execution with
   | `Assoc _ as config_drift ->
     Option.value ~default:false (json_bool "cascade_override" config_drift)
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
@@ -346,7 +346,7 @@ let composite_execution_blocked execution =
   ||
   match json_member "error" execution with
   | `Assoc _ as error -> string_opt_present (json_string "kind" error)
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
 let composite_execution_receipt_present execution =
@@ -362,13 +362,13 @@ let composite_execution_receipt_epoch execution =
 let composite_live_turn_started_epoch snapshot =
   match json_member "live_turn" snapshot with
   | `Assoc _ as live_turn -> json_number "started_at" live_turn
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let composite_live_turn_last_progress_epoch snapshot =
   match json_member "live_turn" snapshot with
   | `Assoc _ as live_turn -> json_number "last_progress_at" live_turn
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let composite_execution_current_for_runtime_state ~snapshot ~execution =

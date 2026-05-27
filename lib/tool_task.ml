@@ -114,7 +114,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                   @ [ "evidence_refs", `List new_refs ]
                 in
                 `Assoc hc_fields
-              | _ -> `Assoc [ "evidence_refs", `List [ `String pr_url ] ]
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Assoc [ "evidence_refs", `List [ `String pr_url ] ]
             in
             (match List.find_opt (fun (k, _) -> String.equal k "handoff_context") kvs with
              | Some _ ->
@@ -140,7 +140,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
           (not (is_internal_marker k))
           && not (List.mem k transition_known_args))
         kvs
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
   in
   if Stdlib.List.length unknown > 0 then
     let names = String.concat ", " (List.map fst unknown) in

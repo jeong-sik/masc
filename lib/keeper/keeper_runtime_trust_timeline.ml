@@ -445,7 +445,7 @@ let pending_approval_json ~(keeper_name : string) =
                (Safe_ops.json_float ~default:0.0 "requested_at" right)
                (Safe_ops.json_float ~default:0.0 "requested_at" left))
       |> fun entries -> `List entries
-  | _ -> `List []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> `List []
 
 let sort_timeline_events events =
   List.sort
@@ -479,4 +479,4 @@ let latest_causal_from_timeline = function
           match items with
           | event :: _ -> event
           | [] -> `Null))
-  | _ -> `Null
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> `Null

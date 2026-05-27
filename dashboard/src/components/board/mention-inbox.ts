@@ -6,7 +6,7 @@ import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { stripStateBlocks } from '../../keeper-message'
-import { SYSTEM_MESSAGE_FROM } from '../../lib/board-utils'
+import { SYSTEM_MESSAGE_FROM, boardMessageRowKey } from '../../lib/board-utils'
 import { currentDashboardActorName } from '../../lib/dashboard-session-actor'
 import { navigate } from '../../router'
 import { messages, shellAuthSummary } from '../../store'
@@ -125,10 +125,6 @@ function previewContent(message: Message): string {
   return stripStateBlocks(message.content).trim() || message.content.trim() || '(empty)'
 }
 
-function rowKey(row: MentionInboxRow): string {
-  return row.message.id ?? `${row.message.seq ?? 'message'}-${row.index}`
-}
-
 function MessageRow({ row }: { row: MentionInboxRow }) {
   const preview = previewContent(row.message)
   const hasState = row.message.content.includes('[STATE]')
@@ -182,7 +178,7 @@ function MentionLane({
       </div>
       ${rows.length === 0
         ? html`<${EmptyState} message=${emptyMessage} compact />`
-        : html`<div class="grid gap-2.5">${rows.map(row => html`<${MessageRow} key=${rowKey(row)} row=${row} />`)}</div>`}
+        : html`<div class="grid gap-2.5">${rows.map(row => html`<${MessageRow} key=${boardMessageRowKey(row.message, row.index)} row=${row} />`)}</div>`}
     </section>
   `
 }

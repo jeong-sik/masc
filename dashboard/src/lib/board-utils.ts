@@ -10,7 +10,26 @@
  */
 export const SYSTEM_MESSAGE_FROM = 'system'
 
+/**
+ * Stable list-item key for a board `Message` row at position `index`.
+ *
+ * Prefers the message's own id (set by the backend on durable posts).
+ * Falls back to `<seq>-<index>` for unposted/draft rows where `id`
+ * hasn't been assigned yet, with `'message'` as the seq placeholder.
+ *
+ * Two board panels (`mention-inbox`, `message-room-timeline`) shipped
+ * this exact body file-internal as `rowKey`. A third (`state-block-messages`)
+ * uses a different base (`id ?? seq ?? index` single chain) plus a
+ * `state-block.slice(0, 24)` suffix and is left on its own helper —
+ * a future change to its base policy can adopt this helper once the
+ * suffix is parameterised.
+ */
+export function boardMessageRowKey(message: Message, index: number): string {
+  return message.id ?? `${message.seq ?? 'message'}-${index}`
+}
+
 import { navigate } from '../router'
+import type { Message } from '../types'
 import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
 import type { BoardActorIdentity, BoardContributorQuality } from '../types'

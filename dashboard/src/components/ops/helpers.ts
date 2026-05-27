@@ -1,7 +1,6 @@
 // Ops helpers — shared view helpers built on top of the canonical ops state.
 
 import { showToast } from '../common/toast'
-import { prettyJson, displayStatus } from '../../lib/status-label'
 import type { OperatorKeeperSnapshot } from '../../types'
 import { dispatchOperatorAction } from '../../operator-store'
 import { workflowActionLabel, type DashboardWorkflowContext } from '../../workflow-context'
@@ -30,8 +29,6 @@ export {
   hydratedWorkflowId,
   persistActorName,
 }
-
-export { prettyJson, displayStatus }
 
 function canonicalizeActionType(value?: string | null): string | null {
   if (!value) return null

@@ -220,10 +220,13 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
         | Error e -> fail (Printf.sprintf "verifier meta fixture: %s" e)
       in
       let lookup = KPolicy.tool_access_lookup_of_meta meta in
+      let visible_tools = KPolicy.keeper_allowed_tool_names meta in
       List.iter
         (fun tool_name ->
           check bool ("verifier keeps " ^ tool_name) true
-            (KPolicy.can_execute ~lookup tool_name))
+            (KPolicy.can_execute ~lookup tool_name);
+          check bool ("verifier exposes " ^ tool_name) true
+            (List.mem tool_name visible_tools))
         [
           "keeper_tasks_list";
           "masc_tasks";
@@ -233,7 +236,9 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
       List.iter
         (fun tool_name ->
           check bool ("verifier hides " ^ tool_name) false
-            (KPolicy.can_execute ~lookup tool_name))
+            (KPolicy.can_execute ~lookup tool_name);
+          check bool ("verifier does not expose " ^ tool_name) false
+            (List.mem tool_name visible_tools))
         [
           "keeper_task_claim";
           "keeper_task_create";

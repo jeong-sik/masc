@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
+import { clampPct } from '../../lib/format-number'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { currentDashboardActor } from '../../api/core'
 import { callMcpTool } from '../../api/mcp'
@@ -556,7 +557,7 @@ async function refreshGoalDetail(goalId: string) {
 }
 
 function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' }) {
-  const clamped = Math.max(0, Math.min(100, pct))
+  const clamped = clampPct(pct)
   const barColor =
     clamped >= 80 ? 'var(--color-status-ok)'
     : clamped >= 50 ? 'var(--color-amber-bright)'

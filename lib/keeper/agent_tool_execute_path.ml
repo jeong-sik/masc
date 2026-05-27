@@ -16,12 +16,15 @@ let resolve_tool_read_cwd
   | Error _ as err -> err
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd ->
-    let exists = Fs_compat.file_exists cwd in
-    let detail =
-      if not exists then "path_does_not_exist"
-      else "path_is_file_not_directory"
-    in
-    Error (Printf.sprintf "cwd_not_directory: %s (%s)" cwd detail)
+    if not (Fs_compat.file_exists cwd) then begin
+      (* Auto-create missing CWD under the sandbox.  The path has already
+         passed [resolve_keeper_read_path] sandbox containment, so creating
+         it is safe.  This handles stale worktree references and first-run
+         repo directories that the LLM targets before clone. *)
+      ignore (Keeper_fs.ensure_dir cwd);
+      Ok cwd
+    end else
+      Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
 let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
@@ -187,7 +190,14 @@ let resolve_tool_write_cwd
     (match validate_repo_cwd_ready ~config ~meta cwd with
      | Ok () -> Ok cwd
      | Error _ as err -> err)
-  | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
+  | Ok cwd ->
+    if not (Fs_compat.file_exists cwd) then begin
+      ignore (Keeper_fs.ensure_dir cwd);
+      match validate_repo_cwd_ready ~config ~meta cwd with
+      | Ok () -> Ok cwd
+      | Error _ as err -> err
+    end else
+      Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
 (* Docker playground path mapping: host → container.
    Host:      <base_path>/.masc/playground/<keeper>/repos/X

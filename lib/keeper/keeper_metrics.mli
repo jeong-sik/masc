@@ -163,7 +163,6 @@ type t =
   | ObservationQueryFailures
   | OasOnStop
   | OasOnIdleEscalated
-  | QuantitativeClaimRejections
   | InvariantViolations
   | FsmEdgeTransitions
   | TurnFsmTransitions

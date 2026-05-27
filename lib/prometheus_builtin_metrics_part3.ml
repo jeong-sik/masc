@@ -395,11 +395,6 @@ let register
      cas_exhausted = backend_state CAS retries depleted under contention."
     `Counter;
   add
-    Keeper_metrics.(to_string QuantitativeClaimRejections)
-    "Total keeper board posts rejected because quantitative code claims lacked explicit \
-     evidence"
-    `Counter;
-  add
     metric_anti_rationalization_fallback
     "Total anti-rationalization fallbacks fired (verifier LLM unavailable), labeled by \
      mode and cascade"

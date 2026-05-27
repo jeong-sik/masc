@@ -290,11 +290,50 @@ let default_completion_contract_text ~title ~description =
       (Printf.sprintf "Task scope satisfied: %s - %s" title description)
 ;;
 
+let write_intent_keywords =
+  [ "write"; "edit"; "create file"; "implement"; "fix"; "refactor"
+  ; "pr "; "pull request"; "commit"; "push"; "merge"
+  ; "modify"; "update"; "add "; "delete"; "remove"
+  ; "test"; "spec"; "lint"; "build"
+  ; "작성"; "수정"; "구현"; "추가"; "삭제"; "변경"
+  ]
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop i =
+      if i + needle_len > haystack_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let text_signals_write_intent ~title ~description =
+  let combined =
+    String.lowercase_ascii (title ^ " " ^ description)
+  in
+  List.exists
+    (fun keyword -> contains_substring ~needle:keyword combined)
+    write_intent_keywords
+
+let infer_required_tools_from_text ~title ~description =
+  if text_signals_write_intent ~title ~description
+  then [ "keeper_fs_edit"; "tool_execute" ]
+  else []
+
 let ensure_task_contract_for_verification ?contract ~title ~description () =
   let base =
     match contract with
     | Some contract -> normalize_task_contract contract
     | None -> empty_task_contract
+  in
+  let required_tools =
+    if base.required_tools <> []
+    then base.required_tools
+    else infer_required_tools_from_text ~title ~description
   in
   let completion_contract =
     if base.completion_contract <> []
@@ -314,7 +353,7 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
     else default_verification_evidence_refs
   in
   normalize_task_contract
-    { base with completion_contract; required_evidence; verify_gate_evidence }
+    { base with required_tools; completion_contract; required_evidence; verify_gate_evidence }
 ;;
 
 let merge_execution_links

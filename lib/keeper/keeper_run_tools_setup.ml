@@ -347,66 +347,52 @@ let prepare_agent_setup
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let allowed_exec_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  (* RFC-0064 Phase 2: Remove aliased internal names from the LLM-visible
-     policy surface. Public aliases are the LLM-visible names; internal
+  (* Descriptor-backed public names are the LLM-visible names; internal
      counterparts are implementation details.
 
-     Order matters: compute [aliased_public_names] against the UNFILTERED
+     Order matters: compute [descriptor_public_names] against the UNFILTERED
      internal allowlist, because tool_policy.toml / presets still express
      allowlists in descriptor/internal names (tool_execute, tool_read_file, ...).
-     Stripping internals before the alias-expansion check would leave
-     [aliased_public_names] empty and drop "Execute"/"ReadFile"/... from the
+     Stripping internals before the descriptor expansion check would leave
+     [descriptor_public_names] empty and drop "Execute"/"ReadFile"/... from the
      visible surface. See PR #14596 review. *)
-  let aliased_internal_names =
-    List.filter_map
-      (fun public ->
-         match Keeper_tool_alias.route public with
-         | Some r -> Some r.internal_name
-         | None -> None)
-      (Keeper_tool_alias.public_names ())
+  let descriptor_internal_names =
+    Agent_tool_descriptor.public_descriptors
+    |> List.concat_map Agent_tool_descriptor.internal_names
+    |> Keeper_types.dedupe_keep_order
   in
-  (* Only include a public alias name when its routed internal target is
+  (* Only include a public name when its descriptor internal target is
      itself in [allowed_exec_names]. Otherwise the public name (e.g. "Execute")
      could let the LLM invoke a tool whose internal handler the current
-     keeper/preset has explicitly excluded — the alias would dispatch to
+     keeper/preset has explicitly excluded — the descriptor would dispatch to
      a registered-but-disallowed tool. See PR #14574 review. *)
-  let allowed_set_for_alias_filter =
-    Keeper_tool_policy.tool_name_set allowed_exec_names
-  in
-  let aliased_public_names =
-    List.filter
-      (fun public ->
-         match Keeper_tool_alias.route public with
-         | Some r ->
-           Keeper_tool_policy.StringSet.mem r.internal_name allowed_set_for_alias_filter
-         | None -> false)
-      (Keeper_tool_alias.public_names ())
-  in
-  (* Now strip the aliased internal names from the LLM-visible surface,
-     after [aliased_public_names] has been computed. *)
-  let allowed_exec_names =
-    List.filter
-      (fun name -> not (List.mem name aliased_internal_names))
+  let descriptor_public_names =
+    Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names
       allowed_exec_names
   in
-  let allowed_exec_names_with_aliases = allowed_exec_names @ aliased_public_names in
+  (* Now strip the descriptor internal names from the LLM-visible surface,
+     after [descriptor_public_names] has been computed. *)
+  let allowed_exec_names =
+    List.filter
+      (fun name -> not (List.mem name descriptor_internal_names))
+      allowed_exec_names
+  in
+  let allowed_exec_names_with_public_descriptors =
+    allowed_exec_names @ descriptor_public_names
+  in
   let allowed_exec_set =
-    let base = Keeper_tool_policy.tool_name_set allowed_exec_names_with_aliases in
+    let base =
+      Keeper_tool_policy.tool_name_set allowed_exec_names_with_public_descriptors
+    in
     Keeper_tool_policy.StringSet.union
       base
       (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
   in
-  let allowed_public_alias_for_internal internal_name =
-    List.find_map
-      (fun public_name ->
-         match Keeper_tool_alias.route public_name with
-         | Some route
-           when String.equal route.internal_name internal_name
-                && Keeper_tool_policy.StringSet.mem public_name universe_set
-                && Keeper_tool_policy.StringSet.mem public_name allowed_exec_set ->
-           Some public_name
-         | _ -> None)
-      (Keeper_tool_alias.public_names ())
+  let allowed_public_name_for_internal internal_name =
+    Agent_tool_descriptor_resolution.public_names_for_internal internal_name
+    |> List.find_opt (fun public_name ->
+      Keeper_tool_policy.StringSet.mem public_name universe_set
+      && Keeper_tool_policy.StringSet.mem public_name allowed_exec_set)
   in
   let max_tools_per_turn =
     if is_retry
@@ -491,7 +477,7 @@ let prepare_agent_setup
     if Keeper_tool_policy.StringSet.mem name universe_set
        && Keeper_tool_policy.StringSet.mem name allowed_exec_set
     then Some name
-    else allowed_public_alias_for_internal name
+    else allowed_public_name_for_internal name
   in
   let filter_visible_policy_surface names =
     names
@@ -508,7 +494,7 @@ let prepare_agent_setup
              && Keeper_tool_policy.StringSet.mem n allowed_exec_set
            then n :: validated, dropped_names
            else
-             match allowed_public_alias_for_internal n with
+             match allowed_public_name_for_internal n with
              | Some public_name -> public_name :: validated, dropped_names
              | None -> validated, n :: dropped_names)
         raw
@@ -797,20 +783,15 @@ let prepare_agent_setup
       else all_allowed, false
     in
     let last_turn_safe = Keeper_tool_policy.last_turn_safe_tool_names () in
-    (* Mirror allowed_exec_names_with_aliases: only include a public alias
+    (* Mirror allowed_exec_names_with_public_descriptors: only include a public name
        in the last-turn-safe set when its routed internal handler is also
        last-turn-safe. Otherwise the public name could re-introduce a tool
        the policy explicitly excluded from the final turn. PR #14574. *)
-    let safe_set = Keeper_tool_policy.tool_name_set last_turn_safe in
-    let aliased_safe_public =
-      List.filter
-        (fun public ->
-           match Keeper_tool_alias.route public with
-           | Some r -> Keeper_tool_policy.StringSet.mem r.internal_name safe_set
-           | None -> false)
-        (Keeper_tool_alias.public_names ())
+    let descriptor_safe_public_names =
+      Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names
+        last_turn_safe
     in
-    let safe_last_turn_tools = last_turn_safe @ aliased_safe_public in
+    let safe_last_turn_tools = last_turn_safe @ descriptor_safe_public_names in
     let all_allowed =
       if is_last_turn && required_tool_names = []
       then

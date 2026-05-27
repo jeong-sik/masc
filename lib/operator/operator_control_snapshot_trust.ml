@@ -12,39 +12,42 @@ let compact_runtime_trust_cache_ttl_sec = 1.0
 
 (* Cache key for the per-keeper runtime-trust projection.
 
-   The previous key embedded [meta.updated_at] (an ISO timestamp that
-   ticks on every meta refresh).  On a live fleet that produced an
-   unbounded set of unique keys for the same logical record: a
-   snapshot of /api/v1/dashboard/cache-stats showed 41/64 entries
-   (65%) occupied by this single key prefix, evicting genuinely hot
-   keys (dashboard.branches, dashboard.rooms, board:memory) from the
-   shared LRU.
+   History:
 
-   The timestamp was acting as an invalidation signal, but the other
-   fields already cover the meaningful invariants:
+   - Originally embedded [meta.updated_at] (ISO timestamp ticking on
+     every meta refresh): 41/64 entries (65%) of the shared LRU
+     belonged to this prefix, evicting hot keys (branches/rooms/board).
+     PR #19010 dropped [meta.updated_at].
+   - PR #19010 retained [meta.runtime.usage.total_turns] in the key,
+     reasoning that monotonic per-turn invalidation was useful.  On a
+     live fleet this still produced a fresh entry per turn — a
+     /dashboard/cache-stats snapshot showed 22/48 entries (45%) of the
+     same prefix, every one expired.  26 keepers × N turns/min ticked
+     the LRU through the same pollution pattern, just slower.
 
-   - [meta.runtime.generation]: bumped on every supervisor-driven
-     restart / takeover — the load-bearing identity bit.
-   - [meta.runtime.usage.total_turns]: monotonic per-turn counter,
-     so any new turn lands on a fresh key.
-   - [meta.paused]: paused/unpaused toggles invalidate.
+   The [compact_runtime_trust_cache_ttl_sec = 1.0] TTL is already the
+   invalidation signal — every key is force-refreshed after one second,
+   so a new turn's data lands within 1s regardless of whether the key
+   embeds the turn counter.  Embedding the counter only fragments the
+   LRU into one slot per turn while contributing nothing the TTL does
+   not already cover.
 
-   And [compact_runtime_trust_cache_ttl_sec = 1.0] is the final
-   safety net: stale data is held for at most one second before the
-   cache forces a refresh.  Dropping [meta.updated_at] gives each
-   keeper exactly one cache slot instead of one per meta refresh
-   tick — pollution disappears, hit_ratio recovers, and stale risk
-   stays bounded by the existing 1s TTL. *)
+   Identity bits the key keeps:
+   - [meta.runtime.generation]: bumped on supervisor restart / takeover.
+   - [meta.paused]: explicit pause/unpause toggle.
+
+   Result: each keeper has exactly one cache slot.  Turn transitions
+   are picked up via the 1s TTL refresh.  Pollution shrinks from
+   N keepers × M turns_per_window to just N keepers. *)
 let compact_runtime_trust_cache_key
       ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
   =
   Printf.sprintf
-    "operator:keeper-runtime-trust:compact:v1:%s:%s:%d:%d:%b"
+    "operator:keeper-runtime-trust:compact:v1:%s:%s:%d:%b"
     config.base_path
     meta.name
     meta.runtime.generation
-    meta.runtime.usage.total_turns
     meta.paused
 ;;
 

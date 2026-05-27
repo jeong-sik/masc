@@ -107,11 +107,6 @@ let command_of_exec_stage ~executable ~argv =
   if String.equal executable ""
   then None
   else
-    let argv =
-      match argv with
-      | first :: rest when String.equal first executable -> rest
-      | argv -> argv
-    in
     Some (String.concat " " (List.map shell_quote_token (executable :: argv)))
 ;;
 

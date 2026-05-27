@@ -1,9 +1,9 @@
 // Shared type-safe normalization utilities for unknown API/SSE payloads.
 // Single source of truth — all dashboard modules import from here.
 
-import { isRecord } from '../../lib/type-guards'
+import { isRecord, hasNonEmptyStringField } from '../../lib/type-guards'
 import { unixSecondsToDate } from '../../lib/format-time'
-export { isRecord }
+export { isRecord, hasNonEmptyStringField }
 
 export function asString(value: unknown): string | undefined
 export function asString(value: unknown, fallback: string): string

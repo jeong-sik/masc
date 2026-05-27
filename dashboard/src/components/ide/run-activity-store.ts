@@ -7,7 +7,7 @@
  */
 
 import { signal } from '@preact/signals'
-import { isRecord } from '../common/normalize'
+import { hasNonEmptyStringField, isRecord } from '../common/normalize'
 
 const DEFAULT_MAX_EVENTS = 200
 const RUN_ACTIVITY_VERBS = [
@@ -129,8 +129,6 @@ export function createRunActivityStore(
   }
 }
 
-type UnknownRecord = Record<string, unknown>
-
 function normalizeMaxEvents(value: number | undefined): number {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value
   return DEFAULT_MAX_EVENTS
@@ -139,20 +137,15 @@ function normalizeMaxEvents(value: number | undefined): number {
 function validEventForRun(event: unknown, runId: string): event is RunActivityEvent {
   if (!isRecord(event)) return false
   if (event.run_id !== runId) return false
-  if (!hasNonEmptyString(event, 'id')) return false
-  if (!hasNonEmptyString(event, 'keeper_id')) return false
-  if (!hasNonEmptyString(event, 'target')) return false
+  if (!hasNonEmptyStringField(event, 'id')) return false
+  if (!hasNonEmptyStringField(event, 'keeper_id')) return false
+  if (!hasNonEmptyStringField(event, 'target')) return false
   if (!isRunActivityVerb(event.verb)) return false
   if (event.detail !== undefined && typeof event.detail !== 'string') return false
   if (event.kind !== undefined && typeof event.kind !== 'string') return false
   if (event.tags !== undefined && !isStringArray(event.tags)) return false
   if (event.context !== undefined && !isRunActivityContext(event.context)) return false
   return Number.isFinite(event.timestamp_ms)
-}
-
-function hasNonEmptyString(record: UnknownRecord, key: string): boolean {
-  const value = record[key]
-  return typeof value === 'string' && value.trim() !== ''
 }
 
 function isStringArray(value: unknown): value is ReadonlyArray<string> {

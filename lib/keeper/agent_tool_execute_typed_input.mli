@@ -18,9 +18,6 @@
       shell operators.  For example, the typed schema accepts
       [find . -name *.ml] because [*.ml] is a [find]-internal pattern,
       not a shell glob.
-    - **Portable find default path**.  Compatibility normalization rewrites
-      [find -type f] style calls to [find . -type f].  GNU find accepts the
-      missing path, but BSD/macOS find reports [illegal option -- t].
     - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
       [exec_stage] separately; [|]-delimited strings are never parsed.
     - **Forbidden in argv tokens**: only control characters that
@@ -76,12 +73,12 @@ val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary.  Accepts either
     [{executable, argv?, cwd?, env?, timeout_sec?}] for [Exec] or
     [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
-    [{stages = ...}] is accepted as an equivalent structured pipeline key.
-    [timeout_sec] is accepted at this layer and consumed by the caller. Raw
-    command-string fields and other unsupported fields are intentionally rejected
-    here.  Compatibility normalization promotes [{executable = ""; argv =
-    command :: rest}] to [{executable = command; argv = rest}] before allowlist
-    validation, so malformed typed calls still cross the same executable gate. *)
+    [timeout_sec] is accepted at this layer and consumed by the caller.
+    [executable] and [pipeline] together, raw command-string fields, [{stages =
+    ...}], and other unsupported fields are intentionally rejected here.  No
+    compatibility normalization is applied: missing [find .] paths, empty
+    [executable] fields, and duplicated executable tokens in [argv] remain
+    caller errors. *)
 
 val validate : mode:allowlist_mode -> execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
@@ -106,8 +103,10 @@ val to_shell_ir :
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]
     inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; literal ["|"]
     argv tokens remain ordinary argument data and never create a pipeline.
-    [sandbox] defaults to host execution; keeper callers may provide Docker
-    runtime targets after sandbox/profile resolution. *)
+    [Exec] argv is passed through as authored; the lowerer does not strip a
+    duplicated executable token. [sandbox] defaults to host execution; keeper
+    callers may provide Docker runtime targets after sandbox/profile
+    resolution. *)
 
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across

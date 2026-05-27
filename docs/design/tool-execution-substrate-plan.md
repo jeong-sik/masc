@@ -266,6 +266,9 @@ scripts/dune-local.sh build test/test_ci_hardening_source.exe
 
 ### PR-C: Prompt and Matrix Alignment
 
+Status: implemented in this PR for keeper-facing web aliases and protected by
+the active-surface lint/source guard.
+
 Normalize keeper-facing prompts to the active public names:
 
 - `SearchWeb`
@@ -284,6 +287,9 @@ should not ask keepers to call `masc_web_search` when the active public alias is
 Validation:
 
 ```bash
+bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail
+scripts/dune-local.sh build test/test_ci_hardening_source.exe
+./_build/default/test/test_ci_hardening_source.exe test source_guard 28
 scripts/dune-local.sh build test/test_keeper_tool_alias.exe test/test_keeper_tool_matrix.exe
 ```
 

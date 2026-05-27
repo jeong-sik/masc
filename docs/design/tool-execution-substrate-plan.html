@@ -635,10 +635,10 @@
             <td><code>bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail</code>, focused source-test build, and targeted case <code>test source_guard 28</code>.</td>
           </tr>
           <tr>
-            <td><span class="status next">PR-C</span> Prompt alignment</td>
+            <td><span class="status done">PR-C</span> Prompt alignment</td>
             <td>Stop keeper prompts from suggesting stale names.</td>
-            <td>Normalize keeper prompts to <code>SearchWeb</code>, <code>FetchWeb</code>, <code>SearchFiles</code>, <code>ReadFile</code>, <code>EditFile</code>, <code>WriteFile</code>, <code>Execute</code>.</td>
-            <td><code>scripts/dune-local.sh build test/test_keeper_tool_alias.exe test/test_keeper_tool_matrix.exe</code></td>
+            <td>Normalize keeper prompts to <code>SearchWeb</code>, <code>FetchWeb</code>, <code>SearchFiles</code>, <code>ReadFile</code>, <code>EditFile</code>, <code>WriteFile</code>, <code>Execute</code>, with an active-surface guard against keeper-facing <code>masc_web_*</code> names.</td>
+            <td><code>bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail</code>, focused source-test build, targeted case <code>test source_guard 28</code>, and focused alias/matrix build.</td>
           </tr>
           <tr>
             <td><span class="status done">PR-C.1</span> Claim lock contention</td>

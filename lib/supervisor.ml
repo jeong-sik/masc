@@ -67,7 +67,7 @@ let restart_limit_exceeded cs =
     On failure, logs and applies restart policy. *)
 let rec start_child ~sw ~clock cs =
   if cs.disabled then begin
-    Log.Server.info ~ctx:cs.spec.name "[Supervisor] skipping disabled child: %s" cs.spec.name
+    Log.Server.info ~ctx:(cs.spec.name) "[Supervisor] skipping disabled child: %s" cs.spec.name
   end else begin
     cs.running <- true;
     Eio.Fiber.fork ~sw (fun () ->

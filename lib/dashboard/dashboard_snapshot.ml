@@ -13,6 +13,8 @@ type t = {
   tools : Yojson.Safe.t;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
+  activity_events_default : Yojson.Safe.t;
+  (* RFC-0201 Step 1 — see [.mli] for contract. *)
 }
 
 (* Lock-free publish slot.  Holds [None] before the first publish so
@@ -69,6 +71,11 @@ let bootstrap ~(config : Coord.config) : t =
      [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches]
      on its first interval (~2s after server start). *)
   let namespace_truth = `Null in
+  (* RFC-0201: leave [activity_events_default] [`Null] in bootstrap.
+     [Activity_graph.json_response] reads disk JSONL; we keep the
+     bootstrap path light and let the refresh fiber populate on its
+     first interval (~2s after start), same as [namespace_truth]. *)
+  let activity_events_default = `Null in
   let t =
     {
       generated_at = Unix.gettimeofday ();
@@ -77,6 +84,7 @@ let bootstrap ~(config : Coord.config) : t =
       tools;
       namespace_truth;
       telemetry_summary;
+      activity_events_default;
     }
   in
   (* Publish only if the slot is still empty — never overwrite a
@@ -141,6 +149,16 @@ let refresh_loop
           | Some json -> json
           | None -> `Null)
     in
+    let activity_events_default =
+      (* RFC-0201 Step 1.  Snapshot the dashboard panel's default
+         query at the API max [limit=1000]; handlers slice this list
+         down to their requested limit per call.  The cost is paid
+         once per [interval_sec] in this background fiber, not on the
+         request path. *)
+      safe "activity_events_default" (fun () ->
+        Activity_graph.json_response config ~kinds:[] ~after_seq:0
+          ~limit:1000 ())
+    in
     {
       generated_at = Unix.gettimeofday ();
       generation = next_generation ();
@@ -148,6 +166,7 @@ let refresh_loop
       tools;
       namespace_truth;
       telemetry_summary;
+      activity_events_default;
     }
   in
   let rec loop () =
@@ -170,7 +189,8 @@ let refresh_loop
 
 let publish_for_test t = Atomic.set slot (Some t)
 
-let make_for_test ~shell ~tools ~namespace_truth ~telemetry_summary =
+let make_for_test ~shell ~tools ~namespace_truth ~telemetry_summary
+      ?(activity_events_default = `Null) () =
   {
     generated_at = Unix.gettimeofday ();
     generation = next_generation ();
@@ -178,6 +198,7 @@ let make_for_test ~shell ~tools ~namespace_truth ~telemetry_summary =
     tools;
     namespace_truth;
     telemetry_summary;
+    activity_events_default;
   }
 ;;
 

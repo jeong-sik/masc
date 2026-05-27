@@ -27,6 +27,14 @@ type t = private {
   tools : Yojson.Safe.t;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
+  activity_events_default : Yojson.Safe.t;
+  (** RFC-0201 Step 1.  [Activity_graph.json_response] computed against
+      the default-shaped query ([kinds=[]], [after_seq=0],
+      [limit=1000]).  Handlers slice this to the request's [limit] for
+      default-shaped queries; non-default queries (cursor, kinds
+      filter, since) fall through to the synchronous compute path.
+      [`Null] until the refresh fiber's first publish (bootstrap stays
+      [`Null] like [namespace_truth]). *)
 }
 
 val current : unit -> t option
@@ -70,6 +78,8 @@ val make_for_test :
   tools:Yojson.Safe.t ->
   namespace_truth:Yojson.Safe.t ->
   telemetry_summary:Yojson.Safe.t ->
+  ?activity_events_default:Yojson.Safe.t ->
+  unit ->
   t
 (** Test-only constructor.  Outside tests, snapshots are produced only
     by the refresh fiber. *)

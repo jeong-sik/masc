@@ -75,6 +75,14 @@ val file_mtime : string -> float option
 (** Rename file. *)
 val rename : string -> string -> unit
 
+(** [rename_if_exists ~src ~dst] renames [src] to [dst], returning [true]
+    on success and [false] if [src] did not exist. Other I/O errors
+    propagate as [Sys_error] (Eio.Io is normalized internally, matching
+    {!rename}). Both runtime paths recognize the missing-source case
+    via typed catches ([Eio.Fs.Not_found] / verified [Sys.file_exists])
+    rather than substring matching on the libc message. *)
+val rename_if_exists : src:string -> dst:string -> bool
+
 (** Remove directory. *)
 val rmdir : string -> unit
 

@@ -303,6 +303,32 @@ let rename (src : string) (dst : string) : unit =
     (fun fs -> Eio.Path.rename Eio.Path.(fs / src) Eio.Path.(fs / dst))
 ;;
 
+(* Both runtime paths catch the missing-source case explicitly rather
+   than substring-matching on the libc error text. Stdlib's [Sys.rename]
+   raises [Sys_error] with a libc-translated, locale-sensitive message;
+   matching "No such file" against it skips the Eio path where
+   [Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _))] is propagated instead (the
+   [with_io] normalizer wraps it into a [Sys_error] whose body does not
+   necessarily contain "No such file"). The result was a silent
+   path-dependent classifier failure: callers using the substring guard
+   only recognized the missing-source case under the Stdlib fallback. *)
+let rename_if_exists ~src ~dst =
+  with_fs_or_fallback
+    ~path:src
+    ~fallback:(fun () ->
+      try
+        Stdlib.Sys.rename src dst;
+        true
+      with
+      | Sys_error _ when not (Stdlib.Sys.file_exists src) -> false)
+    (fun fs ->
+      try
+        Eio.Path.rename Eio.Path.(fs / src) Eio.Path.(fs / dst);
+        true
+      with
+      | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false)
+;;
+
 let rmdir (path : string) : unit =
   with_fs_or_fallback
     ~path

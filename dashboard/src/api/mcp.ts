@@ -27,8 +27,6 @@ let mcpSessionId: string | null = null
 let initPromise: Promise<void> | null = null
 let initCooldownTimer: ReturnType<typeof setTimeout> | null = null
 
-export { ensureDevToken }
-
 async function bestEffortReportToolHostFailure(payload: {
   toolName: string
   message: string

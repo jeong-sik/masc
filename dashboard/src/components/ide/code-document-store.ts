@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { fetchIdeRegions, type IdeCodeRegion } from '../../api/ide'
-import { isRecord, asNullableString } from '../common/normalize'
+import { isRecord, asNullableString, isPositiveSafeInteger } from '../common/normalize'
 
 export interface CodeDocumentSource {
   readonly file_path: string | null
@@ -132,7 +132,7 @@ function parseLines(content: string, maxLines: number): ReadonlyArray<CodeDocume
 }
 
 function normalizeMaxLines(value: number | undefined): number {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value
+  if (isPositiveSafeInteger(value)) return value
   return 5_000
 }
 

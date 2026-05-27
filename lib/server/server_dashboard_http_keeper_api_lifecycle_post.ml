@@ -5,6 +5,22 @@ open Server_dashboard_http_keeper_api_types
 
 module Http = Http_server_eio
 
+let error_json ?ok message =
+  let fields = [ ("error", `String message) ] in
+  let fields =
+    match ok with
+    | None -> fields
+    | Some value -> ("ok", `Bool value) :: fields
+  in
+  `Assoc fields
+
+let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
+  Http.Response.json_value ?request ~status (error_json ?ok message) reqd
+
+let tool_detail_json body =
+  try Yojson.Safe.from_string body with
+  | Yojson.Json_error _ -> `String body
+
 let refresh_keeper_execution_surfaces ~config ~name event =
   Operator_control_snapshot.invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
@@ -36,13 +52,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   in
   match suffix_result with
   | Error msg ->
-      Http.Response.json ~status:`Bad_request
-        (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+      respond_error reqd msg
   | Ok suffix ->
   let name = extract_keeper_name_for_post req_path suffix in
   if String.length name = 0 then
-    Http.Response.json ~status:`Bad_request
-      {|{"error":"keeper name is required"}|} reqd
+    respond_error reqd "keeper name is required"
   else
     let config = state.Mcp_server.room_config in
     let resolve_keeper_agent_name () =
@@ -174,9 +188,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     in
     match args_result with
     | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"ok":false,"error":"%s"}|} (String.escaped msg))
-          reqd
+        respond_error ~ok:false reqd msg
     | Ok args ->
         let started_at = Eio.Time.now clock in
         let duration_ms () =
@@ -219,12 +231,15 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              | None -> Keeper_types.meta_to_json entry.meta
            in
            log_lifecycle_result "already_live";
-           Http.Response.json ~compress:true ~request:req
-             (Printf.sprintf
-                {|{"ok":true,"action":"%s","name":"%s","already_live":true,"detail":%s}|}
-                (String.escaped action)
-                (String.escaped name)
-                (Yojson.Safe.to_string detail))
+           Http.Response.json_value ~compress:true ~request:req
+             (`Assoc
+                [
+                  ("ok", `Bool true);
+                  ("action", `String action);
+                  ("name", `String name);
+                  ("already_live", `Bool true);
+                  ("detail", detail);
+                ])
              reqd
          | None ->
            (match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
@@ -242,12 +257,14 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  | Some _ | None -> ());
                 invalidate_keeper_execution_surfaces ~config ());
               log_lifecycle_result "ok";
-              Http.Response.json ~compress:true ~request:req
-                (Printf.sprintf
-                   {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
-                   (String.escaped action)
-                   (String.escaped name)
-                   body)
+              Http.Response.json_value ~compress:true ~request:req
+                (`Assoc
+                   [
+                     ("ok", `Bool true);
+                     ("action", `String action);
+                     ("name", `String name);
+                     ("detail", tool_detail_json body);
+                   ])
                 reqd
             | Some result when Tool_result.is_success result ->
               (match action with
@@ -256,23 +273,24 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  refresh_keeper_execution_surfaces ~config ~name "stopped"
                | _ -> invalidate_keeper_execution_surfaces ~config ());
               log_lifecycle_result "ok";
-              Http.Response.json ~compress:true ~request:req
-                (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
-                   (String.escaped action)
-                   (String.escaped name))
+              Http.Response.json_value ~compress:true ~request:req
+                (`Assoc
+                   [
+                     ("ok", `Bool true);
+                     ("action", `String action);
+                     ("name", `String name);
+                   ])
                 reqd
             | Some result ->
               let body = Tool_result.message result in
               log_lifecycle_result "rejected";
-              Http.Response.json ~status:`Bad_request ~request:req
-                (Yojson.Safe.to_string
-                   (`Assoc [("ok", `Bool false); ("error", `String body)]))
+              Http.Response.json_value ~status:`Bad_request ~request:req
+                (`Assoc [("ok", `Bool false); ("error", `String body)])
                 reqd
             | None ->
               log_lifecycle_result "dispatch_none";
-              Http.Response.json ~status:`Internal_server_error ~request:req
-                {|{"ok":false,"error":"dispatch returned None"}|}
-                reqd))
+              respond_error ~status:`Internal_server_error ~request:req ~ok:false
+                reqd "dispatch returned None"))
 
 (** POST /api/v1/keepers/:name/directive — pause / resume / wakeup.
 

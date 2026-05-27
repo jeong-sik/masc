@@ -34,6 +34,18 @@ let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
       ("total_active", `Int (List.length allowed));
     ]
 
+let error_json ?ok message =
+  let fields = [ ("error", `String message) ] in
+  let fields =
+    match ok with
+    | None -> fields
+    | Some value -> ("ok", `Bool value) :: fields
+  in
+  `Assoc fields
+
+let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
+  Http.Response.json_value ?request ~status (error_json ?ok message) reqd
+
 (** Handle POST /api/v1/keepers/:name/tools.
     Extracted so it can be called from any prefix_post handler that
     catches POST /api/v1/keepers/* requests. *)
@@ -47,16 +59,12 @@ let handle_keeper_tools_post state req reqd =
     let tlen = String.length req_path in
     let name = String.trim (String.sub req_path plen (tlen - plen - slen)) in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request {|{"error":"keeper name required"}|} reqd
+      respond_error reqd "keeper name required"
     else
       let config = state.Mcp_server.room_config in
       match Keeper_types.read_meta config name with
-      | Error msg ->
-          Http.Response.json ~status:`Not_found
-            (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
-      | Ok None ->
-          Http.Response.json ~status:`Not_found
-            (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+      | Error msg -> respond_error ~status:`Not_found reqd msg
+      | Ok None -> respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
       | Ok (Some meta) ->
           (try
              let args = Yojson.Safe.from_string body_str in
@@ -89,22 +97,20 @@ let handle_keeper_tools_post state req reqd =
              in
              (match updated_meta with
              | Error msg ->
-                 Http.Response.json ~status:`Bad_request
-                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+                 respond_error reqd msg
              | Ok meta' ->
                  (* force: user-initiated tool config is authoritative.
                     Skips version CAS since user intent overrides
                     concurrent keeper turn updates. *)
                  (match Keeper_types.write_meta ~force:true config meta' with
                   | Ok () ->
-                      Http.Response.json ~compress:true ~request:req
-                        (Yojson.Safe.to_string (keeper_tools_response_json meta')) reqd
+                      Http.Response.json_value ~compress:true ~request:req
+                        (keeper_tools_response_json meta') reqd
                   | Error e ->
-                      Http.Response.json ~status:`Internal_server_error
-                        (Printf.sprintf {|{"error":"write failed: %s"}|} (String.escaped e)) reqd))
+                      respond_error ~status:`Internal_server_error reqd
+                        (Printf.sprintf "write failed: %s" e)))
            with Yojson.Json_error e ->
-             Http.Response.json ~status:`Bad_request
-               (Printf.sprintf {|{"error":"invalid json: %s"}|} (String.escaped e)) reqd))
+             respond_error reqd (Printf.sprintf "invalid json: %s" e)))
 
 (* Trajectory preview helpers moved to Server_dashboard_http_keeper_api_types. *)
 
@@ -284,8 +290,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_checkpoints in
   if String.length name = 0 then
-    Http.Response.json ~status:`Bad_request
-      {|{"ok":false,"error":"keeper name is required"}|} reqd
+    respond_error ~ok:false reqd "keeper name is required"
   else
     let config = state.Mcp_server.room_config in
     try
@@ -300,8 +305,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
             |> Json_util.dedupe_keep_order
           in
           if snapshot_ids = [] then
-            Http.Response.json ~status:`Bad_request
-              {|{"ok":false,"error":"snapshot_ids is required"}|} reqd
+            respond_error ~ok:false reqd "snapshot_ids is required"
           else
             let trace_id_result =
               match Keeper_types.read_meta_resolved config name with
@@ -313,10 +317,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
             in
             (match trace_id_result with
              | Error msg ->
-                 Http.Response.json ~status:`Not_found
-                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                      (String.escaped msg))
-                   reqd
+                 respond_error ~status:`Not_found ~ok:false reqd msg
              | Ok trace_id ->
                  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
                  let (deleted, missing) =
@@ -326,32 +327,24 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                  let (_status, inventory) =
                    keeper_checkpoint_inventory_json config name
                  in
-                 Http.Response.json ~compress:true ~request:req
-                   (Yojson.Safe.to_string
-                      (`Assoc
-                         [
-                           ("ok", `Bool true);
-                           ("action", `String "delete_history");
-                           ("keeper", `String name);
-                           ("deleted_snapshot_ids", `List (List.map (fun id -> `String id) deleted));
-                           ("missing_snapshot_ids", `List (List.map (fun id -> `String id) missing));
-                           ("inventory", inventory);
-                         ]))
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("action", `String "delete_history");
+                        ("keeper", `String name);
+                        ("deleted_snapshot_ids", `List (List.map (fun id -> `String id) deleted));
+                        ("missing_snapshot_ids", `List (List.map (fun id -> `String id) missing));
+                        ("inventory", inventory);
+                   ])
                    reqd)
       | "" ->
-          Http.Response.json ~status:`Bad_request
-            {|{"ok":false,"error":"action is required"}|} reqd
+          respond_error ~ok:false reqd "action is required"
       | other ->
-          Http.Response.json ~status:`Bad_request
-            (Printf.sprintf {|{"ok":false,"error":"unknown action: %s"}|}
-               (String.escaped other))
-            reqd
+          respond_error ~ok:false reqd (Printf.sprintf "unknown action: %s" other)
     with
     | Yojson.Json_error e ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"ok":false,"error":"invalid json: %s"}|}
-             (String.escaped e))
-          reqd
+        respond_error ~ok:false reqd (Printf.sprintf "invalid json: %s" e)
 
 let refresh_keeper_execution_surfaces =
   Server_dashboard_http_keeper_api_lifecycle_post.refresh_keeper_execution_surfaces
@@ -362,20 +355,13 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
   if String.length name = 0 then
-    Http.Response.json ~status:`Bad_request
-      {|{"error":"keeper name is required"}|} reqd
+    respond_error reqd "keeper name is required"
   else
     let config = state.Mcp_server.room_config in
     match Keeper_types.read_meta config name with
-    | Error msg ->
-        Http.Response.json ~status:`Not_found
-          (Printf.sprintf {|{"error":"%s"}|}
-             (String.escaped msg))
-          reqd
+    | Error msg -> respond_error ~status:`Not_found reqd msg
     | Ok None ->
-        Http.Response.json ~status:`Not_found
-          (Printf.sprintf {|{"error":"keeper %S not found"}|} name)
-          reqd
+        respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
     | Ok (Some meta0) ->
         (try
            let args = Yojson.Safe.from_string body_str in
@@ -398,11 +384,9 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                if Option.is_some body_name
                   && body_name <> Some name
                then
-                 Http.Response.json ~status:`Bad_request
-                   (Printf.sprintf
-                      {|{"error":"keeper name mismatch: route=%S body=%S"}|}
-                      name (Option.value ~default:"" body_name))
-                   reqd
+                 respond_error reqd
+                   (Printf.sprintf "keeper name mismatch: route=%S body=%S" name
+                      (Option.value ~default:"" body_name))
                else
                  let args_with_name =
                    `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
@@ -419,34 +403,22 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  in
                  (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
                  | Error result ->
-                     Http.Response.json ~status:`Bad_request
-                       (Printf.sprintf {|{"error":"%s"}|}
-                          (String.escaped (Keeper_types.tool_result_body result)))
-                       reqd
+                     respond_error reqd (Keeper_types.tool_result_body result)
                  | Ok parsed ->
                      let result =
                        Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
                      in
                      if not (Keeper_types.tool_result_success result) then
-                       Http.Response.json ~status:`Bad_request
-                         (Printf.sprintf {|{"error":"%s"}|}
-                            (String.escaped (Keeper_types.tool_result_body result)))
-                         reqd
+                       respond_error reqd (Keeper_types.tool_result_body result)
                      else
                        let (_st, json) =
                          Dashboard_http_keeper.keeper_config_json config name
                        in
-                       Http.Response.json ~compress:true ~request:req
-                         (Yojson.Safe.to_string json) reqd)
+                       Http.Response.json_value ~compress:true ~request:req json reqd)
            | None ->
-               Http.Response.json ~status:`Bad_request
-                 {|{"error":"request body must be a JSON object"}|}
-                 reqd
+               respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->
-           Http.Response.json ~status:`Bad_request
-             (Printf.sprintf {|{"error":"invalid json: %s"}|}
-                (String.escaped e))
-             reqd)
+           respond_error reqd (Printf.sprintf "invalid json: %s" e))
 
 let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
@@ -454,8 +426,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then
-    Http.Response.json ~status:`Bad_request
-      {|{"error":"keeper name is required"}|} reqd
+    respond_error reqd "keeper name is required"
   else
     let action =
       try
@@ -470,14 +441,11 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                  "invalid action %S: expected pause, resume, or wakeup" a)
         | None -> Error "missing \"action\" field"
       with Yojson.Json_error e ->
-        Error (Printf.sprintf "invalid json: %s" (String.escaped e))
+        Error (Printf.sprintf "invalid json: %s" e)
     in
-    match action with
-    | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"ok":false,"error":%s}|}
-             (Yojson.Safe.to_string (`String msg)))
-          reqd
+  match action with
+  | Error msg ->
+      respond_error ~ok:false reqd msg
     | Ok directive ->
         let config = state.Mcp_server.room_config in
         let action_str =
@@ -539,9 +507,13 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
            | `Pause -> refresh_keeper_execution_surfaces ~config ~name "paused"
            | `Resume -> refresh_keeper_execution_surfaces ~config ~name "resumed"
            | `Wakeup -> invalidate_keeper_execution_surfaces ~config ());
-          Http.Response.json ~compress:true ~request:req
-            (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
-               (String.escaped action_str) (String.escaped name))
+          Http.Response.json_value ~compress:true ~request:req
+            (`Assoc
+               [
+                 ("ok", `Bool true);
+                 ("action", `String action_str);
+                 ("name", `String name);
+               ])
             reqd
         in
         let needs_meta_for_state_transition =
@@ -561,12 +533,14 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "read_meta_error")]
                ();
-             Http.Response.json ~status:`Internal_server_error ~request:req
-               (Printf.sprintf
-                  {|{"ok":false,"action":"%s","name":"%s","error":"read_meta failed: %s"}|}
-                  (String.escaped action_str)
-                  (String.escaped name)
-                  (String.escaped err))
+             Http.Response.json_value ~status:`Internal_server_error ~request:req
+               (`Assoc
+                  [
+                    ("ok", `Bool false);
+                    ("action", `String action_str);
+                    ("name", `String name);
+                    ("error", `String (Printf.sprintf "read_meta failed: %s" err));
+                  ])
                reqd
          | Ok None, true ->
              Log.Keeper.warn
@@ -578,11 +552,14 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "meta_missing")]
                ();
-             Http.Response.json ~status:`Not_found ~request:req
-               (Printf.sprintf
-                  {|{"ok":false,"action":"%s","name":"%s","error":"keeper meta not found"}|}
-                  (String.escaped action_str)
-                  (String.escaped name))
+             Http.Response.json_value ~status:`Not_found ~request:req
+               (`Assoc
+                  [
+                    ("ok", `Bool false);
+                    ("action", `String action_str);
+                    ("name", `String name);
+                    ("error", `String "keeper meta not found");
+                  ])
                reqd
          | Error err, false ->
              (* Wakeup does not require meta; log but proceed. *)
@@ -639,9 +616,8 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
   in
   match parsed with
   | Error msg ->
-      Http.Response.json ~status:`Bad_request
-        (Printf.sprintf {|{"ok":false,"error":%s}|}
-           (Yojson.Safe.to_string (`String msg)))
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
         reqd
   | Ok (names, directive) ->
       let config = state.Mcp_server.room_config in
@@ -726,16 +702,15 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
             | _ -> acc)
           0 results
       in
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string
-           (`Assoc
-             [
-               ("ok", `Bool true);
-               ("action", `String action_str);
-               ("requested", `Int (List.length names));
-               ("succeeded", `Int ok_count);
-               ("results", `List results);
-             ]))
+      Http.Response.json_value ~compress:true ~request:req
+        (`Assoc
+           [
+             ("ok", `Bool true);
+             ("action", `String action_str);
+             ("requested", `Int (List.length names));
+             ("succeeded", `Int ok_count);
+             ("results", `List results);
+           ])
         reqd
 
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)

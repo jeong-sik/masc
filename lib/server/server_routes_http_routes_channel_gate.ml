@@ -153,12 +153,12 @@ let handle_gate_message ~sw ~clock state request reqd =
     in
     match result with
     | Ok out ->
-        respond_json_with_cors ~status:`OK request reqd
-          (Yojson.Safe.to_string (Channel_gate.outbound_to_json out))
+        respond_json_value_with_cors ~status:`OK request reqd
+          (Channel_gate.outbound_to_json out)
     | Error (gate_err, client_msg) ->
         let status = http_status_of_gate_error gate_err in
-        respond_json_with_cors ~status request reqd
-          (Yojson.Safe.to_string (Channel_gate.error_json client_msg))
+        respond_json_value_with_cors ~status request reqd
+          (Channel_gate.error_json client_msg)
   )
 
 (** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>&room_id=<room>&limit=<n>
@@ -183,15 +183,14 @@ let handle_gate_events _state request reqd =
       ?room_id:(trim_filter "room_id")
       ~limit ()
   in
-  respond_public_read_json ~status:`OK request reqd
-    (Yojson.Safe.to_string json)
+  respond_public_read_json_value ~status:`OK request reqd json
 
 (** GET /api/v1/gate/health
 
     Simple health check for the gate layer. *)
 let handle_gate_health _state request reqd =
-  respond_public_read_json ~status:`OK request reqd
-    {|{"ok":true,"service":"channel_gate"}|}
+  respond_public_read_json_value ~status:`OK request reqd
+    (`Assoc [ ("ok", `Bool true); ("service", `String "channel_gate") ])
 
 (** GET /api/v1/gate/status
 
@@ -199,8 +198,7 @@ let handle_gate_health _state request reqd =
     average latency, error counts.  Public read. *)
 let handle_gate_status _state request reqd =
   let json = Channel_gate_metrics.snapshot_json () in
-  respond_public_read_json ~status:`OK request reqd
-    (Yojson.Safe.to_string json)
+  respond_public_read_json_value ~status:`OK request reqd json
 
 (** GET /api/v1/gate/connectors
 
@@ -218,8 +216,7 @@ let handle_gate_connectors _state request reqd =
     Channel_gate_connector.connectors_json ~gate_status_json:gate_status
       ~audit_limit ()
   in
-  respond_public_read_json ~status:`OK request reqd
-    (Yojson.Safe.to_string json)
+  respond_public_read_json_value ~status:`OK request reqd json
 
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
 
@@ -243,22 +240,20 @@ let handle_gate_connector_status _state request reqd =
   in
   match connector_name with
   | None | Some "" ->
-      respond_public_read_json ~status:`Bad_request request reqd
-        (Yojson.Safe.to_string
-           (Channel_gate.error_json "name or channel is required"))
+      respond_public_read_json_value ~status:`Bad_request request reqd
+        (Channel_gate.error_json "name or channel is required")
   | Some name -> (
       match Channel_gate_connector.find name with
       | None ->
-          respond_public_read_json ~status:`Not_found request reqd
-            (Yojson.Safe.to_string
-               (Channel_gate.error_json ("unknown connector: " ^ name)))
+          respond_public_read_json_value ~status:`Not_found request reqd
+            (Channel_gate.error_json ("unknown connector: " ^ name))
       | Some (module C) ->
           let audit_limit =
             int_query_param request "audit_limit" ~default:10
             |> fun value -> max 1 (min 50 value)
           in
-          respond_public_read_json ~status:`OK request reqd
-            (Yojson.Safe.to_string (C.status_json ~audit_limit ())))
+          respond_public_read_json_value ~status:`OK request reqd
+            (C.status_json ~audit_limit ()))
 
 let gate_keeper_ctx ~sw ~clock state =
   {
@@ -298,9 +293,8 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
       | Yojson.Json_error err ->
           Log.Misc.error "channel_gate %s returned invalid json: %s"
             tool_name err;
-          respond_json_with_cors ~status:`Internal_server_error request reqd
-            (Yojson.Safe.to_string
-               (Channel_gate.error_json "internal error")) )
+          respond_json_value_with_cors ~status:`Internal_server_error request reqd
+            (Channel_gate.error_json "internal error") )
   | Some result ->
       let err = Tool_result.message result in
       let lower = String.lowercase_ascii err in
@@ -308,12 +302,11 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
         if String_util.contains_substring lower "keeper not found" then `Not_found
         else `Bad_gateway
       in
-      respond_json_with_cors ~status request reqd
-        (Yojson.Safe.to_string (Channel_gate.error_json err))
+      respond_json_value_with_cors ~status request reqd
+        (Channel_gate.error_json err)
   | None ->
-      respond_json_with_cors ~status:`Service_unavailable request reqd
-        (Yojson.Safe.to_string
-           (Channel_gate.error_json "keeper dispatch unavailable"))
+      respond_json_value_with_cors ~status:`Service_unavailable request reqd
+        (Channel_gate.error_json "keeper dispatch unavailable")
 
 (** GET /api/v1/gate/keepers?limit=100&detailed=true
 
@@ -338,17 +331,15 @@ let handle_gate_keeper_status ~sw ~clock state request reqd =
   | Some raw_name ->
       let name = String.trim raw_name in
       if name = "" then
-        respond_json_with_cors ~status:`Bad_request request reqd
-          (Yojson.Safe.to_string
-             (Channel_gate.error_json "name is required"))
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (Channel_gate.error_json "name is required")
       else
         let args = `Assoc [ ("name", `String name) ] in
         respond_keeper_tool_json ~sw ~clock state request reqd
           ~tool_name:"masc_keeper_status" ~args
   | None ->
-      respond_json_with_cors ~status:`Bad_request request reqd
-        (Yojson.Safe.to_string
-           (Channel_gate.error_json "name is required"))
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "name is required")
 
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
 let handle_bind_for_connector ~sw ~clock state request reqd
@@ -373,22 +364,19 @@ let handle_bind_for_connector ~sw ~clock state request reqd
         |> String.trim
       in
       if channel_id = "" then
-        respond_json_with_cors ~status:`Bad_request request reqd
-          (Yojson.Safe.to_string
-             (Channel_gate.error_json "channel_id is required"))
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (Channel_gate.error_json "channel_id is required")
       else if keeper_name = "" then
-        respond_json_with_cors ~status:`Bad_request request reqd
-          (Yojson.Safe.to_string
-             (Channel_gate.error_json "keeper_name is required"))
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (Channel_gate.error_json "keeper_name is required")
       else
         match keeper_exists ~sw ~clock state keeper_name with
         | Error err ->
-            respond_json_with_cors ~status:`Service_unavailable request reqd
-              (Yojson.Safe.to_string (Channel_gate.error_json err))
+            respond_json_value_with_cors ~status:`Service_unavailable request reqd
+              (Channel_gate.error_json err)
         | Ok false ->
-            respond_json_with_cors ~status:`Not_found request reqd
-              (Yojson.Safe.to_string
-                 (Channel_gate.error_json ("unknown keeper: " ^ keeper_name)))
+            respond_json_value_with_cors ~status:`Not_found request reqd
+              (Channel_gate.error_json ("unknown keeper: " ^ keeper_name))
         | Ok true -> (
             let actor_name =
               sanitized_dashboard_actor_for_request
@@ -398,15 +386,13 @@ let handle_bind_for_connector ~sw ~clock state request reqd
             in
             match bind_fn ~channel_id ~keeper_name ~actor_name with
             | Ok payload ->
-                respond_json_with_cors ~status:`OK request reqd
-                  (Yojson.Safe.to_string payload)
+                respond_json_value_with_cors ~status:`OK request reqd payload
             | Error err ->
-                respond_json_with_cors ~status:`Internal_server_error request
-                  reqd
-                  (Yojson.Safe.to_string (Channel_gate.error_json err)))
+                respond_json_value_with_cors ~status:`Internal_server_error
+                  request reqd (Channel_gate.error_json err))
     with Yojson.Json_error _ ->
-      respond_json_with_cors ~status:`Bad_request request reqd
-        (Yojson.Safe.to_string (Channel_gate.error_json "invalid json")))
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "invalid json"))
 
 (** Shared unbind handler: parse body, dispatch to connector. *)
 let handle_unbind_for_connector state request reqd
@@ -424,9 +410,8 @@ let handle_unbind_for_connector state request reqd
         |> String.trim
       in
       if channel_id = "" then
-        respond_json_with_cors ~status:`Bad_request request reqd
-          (Yojson.Safe.to_string
-             (Channel_gate.error_json "channel_id is required"))
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (Channel_gate.error_json "channel_id is required")
       else
         let actor_name =
           sanitized_dashboard_actor_for_request
@@ -436,18 +421,16 @@ let handle_unbind_for_connector state request reqd
         in
         match unbind_fn ~channel_id ~actor_name with
         | Ok payload ->
-            respond_json_with_cors ~status:`OK request reqd
-              (Yojson.Safe.to_string payload)
+            respond_json_value_with_cors ~status:`OK request reqd payload
         | Error "binding not found" ->
-            respond_json_with_cors ~status:`Not_found request reqd
-              (Yojson.Safe.to_string
-                 (Channel_gate.error_json "binding not found"))
+            respond_json_value_with_cors ~status:`Not_found request reqd
+              (Channel_gate.error_json "binding not found")
         | Error err ->
-            respond_json_with_cors ~status:`Internal_server_error request reqd
-              (Yojson.Safe.to_string (Channel_gate.error_json err))
+            respond_json_value_with_cors ~status:`Internal_server_error request reqd
+              (Channel_gate.error_json err)
     with Yojson.Json_error _ ->
-      respond_json_with_cors ~status:`Bad_request request reqd
-        (Yojson.Safe.to_string (Channel_gate.error_json "invalid json")))
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "invalid json"))
 
 (** POST /api/v1/gate/connector/bind?name=<connector>
 
@@ -460,15 +443,13 @@ let handle_gate_connector_bind ~sw ~clock state request reqd =
     |> Option.value ~default:""
   in
   if connector_name = "" then
-    respond_json_with_cors ~status:`Bad_request request reqd
-      (Yojson.Safe.to_string (Channel_gate.error_json "name is required"))
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (Channel_gate.error_json "name is required")
   else
     match Channel_gate_connector.find connector_name with
     | None ->
-        respond_json_with_cors ~status:`Not_found request reqd
-          (Yojson.Safe.to_string
-             (Channel_gate.error_json
-                ("unknown connector: " ^ connector_name)))
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
         handle_bind_for_connector ~sw ~clock state request reqd
           ~bind_fn:C.bind
@@ -483,15 +464,13 @@ let handle_gate_connector_unbind _state request reqd =
     |> Option.value ~default:""
   in
   if connector_name = "" then
-    respond_json_with_cors ~status:`Bad_request request reqd
-      (Yojson.Safe.to_string (Channel_gate.error_json "name is required"))
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (Channel_gate.error_json "name is required")
   else
     match Channel_gate_connector.find connector_name with
     | None ->
-        respond_json_with_cors ~status:`Not_found request reqd
-          (Yojson.Safe.to_string
-             (Channel_gate.error_json
-                ("unknown connector: " ^ connector_name)))
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
         handle_unbind_for_connector _state request reqd
           ~unbind_fn:C.unbind

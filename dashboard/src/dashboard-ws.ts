@@ -3,7 +3,7 @@ import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
 import { dashboardBearerToken } from './api/core'
-import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
+import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import {
   GLOBAL_DASHBOARD_PUSH_SLICES,
   type DashboardPushSlice,
@@ -14,9 +14,6 @@ import {
   RECONNECT_JITTER_MS,
   RECONNECT_MAX_MS,
 } from './config/constants'
-
-// Re-export for test consumers that assert on frame parsing.
-export const parseWebSocketSseFrames = parseWebSocketSseFramesImpl
 import {
   dashboardWsConnected,
   dashboardWsLastError,
@@ -549,7 +546,7 @@ function processInboundMessage(data: string): void {
     try {
       raw = JSON.parse(data)
     } catch {
-      for (const payload of parseWebSocketSseFramesImpl(data)) {
+      for (const payload of parseWebSocketSseFrames(data)) {
         handleRawPush(payload)
       }
       return

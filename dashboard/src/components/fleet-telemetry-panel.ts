@@ -57,8 +57,6 @@ import {
   type FleetTelemetryState,
 } from './fleet-telemetry-utils'
 
-export { buildFleetRows }
-
 /**
  * Pure filter for fleet rows.
  *

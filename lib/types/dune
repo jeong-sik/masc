@@ -3,7 +3,7 @@
  (name masc_types)
  (public_name masc_mcp.masc_types)
  (wrapped false)
- (modules rate_limit_types masc_error ids types_core types_auth masc_domain task_stage severity)
+ (modules rate_limit_types masc_error ids evidence_claim types_core types_auth masc_domain task_stage severity)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags (:standard -w +4))
  (libraries yojson unix time_compat masc_core base64 uuidm)

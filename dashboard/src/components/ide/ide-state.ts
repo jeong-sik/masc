@@ -12,6 +12,7 @@
 
 import { signal } from '@preact/signals'
 import type { TabId } from '../../types'
+import { isPositiveSafeInteger } from '../common/normalize'
 
 export const activeIdeFile = signal<string | null>(null)
 
@@ -52,9 +53,7 @@ export function focusIdeContextAnchor(
 }
 
 export function normalizeIdeContextLine(value: number | undefined): number | undefined {
-  return Number.isSafeInteger(value) && value !== undefined && value >= 1
-    ? value
-    : undefined
+  return isPositiveSafeInteger(value) ? value : undefined
 }
 
 export function normalizeIdeContextFilePath(value: string): string | null {

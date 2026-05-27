@@ -141,6 +141,7 @@ let strict_contract ?(verify_gate_evidence = []) () : Masc_domain.task_contract 
   ; completion_contract = [ "tests pass" ]
   ; required_tools = []
   ; required_evidence = []
+  ; required_evidence_typed = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence
   ; links = { operation_id = None; session_id = None }
@@ -183,6 +184,7 @@ let contract_requiring_tools required_tools : Masc_domain.task_contract =
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
+  ; required_evidence_typed = []
   ; links = { operation_id = None; session_id = None }
   }
 ;;

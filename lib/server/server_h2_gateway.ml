@@ -174,60 +174,55 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
          Health & Metrics
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
-          let body =
+          let json =
             Server_routes_http_runtime.make_health_response_json ~listener:"h2" httpun_request
-            |> Yojson.Safe.to_string
           in
-          h2_respond_json h2_reqd body ~extra_headers:cors
+          h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, p when String.equal p Server_health_paths.liveness ->
-          let body =
-            Yojson.Safe.to_string
-              (`Assoc [
-                 ("live", `Bool true);
-                 ("startup", Server_startup_state.to_yojson ());
-               ])
+          let json =
+            `Assoc [
+              ("live", `Bool true);
+              ("startup", Server_startup_state.to_yojson ());
+            ]
           in
-          h2_respond_json h2_reqd body ~extra_headers:cors
+          h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, p when String.equal p Server_health_paths.readiness ->
           let current = Server_startup_state.(!state) in
-          let body, status =
+          let json, status =
             if current.state_ready then
-              (Yojson.Safe.to_string
-                 (`Assoc [
-                    ("ready", `Bool true);
-                    ("phase", `String (Server_startup_state.phase_to_string current.phase));
-                    ("backend_mode", `String current.backend_mode);
-                  ]),
+              (`Assoc [
+                 ("ready", `Bool true);
+                 ("phase", `String (Server_startup_state.phase_to_string current.phase));
+                 ("backend_mode", `String current.backend_mode);
+               ],
                `OK)
             else
-              (Yojson.Safe.to_string
-                 (`Assoc [
-                    ("ready", `Bool false);
-                    ("phase", `String (Server_startup_state.phase_to_string current.phase));
-                    ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
-                  ]),
+              (`Assoc [
+                 ("ready", `Bool false);
+                 ("phase", `String (Server_startup_state.phase_to_string current.phase));
+                 ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
+               ],
                `Service_unavailable)
           in
-          h2_respond_json ~status h2_reqd body ~extra_headers:cors
+          h2_respond_json_value ~status h2_reqd json ~extra_headers:cors
 
       | `GET, ("/.well-known/agent.json" | "/.well-known/agent-card.json") ->
-          h2_respond_json h2_reqd
-            (Server_routes_http_runtime.agent_card_json httpun_request
-             |> Yojson.Safe.to_string)
+          h2_respond_json_value h2_reqd
+            (Server_routes_http_runtime.agent_card_json httpun_request)
             ~extra_headers:cors
 
       | `GET, "/ws" ->
-          let body =
+          let json =
             Server_routes_http_runtime.websocket_discovery_json httpun_request
-            |> Yojson.Safe.to_string
           in
-          h2_respond_json h2_reqd body ~extra_headers:cors
+          h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `POST, "/webrtc/offer" ->
           if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+            h2_respond_json_value h2_reqd
+              (`Assoc [ ("error", `String "webrtc transport disabled") ])
               ~status:`Not_found ~extra_headers:cors
           else
             with_server_state h2_reqd (fun state ->
@@ -250,13 +245,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                     | Ok body ->
                         h2_respond_json h2_reqd body ~extra_headers:cors
                     | Error msg ->
-                        h2_respond_json h2_reqd
-                          (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                        h2_respond_json_value h2_reqd
+                          (`Assoc [ ("error", `String msg) ])
                           ~status:`Bad_request ~extra_headers:cors))
 
       | `POST, "/webrtc/answer" ->
           if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+            h2_respond_json_value h2_reqd
+              (`Assoc [ ("error", `String "webrtc transport disabled") ])
               ~status:`Not_found ~extra_headers:cors
           else
             with_server_state h2_reqd (fun state ->
@@ -279,20 +275,17 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                     | Ok body ->
                         h2_respond_json h2_reqd body ~extra_headers:cors
                     | Error msg ->
-                        h2_respond_json h2_reqd
-                          (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                        h2_respond_json_value h2_reqd
+                          (`Assoc [ ("error", `String msg) ])
                           ~status:`Bad_request ~extra_headers:cors))
 
       | `GET, "/metrics" ->
           let body = Prometheus.to_prometheus_text () in
-          let headers = H2.Headers.of_list ([
-            ("content-type", "text/plain; version=0.0.4; charset=utf-8");
-            ("content-length", string_of_int (String.length body));
-          ] @ cors) in
-          let response = H2.Response.create ~headers `OK in
-          let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-          H2.Body.Writer.write_string writer body;
-          H2.Body.Writer.close writer
+          h2_respond_body
+            ~content_type:"text/plain; version=0.0.4; charset=utf-8"
+            h2_reqd
+            body
+            ~extra_headers:cors
 
       | `GET, "/" ->
           h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
@@ -442,12 +435,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                        h2_respond_empty h2_reqd ~status:`Accepted
                                          ~extra_headers:mcp_hdrs
                                    | json when is_http_error_response json ->
-                                       let body = Yojson.Safe.to_string json in
-                                       h2_respond_json h2_reqd body ~status:`Bad_request
+                                       h2_respond_json_value h2_reqd json ~status:`Bad_request
                                          ~extra_headers:mcp_hdrs
                                    | json ->
-                                       let body = Yojson.Safe.to_string json in
-                                       h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs)))))
+                                       h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))
 
       | `DELETE, "/mcp/operator" ->
           h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
@@ -555,7 +546,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                   ("message", `String "Use /api/v1/dashboard/shell and surface-specific projection endpoints.");
                 ]
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            h2_respond_json_value h2_reqd json
               ~status:`Gone ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/shell" ->
@@ -568,14 +559,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 ~request:httpun_request ~light
                 state.Mcp_server.room_config
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/branches" ->
           with_server_state h2_reqd (fun state ->
             let json =
               Dashboard_branches.json ~config:state.Mcp_server.room_config
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/nudges" ->
           with_server_state h2_reqd (fun state ->
@@ -587,7 +578,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               Dashboard_operator_nudges.json
                 ~config:state.Mcp_server.room_config ~limit ()
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/rooms"
@@ -606,7 +597,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me
                 ~limit ()
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/heuristics"
@@ -615,7 +606,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             Server_routes_http_routes_provider_runs.dashboard_heuristics_json
               httpun_request
           in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+          h2_respond_json_value h2_reqd json
             ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/heuristics/coverage"
@@ -624,7 +615,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             Server_routes_http_routes_provider_runs.dashboard_heuristics_coverage_json
               httpun_request
           in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+          h2_respond_json_value h2_reqd json
             ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/stress"
@@ -634,20 +625,20 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               Server_routes_http_routes_provider_runs.dashboard_stress_json
                 ~config:state.Mcp_server.room_config httpun_request
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/config" ->
           with_h2_public_read h2_reqd (fun _state ->
             let json = Env_config_introspect.to_json () in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/config/excuse-patterns" ->
           with_h2_public_read h2_reqd (fun _state ->
             let patterns = Anti_rationalization.load_excuse_patterns () in
             let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
             let json = `List json_items in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `POST, "/api/v1/dashboard/config/excuse-patterns" ->
           with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
@@ -657,37 +648,34 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                   let json = Yojson.Safe.from_string body_str in
                   match Anti_rationalization.parse_excuse_patterns_json json with
                   | Error msg ->
-                      let err_json =
-                        Yojson.Safe.to_string
-                          (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
-                      in
-                      h2_respond_json
+                      h2_respond_json_value
                         h2_reqd
-                        err_json
+                        (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
                         ~status:`Bad_request
                         ~extra_headers:cors
                   | Ok patterns ->
                       (match Anti_rationalization.save_excuse_patterns patterns with
                        | Ok () ->
-                           h2_respond_json h2_reqd {|{"ok":true}|}
+                           h2_respond_json_value h2_reqd
+                             (`Assoc [ ("ok", `Bool true) ])
                              ~extra_headers:cors
                        | Error msg ->
-                           let err_json =
-                             Yojson.Safe.to_string
-                               (`Assoc
-                                  [ ("ok", `Bool false); ("error", `String msg) ])
-                           in
-                           h2_respond_json
+                           h2_respond_json_value
                              h2_reqd
-                             err_json
+                             (`Assoc
+                                [ ("ok", `Bool false); ("error", `String msg) ])
                              ~status:`Internal_server_error
                              ~extra_headers:cors)
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | _exn ->
-                    h2_respond_json
+                    h2_respond_json_value
                       h2_reqd
-                      {|{"ok":false,"error":"Invalid JSON body"}|}
+                      (`Assoc
+                         [
+                           ("ok", `Bool false);
+                           ("error", `String "Invalid JSON body");
+                         ])
                       ~status:`Bad_request
                       ~extra_headers:cors))
 
@@ -703,12 +691,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               Server_dashboard_snapshot_select.select_project_snapshot_json
                 ~state ~sw ~clock httpun_request
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/execution" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/execution-trust" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -716,12 +704,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               dashboard_execution_trust_http_json ~state ~sw ~clock
                 httpun_request
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/board" ->
           with_h2_public_read h2_reqd (fun _state ->
             let json = dashboard_memory_http_json httpun_request in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/governance" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -729,7 +717,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               dashboard_governance_http_json httpun_request
                 ~base_path:state.Mcp_server.room_config.base_path
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/proof" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -737,7 +725,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               dashboard_proof_http_json
                 ~config:state.Mcp_server.room_config httpun_request
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/planning" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -745,7 +733,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               dashboard_planning_http_json
                 ~config:state.Mcp_server.room_config
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/bootstrap" ->
           (* Same SSOT as the HTTP/1.1 router so the HTTP/2 client sees
@@ -755,7 +743,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let json =
               dashboard_bootstrap_http_json ~state ~sw ~clock httpun_request
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -763,7 +751,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               dashboard_goals_tree_http_json
                 ~config:state.Mcp_server.room_config
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals/detail" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -773,15 +761,19 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               | None -> ""
             in
             if goal_id = "" then
-              h2_respond_json h2_reqd
-                {|{"ok":false,"error":"goal_id query param is required"}|}
+              h2_respond_json_value h2_reqd
+                (`Assoc
+                   [
+                     ("ok", `Bool false);
+                     ("error", `String "goal_id query param is required");
+                   ])
                 ~status:`Bad_request ~extra_headers:cors
             else
               let json =
                 dashboard_goal_detail_http_json
                   ~config:state.Mcp_server.room_config ~goal_id
               in
-              h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/tasks/history" ->
@@ -792,7 +784,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               | None -> ""
             in
             if task_id = "" then
-              h2_respond_json h2_reqd {|{"error":"task_id is required"}|}
+              h2_respond_json_value h2_reqd
+                (`Assoc [ ("error", `String "task_id is required") ])
                 ~status:`Bad_request ~extra_headers:cors
             else
               let limit =
@@ -803,18 +796,18 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 Tool_task.task_history_events_json state.Mcp_server.room_config
                   ~task_id ~limit
               in
-              h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/mission" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/session" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/mission/briefing" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -822,24 +815,24 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               dashboard_mission_briefing_http_json ~state ~sw ~clock
                 httpun_request
             in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/transport-health" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_transport_health_http_json ~state in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/perf" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_perf_http_json state.Mcp_server.room_config in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/oas/telemetry/recent" ->
           with_h2_public_read h2_reqd (fun _state ->
             let provider = oas_telemetry_provider_param httpun_request in
             let limit = oas_telemetry_limit_param httpun_request in
             let json = Dashboard_oas_bridge.recent_json ?provider ~limit () in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/oas/telemetry/summary" ->
@@ -847,7 +840,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let provider = oas_telemetry_provider_param httpun_request in
             let limit = oas_telemetry_limit_param httpun_request in
             let json = Dashboard_oas_bridge.summary_json ?provider ~limit () in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
       | `GET, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
@@ -864,7 +857,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               ("tempo_interval_s", `Float tempo.current_interval_s);
               ("paused", `Bool room_state.paused);
             ] in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/openapi.json" ->
           let host_header = get_header_any_case httpun_request.headers "host" in
@@ -876,9 +869,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json =
             Transport.Rest.generate_openapi_document
               ~host:resolved_host ~port:resolved_port ()
-            |> Yojson.Safe.to_string
           in
-          h2_respond_json h2_reqd json ~extra_headers:cors
+          h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, "/api/v1/namespace/current"
       | `GET, "/api/v1/room/current"

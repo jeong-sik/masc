@@ -358,9 +358,7 @@ let add_routes router =
                                       \"web\" or \"with_token\""
                                      other))))))
          request reqd)
-  |> Http.Router.add ~path:("PREFIX:/api/v1/credentials/")
-       ~methods:[`DELETE]
-       ~handler:(fun request reqd ->
+  |> Http.Router.prefix_delete "/api/v1/credentials/" (fun request reqd ->
          with_token_permission_auth ~permission:Masc_domain.CanAdmin
            (fun state _agent_name req reqd ->
              let base_path = state.Mcp_server.room_config.base_path in

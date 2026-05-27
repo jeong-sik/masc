@@ -317,6 +317,8 @@ module Rest = struct
               details_markdown = name;
               doc_refs = [];
               prompt_hints = [];
+              examples = [];
+              alternatives = [];
             })
 
   let operation_tag_groups =

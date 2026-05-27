@@ -36,6 +36,17 @@ type help_entry = {
       (** LLM-facing usage hints (kept separate from
           [details_markdown] so prompt builders can splice them
           without dragging the full body). *)
+  examples : string list;
+      (** RFC-0195 P0 — Anthropic MCP guidance: examples > longer
+          descriptions for parameter accuracy. Empty list means
+          "no curated example yet"; entries are short, copy-able
+          invocation snippets. *)
+  alternatives : string list;
+      (** RFC-0195 P0 — typed list of sibling tool names the LLM
+          may try when this one rejects or is unavailable. Empty
+          list means "terminal — this is the only path". RFC-0194
+          §2 instantiation: every LLM-blocking gate names an
+          alternative via descriptor metadata, not per-error prose. *)
 }
 
 (** {1 Lookup} *)

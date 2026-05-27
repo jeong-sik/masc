@@ -1,4 +1,4 @@
-(** Development tools for autonomous agent coding.
+(** Development tools for autonomous agent execution.
 
     Provides file_read, file_write, shell_exec so Fleet agents
     can perform local development tasks (code generation, test runs,
@@ -46,9 +46,9 @@ let block_reason_to_string_with_allowlist = Exec_policy.block_reason_to_string_w
 let command_context_with_allowlist = Exec_policy.command_context_with_allowlist
 let validate_command_with_allowlist = Exec_policy.validate_command_with_allowlist
 let validate_command = Exec_policy.validate_command
-let command_context_coding_with_allowlist = Exec_policy.command_context_coding_with_allowlist
-let validate_command_coding_with_allowlist = Exec_policy.validate_command_coding_with_allowlist
-let validate_command_coding = Exec_policy.validate_command_coding
+let command_context_tool_execute_with_allowlist = Exec_policy.command_context_tool_execute_with_allowlist
+let validate_command_tool_execute_with_allowlist = Exec_policy.validate_command_tool_execute_with_allowlist
+let validate_command_tool_execute = Exec_policy.validate_command_tool_execute
 let simple_literal_args = Exec_policy.simple_literal_args
 let existing_dir_path_values_of_shell_ir = Exec_policy.existing_dir_path_values_of_shell_ir
 let validate_shell_ir_paths = Exec_policy.validate_shell_ir_paths

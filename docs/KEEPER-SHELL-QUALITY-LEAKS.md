@@ -46,7 +46,7 @@ Adjacent tool-surface sample from the same 240h window:
 | Timeout | 271 | `lib/exec_core.ml`, Docker shell runtime | Classify as `semantic_status:timeout` for the quality loop; command scoping remains the caller-side correction. |
 | Repeat/streak gates | 203 | OAS retry cache, keeper tool diversity gates | Measure separately as `repeat_or_streak_gate` so retries are not mistaken for new Execute defects. |
 | Wrong tool channel | 164 | typed `tool_execute` allowlist, descriptor-routed MASC tools, `scripts/analyze-keeper-execute-failures.sh` | Preserve pre-exec rejection, but do it through typed command allowlists and descriptor-owned tool routing. Public `gh` PR/status mutations belong to `Execute` with scoped typed argv, not a raw shell string channel. |
-| Command not allowed by validator | 110 | `lib/keeper/keeper_shell_bash.ml`, `retired file-write tool module` | Keep the explicit validator block, but measure it separately from path syntax, wrong-tool, and shell shape classes. |
+| Command not allowed by validator | 110 | `lib/keeper/agent_tool_execute_runtime.ml`, `retired file-write tool module` | Keep the explicit validator block, but measure it separately from path syntax, wrong-tool, and shell shape classes. |
 | Docker image missing | 108 | Docker sandbox runtime | Measure separately from command-shape failures; this is an infrastructure/runtime availability class. |
 | Command usage or regex errors | 59 | command-specific handlers | Keep as caller-command defects rather than path or sandbox defects. |
 | Approval / PR policy bypass | 20 | typed `tool_execute` allowlist and descriptor-owned MASC tools | Preserve pre-exec policy rejection and classify it separately from runtime shell failures. Approval/PR operations should enter through descriptor-owned tools or scoped `Execute` typed argv. |
@@ -79,9 +79,9 @@ path.
 Focused tests:
 
 ```bash
-scripts/dune-local.sh build test/test_keeper_bash_safety.exe
+scripts/dune-local.sh build test/test_tool_execute_safety.exe
 scripts/dune-local.sh build test/test_tool_input_validation.exe
-scripts/dune-local.sh build test/test_keeper_bash_typed_input.exe
+scripts/dune-local.sh build test/test_agent_tool_execute_typed_input.exe
 scripts/dune-local.sh build test/test_keeper_sandbox_docker_route.exe
 scripts/dune-local.sh build test/test_keeper_tool_alias.exe
 ```

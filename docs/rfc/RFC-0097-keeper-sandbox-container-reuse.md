@@ -64,7 +64,7 @@ saturated. The host FD ceiling becomes a function of *active keeper count*
 
 ## Problem
 
-Every keeper Bash sandbox call today goes through:
+Every keeper Execute sandbox call today goes through:
 
 ```
 docker run --rm <flags> <image> bash -lc "<cmd>"
@@ -317,7 +317,7 @@ the trade-off does not invert in our favor.
 - Detection module: `lib/keeper_fd_pressure.ml:36-46 is_fd_exhaustion_text`.
 - Throttle (Layer A/B): `lib/docker_spawn_throttle.ml` (PR #15722).
 - Spawn sites today: `lib/worker_runtime_docker.ml:394 run_worker_spec`,
-  `lib/keeper/keeper_shell_docker.ml:976 docker run --rm`.
+  plus the sandbox Execute runner's `docker run --rm` path.
 
 ## References
 

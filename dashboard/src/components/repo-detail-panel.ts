@@ -10,6 +10,7 @@ import { selectedRepoId, syncRepository, deleteRepository, normalizeRepoStatus, 
 import { requestConfirm } from './common/confirm-dialog'
 import { StatusBadge as CommonStatusBadge } from './common/status-badge'
 import { formatDateTimeKo as formatDate } from '../lib/format-time'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import { Trash2, GitBranch, Clock, Calendar, Folder, Link, Shield, RefreshCw } from 'lucide-preact'
 
 // ── Branch type ──────────────────────────────────────────
@@ -117,7 +118,7 @@ function InfoRow({
 }) {
   const displayValue =
     value === null || value === undefined || value === ''
-      ? '--'
+      ? MISSING_DATA_DASH
       : typeof value === 'boolean'
         ? (value ? 'ON' : 'OFF')
         : String(value)

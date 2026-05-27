@@ -103,7 +103,7 @@ interface TraceSlot {
 
 // ── Per-agent state map ────────────────────────────────
 
-const traceSlots = signal<Record<string, TraceSlot>>({})
+export const traceSlots = signal<Record<string, TraceSlot>>({})
 
 const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', statusFilter: 'all', searchQuery: '', fetchToken: 0 }
 
@@ -314,8 +314,6 @@ export function getKindCounts(agent: string): Record<TraceEventKind | 'all', num
 // ── Trigger signal ─────────────────────────────────────
 // Components subscribe to this to know when traceSlots changed.
 // Reading traceSlots.value inside a component body tracks reactivity.
-export { traceSlots as _traceSlots }
-export { liveTraceFeeds as _liveTraceFeeds }
 
 // ── Filter action ──────────────────────────────────────
 

@@ -99,7 +99,7 @@ module Late_response = struct
         Some msg
     | Failure msg when String.equal msg "cannot write to closed writer" ->
         Some "cannot write to closed writer"
-    | _ -> None
+    | _exn -> None
 end
 [@@@warning "+52"]
 
@@ -149,35 +149,58 @@ let safe_respond_with_string reqd response body =
 module Response = struct
   let html_cache_control = "no-store, max-age=0, must-revalidate"
 
+  let text_plain_content_type = "text/plain; charset=utf-8"
+  let html_content_type = "text/html; charset=utf-8"
+  let json_content_type = "application/json; charset=utf-8"
+
+  let content_headers ?(before_headers = []) ?(after_headers = [])
+      ?(tail_headers = []) ~content_type body =
+    let content_length = string_of_int (String.length body) in
+    let base_headers_rev = [
+      ("content-length", content_length);
+      ("content-type", content_type);
+    ] in
+    match before_headers, after_headers, tail_headers with
+    | [], [], [] -> Httpun.Headers.of_rev_list base_headers_rev
+    | _ ->
+        let rev_headers = List.rev before_headers in
+        let rev_headers =
+          List.rev_append
+            [("content-type", content_type); ("content-length", content_length)]
+            rev_headers
+        in
+        let rev_headers = List.rev_append after_headers rev_headers in
+        Httpun.Headers.of_rev_list (List.rev_append tail_headers rev_headers)
+
+  let response ?before_headers ?after_headers ?tail_headers ~content_type status body =
+    Httpun.Response.create
+      ~headers:(content_headers ?before_headers ?after_headers ?tail_headers ~content_type body)
+      status
+
+  let static_response ~content_type status body =
+    response ~content_type status body, body
+
+  let not_found_response =
+    static_response ~content_type:text_plain_content_type `Not_found "404 Not Found"
+
+  let method_not_allowed_response =
+    static_response ~content_type:text_plain_content_type `Method_not_allowed
+      "405 Method Not Allowed"
+
   let text ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list ([
-      ("content-type", "text/plain; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ]) in
-    let response = Httpun.Response.create ~headers status in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~content_type:text_plain_content_type status body)
+      body
 
   let html ?(status = `OK) ?(headers = []) body reqd =
-    let base_headers = [
-      ("content-type", "text/html; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ] in
-    let response = Httpun.Response.create
-      ~headers:(Httpun.Headers.of_list (base_headers @ headers))
-      status
-    in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~after_headers:headers ~content_type:html_content_type status body)
+      body
 
   let bytes ?(status = `OK) ?(headers = []) ~content_type body reqd =
-    let base_headers = [
-      ("content-type", content_type);
-      ("content-length", string_of_int (String.length body));
-    ] in
-    let response = Httpun.Response.create
-      ~headers:(Httpun.Headers.of_list (base_headers @ headers))
-      status
-    in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~after_headers:headers ~content_type status body)
+      body
 
   (** JSON response with optional zstd compression (dictionary-enhanced)
 
@@ -198,13 +221,10 @@ module Response = struct
         ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
         body
     in
-    let base_headers = [
-      ("content-type", "application/json; charset=utf-8");
-      ("content-length", string_of_int (String.length final_body));
-    ] in
-    let headers = extra_headers @ base_headers @ compression_headers in
-    let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
-    safe_respond_with_string reqd response final_body
+    safe_respond_with_string reqd
+      (response ~before_headers:extra_headers ~tail_headers:compression_headers
+         ~content_type:json_content_type status final_body)
+      final_body
 
   let json_value ?status ?compress ?extra_headers ?request value reqd =
     json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
@@ -223,12 +243,9 @@ module Response = struct
 
   (** Legacy JSON response without compression check (backwards compatible) *)
   let json_raw ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ]) in
-    let response = Httpun.Response.create ~headers status in
-    safe_respond_with_string reqd response body
+    safe_respond_with_string reqd
+      (response ~content_type:json_content_type status body)
+      body
 
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).
@@ -241,10 +258,12 @@ module Response = struct
     let if_none_match = Httpun.Headers.get request.Httpun.Request.headers "if-none-match" in
     match if_none_match with
     | Some inm when String.equal inm etag_value ->
-        let headers = Httpun.Headers.of_list [
-          ("etag", etag_value);
-          ("cache-control", html_cache_control);
-        ] in
+        let headers =
+          Httpun.Headers.of_rev_list [
+            ("cache-control", html_cache_control);
+            ("etag", etag_value);
+          ]
+        in
         let response = Httpun.Response.create ~headers `Not_modified in
         safe_respond_with_string reqd response ""
     | _ ->
@@ -254,21 +273,22 @@ module Response = struct
             ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
             body
         in
-        let base_headers = [
-          ("content-type", "text/html; charset=utf-8");
-          ("content-length", string_of_int (String.length final_body));
+        let extra_headers = [
           ("etag", etag_value);
           ("cache-control", html_cache_control);
         ] in
-        let headers = base_headers @ compression_headers in
-        let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
-        safe_respond_with_string reqd response final_body
+        safe_respond_with_string reqd
+          (response ~after_headers:extra_headers ~tail_headers:compression_headers
+             ~content_type:html_content_type status final_body)
+          final_body
 
   let not_found reqd =
-    text ~status:`Not_found "404 Not Found" reqd
+    let response, body = not_found_response in
+    safe_respond_with_string reqd response body
 
   let method_not_allowed reqd =
-    text ~status:`Method_not_allowed "405 Method Not Allowed" reqd
+    let response, body = method_not_allowed_response in
+    safe_respond_with_string reqd response body
 
   let internal_error msg reqd =
     text ~status:`Internal_server_error ("500 Internal Server Error: " ^ msg) reqd
@@ -298,11 +318,10 @@ module Request = struct
          | None -> default_max_body_bytes)
 
   let respond_error reqd status body =
-    let headers = Httpun.Headers.of_list [
-      ("content-type", "text/plain; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-      ("connection", "close");
-    ] in
+    let headers =
+      Response.content_headers ~tail_headers:[("connection", "close")]
+        ~content_type:Response.text_plain_content_type body
+    in
     let response = Httpun.Response.create ~headers status in
     safe_respond_with_string reqd response body
 
@@ -435,22 +454,40 @@ module Router = struct
     | `Method_not_allowed
     | `Not_found ]
 
-  type t = {
-    exact_by_path: (string, route list) Hashtbl.t;
+  type method_routes = {
+    exact_by_path: (string, route) Hashtbl.t;
     mutable prefix_routes: route list;
+  }
+
+  type t = {
+    get: method_routes;
+    post: method_routes;
+    put: method_routes;
+    delete: method_routes;
+    options: method_routes;
+    exact_paths: (string, unit) Hashtbl.t;
+    mutable routes: route list;
     mutable route_count: int;
   }
 
+  let create_method_routes () =
+    { exact_by_path = Hashtbl.create 128; prefix_routes = [] }
+
   let create () =
-    { exact_by_path = Hashtbl.create 128; prefix_routes = []; route_count = 0 }
+    {
+      get = create_method_routes ();
+      post = create_method_routes ();
+      put = create_method_routes ();
+      delete = create_method_routes ();
+      options = create_method_routes ();
+      exact_paths = Hashtbl.create 128;
+      routes = [];
+      route_count = 0;
+    }
 
   let route_count router = router.route_count
 
-  let routes router =
-    let exact =
-      router.exact_by_path |> Hashtbl.to_seq_values |> List.of_seq |> List.concat
-    in
-    exact @ router.prefix_routes
+  let routes router = List.rev router.routes
 
   let insert_prefix_route route routes =
     let route_len = String.length route.path in
@@ -463,18 +500,40 @@ module Router = struct
     in
     loop [] routes
 
+  let method_routes router = function
+    | `GET -> Some router.get
+    | `POST -> Some router.post
+    | `PUT -> Some router.put
+    | `DELETE -> Some router.delete
+    | `OPTIONS -> Some router.options
+    | _ -> None
+
+  let add_to_method_routes kind route method_routes =
+    match kind with
+    | Exact -> Hashtbl.replace method_routes.exact_by_path route.path route
+    | Prefix ->
+        method_routes.prefix_routes <-
+          insert_prefix_route route method_routes.prefix_routes
+
   let add_kind kind ~path ~methods ~handler router =
     let route = { kind; path; methods; handler } in
     (match kind with
      | Exact ->
-         let existing =
-           match Hashtbl.find_opt router.exact_by_path path with
-           | Some routes -> routes
-           | None -> []
-         in
-         Hashtbl.replace router.exact_by_path path (route :: existing)
+         Hashtbl.replace router.exact_paths path ();
+         List.iter
+           (fun method_ ->
+              match method_routes router method_ with
+              | Some routes -> add_to_method_routes Exact route routes
+              | None -> ())
+           methods
      | Prefix ->
-         router.prefix_routes <- insert_prefix_route route router.prefix_routes);
+         List.iter
+           (fun method_ ->
+              match method_routes router method_ with
+              | Some routes -> add_to_method_routes Prefix route routes
+              | None -> ())
+           methods);
+    router.routes <- route :: router.routes;
     router.route_count <- router.route_count + 1;
     router
 
@@ -504,28 +563,31 @@ module Router = struct
   let prefix_put prefix handler routes =
     add_kind Prefix ~path:prefix ~methods:[`PUT] ~handler routes
 
+  let resolve_prefix routes req_path =
+    List.find_opt
+      (fun route -> String.starts_with req_path ~prefix:route.path)
+      routes.prefix_routes
+
   let resolve router request =
     let req_path = Request.path request in
     let req_method = Request.method_ request in
-    let exact_path_matches = Hashtbl.find_opt router.exact_by_path req_path in
-    match
-      Option.bind exact_path_matches (fun routes ->
-        List.find_opt (fun route -> List.mem req_method route.methods) routes)
-    with
-    | Some route -> `Matched route
+    match method_routes router req_method with
+    | Some routes -> (
+        match Hashtbl.find_opt routes.exact_by_path req_path with
+        | Some route -> `Matched route
+        | None -> (
+            match resolve_prefix routes req_path with
+            | Some route -> `Matched route
+            | None ->
+                if Hashtbl.mem router.exact_paths req_path then
+                  `Method_not_allowed
+                else
+                  `Not_found))
     | None ->
-        (match
-           List.find_opt
-             (fun route ->
-                String.starts_with req_path ~prefix:route.path
-                && List.mem req_method route.methods)
-             router.prefix_routes
-         with
-         | Some route -> `Matched route
-         | None ->
-             (match exact_path_matches with
-              | Some _ -> `Method_not_allowed
-              | None -> `Not_found))
+        if Hashtbl.mem router.exact_paths req_path then
+          `Method_not_allowed
+        else
+          `Not_found
 
   let dispatch router request reqd =
     match resolve router request with

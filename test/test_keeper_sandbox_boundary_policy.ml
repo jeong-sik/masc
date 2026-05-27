@@ -214,12 +214,15 @@ let test_sandbox_failure_recording_not_shell_docker_coupled () =
   assert_not_contains failure_ml "keeper_shell_docker.ml"
 
 let test_dedicated_remote_tool_layer_removed () =
+  let retired_review_tool_path ext =
+    "lib/keeper/" ^ "keeper_tool_" ^ "pr_" ^ "review" ^ ext
+  in
   List.iter
     assert_source_absent
     [ "lib/keeper/" ^ "keeper_tool_" ^ "github_" ^ "pr.ml"
     ; "lib/keeper/" ^ "keeper_tool_" ^ "github_" ^ "pr.mli"
-    ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml"
-    ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli"
+    ; retired_review_tool_path ".ml"
+    ; retired_review_tool_path ".mli"
     ]
 
 let test_retired_remote_repo_helpers_absent () =
@@ -237,8 +240,11 @@ let test_retired_remote_repo_helpers_absent () =
   assert_not_contains "lib/dune" ("keeper_" ^ "g" ^ "h_repo");
   assert_not_contains "lib/dune" ("g" ^ "ithub_cli_executor");
   assert_not_contains "lib/dune" (retired_module_prefix ^ "shared");
-  assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml");
-  assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli")
+  let retired_review_tool_path ext =
+    "lib/keeper/" ^ "keeper_tool_" ^ "pr_" ^ "review" ^ ext
+  in
+  assert_source_absent (retired_review_tool_path ".ml");
+  assert_source_absent (retired_review_tool_path ".mli")
 
 let test_shell_read_ops_use_sandbox_read_runner () =
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in

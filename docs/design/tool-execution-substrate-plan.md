@@ -32,11 +32,11 @@ Do not introduce `Gh_cli` or `Oas_bridge` as descriptor executors.
   dedicated tools. They are CLI workflows expressed through `Execute`, or they
   are runbooks/skills when they need operator guidance.
 
-This reverses the earlier micro-tool failure mode: tools such as
-`pr_comment`, `pr_review`, `pr_close`, `gh_pr`, and `gh_commit` made simple CLI
-actions into product APIs. They increased schemas, prompt hints, policy cases,
-receipts, tests, docs, and vendor coupling without improving the core safety
-model.
+This reverses the earlier micro-tool failure mode: dedicated PR
+comment/review/close wrappers and gh-specific PR/commit wrappers made simple
+CLI actions into product APIs. They increased schemas, prompt hints, policy
+cases, receipts, tests, docs, and vendor coupling without improving the core
+safety model.
 
 ## Current MASC Baseline
 
@@ -250,12 +250,12 @@ Add tests that fail if descriptor executor variants reintroduce:
 Also add a source ratchet for micro-tool names in active descriptor, prompt, and
 tool hint surfaces:
 
-- `pr_comment`
-- `pr_review`
-- `pr_close`
-- `gh_pr`
-- `gh_commit`
-- `github_comment`
+- dedicated PR comment wrapper
+- dedicated PR review wrapper
+- dedicated PR close wrapper
+- gh-specific PR wrapper
+- gh-specific commit wrapper
+- GitHub comment wrapper
 
 Validation:
 
@@ -374,15 +374,13 @@ Replacement guidance:
 Validation:
 
 ```bash
-rg -n "pr_comment|pr_review|pr_close|gh_pr|gh_commit|github_comment" \
-  lib/keeper/agent_tool_descriptor.* config/prompts config/tool_policy.toml \
-  docs/KEEPER-CAPABILITY-MATRIX.md docs/rfc/RFC-0179-descriptor-ecosystem-coverage.md
+scripts/lint/no-tool-substrate-adapter-surface.sh --fail
 ```
 
 The only accepted active-surface hits should be ratchet tests or this decision
-plan. Broader scans currently find `pr_review_*` dashboard/reporting metrics
-and tests. Those are work-category names, not active tool names, and should be
-classified separately instead of deleted by string match.
+plan. Broader scans may still find dashboard/reporting metrics and tests for
+retired PR review concepts. Those are work-category names, not active tool
+names, and should be classified separately instead of deleted by string match.
 
 ## Review Checklist for Future Tool Additions
 

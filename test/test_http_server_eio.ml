@@ -75,6 +75,17 @@ let test_router_indexed_prefix_fallback_after_exact_method_miss () =
   | `Not_found -> Alcotest.fail "expected prefix fallback, got not_found"
 ;;
 
+let test_router_method_index_preserves_exact_405 () =
+  let handler _req _reqd = () in
+  let routes = Router.create () |> Router.get "/api/v1/exact-only" handler in
+  let request = Httpun.Request.create `POST "/api/v1/exact-only" in
+  match Router.resolve routes request with
+  | `Method_not_allowed -> ()
+  | `Matched route ->
+    Alcotest.failf "expected method_not_allowed, got matched route %s" route.path
+  | `Not_found -> Alcotest.fail "expected method_not_allowed, got not_found"
+;;
+
 let test_frontend_transport_routes_present () =
   let routes =
     Masc_mcp.Server_routes_http_routes_frontend.add_routes
@@ -278,6 +289,36 @@ let test_accepts_zstd_negative () =
   Alcotest.(check bool) "no zstd" false (Compression.accepts_zstd request)
 ;;
 
+let test_accepts_zstd_rejects_q_zero () =
+  let headers =
+    Httpun.Headers.of_list [ "accept-encoding", "gzip, zstd;q=0, br" ]
+  in
+  let request = Httpun.Request.create ~headers `GET "/" in
+  Alcotest.(check bool) "zstd q=0 rejected" false (Compression.accepts_zstd request)
+;;
+
+let test_accepts_zstd_dict_positive () =
+  let headers =
+    Httpun.Headers.of_list [ "accept-encoding", "gzip, zstd; dict=masc" ]
+  in
+  let request = Httpun.Request.create ~headers `GET "/" in
+  Alcotest.(check bool)
+    "zstd dictionary accepted"
+    true
+    (Compression.accepts_zstd_dict request)
+;;
+
+let test_accepts_zstd_dict_rejects_q_zero () =
+  let headers =
+    Httpun.Headers.of_list [ "accept-encoding", "zstd; dict=masc; q=0" ]
+  in
+  let request = Httpun.Request.create ~headers `GET "/" in
+  Alcotest.(check bool)
+    "zstd dictionary q=0 rejected"
+    false
+    (Compression.accepts_zstd_dict request)
+;;
+
 let test_accepts_zstd_no_header () =
   let request = Httpun.Request.create `GET "/" in
   Alcotest.(check bool) "no header" false (Compression.accepts_zstd request)
@@ -292,6 +333,9 @@ let compression_tests =
   ; "accepts zstd (positive)", `Quick, test_accepts_zstd_positive
   ; "accepts zstd (only)", `Quick, test_accepts_zstd_only_zstd
   ; "accepts zstd (negative)", `Quick, test_accepts_zstd_negative
+  ; "accepts zstd rejects q=0", `Quick, test_accepts_zstd_rejects_q_zero
+  ; "accepts zstd-dict positive", `Quick, test_accepts_zstd_dict_positive
+  ; "accepts zstd-dict rejects q=0", `Quick, test_accepts_zstd_dict_rejects_q_zero
   ; "accepts zstd (no header)", `Quick, test_accepts_zstd_no_header
   ]
 ;;
@@ -305,6 +349,9 @@ let router_tests =
   ; ( "indexed prefix fallback after exact method miss"
     , `Quick
     , test_router_indexed_prefix_fallback_after_exact_method_miss )
+  ; ( "method index preserves exact 405"
+    , `Quick
+    , test_router_method_index_preserves_exact_405 )
   ; "frontend transport routes present", `Quick, test_frontend_transport_routes_present
   ; ( "frontend canonical localhost redirect"
     , `Quick

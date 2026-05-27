@@ -300,7 +300,7 @@
         "result": "NO_STRICT_CORPUS_POINTER",
         "note": "Issue body and comments record the blocker and negative searches but do not attach or link a strict 206-row corpus."
       },
-      "pr_comment_search": {
+      "pull_request_comment_search": {
         "prs_checked": [
           "jeong-sik/masc-mcp#13266",
           "jeong-sik/masc-mcp#13577"
@@ -397,7 +397,7 @@
         "generated_fixture_diffs",
         "completion_audit_status_snapshots",
         "strict_row_contract_tests",
-        "pr_review_comments",
+        "pull_request_review_comments",
         "negative_search_transcripts"
       ],
       "markers_checked": [

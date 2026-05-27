@@ -1,5 +1,7 @@
 module Retry = Llm_provider.Retry
 
+let _log = Log.create ~module_name:"contract_runner" ()
+
 type run_result =
   { response : (Types.api_response, Error.sdk_error) result
   ; proof : Cdal_proof.t
@@ -52,10 +54,18 @@ let finalize_during_exception finalized capture_state ~result_status =
   match finalize_once finalized capture_state ~result_status with
   | _ -> ()
   | exception exn ->
-    Printf.eprintf
-      "cdal contract runner: proof finalize failed during %s exception path: %s\n%!"
-      (Cdal_proof.result_status_to_string result_status)
-      (Printexc.to_string exn)
+    let result_status = Cdal_proof.result_status_to_string result_status in
+    let error = Printexc.to_string exn in
+    let message =
+      Printf.sprintf
+        "proof finalize failed during exception path: result_status=%s error=%s"
+        result_status
+        error
+    in
+    let before = Log.dropped_without_sink_count () in
+    Log.error _log message [ Log.S ("result_status", result_status); Log.S ("error", error) ];
+    if Log.dropped_without_sink_count () > before
+    then Printf.eprintf "contract_runner: %s\n%!" message
 ;;
 
 let run

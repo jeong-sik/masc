@@ -34,7 +34,7 @@ let with_lock f =
      let trace = Printexc.raw_backtrace_to_string bt0 in
      let dump = Printf.sprintf "Prometheus.with_lock: %s\nCaller stack:\n%s" msg trace in
      Atomic.set last_deadlock_backtrace (Some dump);
-     Printf.eprintf "[ERROR] [Prometheus] %s\n%!" dump;
+     Log.error "Prometheus mutex deadlock: %s" dump;
      raise exn);
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex) f
 ;;

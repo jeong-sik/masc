@@ -56,10 +56,10 @@ let format_timestamp_relative ts =
   let diff = now -. ts in
   if Stdlib.Float.compare diff 60.0 < 0
   then "just now"
-  else if Stdlib.Float.compare diff 3600.0 < 0
+  else if Stdlib.Float.compare diff Masc_time_constants.hour < 0
   then Printf.sprintf "%dm ago" (Stdlib.Int.of_float (diff /. 60.0))
   else if Stdlib.Float.compare diff Masc_time_constants.day < 0
-  then Printf.sprintf "%dh ago" (Stdlib.Int.of_float (diff /. 3600.0))
+  then Printf.sprintf "%dh ago" (Stdlib.Int.of_float (diff /. Masc_time_constants.hour))
   else Printf.sprintf "%dd ago" (Stdlib.Int.of_float (diff /. Masc_time_constants.day))
 ;;
 
@@ -71,10 +71,10 @@ let format_ttl_remaining expires_at =
     let remaining = expires_at -. now in
     if Stdlib.Float.compare remaining 0.0 <= 0
     then "expired"
-    else if Stdlib.Float.compare remaining 3600.0 < 0
+    else if Stdlib.Float.compare remaining Masc_time_constants.hour < 0
     then Printf.sprintf "%dm left" (Stdlib.Int.of_float (remaining /. 60.0))
     else if Stdlib.Float.compare remaining Masc_time_constants.day < 0
-    then Printf.sprintf "%dh left" (Stdlib.Int.of_float (remaining /. 3600.0))
+    then Printf.sprintf "%dh left" (Stdlib.Int.of_float (remaining /. Masc_time_constants.hour))
     else
       Printf.sprintf
         "%dd left"

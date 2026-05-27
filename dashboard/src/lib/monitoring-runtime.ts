@@ -76,19 +76,23 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   unknown: UNKNOWN_PHASE_META,
 }
 
+// PipelineStage SSOT: `types/core.ts#PipelineStage` (10 values from
+// `Keeper_status_runtime.pipeline_stage_of_phase`). Legacy entries
+// `thinking` / `tool_use` / `scheduled_autonomous` removed — the backend
+// never emits them as pipeline_stage (they live in trajectory
+// content_type / turn channel respectively).
 const STAGE_LABELS: Record<string, StageMeta> = {
   idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계가 없습니다.' },
-  thinking: { key: 'thinking', label: '사고', description: '응답이나 다음 액션을 결정하는 중입니다.' },
-  tool_use: { key: 'tool_use', label: '도구', description: '도구를 호출하거나 결과를 소비하는 중입니다.' },
   compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },
   handoff: { key: 'handoff', label: '승계', description: '같은 keeper를 새 trace와 새 세대로 이어붙이는 중입니다.' },
-  scheduled_autonomous: { key: 'scheduled_autonomous', label: '자율', description: '예약된 자율 턴을 수행 중입니다.' },
+  offline: { key: 'offline', label: '오프라인', description: '활동 정보를 확인하지 못했습니다.' },
   failing: { key: 'failing', label: '오류', description: '세부 파이프라인 단계에서 오류를 감지했습니다.' },
+  overflowed: { key: 'overflowed', label: '초과', description: '파이프라인이 용량을 초과했습니다.' },
   draining: { key: 'draining', label: '종료', description: '활동 종료를 위해 파이프라인을 비우는 중입니다.' },
   paused: { key: 'paused', label: '일시정지', description: '활동 단계도 함께 정지된 상태입니다.' },
   crashed: { key: 'crashed', label: '중단', description: '파이프라인 실행이 비정상 종료되었습니다.' },
   restarting: { key: 'restarting', label: '재시작', description: '파이프라인을 다시 올리는 중입니다.' },
-  offline: OFFLINE_STAGE_META,
+  unknown: { key: 'unknown', label: '미상', description: '파이프라인 단계 정보가 없습니다.' },
 }
 
 const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {

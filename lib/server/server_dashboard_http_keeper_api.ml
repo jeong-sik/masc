@@ -8,6 +8,9 @@ include Server_dashboard_http_keeper_api_post
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
+(* Maximum number of trajectory/trace entries returned per query. *)
+let trajectory_max_limit = 500
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -57,7 +60,7 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let limit =
         Server_utils.int_query_param req "limit" ~default:200
-        |> max 1 |> min 500
+        |> max 1 |> min trajectory_max_limit
       in
       let st, json =
         keeper_runtime_trace_json state.Mcp_server.room_config name
@@ -310,7 +313,6 @@ let handle_keeper_get_subroutes state req request reqd =
          respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
        | Ok (Some m) ->
          let trajectory_default_limit = 50 in
-         let trajectory_max_limit = 500 in
          let trace_id =
            Keeper_id.Trace_id.to_string m.runtime.trace_id
          in

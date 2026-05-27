@@ -309,6 +309,10 @@ let provider_capacity_json = Server_dashboard_http_core_entities.provider_capaci
 let dashboard_shell_timeout_s = Env_config_runtime.Dashboard.shell_timeout_sec
 let dashboard_shell_light_timeout_s = Env_config_runtime.Dashboard.shell_light_timeout_sec
 
+(* Grace period after shell timeout during startup — allows the first
+   snapshot to arrive before the dashboard reports "not ready". *)
+let startup_grace_period_s = 10.0
+
 let dashboard_shell_timeout_for ~light =
   if light then dashboard_shell_light_timeout_s else dashboard_shell_timeout_s
 ;;
@@ -801,7 +805,7 @@ let dashboard_shell_http_json
     let current = Server_startup_state.(!state) in
     (not (Atomic.get shell_warmed))
     && current.state_ready
-    && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. 10.0
+    && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. startup_grace_period_s
   in
   let apply_startup_prewarm_guard = Option.is_some request in
   let startup_prewarm_pending =

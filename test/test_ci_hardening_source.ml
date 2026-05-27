@@ -1759,17 +1759,17 @@ let test_dedicated_github_pr_tool_contracts_removed () =
           (Sys.file_exists
              (source_path
                 "docs/design/keeper-agent-tool-boundary-audit-2026-05-25.md")));
-  check bool "shell ops failure metric renamed to workspace inspect" true
+  check bool "shell ops failure metric renamed to search files" true
     (file_not_contains_pattern "lib/keeper/keeper_metrics.ml" ("Shell" ^ "OpsFailures")
      && file_not_contains_pattern
           "lib/keeper/keeper_metrics.ml"
           ("masc_keeper_" ^ "shell_ops_failures_total")
      && file_contains_pattern
           "lib/keeper/keeper_metrics.ml"
-          "WorkspaceInspectFailures"
+          "SearchFilesFailures"
      && file_contains_pattern
           "lib/keeper/keeper_metrics.ml"
-          "masc_keeper_workspace_inspect_failures_total");
+          "masc_keeper_search_files_failures_total");
   check bool "shell runtime left keeper_exec axis" true
     (not (Sys.file_exists (source_path ("lib/keeper/keeper_" ^ "exec_shell.ml")))
      && not (Sys.file_exists (source_path ("lib/keeper/keeper_" ^ "exec_shell.mli")))

@@ -466,7 +466,7 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
     { Masc_mcp.Exec_core.rule_id = "chaining_blocked"
     ; explanation = "chaining not allowed"
     ; rewrite = Some "split into two calls"
-    ; tool_suggestion = Some "tool_workspace_inspect"
+    ; tool_suggestion = Some "tool_search_files"
     }
   in
   let json =
@@ -480,7 +480,7 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
   let d = json |> member "diagnosis" in
   check string "rewrite" "split into two calls"
     (d |> member "rewrite" |> to_string);
-  check string "tool_suggestion" "tool_workspace_inspect"
+  check string "tool_suggestion" "tool_search_files"
     (d |> member "tool_suggestion" |> to_string)
 
 (* --- P10: structured output tests --- *)

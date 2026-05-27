@@ -15,14 +15,15 @@ let json_bool_opt_member key json = Json_util.get_bool json key
 let json_list_member key json =
   match json_member key json with
   | `List items -> items
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 
 let json_string_list_member = Json_util.json_string_list_member
 
 let assoc_bool_default key ~default fields =
   match List.assoc_opt key fields with
   | Some (`Bool value) -> value
-  | _ -> default
+  | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
+  | None -> default
 
 let assoc_string_opt key fields =
   match List.assoc_opt key fields with
@@ -283,7 +284,7 @@ let transition_timeline_event json =
       let operator_signal =
         match json |> json_member "operator_signal" with
         | `Assoc fields -> Some fields
-        | _ -> None
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
       in
       let signal_string key =
         Option.bind operator_signal (assoc_string_opt key)
@@ -316,7 +317,7 @@ let transition_timeline_event json =
       let next_human_action =
         match signal_bool "requires_operator_decision" with
         | Some true -> signal_string "next_human_action"
-        | _ -> None
+        | Some false | None -> None
       in
       let summary =
         match signal_summary with
@@ -361,7 +362,7 @@ let receipt_timeline_event receipt =
         let error_kind =
           match json_member "error" receipt with
           | `Assoc _ as error -> json_string_opt_member "kind" error
-          | _ -> None
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
         in
         let severity =
           match error_kind with

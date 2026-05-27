@@ -78,30 +78,41 @@ let validate_repo_path_ready
   match repo_path_context ~config ~meta cwd with
   | None -> Ok ()
   | Some (repo_name, repo_root, _path_root, accepted_toplevels) ->
-    if not (safe_is_dir probe_path) then
-      Error
-        (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:None)
-    else
-      let top =
-        Keeper_repo_readiness.run_git
-          ~timeout_sec:Keeper_repo_readiness.read_only_probe_timeout_sec
-          ~clone_path:probe_path
-          [ "rev-parse"; "--show-toplevel" ]
-      in
-      let top_opt = if top.ok then Some top.output else None in
-      let top_matches =
-        top.ok
-        && List.exists
-             (fun expected ->
-                String.equal
-                  (normalize_repo_cwd_path top.output)
-                  (normalize_repo_cwd_path expected))
-             accepted_toplevels
-      in
-      if top_matches then Ok ()
-      else
+    let check_probe () =
+      if not (safe_is_dir probe_path) then
         Error
-          (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:top_opt)
+          (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:None)
+      else
+        let top =
+          Keeper_repo_readiness.run_git
+            ~timeout_sec:Keeper_repo_readiness.read_only_probe_timeout_sec
+            ~clone_path:probe_path
+            [ "rev-parse"; "--show-toplevel" ]
+        in
+        let top_opt = if top.ok then Some top.output else None in
+        let top_matches =
+          top.ok
+          && List.exists
+               (fun expected ->
+                  String.equal
+                    (normalize_repo_cwd_path top.output)
+                    (normalize_repo_cwd_path expected))
+               accepted_toplevels
+        in
+        if top_matches then Ok ()
+        else
+          Error
+            (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:top_opt)
+    in
+    match check_probe () with
+    | Ok () -> Ok ()
+    | Error _ as initial_err ->
+      (* Auto-repair: attempt reclone when sandbox repo is missing or corrupt *)
+      (match
+         Keeper_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
+       with
+       | Ok () -> check_probe ()
+       | Error _repair_err -> initial_err)
 
 let validate_repo_cwd_ready ~(config : Coord.config) ~(meta : keeper_meta) cwd =
   validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd

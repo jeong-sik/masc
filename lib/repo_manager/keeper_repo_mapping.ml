@@ -13,7 +13,7 @@ let mapping_of_toml toml keeper_id =
   let* repository_ids =
     Otoml.Helpers.find_strings_result toml (path "repositories")
   in
-  let* github_credential_id =
+  let* credential_id =
     match Otoml.find_result toml Fun.id (path "credential_id") with
     | Error _ -> Ok None
     | Ok (Otoml.TomlString id) ->
@@ -27,7 +27,7 @@ let mapping_of_toml toml keeper_id =
           (Printf.sprintf
              "mapping.%s.credential_id must be a string when present" keeper_id)
   in
-  Ok { keeper_id; repository_ids; github_credential_id }
+  Ok { keeper_id; repository_ids; credential_id }
 
 let credential_type_label = function
   | Github -> "GitHub"
@@ -43,7 +43,7 @@ let toml_of_mapping mapping =
     ]
   in
   let fields =
-    match mapping.github_credential_id with
+    match mapping.credential_id with
     | Some id ->
         let id = String.trim id in
         if id = "" then fields
@@ -166,14 +166,14 @@ let credentials_for_keeper ~base_path ~keeper_id =
                   in credential store: %s"
                  id keeper_id msg)
       in
-      (match mapping.github_credential_id with
+      (match mapping.credential_id with
       | Some id when String.trim id <> "" ->
           let id = String.trim id in
           let* credential = resolve_credential id in
           if credential.cred_type <> Github then
             Error
               (Printf.sprintf
-                 "credential %s referenced by github_credential_id for keeper %s \
+                 "credential %s referenced by credential_id for keeper %s \
                   must be of type GitHub, got %s"
                  id keeper_id (credential_type_label credential.cred_type))
           else

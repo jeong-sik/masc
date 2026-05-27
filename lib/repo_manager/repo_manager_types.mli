@@ -52,7 +52,7 @@ type credential = {
 type keeper_repo_mapping = {
   keeper_id : string;
   repository_ids : string list;
-  github_credential_id : string option [@default None];
+  credential_id : string option [@default None];
 }
 [@@deriving yojson, show, eq]
 

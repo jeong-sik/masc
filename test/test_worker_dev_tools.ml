@@ -126,7 +126,7 @@ let with_registered_repo_fixture f =
          match
            Keeper_repo_mapping.save_mapping
              ~base_path
-             { keeper_id; repository_ids; github_credential_id = None }
+             { keeper_id; repository_ids; credential_id = None }
          with
          | Ok () -> ()
          | Error msg -> Alcotest.fail ("mapping setup failed: " ^ msg)

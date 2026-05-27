@@ -30,7 +30,7 @@ let mapping_json (m : Repo_manager_types.keeper_repo_mapping) : Yojson.Safe.t =
       ("allowed_repos", `List (List.map (fun s -> `String s) m.repository_ids));
       ("allow_all", `Bool allow_all);
       ( "credential_id",
-        match m.github_credential_id with
+        match m.credential_id with
         | Some id ->
             let trimmed = String.trim id in
             if trimmed <> "" then `String trimmed else `Null
@@ -72,7 +72,7 @@ let mapping_of_json keeper_id (json : Yojson.Safe.t) :
             {
               Repo_manager_types.keeper_id;
               repository_ids;
-              github_credential_id = credential_id;
+              credential_id;
             }
       | Error msg, _ | _, Error msg -> Error msg)
   | _ -> Error "expected JSON object body"
@@ -134,7 +134,7 @@ let credential_type_label = function
 
 let validate_mapping_credential ~base_path
     (mapping : Repo_manager_types.keeper_repo_mapping) =
-  match mapping.github_credential_id with
+  match mapping.credential_id with
   | None -> Ok ()
   | Some credential_id -> (
       match Credential_store.find ~base_path credential_id with

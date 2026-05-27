@@ -11,6 +11,7 @@ import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { resolveUnifiedStatus } from '../lib/unified-status'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
+import { findKeeper } from '../lib/keeper-utils'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
@@ -32,7 +33,6 @@ import {
   sendingMention,
   selectedAgent,
   assignedTasks,
-  keeperForAgent,
   missionAgentBrief,
   continuityBriefForAgent,
   closeAgentDetail,
@@ -58,7 +58,7 @@ export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-de
 
 // Wire keeper redirect: keeper-linked agents open the keeper detail overlay
 setKeeperRedirect((agentName: string) => {
-  const keeper = keeperForAgent(agentName)
+  const keeper = findKeeper(agentName)
   if (keeper) {
     openKeeperDetail(keeper)
     return true
@@ -174,7 +174,7 @@ export function AgentDetailOverlay() {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   const agent = selectedAgent()
-  const keeper = keeperForAgent(agentName)
+  const keeper = findKeeper(agentName)
   const continuityBrief = continuityBriefForAgent(agentName)
   const missionBrief = missionAgentBrief(agentName)
   const ownedTasks = assignedTasks(agentName)

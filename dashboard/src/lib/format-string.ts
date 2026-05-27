@@ -57,3 +57,20 @@ export function firstNonEmptyString(
   }
   return null
 }
+
+/**
+ * Escape a string for safe interpolation into a `new RegExp(...)` source.
+ *
+ * Replaces the standard ECMAScript regex meta-characters with their
+ * backslash-escaped form so the input is matched literally. Use whenever
+ * a user-supplied or interpolated string ends up inside a `RegExp` —
+ * e.g. building a needle pattern, asserting a CSS token literal in a
+ * test, etc.
+ *
+ * Two file-internal copies (`components/ide/ide-editor.ts` needle
+ * highlighting, `styles/cockpit-token-cascade.test.ts` CSS literal
+ * assertions) shipped this exact body before centralising here.
+ */
+export function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

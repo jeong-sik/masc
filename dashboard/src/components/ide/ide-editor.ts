@@ -12,6 +12,7 @@ import {
 } from './keeper-line-ownership-store'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
+import { escapeRegExp } from '../../lib/format-string'
 import {
   readOnlyExt,
   themeExt,
@@ -810,9 +811,6 @@ export function currentFileFindMatches(
   return matches
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
 
 // ── CM6 read-only editor ──────────────────────────────────────────
 // Preact ref-based mount — no vDOM conflict with CM6's DOM management.

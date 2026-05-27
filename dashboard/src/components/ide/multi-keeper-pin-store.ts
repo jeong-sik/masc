@@ -8,10 +8,6 @@ import { computed, signal } from '@preact/signals'
  * belong to the consumer (`InspectorMultiKeeperBDI`),
  * not the store.
  *
- * Backward-compat (RFC-0027 §10):
- *   - `pinInspectorKeeper(name, line)` re-exported from `inspector-keeper-bdi.ts`
- *     forwards into `pinKeeper(name, line)`. Callers see no shape change.
- *
  * Cap = 4 ties to RFC-0027 §11 #1 (320px inspector rail + compact-fold). The
  * cap is a constant in the store rather than a runtime parameter so test
  * surface is small.
@@ -103,10 +99,7 @@ export function reorderPins(fromName: string, toIdx: number): void {
   pinnedKeepers.value = { ...prev, entries: next }
 }
 
-/**
- * Head entry projection for legacy single-pin callers. Returns `null` when no
- * keeper is pinned.
- */
+/** Head entry projection for consumers that render one active inspector. */
 export const headPinnedKeeper = computed<PinnedKeeperEntry | null>(
   () => pinnedKeepers.value.entries[0] ?? null,
 )

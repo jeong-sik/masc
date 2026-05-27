@@ -86,7 +86,7 @@ type t =
   | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
-  | WorkspaceInspectFailures
+  | SearchFilesFailures
   | TagDispatchFailures
   | TraceEmitFailures
   | TransitionAuditFailures
@@ -211,8 +211,8 @@ type t =
   | ToolNotAllowed
   | TurnGateRejectedTerminal
   | ReceiptUnmappedDisposition
-  | BashNetworkUpgrade
-  | BashLocalExecution
+  | ExecuteNetworkUpgrade
+  | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
   | StaySilentLoopDetected

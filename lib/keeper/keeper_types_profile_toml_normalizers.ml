@@ -42,7 +42,7 @@ let normalize_git_identity_mode_opt = function
   | Some raw -> (
       match String.trim (String.lowercase_ascii raw) with
       | "keeper_alias" -> Some "keeper_alias"
-      | "github_identity" -> Some "github_identity"
+      | "repo_cli_identity" -> Some "repo_cli_identity"
       | _ -> None)
 
 let normalize_social_model_opt = function

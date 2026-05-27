@@ -400,7 +400,7 @@ let sandbox_allowed_path_within_private_root
 let validate_sandbox_settings
     ~(config : Coord.config)
     ~keeper_name
-    ~github_identity
+    ~repo_cli_identity
     ~sandbox_profile
     ~network_mode
     ~allowed_paths =

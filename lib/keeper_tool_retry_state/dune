@@ -8,7 +8,7 @@
 ; at ERROR level on every retry attempt. The same (tool, normalized
 ; detail) tuple recurs as the supervisor walks the 1->2->3 retry
 ; ladder, so a single transient failure produces three ERROR lines.
-; Observed in the sample: keeper_bash x4, Execute x2,
+; Observed in the sample: tool_execute x4, Execute x2,
 ; tool_execute x2, masc_transition x2, Bash x2 — 12+
 ; events across 5+ distinct tools in 1000 lines.
 ;

@@ -57,7 +57,7 @@ let render_completed_process_result
       ~root ~keeper_name ~op
       ?cwd ~cmd ?(extra = []) st out =
   let success = st = Unix.WEXITED 0 in
-  let cmd_prefix = Keeper_shell_command_words.cmd_prefix cmd in
+  let cmd_prefix = Agent_tool_execute_command_words.cmd_prefix cmd in
   let elapsed_ms =
     List.find_map (fun (k, v) ->
       if k = "execution_time_ms" then

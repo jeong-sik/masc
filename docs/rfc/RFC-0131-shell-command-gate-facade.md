@@ -117,8 +117,8 @@ contract open.
 - Adding a full Bash grammar. The facade rejects out-of-subset input as
   `Too_complex` (closed sum, no catch-all). `bash_subset.mly` may grow in
   follow-up RFCs.
-- Docker shell rewrite. `keeper_shell_docker.ml` is on the same trajectory but
-  has its own credential/runtime surface; a separate RFC covers it.
+- Docker-backed Execute rewrite. That path has its own credential/runtime
+  surface; a separate RFC covers it.
 - Typed argv public surface for the Execute tool. RFC-0091 owns that contract;
   this RFC adapts to it via a Phase E callback (§4.5) but does not modify
   the public tool schema in PR-1.

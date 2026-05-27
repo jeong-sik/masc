@@ -46,14 +46,14 @@ describe('Terminal', () => {
     const container = document.createElement('div')
     render(h(Terminal, {
       lines: [],
-      ariaLabel: 'Keeper shell terminal',
+      ariaLabel: 'Execute output terminal',
       className: 'custom-terminal-shell',
-      emptyText: 'waiting for keeper shell output',
+      emptyText: 'waiting for Execute output',
     }), container)
     const el = container.querySelector('[role="log"]')
-    expect(el?.getAttribute('aria-label')).toBe('Keeper shell terminal')
+    expect(el?.getAttribute('aria-label')).toBe('Execute output terminal')
     expect(el?.className).toBe('custom-terminal-shell')
-    expect(container.textContent).toContain('waiting for keeper shell output')
+    expect(container.textContent).toContain('waiting for Execute output')
   })
 
   it('applies testId', () => {

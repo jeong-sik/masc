@@ -47,8 +47,8 @@ Prior Art 는 `~/me/knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.
 
 ### 1.4 Subprocess-heavy Docker
 
-- **모든 Docker 호출** 이 `lib/docker_spawn_throttle.ml` 의 `with_slot` 으로 감싼 subprocess `docker run/exec` (`lib/worker_runtime_docker.ml`, `lib/keeper/keeper_sandbox_*.ml`, `lib/keeper/keeper_shell_docker.ml`, `lib/keeper/keeper_docker_client_real.ml`).
-- **Docker HTTP API (`/var/run/docker.sock`) 사용 0건**. `lib/keeper/keeper_shell_docker.ml:180-181` 가 명시적으로 `blocked_mount_paths` 에 등재 (security 의도).
+- **모든 Docker 호출** 이 `lib/docker_spawn_throttle.ml` 의 `with_slot` 으로 감싼 subprocess `docker run/exec` (`lib/worker_runtime_docker.ml`, `lib/keeper/keeper_sandbox_*.ml`, sandbox Execute runner, `lib/keeper/keeper_docker_client_real.ml`).
+- **Docker HTTP API (`/var/run/docker.sock`) 사용 0건**. sandbox Execute runner 가 명시적으로 `blocked_mount_paths` 에 등재 (security 의도).
 - **fd 비용**: subprocess 1회 = daemon socket 1 + stdio pipe 3 + cgroup fd. SDK/HTTP API 호출 = 같은 daemon socket 재사용. *cascade-storm 의 가장 큰 spike 원인*.
 - **RFC-0097 (container reuse)** 는 Draft, spec-only — 머지 후 *spec body 만* 존재하고 구현 PR 없음. 본 RFC 가 §3.4 에서 활성화.
 

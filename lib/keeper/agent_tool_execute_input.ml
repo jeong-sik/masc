@@ -1,6 +1,6 @@
 (* Typed Execute input projections.
 
-   Static helpers around [Keeper_tool_bash_input] - quote a token for
+   Static helpers around [Agent_tool_execute_typed_input] - quote a token for
    policy strings, render an [Exec]/[Pipeline] back to a shell-command
    string (for policy validation + auditing), inspect whether env was
    provided, and pretty-print a validation error.
@@ -8,7 +8,7 @@
    Extracted from [Agent_tool_execute_runtime] (godfile decomp). Pure mapping
    over typed input + Stdlib. *)
 
-let has_typed_bash_input_key = function
+let has_typed_execute_input_key = function
   | `Assoc fields ->
     List.exists
       (fun (key, _) ->
@@ -43,21 +43,21 @@ let typed_stage_command_text ~executable ~argv =
 ;;
 
 let typed_input_command_text = function
-  | Keeper_tool_bash_input.Exec { executable; argv; _ } ->
+  | Agent_tool_execute_typed_input.Exec { executable; argv; _ } ->
     typed_stage_command_text ~executable ~argv
-  | Keeper_tool_bash_input.Pipeline { stages; _ } ->
+  | Agent_tool_execute_typed_input.Pipeline { stages; _ } ->
     stages
-    |> List.map (fun (stage : Keeper_tool_bash_input.exec_stage) ->
+    |> List.map (fun (stage : Agent_tool_execute_typed_input.exec_stage) ->
       typed_stage_command_text ~executable:stage.executable ~argv:stage.argv)
     |> String.concat " | "
 ;;
 
 let typed_input_has_env = function
-  | Keeper_tool_bash_input.Exec { env; _ }
-  | Keeper_tool_bash_input.Pipeline { env; _ } ->
+  | Agent_tool_execute_typed_input.Exec { env; _ }
+  | Agent_tool_execute_typed_input.Pipeline { env; _ } ->
     env <> []
 ;;
 
 let typed_validation_error_text error =
-  Format.asprintf "%a" Keeper_tool_bash_input.pp_validation_error error
+  Format.asprintf "%a" Agent_tool_execute_typed_input.pp_validation_error error
 ;;

@@ -25,7 +25,7 @@ let try_handle
       ~base_path:root ~path:target
   in
   let read_target () =
-    match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
+    match Agent_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
     | Error _ as e -> e
     | Ok target ->
       (match containment_check target with
@@ -36,7 +36,7 @@ let try_handle
          | Ok () -> Ok target)
   in
   let cwd_target () =
-    match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
+    match Agent_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
     | Error _ as e -> e
     | Ok cwd ->
       (match containment_check cwd with
@@ -49,7 +49,7 @@ let try_handle
   let path_error e =
     actionable_path_error ~op ~meta ~raw_path ~error:e
   in
-  (* TEL-OK: read-op adapter delegates to Keeper_shell_ir/Exec_dispatch or the
+  (* TEL-OK: read-op adapter delegates to Agent_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
   let dispatch_host_shell_ir
         ?(allowed_commands = Dev_exec_allowlist.readonly)
@@ -57,7 +57,7 @@ let try_handle
         ~workdir
         ir
     =
-    Keeper_shell_ir.dispatch ~allowed_commands ~keeper_id:meta.name
+    Agent_tool_execute_shell_ir.dispatch ~allowed_commands ~keeper_id:meta.name
       ~base_path:root ~workdir ~sandbox:(Masc_exec.Sandbox_target.host ())
       ?timeout_sec ir
   in
@@ -91,7 +91,7 @@ let try_handle
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
   in
   let hostify_turn_runtime_output out =
-    Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host ~config ~meta out
+    Agent_tool_execute_runtime_paths.rewrite_turn_runtime_paths_to_host ~config ~meta out
   in
   let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
@@ -191,14 +191,14 @@ let try_handle
        | Ok cwd ->
          if Keeper_sandbox_read_runner.should_route_read ~meta then
            render_sandbox_process_result ~cwd ~cmd:"pwd" ~backend_cmd:"pwd"
-             ~timeout_sec:Keeper_shell_timeout.io_timeout_sec
+             ~timeout_sec:Agent_tool_execute_timeout.io_timeout_sec
          else
            let host_ir =
-             Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Pwd []
+             Agent_tool_execute_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Pwd []
            in
            run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ coreutils.pwd ]
              ~host_ir ~map_output:hostify_turn_runtime_output ~max_bytes:4096
-             ~timeout_sec:Keeper_shell_timeout.io_timeout_sec ())
+             ~timeout_sec:Agent_tool_execute_timeout.io_timeout_sec ())
   | "git_status" ->
     Some
       (match cwd_target () with
@@ -208,10 +208,10 @@ let try_handle
            render_sandbox_process_result ~cwd
              ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
              ~backend_cmd:"git --no-optional-locks status --short --branch"
-             ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+             ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
          else
            let ir =
-             Keeper_shell_ir.simple
+             Agent_tool_execute_shell_ir.simple
                ~cwd_raw:cwd
                ~cwd_base:root
                Masc_exec.Exec_program.Git
@@ -250,7 +250,7 @@ let try_handle
                    ?turn_sandbox_factory ~config ~meta
                    ~command_argv:[ "ls"; "-la"; cpath ]
                    ~max_bytes:1_000_000
-                   ~timeout_sec:Keeper_shell_timeout.io_timeout_sec
+                   ~timeout_sec:Agent_tool_execute_timeout.io_timeout_sec
                    ()
                with
                | Error msg ->
@@ -266,7 +266,7 @@ let try_handle
                        ; "entries", lines_to_json ~limit out
                        ])))
          else
-           let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Ls [ "-la"; target ] in
+           let ir = Agent_tool_execute_shell_ir.simple Masc_exec.Exec_program.Ls [ "-la"; target ] in
            run_host_shell_ir
              ~workdir:target
              ~cmd:"ls -la"
@@ -294,7 +294,7 @@ let try_handle
               Keeper_sandbox_read_runner.read_file
                 ?turn_sandbox_factory ~config ~meta
                 ~host_path:target ~max_bytes
-                ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+                ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
                 ()
             with
             | Error msg ->
@@ -314,7 +314,7 @@ let try_handle
                     ; "content", `String body
                     ]))
          else
-           let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Cat [ target ] in
+           let ir = Agent_tool_execute_shell_ir.simple Masc_exec.Exec_program.Cat [ target ] in
            run_host_shell_ir
              ~workdir:target
              ~cmd:"cat"
@@ -357,7 +357,7 @@ let try_handle
                     base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
                   ~ok_exit_codes:[ 0; 1 ]
                   ~max_bytes:1_000_000
-                  ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+                  ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
                   ()
               with
               | Error response -> response
@@ -373,7 +373,7 @@ let try_handle
                       ; "matches", lines_to_json ~limit out
                       ]))
            else
-             let rg_available = Keeper_shell_path.shell_command_available "rg" in
+             let rg_available = Agent_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
                path_error "rg executable not found; SearchFiles requires rg"
              else
@@ -387,7 +387,7 @@ let try_handle
                     else [])
                  @ [ pattern; target ]
                in
-               let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Rg argv in
+               let ir = Agent_tool_execute_shell_ir.simple Masc_exec.Exec_program.Rg argv in
                run_host_shell_ir
                  ~workdir:target
                  ~cmd:op
@@ -439,7 +439,7 @@ let try_handle
               in
               render_sandbox_process_result ~cwd
                 ~cmd:"git -C <cwd> --no-optional-locks log --format=<fmt> -<n>"
-                ~backend_cmd ~timeout_sec:Keeper_shell_timeout.read_timeout_sec)
+                ~backend_cmd ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec)
          else
            (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
             | Some runtime ->
@@ -476,7 +476,7 @@ let try_handle
                    ~cwd ~command_argv:argv
                    ~ok_exit_codes:[ 0 ]
                    ~max_bytes:1_000_000
-                   ~timeout_sec:Keeper_shell_timeout.read_timeout_sec ()
+                   ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec ()
                with
                | Error msg ->
                  error_json
@@ -515,7 +515,7 @@ let try_handle
                 if file_path = "" then args_with_grep else args_with_grep @ [ "--"; file_path ]
               in
               let ir =
-                Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git args
+                Agent_tool_execute_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git args
               in
               run_host_shell_ir
                 ~allowed_commands:Dev_exec_allowlist.dev
@@ -554,7 +554,7 @@ let try_handle
                       "-not"; "-path"; "*/_build/*";
                       "-not"; "-path"; "*/.masc/*" ])
                   ~max_bytes:1_000_000
-                  ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+                  ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
                   ()
               with
               | Error response -> response
@@ -571,7 +571,7 @@ let try_handle
                       ]))
            else
              let ir =
-               Keeper_shell_ir.simple
+               Agent_tool_execute_shell_ir.simple
                  Masc_exec.Exec_program.Find
                  [ target
                  ; "-maxdepth"
@@ -618,7 +618,7 @@ let try_handle
                 ~command_argv:(fun cpath ->
                   [ "head"; "-n"; string_of_int n; cpath ])
                 ~max_bytes:1_000_000
-                ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+                ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
                 ()
             with
             | Error response -> response
@@ -635,7 +635,7 @@ let try_handle
                     ]))
          else
            let ir =
-             Keeper_shell_ir.simple
+             Agent_tool_execute_shell_ir.simple
                Masc_exec.Exec_program.Head
                [ "-n"; string_of_int n; target ]
            in
@@ -668,7 +668,7 @@ let try_handle
                 ~command_argv:(fun cpath ->
                   [ "tail"; "-n"; string_of_int n; cpath ])
                 ~max_bytes:1_000_000
-                ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+                ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
                 ()
             with
             | Error response -> response
@@ -685,7 +685,7 @@ let try_handle
                     ]))
          else
            let ir =
-             Keeper_shell_ir.simple
+             Agent_tool_execute_shell_ir.simple
                Masc_exec.Exec_program.Tail
                [ "-n"; string_of_int n; target ]
            in
@@ -716,7 +716,7 @@ let try_handle
               run_readonly_in_sandbox ~target
                 ~command_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
                 ~max_bytes:4096
-                ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+                ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
                 ()
             with
             | Error response -> response
@@ -739,7 +739,7 @@ let try_handle
                    ~output:out
                    ()))
          else
-           let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Wc [ "-l"; target ] in
+           let ir = Agent_tool_execute_shell_ir.simple Masc_exec.Exec_program.Wc [ "-l"; target ] in
            run_host_shell_ir
              ~workdir:target
              ~cmd:"wc"
@@ -764,7 +764,7 @@ let try_handle
                     "-not"; "-path"; "*/.git/*";
                     "-not"; "-path"; "*/_build/*" ])
                 ~max_bytes:1_000_000
-                ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+                ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec
                 ()
             with
             | Error response -> response
@@ -780,7 +780,7 @@ let try_handle
                     ]))
          else
            let ir =
-             Keeper_shell_ir.simple
+             Agent_tool_execute_shell_ir.simple
                Masc_exec.Exec_program.Find
                [ target
                ; "-maxdepth"

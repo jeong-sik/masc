@@ -40,6 +40,7 @@ import {
   type RunActivityVerb,
 } from './run-activity-store'
 import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
+import { isRecord } from '../../lib/type-guards'
 
 const FALLBACK_VERB_MAP: Readonly<Record<string, RunActivityVerb>> = {
   approved: 'approved',
@@ -169,9 +170,8 @@ function targetFromSubject(subject: ApiActivityEvent['subject'], kind: string): 
 }
 
 function detailFromPayload(payload: unknown, kind: string): string | undefined {
-  if (typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
-    const record = payload as Record<string, unknown>
-    const summary = record['summary'] ?? record['title'] ?? record['body'] ?? record['reason']
+  if (isRecord(payload)) {
+    const summary = payload['summary'] ?? payload['title'] ?? payload['body'] ?? payload['reason']
     if (typeof summary === 'string' && summary.trim() !== '') {
       const truncated = summary.length > 120 ? summary.slice(0, 117) + '...' : summary
       return truncated

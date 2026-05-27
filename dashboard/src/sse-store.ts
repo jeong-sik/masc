@@ -51,6 +51,7 @@ import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
 import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
+import { isRecord } from './lib/type-guards'
 import { hydrateGoalTreeSnapshot } from './goal-tree-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
@@ -541,9 +542,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 }
 
 function eventPayloadRecord(payload: unknown): Record<string, unknown> {
-  return payload && typeof payload === 'object' && !Array.isArray(payload)
-    ? payload as Record<string, unknown>
-    : { payload }
+  return isRecord(payload) ? payload : { payload }
 }
 
 export function hydrateDashboardSlice(slice: string, payload: unknown, eventType?: string): void {

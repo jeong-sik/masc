@@ -321,8 +321,8 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   | Trending ->
       let now = Time_compat.now () in
       List.sort (fun (a : Board.post) (b : Board.post) ->
-        let age_a = Stdlib.Float.max 1.0 ((now -. a.created_at) /. 3600.0) in
-        let age_b = Stdlib.Float.max 1.0 ((now -. b.created_at) /. 3600.0) in
+        let age_a = Stdlib.Float.max 1.0 ((now -. a.created_at) /. Masc_time_constants.hour) in
+        let age_b = Stdlib.Float.max 1.0 ((now -. b.created_at) /. Masc_time_constants.hour) in
         let score_a =
           Stdlib.Float.of_int (a.votes_up - a.votes_down + (a.reply_count * 2))
           /. (Stdlib.( **) age_a 0.5)

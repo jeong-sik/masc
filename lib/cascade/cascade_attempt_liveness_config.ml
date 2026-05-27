@@ -200,7 +200,7 @@ let budget_of_samples samples =
     let observed_wall =
       tuned_seconds
         ~floor:180.0
-        ~ceiling:3600.0
+        ~ceiling:Masc_time_constants.hour
         ~multiplier:1.4
         ~add:30.0
         (seconds_of_ms wall_ms)

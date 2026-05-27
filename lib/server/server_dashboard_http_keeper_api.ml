@@ -115,86 +115,104 @@ let handle_keeper_get_subroutes state req request reqd =
           ~default:24
         |> max 1 |> min 168  (* 1h .. 7d *)
       in
-      let since = Time_compat.now () -. (float_of_int window_hours *. Masc_time_constants.hour) in
-      let read_result =
-        Trajectory.read_entries_since_result ~masc_root ~keeper_name:name ~since
+      (* Trajectory scan + tool-stat aggregation + hourly timeline +
+         coverage-gap lookup all hit disk under [masc_root]. 5-trial
+         latency variance 0.16s..1.92s (mean ~1.0s) on PR #19097 HEAD
+         because each miss ran on the calling fiber's Eio main domain.
+         Mirrors PRs #19088 / #19097 — cache + offload, key includes the
+         inputs that change the result. *)
+      let cache_key =
+        Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
       in
-      let entries = read_result.Trajectory.entries in
-      let tools = Trajectory.aggregate_tool_stats entries in
-      let timeline = Trajectory.hourly_timeline entries in
-      let latest_ts =
-        List.fold_left
-          (fun acc (entry : Trajectory.tool_call_entry) ->
-            match acc with
-            | Some ts when ts >= entry.ts -> acc
-            | _ -> Some entry.ts)
-          None entries
+      let json =
+        Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            let since =
+              Time_compat.now ()
+              -. (float_of_int window_hours *. Masc_time_constants.hour)
+            in
+            let read_result =
+              Trajectory.read_entries_since_result ~masc_root ~keeper_name:name ~since
+            in
+            let entries = read_result.Trajectory.entries in
+            let tools = Trajectory.aggregate_tool_stats entries in
+            let timeline = Trajectory.hourly_timeline entries in
+            let latest_ts =
+              List.fold_left
+                (fun acc (entry : Trajectory.tool_call_entry) ->
+                  match acc with
+                  | Some ts when ts >= entry.ts -> acc
+                  | _ -> Some entry.ts)
+                None entries
+            in
+            let latest_age_s =
+              match latest_ts with
+              | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+              | None -> None
+            in
+            let freshness_slo_s = 300.0 in
+            let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
+            let coverage_gaps =
+              Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+              |> List.filter (fun gap ->
+                   String.equal
+                     (Safe_ops.json_string ~default:"" "dashboard_surface" gap)
+                     dashboard_surface
+                   &&
+                   match Safe_ops.json_string_opt "keeper_name" gap with
+                   | Some keeper_name -> String.equal keeper_name name
+                   | None -> true)
+            in
+            let latest_gap =
+              List.rev coverage_gaps |> List.find_opt (fun _ -> true)
+            in
+            let health, stale_reason =
+              match latest_gap with
+              | Some gap ->
+                  ( "coverage_gap",
+                    Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
+              | None -> (
+                  match latest_age_s with
+                  | None -> ("empty", "no_entries")
+                  | Some age when age > freshness_slo_s ->
+                      ("stale", "freshness_slo_exceeded")
+                  | Some _ -> ("ok", ""))
+            in
+            `Assoc [
+              ("keeper", `String name);
+              ("window_hours", `Int window_hours);
+              ("total_entries", `Int (List.length entries));
+              ("source", `String "trajectory_tool_call");
+              ( "producer",
+                `String
+                  "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+              ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
+              ("dashboard_surface", `String dashboard_surface);
+              ("freshness_slo_s", `Float freshness_slo_s);
+              ( "latest_ts_unix",
+                match latest_ts with Some ts -> `Float ts | None -> `Null );
+              ( "latest_ts_iso",
+                match latest_ts with
+                | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+                | None -> `Null );
+              ( "latest_age_s",
+                match latest_age_s with Some age -> `Float age | None -> `Null );
+              ("health", `String health);
+              ( "stale_reason",
+                if stale_reason = "" then `Null else `String stale_reason );
+              ( "gate_decode",
+                `Assoc
+                  [
+                    ( "parsed_gate_count",
+                      `Int read_result.Trajectory.gate_decode.parsed_gate_count );
+                    ( "legacy_default_count",
+                      `Int read_result.Trajectory.gate_decode.legacy_default_count );
+                  ] );
+              ("coverage_gaps", `List coverage_gaps);
+              ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
+              ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
+            ]))
       in
-      let latest_age_s =
-        match latest_ts with
-        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
-        | None -> None
-      in
-      let freshness_slo_s = 300.0 in
-      let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
-      let coverage_gaps =
-        Telemetry_coverage_gap.read_recent ~masc_root ~n:32
-        |> List.filter (fun gap ->
-             String.equal
-               (Safe_ops.json_string ~default:"" "dashboard_surface" gap)
-               dashboard_surface
-             &&
-             match Safe_ops.json_string_opt "keeper_name" gap with
-             | Some keeper_name -> String.equal keeper_name name
-             | None -> true)
-      in
-      let latest_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
-      let health, stale_reason =
-        match latest_gap with
-        | Some gap ->
-            ( "coverage_gap",
-              Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-        | None -> (
-            match latest_age_s with
-            | None -> ("empty", "no_entries")
-            | Some age when age > freshness_slo_s ->
-                ("stale", "freshness_slo_exceeded")
-            | Some _ -> ("ok", ""))
-      in
-      let json = `Assoc [
-        ("keeper", `String name);
-        ("window_hours", `Int window_hours);
-        ("total_entries", `Int (List.length entries));
-        ("source", `String "trajectory_tool_call");
-        ( "producer",
-          `String
-            "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
-        ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
-        ("dashboard_surface", `String dashboard_surface);
-        ("freshness_slo_s", `Float freshness_slo_s);
-        ( "latest_ts_unix",
-          match latest_ts with Some ts -> `Float ts | None -> `Null );
-        ( "latest_ts_iso",
-          match latest_ts with
-          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-          | None -> `Null );
-        ( "latest_age_s",
-          match latest_age_s with Some age -> `Float age | None -> `Null );
-        ("health", `String health);
-        ( "stale_reason",
-          if stale_reason = "" then `Null else `String stale_reason );
-        ( "gate_decode",
-          `Assoc
-            [
-              ( "parsed_gate_count",
-                `Int read_result.Trajectory.gate_decode.parsed_gate_count );
-              ( "legacy_default_count",
-                `Int read_result.Trajectory.gate_decode.legacy_default_count );
-            ] );
-        ("coverage_gaps", `List coverage_gaps);
-        ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
-        ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
-      ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd
   else if ends_with "/tool-calls" then

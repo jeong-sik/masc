@@ -1018,8 +1018,13 @@ let test_approval_queue_surfaces_action_key_and_sandbox_target () =
       let id =
         Lib.Keeper_approval_queue.submit_pending
           ~keeper_name:"governance-judge"
-          ~tool_name:"tool_workspace_inspect"
-          ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
+          ~tool_name:"tool_execute"
+          ~input:
+            (`Assoc
+              [ ("action", `String "pr_view")
+              ; ("executable", `String "gh")
+              ; ("argv", `List [ `String "pr"; `String "view"; `String "123" ])
+              ])
           ~risk_level:Lib.Keeper_approval_queue.Medium
           ~runtime_contract:
             (`Assoc [("backend", `String "docker"); ("sandbox_target", `String "docker")])
@@ -1042,7 +1047,7 @@ let test_approval_queue_surfaces_action_key_and_sandbox_target () =
           let approval =
             json |> member "approval_queue" |> to_list |> List.hd
           in
-          check string "action key surfaced" "op:gh"
+          check string "action key surfaced" "action:pr_view"
             (approval |> member "action_key" |> to_string);
           check string "sandbox target surfaced" "docker"
             (approval |> member "sandbox_target" |> to_string)))

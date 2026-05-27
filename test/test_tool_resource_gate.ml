@@ -83,20 +83,25 @@ let test_classifies_host_local_bottlenecks () =
     (classify "SearchWeb" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
-    "tool_workspace_inspect legacy git_clone defaults visibly to shell"
-    "shell"
+    "tool_workspace_inspect unsupported op skips shell gate"
+    "ungated"
     (classify
        "tool_workspace_inspect"
        ~is_read_only:true
-       ~args:(`Assoc [ "op", `String "git_clone" ]));
+       ~args:(`Assoc [ "op", `String "future_repo_op" ]));
   check
     string
-    "tool_workspace_inspect unknown op defaults visibly to shell"
-    "shell"
+    "tool_workspace_inspect missing op skips shell gate"
+    "ungated"
+    (classify "tool_workspace_inspect" ~is_read_only:true ~args:(`Assoc []));
+  check
+    string
+    "tool_workspace_inspect shell-looking op is not a shell fallback"
+    "ungated"
     (classify
        "tool_workspace_inspect"
        ~is_read_only:true
-       ~args:(`Assoc [ "op", `String "future_op" ]));
+       ~args:(`Assoc [ "op", `String "bash" ]));
   check string "board write" "board_write" (classify "masc_board_post");
   check string "transition" "coordination_write" (classify "masc_transition");
   check string "worker shell_exec" "shell" (classify "shell_exec");

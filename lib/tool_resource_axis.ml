@@ -118,7 +118,6 @@ let classify_shell_op_value raw =
   | "git_status" | "git_log" | "git_diff" -> Known_shell_op Filesystem_read
   | "rg" | "find" | "tree" | "cat" | "head" | "tail" | "wc" | "ls" ->
     Known_shell_op Filesystem_read
-  | "bash" | "exec" | "shell" | "sh" -> Known_shell_op Shell
   | unknown -> Unknown_shell_op unknown
 ;;
 
@@ -129,10 +128,10 @@ let classify_structured_shell_op args =
      | Known_shell_op resource_class -> resource_class
      | Unknown_shell_op unknown ->
        Log.Mcp.warn
-         "unknown structured shell op; defaulting resource gate to shell: op=%s"
+         "unknown structured workspace op; skipping resource gate for unsupported op=%s"
          unknown;
-       Shell)
-  | None -> Shell
+       Ungated)
+  | None -> Ungated
 ;;
 
 let classify_keeper_tool (tool : Tool_name.Keeper.t) args =

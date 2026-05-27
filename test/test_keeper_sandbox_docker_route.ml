@@ -617,7 +617,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   Alcotest.(check int) "rg no-match returns empty matches" 0
     (parse_field raw "matches" |> Json.to_list |> List.length)
 
-let test_git_clone_is_unsupported_before_docker () =
+let test_unknown_workspace_op_is_unsupported_before_docker () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground:_ ->
   let raw =
@@ -627,15 +627,15 @@ let test_git_clone_is_unsupported_before_docker () =
       ~args:
         (`Assoc
           [
-            ("op", `String "git_clone");
+            ("op", `String "future_repo_op");
             ("url", `String "https://github.com/jeong-sik/masc-mcp.git");
           ])
   in
-  Alcotest.(check (option bool)) "git_clone is unsupported" (Some false)
+  Alcotest.(check (option bool)) "unknown op is unsupported" (Some false)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string)) "error" (Some "unsupported_op")
     (parse_string_field raw "error");
-  Alcotest.(check (option string)) "unsupported op" (Some "git_clone")
+  Alcotest.(check (option string)) "unsupported op" (Some "future_repo_op")
     (parse_string_field raw "op")
 
 let test_turn_sandbox_file_write_uses_host_bind_mount () =
@@ -1217,28 +1217,6 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   in
   Alcotest.(check bool) "generic typed push does not mount GH identity bundle" false
     (contains_substring log (gh_config_mount_spec root_gh_dir))
-
-let test_tool_search_files_gh_pr_review_is_unsupported () =
-  with_tool_policy_config @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_exec_shell.handle_tool_search_files
-      ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
-      ~args:
-        (`Assoc
-           [ ("op", `String "gh")
-           ; ("cmd", `String "pr review 123 --approve --body ok")
-           ; ("cwd", `String playground)
-           ])
-  in
-  Alcotest.(check (option bool)) "blocked" (Some false)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "error"
-    (Some "unsupported_op")
-    (parse_string_field raw "error");
-  Alcotest.(check (option string)) "unsupported op" (Some "gh")
-    (parse_string_field raw "op")
 
 let docker_run_line log_path =
   read_file log_path
@@ -2108,9 +2086,6 @@ let () =
             "docker keeper git push routes through git-creds docker"
             `Quick test_bash_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
-            "tool_workspace_inspect gh pr review is unsupported"
-            `Quick test_tool_search_files_gh_pr_review_is_unsupported;
-          Alcotest.test_case
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
           Alcotest.test_case
@@ -2158,8 +2133,8 @@ let () =
         [
           Alcotest.test_case "rg no-match remains successful" `Quick
             test_rg_no_match_remains_successful_in_docker_route;
-          Alcotest.test_case "git_clone is unsupported before docker" `Quick
-            test_git_clone_is_unsupported_before_docker;
+          Alcotest.test_case "unknown workspace op is unsupported before docker" `Quick
+            test_unknown_workspace_op_is_unsupported_before_docker;
           Alcotest.test_case
             "turn sandbox file writes use bind-mounted host path"
             `Quick test_turn_sandbox_file_write_uses_host_bind_mount;

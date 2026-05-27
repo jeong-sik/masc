@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it } from 'vitest'
-import { formatPct, formatPct1, formatTokens, formatNumber, formatCost } from './format-number'
+import { formatPct, formatPct1, formatTokens, formatNumber, formatCost, formatMsCompact } from './format-number'
 
 describe('formatPct', () => {
   it('formats 0 as 0%', () => {
@@ -171,5 +171,32 @@ describe('formatCost', () => {
 
   it('uses custom fallback', () => {
     expect(formatCost(null, 'N/A')).toBe('N/A')
+  })
+})
+
+describe('formatMsCompact', () => {
+  it('formats milliseconds', () => {
+    expect(formatMsCompact(500)).toBe('500ms')
+  })
+
+  it('formats seconds', () => {
+    expect(formatMsCompact(1500)).toBe('1.5s')
+  })
+
+  it('formats minutes', () => {
+    expect(formatMsCompact(90000)).toBe('1.5m')
+  })
+
+  it('rounds milliseconds', () => {
+    expect(formatMsCompact(499)).toBe('499ms')
+  })
+
+  it('formats 0 as 0ms', () => {
+    expect(formatMsCompact(0)).toBe('0ms')
+  })
+
+  it('formats exact unit boundaries', () => {
+    expect(formatMsCompact(1000)).toBe('1.0s')
+    expect(formatMsCompact(60000)).toBe('1.0m')
   })
 })

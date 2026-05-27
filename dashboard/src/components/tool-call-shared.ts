@@ -2,7 +2,6 @@
 // and tool-call-timeline components.
 
 import { truncate } from '../lib/truncate'
-import { formatMsCompact } from '../lib/format-number'
 
 // ── Constants ────────────────────────────────────────────
 
@@ -82,9 +81,6 @@ export function toolCategory(name: string): ToolCategoryResult {
   const found = TOOL_CATEGORIES.find(c => c.match(name))
   return found ?? DEFAULT_TOOL_STYLE
 }
-
-/** Format duration as human-readable string with unit. */
-export const formatDuration = formatMsCompact
 
 /** Summarize a list of trajectory entries: total duration, success count, error count. */
 export function summarizeEntries(entries: Array<{ duration_ms?: number; error?: string | null }>): {

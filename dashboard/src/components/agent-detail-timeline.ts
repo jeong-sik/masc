@@ -11,7 +11,8 @@ import { TextInput } from './common/input'
 import { DashboardFeedSourceStrip } from './common/dashboard-feed-source-strip'
 import { agentTimeline } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
-import { toolCategory, durationColor, formatDuration, formatArgs } from './tool-call-shared'
+import { formatMsCompact } from '../lib/format-number'
+import { toolCategory, durationColor, formatArgs } from './tool-call-shared'
 import type { AgentTimelineEvent } from '../api'
 
 function timelineEventIcon(type: string): string {
@@ -111,7 +112,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-50" title=${toolName}>${toolName}</span>
         <span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]">${cat.label}</span>
         ${durationMs != null
-          ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>`
+          ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatMsCompact(durationMs)}</span>`
           : null}
         ${success
           ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`

@@ -9,8 +9,8 @@ import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
 import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
-import { formatCost } from '../../lib/format-number'
-import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
+import { formatCost, formatMsCompact } from '../../lib/format-number'
+import { toolCategory, durationColor, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
 import {
   openIdeContextRouteLink,
@@ -532,7 +532,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
       ${event.cost_usd != null && event.cost_usd > 0 ? html`
         <div class="flex gap-3 text-3xs text-[var(--color-fg-disabled)]">
           <span>비용: <span class="font-mono text-[var(--color-accent-fg)]">${formatCost(event.cost_usd)}</span></span>
-          ${event.duration_ms != null ? html`<span>소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatDuration(event.duration_ms)}</span></span>` : null}
+          ${event.duration_ms != null ? html`<span>소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatMsCompact(event.duration_ms)}</span></span>` : null}
         </div>
       ` : null}
     </div>
@@ -680,7 +680,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
         <div class="flex items-center gap-3 text-xs flex-wrap">
           <span><span class="text-[var(--color-fg-disabled)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
-          ${durationMs != null ? html`<span><span class="text-[var(--color-fg-disabled)]">소요:</span> <span class="font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span></span>` : null}
+          ${durationMs != null ? html`<span><span class="text-[var(--color-fg-disabled)]">소요:</span> <span class="font-mono ${durationColor(durationMs)}">${formatMsCompact(durationMs)}</span></span>` : null}
           ${turn != null ? html`<span><span class="text-[var(--color-fg-disabled)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
         </div>
         ${responseText ? html`
@@ -800,7 +800,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
       ${'' /* Right side: duration + time */}
       <div class="flex-shrink-0 flex flex-col items-end gap-0.5">
         ${event.duration_ms != null ? html`
-          <span class="text-2xs font-mono ${durationColor(event.duration_ms)}">${formatDuration(event.duration_ms)}</span>
+          <span class="text-2xs font-mono ${durationColor(event.duration_ms)}">${formatMsCompact(event.duration_ms)}</span>
         ` : null}
         <${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-[var(--color-fg-disabled)]" />
       </div>

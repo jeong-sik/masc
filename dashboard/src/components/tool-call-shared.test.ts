@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   toolCategory,
-  formatDuration,
   summarizeEntries,
   durationColor,
   formatArgs,
@@ -69,40 +68,6 @@ describe('toolCategory', () => {
   it('matches memory category', () => {
     const result = toolCategory('memory_recall')
     expect(result.label).toBe('memory')
-  })
-})
-
-// ================================================================
-// formatDuration (tool-call-shared version, milliseconds)
-// ================================================================
-
-describe('formatDuration', () => {
-  it('formats milliseconds', () => {
-    expect(formatDuration(500)).toBe('500ms')
-  })
-
-  it('formats seconds', () => {
-    expect(formatDuration(1500)).toBe('1.5s')
-  })
-
-  it('formats minutes', () => {
-    expect(formatDuration(90000)).toBe('1.5m')
-  })
-
-  it('rounds milliseconds', () => {
-    expect(formatDuration(499)).toBe('499ms')
-  })
-
-  it('formats 0 as 0ms', () => {
-    expect(formatDuration(0)).toBe('0ms')
-  })
-
-  it('formats exactly 1 second', () => {
-    expect(formatDuration(1000)).toBe('1.0s')
-  })
-
-  it('formats exactly 1 minute', () => {
-    expect(formatDuration(60000)).toBe('1.0m')
   })
 })
 

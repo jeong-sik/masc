@@ -467,7 +467,15 @@ let claim_next_r
           make_required_tools_predicate ?agent_tool_names ()
         in
         let required_tool_claim_allowed (task : Masc_domain.task) =
-          let required_tools = task_required_tools task in
+          let required_tools =
+            match task_required_tools task with
+            | [] ->
+              (* Fallback for tasks created before required_tools inference:
+                 infer from title/description keywords. *)
+              Coord_task_classify.infer_required_tools_from_text
+                ~title:task.title ~description:task.description
+            | tools -> tools
+          in
           required_tools_allowed_for_agent required_tools
           && not (receipt_blocks_task task)
         in

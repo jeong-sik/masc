@@ -20,6 +20,7 @@ import {
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { formatMsCompact } from '../lib/format-number'
+import { errorToString } from '../lib/format-string'
 
 // ── Module-level signals ──────────────────────────────────────────────────
 
@@ -106,7 +107,7 @@ async function refreshWaterfall() {
     waterfallEvents.value = res.events
     waterfallUpdatedAt.value = res.updated_at
   } catch (err) {
-    waterfallError.value = err instanceof Error ? err.message : String(err)
+    waterfallError.value = errorToString(err)
   } finally {
     waterfallLoading.value = false
   }

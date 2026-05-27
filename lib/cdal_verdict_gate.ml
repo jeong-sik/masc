@@ -125,6 +125,7 @@ let lookup_latest_verdict ?base_dir
       if warn_on_missing
       then
         Log.Task.info
+          ~keeper_name:task_id
           "[cdal-gate] task_id=%s: starting window saturated (%d entries) \
            without match; widening to %d and re-scanning"
           task_id limit widened;
@@ -146,6 +147,7 @@ let lookup_latest_verdict ?base_dir
     | Some _, _ -> ()
     | None, [] ->
        Log.Task.warn
+         ~keeper_name:task_id
          "[cdal-gate] task_id=%s: cdal_verdicts ledger is EMPTY at %s. \
           Writer pipeline likely dormant — check that OAS Agent.run \
           emits result.proof and Cdal_eval_v1.persist is reached. (#10115)"
@@ -154,6 +156,7 @@ let lookup_latest_verdict ?base_dir
       if not (Hashtbl.mem saturation_warn_emitted task_id) then begin
         Hashtbl.add saturation_warn_emitted task_id ();
         Log.Task.warn
+          ~keeper_name:task_id
           "[cdal-gate] task_id=%s: scanned newest %d entries (auto-widened \
            %dx from MASC_CDAL_VERDICT_LOOKUP_LIMIT=%d) without match \
            (task_scoped=%d unscoped=%d). Older verdicts beyond this ceiling \
@@ -163,6 +166,7 @@ let lookup_latest_verdict ?base_dir
       end
     | None, _ ->
       Log.Task.warn
+        ~keeper_name:task_id
         "[cdal-gate] task_id=%s: no task-scoped verdict in current ledger \
          window (%d entries scanned, task_scoped=%d, unscoped=%d, below \
          limit=%d). CDAL writer is active; this task either has never \

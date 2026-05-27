@@ -9,13 +9,14 @@
 // optional Bar progress row, caption + delta in standard/stacked variants.
 
 import { Show, type JSX } from 'solid-js'
-import { Bar, type BarKind } from './bar.solid'
+import { Bar } from './bar.solid'
+import { type BarKind } from './bar-shared'
+import { MONO_STACK } from './common/font-stacks'
 import { useKpiStripContext } from './kpi-strip.solid'
 import {
   kpiCellAriaLabel,
   VALUE_COLOR_BY_KIND,
   DELTA_COLOR_BY_DIRECTION,
-  MONO_STACK,
   type KpiCellProps,
   type KpiCellVariant,
 } from './kpi-shared'

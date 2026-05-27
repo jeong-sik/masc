@@ -725,7 +725,7 @@ let test_dashboard_shell_snapshot_selector_injects_auth () =
                 ])
            ~tools:`Null
            ~namespace_truth:`Null
-           ~telemetry_summary:`Null
+           ~telemetry_summary:`Null ()
        in
        Lib.Dashboard_snapshot.publish_for_test snapshot;
        let json =
@@ -825,7 +825,7 @@ let test_shell_snapshot_wire_returns_snapshot_when_published () =
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:sentinel ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:`Null);
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Lib.Server_timing.create () in
   let json =
     Lib.Server_dashboard_snapshot_select.select_shell_json
@@ -871,7 +871,7 @@ let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:sentinel ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:`Null);
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Lib.Server_timing.create () in
   let json =
     Lib.Server_dashboard_snapshot_select.select_shell_json
@@ -959,7 +959,7 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:`Null ~tools:sentinel
-       ~namespace_truth:`Null ~telemetry_summary:`Null);
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Lib.Server_timing.create () in
   let json =
     Lib.Server_dashboard_snapshot_select.select_tools_json
@@ -995,7 +995,7 @@ let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:sentinel);
+       ~namespace_truth:`Null ~telemetry_summary:sentinel ());
   let timing = Lib.Server_timing.create () in
   let json =
     Lib.Server_dashboard_snapshot_select.select_telemetry_summary_json
@@ -1038,7 +1038,7 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:sentinel ~telemetry_summary:`Null);
+       ~namespace_truth:sentinel ~telemetry_summary:`Null ());
   let clock = Eio.Stdenv.clock env in
   let state = Lib.Mcp_server.create_state ~base_path:"/tmp/rfc-0138-step3" in
   let req = request "/api/v1/dashboard/project-snapshot" in

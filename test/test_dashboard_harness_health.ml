@@ -109,6 +109,7 @@ let make_req ?(title = "Task") ?(notes = "Detailed completion notes") () :
     task_description = "desc";
     completion_notes = notes;
     agent_name = "agent_code";
+    task_id = "test-task-dash";
   }
 
 let make_result ?(verdict = AR.Approve) ?(gate = AR.Structured_tool)

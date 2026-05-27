@@ -12,8 +12,8 @@ import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
 import { TimeAgo } from '../common/time-ago'
 import { findKeeper } from '../../lib/keeper-utils'
+import { selectedTask } from './task-detail-selection'
 import {
-  selectedTask,
   closeTaskDetail,
   taskEvents,
   taskEventsLoading,

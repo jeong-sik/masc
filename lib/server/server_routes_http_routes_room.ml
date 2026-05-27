@@ -23,7 +23,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
            ("tempo_interval_s", `Float status.tempo_interval_s);
            ("paused", `Bool status.paused);
          ] in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/tasks" (fun request reqd ->
        with_read_auth (fun state req reqd ->
@@ -69,7 +69,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
            ("offset", `Int offset);
            ("total", `Int total);
          ] in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
        with_read_auth (fun state req reqd ->
@@ -104,7 +104,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
            ("offset", `Int offset);
            ("total", `Int total);
          ] in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/messages" (fun request reqd ->
        with_read_auth (fun state req reqd ->
@@ -136,5 +136,5 @@ module Keeper_stream = Server_routes_http_keeper_stream
            ("since_seq", `Int since_seq);
            ("total", `Int total);
          ] in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value json reqd
        ) request reqd)

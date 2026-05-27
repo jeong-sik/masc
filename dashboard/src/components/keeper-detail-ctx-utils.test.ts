@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDurationCompound as formatDuration } from '../lib/format-time'
+import { formatDurationCompound } from '../lib/format-time'
 import { autonomyHint } from './keeper-detail-ctx-utils'
 
 describe('autonomyHint', () => {
@@ -25,22 +25,22 @@ describe('autonomyHint', () => {
   })
 })
 
-describe('formatDuration', () => {
+describe('formatDurationCompound', () => {
   it('formats seconds under 60', () => {
-    expect(formatDuration(0)).toBe('0초')
-    expect(formatDuration(30)).toBe('30초')
-    expect(formatDuration(59)).toBe('59초')
+    expect(formatDurationCompound(0)).toBe('0초')
+    expect(formatDurationCompound(30)).toBe('30초')
+    expect(formatDurationCompound(59)).toBe('59초')
   })
 
   it('formats minutes under 3600', () => {
-    expect(formatDuration(60)).toBe('1분')
-    expect(formatDuration(120)).toBe('2분')
-    expect(formatDuration(3599)).toBe('59분')
+    expect(formatDurationCompound(60)).toBe('1분')
+    expect(formatDurationCompound(120)).toBe('2분')
+    expect(formatDurationCompound(3599)).toBe('59분')
   })
 
   it('formats hours with remaining minutes', () => {
-    expect(formatDuration(3600)).toBe('1시간 0분')
-    expect(formatDuration(3660)).toBe('1시간 1분')
-    expect(formatDuration(7384)).toBe('2시간 3분')
+    expect(formatDurationCompound(3600)).toBe('1시간 0분')
+    expect(formatDurationCompound(3660)).toBe('1시간 1분')
+    expect(formatDurationCompound(7384)).toBe('2시간 3분')
   })
 })

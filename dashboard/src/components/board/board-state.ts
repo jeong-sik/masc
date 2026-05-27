@@ -19,8 +19,6 @@ import {
   loadMoreBoardPosts,
 } from '../../store'
 import {
-  votePost,
-  voteComment,
   fetchBoardHearths,
   fetchBoardFlairs,
   fetchSubBoards,
@@ -51,9 +49,6 @@ export {
   refreshBoard,
   loadMoreBoardPosts,
 }
-export { votePost }
-export { voteComment }
-export { deleteBoardPost }
 export type { BoardComment, BoardPost, BoardSortMode }
 
 // ── Sort modes ─────────────────────────────────────────────────────

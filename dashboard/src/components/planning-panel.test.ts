@@ -31,7 +31,7 @@ vi.mock('../store', () => ({
   get goals() { return goalsSignal },
 }))
 
-vi.mock('./goals', () => ({
+vi.mock('./goals/planning', () => ({
   Planning: () => html`<div data-testid="planning">Planning</div>`,
 }))
 vi.mock('./goals/goal-tree', () => ({

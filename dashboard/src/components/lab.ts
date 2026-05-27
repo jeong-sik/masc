@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { route } from '../router'
-import { Tools } from './tools'
+import { Tools } from './tools/tools-main'
 import { HarnessHealth } from './harness-health'
 
 type LabSection = 'tools' | 'harness'

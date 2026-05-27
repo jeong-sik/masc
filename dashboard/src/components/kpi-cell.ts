@@ -17,12 +17,12 @@ import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { Bar } from './bar'
 import { type BarKind } from './bar-shared'
+import { MONO_STACK } from './common/font-stacks'
 import {
   DEFAULT_KPI_CELL_VARIANT,
   kpiCellAriaLabel,
   VALUE_COLOR_BY_KIND,
   DELTA_COLOR_BY_DIRECTION,
-  MONO_STACK,
   type KpiCellProps,
 } from './kpi-shared'
 

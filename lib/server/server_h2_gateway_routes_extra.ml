@@ -15,8 +15,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       let status =
         match status with `OK -> `OK | `Error -> `Internal_server_error
       in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status
-        ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~status ~extra_headers:cors;
       true
 
   | `GET, "/api/v1/board" ->
@@ -73,7 +72,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         ("offset", `Int offset);
         ("sort_by", `String (board_sort_label sort_by));
       ] in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors;
       true
 
   | `GET, "/api/v1/board/curation" ->
@@ -83,7 +82,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         | Some snap ->
             `Assoc [("snapshot", Board_curation.snapshot_to_yojson snap)]
       in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors;
       true
 
   | `GET, "/api/v1/board/hearths" ->
@@ -93,13 +92,13 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
           `Assoc [("name", `String name); ("count", `Int count)]
         ) hearths));
       ] in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors;
       true
 
   | `GET, "/api/v1/board/flairs" ->
       let flairs = List.map Board.flair_to_yojson Board.available_flairs in
       let json = `Assoc [("flairs", `List flairs)] in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors;
       true
 
   | `GET, "/api/v1/board/sub-boards" ->
@@ -111,7 +110,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
               `List (List.map Board.sub_board_to_yojson sub_boards) );
           ]
       in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors;
       true
 
   | `GET, "/api/v1/board/karma/ledger" ->
@@ -144,7 +143,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
                    totals) );
           ]
       in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors;
       true
 
   | `GET, p
@@ -172,7 +171,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
           `Assoc [("agent", `String agent); ("karma", `Int k)]
         ) sorted));
       ] in
-      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors;
       true
 
   | `GET, "/static/css/middleware.css" ->
@@ -221,20 +220,14 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
                || Filename.check_suffix filename ".css"
                || Filename.check_suffix filename ".svg"
              in
-             let accepts_zstd =
-               Http_server_eio.Compression.accepts_zstd httpun_request
-             in
              let final_body, encoding_headers =
-               if is_compressible && accepts_zstd then
-                 let (compressed, did_compress) =
-                   Http_server_eio.Compression.compress_zstd ~level:3 body
-                 in
-                 if did_compress then
-                   (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
-                 else
-                   (body, [])
-               else
-                 (body, [])
+               Http_response_payload.compress_body
+                 ~compress:is_compressible
+                 ~accept_encoding:
+                   (Httpun.Headers.get
+                      httpun_request.Httpun.Request.headers
+                      "accept-encoding")
+                 body
              in
              let base_headers = [
                ("content-type", ct);

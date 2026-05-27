@@ -9,8 +9,7 @@ let json_error message =
   `Assoc [("ok", `Bool false); ("error", `String message)]
 
 let json_response ~status req reqd json =
-  Http.Response.json ~status ~request:req
-    (Yojson.Safe.to_string json) reqd
+  Http.Response.json_value ~status ~request:req json reqd
 
 let repositories_prefix = "/api/v1/repositories/"
 let sync_suffix = "/sync"
@@ -223,16 +222,14 @@ let handle_list_repositories state req reqd =
             ("total", `Int (List.length repos));
           ]
       in
-      Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~request:req json reqd
 
 let handle_get_repository state id req reqd =
   let base_path = base_path_of_state state in
   match Repo_store.find ~base_path id with
   | Error msg -> json_response ~status:`Not_found req reqd (json_error msg)
   | Ok repo ->
-      Http.Response.json ~request:req
-        (Yojson.Safe.to_string (repository_json repo))
-        reqd
+      Http.Response.json_value ~request:req (repository_json repo) reqd
 
 let handle_list_branches state id req reqd =
   let base_path = base_path_of_state state in
@@ -253,7 +250,7 @@ let handle_list_branches state id req reqd =
                        branches) );
               ]
           in
-          Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd)
+          Http.Response.json_value ~request:req json reqd)
 
 let handle_get_repository_path state req reqd =
   match extract_repo_id (Http.Request.path req) with
@@ -280,7 +277,7 @@ let handle_add_repository state _agent_name req reqd =
               json_response ~status:`Bad_request req reqd (json_error msg)
           | Ok added_repo ->
               let json = repository_json added_repo in
-              Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd))
+              Http.Response.json_value ~request:req json reqd))
 
 let handle_remove_repository state _agent_name req reqd =
   let base_path = base_path_of_state state in
@@ -297,7 +294,7 @@ let handle_remove_repository state _agent_name req reqd =
           json_response ~status:`Not_found req reqd (json_error msg)
       | Ok () ->
           let json = `Assoc [("id", `String id); ("removed", `Bool true)] in
-          Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd)
+          Http.Response.json_value ~request:req json reqd)
       | _ ->
           json_response ~status:`Bad_request req reqd
             (json_error "DELETE expects /api/v1/repositories/:id"))
@@ -329,9 +326,8 @@ let handle_update_repository state _agent_name req reqd =
                           json_response ~status:`Internal_server_error req reqd
                             (json_error msg)
                       | Ok persisted ->
-                          Http.Response.json ~request:req
-                            (Yojson.Safe.to_string (repository_json persisted))
-                            reqd))))
+                          Http.Response.json_value ~request:req
+                            (repository_json persisted) reqd))))
       | _ ->
           json_response ~status:`Not_found req reqd
             (json_error "unknown repository endpoint"))
@@ -375,8 +371,7 @@ let handle_sync_repository state _agent_name req reqd =
                         ("branches", branches);
                       ]
                   in
-                  Http.Response.json ~request:req (Yojson.Safe.to_string json)
-                    reqd)))
+                  Http.Response.json_value ~request:req json reqd)))
 
 let handle_discover_repositories state _agent_name req reqd =
   let base_path = base_path_of_state state in
@@ -393,7 +388,7 @@ let handle_discover_repositories state _agent_name req reqd =
             ("registered", `Bool true);
           ]
       in
-      Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~request:req json reqd
 
 let add_routes router =
   router

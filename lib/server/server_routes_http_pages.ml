@@ -268,14 +268,10 @@ let serve_dashboard_static name request reqd =
           "public, max-age=31536000, immutable"
       in
       let final_body, encoding_headers =
-        if is_compressible_asset name && Http.Compression.accepts_zstd request then
-          let (compressed, did_compress) = Http.Compression.compress_zstd ~level:3 body in
-          if did_compress then
-            (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
-          else
-            (body, [])
-        else
-          (body, [])
+        Http_response_payload.compress_body
+          ~compress:(is_compressible_asset name)
+          ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
+          body
       in
       let headers = ("cache-control", cache_control) :: encoding_headers in
       Http.Response.bytes ~headers ~content_type final_body reqd
@@ -449,21 +445,17 @@ let keepers_summary_from_registry ~base_path
 let bonsai_api_keepers_summary request reqd =
   match !server_state with
   | None ->
-      respond_public_read_json
+      respond_public_read_json_value
         ~status:`Internal_server_error
         request
         reqd
-        (Yojson.Safe.to_string
-           (`Assoc [ ("error", `String "server state not initialized") ]))
+        (`Assoc [ ("error", `String "server state not initialized") ])
   | Some state ->
       let resp =
         keepers_summary_from_registry ~base_path:state.room_config.base_path
       in
-      let body =
-        Yojson.Safe.to_string
-          (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
-      in
-      respond_public_read_json request reqd body
+      respond_public_read_json_value request reqd
+        (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
 
 let serve_bonsai_static name request reqd =
   let path = Filename.concat (bonsai_asset_root ()) name in
@@ -477,14 +469,10 @@ let serve_bonsai_static name request reqd =
           "public, max-age=31536000, immutable"
       in
       let final_body, encoding_headers =
-        if is_compressible_asset name && Http.Compression.accepts_zstd request then
-          let (compressed, did_compress) = Http.Compression.compress_zstd ~level:3 body in
-          if did_compress then
-            (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
-          else
-            (body, [])
-        else
-          (body, [])
+        Http_response_payload.compress_body
+          ~compress:(is_compressible_asset name)
+          ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
+          body
       in
       let headers = ("cache-control", cache_control) :: encoding_headers in
       Http.Response.bytes ~headers ~content_type final_body reqd

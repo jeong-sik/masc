@@ -40,6 +40,13 @@ let request_of_reqd reqd =
 
 (** Simple response helpers - H2 streaming API *)
 module Response = struct
+  let maybe_compress ?(compress = true) reqd body =
+    let request = H2.Reqd.request reqd in
+    Http_response_payload.compress_body
+      ~compress
+      ~accept_encoding:(H2.Headers.get request.headers "accept-encoding")
+      body
+
   (** Send a complete response body *)
   let send_body reqd response body =
     (* H2 API: respond_with_streaming returns Body.Writer.t directly
@@ -48,32 +55,37 @@ module Response = struct
     H2.Body.Writer.write_string writer body;
     H2.Body.Writer.close writer
 
-  let text ?(status = `OK) body reqd =
-    let headers = H2.Headers.of_list ([
-      ("content-type", "text/plain; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ]) in
+  let send_typed_body
+      ?(status = `OK)
+      ?(headers = [])
+      ?(compress = true)
+      ~content_type
+      body
+      reqd =
+    let final_body, compression_headers = maybe_compress ~compress reqd body in
+    let headers =
+      H2.Headers.of_list
+        ([
+           ("content-type", content_type);
+           ("content-length", string_of_int (String.length final_body));
+         ]
+        @ compression_headers
+        @ headers)
+    in
     let response = H2.Response.create ~headers status in
-    send_body reqd response body
+    send_body reqd response final_body
+
+  let text ?(status = `OK) body reqd =
+    send_typed_body ~status ~content_type:"text/plain; charset=utf-8" body reqd
 
   let html ?(status = `OK) ?(headers = []) body reqd =
-    let base_headers = [
-      ("content-type", "text/html; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ] in
-    let response = H2.Response.create
-      ~headers:(H2.Headers.of_list (base_headers @ headers))
-      status
-    in
-    send_body reqd response body
+    send_typed_body ~status ~headers ~content_type:"text/html; charset=utf-8" body reqd
 
   let json ?(status = `OK) body reqd =
-    let headers = H2.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ]) in
-    let response = H2.Response.create ~headers status in
-    send_body reqd response body
+    send_typed_body ~status ~content_type:"application/json; charset=utf-8" body reqd
+
+  let json_value ?status value reqd =
+    json ?status (Yojson.Safe.to_string value) reqd
 
   let not_found reqd =
     text ~status:`Not_found "404 Not Found" reqd
@@ -97,15 +109,7 @@ module Response = struct
     H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd response
 
   let bytes ?(status = `OK) ?(headers = []) ~content_type body reqd =
-    let base_headers = [
-      ("content-type", content_type);
-      ("content-length", string_of_int (String.length body));
-    ] in
-    let response = H2.Response.create
-      ~headers:(H2.Headers.of_list (base_headers @ headers))
-      status
-    in
-    send_body reqd response body
+    send_typed_body ~status ~headers ~compress:false ~content_type body reqd
 
   let internal_error msg reqd =
     text ~status:`Internal_server_error ("500 Internal Server Error: " ^ msg) reqd

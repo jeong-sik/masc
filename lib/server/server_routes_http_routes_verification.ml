@@ -56,8 +56,7 @@ let add_routes router =
          let json =
            Dashboard_verification.requests_json ~base_path ?task_id ?limit ()
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/verification/summary" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -68,20 +67,17 @@ let add_routes router =
          in
          let base_path = state.Mcp_server.room_config.base_path in
          let json = Dashboard_verification.summary_json ~base_path ?recent () in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/verification/specs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_tla_specs.specs_json () in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/verification/tlc-results" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_tla_specs.tlc_results_json () in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/verification/resolve" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_operator_confirm"
@@ -96,17 +92,14 @@ let add_routes router =
                    ~config ~verifier ~args
                with
                | Ok json ->
-                   respond_json_with_cors request reqd
-                     (Yojson.Safe.to_string json)
+                   respond_json_value_with_cors request reqd json
                | Error message ->
-                   respond_json_with_cors
+                   respond_json_value_with_cors
                      ~status:`Bad_request request reqd
-                     (Yojson.Safe.to_string (verification_error_json message))
+                     (verification_error_json message)
              with Yojson.Json_error msg ->
-               respond_json_with_cors
+               respond_json_value_with_cors
                  ~status:`Bad_request request reqd
-                 (Yojson.Safe.to_string
-                    (verification_error_json
-                       (Printf.sprintf "invalid json: %s" msg)))
+                 (verification_error_json (Printf.sprintf "invalid json: %s" msg))
            )
          ) request reqd)

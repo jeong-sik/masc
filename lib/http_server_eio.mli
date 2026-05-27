@@ -108,7 +108,8 @@ module Response : sig
 
   (** JSON response with optional zstd compression.  Default
       status [`OK].  When [compress = true] (default) AND
-      [?request] supplies a [Compression.accepts_zstd] match,
+      [?request] or the request attached to [reqd] supplies an
+      [Accept-Encoding: zstd] match,
       uses dictionary-based compression for small messages
       (~70% reduction vs ~6% with standard zstd). *)
   val json
@@ -117,6 +118,15 @@ module Response : sig
     -> ?extra_headers:(string * string) list
     -> ?request:Httpun.Request.t
     -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  val json_value
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> Yojson.Safe.t
     -> Httpun.Reqd.t
     -> unit
 

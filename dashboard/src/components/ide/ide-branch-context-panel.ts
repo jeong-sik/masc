@@ -14,6 +14,7 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
+import { routeLinkLabels } from './ide-context-route-helpers'
 
 type BranchTone = 'current' | 'dirty' | 'conflict' | 'stale'
 
@@ -478,9 +479,6 @@ function laneRouteLinks(
   })
 }
 
-function routeLinkLabels(routeLinks: ReadonlyArray<IdeContextRouteLink>): string {
-  return routeLinks.map(link => link.label).join(', ')
-}
 
 function BranchLaneRouteLink(link: IdeContextRouteLink) {
   return html`

@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { formatPct1 } from '../lib/format-number'
 import { unixSecondsToDate } from '../lib/format-time'
+import { isStringArray } from '../lib/type-guards'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import {
@@ -339,9 +340,6 @@ interface LineageVerdictMeta {
   detail: string
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string')
-}
 
 function isLineageJudgment(value: unknown): value is LineageJudgment {
   if (!isRecord(value)) return false

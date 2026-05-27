@@ -138,7 +138,7 @@ keeper continuity의 기본 경로는 `resume`이다.
 
 ## Deterministic Step Boundary
 
-replay target은 "typed post-step facts"다.
+replay target은 "typed after-step facts"다.
 
 아래는 replay 대상으로 본다.
 
@@ -264,7 +264,7 @@ Secondary design touchpoints:
 ### Phase 2
 
 - reduce keeper-owned wrapper state around OAS checkpoint/context
-- move replay-relevant state to typed post-turn facts
+- move replay-relevant state to typed after-turn facts
 
 ### Phase 3
 

@@ -33,7 +33,7 @@ follow_up_prs:
   - "host-config-cleanup-F: test-mode (5 String.starts_with sites)"
   - "disclosure-activation-G: worker_oas.ml Builder.with_disclosure_level wiring"
   - "disclosure-activation-H: keeper_meta.ml TOML [disclosure] round-trip"
-  - "post-hook-typed-I: 5 post-hook site signature migration (PR-10 deferred)"
+  - "dispatch-observer-I: completed; current Tool_dispatch observer API is dispatch_observer/register_dispatch_observer"
   - "legacy-flag-cleanup-J: MASC_DISPATCH_V2 env flag removal (PR-11 deferred)"
 ---
 
@@ -53,7 +53,7 @@ masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 
 
 | 비대칭 종류 | 행동 |
 |---|---|
-| **결함** — 권한 게이트 0건, dead pre-hook chain, post-hook silent skip | 통일 (typed wrapper로 root-fix) |
+| **결함** — 권한 게이트 0건, dead pre-hook chain, observer silent skip | 통일 (typed wrapper로 root-fix) |
 | **의도된 경계** — OAS↔masc-mcp boundary, Public MCP vs Internal, Runtime lens carve-out | typed enumeration으로 명시 (통일 금지) |
 
 본 RFC는 **결함은 통일, 경계는 명시**. 두 행동이 동시에 typed 방식으로 진행.
@@ -80,13 +80,13 @@ let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
         Some (Tool_result.of_exn ~tool_name:name ~start_time exn)
     in
     (match result with
-     | Some tr -> Some (run_post_hooks tr)
-     | None -> None)                          (* ⚠ post-hook NOT invoked *)
+     | Some tr -> Some (run_observers tr)
+     | None -> None)                          (* ⚠ observer NOT invoked *)
   | None -> None                              (* ⚠ silent miss *)
 ```
 
 - Pre-hook 호출 0건.
-- `None` 반환 시 post-hook 미호출 → audit/metric silent skip.
+- `None` 반환 시 observer 미호출 → audit/metric silent skip.
 - Tool 미등록 시 silent `None`.
 
 **Entry 2 — `Tool_dispatch.dispatch_structured`** (`lib/tool_dispatch.ml:140-145`):
@@ -99,7 +99,7 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   | (None, coerced_args) -> dispatch ~token ~args:coerced_args
 ```
 
-- Pre-hook → handler → post-hook 체인.
+- Pre-hook → handler → observer 체인.
 - **caller 0건** (`rg -n 'dispatch_structured' lib/ bin/`은 정의 파일 외 0 매치). 즉 dead.
 
 **Entry 3 — `Keeper_tag_dispatch`** (`lib/keeper/keeper_tag_dispatch.ml`):
@@ -109,7 +109,7 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
 
 **Caller 분포**:
 
-| Caller | Entry | Pre-hook | Post-hook | Capability gate | Trace span |
+| Caller | Entry | Pre-hook | Observer | Capability gate | Trace span |
 |---|---|---|---|---|---|
 | `agent_tool_remote_mcp_runtime.ml:164` (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ unrestricted¹ | ✗ |
 | `agent_tool_remote_mcp_runtime.ml:218` (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ | ✗ |
@@ -129,7 +129,7 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
 |---|---|
 | `Span` (OTel) | 0 emission. `lib/otel/otel_dispatch_hook.ml:103` 등록만 있고 span 시작/종료 없음. |
 | `Audit` | `Audit_log.record` caller 10+곳 분산 (`dashboard_tool_host_events`, `governance_anomaly`, `mcp_server_eio_call_tool`, `mcp_server_eio_execute`, `operator/operator_control`, `tool_inline_dispatch_comm` 등). dispatch path에서 SSOT 없음. |
-| `Metric` | `tool_metrics.install` (`lib/tool_metrics.ml:127`)가 post-hook으로 등록하지만 `dispatch:127-129`가 handler `None` 반환 시 post-hook 미호출 → metric silent skip. Tool-selection failure counters now live on the run-tools setup path. |
+| `Metric` | `tool_metrics.install` (`lib/tool_metrics.ml:127`)가 observer로 등록하지만 `dispatch:127-129`가 handler `None` 반환 시 observer 미호출 → metric silent skip. Tool-selection failure counters now live on the run-tools setup path. |
 | `Trace_id` | propagation 메커니즘 0. LLM turn ↔ tool call ↔ side-effect 연결 단절. |
 
 ### §1.3 Surface Coverage Gap
@@ -294,7 +294,7 @@ type t =
   | Handler_error of { tool : Tool_name.t; exn : exn; backtrace : string }
 ```
 
-Post-hook signature: `Dispatch_outcome.t -> Dispatch_outcome.t`. 5 post-hook site 모두 5-arm exhaustive match (`tool_output_validation:65`, `tool_usage_log:272`, `tool_metrics:127`, `otel_dispatch_hook:103`, `server_bootstrap_loops:968`).
+Dispatch observer signature: `Dispatch_outcome.t -> Tool_result.t option -> unit`. Observer sites pattern-match on the typed outcome; result transformation is kept in `Tool_dispatch.set_result_transformer`.
 
 ### §3.4 `Host_config.t` (PR-12)
 
@@ -355,7 +355,7 @@ RFC-OAS-013 §2.1 v2의 `if meta.name = "imseonghan"` 패턴 거부. 대신 *con
 | PR-7 | `pr-7-keeper-guarded` | PR-6 | keeper turn → `guarded_dispatch` (log-only mode) | **high** | 250-400 |
 | PR-8 | `pr-8-mcp-guarded` | PR-7 | MCP server → `guarded_dispatch` | med | 150-250 |
 | PR-9 | `pr-9-tag-dispatch-guarded` | PR-8 | tag-dispatch fallback → `guarded_dispatch` | med | 200-350 |
-| PR-10 | `pr-10-dispatch-outcome-total` | PR-9 | `Dispatch_outcome.t` 5-arm + post-hook total | med | 350-500 |
+| PR-10 | `pr-10-dispatch-outcome-total` | PR-9 | `Dispatch_outcome.t` 5-arm + observer total | med | 350-500 |
 | PR-11 | `pr-11-legacy-removal` | PR-10 | `dispatch`/`dispatch_structured`/`MASC_DISPATCH_V2` 제거 | low | 150-250 |
 | PR-12 | `pr-12-host-config-portability` | PR-11 (PR-1 parallel) | `Host_config.t` + 하드코드 11곳 일소 | med | 600-900 |
 | PR-13 | `pr-13-disclosure-activation` | PR-12 | RFC-OAS-013 config-driven activation | med | 400-600 |
@@ -381,7 +381,7 @@ RFC-OAS-013 §2.1 v2의 `if meta.name = "imseonghan"` 패턴 거부. 대신 *con
 | PR-6 | **24h shadow mode**: both paths 동시 실행, divergence log. 0 divergence면 PR-7 진행 | single-PR revert |
 | PR-7 | **Pre-hook log-only mode 1 deploy cycle** → enforce. Capability gate advisory mode 처음 24h | `agent_tool_remote_mcp_runtime.ml` 2-line revert |
 | PR-8~9 | 동일 path 적용 | single-PR revert |
-| PR-10 | post-hook signature 변경 5 site 일제 (compile-time 강제) | single-PR revert |
+| PR-10 | observer signature 변경 5 site 일제 (compile-time 강제) | single-PR revert |
 | PR-11 | dead code 제거 (PR-7~10 후) | single-PR revert (cherrry-pick) |
 | PR-12 | macOS+Linux dual host CI matrix | single-PR revert |
 | PR-13 | keeper TOML schema bump, 기본값 `Full` (no-op) | TOML revert |
@@ -475,7 +475,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 - `lib/tool_dispatch.ml:117-130` — `dispatch` (Entry 1)
 - `lib/tool_dispatch.ml:140-145` — `dispatch_structured` (Entry 2, dead)
 - `lib/tool_dispatch.ml:32` — `registry : (string, handler) Hashtbl.t`
-- `lib/tool_dispatch.ml:79-80` — `pre_hooks` / `post_hooks` refs
+- `lib/tool_dispatch.ml` — `pre_hooks` / `dispatch_observers` refs
 - `lib/tool_dispatch.ml:127-129` — handler `None` → silent skip
 - `lib/tool_dispatch.ml:149` — `MASC_DISPATCH_V2` flag
 - `lib/tool_capability.ml` / `lib/tool_catalog.ml` — typed capability metadata

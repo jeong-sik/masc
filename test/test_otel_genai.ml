@@ -337,7 +337,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
           in
           match returned with
           | Some returned ->
-              check bool "post-hook preserves success" true returned.success
+              check bool "finalizer preserves success" true returned.success
           | None -> fail "expected finalized result");
       match !spans with
       | [ (name, attrs) ] ->

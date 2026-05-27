@@ -156,9 +156,9 @@ let execute_with_observers
            ; failure_class = Some failure_boundary.failure_class
            }
        in
-       (* RFC-0084 PR-I-3 — typed observers replace
-          run_post_hooks. *)
-       Tool_dispatch.run_typed_post_hooks
+       (* OAS tool execution bypasses guarded_dispatch, so emit the shared
+          dispatch observers explicitly. *)
+       Tool_dispatch.run_dispatch_observers
          Dispatch_outcome.Handled (Some tr));
       let detail =
         let s = String.trim raw_result in
@@ -345,9 +345,9 @@ let execute_with_observers
            ; failure_class = None
            }
        in
-       (* RFC-0084 PR-I-3 — typed observers replace
-          run_post_hooks. *)
-       Tool_dispatch.run_typed_post_hooks
+       (* OAS tool execution bypasses guarded_dispatch, so emit the shared
+          dispatch observers explicitly. *)
+       Tool_dispatch.run_dispatch_observers
          Dispatch_outcome.Handled (Some tr));
       let ts = Time_compat.now () in
       broadcast_keeper_tool_call_event

@@ -281,12 +281,10 @@ let extract_caller (result : Tool_result.t) : string option =
        | _ -> None)
   | _ -> None
 
-(* RFC-0084 PR-I-2.b — migrate to typed post-hook surface.
-   Behaviour-preserving: legacy hook fired on the [Handled] arm of
-   [dispatch] only, and only logged for system-internal tools.
-   The new typed hook reproduces the same gate. *)
+(* Log only handled System_internal dispatches. Non-handled outcomes are
+   represented by dispatch telemetry, not tool-usage rows. *)
 let install () =
-  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+  Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some (result : Tool_result.t) ->
       if is_system_internal result.tool_name then

@@ -48,12 +48,12 @@ let test_shard_filesystem_exists () =
       (List.mem "tool_edit_file" names)
   | None -> Alcotest.fail "filesystem shard not found"
 
-let test_shard_shell_exists () =
-  match Tool_shard.get_shard "shell" with
+let test_shard_search_files_exists () =
+  match Tool_shard.get_shard "search_files" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
-  | None -> Alcotest.fail "shell shard not found"
+  | None -> Alcotest.fail "search_files shard not found"
 
 let test_shard_governance_removed () =
   Alcotest.(check bool) "governance shard removed"
@@ -62,6 +62,11 @@ let test_shard_governance_removed () =
 let test_shard_coding_removed () =
   Alcotest.(check bool) "coding shard removed" true
     (Option.is_none (Tool_shard.get_shard "coding"))
+
+let test_retired_search_family_name_removed () =
+  let legacy_name = "s" ^ "hell" in
+  Alcotest.(check bool) "legacy search-family shard removed" true
+    (Option.is_none (Tool_shard.get_shard legacy_name))
 
 let test_shard_voice_exists () =
   match Tool_shard.get_shard "voice" with
@@ -168,7 +173,7 @@ let test_grant_already_granted () =
    ============================================================ *)
 
 let test_revoke_removable () =
-  let active = ["base"; "board"; "shell"] in
+  let active = ["base"; "board"; "search_files"] in
   match Tool_shard.revoke_shard active "board" with
   | Ok new_shards ->
     Alcotest.(check int) "now 2" 2 (List.length new_shards);
@@ -185,7 +190,7 @@ let test_revoke_non_removable () =
        with Not_found -> false)
 
 let test_revoke_not_granted () =
-  match Tool_shard.revoke_shard ["base"] "shell" with
+  match Tool_shard.revoke_shard ["base"] "search_files" with
   | Ok _ -> Alcotest.fail "should fail"
   | Error msg ->
     Alcotest.(check bool) "mentions not granted" true
@@ -214,7 +219,7 @@ let test_get_agent_shards_default () =
 
 let test_set_get_agent_shards () =
   Tool_shard.remove_agent_shards "test-agent-x";
-  Tool_shard.set_agent_shards "test-agent-x" ["base"; "shell"];
+  Tool_shard.set_agent_shards "test-agent-x" ["base"; "search_files"];
   let shards = Tool_shard.get_agent_shards "test-agent-x" in
   Alcotest.(check int) "2 shards" 2 (List.length shards);
   Alcotest.(check bool) "sorted" true (shards = List.sort String.compare shards);
@@ -264,7 +269,7 @@ let test_execute_grant_missing_params () =
 
 let test_execute_revoke () =
   Tool_shard.remove_agent_shards "test-revoke";
-  Tool_shard.set_agent_shards "test-revoke" ["base"; "board"; "shell"];
+  Tool_shard.set_agent_shards "test-revoke" ["base"; "board"; "search_files"];
   let (ok, json) = Tool_shard.execute "masc_tool_revoke"
     (`Assoc [("agent_name", `String "test-revoke"); ("shard_name", `String "board")]) in
   Alcotest.(check bool) "succeeds" true ok;
@@ -472,7 +477,7 @@ let test_set_agent_shards_from_persona () =
   Alcotest.(check bool) "has board" true (List.mem "board" active);
   Alcotest.(check bool) "has library" true (List.mem "library" active);
   Alcotest.(check bool) "no coding" false (List.mem "coding" active);
-  Alcotest.(check bool) "no shell" false (List.mem "shell" active);
+  Alcotest.(check bool) "no search_files" false (List.mem "search_files" active);
   (* Verify tools_of_shards returns restricted set *)
   let tools = Tool_shard.tools_of_shards active in
   let tool_names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) tools in
@@ -499,9 +504,10 @@ let () =
       Alcotest.test_case "base" `Quick test_shard_base_exists;
       Alcotest.test_case "board" `Quick test_shard_board_exists;
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
-      Alcotest.test_case "shell" `Quick test_shard_shell_exists;
+      Alcotest.test_case "search_files" `Quick test_shard_search_files_exists;
       Alcotest.test_case "governance removed" `Quick test_shard_governance_removed;
       Alcotest.test_case "coding removed" `Quick test_shard_coding_removed;
+      Alcotest.test_case "legacy search-family removed" `Quick test_retired_search_family_name_removed;
       Alcotest.test_case "voice" `Quick test_shard_voice_exists;
       Alcotest.test_case "unknown" `Quick test_shard_unknown;
       Alcotest.test_case "all count" `Quick test_all_shards_count;

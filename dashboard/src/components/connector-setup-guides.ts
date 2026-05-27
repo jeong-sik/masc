@@ -95,7 +95,7 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
   sandbox_hardened: {
     title: 'Keeper Docker Sandbox 프리플라이트',
     intro:
-      "keeper의 sandbox_profile을 'docker'로 바꾸면 다음 keeper_bash 호출부터 container에서 실행됩니다. 먼저 호스트 Docker가 준비됐는지 확인하세요.",
+      "keeper의 sandbox_profile을 'docker'로 바꾸면 다음 Execute 호출부터 container에서 실행됩니다. 먼저 호스트 Docker가 준비됐는지 확인하세요.",
     steps: [
       {
         text: '터미널에서 `docker info` → daemon이 응답하는지 확인. 실패하면 Docker Desktop/engine을 먼저 실행.',
@@ -104,7 +104,7 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
         text: '핀된 이미지 풀: `docker pull ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff`. (이미지 경로 override는 env var `MASC_KEEPER_SANDBOX_DOCKER_IMAGE`.)',
       },
       {
-        text: '(강화 모드) rootless 여부 확인: `docker info --format {{json .SecurityOptions}}` 결과에 `rootless`가 포함되어야 `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=true` 환경에서 keeper_bash가 통과합니다. 기본값은 `false`라 생략 가능.',
+        text: '(강화 모드) rootless 여부 확인: `docker info --format {{json .SecurityOptions}}` 결과에 `rootless`가 포함되어야 `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=true` 환경에서 Execute가 통과합니다. 기본값은 `false`라 생략 가능.',
       },
       {
         text: '(옵션) userns 확인: 같은 명령 출력에서 `userns` 키 유무를 확인. `MASC_KEEPER_SANDBOX_REQUIRE_USERNS=true`일 때만 필수.',
@@ -113,7 +113,7 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
         text: "메모리/프로세스 한도 기본값 확인: `MASC_KEEPER_SANDBOX_MEMORY=2g`, `MASC_KEEPER_SANDBOX_PIDS_LIMIT=128`, `MASC_KEEPER_SANDBOX_TMPFS_SIZE=256m`. 사용 keeper가 더 필요하면 서버 기동 env에서 조정.",
       },
       {
-        text: "sandbox_profile을 'docker'로 저장한 뒤 해당 keeper의 다음 keeper_bash 호출 로그를 확인. 실패하면 sandbox_last_error 필드가 이 화면 위쪽에 노출됩니다.",
+        text: "sandbox_profile을 'docker'로 저장한 뒤 해당 keeper의 다음 Execute 호출 로그를 확인. 실패하면 sandbox_last_error 필드가 이 화면 위쪽에 노출됩니다.",
       },
     ],
     references: [

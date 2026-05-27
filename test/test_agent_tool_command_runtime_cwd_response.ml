@@ -55,7 +55,7 @@ let count_substring src needle =
 
 (* The wiring uses [Keeper_cwd_response.to_yojson_response cwd_response]
    for the dispatcher helper. Generic op=bash has been removed from
-   tool_workspace_inspect, so there should no longer be a separate bash cwd echo path. *)
+   tool_search_files, so there should no longer be a separate bash cwd echo path. *)
 
 let test_render_sandbox_process_result_uses_cwd_response () =
   match find_source_path () with

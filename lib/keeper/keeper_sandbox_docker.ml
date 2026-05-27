@@ -503,7 +503,7 @@ let run_docker_shell_command_with_status_internal
          sees a corrected-form hint in the same turn rather than gh's raw
          "unknown flag: --repo" error after the round-trip. *)
            (match
-              Agent_tool_execute_command_semantics.gh_repo_flag_api_misuse_of_stages
+              Agent_tool_execute_command_semantics.repo_hosting_cli_repo_flag_api_misuse_of_stages
                 cmd_stages
             with
             | Some (repo_arg, endpoint) ->

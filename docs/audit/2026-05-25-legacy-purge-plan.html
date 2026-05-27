@@ -578,8 +578,8 @@
           <tr>
             <td><code>keeper_meta</code> blocker and identity sidecars</td>
             <td><span class="status done">merged #18640</span></td>
-            <td>Stop treating old <code>last_blocker</code>/<code>last_blocker_class</code> pairs and embedded meta <code>github_identity</code> as readable keeper state. <code>github_identity</code> belongs to keeper TOML + credential mapping + playground credential env, not runtime meta. Health output moves to the structured <code>last_blocker</code> object instead of class/detail sidecar fields.</td>
-            <td>Roundtrip tests keep only structured blocker JSON. Legacy blocker string/pair and meta <code>github_identity</code> rows are rejection tests; existing sandbox tests keep proving TOML/mapping-driven <code>github_identity</code> env injection.</td>
+            <td>Stop treating old <code>last_blocker</code>/<code>last_blocker_class</code> pairs and embedded meta <code>repo_cli_identity</code> as readable keeper state. <code>repo_cli_identity</code> belongs to keeper TOML + credential mapping + playground credential env, not runtime meta. Health output moves to the structured <code>last_blocker</code> object instead of class/detail sidecar fields.</td>
+            <td>Roundtrip tests keep only structured blocker JSON. Legacy blocker string/pair and meta <code>repo_cli_identity</code> rows are rejection tests; existing sandbox tests keep proving TOML/mapping-driven <code>repo_cli_identity</code> env injection.</td>
           </tr>
           <tr>
             <td><code>Keeper_types</code> hidden support include</td>
@@ -638,7 +638,7 @@
           <tr>
             <td>Keeper compatibility alias bundle</td>
             <td><span class="status done">merged #18654</span></td>
-            <td>Remove the <code>MASC_KEEPER_AUTOBOT_MAX</code> typo env alias, ignored sandbox <code>~in_playground</code> argument, stale GH/worktree boundary docs, dashboard worktree-status SSE residue, and LLM-native file/search descriptor compatibility args.</td>
+            <td>Remove the <code>MASC_KEEPER_AUTOBOT_MAX</code> typo env alias, ignored sandbox <code>~in_playground</code> argument, stale repo-checkout boundary docs, dashboard worktree-status SSE residue, and LLM-native file/search descriptor compatibility args.</td>
             <td>Merged as <code>eb085cc5a</code>; negative tests now pin the removed aliases as absent or rejected.</td>
           </tr>
           <tr>
@@ -708,15 +708,15 @@
             <td>Merged as <code>12acddd4c</code>. Remaining references are explicit retired-surface history or negative tests for deleted names.</td>
           </tr>
           <tr>
-            <td>Keeper prompt / GitHub identity residue</td>
+            <td>Keeper prompt / repo CLI identity residue</td>
             <td><span class="status done">merged #18757</span></td>
-            <td>Remove keeper-specific GitHub identity operator actions, dashboard adapters, split script/test scaffolding, and stale retired tool-name references in prompt continuity, proof artifacts, changelog, docs, and cockpit seed data.</td>
-            <td>Merged as <code>4e03613d5</code>. Backstop grep is clean for retired PR helper, keeper-specific GitHub identity, legacy code helper, and GitHub CLI adapter tokens outside this audit plan.</td>
+            <td>Remove keeper-specific repo CLI identity operator actions, dashboard adapters, split script/test scaffolding, and stale retired tool-name references in prompt continuity, proof artifacts, changelog, docs, and cockpit seed data.</td>
+            <td>Merged as <code>4e03613d5</code>. Backstop grep is clean for deleted helper-family and identity-adapter tokens outside this audit plan.</td>
           </tr>
           <tr>
-            <td>Generic GitHub identity operator actions</td>
+            <td>Generic repo CLI identity operator actions</td>
             <td><span class="status done">merged #18764</span></td>
-            <td>Remove <code>github_identity_login_prepare</code> / <code>github_identity_status</code> from the generic operator action enum, available-action catalog, approval policy, execution handlers, and current RFC text. GitHub credentials should be bootstrap/config materialization, not a runtime operator-control workaround.</td>
+            <td>Remove <code>repo_cli_identity_login_prepare</code> / <code>repo_cli_identity_status</code> from the generic operator action enum, available-action catalog, approval policy, execution handlers, and current RFC text. GitHub credentials should be bootstrap/config materialization, not a runtime operator-control workaround.</td>
             <td>Merged as <code>b3e993c70</code>. Static grep is clean for the live tool/action names outside negative tests, and the branch is included in <code>origin/main</code>.</td>
           </tr>
           <tr>

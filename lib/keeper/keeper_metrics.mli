@@ -86,7 +86,7 @@ type t =
   | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
-  | WorkspaceInspectFailures
+  | SearchFilesFailures
   | TagDispatchFailures
   | TraceEmitFailures
   | TransitionAuditFailures

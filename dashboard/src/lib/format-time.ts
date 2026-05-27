@@ -27,17 +27,29 @@ export function formatRelativeAgeMs(ageMs: number): string {
   return formatRelativeSec(Math.max(0, Math.round(ageMs / 1000)))
 }
 
+/**
+ * Sentinel string returned when a time-related helper has no input to format.
+ *
+ * Exposed so call sites that compare against it (e.g. unwrapping the
+ * fallback back to `null` in keeper-shared.formatTime) don't have to
+ * duplicate the literal — changing the displayed sentinel here updates
+ * every comparison automatically. Tests in `format-time.test.ts`
+ * deliberately keep the literal so the assertion documents the
+ * user-visible string.
+ */
+export const NO_TIME_INFO = '정보 없음'
+
 /** Relative time from ISO string — "3분 전", "2시간 전" etc. Uses Intl.RelativeTimeFormat. */
-export function relativeTime(iso?: string | null, fallback = '정보 없음'): string {
+export function relativeTime(iso?: string | null, fallback: string = NO_TIME_INFO): string {
   if (!iso) return fallback
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
   return formatRelativeAgeMs(Date.now() - ts)
 }
 
-/** Format elapsed seconds — "3초", "5분", "2시간". Returns '정보 없음' for invalid. */
+/** Format elapsed seconds — "3초", "5분", "2시간". Returns NO_TIME_INFO for invalid. */
 export function formatElapsed(value?: number | null): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
+  if (typeof value !== 'number' || !Number.isFinite(value)) return NO_TIME_INFO
   if (value < SECONDS_PER_MINUTE) return `${Math.round(value)}초`
   if (value < SECONDS_PER_HOUR) return `${Math.round(value / SECONDS_PER_MINUTE)}분`
   return `${Math.round(value / SECONDS_PER_HOUR)}시간`

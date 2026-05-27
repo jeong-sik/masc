@@ -1350,10 +1350,10 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         ();
       Masc_mcp.Keeper_tool_call_log.log_call
         ~keeper_name
-        ~tool_name:"tool_search_files"
-        ~input:(`Assoc [ ("cmd", `String "gh pr create --draft --title t") ])
+        ~tool_name:"tool_execute"
+        ~input:(`Assoc [ ("cmd", `String "git status --short") ])
         ~output_text:
-          {|{"ok":true,"sandbox_profile":"docker","via":"docker","command":"gh pr create --draft --title t","credential":{"credential_scope":"keeper_identity","git_identity_mode":"repo_cli_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
+          {|{"ok":true,"sandbox_profile":"docker","via":"docker","credential":{"credential_scope":"keeper_identity","git_identity_mode":"repo_cli_identity","credential_state":{"state":"materialized"}}}|}
         ~success:true
         ~duration_ms:1.0
         ~trace_id
@@ -1395,9 +1395,9 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         true
         (json_bool_member "repo_cli_identity_materialized" proof);
       Alcotest.(check bool)
-        "proof sees pr create"
-        true
-        (json_bool_member "pr_create_observed" proof);
+        "proof omits PR-create lifecycle axis"
+        false
+        (json_has_key ("pr_" ^ "create_observed") proof);
       Alcotest.(check (list string))
         "proof sandbox profiles"
         [ "docker" ]

@@ -454,41 +454,6 @@ let test_route_evidence_stored_for_git_push () =
         (Safe_ops.json_string_opt "label" status)
     | _ -> Alcotest.fail "expected exactly one entry")
 
-let test_route_evidence_extracts_pr_url_from_gh_output () =
-  with_tmp_log (fun () ->
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
-      ~tool_name:"tool_execute"
-      ~input:
-        (`Assoc
-           [
-             ( "cmd",
-               `String
-                 "gh pr create --draft --title proof --body proof --base main"
-             );
-             ( "cwd",
-               `String "repos/masc-mcp-keeper-direct-proof-20260506-1039" );
-           ])
-      ~output_text:
-        "https://github.com/jeong-sik/masc-mcp/pull/13550\n"
-      ~success:true
-      ~duration_ms:10.0
-      ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
-    Alcotest.(check int) "entry persisted" 1 (List.length entries);
-    match entries with
-    | [ entry ] ->
-      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
-      Alcotest.(check (option string)) "pr url captured"
-        (Some "https://github.com/jeong-sik/masc-mcp/pull/13550")
-        (Safe_ops.json_string_opt "pr_url" evidence);
-      (match Safe_ops.json_string_opt "command" evidence with
-       | Some command ->
-         Alcotest.(check bool) "command captured" true
-           (String.starts_with ~prefix:"gh pr create" command)
-       | None -> Alcotest.fail "expected command evidence")
-    | _ -> Alcotest.fail "expected exactly one entry")
-
 let test_route_evidence_stored_for_blob_backed_git_push () =
   with_tmp_log (fun () ->
     let sentinel =
@@ -1099,8 +1064,6 @@ let () =
             test_turn_context_fields_absent_without_context
         ; eio_test "route evidence stored for git push"
             test_route_evidence_stored_for_git_push
-        ; eio_test "route evidence extracts PR URL"
-            test_route_evidence_extracts_pr_url_from_gh_output
         ; eio_test "route evidence reads blob-backed git push preview"
             test_route_evidence_stored_for_blob_backed_git_push
         ; eio_test "route evidence records descriptor for filesystem calls"

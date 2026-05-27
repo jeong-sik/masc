@@ -257,9 +257,6 @@ lib/dashboard/dashboard_http_tool_quality.ml:109
 lib/dashboard/dashboard_http_tool_quality.ml:292
 lib/dashboard/dashboard_keeper_decision_log_proof.ml:99
 lib/dashboard/dashboard_keeper_decision_log_proof.ml:157
-lib/dashboard/dashboard_keeper_git_pr_proof.ml:55
-lib/dashboard/dashboard_keeper_git_pr_proof.ml:65
-lib/dashboard/dashboard_keeper_git_pr_proof.ml:206
 lib/dashboard/dashboard_keeper_tool_failure_proof.ml:54
 lib/dashboard/dashboard_keeper_tool_failure_proof.ml:71
 lib/dashboard/dashboard_keeper_tool_failure_proof.ml:189

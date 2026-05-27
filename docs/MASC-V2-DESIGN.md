@@ -151,11 +151,9 @@ git worktree add .worktrees/claude-PK-12345 -b agent-llm-a/PK-12345 origin/devel
 cd .worktrees/claude-PK-12345
 # ... make changes ...
 
-# Agent creates PR via gh CLI (not custom system)
-gh pr create --draft --title "[PK-12345] Feature X" --body "..."
-
-# Other agents can review
-masc_broadcast "PR ready for review: #123"
+# Agent publishes work through the repository's normal forge workflow.
+# MASC records coordination state; it does not wrap forge lifecycle actions.
+masc_broadcast "work ready for external review"
 ```
 
 ### 2. Capability-based Routing (not Role-based)
@@ -192,27 +190,16 @@ Match: agent-llm-a (2/2 capabilities) > provider-f (1/2) > agent-code (1/2)
 ```jsonl
 {"seq":1,"type":"agent_join","agent":"agent-llm-a","ts":"2025-01-02T10:00:00Z"}
 {"seq":2,"type":"task_claim","agent":"agent-llm-a","task":"PK-12345","ts":"2025-01-02T10:01:00Z"}
-{"seq":3,"type":"pr_created","agent":"agent-llm-a","pr":123,"ts":"2025-01-02T11:00:00Z"}
-{"seq":4,"type":"pr_merged","agent":"provider-f","pr":123,"ts":"2025-01-02T12:00:00Z"}
+{"seq":3,"type":"work_published","agent":"agent-llm-a","ref":"agent-llm-a/PK-12345","ts":"2025-01-02T11:00:00Z"}
+{"seq":4,"type":"work_reviewed","agent":"provider-f","ref":"agent-llm-a/PK-12345","ts":"2025-01-02T12:00:00Z"}
 ```
 
-### 4. PR Workflow (gh CLI 활용)
+### 4. Forge Workflow Boundary
 
-**CASPER 핵심 조언**: "PR 시스템 재발명 금지. `gh` CLI가 이미 충분함"
-
-```bash
-# Create PR
-gh pr create --draft --base develop --head agent-llm-a/PK-12345
-
-# Request review from another agent
-gh pr edit 123 --add-reviewer @provider-f
-
-# Merge when approved
-gh pr merge 123 --squash
-```
+**CASPER 핵심 조언**: "PR 시스템 재발명 금지."
 
 **MASC의 역할**:
-- PR 생성/머지를 이벤트 로그에 기록
+- worktree/task 상태와 외부 리뷰 준비 신호를 이벤트 로그에 기록
 - 에이전트 간 알림 브로드캐스트
 - Worktree 생성/정리 자동화
 
@@ -229,8 +216,6 @@ CASPER의 실용적 조언에 따라 최소 기능부터 시작:
 - [x] `masc_status` - 상태 조회
 
 ### Should Have
-- [ ] `masc_pr_create` - `gh pr create` 래퍼 + 이벤트 로깅
-- [ ] `masc_pr_review` - 리뷰 요청/응답
 - [ ] Capability matching 알고리즘
 
 ### Won't Have (v2.1+)
@@ -282,14 +267,9 @@ git worktree prune
 {"seq":3,"type":"worktree_create","agent":"agent-llm-a","branch":"agent-llm-a/PK-123","ts":"..."}
 {"seq":4,"type":"worktree_remove","agent":"agent-llm-a","branch":"agent-llm-a/PK-123","ts":"..."}
 
-// PR lifecycle
-{"seq":5,"type":"pr_create","agent":"agent-llm-a","pr":123,"base":"develop","ts":"..."}
-{"seq":6,"type":"pr_review","agent":"provider-f","pr":123,"verdict":"approve","ts":"..."}
-{"seq":7,"type":"pr_merge","agent":"provider-f","pr":123,"ts":"..."}
-
 // Task lifecycle
-{"seq":8,"type":"task_claim","agent":"agent-llm-a","task":"PK-123","ts":"..."}
-{"seq":9,"type":"task_done","agent":"agent-llm-a","task":"PK-123","ts":"..."}
+{"seq":5,"type":"task_claim","agent":"agent-llm-a","task":"PK-123","ts":"..."}
+{"seq":6,"type":"task_done","agent":"agent-llm-a","task":"PK-123","ts":"..."}
 ```
 
 ---

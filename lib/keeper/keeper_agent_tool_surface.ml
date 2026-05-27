@@ -679,8 +679,8 @@ let tool_search_alias_entries =
   ; "tool_write_file", "파일 쓰기 저장 생성 덮어쓰기"
   ; "tool_search_files", "명령어 조회 검색 탐색 파일 git status diff log"
   ; ( "tool_execute"
-    , "명령어 실행 쉘 빌드 테스트 run dune build check compile compiles code git gh \
-       add commit push pr pull request draft 생성 풀리퀘스트" )
+    , "명령어 실행 쉘 빌드 테스트 run dune build check compile compiles code git \
+       add commit push" )
   ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
   ; "keeper_library_search", "라이브러리 지식 문서 검색"
   ; "keeper_library_read", "라이브러리 문서 읽기 지식"

@@ -36,7 +36,6 @@ let command_words command =
 let add_command_markers command markers =
   match command_words command with
   | "git" :: "push" :: _ -> add_unique_marker "git push" markers
-  | "gh" :: "pr" :: "create" :: _ -> add_unique_marker "gh pr create" markers
   | _ -> markers
 ;;
 
@@ -49,12 +48,6 @@ let add_action_marker action markers =
 let add_event_marker event markers =
   match String.uppercase_ascii (String.trim event) with
   | "APPROVE" -> add_unique_marker "event=APPROVE" markers
-  | _ -> markers
-;;
-
-let add_operation_marker operation markers =
-  match String.lowercase_ascii (String.trim operation) with
-  | "pr_create" -> add_unique_marker "gh pr create" markers
   | _ -> markers
 ;;
 
@@ -109,12 +102,7 @@ let add_json_marker_fields ?(trusted_route_fields = true) json markers =
       | None -> markers)
     else markers
   in
-  if trusted_route_fields
-  then (
-    match json_string_field_opt "operation" json with
-    | Some operation -> add_operation_marker operation markers
-    | None -> markers)
-  else markers
+  markers
 ;;
 
 let tool_exec_result_markers ~(input : Yojson.Safe.t) ~(output : string) : string list =

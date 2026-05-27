@@ -1708,11 +1708,10 @@ let test_result_markers_ignore_lifecycle_mentions () =
     Keeper_tools_oas_markers.tool_exec_result_markers
       ~input:
         (`Assoc
-            [ "cmd", `String "echo git push"; "command", `String "printf 'gh pr create'" ])
+            [ "cmd", `String "echo git push"; "command", `String "printf 'draft request'" ])
       ~output
   in
   check bool "mentioned git push not marked" false (List.mem "git push" markers);
-  check bool "mentioned pr create not marked" false (List.mem "gh pr create" markers);
   check bool "output via marker still captured" true (List.mem "via=docker" markers)
 ;;
 
@@ -1734,13 +1733,12 @@ let test_result_markers_ignore_input_route_fields () =
         (`Assoc
             [ "action", `String "push"
             ; "event", `String "APPROVE"
-            ; "operation", `String "pr_create"
+            ; "operation", `String "publish"
             ])
       ~output
   in
   check bool "input action marker ignored" false (List.mem "git push" markers);
-  check bool "input event marker ignored" false (List.mem "event=APPROVE" markers);
-  check bool "input operation marker ignored" false (List.mem "gh pr create" markers)
+  check bool "input event marker ignored" false (List.mem "event=APPROVE" markers)
 ;;
 
 let test_result_markers_reject_untrusted_via () =
@@ -1755,17 +1753,6 @@ let test_result_markers_reject_untrusted_via () =
     "untrusted via marker rejected"
     false
     (List.exists (fun marker -> String.starts_with ~prefix:"via=" marker) markers)
-;;
-
-let test_result_markers_capture_pr_create_operation () =
-  let output =
-    Keeper_tools_oas.normalize_tool_result
-      ~success:true
-      {|{"ok":true,"via":"docker","operation":"pr_create"}|}
-  in
-  let markers = Keeper_tools_oas_markers.tool_exec_result_markers ~input:(`Assoc []) ~output in
-  check bool "pr create marker" true (List.mem "gh pr create" markers);
-  check bool "via marker" true (List.mem "via=docker" markers)
 ;;
 
 (* ── Tool_output_validation tests (memory cap) ──────────────── *)
@@ -1986,10 +1973,6 @@ let () =
             "rejects untrusted via marker"
             `Quick
             test_result_markers_reject_untrusted_via
-        ; test_case
-            "captures pr create operation"
-            `Quick
-            test_result_markers_capture_pr_create_operation
         ] )
     ; ( "library_tools"
       , [ test_case

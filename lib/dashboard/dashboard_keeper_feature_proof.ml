@@ -16,7 +16,6 @@ type keeper_snapshot = {
 
 module Decision = Dashboard_keeper_decision_log_proof
 module Failure = Dashboard_keeper_tool_failure_proof
-module Git_pr = Dashboard_keeper_git_pr_proof
 
 let status_to_string = function
   | Pass -> "pass"
@@ -601,7 +600,6 @@ let json
       autonomous_tool_feature snapshots;
       board_reactive_feature snapshots;
       scheduled_proactive_feature ~config ?window_hours ~now snapshots;
-      Git_pr.json ~n ?window_hours ~keeper_names ();
     ]
     @ List.map
         (tool_feature_json ~success_threshold_pct ~keeper_names failure_table

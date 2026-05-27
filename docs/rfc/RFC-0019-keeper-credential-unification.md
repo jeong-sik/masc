@@ -247,7 +247,7 @@ This RFC lays out 4 PRs. Each is independently shippable, each ramps acceptance-
 
 **Goal**: prevent the next #12304-style split-brain.
 
-- `~/me/.claude/hooks/pr-creation.sh` (new): on `gh pr create`, scan `docs/rfc/` and `docs/design/` for keyword overlap with the changed files (e.g. files matching `lib/keeper/`, `lib/repo_manager/`, `*credential*` → check for prior RFCs). Emit `[WARN] this PR touches subsystems with prior RFCs: …` and require either an RFC link in body or `--skip-rfc-check` flag with explicit reason.
+- `~/me/.claude/hooks/rfc-discovery.sh` (new): before external review publication, scan `docs/rfc/` and `docs/design/` for keyword overlap with the changed files (e.g. files matching `lib/keeper/`, `lib/repo_manager/`, `*credential*` → check for prior RFCs). Emit `[WARN] this work touches subsystems with prior RFCs: …` and require either an RFC link in the review notes or `RFC-WAIVED: <reason>`.
 - `~/me/instructions/workflow-pr.md`: add clause "PR touching credential / keeper / repo_manager / operator subsystems MUST cite an RFC in body or include `RFC-WAIVED: <reason>` line".
 - `~/me/AGENT-LLM-A.md` `<agent_delegation>`: codify the agent gate from §3.2 P9.
 - `docs/KEEPER-USER-MANUAL.md`: rewrite the "repo_cli_identity" section to teach the unified `Credential_store` model. Old `repo_cli_identity` field documented as legacy with deprecation date.
@@ -269,17 +269,17 @@ The technical fix in §4-§5 closes the user-facing problem. The process fix in 
 
 ### 7.1 Pre-PR RFC-discovery hook (PR-D)
 
-A bash hook fires on `gh pr create` (or git push for PR-bound branches). It:
+A bash hook fires before external review publication. It:
 
 1. Diffs the working tree against `origin/main`.
 2. Maps changed files to subsystem keywords (`lib/keeper/` → `keeper`; `lib/repo_manager/` → `repo_manager`, `credential`; …).
 3. Greps `docs/rfc/*.md` for those keywords in titles and abstracts.
-4. If any RFC matches AND the PR body does not cite that RFC's number, prints:
+4. If any RFC matches AND the review notes do not cite that RFC's number, prints:
    ```
    ⚠️  This PR touches subsystems with active RFCs:
        - RFC-0008 (Credential Provider) ← matches lib/keeper/credential_provider.{mli,ml}
        - RFC-0019 (Credential Unification) ← matches lib/repo_manager/credential_store.ml
-   PR body must cite at least one RFC number, or include "RFC-WAIVED: <reason>" line.
+   Review notes must cite at least one RFC number, or include "RFC-WAIVED: <reason>" line.
    Override with --skip-rfc-check (logged to audit-events).
    ```
 5. Exits non-zero unless body cites or override flag is present.
@@ -372,9 +372,9 @@ GH_TOKEN_OPERATOR=$(gh auth token) \
 git checkout -b test/credential-touch
 echo "// test" >> lib/keeper/credential_provider.ml
 git commit -am "test"
-gh pr create --title "test" --body "no RFC cited"
+./.claude/hooks/rfc-discovery.sh --title "test" --body "no RFC cited"
 # Expected: hook blocks with "RFC-0008 / RFC-0019 references missing".
-gh pr create --title "test" --body "Refs RFC-0019"
+./.claude/hooks/rfc-discovery.sh --title "test" --body "Refs RFC-0019"
 # Expected: hook allows.
 ```
 

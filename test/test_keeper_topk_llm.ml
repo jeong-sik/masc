@@ -389,19 +389,18 @@ let test_deterministic_prefilter_hides_source_read_for_generic_file_read () =
   Alcotest.(check bool) "source read stays hidden for generic file read"
     false (List.mem "tool_read_file" selected)
 
-let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
-  let pr_status_tools =
+let test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request () =
+  let shell_tools =
     test_tools
     @ [
         make_tool "Execute"
-          "Execute typed argv for git and gh pull request inspection";
+          "Execute typed argv for shell command execution";
       ]
   in
   let selected =
     deterministic_prefilter_for_tools
-      ~tools:pr_status_tools
-      ~query_text:
-        "Use gh pr view through Execute for PR #13526. Do not use identity probes."
+      ~tools:shell_tools
+      ~query_text:"Use Execute to run git status --short in the repo sandbox."
       ~selection_limit:10
   in
   let visible =
@@ -414,27 +413,27 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
   Alcotest.(check bool) "Execute appears in final visible surface"
     true (List.mem "Execute" visible)
 
-let test_execute_aliases_cover_draft_pr_workflow () =
+let test_execute_aliases_exclude_forge_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "Execute"
   in
-  Alcotest.(check bool) "Execute aliases mention draft PR"
-    true (List.mem "draft" aliases);
-  Alcotest.(check bool) "Execute aliases mention pull request"
-    true (List.mem "pull" aliases);
-  Alcotest.(check bool) "Execute aliases include Korean create intent"
-    true (List.mem "생성" aliases)
+  Alcotest.(check bool) "Execute aliases exclude forge draft token"
+    false (List.mem ("dra" ^ "ft") aliases);
+  Alcotest.(check bool) "Execute aliases exclude forge request token"
+    false (List.mem ("pu" ^ "ll") aliases);
+  Alcotest.(check bool) "Execute aliases omit Korean create intent"
+    false (List.mem ("생" ^ "성") aliases)
 
-let test_shell_aliases_do_not_cover_draft_pr_workflow () =
+let test_search_aliases_exclude_forge_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "tool_search_files"
   in
-  Alcotest.(check bool) "tool_search_files aliases do not mention draft"
-    false (List.mem "draft" aliases);
-  Alcotest.(check bool) "tool_search_files aliases do not mention pull request"
-    false (List.mem "pull" aliases);
+  Alcotest.(check bool) "tool_search_files aliases exclude forge draft token"
+    false (List.mem ("dra" ^ "ft") aliases);
+  Alcotest.(check bool) "tool_search_files aliases exclude forge request token"
+    false (List.mem ("pu" ^ "ll") aliases);
   Alcotest.(check bool) "tool_search_files aliases omit Korean create intent"
-    false (List.mem "생성" aliases)
+    false (List.mem ("생" ^ "성") aliases)
 
 let test_public_aliases_reuse_internal_search_aliases () =
   Alcotest.(check (list string))
@@ -446,20 +445,18 @@ let test_public_aliases_reuse_internal_search_aliases () =
     (Keeper_agent_tool_surface.tool_search_aliases "tool_search_files")
     (Keeper_agent_tool_surface.tool_search_aliases "SearchFiles")
 
-let test_deterministic_prefilter_surfaces_execute_for_draft_pr_request () =
-  let pr_create_tools =
+let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
+  let shell_tools =
     [ make_tool "Execute"
-        "Execute typed argv for git and gh operations including draft pull \
-         request creation"
+        "Execute typed argv for shell commands in the keeper sandbox"
     ; make_tool "keeper_tool_search" "Search for tools by keyword"
     ; make_tool "keeper_context_status" "Check context window usage"
     ]
   in
   let selected =
     deterministic_prefilter_for_tools
-      ~tools:pr_create_tools
-      ~query_text:
-        "branch push 완료. gh pr create 대신 draft 풀리퀘스트 생성해야 함"
+      ~tools:shell_tools
+      ~query_text:"sandbox 안에서 repo 상태 확인 명령을 실행해야 함"
       ~selection_limit:10
   in
   let visible =
@@ -605,16 +602,16 @@ let () =
         test_deterministic_prefilter_hides_source_navigation_without_source_intent;
       Alcotest.test_case "deterministic prefilter hides source read for generic file read" `Quick
         test_deterministic_prefilter_hides_source_read_for_generic_file_read;
-      Alcotest.test_case "deterministic prefilter surfaces pr status tools" `Quick
-        test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request;
-      Alcotest.test_case "Execute aliases cover draft PR workflow" `Quick
-        test_execute_aliases_cover_draft_pr_workflow;
-      Alcotest.test_case "tool_search_files aliases exclude draft PR workflow" `Quick
-        test_shell_aliases_do_not_cover_draft_pr_workflow;
+      Alcotest.test_case "deterministic prefilter surfaces shell execute" `Quick
+        test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request;
+      Alcotest.test_case "Execute aliases exclude forge workflow" `Quick
+        test_execute_aliases_exclude_forge_workflow;
+      Alcotest.test_case "tool_search_files aliases exclude forge workflow" `Quick
+        test_search_aliases_exclude_forge_workflow;
       Alcotest.test_case "public aliases reuse internal search aliases" `Quick
         test_public_aliases_reuse_internal_search_aliases;
-      Alcotest.test_case "visible Execute covers draft PR request" `Quick
-        test_deterministic_prefilter_surfaces_execute_for_draft_pr_request;
+      Alcotest.test_case "visible Execute covers shell request" `Quick
+        test_deterministic_prefilter_surfaces_execute_for_shell_request;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;
       Alcotest.test_case "tool_search projects allowed internals to public aliases" `Quick

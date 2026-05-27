@@ -46,6 +46,12 @@ let retired_docker_pr_reprobe_runbook =
 let retired_docker_pr_reprobe_script_name =
   "harness_" ^ "keeper_docker_" ^ "pr_" ^ "lifecycle_" ^ "reprobe.sh"
 
+let retired_dashboard_workflow_proof_ml =
+  "lib/dashboard/dashboard_keeper_" ^ "git_" ^ "pr_" ^ "proof.ml"
+
+let retired_dashboard_workflow_proof_mli =
+  "lib/dashboard/dashboard_keeper_" ^ "git_" ^ "pr_" ^ "proof.mli"
+
 let file_contains_line_with_patterns file_rel patterns =
   let path = source_path file_rel in
   if not (Sys.file_exists path) then false
@@ -1707,12 +1713,11 @@ let test_forge_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--require-pr-create-evidence");
-  check bool "keeper fleet audit still accepts historical tool_execute evidence" true
-    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "PR_CREATE_TOOLS");
-  check bool "keeper fleet audit requires structured create markers" true
-    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "has_gh_pr_create_marker");
+  check bool "keeper fleet audit no longer consumes PR tool markers" true
+    (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       ("PR_" ^ "CREATE_TOOLS")
+     && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          ("has_" ^ "gh_pr_create_marker"));
   check bool "keeper fleet audit scans filesystem JSONL evidence" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "pr_creation_scan_paths"
@@ -1731,6 +1736,20 @@ let test_forge_pr_audit_contracts () =
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           "load_harness_evidence_windows"
      && not (Sys.file_exists (source_path retired_docker_pr_reprobe_workload)));
+  check bool "dashboard no longer has retired workflow proof surface" true
+    (not (Sys.file_exists (source_path retired_dashboard_workflow_proof_ml))
+     && not (Sys.file_exists (source_path retired_dashboard_workflow_proof_mli))
+     && file_not_contains_pattern "lib/dashboard/dashboard_keeper_feature_proof.ml"
+          ("docker_" ^ "git_pr_workflow")
+     && file_not_contains_pattern
+          "lib/server/server_dashboard_http_keeper_runtime_lens_proof.ml"
+          ("pr_" ^ "create_observed")
+     && file_not_contains_pattern "lib/keeper/keeper_tools_oas_markers.ml"
+          ("gh " ^ "pr create")
+     && file_not_contains_pattern "lib/keeper_tool_call_log_route_evidence.ml"
+          ("pr_" ^ "url")
+     && file_not_contains_pattern "docs/DASHBOARD-INTEGRATION.md"
+          ("git-to-" ^ "PR workflow"));
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})

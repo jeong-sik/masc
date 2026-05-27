@@ -40,4 +40,3 @@ val with_slot : (unit -> 'a) -> 'a
     in-flight callers.
 
     Exceptions from [f] propagate; the slot is always released. *)
-

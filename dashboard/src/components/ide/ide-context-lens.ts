@@ -10,6 +10,7 @@ import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
 import { focusIdeContextAnchor, normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-state'
 import { truncate } from '../../lib/truncate'
+import { isPositiveSafeInteger } from '../common/normalize'
 
 type SurfaceStatus = 'linked' | 'quiet'
 
@@ -955,9 +956,7 @@ function cachedEventSearchText(event: RunActivityEvent, values: EventSearchTextM
 }
 
 function positiveLine(value: number | null | undefined): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? value
-    : undefined
+  return isPositiveSafeInteger(value) ? value : undefined
 }
 
 function diagnosticSeverityLabel(severity: number | undefined): string {

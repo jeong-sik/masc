@@ -442,10 +442,10 @@ describe('consolidation redirects (Phase 1)', () => {
     expect(result.section).toBe('planning')
   })
 
-  it('command:connectors → operations?view=connectors (Phase 6)', () => {
+  it('does not keep command:connectors as an in-surface redirect', () => {
     const result = normalizeRouteParams('command', { section: 'connectors' })
     expect(result.section).toBe('operations')
-    expect(result.view).toBe('connectors')
+    expect(result.view).toBeUndefined()
   })
 
   it('command:inspector → operations?view=inspector (Phase 6)', () => {

@@ -77,8 +77,8 @@ flickers without conveying anything.
 > operator already knows.
 
 - Phase 7 IA promotion: connectors moved out of `operations`, but the
-  legacy `?section=operations&view=connectors` URL still resolves
-  via a redirect in `operations-panel.ts`.
+  legacy `command:connectors` URL still resolves through the router to
+  `connectors:connector-status`.
 - Overview strip rendered *above* the existing stacked detail panels,
   not *replacing* them.
 - Rail sits *above* the existing toggle buttons (📋 Logs / ⚙ Config /

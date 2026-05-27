@@ -167,10 +167,9 @@ describe('CommandPalette', () => {
     const { CommandPalette } = await loadPalette()
     render(html`<${CommandPalette} />`, container)
 
+    type PaletteItem = { id: string; section?: string; keywords?: string; handler: () => void }
     await waitFor(() => {
-      const palette = container.querySelector('ninja-keys') as (HTMLElement & {
-        data?: Array<{ id: string; section?: string; keywords?: string }>
-      }) | null
+      const palette = container.querySelector('ninja-keys') as (HTMLElement & { data?: PaletteItem[] }) | null
       expect(palette?.data?.find((item) => item.id === 'nav-agent-worker-a')?.section)
         .toBe('Agent targets (1)')
       expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.section)
@@ -179,6 +178,21 @@ describe('CommandPalette', () => {
         .toBe('Session targets (1)')
       expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.keywords)
         .toContain('명령 대상 에이전트 1 / 키퍼 2 / 세션 1')
+    })
+
+    const palette = container.querySelector('ninja-keys') as (HTMLElement & { data?: PaletteItem[] }) | null
+
+    palette?.data?.find((item) => item.id === 'nav-agent-worker-a')?.handler()
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', agent: 'worker-a' })
+
+    palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.handler()
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'keeper-a' })
+
+    palette?.data?.find((item) => item.id === 'nav-session-sess-1')?.handler()
+    expect(navigate).toHaveBeenCalledWith('monitoring', {
+      section: 'fleet-health',
+      view: 'event-log',
+      session_id: 'sess-1',
     })
   })
 })

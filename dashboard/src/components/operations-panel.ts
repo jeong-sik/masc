@@ -1,9 +1,9 @@
 // MASC Dashboard — Operations Panel (Phase 5+6+7)
 // FilterChips toggle for ops/governance/safety/inspector sub-views.
-// Phase 7: connectors split out as a top-level surface (#command?view=connectors → #connectors).
+// Phase 7: connectors split out as a top-level surface. Legacy
+// command:connectors links are routed before this panel mounts.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
 import { FilterChips } from './common/filter-chips'
 import { Ops } from './ops'
 import { Governance } from './governance'
@@ -38,22 +38,7 @@ function updateViewParam(next: OpsView): void {
   )
 }
 
-// Legacy URL migration (Phase 7):
-// #command?section=operations&view=connectors → #connectors?section=connector-status
-function redirectLegacyConnectorsView(): void {
-  replaceRoute('connectors', { section: 'connector-status' })
-}
-
 export function OperationsPanel() {
-  const rawView = route.value.params.view
-  const isLegacyConnectors = rawView === 'connectors'
-
-  useEffect(() => {
-    if (isLegacyConnectors) redirectLegacyConnectorsView()
-  }, [isLegacyConnectors])
-
-  if (isLegacyConnectors) return null
-
   const view = currentView()
 
   return html`

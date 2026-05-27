@@ -156,7 +156,7 @@ export function CommandPalette() {
       title: `에이전트 상세: ${agent.display_name || agent.agent_name}`,
       section: formatCommandTargetSection('agent', agents.length),
       keywords: `worker detail status command target mission ${commandTargetSummary} ${agent.status || ''}`,
-      handler: () => navigate('overview', { section: 'worker', operation_id: agent.agent_name })
+      handler: () => navigate('monitoring', { section: 'agents', agent: agent.agent_name })
     }))
 
     // Add Keepers dynamically
@@ -165,7 +165,7 @@ export function CommandPalette() {
       title: `키퍼 상세: ${keeper.name}`,
       section: formatCommandTargetSection('keeper', keepers.length),
       keywords: `bot detail status command target mission ${commandTargetSummary} ${keeper.status || ''}`,
-      handler: () => navigate('overview', { section: 'keeper', operation_id: keeper.name })
+      handler: () => navigate('monitoring', { section: 'agents', keeper: keeper.name })
     }))
 
     // Add Sessions dynamically
@@ -174,7 +174,7 @@ export function CommandPalette() {
       title: `세션 확인: ${s.goal || s.session_id}`,
       section: formatCommandTargetSection('session', sessions.length),
       keywords: `task run command target mission ${commandTargetSummary} ${s.status || ''}`,
-      handler: () => navigate('workspace', { section: 'session', session_id: s.session_id })
+      handler: () => navigate('monitoring', { section: 'fleet-health', view: 'event-log', session_id: s.session_id })
     }))
 
     ref.current.data = [...baseActions, ...agentActions, ...keeperActions, ...sessionActions]

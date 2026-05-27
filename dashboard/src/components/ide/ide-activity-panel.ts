@@ -295,7 +295,7 @@ function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void 
   }
   if (key === 'line') {
     const line = Number.parseInt(value, 10)
-    if (Number.isSafeInteger(line) && line >= 1) next.line = line
+    if (isPositiveSafeInteger(line)) next.line = line
     return
   }
   if (key === 'goal') next.goal_id = value

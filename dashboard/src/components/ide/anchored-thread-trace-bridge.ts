@@ -1,4 +1,5 @@
 import { pushTrace } from './keeper-trace-store'
+import { isPositiveSafeInteger } from '../common/normalize'
 
 /**
  * RFC-0028 PR-δ producer: anchored-thread → keeper-trace bridge.
@@ -70,7 +71,5 @@ export function bridgePostsToTrace(
 }
 
 function lineFromPost(post: AnchoredThreadProducerInput): number | null {
-  return typeof post.line === 'number' && Number.isSafeInteger(post.line) && post.line >= 1
-    ? post.line
-    : null
+  return isPositiveSafeInteger(post.line) ? post.line : null
 }

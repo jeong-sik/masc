@@ -173,8 +173,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   monitoring: [
     {
       id: 'agents',
-      label: 'Keeper Operations',
-      description: 'Attention-first keeper operations.',
+      label: 'Keeper Fleet',
+      description: 'Live and configured keeper roster.',
       params: { section: 'agents' },
     },
     {

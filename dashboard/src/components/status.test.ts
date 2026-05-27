@@ -9,7 +9,7 @@ describe("sectionLabel", () => {
     ["runtime", "Cascade & Runtime"],
     ["fleet-health", "Tool Monitor"],
     ["cognition", "Keeper Cognition"],
-    ["agents", "Keeper Operations"],
+    ["agents", "Keeper Fleet"],
   ] as [StatusSection, string][])("maps %s to %s", (section, expected) => {
     expect(sectionLabel(section)).toBe(expected)
   })

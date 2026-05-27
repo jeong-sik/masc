@@ -18,6 +18,16 @@ import {
   type InferOutput,
 } from 'valibot'
 
+export interface FormatIssuesOptions {
+  /**
+   * Truncate to the first N issues before formatting. Used by noisy
+   * endpoints (e.g. activity graph/swimlane) that should not surface
+   * the full issue list in an Error message — three is enough to spot
+   * the first failure cluster while keeping the log line bounded.
+   */
+  readonly maxIssues?: number
+}
+
 /**
  * Format a valibot issue list as a `; `-joined string of
  * `<dotted.path>: <message>` segments, using `<root>` for issues
@@ -25,9 +35,18 @@ import {
  * `SchemaDriftError` subclasses that build their own summary in a
  * `super(...)` call don't have to inline the same `.map(...).join(';')`
  * block — keeps the `<root>` sentinel and the segment shape in one place.
+ *
+ * `maxIssues` truncates the input before mapping; without it the
+ * whole list is formatted (existing default).
  */
-export function formatIssues(issues: readonly BaseIssue<unknown>[]): string {
-  return issues
+export function formatIssues(
+  issues: readonly BaseIssue<unknown>[],
+  options?: FormatIssuesOptions,
+): string {
+  const limited = options?.maxIssues !== undefined
+    ? issues.slice(0, options.maxIssues)
+    : issues
+  return limited
     .map(issue => {
       const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
       return `${path}: ${issue.message}`

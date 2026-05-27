@@ -31,6 +31,7 @@ import {
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+import { formatIssues } from './drift-error'
 
 // Node / edge `kind` and `status` stay open `string()`. They're
 // backend-evolved enumerations (new agent kinds, new lifecycle states)
@@ -223,14 +224,7 @@ export class ActionsActivitySchemaDriftError extends Error {
   readonly issues: readonly BaseIssue<unknown>[]
   readonly endpoint: 'graph' | 'swimlane'
   constructor(endpoint: 'graph' | 'swimlane', issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .slice(0, 3)
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`activity ${endpoint} schema drift: ${summary}`)
+    super(`activity ${endpoint} schema drift: ${formatIssues(issues, { maxIssues: 3 })}`)
     this.name = ActionsActivitySchemaDriftError.name
     this.endpoint = endpoint
     this.issues = issues

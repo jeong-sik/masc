@@ -299,7 +299,7 @@ export function KeeperConversationPanel({
   const submit = async () => {
     const prompt = draft.trim()
     if (chatAccess.blocked) {
-      showToast(chatAccess.message ?? '직접 통신 권한이 없습니다.', 'error')
+      showToast(chatAccess.message, 'error')
       return
     }
     if (!keeperName || !prompt) return

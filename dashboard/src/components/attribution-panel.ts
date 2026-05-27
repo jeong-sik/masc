@@ -21,6 +21,7 @@ import { EmptyState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { highlightMatch } from '../lib/highlight-match'
 import { unixSecondsToDate } from '../lib/format-time'
+import { isAbortError } from '../lib/async-state'
 
 const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
@@ -253,7 +254,7 @@ export function AttributionPanel() {
         recent.value = r.events
         error.value = null
       } catch (e) {
-        if (cancelled || (e as Error).name === 'AbortError') return
+        if (cancelled || isAbortError(e)) return
         error.value = (e as Error).message || 'attribution fetch failed'
       } finally {
         if (!cancelled) loading.value = false

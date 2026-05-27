@@ -5,17 +5,21 @@ import { PanelCard } from './common/panel-card'
 import { StatusDot } from './common/status-dot'
 import {
   ContextChart,
-  CtxCompositionPanel,
-  EquipmentList,
-  InferenceTelemetryPanel,
-  KpiGrid,
   MetricsCharts,
-  PromptTelemetryPanel,
-  RawDataDebug,
-  RelationshipList,
   TokenTrendChart,
+} from './keeper-detail-charts'
+import { CtxCompositionPanel } from './keeper-detail-ctx-composition'
+import { RawDataDebug } from './keeper-detail-debug'
+import { KpiGrid } from './keeper-detail-kpi'
+import {
+  EquipmentList,
+  RelationshipList,
   TraitsList,
-} from './keeper-detail-panels'
+} from './keeper-detail-lists'
+import {
+  InferenceTelemetryPanel,
+  PromptTelemetryPanel,
+} from './keeper-detail-telemetry'
 import {
   KeeperLiveTruthPanel,
   RuntimeLensSection,

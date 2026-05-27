@@ -17,6 +17,7 @@ import { Surf } from './surf'
 import type { KeeperConversationEntry } from '../types'
 import { shellAuthSummary } from '../store'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
+import { errorToString } from '../lib/format-string'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
@@ -171,7 +172,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
         // Surface via chatError so the operator distinguishes "no
         // history yet" from "load failed" in the UI.
         if (stale) return
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = errorToString(err)
         chatError.value = `이전 대화 불러오기 실패: ${msg}`
       })
     return () => { stale = true }

@@ -59,7 +59,7 @@ Typical contents:
 
 - cloned repos for keeper-driven edits
 - scratch files and temporary notes
-- keeper-local state such as repo caches or PR history
+- keeper-local state such as repo caches
 
 ### Handoff
 

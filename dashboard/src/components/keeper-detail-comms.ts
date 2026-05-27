@@ -53,21 +53,6 @@ function isPlaygroundRepo(r: unknown): r is PlaygroundRepo {
     && typeof r.last_action === 'string'
 }
 
-interface PlaygroundPR {
-  pr_url: string
-  branch: string
-  title: string
-  draft: boolean
-}
-
-function isPlaygroundPR(r: unknown): r is PlaygroundPR {
-  if (!isRecord(r)) return false
-  return typeof r.pr_url === 'string'
-    && typeof r.branch === 'string'
-    && typeof r.title === 'string'
-    && typeof r.draft === 'boolean'
-}
-
 interface PlaygroundWorktree {
   name: string
   path: string
@@ -87,10 +72,9 @@ export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   if (!isRecord(execCtx)) return null
 
   const repos = (Array.isArray(execCtx.playground_repos) ? execCtx.playground_repos : []).filter(isPlaygroundRepo)
-  const prs = (Array.isArray(execCtx.pr_history) ? execCtx.pr_history : []).filter(isPlaygroundPR)
   const worktrees = (Array.isArray(execCtx.active_worktrees) ? execCtx.active_worktrees : []).filter(isPlaygroundWorktree)
 
-  if (repos.length === 0 && prs.length === 0 && worktrees.length === 0) return null
+  if (repos.length === 0 && worktrees.length === 0) return null
 
   return html`
     <${PanelCard} title="플레이그라운드">
@@ -110,22 +94,6 @@ export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                     <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
                   </div>
                   <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${r.last_action}</span>
-                </div>
-              `)}
-            </div>
-          </div>
-        ` : null}
-
-        ${prs.length > 0 ? html`
-          <div>
-            <${SectionHeader} size="xs" class="mb-1.5">PRs (${prs.length})</${SectionHeader}>
-            <div class="flex flex-col gap-1.5">
-              ${prs.map(pr => html`
-                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-                  <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
-                  <${MonoBadge}>${pr.branch}</${MonoBadge}>
-                  ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
-                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-3xs text-[var(--color-accent-fg)] hover:underline flex-shrink-0">PR</a>
                 </div>
               `)}
             </div>

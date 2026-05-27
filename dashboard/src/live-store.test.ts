@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { eventKindColor, eventKindLabel, eventKindTone } from './live-store'
+import { eventKindColor, journalEventKindLabel, eventKindTone } from './live-store'
 import type { JournalEntry } from './types'
 
 function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
@@ -72,76 +72,76 @@ describe('eventKindTone', () => {
 })
 
 // ================================================================
-// eventKindLabel
+// journalEventKindLabel
 // ================================================================
 
-describe('eventKindLabel', () => {
+describe('journalEventKindLabel', () => {
   it('returns "broadcast" for broadcast eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'broadcast' }))).toBe('broadcast')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'broadcast' }))).toBe('broadcast')
   })
 
   it('returns "joined" for agent_joined eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'agent_joined' }))).toBe('joined')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_joined' }))).toBe('joined')
   })
 
   it('returns "left" for agent_left eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'agent_left' }))).toBe('left')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_left' }))).toBe('left')
   })
 
   it('returns "task" for task_update eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'task_update' }))).toBe('task')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'task_update' }))).toBe('task')
   })
 
   it('returns "post" for board_post eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'board_post' }))).toBe('post')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'board_post' }))).toBe('post')
   })
 
   it('returns "comment" for board_comment eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'board_comment' }))).toBe('comment')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'board_comment' }))).toBe('comment')
   })
 
   it('returns "deleted" for board_delete eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'board_delete' }))).toBe('deleted')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'board_delete' }))).toBe('deleted')
   })
 
   it('returns "heartbeat" for keeper_heartbeat eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'keeper_heartbeat' }))).toBe('heartbeat')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_heartbeat' }))).toBe('heartbeat')
   })
 
   it('returns "handoff" for keeper_handoff eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'keeper_handoff' }))).toBe('handoff')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_handoff' }))).toBe('handoff')
   })
 
   it('returns "compact" for keeper_compaction eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'keeper_compaction' }))).toBe('compact')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_compaction' }))).toBe('compact')
   })
 
   it('returns "guardrail" for keeper_guardrail eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'keeper_guardrail' }))).toBe('guardrail')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_guardrail' }))).toBe('guardrail')
   })
 
   it('returns "phase" for keeper_phase_changed eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'keeper_phase_changed' }))).toBe('phase')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_phase_changed' }))).toBe('phase')
   })
 
   it('falls back to kind-based label for unrecognized eventType', () => {
     // board_vote has no explicit case, falls through to kind-based
-    expect(eventKindLabel(makeEntry({ eventType: 'board_vote', kind: 'board' }))).toBe('board')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'board_vote', kind: 'board' }))).toBe('board')
   })
 
   it('falls back to "task" for tasks kind without matching eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'oas_task', kind: 'tasks' }))).toBe('task')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_task', kind: 'tasks' }))).toBe('task')
   })
 
   it('falls back to "keeper" for keepers kind without matching eventType', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'oas_keeper_snapshot', kind: 'keepers' }))).toBe('keeper')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_keeper_snapshot', kind: 'keepers' }))).toBe('keeper')
   })
 
   it('returns "system" as final fallback', () => {
-    expect(eventKindLabel(makeEntry({ eventType: 'oas_tool' }))).toBe('system')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_tool' }))).toBe('system')
   })
 
   it('returns "system" when both kind and eventType are undefined', () => {
-    expect(eventKindLabel(makeEntry({}))).toBe('system')
+    expect(journalEventKindLabel(makeEntry({}))).toBe('system')
   })
 })

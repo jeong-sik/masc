@@ -5,6 +5,9 @@
 
 include Server_dashboard_http_keeper_api_post
 
+(* Cache TTL — standard SWR window for keeper tool-stats. *)
+let standard_cache_ttl_s = 5.0
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -117,7 +120,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
       in
       let json =
-        Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+        Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             let since =
               Time_compat.now ()

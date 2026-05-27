@@ -15,11 +15,13 @@ include Server_routes_http_routes_dashboard_setup
    config: feature flags + provider rollups (30s)
    standard: typical dashboard surfaces (5s)
    live: frequently-changing data (3s)
-   realtime: near-realtime feeds (2s) *)
+   realtime: near-realtime feeds (2s)
+   feature_health: minute-scale flags, 3.5s compute cost (60s) *)
 let config_cache_ttl_s = 30.0
 let standard_cache_ttl_s = 5.0
 let live_cache_ttl_s = 3.0
 let realtime_cache_ttl_s = 2.0
+let feature_health_cache_ttl_s = 60.0
 
 let dashboard_error_json ?ok message =
   let fields = [ ("error", `String message) ] in
@@ -794,7 +796,7 @@ let rec add_routes ~sw ~clock router =
             profile, cold or near-expiry). 10s TTL means every 11th poll
             eats 3.5s; 60s collapses to 1/60 polls. *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:60.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:feature_health_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_feature_health.json ()))
          in

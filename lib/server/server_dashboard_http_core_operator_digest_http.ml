@@ -25,6 +25,10 @@
     Pure helper move (no callback injection). All references reach
     existing siblings or top-level libraries. *)
 
+(* Cache TTL — standard SWR window (matches [standard_cache_ttl_s] in
+   [server_routes_http_routes_dashboard.ml]). *)
+let standard_cache_ttl_s = 5.0
+
 open Server_utils
 open Server_auth
 include Server_dashboard_http_cache
@@ -151,7 +155,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
     Ok
       (Dashboard_cache.get_or_compute_with_timeout
          cache_key
-         ~ttl:5.0
+         ~ttl:standard_cache_ttl_s
          ~clock
          ~timeout_sec:Core_cache.dashboard_request_timeout_s
          compute

@@ -1,5 +1,10 @@
 (** See [server_dashboard_snapshot_select.mli] for the contract. *)
 
+(* Cache TTL — short window for namespace truth fallback reads.
+   2s matches the realtime tier; the primary path (snapshot) has its
+   own refresh cadence. *)
+let namespace_truth_fallback_ttl_s = 2.0
+
 let select_shell_json
       ?clock ?request ?timing ?(light = false) (config : Coord.config)
   : Yojson.Safe.t
@@ -119,7 +124,7 @@ let select_project_snapshot_json ~state ~sw ~clock ?timing req
       timing_obj
       Server_timing.Project_snapshot_runtime
       (fun () ->
-        Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+        Dashboard_cache.get_or_compute cache_key ~ttl:namespace_truth_fallback_ttl_s (fun () ->
           Server_dashboard_http_namespace_truth
             .dashboard_namespace_truth_http_json
             ~state ~sw ~clock req))

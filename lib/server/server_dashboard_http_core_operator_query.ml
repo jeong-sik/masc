@@ -14,6 +14,7 @@ let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
 
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
 let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
+let standard_cache_ttl_s = 5.0
 
 let operator_retention_json ~(config : Coord.config) ~scope ~producer =
   `Assoc
@@ -23,7 +24,7 @@ let operator_retention_json ~(config : Coord.config) ~scope ~producer =
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
     ; "cache_surface", `String "Server_dashboard_http_core.cached_surface"
-    ; "http_swr_ttl_s", `Float 5.0
+    ; "http_swr_ttl_s", `Float standard_cache_ttl_s
     ; "background_refresh_interval_s", `Float operator_refresh_interval_s
     ; "request_timeout_s", `Float dashboard_request_timeout_s
     ; ( "cache_policy"

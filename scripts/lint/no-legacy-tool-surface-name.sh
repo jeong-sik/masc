@@ -2,12 +2,12 @@
 # Guard against re-emergence of pre-RFC-0064 public tool names in the
 # descriptor-backed tool surface.
 #
-# After the ToolDescriptor spine landed (#18570, #18581, #18586, #18654), the
-# only LLM-native public names are:
-#   Execute, SearchFiles, ReadFile, EditFile, WriteFile, SearchWeb, FetchWeb
+# After RFC-0202 tool name alignment, the active LLM-native public names are:
+#   Execute, Read, Edit, Write, Grep, WebSearch, WebFetch
 #
-# The legacy names — Bash, Grep, Read, Edit, Write, WebSearch, WebFetch — must
-# not reappear as quoted string literals in active tool-surface modules. This
+# The retired names — Bash, ReadFile, WriteFile, EditFile, SearchFiles,
+# SearchWeb, FetchWeb — must not reappear as quoted string literals in active
+# tool-surface modules. This
 # script is intentionally narrow: it only scans files that declare or route
 # public tool names. Identifiers and code symbols (e.g. OCaml `Read` modules)
 # are untouched.
@@ -63,7 +63,7 @@ SCAN_GLOBS=(
   "lib/tool_catalog_surfaces.mli"
 )
 
-LITERAL_PATTERN='"(Bash|Grep|Read|Edit|Write|WebSearch|WebFetch)"'
+LITERAL_PATTERN='"(Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb)"'
 
 current_tmp="$(mktemp -t legacy-tool-surface-name.current.XXXXXX)"
 allow_tmp="$(mktemp -t legacy-tool-surface-name.allow.XXXXXX)"
@@ -116,7 +116,7 @@ if [[ -s "$new_tmp" ]]; then
   echo
   echo "[no-legacy-tool-surface-name] DRIFT UP: legacy public tool name re-emerged in active surface" >&2
   sed 's/^/  - /' "$new_tmp" >&2
-  echo "  Use the descriptor-owned name (Execute, SearchFiles, ReadFile, EditFile, WriteFile, SearchWeb, FetchWeb)." >&2
+  echo "  Use the descriptor-owned name (Execute, Read, Edit, Write, Grep, WebSearch, WebFetch)." >&2
   echo "  See lib/keeper/agent_tool_descriptor.ml for the canonical surface." >&2
   fail=1
 fi

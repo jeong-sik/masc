@@ -106,10 +106,7 @@ let collapse_preview text =
   |> String.trim
 
 let truncate_text ?(max_len = 160) text =
-  if String.length text <= max_len then
-    text
-  else
-    String.sub text 0 max_len ^ "...[truncated]"
+  String_util.to_string (String_util.utf8_safe ~max_bytes:max_len ~suffix:"...[truncated]" text)
 
 let default_probe_timeout_sec = 6
 let default_ps_timeout_sec = 2

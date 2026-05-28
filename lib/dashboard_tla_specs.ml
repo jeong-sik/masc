@@ -119,17 +119,7 @@ let list_specs () =
       | c -> c)
 ;;
 
-let iso_of_unix_time t =
-  let open Unix in
-  let tm = gmtime t in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900)
-    (tm.tm_mon + 1)
-    tm.tm_mday
-    tm.tm_hour
-    tm.tm_min
-    tm.tm_sec
+let iso_of_unix_time = Dashboard_utils.iso_of_unix
 ;;
 
 let entry_to_json e : Yojson.Safe.t =

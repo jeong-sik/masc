@@ -76,37 +76,12 @@ let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
 
-let member_assoc key json =
-  match json with
-  | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)
-  | _ -> `Null
-
-let string_field ?(default = "") key json =
-  match member_assoc key json with
-  | `String value -> value
-  | _ -> default
-
-let string_field_opt key json =
-  match member_assoc key json with
-  | `String value ->
-      let trimmed = String.trim value in
-      if trimmed <> "" then Some trimmed else None
-  | _ -> None
-
+let member_assoc = Dashboard_utils.member_assoc
+let string_field = Dashboard_utils.string_field
+let string_field_opt = Json_util.assoc_string_opt
 let take = List.take
-
-let int_field ?(default = 0) key json =
-  match member_assoc key json with
-  | `Int value -> value
-  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
-  | `Float value -> int_of_float value
-  | _ -> default
-
-let list_field key json =
-  match member_assoc key json with
-  | `List items -> items
-  | _ -> []
-
+let int_field = Dashboard_utils.int_field
+let list_field = Dashboard_utils.list_field
 let compact_text = String_util.compact_text
 
 

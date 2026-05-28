@@ -580,4 +580,23 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   Stdlib.Mutex.protect path_mu (fun () ->
     Stdlib.output_string oc line;
     Stdlib.flush oc)
+
+let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
+  if jsons = [] then ()
+  else begin
+    test_exec_home_guard ~op:"append_jsonl_batch" path;
+    let dir = Stdlib.Filename.dirname path in
+    mkdir_p_memoized dir;
+    let buf = Buffer.create 4096 in
+    List.iter (fun json ->
+      Buffer.add_string buf (Yojson.Safe.to_string json);
+      Buffer.add_char buf '\n'
+    ) jsons;
+    let chunk = Buffer.contents buf in
+    let oc = Fd_cache.get_writer path in
+    let path_mu = get_append_path_mutex path in
+    Stdlib.Mutex.protect path_mu (fun () ->
+      Stdlib.output_string oc chunk;
+      Stdlib.flush oc)
+  end
 ;;

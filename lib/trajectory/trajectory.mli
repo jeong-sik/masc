@@ -135,6 +135,10 @@ val read_all_lines :
 
     Mutable session-scoped state for tracking tool calls in progress. *)
 
+type pending_entry = {
+  pe_json : Yojson.Safe.t;
+}
+
 type accumulator = {
   mutable entries : tool_call_entry list;
   mutable total_cost : float;
@@ -146,11 +150,16 @@ type accumulator = {
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
+  pending_queue : pending_entry Queue.t;
+  pending_mu : Mutex.t;
+  mutable last_flush : float;
+  mutable on_flush_error : (exn -> unit) option;
 }
 
 val create_accumulator :
+  ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> accumulator
+  generation:int -> unit -> accumulator
 
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit
@@ -163,6 +172,16 @@ val record_entry :
   tool_call_entry ->
   unit
 val finalize : accumulator -> trajectory_outcome -> trajectory
+
+val flush_pending : accumulator -> unit
+(** [flush_pending acc] drains the pending queue and writes all entries
+    to disk in a single batch. Called automatically by [finalize] and
+    by the background flush fiber. *)
+
+val flush_all_pending : unit -> unit
+(** [flush_all_pending ()] flushes pending entries for all active
+    accumulators. Called by the background flush fiber in
+    server_runtime_bootstrap. *)
 
 val detect_entropy :
   ?threshold:int -> ?args_json:string -> accumulator -> string -> (string * int) option

@@ -155,6 +155,11 @@ val fold_jsonl_lines
     is registered at [at_exit]. *)
 val append_jsonl : string -> Yojson.Safe.t -> unit
 
+(** [append_jsonl_batch path jsons] writes multiple JSON entries to [path]
+    in a single lock+flush cycle. More efficient than calling [append_jsonl]
+    repeatedly when batching pending entries. No-op if [jsons] is empty. *)
+val append_jsonl_batch : string -> Yojson.Safe.t list -> unit
+
 (** Flush and close every cached [out_channel] held by
     [append_jsonl]. Safe to call concurrently with active appends;
     a subsequent [append_jsonl] re-opens fresh. Intended for

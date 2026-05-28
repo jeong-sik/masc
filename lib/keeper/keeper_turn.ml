@@ -244,7 +244,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~masc_root
           ~keeper_name:meta.name
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~generation:meta.runtime.generation
+          ~generation:meta.runtime.generation ()
       in
       let effective_models =
         if direct_reply then

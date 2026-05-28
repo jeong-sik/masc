@@ -217,7 +217,7 @@ let record_pre_dispatch_terminal_observation
   let started_at = now_iso () in
   let masc_root = Coord.masc_root_dir config in
   let trajectory_acc =
-    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation
+    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation ()
   in
   finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc trajectory_outcome;
   let ended_at = now_iso () in

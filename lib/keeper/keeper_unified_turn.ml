@@ -282,7 +282,7 @@ let run_keeper_cycle
                    ~masc_root
                    ~keeper_name:meta.name
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~generation:meta.runtime.generation
+                   ~generation:meta.runtime.generation ()
                in
                let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
                (* 4. Build turn prompt callback: use our unified system prompt *)

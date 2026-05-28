@@ -54,7 +54,7 @@ let test_create_accumulator () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-001" ~generation:0 in
+      ~trace_id:"trace-001" ~generation:0 () in
     Alcotest.(check int) "initial turn" 0 acc.Trajectory.turn;
     Alcotest.(check (float 0.0001)) "initial cost" 0.0 acc.Trajectory.total_cost;
     Alcotest.(check int) "initial entries" 0 (List.length acc.Trajectory.entries))
@@ -67,7 +67,7 @@ let test_record_entry () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-002" ~generation:0 in
+      ~trace_id:"trace-002" ~generation:0 () in
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0;
       ts_iso = "2026-01-01T00:00:00Z";
@@ -93,7 +93,7 @@ let test_entropy_not_triggered () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-003" ~generation:0 in
+      ~trace_id:"trace-003" ~generation:0 () in
     (* Add 1 consecutive call — with +1 for upcoming, count=2 < threshold 3 *)
     let mk_entry tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
@@ -110,7 +110,7 @@ let test_entropy_triggered () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-004" ~generation:0 in
+      ~trace_id:"trace-004" ~generation:0 () in
     let mk_entry tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
       tool_name = tool; args_json = "{}";
@@ -135,7 +135,7 @@ let test_increment_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-005" ~generation:0 in
+      ~trace_id:"trace-005" ~generation:0 () in
     Alcotest.(check int) "turn 0" 0 acc.Trajectory.turn;
     Trajectory.increment_turn acc;
     Alcotest.(check int) "turn 1" 1 acc.Trajectory.turn;
@@ -150,7 +150,7 @@ let test_finalize () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-006" ~generation:0 in
+      ~trace_id:"trace-006" ~generation:0 () in
     Trajectory.increment_turn acc;
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z";
@@ -189,7 +189,7 @@ let test_calls_in_current_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-007" ~generation:0 in
+      ~trace_id:"trace-007" ~generation:0 () in
     Trajectory.increment_turn acc;
     let mk tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
@@ -211,14 +211,14 @@ let test_task_id_default_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-001" ~generation:0 in
+      ~trace_id:"trace-tid-001" ~generation:0 () in
     Alcotest.(check (option string)) "task_id default" None acc.Trajectory.task_id)
 
 let test_set_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-002" ~generation:0 in
+      ~trace_id:"trace-tid-002" ~generation:0 () in
     Trajectory.set_task_id acc "task-042";
     Alcotest.(check (option string)) "task_id set"
       (Some "task-042") acc.Trajectory.task_id)
@@ -227,7 +227,7 @@ let test_clear_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-003" ~generation:0 in
+      ~trace_id:"trace-tid-003" ~generation:0 () in
     Trajectory.set_task_id acc "task-042";
     Trajectory.clear_task_id acc;
     Alcotest.(check (option string)) "task_id cleared" None acc.Trajectory.task_id)
@@ -236,7 +236,7 @@ let test_finalize_propagates_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-004" ~generation:0 in
+      ~trace_id:"trace-tid-004" ~generation:0 () in
     Trajectory.set_task_id acc "task-099";
     Trajectory.increment_turn acc;
     let traj = Trajectory.finalize acc Trajectory.Completed in
@@ -247,7 +247,7 @@ let test_task_id_in_trajectory_json () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-005" ~generation:0 in
+      ~trace_id:"trace-tid-005" ~generation:0 () in
     Trajectory.set_task_id acc "task-json-test";
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
@@ -262,7 +262,7 @@ let test_task_id_null_when_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-006" ~generation:0 in
+      ~trace_id:"trace-tid-006" ~generation:0 () in
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
     let open Yojson.Safe.Util in

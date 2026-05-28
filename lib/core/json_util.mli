@@ -81,6 +81,9 @@ val assoc_int_opt : string -> Yojson.Safe.t -> int option
 val assoc_bool_opt : string -> Yojson.Safe.t -> bool option
 (** [assoc_bool_opt name json] extracts bool field *)
 
+val assoc_float_opt : string -> Yojson.Safe.t -> float option
+(** [assoc_float_opt name json] extracts float field, coerces int to float *)
+
 val json_string_list_member : string -> Yojson.Safe.t -> string list
 (** [json_string_list_member name json] extracts a list of non-empty
     trimmed strings from the JSON array at field [name]. Returns [[]]

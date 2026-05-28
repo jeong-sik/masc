@@ -177,6 +177,12 @@ let assoc_bool_opt name json =
   | Some (`Bool value) -> Some value
   | _ -> None
 
+let assoc_float_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (Float.of_int value)
+  | _ -> None
+
 let json_string_list_member name json =
   match Yojson.Safe.Util.member name json with
   | `List values ->

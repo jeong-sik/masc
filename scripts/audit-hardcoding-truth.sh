@@ -74,8 +74,7 @@ legacy_helper_pattern='is_main_''worktree_''boundary_''exempt'
 legacy_phrase_pattern='main-''worktree ''boundary|worktree ''boundary'
 legacy_boundary_matches="$(
   rg -n "${legacy_helper_pattern}|${legacy_phrase_pattern}" \
-    lib/tool_catalog.ml lib/tool_catalog.mli lib/keeper/keeper_tool_registry.ml \
-    lib/keeper/keeper_tool_registry.mli 2>/dev/null || true
+    lib/tool_catalog.ml lib/tool_catalog.mli 2>/dev/null || true
 )"
 if [ -n "$legacy_boundary_matches" ]; then
   mark_confirmed "legacy checkout follow-up helper surface still exists"

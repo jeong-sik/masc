@@ -28,7 +28,7 @@ let now_iso () = Masc_domain.now_iso ()
 
 let json_string_option = Json_util.string_opt_to_json
 
-let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
+let candidate_to_json (c : Cascade_config_selection.candidate_info) : Yojson.Safe.t =
   `Assoc
     [ "model", `String c.model_string
     ; "display_model", `String c.display_model_string
@@ -44,10 +44,10 @@ let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
 ;;
 
 let source_to_string = function
-  | CC.Named -> "named"
-  | CC.Default_fallback -> "default_fallback"
-  | CC.Hardcoded_defaults -> "hardcoded_defaults"
-  | CC.Load_failed _ -> "load_failed"
+  | Cascade_config_resolve.Named -> "named"
+  | Cascade_config_resolve.Default_fallback -> "default_fallback"
+  | Cascade_config_resolve.Hardcoded_defaults -> "hardcoded_defaults"
+  | Cascade_config_resolve.Load_failed _ -> "load_failed"
 ;;
 
 let string_list_to_json = Json_util.json_string_list

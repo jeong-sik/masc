@@ -41,7 +41,6 @@ type keeper_profile_defaults = {
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  cascade_name : string option;
   models : string list option;
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;

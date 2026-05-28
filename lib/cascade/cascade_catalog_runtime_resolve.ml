@@ -285,7 +285,7 @@ let expand_weighted_entries ~cascade
   let expanded =
     List.concat_map
       (fun (entry : Cascade_config_loader.weighted_entry) ->
-        Cascade_config.expand_auto_models [ entry.model ]
+        Cascade_config_parser.expand_auto_models [ entry.model ]
         |> List.map (fun model -> { entry with model }))
       entries
   in

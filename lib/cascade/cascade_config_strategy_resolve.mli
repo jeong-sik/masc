@@ -11,26 +11,12 @@
 
     @stability Internal *)
 
-val normalize_priority_tiers :
-  config_path:string ->
-  name:string ->
-  string list list ->
-  (string list list, string) result
-
 val resolve_strategy :
-  ?config_path:string ->
-  name:string ->
-  unit ->
-  Cascade_strategy.t
+  ?config_path:string -> name:string -> unit -> Cascade_strategy.t
 
 val resolve_ollama_max_concurrent :
-  ?config_path:string ->
-  name:string ->
-  unit ->
-  int option
+  ?config_path:string -> name:string -> unit -> int option
 
 val resolve_cli_max_concurrent :
-  ?config_path:string ->
-  name:string ->
-  unit ->
-  int option
+  ?config_path:string -> name:string -> unit -> int option
+

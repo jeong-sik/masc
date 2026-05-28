@@ -200,131 +200,6 @@ val expand_weighted_auto_entries :
     entries to match a parsed primary [Provider_config] back to its
     weighted entry (and therefore to its [secondary] declaration). *)
 
-(** {1 Cascade Config Loading} *)
-
-(** How a cascade name was resolved. *)
-type cascade_source =
-  | Named              (** Found as a declarative profile in cascade.toml *)
-  | Default_fallback   (** Name not found; used the [routes.keeper_turn] profile *)
-  | Hardcoded_defaults (** Neither found; used hardcoded [defaults] *)
-  | Load_failed of string
-    (** Config file load failed (parse / IO / missing).  Returned in
-        place of [Hardcoded_defaults] so that the dashboard can
-        distinguish a fault from operator intent.  The string carries
-        the underlying error for telemetry. *)
-
-(** Resolve model strings for a named cascade.
-
-    Resolution order:
-    1. Named declarative profile from [config_path]
-    2. [routes.keeper_turn] profile from [config_path] (fallback)
-    3. Hardcoded [defaults]
-
-    When [config_path] is [None], returns [defaults] directly. *)
-val resolve_model_strings :
-  ?config_path:string ->
-  name:string ->
-  defaults:string list ->
-  unit ->
-  string list
-
-(** Expand execution-time convenience fallbacks while preserving stable order.
-
-    Uses the same provider:auto expansion as {!expand_auto_models}, so
-    provider-family entries execute in the same concrete order the
-    dashboard shows by default.
-
-    When [rotation_scope] is provided, each [provider:auto] entry is
-    rotated independently within that scope so repeated execution calls
-    do not always start from the same concrete model.
-
-    Duplicate entries are removed after expansion, keeping the first
-    appearance. This lets callers keep config concise while still
-    getting automatic provider-internal failover at execution time.
-
-    @since 0.116.2 *)
-val expand_model_strings_for_execution :
-  ?rotation_scope:string ->
-  string list ->
-  string list
-
-(** Like {!resolve_model_strings} but also returns which resolution
-    path was taken. Use this to detect typos: if [source <> Named]
-    when you expected a named profile, the cascade name is likely wrong.
-
-    @since 0.78.0 *)
-val resolve_model_strings_traced :
-  ?config_path:string ->
-  name:string ->
-  defaults:string list ->
-  unit ->
-  string list * cascade_source
-
-(** Per-candidate info in a weighted selection decision.
-
-    Captures the state that influenced a single candidate's ordering
-    at decision time: its declared weight, health-adjusted effective
-    weight, and current health signals.
-
-    @since 0.139.0 *)
-type candidate_info = {
-  model_string : string;        (** "provider:model_id" as written in config *)
-  display_model_string : string; (** User-facing label for the configured candidate *)
-  provider_name : string option; (** Raw provider prefix when present *)
-  display_provider_name : string option; (** User-facing provider family label *)
-  runtime_kind : string option; (** "local" / "cli_agent" / "direct_api" when known *)
-  expanded_models : string list; (** Concrete execution order for this configured candidate *)
-  config_weight : int;          (** Weight from cascade config ([1] when absent) *)
-  effective_weight : int;       (** Weight after health adjustment; [0] = cooled-down *)
-  success_rate : float;         (** Rolling-window success rate, [0.0]–[1.0] *)
-  in_cooldown : bool;           (** Provider currently skipped by cooldown *)
-}
-
-(** Full trace of a cascade selection decision.
-
-    Consumers can use this to surface, in dashboards/telemetry,
-    why a particular provider was attempted first and what signals
-    were considered.
-
-    [candidates] is in final attempt order — the first entry is the
-    provider the cascade will try first.
-
-    When the profile has no weights (every entry is [weight=1]), no
-    probabilistic shuffle happens and [effective_weight = config_weight = 1]
-    for each entry.
-
-    @since 0.139.0 *)
-type selection_trace = {
-  candidates : candidate_info list;
-  source : cascade_source;
-}
-
-(** Build a live selection trace from already-known weighted entries.
-
-    Applies {!order_weighted_entries} and snapshots current health signals
-    without rereading raw cascade source text. Useful when callers already hold
-    validated runtime profile data and need the same dashboard trace shape.
-
-    @since 0.150.4 *)
-val selection_trace_of_weighted_entries :
-  ?source:cascade_source ->
-  Cascade_config_loader.weighted_entry list ->
-  selection_trace
-
-(** Like {!resolve_model_strings_traced} but also returns per-candidate
-    health signals that influenced the ordering. Useful for rendering
-    the cascade decision in dashboards without re-deriving state.
-
-    Non-breaking: callers who only need the ordered model list can
-    continue using {!resolve_model_strings} or {!resolve_model_strings_traced}.
-
-    @since 0.139.0 *)
-val resolve_model_strings_with_trace :
-  ?config_path:string ->
-  name:string ->
-  defaults:string list ->
-  unit ->
-  string list * selection_trace
 
 (** {1 Catalog Source Access} *)
 
@@ -492,11 +367,6 @@ val apply_provider_filter_strict :
 
     @since 0.9.6 *)
 
-val resolve_strategy :
-  ?config_path:string ->
-  name:string ->
-  unit ->
-  Cascade_strategy.t
 (** [resolve_strategy ~config_path ~name] reads
     [{name}_strategy], [{name}_max_cycles], [{name}_backoff_base_ms],
     [{name}_backoff_cap_ms] from [config_path] and returns the
@@ -517,31 +387,16 @@ val resolve_strategy :
     - [backoff_cap_ms < backoff_base_ms] → clamped up to
       [backoff_base_ms]. *)
 
-val normalize_priority_tiers :
-  config_path:string ->
-  name:string ->
-  string list list ->
-  (string list list, string) result
 (** Validate and normalize a [priority_tier] tier matrix against the
     configured candidate model ids for [name]. Returns [Error] when all
     tiers collapse or when the profile has no configured candidates. *)
 
-val resolve_ollama_max_concurrent :
-  ?config_path:string ->
-  name:string ->
-  unit ->
-  int option
 (** Per-cascade override for the HTTP-probe-capable provider's
     client-capacity registration default.  The caller in
     {!Keeper_turn_driver} consults provider-kind probe capability and registers
     matching cfgs through {!Cascade_client_capacity.register}.
     [None] means "use the literal default of 1". *)
 
-val resolve_cli_max_concurrent :
-  ?config_path:string ->
-  name:string ->
-  unit ->
-  int option
 (** Per-cascade override for the CLI client-capacity registration
     default ({!Cascade_client_capacity.auto_register_cli_for_candidates}).
     [None] means "use the env-var default

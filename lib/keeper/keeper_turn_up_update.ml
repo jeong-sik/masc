@@ -275,10 +275,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          present; otherwise preserve the existing keeper's cascade_ref so
          dashboard drift remains visible.  See #6747. *)
       (let group =
-         match p.cascade_name_opt, p.profile_defaults.cascade_name with
-         | Some name, _ -> name
-         | None, Some name -> name
-         | None, None ->
+         match p.cascade_name_opt with
+         | Some name -> name
+         | None ->
            let prev = cascade_name_of_meta old in
            if String.trim prev <> "" then prev
            else (Keeper_config.default_cascade_name ())

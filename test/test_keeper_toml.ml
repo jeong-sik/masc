@@ -689,8 +689,7 @@ preset = "delivery"
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
-          check (option string) "base cascade" (Some "route.keeper_turn")
-            defaults.cascade_name;
+          (* cascade_name field removed from keeper_profile_defaults *)
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
           check (option string) "base network" (Some "inherit")

@@ -15,7 +15,6 @@ type network_mode =
 [@@deriving tla]
 
 val sandbox_profile_to_string : sandbox_profile -> string
-val reserved_cascade_names : string list
 val sandbox_profile_of_string : string -> sandbox_profile option
 val all_sandbox_profiles : sandbox_profile list
 val valid_sandbox_profile_strings : string list

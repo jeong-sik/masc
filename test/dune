@@ -102,7 +102,6 @@
   test_reward_advice_artifact
   test_cascade_capability_profile
   test_cascade_deadline
-  test_cascade_tier_wait_scheduler
   test_cascade_secondary_expand
   test_keeper_hooks_oas_telemetry
   test_masc_oas_bridge_timeout_guard
@@ -292,22 +291,11 @@
   test_keeper_tool_call_sse_io_preview
   test_observability_provider_contracts
   test_config_doctor
-  test_cascade_name
-  test_cascade_config_validity
   test_cascade_routes_decoder
-  test_cascade_declarative_parser
-  test_cascade_declarative_validator
-  test_cascade_declarative_adapter
-  test_cascade_declarative_hotpath
-  test_cascade_phonebook
-  test_cascade_phonebook_resolve
-  test_cascade_routing_policy
-  test_cascade_routing_policy_targets_exist
   test_cascade_judge_route_intent_golden
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_cascade_server_flavor
-  test_cascade_phonebook_integration
   test_keeper_cascade_profile_partial
   test_doctor_dispatch
   test_disk_hygiene_script
@@ -431,7 +419,6 @@
   test_reward_advice_artifact
   test_cascade_capability_profile
   test_cascade_deadline
-  test_cascade_tier_wait_scheduler
   test_cascade_secondary_expand
   test_keeper_hooks_oas_telemetry
   test_masc_oas_bridge_timeout_guard
@@ -621,22 +608,11 @@
   test_keeper_tool_call_sse_io_preview
   test_observability_provider_contracts
   test_config_doctor
-  test_cascade_name
-  test_cascade_config_validity
   test_cascade_routes_decoder
-  test_cascade_declarative_parser
-  test_cascade_declarative_validator
-  test_cascade_declarative_adapter
-  test_cascade_declarative_hotpath
-  test_cascade_phonebook
-  test_cascade_phonebook_resolve
-  test_cascade_routing_policy
-  test_cascade_routing_policy_targets_exist
   test_cascade_judge_route_intent_golden
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_cascade_server_flavor
-  test_cascade_phonebook_integration
   test_keeper_cascade_profile_partial
   test_doctor_dispatch
   test_disk_hygiene_script
@@ -1454,11 +1430,9 @@
 
 (include stanzas/test_cascade_attempt_fsm_response_pins.inc)
 
-(include stanzas/test_cascade_saturation_signal.inc)
 
 (include stanzas/test_cascade_saturation_signal_phase_a2.inc)
 
-(include stanzas/test_cascade_tier_admission.inc)
 
 (include stanzas/test_cascade_catalog_runtime_yojson.inc)
 

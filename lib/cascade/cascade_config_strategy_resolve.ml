@@ -3,8 +3,6 @@
     Extracted from [cascade_config.ml]. *)
 
 module Parser = Cascade_config_parser
-module Resolve = Cascade_config_resolve
-
 (* One-time warning per (cascade name, raw value) pair so misspelled
    strategy fields do not flood the log on every keeper turn. *)
 let strategy_warned : (string * string, unit) Hashtbl.t = Hashtbl.create 4

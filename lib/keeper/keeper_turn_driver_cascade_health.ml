@@ -110,7 +110,7 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
     let provider_owned_capacity =
       match capacity_source with
       | Some Provider_capacity -> true
-      | Some (Client_capacity | Admission_capacity | Cascade_slot) -> false
+      | Some (Client_capacity | Tier_admission | Cascade_slot) -> false
       | None -> true
     in
     if not provider_owned_capacity

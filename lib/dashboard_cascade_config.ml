@@ -151,7 +151,7 @@ let keeper_assignable_name_set ?config_path () =
   |> List.fold_left (fun acc name -> StringSet.add name acc) StringSet.empty
 ;;
 
-let profile_json_of_trace ~keeper_assignable name (trace : CC.selection_trace) =
+let profile_json_of_trace ~keeper_assignable name (trace : Cascade_config_resolve.selection_trace) =
   `Assoc
     [ "name", `String name
     ; "source", `String (source_to_string trace.source)
@@ -179,7 +179,7 @@ let profile_json_raw ~config_path ~keeper_assignable_names name =
       ~cascade_name:(Cascade_name.of_string_exn name)
   in
   let _models, trace =
-    CC.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
+    Cascade_config_resolve.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
   in
   profile_json_of_trace
     ~keeper_assignable:(StringSet.mem name keeper_assignable_names)
@@ -300,11 +300,7 @@ let config_json ?base_path () =
         if StringSet.mem name active_names
         then None
         else (
-          let cascade_name =
-            match doc.Keeper_types_profile.cascade_name with
-            | Some c -> c
-            | None -> (Keeper_config.default_cascade_name ())
-          in
+          let cascade_name = Keeper_config.default_cascade_name () in
           Some (`Assoc (keeper_profile_fields ~keeper:name ~cascade_name))))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

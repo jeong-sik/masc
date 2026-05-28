@@ -81,27 +81,6 @@ type candidate_info = Cascade_config_selection.candidate_info = {
   in_cooldown : bool;
 }
 
-(* Resolve (cascade_source + selection_trace + materialized json) — this PR *)
-type cascade_source = Cascade_config_resolve.cascade_source =
-  | Named
-  | Default_fallback
-  | Hardcoded_defaults
-  | Load_failed of string
-
-type selection_trace = Cascade_config_resolve.selection_trace = {
-  candidates : candidate_info list;
-  source : cascade_source;
-}
-
-let selection_trace_of_weighted_entries =
-  Cascade_config_resolve.selection_trace_of_weighted_entries
-let resolve_model_strings = Cascade_config_resolve.resolve_model_strings
-let resolve_model_strings_traced =
-  Cascade_config_resolve.resolve_model_strings_traced
-let resolve_model_strings_with_trace =
-  Cascade_config_resolve.resolve_model_strings_with_trace
-let expand_model_strings_for_execution =
-  Cascade_config_resolve.expand_model_strings_for_execution
 
 (* Health filtering (existing sub-module) *)
 let filter_healthy_strict = Cascade_health_filter.filter_healthy_strict
@@ -128,12 +107,4 @@ let apply_provider_filter = Cascade_config_provider_filter.apply_provider_filter
 let apply_provider_filter_strict =
   Cascade_config_provider_filter.apply_provider_filter_strict
 
-(* Strategy / priority-tier / concurrency resolution (this PR) *)
-let normalize_priority_tiers =
-  Cascade_config_strategy_resolve.normalize_priority_tiers
-let resolve_strategy = Cascade_config_strategy_resolve.resolve_strategy
-let resolve_ollama_max_concurrent =
-  Cascade_config_strategy_resolve.resolve_ollama_max_concurrent
-let resolve_cli_max_concurrent =
-  Cascade_config_strategy_resolve.resolve_cli_max_concurrent
 

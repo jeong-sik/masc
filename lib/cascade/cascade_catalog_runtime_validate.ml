@@ -177,9 +177,9 @@ let validate_strategy ~config_path ~name =
     Error strategy_errors
   else
     Ok
-      ( Cascade_config.resolve_strategy ~config_path ~name (),
-        Cascade_config.resolve_ollama_max_concurrent ~config_path ~name (),
-        Cascade_config.resolve_cli_max_concurrent ~config_path ~name () )
+      ( Cascade_config_strategy_resolve.resolve_strategy ~config_path ~name (),
+        Cascade_config_strategy_resolve.resolve_ollama_max_concurrent ~config_path ~name (),
+        Cascade_config_strategy_resolve.resolve_cli_max_concurrent ~config_path ~name () )
 
 let rejection_of_path ~config_path ~attempted_mtime ~checked_at
     ~(errors : string list) ~(profiles : profile_rejection list) =

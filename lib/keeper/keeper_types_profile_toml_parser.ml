@@ -216,7 +216,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
         social_model = normalize_social_model_opt (str "social_model");
-        model = str "model";
         models = None;
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
@@ -467,7 +466,6 @@ let merge_keeper_profile_defaults
     per_provider_timeout;
     always_approve = prefer overlay.always_approve base.always_approve;
     social_model = prefer overlay.social_model base.social_model;
-    model = prefer overlay.model base.model;
     models = None;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =

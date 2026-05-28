@@ -54,10 +54,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
   let selected_cascade_name =
-    match p.cascade_name_opt, p.profile_defaults.cascade_name with
-    | Some name, _ -> name
-    | None, Some name -> name
-    | None, None -> Keeper_config.default_cascade_name ()
+    match p.cascade_name_opt with
+    | Some name -> name
+    | None -> Keeper_config.default_cascade_name ()
   in
   let active_goal_ids_error =
     match p.active_goal_ids_opt with

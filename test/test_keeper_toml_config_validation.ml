@@ -535,7 +535,7 @@ let test_resolve_model_strings_reads_declarative_profile () =
   with_temp_config_dir minimal_cascade_profile_metadata_toml
   @@ fun ~config_root:_ ~cascade_path ->
   let models =
-    Masc_mcp.Cascade_config.resolve_model_strings
+    Masc_mcp.Cascade_config_resolve.resolve_model_strings
       ~config_path:cascade_path ~name:"primary" ~defaults:["fallback"] ()
   in
   check (list string) "primary group models"
@@ -567,7 +567,7 @@ target = "tier.primary"
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   let models =
-    Masc_mcp.Cascade_config.resolve_model_strings
+    Masc_mcp.Cascade_config_resolve.resolve_model_strings
       ~config_path:cascade_path ~name:"primary" ~defaults:["fallback"] ()
   in
   check (list string) "custom provider resolved from protocol"

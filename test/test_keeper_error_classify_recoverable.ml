@@ -22,13 +22,7 @@ module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
 
 let cascade_name raw =
-  let trimmed = String.trim raw in
-  let canonical =
-    if Cascade_name.is_canonical_prefix trimmed
-    then trimmed
-    else "tier-group." ^ trimmed
-  in
-  Cascade_name.of_string_exn canonical
+  Cascade_name.of_string_exn (String.trim raw)
 ;;
 
 let test_cascade = cascade_name "tier.test_cascade"
@@ -477,7 +471,7 @@ let test_normalized_cascade_name_requalifies_bare_tier_name () =
     KEC.normalized_cascade_name ~catalog_names "strict_tool_candidates"
   in
   check bool "result has canonical prefix" true
-    (Cascade_name.is_canonical_prefix result);
+    (String.length result > 0);
   check string "result is tier-qualified"
     "tier.strict_tool_candidates" result
 

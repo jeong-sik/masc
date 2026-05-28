@@ -5,7 +5,9 @@
 
 open Alcotest
 module R = Masc_mcp.Cascade_model_resolve
-module C = Masc_mcp.Cascade_config
+module C = Masc_mcp.Cascade_config_resolve
+module CP = Masc_mcp.Cascade_config_parser
+module CS = Masc_mcp.Cascade_config_selection
 module State = Masc_mcp.Cascade_state
 module H = Masc_mcp.Cascade_health_tracker
 
@@ -104,7 +106,7 @@ let prefixed provider model = provider ^ ":" ^ model
 let auto_models_for pid =
   let prefix = pid ^ ":" in
   let prefix_len = String.length prefix in
-  C.expand_auto_models [ prefix ^ "auto" ]
+  CP.expand_auto_models [ prefix ^ "auto" ]
   |> List.filter_map (fun spec ->
     if String.length spec >= prefix_len
        && String.equal (String.sub spec 0 prefix_len) prefix
@@ -216,7 +218,7 @@ let test_expand_model_strings_for_execution_matches_auto_expansion () =
     check
       (list string)
       "execution expansion matches auto expansion"
-      (C.expand_auto_models items)
+      (CP.expand_auto_models items)
       (C.expand_model_strings_for_execution items))
 ;;
 
@@ -302,15 +304,15 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
       }
     in
     let first =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "synthetic-api:auto" ]
+      CS.order_weighted_entries ~rotation_scope:"primary" [ entry "synthetic-api:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let second =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "synthetic-api:auto" ]
+      CS.order_weighted_entries ~rotation_scope:"primary" [ entry "synthetic-api:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let other_scope =
-      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "synthetic-api:auto" ]
+      CS.order_weighted_entries ~rotation_scope:"scoring" [ entry "synthetic-api:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     check
@@ -345,19 +347,19 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
       [ entry "provider-a:model"; entry "provider-b:model"; entry "provider-c:model" ]
     in
     let first =
-      C.order_weighted_entries ~rotation_scope:"primary" entries
+      CS.order_weighted_entries ~rotation_scope:"primary" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let second =
-      C.order_weighted_entries ~rotation_scope:"primary" entries
+      CS.order_weighted_entries ~rotation_scope:"primary" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let third =
-      C.order_weighted_entries ~rotation_scope:"primary" entries
+      CS.order_weighted_entries ~rotation_scope:"primary" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let other_scope =
-      C.order_weighted_entries ~rotation_scope:"scoring" entries
+      CS.order_weighted_entries ~rotation_scope:"scoring" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     check string "first call starts with declared provider" "provider-a:model" (List.hd first);
@@ -384,7 +386,7 @@ let test_order_weighted_entries_cooldown_is_provider_scoped () =
     H.record_failure H.global ~provider_key:"test-provider" ();
     H.record_failure H.global ~provider_key:"test-provider" ();
     let ordered =
-      C.order_weighted_entries
+      CS.order_weighted_entries
         ~rand_int:(fun _ -> 0)
         [ entry "test-provider:model-a"; entry "other-provider:model-a" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)

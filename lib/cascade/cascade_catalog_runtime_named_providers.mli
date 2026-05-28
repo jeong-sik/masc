@@ -94,4 +94,4 @@ val resolve_selection_trace :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   name:string ->
   unit ->
-  (Cascade_config.selection_trace, string) result
+  (Cascade_config_resolve.selection_trace, string) result

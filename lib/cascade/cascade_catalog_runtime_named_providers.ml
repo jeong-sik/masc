@@ -159,7 +159,7 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           (String.trim c.model_id)
       in
       let ordered_entries =
-        Cascade_config.order_weighted_entries ~rotation_scope:normalized
+        Cascade_config_selection.order_weighted_entries ~rotation_scope:normalized
           ~cascade:normalized profile.weighted_entries
       in
       let parsed_pairs =
@@ -168,7 +168,7 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
       in
       let parsed_configs = List.map fst parsed_pairs in
       let filtered_configs =
-        Cascade_config.apply_provider_filter ~provider_filter
+        Cascade_config_provider_filter.apply_provider_filter ~provider_filter
           ~label:normalized parsed_configs
       in
       let is_kept cfg =
@@ -232,7 +232,7 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
   | Ok (_snapshot, normalized, profile) ->
       let normalized = Cascade_name.to_string normalized in
       let ordered_entries =
-        Cascade_config.order_weighted_entries ~rotation_scope:normalized
+        Cascade_config_selection.order_weighted_entries ~rotation_scope:normalized
           ~cascade:normalized profile.weighted_entries
       in
       let parsed_pairs =
@@ -242,12 +242,12 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
       let parsed_configs = List.map fst parsed_pairs in
       let filtered_configs_result =
         match
-          Cascade_config.apply_provider_filter_strict ~provider_filter
+          Cascade_config_provider_filter.apply_provider_filter_strict ~provider_filter
             ~label:normalized parsed_configs
         with
         | Error rejection ->
             Error
-              (Cascade_config.provider_filter_rejection_to_string
+              (Cascade_config_provider_filter.provider_filter_rejection_to_string
                  rejection)
         | Ok ps -> Ok ps
       in
@@ -292,7 +292,7 @@ let provider_filter_allows_single ~provider_filter ~label provider =
   | None | Some [] -> true
   | Some _ -> (
       match
-        Cascade_config.apply_provider_filter_strict ~provider_filter
+        Cascade_config_provider_filter.apply_provider_filter_strict ~provider_filter
           ~label [ provider ]
       with
       | Ok [ _ ] -> true
@@ -315,7 +315,7 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
   | Ok (_snapshot, normalized, profile) ->
       let normalized = Cascade_name.to_string normalized in
       let ordered_entries =
-        Cascade_config.order_weighted_entries ~rotation_scope:normalized
+        Cascade_config_selection.order_weighted_entries ~rotation_scope:normalized
           ~cascade:normalized profile.weighted_entries
       in
       let parsed_pairs =
@@ -332,14 +332,14 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
           parsed_pairs
       in
       (match
-         Cascade_config.apply_provider_filter_strict ~provider_filter
+         Cascade_config_provider_filter.apply_provider_filter_strict ~provider_filter
            ~label:normalized primaries
        with
        | Error rejection ->
            Cascade_metrics.on_resolve_failure ~cascade:normalized
              ~reason:"provider_filter_rejected";
            Error
-             (Cascade_config.provider_filter_rejection_to_string rejection)
+             (Cascade_config_provider_filter.provider_filter_rejection_to_string rejection)
        | Ok _filtered_primaries ->
          let provider_filter_allows =
            provider_filter_allows_single ~provider_filter ~label:normalized
@@ -421,5 +421,5 @@ let resolve_selection_trace ?sw ?net ?clock ~name () =
   | Error _ as e -> e
   | Ok (_snapshot, _normalized, profile) ->
       Ok
-        (Cascade_config.selection_trace_of_weighted_entries
-           ~source:Cascade_config.Named profile.weighted_entries)
+        (Cascade_config_resolve.selection_trace_of_weighted_entries
+           ~source:Cascade_config_resolve.Named profile.weighted_entries)

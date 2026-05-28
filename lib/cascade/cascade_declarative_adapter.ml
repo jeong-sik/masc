@@ -166,7 +166,7 @@ let request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url =
   in
   match kind with
   | Llm_provider.Provider_config.Provider_d_compat ->
-    Cascade_config.normalize_openai_compat_request_path ~base_url ~request_path
+    Cascade_config_provider_binding.normalize_openai_compat_request_path ~base_url ~request_path
   | _ -> request_path
 
 let supports_tool_choice_override_of_model_spec (spec : cascade_model_spec) =
@@ -223,7 +223,7 @@ let provider_config_from_declared_provider
            request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
          in
          let api_key = api_key_of_credential ?registry_entry provider.credentials in
-         let auth_headers = Cascade_config.headers_with_auth ~kind ~api_key in
+         let auth_headers = Cascade_config_provider_binding.headers_with_auth ~kind ~api_key in
          let custom_headers = Option.value ~default:[] provider.headers in
          (* TOML-declared custom headers override generated auth headers by key.
             This allows operators to set provider-specific headers (e.g.

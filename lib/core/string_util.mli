@@ -10,6 +10,16 @@ val contains_substring_ci : string -> string -> bool
     Returns [false] when [needle] is empty, matching the behavior
     of the original per-module [contains_ci] helpers. *)
 
+val string_contains_substring : needle:string -> string -> bool
+(** Labeled-arg wrapper around [contains_substring].
+    [string_contains_substring ~needle haystack] is equivalent to
+    [contains_substring haystack needle]. *)
+
+val string_contains_substring_ci : needle:string -> string -> bool
+(** Labeled-arg wrapper around [contains_substring_ci].
+    [string_contains_substring_ci ~needle haystack] is equivalent to
+    [contains_substring_ci haystack needle]. *)
+
 val starts_with_ci : prefix:string -> string -> bool
 (** [starts_with_ci ~prefix s] is the ASCII case-insensitive variant of
     [String.starts_with]. Performs no allocation; lowercases each byte

@@ -12,15 +12,11 @@ val default_turn_event_bus_drain_interval_sec : float
 
 val turn_event_bus_drain_interval_sec : unit -> float
 
-val substring_matches_at : needle:string -> string -> int -> bool
-(** [substring_matches_at ~needle haystack start_idx] checks whether
-    [needle] occurs in [haystack] starting at [start_idx]. *)
-
 val string_contains_substring : needle:string -> string -> bool
-(** Case-sensitive substring test. *)
+(** Delegates to [String_util.string_contains_substring]. *)
 
 val string_contains_substring_ci : needle:string -> string -> bool
-(** Case-insensitive substring test. *)
+(** Delegates to [String_util.string_contains_substring_ci]. *)
 
 val report_keeper_cycle_side_effect_issue :
   config:Coord.config ->

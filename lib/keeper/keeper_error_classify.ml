@@ -11,32 +11,7 @@
 open Keeper_types
 open Keeper_context_runtime
 
-(* Duplicated from keeper_unified_turn.ml to avoid circular dependency.
-   keeper_unified_turn.ml also keeps its own copy for the error-classification
-   helpers that remain there (is_server_rejected_parse_error pattern matching). *)
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  if start_idx < 0 || start_idx + needle_len > String.length haystack
-  then false
-  else
-    let rec check i =
-      if i >= needle_len then true
-      else if String.unsafe_get needle i <> String.unsafe_get haystack (start_idx + i)
-      then false
-      else check (i + 1)
-    in
-    check 0
-
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  if needle = "" then true
-  else
-    let max_start = String.length haystack - String.length needle in
-    let rec try_from i =
-      if i > max_start then false
-      else if substring_matches_at ~needle haystack i then true
-      else try_from (i + 1)
-    in
-    try_from 0
+let string_contains_substring = String_util.string_contains_substring
 
 (** {1 Retry & Side-Effect Safety}
 

@@ -57,29 +57,7 @@ let parse_masc_internal_error_json = Cascade_error_from_sdk.parse_masc_internal_
 let classify_masc_internal_error_of_string = Cascade_error_from_sdk.classify_masc_internal_error_of_string
 let classify_masc_internal_error = Cascade_error_from_sdk.classify_masc_internal_error
 
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  if start_idx < 0 || start_idx + needle_len > String.length haystack
-  then false
-  else
-    let rec loop i =
-      if i >= needle_len then true
-      else if String.unsafe_get needle i <> String.unsafe_get haystack (start_idx + i)
-      then false
-      else loop (i + 1)
-    in
-    loop 0
-
-let string_contains_substring ~(needle : string) (haystack : string) =
-  if String.equal needle "" then true
-  else
-    let max_start = String.length haystack - String.length needle in
-    let rec loop i =
-      if i > max_start then false
-      else if substring_matches_at ~needle haystack i then true
-      else loop (i + 1)
-    in
-    loop 0
+let string_contains_substring = String_util.string_contains_substring
 
 let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
   match err with

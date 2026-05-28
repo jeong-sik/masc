@@ -17,40 +17,10 @@ open Keeper_context_runtime
 let default_turn_event_bus_drain_interval_sec = 0.05
 let turn_event_bus_drain_interval_sec () = default_turn_event_bus_drain_interval_sec
 
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  let rec loop offset =
-    if offset = needle_len
-    then true
-    else if haystack.[start_idx + offset] <> needle.[offset]
-    then false
-    else loop (offset + 1)
-  in
-  loop 0
+let string_contains_substring = String_util.string_contains_substring
 ;;
 
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  if needle_len = 0
-  then true
-  else if needle_len > hay_len
-  then false
-  else (
-    let rec loop i =
-      if i + needle_len > hay_len
-      then false
-      else if substring_matches_at ~needle haystack i
-      then true
-      else loop (i + 1)
-    in
-    loop 0)
-;;
-
-let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
-  string_contains_substring
-    ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
+let string_contains_substring_ci = String_util.string_contains_substring_ci
 ;;
 
 let side_effect_metric_label side_effect =

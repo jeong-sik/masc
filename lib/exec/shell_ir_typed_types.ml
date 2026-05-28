@@ -66,6 +66,7 @@ and (_, _, _, _) command =
       { path : string
       ; name : string option
       ; type_ : [ `File | `Dir ] option
+      ; maxdepth : int option
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Head :

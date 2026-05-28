@@ -423,7 +423,7 @@ parse false false [] args|}
     }
   ; { name = "Find"
     ; anon_pattern = "Find _"
-    ; bind_pattern = "Find { path; name; type_ }"
+    ; bind_pattern = "Find { path; name; type_; maxdepth }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -435,6 +435,7 @@ parse false false [] args|}
            | None -> []
            | Some `File -> [ "-type"; "f" ]
            | Some `Dir -> [ "-type"; "d" ])
+        @ (match maxdepth with None -> [] | Some d -> [ "-maxdepth"; string_of_int d ])
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Find
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
@@ -465,15 +466,19 @@ let value_flags =
   ; "-printf"; "-fprintf"; "-fls"; "-fprint0"; "-fprint"
   ]
 in
-let rec parse name type_ path = function
+let rec parse name type_ maxdepth path = function
   | [] ->
     let resolved = match path with Some p -> p | None -> "." in
-    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = resolved; name; type_ }))
-  | "-name" :: n :: rest -> parse (Some n) type_ path rest
-  | "-type" :: "f" :: rest -> parse name (Some `File) path rest
-  | "-type" :: "d" :: rest -> parse name (Some `Dir) path rest
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = resolved; name; type_; maxdepth }))
+  | "-name" :: n :: rest -> parse (Some n) type_ maxdepth path rest
+  | "-type" :: "f" :: rest -> parse name (Some `File) maxdepth path rest
+  | "-type" :: "d" :: rest -> parse name (Some `Dir) maxdepth path rest
+  | "-maxdepth" :: d :: rest ->
+    (match int_of_string_opt d with
+     | Some n -> parse name type_ (Some n) path rest
+     | None -> parse name type_ maxdepth path rest)
   | "-exec" :: rest | "-ok" :: rest
-  | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ path (skip_exec rest)
+  | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ maxdepth path (skip_exec rest)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then (
@@ -481,15 +486,15 @@ let rec parse name type_ path = function
       if List.mem arg value_flags
       then (
         match rest with
-        | _ :: rest' -> parse name type_ path rest'
-        | [] -> parse name type_ path rest)
-      else parse name type_ path rest)
+        | _ :: rest' -> parse name type_ maxdepth path rest'
+        | [] -> parse name type_ maxdepth path rest)
+      else parse name type_ maxdepth path rest)
     else (
       match path with
-      | None -> parse name type_ (Some arg) rest
+      | None -> parse name type_ maxdepth (Some arg) rest
       | Some _ -> None)
 in
-parse None None None args|}
+parse None None None None args|}
     }
   ; { name = "Head"
     ; anon_pattern = "Head _"

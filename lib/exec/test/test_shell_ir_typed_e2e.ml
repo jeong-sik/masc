@@ -752,6 +752,37 @@ let test_du_max_depth () =
     ~expected_depth:None ~expected_human:true ~expected_summary:true ~expected_path:(Some "/tmp")
 ;;
 
+(** Verify that [find] captures -maxdepth as a typed field. *)
+let test_find_maxdepth () =
+  let check_find cmd ~expected_name ~expected_type ~expected_maxdepth ~expected_path =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Find { path; name; type_; maxdepth }) ->
+      check (option string) (Printf.sprintf "\"%s\" → name" cmd) expected_name name;
+      (match expected_type, type_ with
+       | None, None -> ()
+       | Some `File, Some `File -> ()
+       | Some `Dir, Some `Dir -> ()
+       | _ -> failf "\"%s\" → type_ mismatch" cmd);
+      check (option int) (Printf.sprintf "\"%s\" → maxdepth" cmd) expected_maxdepth maxdepth;
+      check string (Printf.sprintf "\"%s\" → path" cmd) expected_path path
+    | _ -> failf "expected Find for: %s" cmd
+  in
+  (* with -maxdepth *)
+  check_find "find . -maxdepth 2 -name '*.ml'"
+    ~expected_name:(Some "*.ml") ~expected_type:None ~expected_maxdepth:(Some 2) ~expected_path:".";
+  (* without -maxdepth *)
+  check_find "find /tmp -name 'foo' -type f"
+    ~expected_name:(Some "foo") ~expected_type:(Some `File) ~expected_maxdepth:None ~expected_path:"/tmp";
+  (* -maxdepth 1 with -type d *)
+  check_find "find . -maxdepth 1 -type d"
+    ~expected_name:None ~expected_type:(Some `Dir) ~expected_maxdepth:(Some 1) ~expected_path:".";
+  (* -maxdepth 0 edge case *)
+  check_find "find / -maxdepth 0 -name 'etc'"
+    ~expected_name:(Some "etc") ~expected_type:None ~expected_maxdepth:(Some 0) ~expected_path:"/"
+;;
+
 (** Verify that [uniq] handles -f and -s value flags. *)
 let test_uniq_value_flags () =
   let check_uniq cmd ~expected_count ~expected_duplicates ~expected_unique ~expected_file =
@@ -1080,6 +1111,8 @@ let suite =
     , [ test_case "field values" `Quick test_cut_long_forms ] )
   ; ( "E2E: Du --max-depth"
     , [ test_case "field values" `Quick test_du_max_depth ] )
+  ; ( "E2E: Find -maxdepth"
+    , [ test_case "field values" `Quick test_find_maxdepth ] )
   ; ( "E2E: Uniq -f/-s"
     , [ test_case "field values" `Quick test_uniq_value_flags ] )
   ; ( "E2E: Grep combined flags"

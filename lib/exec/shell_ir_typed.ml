@@ -90,16 +90,18 @@ let pp fmt = function
          ~pp_sep:(fun fmt () -> Format.fprintf fmt " ")
          Format.pp_print_string)
       target_argv
-  | W (Find { path; name; type_ }) ->
+  | W (Find { path; name; type_; maxdepth }) ->
     Format.fprintf
       fmt
-      "Find(path=%s, name=%a, type_=%a)"
+      "Find(path=%s, name=%a, type_=%a, maxdepth=%a)"
       path
       (Format.pp_print_option Format.pp_print_string)
       name
       (Format.pp_print_option (fun fmt t ->
          Format.pp_print_string fmt (match t with `File -> "f" | `Dir -> "d")))
       type_
+      (Format.pp_print_option Format.pp_print_int)
+      maxdepth
   | W (Head { path; lines }) ->
     Format.fprintf fmt "Head(path=%s, lines=%d)" path lines
   | W (Tail { path; lines }) ->

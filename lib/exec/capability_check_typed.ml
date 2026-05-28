@@ -90,7 +90,7 @@ let of_command = function
   | Shell_ir_typed.W (Sudo { target_argv }) ->
     let args = List.map arg target_argv in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sudo, args) ]
-  | Shell_ir_typed.W (Find { path; name; type_ }) ->
+  | Shell_ir_typed.W (Find { path; name; type_; maxdepth }) ->
     let args =
       arg path
       :: (match name with None -> [] | Some n -> [ arg "-name"; arg n ])
@@ -98,6 +98,7 @@ let of_command = function
          | None -> []
          | Some `File -> [ arg "-type"; arg "f" ]
          | Some `Dir -> [ arg "-type"; arg "d" ])
+      @ (match maxdepth with None -> [] | Some d -> [ arg "-maxdepth"; arg (string_of_int d) ])
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Find, args) ]
   | Shell_ir_typed.W (Head { path; lines }) ->

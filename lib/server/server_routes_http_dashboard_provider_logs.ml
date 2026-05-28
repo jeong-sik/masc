@@ -2,13 +2,8 @@
 
 module Cascade_decl = Cascade_declarative_types
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
-
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
+let option_int_json = Json_util.option_to_yojson (fun v -> `Int v)
+let option_string_json = Json_util.option_to_yojson (fun v -> `String v)
 
 let provider_log_surface = "/api/v1/dashboard/provider-logs"
 let provider_log_tail_surface = "/api/v1/dashboard/provider-logs/tail"
@@ -19,9 +14,7 @@ let provider_log_hard_max_bytes = 4_194_304
 
 let clamp_int ~min_value ~max_value value = max min_value (min max_value value)
 
-let string_starts_with ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
+let string_starts_with = String.starts_with
 
 let expand_provider_log_path raw =
   let path = String.trim raw in

@@ -1,6 +1,6 @@
 (** SSOT for LLM-provider runtime error classification surfaced to
     keeper auto-resume reactors (Provider_capacity backpressure,
-    Tier_admission watchdog, Provider_dns_failure, Provider_timeout).
+    Admission watchdog, Provider_dns_failure, Provider_timeout).
 
     RFC-0142 §Phase 2 — PR-A.
 
@@ -44,9 +44,9 @@ type t =
       (** Local in-flight admission cap reached; the failure is on
           our side, not the provider.  RFC-0042 / RFC-0058 territory.
           Reactor: pause new admission, drain in-flight. *)
-  | Tier_admission_exhausted of { capability_profile : string option }
-      (** Cascade tier-group admission denied because every model in
-          the strict capability profile is saturated or unavailable.
+  | Admission_exhausted of { capability_profile : string option }
+      (** Cascade admission denied because every model in the strict
+          capability profile is saturated or unavailable.
           [capability_profile] is the canonical profile name (e.g.
           [Some "strict_tool_candidates"]) when the adapter can
           attribute the denial to a specific profile, [None]
@@ -125,7 +125,7 @@ val timeout_http_statuses : int list
 
 val to_short_tag : t -> string
 (** Returns the stable short tag.  One of:
-    [client_capacity_exhausted], [tier_admission_exhausted],
+    [client_capacity_exhausted], [admission_exhausted],
     [backpressure], [dns_resolution_failure], [response_timeout],
     [unspecified]. *)
 

@@ -76,13 +76,7 @@ let make_loop
 
 let active_open_loop_count state = List.length state.active_loops
 
-let take n values =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: xs -> loop (remaining - 1) (x :: acc) xs
-  in
-  loop n [] values
+let take = List.take
 
 let drop n values =
   let rec loop remaining = function

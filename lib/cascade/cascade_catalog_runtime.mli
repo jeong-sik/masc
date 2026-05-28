@@ -39,9 +39,9 @@ type profile_build = {
   probes : candidate_probe list;
   required_capability_profile : string option;
       (** Profile-scoped capability lint hint. The RFC-0058 declarative
-          namespaces ([providers], [models], [tier], [tier-group] +
-          provider binding tables) do not carry this field yet, so callers
-          normally see [None] under fully-declarative configs. *)
+          namespaces ([providers], [models] + provider binding tables)
+          do not carry this field yet, so callers normally see [None]
+          under fully-declarative configs. *)
 }
 
 type snapshot = {
@@ -80,10 +80,21 @@ val inspect_active :
   unit ->
   (state, rejection) result
 
+(** Re-exported pass-through type for the DI envelope owned by
+    {!Cascade_catalog_runtime_validate}.  See [route_data] there. *)
+type route_data = Cascade_catalog_runtime_validate.route_data = {
+  keeper_turn_target : string;
+  route_targets : string list;
+  unknown_route_keys : string list;
+}
+
+val empty_route_data : route_data
+
 val validate_path :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  route_data:route_data ->
   config_path:string ->
   unit ->
   (snapshot, rejection) result
@@ -246,10 +257,7 @@ val candidate_probe_to_yojson : candidate_probe -> Yojson.Safe.t
 
 val invalidate_path : string -> unit
 
-val runtime_required_profile_names :
-  ?config_path:string ->
-  unit ->
-  string list
+(* #19327/#19340 follow-up: [runtime_required_profile_names] removed (dead). *)
 
 val install_snapshot_for_tests :
   source_path:string ->

@@ -565,10 +565,7 @@ let admitted = function
   | Block _ -> false
 ;;
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
+let option_int_json = Json_util.option_to_yojson (fun v -> `Int v)
 
 let admission_block_to_json = function
   | Fd_pressure_cooldown remaining_sec ->

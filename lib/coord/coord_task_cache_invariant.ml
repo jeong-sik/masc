@@ -36,11 +36,7 @@ let string_contains s needle =
     loop 0
 ;;
 
-let string_starts_with ~prefix s =
-  let len_s = String.length s in
-  let len_prefix = String.length prefix in
-  len_s >= len_prefix && String.sub s 0 len_prefix = prefix
-;;
+let string_starts_with = String.starts_with
 
 let trusted_cache_signal_sender from_agent =
   String.lowercase_ascii from_agent |> fun value ->

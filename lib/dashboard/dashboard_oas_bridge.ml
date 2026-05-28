@@ -362,13 +362,7 @@ let snapshot_all () =
         (fun _ q acc -> Queue.fold (fun a x -> x :: a) acc q)
         table [])
 
-let take_first n xs =
-  let rec aux n acc = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: rest -> aux (n - 1) (x :: acc) rest
-  in
-  aux n [] xs
+let take_first = List.take
 
 let recent ?provider ?(limit = 50) () =
   let xs =

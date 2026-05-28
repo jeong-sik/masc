@@ -106,7 +106,15 @@ let inspect_active ?sw ?net ?clock () =
            | _ -> ());
           result
       | None -> (
-          match Validate.validate_path_result ?sw ?net ~config_path () with
+          (* #19327/#19340 follow-up: internal resolve path skips the
+             route-target cross-check by passing [empty_route_data] — that
+             check is owned by external callers (dashboard / boot probes)
+             which fetch from [Cascade_routes] explicitly.  See PR cycle
+             resolution. *)
+          match
+            Validate.validate_path_result ?sw ?net
+              ~route_data:Validate.empty_route_data ~config_path ()
+          with
           | Ok { snapshot; rejected_update = None } ->
               (* Recovery detection: capture prev rejected_update
                  inside the same lock as the write so a degraded ->
@@ -266,7 +274,7 @@ let lookup_active_profile ?sw ?net ?clock raw_name =
         | Error `Invalid_prefix ->
             Error
               (Printf.sprintf
-                 "cascade_name %S lacks required prefix (tier-group|tier|route)"
+                 "cascade_name %S lacks required prefix (route.)"
                  trimmed)
         | Error `Empty ->
             (* Defensive: empty case is handled above, but [of_string]

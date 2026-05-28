@@ -28,14 +28,10 @@ module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_types_support = Masc_mcp.Keeper_types_support
 
+(* #19327 tier-group purge: Cascade_name is a plain string alias. *)
 let oas_error_cascade_name raw =
-  let normalized = Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw in
-  let canonical =
-    if Cascade_name.is_canonical_prefix normalized
-    then normalized
-    else "tier-group." ^ normalized
-  in
-  Cascade_name.of_string_exn canonical
+  Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw
+  |> Cascade_name.of_string_exn
 ;;
 
 let phase_buffer_cascade_name () =
@@ -11497,12 +11493,12 @@ let () =
                        { status = 522
                        ; message = "Connection timed out"
                        }))))
-        ; test_case "ServerError 524 short-circuits same-cascade transient retry" `Quick
+        ; test_case "ServerError 524 advances cascade to next provider" `Quick
           (fun () ->
             check
               bool
-              "524 cloudflare timeout is not same-cascade transient"
-              false
+              "524 cloudflare timeout is transient — advances cascade"
+              true
               (EC.is_transient_network_error
                  (Agent_sdk.Error.Api
                     (ServerError

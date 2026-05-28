@@ -128,16 +128,10 @@ let apply_provider_filter = Cascade_config_provider_filter.apply_provider_filter
 let apply_provider_filter_strict =
   Cascade_config_provider_filter.apply_provider_filter_strict
 
-(* Strategy / priority-tier / concurrency resolution (this PR) *)
-let normalize_priority_tiers =
-  Cascade_config_strategy_resolve.normalize_priority_tiers
+(* Strategy / concurrency resolution (priority-tier removed in #19327). *)
 let resolve_strategy = Cascade_config_strategy_resolve.resolve_strategy
 let resolve_ollama_max_concurrent =
   Cascade_config_strategy_resolve.resolve_ollama_max_concurrent
 let resolve_cli_max_concurrent =
   Cascade_config_strategy_resolve.resolve_cli_max_concurrent
 
-(* Phonebook loading (RFC Cascade-Phonebook) *)
-let load_phonebook = Cascade_config_loader.load_phonebook
-let invalidate_phonebook_cache = Cascade_config_loader.invalidate_phonebook_cache
-let load_phonebook_from_config = Cascade_config_loader.load_phonebook_from_config

@@ -972,7 +972,10 @@ target = "tier.primary"
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   match
-    Masc_mcp.Cascade_catalog_runtime.validate_path ~config_path:cascade_path ()
+    (* #19327/#19340 follow-up: validate_path now takes ~route_data. *)
+    Masc_mcp.Cascade_catalog_runtime.validate_path
+      ~route_data:Masc_mcp.Cascade_catalog_runtime.empty_route_data
+      ~config_path:cascade_path ()
   with
   | Ok _ -> fail "runtime validation should reject declarative parse errors"
   | Error rejection ->
@@ -1006,7 +1009,10 @@ target = "tier.broken"
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   match
-    Masc_mcp.Cascade_catalog_runtime.validate_path ~config_path:cascade_path ()
+    (* #19327/#19340 follow-up: validate_path now takes ~route_data. *)
+    Masc_mcp.Cascade_catalog_runtime.validate_path
+      ~route_data:Masc_mcp.Cascade_catalog_runtime.empty_route_data
+      ~config_path:cascade_path ()
   with
   | Ok _ -> fail "runtime validation should reject declarative adapter errors"
   | Error rejection ->
@@ -1046,7 +1052,10 @@ target = "tier-group.local_only"
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   match
-    Masc_mcp.Cascade_catalog_runtime.validate_path ~config_path:cascade_path ()
+    (* #19327/#19340 follow-up: validate_path now takes ~route_data. *)
+    Masc_mcp.Cascade_catalog_runtime.validate_path
+      ~route_data:Masc_mcp.Cascade_catalog_runtime.empty_route_data
+      ~config_path:cascade_path ()
   with
   | Ok _ -> fail "runtime validation should reject deprecated cascade profile names"
   | Error rejection ->

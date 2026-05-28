@@ -1,20 +1,20 @@
-(** Cascade_tier_wait_scheduler — bounded wait layer over tier admission.
+(** Cascade_tier_wait_scheduler — bounded wait layer over cascade admission.
 
     RFC-0153 Phase C.1.
 
     Architecture:
     - Wraps [Cascade_tier_admission.t] without modifying it (tower
       composition pattern).
-    - Per-tier FIFO queue of waiting fibers, each with its own
+    - Per-cascade FIFO queue of waiting fibers, each with its own
       [Eio.Promise] for wake-up notification.
     - Backoff: fiber sleeps [backoff_delay] then retries [try_acquire].
     - On release: oldest waiter's promise is resolved, waking it.
     - Timeout: each fiber tracks its own deadline via [Eio.Time.Timeout].
 
     Concurrency model:
-    - [tier_mu] protects the per-tier waiter queue + stats.
+    - [cascade_mu] protects the per-cascade waiter queue + stats.
     - Admission [try_acquire] / [release] go through the underlying
-      [Cascade_tier_admission.t] which has its own per-tier mutex.
+      [Cascade_tier_admission.t] which has its own per-cascade mutex.
     - Fiber-per-waiter: each [try_admission_or_wait] call that hits
       capacity_full spawns a wait loop in the calling fiber (no extra
       fiber). The fiber is identified by its promise for FIFO ordering. *)
@@ -54,28 +54,28 @@ let next_backoff_delay strategy attempt =
 
 type rejection_detail =
   | Timeout_expired of {
-      tier_id : string;
+      admission_key : string;
       total_waited_s : float;
       attempts : int;
     }
   | Max_retries_exceeded of {
-      tier_id : string;
+      admission_key : string;
       retries : int;
       total_waited_s : float;
     }
-  | Cancelled of { tier_id : string }
+  | Cancelled of { admission_key : string }
 
 let pp_rejection_detail fmt = function
-  | Timeout_expired { tier_id; total_waited_s; attempts } ->
+  | Timeout_expired { admission_key; total_waited_s; attempts } ->
       Format.fprintf fmt
-        "timeout_expired tier=%s waited=%.3fs attempts=%d"
-        tier_id total_waited_s attempts
-  | Max_retries_exceeded { tier_id; retries; total_waited_s } ->
+        "timeout_expired admission_key=%s waited=%.3fs attempts=%d"
+        admission_key total_waited_s attempts
+  | Max_retries_exceeded { admission_key; retries; total_waited_s } ->
       Format.fprintf fmt
-        "max_retries_exceeded tier=%s retries=%d waited=%.3fs"
-        tier_id retries total_waited_s
-  | Cancelled { tier_id } ->
-      Format.fprintf fmt "cancelled tier=%s" tier_id
+        "max_retries_exceeded admission_key=%s retries=%d waited=%.3fs"
+        admission_key retries total_waited_s
+  | Cancelled { admission_key } ->
+      Format.fprintf fmt "cancelled admission_key=%s" admission_key
 
 (* ── Per-tier state ─────────────────────────────────────────────── *)
 
@@ -84,7 +84,7 @@ type waiter = {
   resolver : unit Eio.Promise.u;
 }
 
-type tier_wait_state = {
+type cascade_wait_state = {
   mu : Eio.Mutex.t;
   mutable waiters : waiter Queue.t;
   mutable total_admitted : int;
@@ -93,7 +93,7 @@ type tier_wait_state = {
   mutable total_wait_s : float;
 }
 
-let create_tier_state () =
+let create_cascade_state () =
   {
     mu = Eio.Mutex.create ();
     waiters = Queue.create ();
@@ -107,7 +107,7 @@ let create_tier_state () =
 
 type t = {
   admission : Cascade_tier_admission.t;
-  tiers : (string, tier_wait_state) Hashtbl.t;
+  cascades : (string, cascade_wait_state) Hashtbl.t;
   guard_mu : Eio.Mutex.t;
   default_wait_config : wait_config;
   clock : float Eio.Time.clock_ty Eio.Resource.t option;
@@ -116,7 +116,7 @@ type t = {
 let create ?(default_wait_config = default_wait_config) ?clock admission =
   {
     admission;
-    tiers = Hashtbl.create 8;
+    cascades = Hashtbl.create 8;
     guard_mu = Eio.Mutex.create ();
     default_wait_config;
     clock;
@@ -124,13 +124,13 @@ let create ?(default_wait_config = default_wait_config) ?clock admission =
 
 let clock t = t.clock
 
-let get_or_create_tier t tier_id =
+let get_or_create_cascade t admission_key =
   Eio.Mutex.use_rw t.guard_mu ~protect:false (fun () ->
-      match Hashtbl.find_opt t.tiers tier_id with
+      match Hashtbl.find_opt t.cascades admission_key with
       | Some ts -> ts
       | None ->
-          let ts = create_tier_state () in
-          Hashtbl.add t.tiers tier_id ts;
+          let ts = create_cascade_state () in
+          Hashtbl.add t.cascades admission_key ts;
           ts)
 
 (* ── Wake oldest waiter (FIFO) ──────────────────────────────────── *)
@@ -145,8 +145,8 @@ let wake_oldest ts =
 
 (* ── on_admission_release ───────────────────────────────────────── *)
 
-let on_admission_release t ~tier_id =
-  match Hashtbl.find_opt t.tiers tier_id with
+let on_admission_release t ~admission_key =
+  match Hashtbl.find_opt t.cascades admission_key with
   | None -> ()
   | Some ts ->
       Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
@@ -190,7 +190,7 @@ let backoff_sleep t ~sw delay_s waiter_promise =
 
 (* ── Main API: try_admission_or_wait ────────────────────────────── *)
 
-let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
+let try_admission_or_wait t ~admission_key ?(wait_config = t.default_wait_config)
     ?deadline:cascade_deadline ~sw f =
   let start_time = Unix.gettimeofday () in
   (* RFC-0192 § 2: effective per-call timeout =
@@ -207,23 +207,23 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
   in
 
   (* Attempt 1: immediate try_acquire *)
-  match Cascade_tier_admission.try_acquire t.admission ~tier_id with
+  match Cascade_tier_admission.try_acquire t.admission ~admission_key with
   | Cascade_tier_admission.Granted _ ->
-      (* Fast path — run f with auto-release. No tier state created. *)
+      (* Fast path — run f with auto-release. No cascade state created. *)
       (match f () with
        | v ->
-           Cascade_tier_admission.release t.admission ~tier_id;
-           on_admission_release t ~tier_id;
+           Cascade_tier_admission.release t.admission ~admission_key;
+           on_admission_release t ~admission_key;
            Ok v
        | exception exn ->
            (try
-              Cascade_tier_admission.release t.admission ~tier_id;
-              on_admission_release t ~tier_id
+              Cascade_tier_admission.release t.admission ~admission_key;
+              on_admission_release t ~admission_key
             with _ -> ());
            raise exn)
   | Cascade_tier_admission.Capacity_full _ ->
-      (* Slow path — create tier state lazily, enter wait loop *)
-      let ts = get_or_create_tier t tier_id in
+      (* Slow path — create cascade state lazily, enter wait loop *)
+      let ts = get_or_create_cascade t admission_key in
       let wait_deadline_s = start_time +. effective_timeout_s in
       let max_retries = wait_config.max_retries in
       let rec loop attempt total_waited =
@@ -234,7 +234,7 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
               ts.total_timeouts <- ts.total_timeouts + 1;
               ts.total_rejected <- ts.total_rejected + 1;
               ts.total_wait_s <- ts.total_wait_s +. total_waited);
-          Error (Timeout_expired { tier_id; total_waited_s = total_waited; attempts = attempt })
+          Error (Timeout_expired { admission_key; total_waited_s = total_waited; attempts = attempt })
         end
         (* Check max_retries *)
         else begin
@@ -244,7 +244,7 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
                   ts.total_rejected <- ts.total_rejected + 1;
                   ts.total_wait_s <- ts.total_wait_s +. total_waited);
               Error (Max_retries_exceeded {
-                tier_id;
+                admission_key;
                 retries = attempt - 1;
                 total_waited_s = total_waited;
               })
@@ -280,7 +280,7 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
                   ) remaining);
               (* Always try_acquire after sleep or wake *)
               match Cascade_tier_admission.try_acquire t.admission
-                      ~tier_id with
+                      ~admission_key with
               | Cascade_tier_admission.Granted _ ->
                   Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
                       ts.total_admitted <- ts.total_admitted + 1;
@@ -288,13 +288,13 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
                   (match f () with
                    | v ->
                        Cascade_tier_admission.release t.admission
-                         ~tier_id;
-                       on_admission_release t ~tier_id;
+                         ~admission_key;
+                       on_admission_release t ~admission_key;
                        Ok v
                    | exception exn ->
                        (try Cascade_tier_admission.release
-                              t.admission ~tier_id;
-                            on_admission_release t ~tier_id
+                              t.admission ~admission_key;
+                            on_admission_release t ~admission_key
                         with _ -> ());
                        raise exn)
               | Cascade_tier_admission.Capacity_full _ ->
@@ -306,7 +306,7 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
                         ts.total_rejected <- ts.total_rejected + 1;
                         ts.total_wait_s <- ts.total_wait_s +. new_total);
                     Error (Timeout_expired {
-                      tier_id;
+                      admission_key;
                       total_waited_s = new_total;
                       attempts = attempt;
                     })
@@ -319,8 +319,8 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
 
 (* ── Observability ──────────────────────────────────────────────── *)
 
-type tier_wait_stats = {
-  tier_id : string;
+type cascade_wait_stats = {
+  admission_key : string;
   waiting_fibers : int;
   total_admitted : int;
   total_rejected : int;
@@ -328,8 +328,8 @@ type tier_wait_stats = {
   avg_wait_s : float;
 }
 
-let stats t ~tier_id =
-  match Hashtbl.find_opt t.tiers tier_id with
+let stats t ~admission_key =
+  match Hashtbl.find_opt t.cascades admission_key with
   | None -> None
   | Some ts ->
       Eio.Mutex.use_ro ts.mu (fun () ->
@@ -339,7 +339,7 @@ let stats t ~tier_id =
             else 0.0
           in
           Some {
-            tier_id;
+            admission_key;
             waiting_fibers = Queue.length ts.waiters;
             total_admitted = ts.total_admitted;
             total_rejected = ts.total_rejected;
@@ -348,8 +348,8 @@ let stats t ~tier_id =
           })
 
 let all_stats t =
-  Hashtbl.fold (fun tier_id ts acc ->
-      match stats t ~tier_id with
+  Hashtbl.fold (fun admission_key ts acc ->
+      match stats t ~admission_key with
       | Some s -> s :: acc
       | None -> acc
-    ) t.tiers []
+    ) t.cascades []

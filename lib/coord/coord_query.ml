@@ -68,15 +68,7 @@ let get_tasks_safe config =
 let safe_yield () =
   Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 
-let take_first n xs =
-  if n <= 0 then []
-  else
-    let rec loop acc remaining = function
-      | [] -> List.rev acc
-      | _ when remaining <= 0 -> List.rev acc
-      | x :: rest -> loop (x :: acc) (remaining - 1) rest
-    in
-    loop [] n xs
+let take_first = List.take
 
 let list_leaf_json_names config dir =
   list_dir config dir

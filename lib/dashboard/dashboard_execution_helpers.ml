@@ -98,7 +98,7 @@ let string_field_opt key json =
       if trimmed <> "" then Some trimmed else None
   | _ -> None
 
-let take n lst = List.filteri (fun i _ -> i < n) lst
+let take = List.take
 
 let int_field ?(default = 0) key json =
   match member_assoc key json with

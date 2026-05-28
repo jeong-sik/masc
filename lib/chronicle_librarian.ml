@@ -59,13 +59,7 @@ let to_gravity_item ~now_ms (ev : Chronicle_event.t) =
     frequency_weight = 0.0;
   }
 
-let take n xs =
-  let rec aux k acc = function
-    | [] -> List.rev acc
-    | _ when k <= 0 -> List.rev acc
-    | x :: rest -> aux (k - 1) (x :: acc) rest
-  in
-  aux n [] xs
+let take = List.take
 
 let search (s : store) ~query ?now_ms ?limit () =
   let now =

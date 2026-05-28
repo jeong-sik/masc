@@ -210,8 +210,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
                   ("suggested_params", `Assoc []);
                 ]))
 
-let take_n n lst =
-  if List.length lst <= n then lst else List.filteri (fun i _ -> i < n) lst
+let take_n = List.take
 
 let severity_of_meta_salience = function
   | Meta_cognition.Operator_tension -> "bad"

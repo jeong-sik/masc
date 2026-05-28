@@ -51,6 +51,16 @@ val sorted_hooks : unit -> hook list
 
 val is_shutting_down_global : unit -> bool
 
+val mark_shutting_down : unit -> unit
+(** Set the sticky global shutdown flag observed by
+    [is_shutting_down_global]. Safe to call from an OCaml signal handler:
+    backed by [Atomic.set], lock-free, async-signal-safe. Idempotent.
+
+    Call this from the SIGTERM/SIGINT handler before any fiber observes
+    [Eio.Cancel.Cancelled], so consumers can reclassify cancellation as
+    graceful shutdown (see [Keeper_registry_types_failure.fiber_drop_cause]
+    [Graceful_shutdown]). *)
+
 (** {1 Phase Execution} *)
 
 val initiate :

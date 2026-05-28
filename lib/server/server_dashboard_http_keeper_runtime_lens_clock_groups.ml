@@ -176,13 +176,7 @@ let clock_group_jsons scan =
   | `List groups -> groups
   | _ -> []
 
-let take_n n values =
-  let rec loop acc remaining = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | value :: rest -> loop (value :: acc) (remaining - 1) rest
-  in
-  loop [] n values
+let take_n = List.take
 
 let preview_values values =
   let first = take_n 4 values in

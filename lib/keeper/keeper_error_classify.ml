@@ -45,15 +45,12 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (Overloaded _) -> true
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
   (* Cloudflare 52x timeout family — origin server unreachable or
-     slow to respond.
-     522 = Connection timed out (TCP handshake failed).
-     524 = A timeout occurred after the origin accepted the request; keep it
-     out of the same-cascade transient retry path so it can short-circuit into
-     the degraded cascade rotation server_error path instead. *)
+     slow to respond. Both are transient: a different provider may succeed
+     where one origin timed out, so the cascade should advance. *)
   | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> true
-  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> false
+  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
-      false
+      true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       transient
   (* Non-transient API errors. *)
@@ -505,9 +502,6 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.A2a _
          | Agent_sdk.Error.Internal _ -> None)
 
-(* Tier/tier-group purge: all cascade names are plain provider:model strings.
-   No prefix qualification, canonical form, or bare-name requalification. *)
-
 let normalized_cascade_name ~catalog_names name =
   let trimmed = String.trim name in
   if List.exists (String.equal trimmed) catalog_names then trimmed
@@ -517,9 +511,6 @@ let normalized_cascade_name ~catalog_names name =
     || String.equal trimmed Keeper_config.tool_required_cascade_name
   then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
-
-(* Tier/tier-group purge: no tier/tier-group prefixes exist. *)
-let direct_tier_duplicates_attempted_group ~attempted:_ ~candidate:_ = false
 
 let required_tool_rotation_candidate
     ?(allow_phase_recovery = false)
@@ -653,8 +644,7 @@ let degraded_rotation_after_recoverable_error
         ~fallback_hint
         ~base_cascade ~effective_cascade ~tool_requirement
       |> List.find_opt (fun candidate ->
-             (not (List.exists (String.equal candidate) attempted))
-             && not (direct_tier_duplicates_attempted_group ~attempted ~candidate))
+             not (List.exists (String.equal candidate) attempted))
       |> Option.map (fun next_cascade -> { next_cascade; fallback_reason })
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =

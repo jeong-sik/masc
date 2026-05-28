@@ -2494,7 +2494,7 @@
         },
         {
           "file": "lib/server/server_mcp_transport_http_headers.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/server/server_mcp_transport_http_protocol.ml",
@@ -2602,7 +2602,7 @@
         },
         {
           "file": "lib/server/server_routes_http_runtime.ml",
-          "value": 6
+          "value": 7
         },
         {
           "file": "lib/server/server_routes_http_sidecar_paths.ml",

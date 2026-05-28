@@ -503,6 +503,8 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                   validated_at = checked_at;
                   profiles = profile_snapshots;
                   default_profile_name =
+                    (* NDT-OK: sound-partial: optional route target defaults
+                       to empty when no routes.keeper_turn is configured. *)
                     Option.value required_default_profile ~default:"";
                 }
               in

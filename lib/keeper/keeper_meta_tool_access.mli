@@ -32,18 +32,6 @@ val tool_access_default_room_signal_prompt_enabled :
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)
 val normalize_tool_names : string list -> string list
 
-(** Legacy [Keeper_internal] tools, with [masc_*] internals filtered
-    out so legacy migrations don't silently re-expand. *)
-val legacy_keeper_internal_tool_names : string list
-
-(** Canonical legacy MASC coordination tools that historical keepers
-    received before tier removal. *)
-val legacy_session_min_tool_names : string list
-
-(** Build a [Custom tool_access] from
-    [legacy_keeper_internal_tool_names ++ names], normalised. *)
-val migrate_legacy_restricted_tools : string list -> tool_access
-
 val tool_preset_to_string : tool_preset -> string
 val all_tool_presets : tool_preset list
 val valid_tool_preset_strings : string list
@@ -80,7 +68,7 @@ val string_list_field_opt_result :
   (string list, string) result
 
 (** Default [tool_access] for missing/null fields:
-    [migrate_legacy_restricted_tools legacy_session_min_tool_names]. *)
+    [Keeper_internal] surface with write tools excluded. *)
 val default_tool_access_of_meta_json : unit -> tool_access
 
 (** Parse [tool_access] from persisted meta JSON, accepting only the

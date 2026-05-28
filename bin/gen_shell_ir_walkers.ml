@@ -1858,7 +1858,7 @@ parse None false false None args|}
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
-    ; bind_pattern = "Ssh { host; user; command; port }"
+    ; bind_pattern = "Ssh { host; user; command; port; identity_file }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -1869,8 +1869,10 @@ parse None false false None args|}
         | Some u -> u ^ "@" ^ host
       in
       let port_args = match port with Some p -> [ "-p"; string_of_int p ] | None -> [] in
+      let id_args = match identity_file with Some f -> [ "-i"; f ] | None -> [] in
       let args =
         port_args
+        @ id_args
         @ [ host_str ]
         @ (match command with None -> [] | Some c -> [ c ])
       in
@@ -1885,24 +1887,24 @@ parse None false false None args|}
     ; parse_body =
         Some
           {|
-let rec parse port host user command = function
+let rec parse port id_file host user command = function
   | [] ->
     (match host with
      | Some h ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host = h; user; command; port }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host = h; user; command; port; identity_file = id_file }))
      | None -> None)
   | "-p" :: p_str :: rest ->
     (match int_of_string_opt p_str with
-     | Some p -> parse (Some p) host user command rest
-     | None -> parse port host user command rest)
-  | "-i" :: _ :: rest -> parse port host user command rest
-  | "-o" :: _ :: rest -> parse port host user command rest
-  | "-L" :: _ :: rest -> parse port host user command rest
-  | "-R" :: _ :: rest -> parse port host user command rest
-  | "-D" :: _ :: rest -> parse port host user command rest
+     | Some p -> parse (Some p) id_file host user command rest
+     | None -> parse port id_file host user command rest)
+  | "-i" :: f :: rest -> parse port (Some f) host user command rest
+  | "-o" :: _ :: rest -> parse port id_file host user command rest
+  | "-L" :: _ :: rest -> parse port id_file host user command rest
+  | "-R" :: _ :: rest -> parse port id_file host user command rest
+  | "-D" :: _ :: rest -> parse port id_file host user command rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse port host user command rest
+    then parse port id_file host user command rest
     else (
       match host with
       | None ->
@@ -1912,14 +1914,14 @@ let rec parse port host user command = function
           | [ u; h ] -> (Some u, h)
           | _ -> (None, arg)
         in
-        parse port (Some h) u command rest
+        parse port id_file (Some h) u command rest
       | Some _ ->
         (* Remaining positional tokens are the remote command *)
         let cmd = String.concat " " (arg :: rest) in
         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh
-          { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port })))
+          { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port; identity_file = id_file })))
 in
-parse None None None None args|}
+parse None None None None None args|}
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"

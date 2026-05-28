@@ -238,6 +238,7 @@ and (_, _, _, _) command =
       ; user : string option
       ; command : string option
       ; port : int option
+      ; identity_file : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Scp :

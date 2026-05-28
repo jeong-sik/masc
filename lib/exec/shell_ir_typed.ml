@@ -315,10 +315,10 @@ let pp fmt = function
       output
       continue_
       no_check_certificate
-  | W (Ssh { host; user; command; port }) ->
+  | W (Ssh { host; user; command; port; identity_file }) ->
     Format.fprintf
       fmt
-      "Ssh(host=%s, user=%a, command=%a, port=%a)"
+      "Ssh(host=%s, user=%a, command=%a, port=%a, id=%a)"
       host
       (Format.pp_print_option Format.pp_print_string)
       user
@@ -326,6 +326,8 @@ let pp fmt = function
       command
       (Format.pp_print_option Format.pp_print_int)
       port
+      (Format.pp_print_option Format.pp_print_string)
+      identity_file
   | W (Scp { source; dest; recursive; port }) ->
     Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b, port=%a)" source dest recursive
       (Format.pp_print_option Format.pp_print_int) port

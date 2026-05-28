@@ -294,13 +294,14 @@ let of_command = function
       @ (match output with None -> [] | Some o -> [ arg "-O"; arg o ])
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Wget, flag_args @ [ arg url ]) ]
-  | Shell_ir_typed.W (Ssh { host; user; command; port }) ->
+  | Shell_ir_typed.W (Ssh { host; user; command; port; identity_file }) ->
     let target =
       match user with None -> host | Some u -> u ^ "@" ^ host
     in
     let port_args = match port with Some p -> [ arg "-p"; arg (string_of_int p) ] | None -> [] in
+    let id_args = match identity_file with Some f -> [ arg "-i"; arg f ] | None -> [] in
     let cmd_args = match command with None -> [] | Some c -> [ arg c ] in
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, port_args @ [ arg target ] @ cmd_args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, port_args @ id_args @ [ arg target ] @ cmd_args) ]
   | Shell_ir_typed.W (Scp { source; dest; recursive; port }) ->
     let port_args = match port with Some p -> [ arg "-P"; arg (string_of_int p) ] | None -> [] in
     let flag_args = port_args @ (if recursive then [ arg "-r" ] else []) in

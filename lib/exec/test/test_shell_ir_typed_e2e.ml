@@ -964,6 +964,35 @@ let test_wget_long_form () =
     ~expected_continue:true ~expected_ncc:true
 ;;
 
+let test_ssh_identity_file () =
+  let check_ssh cmd ~expected_host ~expected_user ~expected_port ~expected_id =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Ssh { host; user; command = _; port; identity_file }) ->
+      check string (Printf.sprintf "\"%s\" → host" cmd) expected_host host;
+      check (option string) (Printf.sprintf "\"%s\" → user" cmd) expected_user user;
+      check (option int) (Printf.sprintf "\"%s\" → port" cmd) expected_port port;
+      check (option string) (Printf.sprintf "\"%s\" → identity_file" cmd) expected_id identity_file
+    | _ -> failf "expected Ssh for: %s" cmd
+  in
+  (* basic - no identity file *)
+  check_ssh "ssh user@host"
+    ~expected_host:"host" ~expected_user:(Some "user") ~expected_port:None ~expected_id:None;
+  (* -i flag *)
+  check_ssh "ssh -i ~/.ssh/id_rsa user@host"
+    ~expected_host:"host" ~expected_user:(Some "user") ~expected_port:None
+    ~expected_id:(Some "~/.ssh/id_rsa");
+  (* -i with port *)
+  check_ssh "ssh -p 2222 -i /path/key user@host"
+    ~expected_host:"host" ~expected_user:(Some "user") ~expected_port:(Some 2222)
+    ~expected_id:(Some "/path/key");
+  (* -i before user@host, no user *)
+  check_ssh "ssh -i key.pem host"
+    ~expected_host:"host" ~expected_user:None ~expected_port:None
+    ~expected_id:(Some "key.pem")
+;;
+
 let test_diff_brief () =
   let check_diff cmd ~expected_unified ~expected_brief =
     let simple = parse_simple cmd in
@@ -1214,6 +1243,8 @@ let suite =
     , [ test_case "field values" `Quick test_ps_combined_flags ] )
   ; ( "E2E: Tar -fARCHIVE combined"
     , [ test_case "field values" `Quick test_tar_farchive_combined ] )
+  ; ( "E2E: Ssh -i identity file"
+    , [ test_case "field values" `Quick test_ssh_identity_file ] )
   ]
 
 let () = run "shell_ir_typed_e2e" suite

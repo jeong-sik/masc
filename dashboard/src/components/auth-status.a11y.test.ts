@@ -22,6 +22,7 @@ vi.mock('../api/core', () => ({
 vi.mock('../api/mcp', () => ({ resetMcpClientState: vi.fn() }))
 vi.mock('../lib/dashboard-auth-access', () => ({
   dashboardAuthAccess: vi.fn().mockReturnValue({ allowed: true, reason: null }),
+  cleanErrorMessage: vi.fn((v: string | null | undefined) => v ?? null),
 }))
 vi.mock('../lib/dashboard-actor', () => ({
   hasDashboardActorQueryParam: vi.fn().mockReturnValue(false),

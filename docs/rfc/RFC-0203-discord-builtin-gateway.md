@@ -16,7 +16,7 @@ OCaml Gateway client replaces `sidecars/discord-bot/`. One tool out, push in.
 
 - `sidecars/discord-bot/` (Python) has been silently dead since 2026-05-10 — gate reports `stale, connected:false`, can't self-recover.
 - The connector state module (`Channel_gate_discord_state`) already lives in-process. Only "speak Discord" is external.
-- OCaml build already has `httpun-ws`, `tls-eio`, `piaf`, `ca-certs`, `eio`. Zero new deps.
+- OCaml build already has `tls-eio`, `cohttp-eio`, `piaf`, `ca-certs`, `eio`. One new opam dep: `websocket` 2.17 (ISC, +2 transitive: `conduit`, `ipaddr-sexp`). Chose cohttp+websocket over `httpun-ws` because `Tls_eio.t` is a flow without an fd, and `Httpun_ws_eio.Client.connect` requires an fd-backed socket — they don't compose for client-mode WSS over TLS. Same stack as `ushitora-anqou/discordml`, which validates this path against the live Gateway.
 
 ## Shape
 

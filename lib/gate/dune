@@ -24,15 +24,19 @@
    eio
    eio.unix
    ; RFC-0203 Phase 1.2b — Discord Gateway WSS client
+   ; (httpun-ws-eio.Client requires fd-backed socket but Tls_eio.t exposes
+   ;  only Eio.Flow.two_way_ty; we adopt the discordml-verified stack:
+   ;  Tls_eio + Cohttp_eio + Websocket functor over Buf_read/Buf_write.)
    uri
    ca-certs
    tls
    tls-eio
-   httpun
-   httpun-eio
-   httpun-ws
-   httpun-ws-eio
-   digestif
+   cohttp
+   cohttp-eio
+   websocket
+   mirage-crypto-rng
+   mirage-crypto-rng.unix
+   base64
    ; existing
    masc_config
    masc_core

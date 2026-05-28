@@ -49,10 +49,9 @@ let lookup name =
    - Four are registered in Config.raw_all_tool_schemas and
      therefore round-trip through find_entry. Those are the
      ones this test pins.
-   - Two (masc_worktree_create, masc_plan_set_task) are
-     coordination-side tools whose schemas live on a different
-     surface that this PR does not modify. Their manual_help
-     entries are written here as future-proofing — they take
+   - One (masc_plan_set_task) is a coordination-side tool whose schema lives on
+     a different surface that this PR does not modify. Its manual_help
+     entry is written here as future-proofing — it takes
      effect the moment those schemas join the keeper-side
      registry. See PR body §"Reachable surface" for the split. *)
 let curated_with_examples =

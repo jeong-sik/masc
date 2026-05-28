@@ -531,7 +531,6 @@ type permission =
   | CanReadState | CanAddTask | CanClaimTask | CanCompleteTask
   | CanBroadcast
   | CanOpenPortal | CanSendPortal
-  | CanCreateWorktree | CanRemoveWorktree
   | CanVote | CanInterrupt | CanApprove
   | CanAdmin
 ```
@@ -540,7 +539,7 @@ type permission =
 
 | Role | Permissions |
 |------|------------|
-| Worker | `CanReadState`, `CanJoin`, `CanLeave`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanCreateWorktree`, `CanRemoveWorktree`, `CanVote` |
+| Worker | `CanReadState`, `CanJoin`, `CanLeave`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanVote` |
 | Admin | Worker + `CanInit`, `CanReset`, `CanInterrupt`, `CanApprove`, `CanAdmin` (전체) |
 
 ### 9.3 Agent Credential

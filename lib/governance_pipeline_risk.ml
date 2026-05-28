@@ -97,7 +97,6 @@ let risk_overrides : (string * risk_level) list =
        Removal target: RFC-0193 typed capability table (Issue #19032). Evidence: 11 approval_required/8.4h on 2026-05-27. *)
     ("masc_plan_set_task", Low); (* "set" substring → High; payload is self-owned task plan metadata *)
     ("keeper_memory_write", Low); (* "write" substring → High; scoped to own keeper memory *)
-    ("masc_worktree_create", Medium); (* "create" substring → High; meta tooling, no code mutation *)
   ]
 
 let critical_patterns =

@@ -200,8 +200,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("priority", `Int goal.priority);
       ("metric",
        match goal.metric with Some metric -> `String metric | None -> `Null);
-      ("target_value",
-       match goal.target_value with Some value -> `String value | None -> `Null);
+      ("target_value", Json_util.string_opt_to_json goal.target_value);
       ( "require_completion_approval",
         `Bool goal.Goal_store.require_completion_approval );
       ("due_date",

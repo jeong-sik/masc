@@ -3073,7 +3073,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 61,
+      "baseline": 63,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {

@@ -356,10 +356,7 @@ let config_json ?base_path () =
   in
   let fields =
     [ "updated_at", `String (now_iso ())
-    ; ( "config_path"
-      , match config_path with
-        | Some p -> `String p
-        | None -> `Null )
+    ; ( "config_path", Json_util.string_opt_to_json config_path )
     ]
     @ source_json_fields source
     @ validation_summary_json ?config_path ()
@@ -439,10 +436,7 @@ let raw_config_json_compute () =
     ; "source_text", `String source_text
     ; "assist", source_assist_json source_text
     ; "raw_json", `String raw_json
-    ; ( "materialization_error"
-      , match materialization_error with
-        | Some msg -> `String msg
-        | None -> `Null )
+    ; ( "materialization_error", Json_util.string_opt_to_json materialization_error )
     ]
 ;;
 

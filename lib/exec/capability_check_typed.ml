@@ -397,5 +397,11 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Mpg123, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Open { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Open, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Su { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Su, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Dd { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Dd, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Mkfs { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Mkfs, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

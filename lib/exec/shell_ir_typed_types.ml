@@ -466,6 +466,21 @@ and (_, _, _, _) command =
       ; args : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Su :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Privileged ], [ `Host ]) command
+  | Dd :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Privileged ], [ `Host ]) command
+  | Mkfs :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Privileged ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

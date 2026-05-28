@@ -456,5 +456,14 @@ let pp fmt = function
   | W (Open { subcommand; args }) ->
     Format.fprintf fmt "Open(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
+  | W (Su { subcommand; args }) ->
+    Format.fprintf fmt "Su(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Dd { subcommand; args }) ->
+    Format.fprintf fmt "Dd(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Mkfs { subcommand; args }) ->
+    Format.fprintf fmt "Mkfs(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

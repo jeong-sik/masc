@@ -3148,6 +3148,102 @@ let rec parse subcmd extra = function
 in
 parse None [] args|}
     }
+  ; { name = "Su"
+    ; anon_pattern = "Su _"
+    ; bind_pattern = "Su { subcommand; args }"
+    ; risk = "`Privileged"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Su
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Su"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Su { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Dd"
+    ; anon_pattern = "Dd _"
+    ; bind_pattern = "Dd { subcommand; args }"
+    ; risk = "`Privileged"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Dd
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Dd"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dd { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Mkfs"
+    ; anon_pattern = "Mkfs _"
+    ; bind_pattern = "Mkfs { subcommand; args }"
+    ; risk = "`Privileged"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Mkfs
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Mkfs"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkfs { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"

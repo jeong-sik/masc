@@ -113,6 +113,9 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Ffplay { subcommand = "video.mp4"; args = [ "-autoexit" ] })
   ; W (Mpg123 { subcommand = "song.mp3"; args = [ "-q" ] })
   ; W (Open { subcommand = "file.txt"; args = [] })
+  ; W (Su { subcommand = "root"; args = [] })
+  ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=10" ] })
+  ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdb1" ] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -200,9 +203,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    90
+    93
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 90 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 93 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -307,6 +310,9 @@ let test_of_simple_round_trip () =
     ; W (Ffplay { subcommand = "clip.mp4"; args = [ "-nodisp"; "-autoexit" ] })
     ; W (Mpg123 { subcommand = "podcast.mp3"; args = [ "-q"; "--list"; "playlist.m3u" ] })
     ; W (Open { subcommand = "https://example.com"; args = [ "-a"; "Safari" ] })
+    ; W (Su { subcommand = "root"; args = [ "-c"; "whoami" ] })
+    ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=1" ] })
+    ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdc1" ] })
     ]
   in
   List.iter
@@ -365,9 +371,9 @@ let test_of_simple_generic_fallback () =
     (match w_var with
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false);
-  (* unknown binary kind — `su` is in Exec_program.known but has no typed parser *)
+  (* unknown binary kind — `awk` is NOT in Exec_program.known, must fall through *)
   let w_unknown =
-    Shell_ir_typed.of_simple { base with bin = bin_ok "su"; args = [ lit "root" ] }
+    Shell_ir_typed.of_simple { base with bin = bin_ok "awk"; args = [ lit "{print $1}" ] }
   in
   Alcotest.(check bool)
     "unknown bin fallback"
@@ -404,6 +410,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Ruff"; "Pyright"; "Tsc"; "Ocamlfind"; "Rustc"; "Gofmt"; "Gradle"; "Ninja"
     ; "Java"; "Javac"; "Mvn"; "Cmake"; "Dune_local_sh"
     ; "Osascript"; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
+    ; "Su"; "Dd"; "Mkfs"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

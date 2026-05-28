@@ -140,6 +140,9 @@ let constructor_label = function
      | Shell_ir_typed.Ffplay _ -> "Ffplay"
      | Shell_ir_typed.Mpg123 _ -> "Mpg123"
      | Shell_ir_typed.Open _ -> "Open"
+     | Shell_ir_typed.Su _ -> "Su"
+     | Shell_ir_typed.Dd _ -> "Dd"
+     | Shell_ir_typed.Mkfs _ -> "Mkfs"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)
@@ -208,14 +211,12 @@ let test_docker_lifts_to_docker_constructor () =
     "docker now has a typed parser — must lift to Docker constructor"
     "Docker" (constructor_label result)
 
-let test_su_falls_through_to_generic () =
-  (* `su` is in Exec_program.known but has no typed parser yet. *)
+let test_su_lifts_to_su_constructor () =
   let simple = make_simple "su" [ "root" ] in
   let result = Shell_ir_typed.of_simple simple in
-  check bool
-    "su (Privileged_program kind) has no typed parser yet — must be \
-     Generic, not silently dropped"
-    true (is_generic result)
+  check string
+    "su now has a typed parser — must lift to Su constructor"
+    "Su" (constructor_label result)
 
 (* ── P2 (sudo argv): no whitespace-loss round trip ───────────── *)
 
@@ -270,8 +271,8 @@ let suite =
           "docker lifts to Docker" `Quick
           test_docker_lifts_to_docker_constructor
       ; test_case
-          "su falls through" `Quick
-          test_su_falls_through_to_generic
+          "su lifts to Su" `Quick
+          test_su_lifts_to_su_constructor
       ] )
   ; ( "Sudo argv tokenization (P2)"
     , [ test_case "sudo lifts argv as list" `Quick test_sudo_lifts_argv_as_list

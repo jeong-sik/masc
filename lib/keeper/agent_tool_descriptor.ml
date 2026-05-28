@@ -1247,14 +1247,8 @@ let translate_input ~public input =
   | None -> input
 ;;
 
-let string_opt_to_json = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
-let bool_opt_to_json = function
-  | Some value -> `Bool value
-  | None -> `Null
+let string_opt_to_json = Json_util.string_opt_to_json
+let bool_opt_to_json = Json_util.bool_opt_to_json
 ;;
 
 let receipt_labels_json d =

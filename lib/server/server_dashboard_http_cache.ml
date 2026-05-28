@@ -27,9 +27,7 @@ let now_cache_stamp () =
   let ts = Unix.gettimeofday () in
   (ts, Masc_domain.now_iso ())
 
-let json_of_string_option = function
-  | Some value -> `String value
-  | None -> `Null
+let json_of_string_option = Json_util.string_opt_to_json
 
 let mark_cached_surface_attempt surface =
   let ts, iso = now_cache_stamp () in

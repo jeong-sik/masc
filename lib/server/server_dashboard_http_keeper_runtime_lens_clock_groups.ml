@@ -10,8 +10,6 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 let json_string_opt = Json_util.string_opt_to_json
 
-let json_int_opt = Json_util.int_opt_to_json
-
 let edge_string key edge = json_string_member_opt key edge
 let edge_int key edge = json_int_member_opt key edge
 let edge_string_list key edge = json_string_list_member key edge

@@ -8,7 +8,6 @@
 open Masc_domain
 open Server_utils
 
-let compact_preview = Server_dashboard_http_json_utils.compact_preview
 let json_member = Server_dashboard_http_json_utils.json_member
 let json_string key json = Json_util.get_string json key
 let json_int key json = Json_util.get_int json key

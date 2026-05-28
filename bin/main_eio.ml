@@ -718,10 +718,15 @@ let run_cmd host port base_path =
      to bracket agent turn spans ([emit_turn_start]/[emit_turn_end]). *)
   Masc_runtime_events.start_listener ();
 
-  (* Signal handlers stay side-effect free. The Eio watcher fiber performs
-     all shutdown work inside the event loop. *)
+  (* Signal handlers do the minimum async-signal-safe work: mark the sticky
+     global flag so any fiber that observes [Eio.Cancel.Cancelled] before the
+     watcher fiber wakes up can still classify itself as a graceful drop
+     ([Keeper_registry_types_failure.fiber_drop_cause]: [Graceful_shutdown]),
+     then enqueue the signal name for the Eio watcher fiber to consume.
+     [Atomic.set]/[Atomic.get] are lock-free and signal-safe. *)
   let pending_shutdown_signal = Atomic.make None in
   let request_shutdown signal_name =
+    Masc_mcp.Shutdown.mark_shutting_down ();
     if Option.is_none (Atomic.get pending_shutdown_signal) then
       Atomic.set pending_shutdown_signal (Some signal_name)
   in

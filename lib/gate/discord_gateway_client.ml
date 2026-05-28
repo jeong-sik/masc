@@ -76,12 +76,6 @@ let frame_to_input frame =
        transparently. *)
     None
 
-(* Raised by run_effect when the state machine asks us to (re)open or
-   close the WSS connection. Caught by the outer reconnect loop —
-   currently a stub that surfaces a clear "Phase 1.4 not implemented"
-   error rather than silently looping. *)
-exception Reconnect_requested
-
 let log_effect level message =
   let prefix = match level with
     | `Info -> "[discord] "
@@ -135,16 +129,37 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
     let open Discord_gateway_state in
     match eff with
     | Open_wss { url } ->
+      (* WORKAROUND: Phase 1.4a does not tear down the previous
+         reader/writer fibers when a reconnect path issues Open_wss
+         after Close_wss has cleared conn_ref. The old fibers exit
+         naturally once the underlying flow is GC'd by the OS-level
+         close; we leak the fiber slot until then. Root: needs
+         per-session Eio.Switch. Phase 1.4b will refactor with
+         Discord_wss_connection.close + nested switch. *)
       (match !conn_ref with
-       | Some _ -> raise Reconnect_requested
+       | Some _ ->
+         log_effect `Warn
+           "Open_wss while conn_ref still Some; expected Close_wss \
+            first — dropping new connect"
        | None ->
          let conn = Discord_wss_connection.connect ~sw ~env ~url in
          conn_ref := Some conn;
          Eio.Fiber.fork ~sw (fun () -> reader_loop conn))
-    | Close_wss _ -> raise Reconnect_requested
+    | Close_wss _ ->
+      (* Drop our reference. The reader fiber will hit End_of_file or
+         an exception on the next read once the OS closes the socket
+         and surface that as Wss_closed via the mailbox — but that
+         input is now a no-op (state already Reconnect_pending). *)
+      conn_ref := None
     | Send_frame f ->
       (match !conn_ref with
-       | None -> failwith "Send_frame before WSS open"
+       | None ->
+         (* Late effect after conn cleared — drop with a log instead
+            of crashing the drive loop. *)
+         log_effect `Warn
+           (Printf.sprintf
+              "Send_frame op=%d while conn_ref is None; dropping"
+              (Discord_gateway_state.opcode_to_int f.op))
        | Some conn ->
          let json = Discord_gateway_state.encode_frame f in
          let payload = Yojson.Safe.to_string json in
@@ -154,7 +169,10 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
          Discord_wss_connection.write conn ws)
     | Schedule_heartbeat { interval_ms } ->
       heartbeat_ms := Some interval_ms
-    | Schedule_backoff _ -> raise Reconnect_requested
+    | Schedule_backoff { delay_ms } ->
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Time.sleep clock (float_of_int delay_ms /. 1000.0);
+        Eio.Stream.add input_mailbox Discord_gateway_state.Backoff_elapsed)
     | Emit_event ev -> on_event ev
     | Log { level; message } -> log_effect level message
   in
@@ -166,18 +184,11 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
     List.iter run_effect effects
   in
 
-  (* Kick off: state machine emits Open_wss + Log, which run_effect
-     turns into the actual TCP+TLS+WSS handshake plus a reader fiber. *)
   step_now Discord_gateway_state.Connect_requested;
 
-  (try
-     let rec drive () =
-       let input = Eio.Stream.take input_mailbox in
-       step_now input;
-       drive ()
-     in
-     drive ()
-   with Reconnect_requested ->
-     failwith
-       "Discord_gateway_client.run: reconnect requested, but Phase 1.4 \
-        (reconnect/resume) not yet implemented")
+  let rec drive () =
+    let input = Eio.Stream.take input_mailbox in
+    step_now input;
+    drive ()
+  in
+  drive ()

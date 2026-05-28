@@ -164,10 +164,14 @@ let gateway_url = "wss://gateway.discord.gg/?v=10&encoding=json"
 type t =
   { state : connection_state
   ; config : config
-  ; reconnect_attempts : int        (* Exponential backoff in Phase 1.4. *)
+  ; reconnect_attempts : int        (* Exponential backoff exponent. *)
   ; last_seq : int option           (* Latest dispatch sequence number. *)
   ; heartbeat_interval_ms : int option  (* From Op_hello, used by Heartbeat_tick. *)
-  ; resume_gateway_url : string option  (* From READY, used by Resuming in Phase 1.4. *)
+  ; resume_gateway_url : string option  (* From READY, used by Resuming. *)
+  ; resume_context : (string * int option) option
+    (* (session_id, last_seq_at_disconnect). Set when leaving Connected
+       via a resumable disconnect; cleared on fresh identify path. Lets
+       handle_hello choose Identify vs Resume after Awaiting_hello. *)
   }
 
 let create ~config =
@@ -177,6 +181,7 @@ let create ~config =
   ; last_seq = None
   ; heartbeat_interval_ms = None
   ; resume_gateway_url = None
+  ; resume_context = None
   }
 
 let state t = t.state
@@ -295,6 +300,37 @@ let heartbeat_frame ~last_seq =
   in
   { op = Op_heartbeat; s = None; t = None; d }
 
+let resume_frame ~config ~session_id ~last_seq =
+  let payload =
+    `Assoc
+      [ ("token", `String config.token)
+      ; ("session_id", `String session_id)
+      ; ("seq", (match last_seq with Some n -> `Int n | None -> `Int 0))
+      ]
+  in
+  { op = Op_resume; s = None; t = None; d = payload }
+
+(* Discord close codes that prohibit reconnect. Source: Discord
+   Developer Docs — Gateway Close Event Codes. *)
+let is_fatal_close_code = function
+  | 4004 (* authentication failed *)
+  | 4010 (* invalid shard *)
+  | 4011 (* sharding required *)
+  | 4012 (* invalid API version *)
+  | 4013 (* invalid intents *)
+  | 4014 (* disallowed intents *) -> true
+  | _ -> false
+
+(* Exponential backoff capped at 60s. attempts=0 -> 1s, 1 -> 2s, ... 6+
+   capped. Intentionally deterministic (no jitter) so the state
+   machine remains testable; jitter belongs in the I/O layer if added
+   later. *)
+let backoff_ms ~attempts =
+  let base = 1_000 in
+  let cap = 60_000 in
+  let shift = min attempts 6 in
+  min cap (base * Int.shift_left 1 shift)
+
 (* ── Transition function ────────────────────────────────────────
 
    Every [input] variant is matched explicitly. No catch-all arm.
@@ -320,19 +356,31 @@ let handle_hello t (frame : frame) =
        | None ->
            log_warn t "Op_hello missing heartbeat_interval; staying in Awaiting_hello"
        | Some interval_ms ->
-           let identify = identify_frame ~config:t.config in
+           (* Branch on resume_context: if set, send Op_resume and
+              enter Resuming; else send Op_identify and enter
+              Identifying. Both paths schedule the same heartbeat. *)
+           let outbound_frame, next_state, log_msg =
+             match t.resume_context with
+             | Some (session_id, last_seq) ->
+                 ( resume_frame ~config:t.config ~session_id ~last_seq
+                 , Resuming
+                 , Printf.sprintf
+                     "received Hello, resuming session %s (heartbeat=%dms)"
+                     session_id interval_ms )
+             | None ->
+                 ( identify_frame ~config:t.config
+                 , Identifying
+                 , Printf.sprintf
+                     "received Hello, identifying (heartbeat=%dms)"
+                     interval_ms )
+           in
            ( { t with
-               state = Identifying
+               state = next_state
              ; heartbeat_interval_ms = Some interval_ms
              }
            , [ Schedule_heartbeat { interval_ms }
-             ; Send_frame identify
-             ; Log
-                 { level = `Info
-                 ; message =
-                     Printf.sprintf "received Hello, identifying (heartbeat=%dms)"
-                       interval_ms
-                 }
+             ; Send_frame outbound_frame
+             ; Log { level = `Info; message = log_msg }
              ] ))
   | Disconnected | Identifying | Resuming
   | Connected _ | Reconnect_pending _ | Failed _ ->
@@ -361,6 +409,7 @@ let handle_dispatch t (frame : frame) =
              ; config = new_config
              ; resume_gateway_url = Some resume_gateway_url
              ; reconnect_attempts = 0
+             ; resume_context = None
              }
            , [ Emit_event
                  (Ready { session_id; resume_gateway_url; bot_user_id })
@@ -372,6 +421,27 @@ let handle_dispatch t (frame : frame) =
        | Ok (Message_create _ as ev)
        | Ok (Reaction_add _ as ev) ->
            (t', [ Emit_event ev ])
+       | Ok (Ignored "RESUMED") ->
+           (* Successful resume — server has replayed missed events
+              and signalled completion. Recover session_id from
+              resume_context and return to Connected. *)
+           (match t'.state, t'.resume_context with
+            | Resuming, Some (session_id, _) ->
+                ( { t' with
+                    state = Connected { session_id; last_seq = frame.s }
+                  ; reconnect_attempts = 0
+                  ; resume_context = None
+                  }
+                , [ Log
+                      { level = `Info
+                      ; message =
+                          Printf.sprintf "RESUMED session %s" session_id
+                      }
+                  ] )
+            | (Disconnected | Awaiting_hello | Identifying | Resuming
+              | Connected _ | Reconnect_pending _ | Failed _), _ ->
+                log_warn t'
+                  "RESUMED dispatch outside Resuming state; ignoring")
        | Ok (Ignored _) ->
            no_op t')
 
@@ -382,18 +452,212 @@ let handle_server_heartbeat_demand t =
         { level = `Info; message = "server requested immediate heartbeat" }
     ] )
 
+(* ── Reconnect / resume helpers ───────────────────────────────────
+
+   Builds a Reconnect_pending state + Schedule_backoff effect with
+   the right resume_context. Used by every "we need to reconnect now"
+   handler (Wss_closed, Heartbeat_ack_timeout, Op_reconnect,
+   Op_invalid_session). *)
+
+let make_reconnect_pending t ~now_mono ~delay_ms ~resumable ~resume_context =
+  let backoff_until_mono = now_mono +. (float_of_int delay_ms /. 1000.0) in
+  { t with
+    state = Reconnect_pending { backoff_until_mono; resumable }
+  ; reconnect_attempts = t.reconnect_attempts + 1
+  ; resume_context
+  }
+
+(* Captures session context (if any) when leaving Connected. Pre-
+   connection states have no session yet, so we fall back to [None]. *)
+let capture_resume_context t =
+  match t.state with
+  | Connected { session_id; last_seq } -> Some (session_id, last_seq)
+  | Resuming -> t.resume_context  (* preserve in-flight resume context *)
+  | Disconnected | Awaiting_hello | Identifying
+  | Reconnect_pending _ | Failed _ -> None
+
+let handle_wss_closed t ~now_mono ~code ~reason =
+  match t.state with
+  | Disconnected | Reconnect_pending _ | Failed _ ->
+      log_warn t
+        (Printf.sprintf
+           "Wss_closed (%d %s) in non-connection state; ignoring"
+           code reason)
+  | Awaiting_hello | Identifying | Resuming | Connected _ ->
+      if is_fatal_close_code code then
+        ( { t with
+            state =
+              Failed
+                (Printf.sprintf "Discord fatal close %d: %s" code reason)
+          ; resume_context = None
+          }
+        , [ Log
+              { level = `Error
+              ; message =
+                  Printf.sprintf
+                    "Discord fatal close %d (%s); not reconnecting"
+                    code reason
+              }
+          ] )
+      else
+        let resume_context = capture_resume_context t in
+        let resumable = Option.is_some resume_context in
+        let delay_ms = backoff_ms ~attempts:t.reconnect_attempts in
+        let t' =
+          make_reconnect_pending t ~now_mono ~delay_ms ~resumable
+            ~resume_context
+        in
+        ( t'
+        , [ Schedule_backoff { delay_ms }
+          ; Log
+              { level = `Warn
+              ; message =
+                  Printf.sprintf
+                    "WSS closed %d (%s); reconnect in %dms (resumable=%b)"
+                    code reason delay_ms resumable
+              }
+          ] )
+
+let handle_heartbeat_ack_timeout t ~now_mono =
+  match t.state with
+  | Connected _ ->
+      let resume_context = capture_resume_context t in
+      let delay_ms = backoff_ms ~attempts:t.reconnect_attempts in
+      let t' =
+        make_reconnect_pending t ~now_mono ~delay_ms ~resumable:true
+          ~resume_context
+      in
+      ( t'
+      , [ Close_wss { code = 4000; reason = "heartbeat ack timeout" }
+        ; Schedule_backoff { delay_ms }
+        ; Log
+            { level = `Warn
+            ; message =
+                Printf.sprintf
+                  "heartbeat ack timeout; closing and resuming in %dms"
+                  delay_ms
+            }
+        ] )
+  | Disconnected | Awaiting_hello | Identifying | Resuming
+  | Reconnect_pending _ | Failed _ ->
+      log_warn t
+        "Heartbeat_ack_timeout outside Connected state; ignoring"
+
+let handle_backoff_elapsed t =
+  match t.state with
+  | Reconnect_pending { resumable = true; _ } ->
+      (* Resumable path. Need a resume URL; if missing, defensively
+         fall through to fresh identify. *)
+      (match t.resume_gateway_url, t.resume_context with
+       | Some url, Some _ ->
+           ( { t with state = Awaiting_hello }
+           , [ Open_wss { url }
+             ; Log
+                 { level = `Info
+                 ; message =
+                     Printf.sprintf "backoff elapsed; resuming via %s" url
+                 }
+             ] )
+       | _ ->
+           ( { t with state = Awaiting_hello; resume_context = None }
+           , [ Open_wss { url = gateway_url }
+             ; Log
+                 { level = `Warn
+                 ; message =
+                     "backoff elapsed; resumable but missing context, \
+                      starting fresh identify"
+                 }
+             ] ))
+  | Reconnect_pending { resumable = false; _ } ->
+      ( { t with state = Awaiting_hello; resume_context = None }
+      , [ Open_wss { url = gateway_url }
+        ; Log
+            { level = `Info
+            ; message = "backoff elapsed; starting fresh identify"
+            }
+        ] )
+  | Disconnected | Awaiting_hello | Identifying | Resuming
+  | Connected _ | Failed _ ->
+      log_warn t "Backoff_elapsed outside Reconnect_pending; ignoring"
+
+let handle_op_reconnect t ~now_mono =
+  match t.state with
+  | Identifying | Resuming | Connected _ ->
+      let resume_context = capture_resume_context t in
+      let resumable = Option.is_some resume_context in
+      let delay_ms = backoff_ms ~attempts:t.reconnect_attempts in
+      let t' =
+        make_reconnect_pending t ~now_mono ~delay_ms ~resumable
+          ~resume_context
+      in
+      ( t'
+      , [ Close_wss { code = 1000; reason = "server requested reconnect" }
+        ; Schedule_backoff { delay_ms }
+        ; Log
+            { level = `Info
+            ; message =
+                Printf.sprintf
+                  "server requested reconnect; closing and reconnecting in %dms"
+                  delay_ms
+            }
+        ] )
+  | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ ->
+      log_warn t "Op_reconnect in unexpected state; ignoring"
+
+let handle_op_invalid_session t ~now_mono (frame : frame) =
+  let resumable_payload =
+    match frame.d with
+    | `Bool b -> b
+    | _ -> false
+  in
+  match t.state with
+  | Identifying | Resuming | Connected _ ->
+      let resume_context =
+        if resumable_payload then capture_resume_context t else None
+      in
+      let resumable = Option.is_some resume_context in
+      (* Discord docs: when invalid_session(resumable=true), back off
+         1-5s before sending Resume. We pick a deterministic mid-range
+         1500ms so the state machine stays test-driveable. *)
+      let delay_ms =
+        if resumable then 1_500
+        else backoff_ms ~attempts:t.reconnect_attempts
+      in
+      let attempts_next =
+        if resumable then t.reconnect_attempts else 0
+      in
+      let backoff_until_mono =
+        now_mono +. (float_of_int delay_ms /. 1000.0)
+      in
+      ( { t with
+          state = Reconnect_pending { backoff_until_mono; resumable }
+        ; reconnect_attempts = attempts_next
+        ; resume_context
+        }
+      , [ Close_wss { code = 1000; reason = "invalid session" }
+        ; Schedule_backoff { delay_ms }
+        ; Log
+            { level = `Warn
+            ; message =
+                Printf.sprintf
+                  "invalid_session (server resumable=%b); reconnect in %dms (resumable=%b)"
+                  resumable_payload delay_ms resumable
+            }
+        ] )
+  | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ ->
+      log_warn t "Op_invalid_session in unexpected state; ignoring"
+
 (* Sub-handler: incoming frame. Outer dispatch is by opcode (8-arm,
    no wildcard). State-sensitive opcodes delegate to per-opcode
    handlers that enumerate every state variant. *)
-let step_frame t ~now_mono:_ (frame : frame) =
+let step_frame t ~now_mono (frame : frame) =
   match frame.op with
   | Op_hello -> handle_hello t frame
   | Op_dispatch -> handle_dispatch t frame
   | Op_heartbeat_ack -> no_op t
   | Op_heartbeat -> handle_server_heartbeat_demand t
-  | Op_reconnect -> pending t "RFC-0203 Phase 1.4 (Op_reconnect)"
-  | Op_invalid_session ->
-      pending t "RFC-0203 Phase 1.4 (Op_invalid_session)"
+  | Op_reconnect -> handle_op_reconnect t ~now_mono
+  | Op_invalid_session -> handle_op_invalid_session t ~now_mono frame
   | Op_identify ->
       log_warn t "Op_identify received from server (unexpected)"
   | Op_resume ->
@@ -427,8 +691,8 @@ let step t ~now_mono input =
   | Frame_received frame -> step_frame t ~now_mono frame
   | Frame_parse_error reason ->
       log_warn t (Printf.sprintf "frame parse error: %s" reason)
-  | Wss_closed _ -> pending t "RFC-0203 Phase 1.4 (Wss_closed)"
+  | Wss_closed { code; reason } ->
+      handle_wss_closed t ~now_mono ~code ~reason
   | Heartbeat_tick -> handle_heartbeat_tick t
-  | Heartbeat_ack_timeout ->
-      pending t "RFC-0203 Phase 1.4 (Heartbeat_ack_timeout)"
-  | Backoff_elapsed -> pending t "RFC-0203 Phase 1.4 (Backoff_elapsed)"
+  | Heartbeat_ack_timeout -> handle_heartbeat_ack_timeout t ~now_mono
+  | Backoff_elapsed -> handle_backoff_elapsed t

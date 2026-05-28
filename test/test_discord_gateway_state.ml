@@ -291,6 +291,223 @@ let test_heartbeat_tick_when_connected () =
     (has_send_heartbeat effects)
 
 (* ---------------------------------------------------------------- *)
+(* Phase 1.4 — reconnect / resume arms                              *)
+(* ---------------------------------------------------------------- *)
+
+let has_schedule_backoff effects =
+  List.exists (function S.Schedule_backoff _ -> true | _ -> false) effects
+
+let has_close_wss effects =
+  List.exists (function S.Close_wss _ -> true | _ -> false) effects
+
+let has_open_wss_url ~url effects =
+  List.exists
+    (function S.Open_wss { url = u } -> String.equal u url | _ -> false)
+    effects
+
+let has_send_resume effects =
+  List.exists
+    (function
+      | S.Send_frame { op = S.Op_resume; _ } -> true
+      | _ -> false)
+    effects
+
+(* Build a state already at Connected (sess-x), to skip ceremony in
+   each test below. *)
+let connected_at ~session_id ~resume_url ~user_id =
+  let m = S.create ~config:(mk_config ()) in
+  let m, _ = S.step m ~now_mono:0.0 S.Connect_requested in
+  let m, _ =
+    S.step m ~now_mono:1.0
+      (S.Frame_received (hello_frame ~heartbeat_interval:41250))
+  in
+  let m, _ =
+    S.step m ~now_mono:2.0
+      (S.Frame_received
+         (ready_frame ~session_id ~resume_url ~user_id))
+  in
+  m
+
+let test_wss_closed_from_connected_is_resumable () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume.discord.gg/"
+      ~user_id:"42"
+  in
+  let m', effects =
+    S.step m ~now_mono:10.0
+      (S.Wss_closed { code = 1006; reason = "network blip" })
+  in
+  (match S.state m' with
+   | S.Reconnect_pending { resumable = true; _ } -> ()
+   | _ -> fail "expected Reconnect_pending resumable=true");
+  check bool "Schedule_backoff emitted" true
+    (has_schedule_backoff effects)
+
+let test_wss_closed_fatal_goes_to_failed () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume.discord.gg/"
+      ~user_id:"42"
+  in
+  let m', effects =
+    S.step m ~now_mono:10.0
+      (S.Wss_closed { code = 4014; reason = "disallowed intents" })
+  in
+  (match S.state m' with
+   | S.Failed _ -> ()
+   | _ -> fail "expected Failed for fatal close code 4014");
+  check bool "no Schedule_backoff on fatal close" false
+    (has_schedule_backoff effects)
+
+let test_heartbeat_ack_timeout () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume.discord.gg/"
+      ~user_id:"42"
+  in
+  let m', effects =
+    S.step m ~now_mono:10.0 S.Heartbeat_ack_timeout
+  in
+  (match S.state m' with
+   | S.Reconnect_pending { resumable = true; _ } -> ()
+   | _ -> fail "expected Reconnect_pending resumable=true");
+  check bool "Close_wss emitted" true (has_close_wss effects);
+  check bool "Schedule_backoff emitted" true
+    (has_schedule_backoff effects)
+
+let test_op_reconnect_from_server () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume.discord.gg/"
+      ~user_id:"42"
+  in
+  let reconnect_frame : S.frame =
+    { op = S.Op_reconnect; s = None; t = None; d = `Null }
+  in
+  let m', effects =
+    S.step m ~now_mono:10.0 (S.Frame_received reconnect_frame)
+  in
+  (match S.state m' with
+   | S.Reconnect_pending { resumable = true; _ } -> ()
+   | _ -> fail "expected Reconnect_pending after server Op_reconnect");
+  check bool "Close_wss + Schedule_backoff" true
+    (has_close_wss effects && has_schedule_backoff effects)
+
+let test_op_invalid_session_resumable_true () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume.discord.gg/"
+      ~user_id:"42"
+  in
+  let invalid : S.frame =
+    { op = S.Op_invalid_session; s = None; t = None; d = `Bool true }
+  in
+  let m', effects =
+    S.step m ~now_mono:10.0 (S.Frame_received invalid)
+  in
+  (match S.state m' with
+   | S.Reconnect_pending { resumable = true; _ } -> ()
+   | _ -> fail "expected Reconnect_pending resumable=true");
+  check bool "Schedule_backoff emitted" true
+    (has_schedule_backoff effects)
+
+let test_op_invalid_session_resumable_false () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume.discord.gg/"
+      ~user_id:"42"
+  in
+  let invalid : S.frame =
+    { op = S.Op_invalid_session; s = None; t = None; d = `Bool false }
+  in
+  let m', _effects =
+    S.step m ~now_mono:10.0 (S.Frame_received invalid)
+  in
+  (match S.state m' with
+   | S.Reconnect_pending { resumable = false; _ } -> ()
+   | _ -> fail "expected Reconnect_pending resumable=false")
+
+let test_backoff_elapsed_resumable_uses_resume_url () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume-host.discord.gg/"
+      ~user_id:"42"
+  in
+  let m, _ =
+    S.step m ~now_mono:10.0
+      (S.Wss_closed { code = 1006; reason = "blip" })
+  in
+  let m', effects = S.step m ~now_mono:12.0 S.Backoff_elapsed in
+  (match S.state m' with
+   | S.Awaiting_hello -> ()
+   | _ -> fail "expected Awaiting_hello after Backoff_elapsed (resumable)");
+  check bool "Open_wss uses resume URL" true
+    (has_open_wss_url ~url:"wss://resume-host.discord.gg/" effects)
+
+let test_backoff_elapsed_non_resumable_uses_fresh_url () =
+  (* Drive into Reconnect_pending(resumable=false) via
+     Op_invalid_session with `d = `Bool false`. *)
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume-host.discord.gg/"
+      ~user_id:"42"
+  in
+  let invalid : S.frame =
+    { op = S.Op_invalid_session; s = None; t = None; d = `Bool false }
+  in
+  let m, _ = S.step m ~now_mono:10.0 (S.Frame_received invalid) in
+  let m', effects = S.step m ~now_mono:12.0 S.Backoff_elapsed in
+  (match S.state m' with
+   | S.Awaiting_hello -> ()
+   | _ -> fail "expected Awaiting_hello after Backoff_elapsed (fresh)");
+  check bool "Open_wss uses default gateway URL (not resume URL)" true
+    (has_open_wss_url
+       ~url:"wss://gateway.discord.gg/?v=10&encoding=json"
+       effects)
+
+let test_resume_round_trip_to_connected () =
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume-host.discord.gg/"
+      ~user_id:"42"
+  in
+  let m, _ =
+    S.step m ~now_mono:10.0
+      (S.Wss_closed { code = 1006; reason = "blip" })
+  in
+  let m, _ = S.step m ~now_mono:12.0 S.Backoff_elapsed in
+  let m, effects =
+    S.step m ~now_mono:13.0
+      (S.Frame_received (hello_frame ~heartbeat_interval:41250))
+  in
+  (match S.state m with
+   | S.Resuming -> ()
+   | _ -> fail "expected Resuming after Hello on resume path");
+  check bool "Send_frame Op_resume emitted (not Identify)" true
+    (has_send_resume effects);
+  let resumed : S.frame =
+    { op = S.Op_dispatch
+    ; s = Some 99
+    ; t = Some "RESUMED"
+    ; d = `Assoc []
+    }
+  in
+  let m', _ = S.step m ~now_mono:14.0 (S.Frame_received resumed) in
+  match S.state m' with
+  | S.Connected { session_id = "sess-1"; last_seq = Some 99 } -> ()
+  | _ -> fail "expected Connected sess-1 last_seq=99 after RESUMED"
+
+(* ---------------------------------------------------------------- *)
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
 
@@ -327,5 +544,34 @@ let () =
             test_ready_transition
         ; test_case "Heartbeat_tick (Connected) → Send_frame Op_heartbeat"
             `Quick test_heartbeat_tick_when_connected
+        ] )
+    ; ( "reconnect / resume"
+      , [ test_case
+            "Wss_closed (Connected, non-fatal) → Reconnect_pending(resumable)"
+            `Quick test_wss_closed_from_connected_is_resumable
+        ; test_case "Wss_closed (code=4014 disallowed intents) → Failed"
+            `Quick test_wss_closed_fatal_goes_to_failed
+        ; test_case
+            "Heartbeat_ack_timeout (Connected) → Close_wss + Schedule_backoff"
+            `Quick test_heartbeat_ack_timeout
+        ; test_case
+            "Op_reconnect from server → Close_wss + Schedule_backoff"
+            `Quick test_op_reconnect_from_server
+        ; test_case
+            "Op_invalid_session resumable=true → Reconnect_pending(resumable)"
+            `Quick test_op_invalid_session_resumable_true
+        ; test_case
+            "Op_invalid_session resumable=false → Reconnect_pending(fresh)"
+            `Quick test_op_invalid_session_resumable_false
+        ; test_case
+            "Backoff_elapsed (resumable) opens WSS via resume_gateway_url"
+            `Quick test_backoff_elapsed_resumable_uses_resume_url
+        ; test_case
+            "Backoff_elapsed (non-resumable) opens default gateway URL"
+            `Quick test_backoff_elapsed_non_resumable_uses_fresh_url
+        ; test_case
+            "Resume round trip: Connected → blip → Backoff → Hello → \
+             Op_resume → RESUMED → Connected"
+            `Quick test_resume_round_trip_to_connected
         ] )
     ]

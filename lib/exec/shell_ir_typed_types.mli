@@ -266,16 +266,19 @@ and (_, _, _, _) command =
   | Node :
       { script : string
       ; args : string list
+      ; inline : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Python :
       { script : string
       ; args : string list
+      ; inline : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Python3 :
       { script : string
       ; args : string list
+      ; inline : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Pip :

@@ -2271,12 +2271,16 @@ parse [] None None args|}
     }
   ; { name = "Node"
     ; anon_pattern = "Node _"
-    ; bind_pattern = "Node { script; args }"
+    ; bind_pattern = "Node { script; args; inline }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let all_args = script :: args in
+      let all_args =
+        match inline with
+        | Some code -> [ "-e"; code ] @ args
+        | None -> script :: args
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Node
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
       ; env = []
@@ -2288,27 +2292,38 @@ parse [] None None args|}
     ; parse_body =
         Some
           {|
-let rec parse script extra = function
+let rec parse inline script extra = function
   | [] ->
-    (match script with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = s; args = List.rev extra }))
-     | None -> None)
+    (match inline, script with
+     | Some code, _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = ""; args = List.rev extra; inline = Some code }))
+     | None, Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = s; args = List.rev extra; inline = None }))
+     | None, None -> None)
+  | "-e" :: code :: rest -> parse (Some code) script extra rest
   | arg :: rest ->
-    (match script with
-     | None -> parse (Some arg) extra rest
-     | Some _ -> parse script (arg :: extra) rest)
+    (match inline, script with
+     | Some _, _ -> parse inline script (arg :: extra) rest
+     | None, Some _ -> parse inline script (arg :: extra) rest
+     | None, None ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra rest
+       else parse inline (Some arg) extra rest)
 in
-parse None [] args|}
+parse None None [] args|}
     }
   ; { name = "Python"
     ; anon_pattern = "Python _"
-    ; bind_pattern = "Python { script; args }"
+    ; bind_pattern = "Python { script; args; inline }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let all_args = script :: args in
+      let all_args =
+        match inline with
+        | Some code -> [ "-c"; code ] @ args
+        | None -> script :: args
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Python
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
       ; env = []
@@ -2320,27 +2335,38 @@ parse None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse script extra = function
+let rec parse inline script extra = function
   | [] ->
-    (match script with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = s; args = List.rev extra }))
-     | None -> None)
+    (match inline, script with
+     | Some code, _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = ""; args = List.rev extra; inline = Some code }))
+     | None, Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = s; args = List.rev extra; inline = None }))
+     | None, None -> None)
+  | "-c" :: code :: rest -> parse (Some code) script extra rest
   | arg :: rest ->
-    (match script with
-     | None -> parse (Some arg) extra rest
-     | Some _ -> parse script (arg :: extra) rest)
+    (match inline, script with
+     | Some _, _ -> parse inline script (arg :: extra) rest
+     | None, Some _ -> parse inline script (arg :: extra) rest
+     | None, None ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra rest
+       else parse inline (Some arg) extra rest)
 in
-parse None [] args|}
+parse None None [] args|}
     }
   ; { name = "Python3"
     ; anon_pattern = "Python3 _"
-    ; bind_pattern = "Python3 { script; args }"
+    ; bind_pattern = "Python3 { script; args; inline }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let all_args = script :: args in
+      let all_args =
+        match inline with
+        | Some code -> [ "-c"; code ] @ args
+        | None -> script :: args
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Python3
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
       ; env = []
@@ -2352,18 +2378,25 @@ parse None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse script extra = function
+let rec parse inline script extra = function
   | [] ->
-    (match script with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = s; args = List.rev extra }))
-     | None -> None)
+    (match inline, script with
+     | Some code, _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = ""; args = List.rev extra; inline = Some code }))
+     | None, Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = s; args = List.rev extra; inline = None }))
+     | None, None -> None)
+  | "-c" :: code :: rest -> parse (Some code) script extra rest
   | arg :: rest ->
-    (match script with
-     | None -> parse (Some arg) extra rest
-     | Some _ -> parse script (arg :: extra) rest)
+    (match inline, script with
+     | Some _, _ -> parse inline script (arg :: extra) rest
+     | None, Some _ -> parse inline script (arg :: extra) rest
+     | None, None ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra rest
+       else parse inline (Some arg) extra rest)
 in
-parse None [] args|}
+parse None None [] args|}
     }
   ; { name = "Pip"
     ; anon_pattern = "Pip _"

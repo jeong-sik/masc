@@ -327,12 +327,15 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sed, flag_args @ [ arg "-e"; arg expression; arg file ]) ]
   | Shell_ir_typed.W (Rsync { source; dest; flags }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Rsync, List.map arg flags @ [ arg source; arg dest ]) ]
-  | Shell_ir_typed.W (Node { script; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Node, arg script :: List.map arg args) ]
-  | Shell_ir_typed.W (Python { script; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python, arg script :: List.map arg args) ]
-  | Shell_ir_typed.W (Python3 { script; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python3, arg script :: List.map arg args) ]
+  | Shell_ir_typed.W (Node { script; args; inline }) ->
+    let entry = match inline with Some code -> [ arg "-e"; arg code ] | None -> [ arg script ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Node, entry @ List.map arg args) ]
+  | Shell_ir_typed.W (Python { script; args; inline }) ->
+    let entry = match inline with Some code -> [ arg "-c"; arg code ] | None -> [ arg script ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python, entry @ List.map arg args) ]
+  | Shell_ir_typed.W (Python3 { script; args; inline }) ->
+    let entry = match inline with Some code -> [ arg "-c"; arg code ] | None -> [ arg script ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python3, entry @ List.map arg args) ]
   | Shell_ir_typed.W (Pip { subcommand; packages }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Pip, arg subcommand :: List.map arg packages) ]
   | Shell_ir_typed.W (Patch { file; patchfile; strip; reverse }) ->

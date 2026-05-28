@@ -353,15 +353,18 @@ let pp fmt = function
   | W (Rsync { source; dest; flags }) ->
     Format.fprintf fmt "Rsync(source=%s, dest=%s, flags=%a)" source dest
       (Format.pp_print_list Format.pp_print_string) flags
-  | W (Node { script; args }) ->
-    Format.fprintf fmt "Node(script=%s, args=%a)" script
+  | W (Node { script; args; inline }) ->
+    Format.fprintf fmt "Node(script=%s, args=%a, inline=%a)" script
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Python { script; args }) ->
-    Format.fprintf fmt "Python(script=%s, args=%a)" script
+      (Format.pp_print_option Format.pp_print_string) inline
+  | W (Python { script; args; inline }) ->
+    Format.fprintf fmt "Python(script=%s, args=%a, inline=%a)" script
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Python3 { script; args }) ->
-    Format.fprintf fmt "Python3(script=%s, args=%a)" script
+      (Format.pp_print_option Format.pp_print_string) inline
+  | W (Python3 { script; args; inline }) ->
+    Format.fprintf fmt "Python3(script=%s, args=%a, inline=%a)" script
       (Format.pp_print_list Format.pp_print_string) args
+      (Format.pp_print_option Format.pp_print_string) inline
   | W (Pip { subcommand; packages }) ->
     Format.fprintf fmt "Pip(subcommand=%s, packages=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) packages

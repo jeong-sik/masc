@@ -41,8 +41,9 @@ let declared_provider_schemes_set ?(config_path : string option) () : StringSet.
        Cascade_routes and Cascade_catalog_runtime) and inject. *)
     let route_data : Cascade_catalog_runtime.route_data =
       { keeper_turn_target =
-          Cascade_routes_resolve.cascade_name_for_use ~config_path:path
-            Cascade_routes.Keeper_turn
+          Some
+            (Cascade_routes_resolve.cascade_name_for_use ~config_path:path
+               Cascade_routes.Keeper_turn)
       ; route_targets =
           Cascade_routes.configured_route_targets ~config_path:path ()
       ; unknown_route_keys =

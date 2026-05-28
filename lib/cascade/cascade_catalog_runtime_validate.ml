@@ -288,13 +288,13 @@ let config_path_opt () =
    reached up into [Cascade_routes] — the back-edge that closed the
    Cascade_routes ↔ Cascade_catalog_runtime_validate module-level cycle. *)
 type route_data = {
-  keeper_turn_target : string;
+  keeper_turn_target : string option;
   route_targets : string list;
   unknown_route_keys : string list;
 }
 
 let empty_route_data : route_data =
-  { keeper_turn_target = "route.keeper_turn"
+  { keeper_turn_target = None
   ; route_targets = []
   ; unknown_route_keys = []
   }
@@ -450,14 +450,17 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                 else []
               in
               let base = base @ route_key_errors @ route_target_errors in
-              if List.mem required_default_profile profiles then base
-              else
-                base
-                @ [
-                    Printf.sprintf
-                      "required default profile %S is missing"
-                      required_default_profile;
-                  ]
+              match required_default_profile with
+              | None -> base
+              | Some profile_name ->
+                if List.mem profile_name profiles then base
+                else
+                  base
+                  @ [
+                      Printf.sprintf
+                        "required default profile %S is missing"
+                        profile_name;
+                    ]
             in
             let built_profiles, statically_rejected_profiles =
               List.fold_left
@@ -485,10 +488,13 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
               in
               let rejected_profiles = statically_rejected_profiles in
               let default_profile_validated =
-                List.exists
-                  (fun (profile : profile_snapshot) ->
-                    String.equal profile.name required_default_profile)
-                  profile_snapshots
+                match required_default_profile with
+                | None -> true
+                | Some profile_name ->
+                  List.exists
+                    (fun (profile : profile_snapshot) ->
+                      String.equal profile.name profile_name)
+                    profile_snapshots
               in
               let snapshot =
                 {
@@ -496,7 +502,8 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                   mtime = source_mtime;
                   validated_at = checked_at;
                   profiles = profile_snapshots;
-                  default_profile_name = required_default_profile;
+                  default_profile_name =
+                    Option.value required_default_profile ~default:"";
                 }
               in
               Probe.record_probe_metrics profile_snapshots;
@@ -582,7 +589,8 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                             Printf.sprintf
                               "required default profile %S failed \
                                validation"
-                              required_default_profile;
+                              (Option.value required_default_profile
+                                 ~default:"");
                           ])
                       @ [
                           Printf.sprintf

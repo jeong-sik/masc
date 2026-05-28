@@ -5555,9 +5555,9 @@ let test_run_keeper_cycle_fails_closed_when_registry_phase_missing () =
            bool
            "error explains registry phase gap"
            true
-           (KTH.string_contains_substring
-              ~needle:"registry phase lookup returned None"
-              (Agent_sdk.Error.to_string err));
+           (String_util.contains_substring
+              (Agent_sdk.Error.to_string err)
+              "registry phase lookup returned None");
          (match Masc_mcp.Keeper_execution_receipt.latest_json config meta.name with
           | None -> fail "expected registry phase gap execution receipt"
           | Some receipt ->

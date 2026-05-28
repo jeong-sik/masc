@@ -95,8 +95,6 @@ val provider_attempt_row_json :
   Keeper_runtime_manifest.t -> Yojson.Safe.t
 (** Pure: provider-attempt manifest row → JSON record. *)
 
-val string_contains_substring : string -> string -> bool
-(** Pure: naive substring presence test. *)
 
 val runtime_trace_keeps_provider_attempt_provenance_key : string -> bool
 (** Pure: allowlist for provider/model-related decision keys in

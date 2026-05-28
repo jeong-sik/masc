@@ -164,7 +164,6 @@ let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
         Json_util.string_opt_to_json (decision_string "exception_kind") );
     ]
 
-let string_contains_substring = String_util.contains_substring
 
 let runtime_trace_keeps_provider_attempt_provenance_key = function
   | "model_source"
@@ -184,8 +183,8 @@ let runtime_trace_redacts_provider_model_key key =
   let key = String.lowercase_ascii key in
   (not (runtime_trace_keeps_provider_attempt_provenance_key key))
   &&
-  (string_contains_substring key "provider"
-   || string_contains_substring key "model"
+  (String_util.contains_substring key "provider"
+   || String_util.contains_substring key "model"
    || String.equal key "configured_labels")
 
 let rec runtime_trace_public_json = function

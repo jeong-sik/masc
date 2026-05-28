@@ -13,7 +13,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-let string_contains_substring = String_util.string_contains_substring
 
 (** {1 Retry & Side-Effect Safety}
 
@@ -90,19 +89,19 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
       (* Compound patterns to avoid false positives on generic messages
          like "Service closing" or "Can't find the specified tool".
          Each pattern targets a specific JSON parser error family. *)
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
+      (String_util.contains_substring lower "can't find closing"
+       || String_util.contains_substring lower "find end of")
+      || String_util.contains_substring lower "unexpected character in json"
+      || String_util.contains_substring lower "unterminated"
+      || String_util.contains_substring lower "parse error"
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.InvalidRequest { reason; _ }) ->
       let lower = String.lowercase_ascii reason in
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
+      (String_util.contains_substring lower "can't find closing"
+       || String_util.contains_substring lower "find end of")
+      || String_util.contains_substring lower "unexpected character in json"
+      || String_util.contains_substring lower "unterminated"
+      || String_util.contains_substring lower "parse error"
   (* All other API error variants do not represent server-side parse failures. *)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (Overloaded _)
@@ -157,7 +156,7 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
 let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Internal msg ->
-      string_contains_substring ~needle:"execution_receipt_append_failed" msg
+      String_util.contains_substring msg "execution_receipt_append_failed"
   | _ -> false
 
 (** Provider-level timeout (not structural OAS wall-clock budget). *)

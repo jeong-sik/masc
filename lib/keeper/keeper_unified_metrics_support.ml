@@ -6,9 +6,6 @@ open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
 
-let string_contains_substring = String_util.string_contains_substring
-
-let string_contains_substring_ci = String_util.string_contains_substring_ci
 
 
 (* ── Observation / decision helpers ─────────────── *)
@@ -335,7 +332,7 @@ let error_category_of_no_result_outcome ~outcome ~error =
             String.starts_with e_lower ~prefix
           in
           let contains needle =
-            string_contains_substring ~needle e_lower
+            String_util.contains_substring e_lower needle
           in
           (* starts_with checks first (more specific), then contains *)
           if starts_with "invalid request" then Some "invalid_request"
@@ -461,8 +458,8 @@ let response_requests_confirmation (text : string) : bool =
   let trimmed = String.trim text in
   trimmed <> ""
   && (String.contains trimmed '?'
-      || string_contains_substring_ci ~needle:"would you like" trimmed
-      || string_contains_substring_ci ~needle:"do you want" trimmed
-      || string_contains_substring_ci ~needle:"let me know" trimmed
-      || string_contains_substring_ci ~needle:"어떻게 할까" trimmed
-      || string_contains_substring_ci ~needle:"할까" trimmed)
+      || String_util.contains_substring_ci trimmed "would you like"
+      || String_util.contains_substring_ci trimmed "do you want"
+      || String_util.contains_substring_ci trimmed "let me know"
+      || String_util.contains_substring_ci trimmed "어떻게 할까"
+      || String_util.contains_substring_ci trimmed "할까")

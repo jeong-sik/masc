@@ -57,18 +57,16 @@ let parse_masc_internal_error_json = Cascade_error_from_sdk.parse_masc_internal_
 let classify_masc_internal_error_of_string = Cascade_error_from_sdk.classify_masc_internal_error_of_string
 let classify_masc_internal_error = Cascade_error_from_sdk.classify_masc_internal_error
 
-let string_contains_substring = String_util.string_contains_substring
-
 let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
   | Agent_sdk.Error.Api (InvalidRequest { message }) ->
     let lower = String.lowercase_ascii message in
-    (string_contains_substring ~needle:"can't find closing" lower
-     || string_contains_substring ~needle:"find end of" lower)
-    || string_contains_substring ~needle:"unexpected character in json" lower
-    || string_contains_substring ~needle:"unterminated" lower
-    || string_contains_substring ~needle:"parse error" lower
+    (String_util.contains_substring lower "can't find closing"
+     || String_util.contains_substring lower "find end of")
+    || String_util.contains_substring lower "unexpected character in json"
+    || String_util.contains_substring lower "unterminated"
+    || String_util.contains_substring lower "parse error"
   | Agent_sdk.Error.Api
       ( RateLimited _
       | Overloaded _

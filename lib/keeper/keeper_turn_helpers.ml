@@ -19,12 +19,6 @@ open Keeper_context_runtime
 let default_turn_event_bus_drain_interval_sec = 0.05
 let turn_event_bus_drain_interval_sec () = default_turn_event_bus_drain_interval_sec
 
-let string_contains_substring = String_util.string_contains_substring
-;;
-
-let string_contains_substring_ci = String_util.string_contains_substring_ci
-;;
-
 let side_effect_metric_label side_effect =
   let trimmed = String.trim side_effect in
   let normalized =

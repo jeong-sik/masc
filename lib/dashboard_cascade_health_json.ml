@@ -36,7 +36,22 @@ let declared_provider_schemes_set ?(config_path : string option) () : StringSet.
   match config_path with
   | None -> StringSet.empty
   | Some path ->
-    (match Cascade_catalog_runtime.validate_path ~config_path:path () with
+    (* #19327/#19340 follow-up cycle resolution: build [route_data] from
+       Cascade_routes at the dashboard layer (which sits above both
+       Cascade_routes and Cascade_catalog_runtime) and inject. *)
+    let route_data : Cascade_catalog_runtime.route_data =
+      { keeper_turn_target =
+          Cascade_routes_resolve.cascade_name_for_use ~config_path:path
+            Cascade_routes.Keeper_turn
+      ; route_targets =
+          Cascade_routes.configured_route_targets ~config_path:path ()
+      ; unknown_route_keys =
+          Cascade_routes.configured_unknown_route_keys ~config_path:path ()
+      }
+    in
+    (match
+       Cascade_catalog_runtime.validate_path ~route_data ~config_path:path ()
+     with
      | Error _ -> StringSet.empty
      | Ok snapshot ->
        List.fold_left

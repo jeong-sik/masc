@@ -106,7 +106,15 @@ let inspect_active ?sw ?net ?clock () =
            | _ -> ());
           result
       | None -> (
-          match Validate.validate_path_result ?sw ?net ~config_path () with
+          (* #19327/#19340 follow-up: internal resolve path skips the
+             route-target cross-check by passing [empty_route_data] — that
+             check is owned by external callers (dashboard / boot probes)
+             which fetch from [Cascade_routes] explicitly.  See PR cycle
+             resolution. *)
+          match
+            Validate.validate_path_result ?sw ?net
+              ~route_data:Validate.empty_route_data ~config_path ()
+          with
           | Ok { snapshot; rejected_update = None } ->
               (* Recovery detection: capture prev rejected_update
                  inside the same lock as the write so a degraded ->

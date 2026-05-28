@@ -105,83 +105,11 @@ let test_cascade_json_absent () =
   check bool "config/cascade.json absent" false (Sys.file_exists (config_path "cascade.json"))
 ;;
 
-let find_tier_group cfg name =
-  cfg.Types.tier_groups
-  |> List.find_opt (fun (group : Types.cascade_tier_group) ->
-    String.equal group.name name)
-;;
-
-let find_tier cfg name =
-  cfg.Types.tiers
-  |> List.find_opt (fun (tier : Types.cascade_tier) ->
-    String.equal tier.name name)
-;;
-
-let index_of value values =
-  let rec loop index = function
-    | [] -> None
-    | candidate :: rest ->
-      if String.equal candidate value then Some index else loop (index + 1) rest
-  in
-  loop 0 values
-;;
-
-let test_ollama_cloud_stable_is_system_only () =
-  let cfg = load_checked_in_cascade_toml () in
-  match find_tier_group cfg "ollama_cloud_stable" with
-  | None -> fail "missing tier-group.ollama_cloud_stable"
-  | Some group ->
-    check
-      (option bool)
-      "ollama_cloud_stable keeper-assignable"
-      (Some false)
-      group.keeper_assignable
-;;
-
-let test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud () =
-  let cfg = load_checked_in_cascade_toml () in
-  match find_tier_group cfg "strict_tool_candidates" with
-  | None -> fail "missing tier-group.strict_tool_candidates"
-  | Some group ->
-    (match index_of "ollama_cloud_stable" group.tiers with
-     | None -> ()
-     | Some cloud_index ->
-       (match index_of "provider_k-coding-with-spark" group.tiers with
-        | Some glm_index when glm_index < cloud_index -> ()
-        | Some _ ->
-          fail
-            "strict_tool_candidates must try provider_k-coding-with-spark before \
-             ollama_cloud_stable"
-        | None ->
-          fail
-            "strict_tool_candidates must not include ollama_cloud_stable without \
-             provider_k-coding-with-spark ahead of it"))
-;;
-
-let test_no_deprecated_profile_names () =
-  let cfg = load_checked_in_cascade_toml () in
-  let deprecated_tiers =
-    cfg.Types.tiers
-    |> List.filter_map (fun (tier : Types.cascade_tier) ->
-      if Masc_mcp.Cascade_config_loader.is_deprecated_logical_profile_name tier.name
-      then Some ("tier." ^ tier.name)
-      else None)
-  in
-  let deprecated_groups =
-    cfg.Types.tier_groups
-    |> List.filter_map (fun (group : Types.cascade_tier_group) ->
-      if
-        Masc_mcp.Cascade_config_loader.is_deprecated_logical_profile_name
-          group.name
-      then Some ("tier-group." ^ group.name)
-      else None)
-  in
-  check
-    string
-    "deprecated tier/tier-group names"
-    ""
-    (String.concat ", " (deprecated_tiers @ deprecated_groups))
-;;
+(* #19327/#19340 tier-group purge: helpers [find_tier_group] / [find_tier] /
+   [index_of] and the four tests that exercised them (ollama_cloud_stable,
+   strict_tool_group, no_deprecated_profile_names, primary_priority_order)
+   removed.  If equivalent invariants against the new direct-binding
+   cascade.toml schema are still desired, add them as a separate test. *)
 
 let check_qwen_thinking_control cfg model_id =
   match Types.model_capabilities_for_id cfg model_id with
@@ -203,54 +131,22 @@ let test_qwen_models_use_chat_template_kwargs () =
   check_qwen_thinking_control cfg "qwen3-5"
 ;;
 
-let test_primary_priority_order () =
-  let cfg = load_checked_in_cascade_toml () in
-  match find_tier cfg "primary" with
-  | None -> fail "missing tier.primary"
-  | Some tier ->
-    check
-      (list string)
-      "primary priority"
-      [
-        "runpod_mtp.qwen-runpod.keeper";
-        "local_mtp.qwen-local.keeper";
-        "glm-coding.glm-5-turbo";
-        "glm-coding.glm-flashx";
-        "cli_tool_a.codex-spark.for-keeper-turn";
-      ]
-      tier.members
-;;
-
 let () =
   run
     "cascade config validity"
     [ ( "checked-in seed"
-      , [ test_case "cascade.toml parses, validates, and adapts" `Quick test_cascade_toml_validates
+      , [ test_case "cascade.toml parses, validates, and adapts" `Quick
+            test_cascade_toml_validates
         ; test_case
             "cascade.toml has no rejected runtime profiles"
             `Quick
             test_cascade_toml_runtime_validates_without_rejected_profiles
-        ; test_case "cascade.json is not a checked-in source" `Quick test_cascade_json_absent
-        ; test_case
-            "ollama_cloud_stable is system-only"
-            `Quick
-            test_ollama_cloud_stable_is_system_only
-        ; test_case
-            "strict tool group does not bypass GLM before Ollama Cloud"
-            `Quick
-            test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud
-        ; test_case
-            "cascade.toml has no deprecated profile names"
-            `Quick
-            test_no_deprecated_profile_names
+        ; test_case "cascade.json is not a checked-in source" `Quick
+            test_cascade_json_absent
         ; test_case
             "provider_h models use chat_template_kwargs thinking control"
             `Quick
             test_qwen_models_use_chat_template_kwargs
-        ; test_case
-            "primary tier follows operator priority"
-            `Quick
-            test_primary_priority_order
         ] )
     ]
 ;;

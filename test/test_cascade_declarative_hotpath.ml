@@ -535,7 +535,7 @@ target = "tier-group.provider_k-coding-with-spark"
          "expected one provider config, got %d"
          (List.length cfgs))
 
-let test_runtime_resolution_preserves_tier_id () =
+let test_runtime_resolution_preserves_admission_key () =
   let toml =
     {|
 [providers.ollama_cloud]
@@ -573,7 +573,7 @@ fallback = false
   with
   | Error err -> fail err
   | Ok { tiered_providers = [ tiered ]; _ } ->
-    check string "tier id" "tier-group.provider_k-coding-with-spark" tiered.tier_id
+    check string "tier id" "tier-group.provider_k-coding-with-spark" tiered.admission_key
   | Ok resolution ->
     fail
       (Printf.sprintf
@@ -643,9 +643,9 @@ fallback = false
   | Error err -> fail err
   | Ok { tiered_providers = [ runpod; ollama ]; _ } ->
     check string "runpod admission tier id"
-      "tier-group.strict_tool_candidates.tier-0" runpod.tier_id;
+      "tier-group.strict_tool_candidates.tier-0" runpod.admission_key;
     check string "ollama cloud admission tier id"
-      "tier-group.strict_tool_candidates.tier-1" ollama.tier_id
+      "tier-group.strict_tool_candidates.tier-1" ollama.admission_key
   | Ok resolution ->
     fail
       (Printf.sprintf
@@ -829,9 +829,9 @@ let test_partial_snapshot_errors_disjoint_from_profile_names () =
               | Adapter.Provider_not_found s
               | Adapter.Model_not_found s
               | Adapter.Binding_resolution_failed s
-              | Adapter.Alias_resolution_failed s
-              | Adapter.Tier_group_empty s -> Some s
-              | Adapter.Strategy_mismatch _
+              | Adapter.Alias_resolution_failed s -> Some s
+              (* #19327: Tier_group_empty removed.
+                 #19340 follow-up: Strategy_mismatch also removed. *)
               | Adapter.Duplicate_route _
               | Adapter.Internal _ -> None)
         in
@@ -944,7 +944,7 @@ let () =
         test_case
           "runtime resolution preserves admission tier id"
           `Quick
-          test_runtime_resolution_preserves_tier_id;
+          test_runtime_resolution_preserves_admission_key;
         test_case
           "runtime resolution splits multi-tier group admission ids"
           `Quick

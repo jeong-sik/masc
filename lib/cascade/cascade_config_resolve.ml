@@ -170,9 +170,23 @@ let resolve_model_strings_traced_with
          (models, Named)
        else
          let fallback_profile =
-           Cascade_routes.cascade_name_for_use
-             ~config_path:path
-             Cascade_routes.Keeper_turn
+           (* #19327/#19340 follow-up: bypass the catalog-aware
+              [Cascade_routes_resolve.cascade_name_for_use] (which would
+              re-introduce the Cascade_routes ↔ Cascade_catalog_runtime
+              cycle through this module) and resolve directly from route
+              bindings, falling back to the canonical route name. *)
+           let route_key =
+             Cascade_routes.logical_use_key Cascade_routes.Keeper_turn
+           in
+           match
+             Cascade_routes.configured_route_bindings ~config_path:path ()
+             |> List.find_map (fun (k, target) ->
+                    if String.equal k route_key then Some target else None)
+           with
+           | Some target -> target
+           | None ->
+             Cascade_routes.fallback_name_for_catalog Cascade_routes.Keeper_turn
+               ~catalog:[]
          in
          let fallback_weighted =
            configured_weighted_entries_from_materialized_json
@@ -235,9 +249,20 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
       (models, { candidates; source = Named })
     else
       let fallback_profile =
-        Cascade_routes.cascade_name_for_use
-          ~config_path:path
-          Cascade_routes.Keeper_turn
+        (* #19327/#19340 follow-up: bypass catalog-aware resolver to avoid
+           the Cascade_routes ↔ Cascade_catalog_runtime cycle. *)
+        let route_key =
+          Cascade_routes.logical_use_key Cascade_routes.Keeper_turn
+        in
+        match
+          Cascade_routes.configured_route_bindings ~config_path:path ()
+          |> List.find_map (fun (k, target) ->
+                 if String.equal k route_key then Some target else None)
+        with
+        | Some target -> target
+        | None ->
+          Cascade_routes.fallback_name_for_catalog Cascade_routes.Keeper_turn
+            ~catalog:[]
       in
       let fallback_weighted =
         configured_weighted_entries_from_materialized_json json

@@ -45,26 +45,8 @@ let normalize_tool_names names =
   |> dedupe_keep_order
 ;;
 
-let legacy_keeper_internal_tool_names =
-  (* Keep legacy masc coordination defaults explicit in
-     [legacy_session_min_tool_names]; new [masc_*] internal tools should not
-     silently expand missing [tool_access] migrations. *)
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-  |> List.filter (fun name -> not (String.starts_with ~prefix:"masc_" name))
-;;
-
-let legacy_session_min_tool_names =
-  (* Legacy keepers historically received canonical masc_* coordination tools,
-     not the SDK alias-heavy Session_min surface. Keep this compatibility list
-     explicit so missing tool_access migration remains stable after tier removal. *)
-  List.map
-    Tool_name.Masc.to_string
-    Tool_name.Masc.
-      [ Status; Tasks; Claim_next; Plan_set_task; Transition; Add_task; Broadcast ]
-;;
-
-let migrate_legacy_restricted_tools names =
-  Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
+let write_tools =
+  [ "tool_edit_file"; "tool_write_file"; "tool_execute" ]
 ;;
 
 let tool_preset_to_string = function
@@ -169,7 +151,12 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
 ;;
 
 let default_tool_access_of_meta_json () =
-  migrate_legacy_restricted_tools legacy_session_min_tool_names
+  let tools =
+    Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+    |> List.filter (fun name ->
+           not (List.exists (String.equal name) write_tools))
+  in
+  Custom (normalize_tool_names tools)
 ;;
 
 let tool_access_of_meta_json (json : Yojson.Safe.t) =

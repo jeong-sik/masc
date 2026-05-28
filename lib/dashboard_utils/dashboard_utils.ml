@@ -49,9 +49,6 @@ let string_list_of_json json =
              | _ -> None)
   | _ -> []
 
-let json_string_option = Json_util.string_opt_to_json_trimmed
-
-let option_to_json = Json_util.option_to_yojson
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)

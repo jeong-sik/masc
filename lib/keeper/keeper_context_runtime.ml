@@ -404,12 +404,18 @@ let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities 
       | Ok agent -> agent.capabilities <> capabilities
       | Error _ -> true)
 
-let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
+type room_presence_error = {
+  room_id : string;
+  exn_msg : string;
+}
+
+let ensure_keeper_room_presence config (meta : keeper_meta)
+  : keeper_meta * room_presence_error list =
   let room_ids = room_ids_for_meta config meta in
   let capabilities = keeper_room_capabilities meta in
-  let successful_rooms =
+  let successful_rooms, errors =
     List.fold_left
-      (fun acc room_id ->
+      (fun (acc_rooms, acc_errs) room_id ->
         try
           let joined =
             Coord.is_agent_joined config ~agent_name:meta.agent_name
@@ -428,13 +434,23 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
                  ~capabilities ());
           ignore
             (Coord.heartbeat config ~agent_name:meta.agent_name);
-          room_id :: acc
+          room_id :: acc_rooms, acc_errs
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Keeper_context_core.log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;
-          acc)
-      [] room_ids
+          let exn_msg = Printexc.to_string exn in
+          Log.Keeper.error
+            "room_presence_join_failed keeper=%s room=%s exn=%s"
+            meta.name room_id exn_msg;
+          acc_rooms, { room_id; exn_msg } :: acc_errs)
+      ([], [])
+      room_ids
   in
-  { meta with joined_room_ids = List.rev successful_rooms }
+  let errors = List.rev errors in
+  let synced = { meta with joined_room_ids = List.rev successful_rooms } in
+  if room_ids <> [] && successful_rooms = [] then
+    Log.Keeper.error
+      "room_presence_all_failed keeper=%s rooms=%d errors=%d — keeper has no room presence"
+      meta.name (List.length room_ids) (List.length errors);
+  synced, errors
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =

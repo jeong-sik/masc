@@ -162,9 +162,15 @@ let handle_tool_execute_typed
            was even built). *)
         match Agent_tool_execute_typed_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
         | Error e ->
-          error_json
-            ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
-            (typed_validation_error_text e)
+          let alts = Agent_tool_execute_typed_input.validation_error_alternatives e in
+          let fields =
+            [ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+            @
+            (match alts with
+             | [] -> []
+             | _ -> [ "alternatives", `List (List.map (fun s -> `String s) alts) ])
+          in
+          error_json ~fields (typed_validation_error_text e)
         | Ok ir ->
         let cmd_for_log =
           Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir

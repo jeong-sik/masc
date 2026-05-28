@@ -906,6 +906,35 @@ let test_redirection_rejected_emits_typed_alternative () =
   | _ -> Alcotest.fail "expected Argv_contains_shell_redirection"
 ;;
 
+let test_validation_error_alternatives () =
+  let check_alts ~name err expected =
+    let actual = Execute_input.validation_error_alternatives err in
+    Alcotest.(check (list string)) name expected actual
+  in
+  check_alts
+    ~name:"Argv_contains_shell_redirection alternatives"
+    (Execute_input.Argv_contains_shell_redirection
+       { executable = "find"; index = 3; token = "2>/dev/null" })
+    [ "discard_stderr"; "discard_stdout"; "Pipeline" ];
+  check_alts
+    ~name:"Argv_contains_shell_metachar alternatives"
+    (Execute_input.Argv_contains_shell_metachar
+       { executable = "find"; index = 3; token = "foo\nbar" })
+    [ "Pipeline" ];
+  check_alts
+    ~name:"Executable_not_allowlisted has no alternatives"
+    (Execute_input.Executable_not_allowlisted { name = "rm"; mode = Execute_input.Dev_full })
+    [];
+  check_alts
+    ~name:"Empty_executable has no alternatives"
+    (Execute_input.Empty_executable { argv = [ "ls" ] })
+    [];
+  check_alts
+    ~name:"Cwd_not_absolute has no alternatives"
+    (Execute_input.Cwd_not_absolute "relative")
+    []
+;;
+
 (* RFC-0198 Phase B: typed [stdin]/[stdout]/[stderr] redirect fields. *)
 
 let mk_exec_with_redirects
@@ -1184,6 +1213,10 @@ let suite =
           "rfc_0198_redirection_rejected_emits_typed_alternative"
           `Quick
           test_redirection_rejected_emits_typed_alternative
+      ; Alcotest.test_case
+          "rfc_0198_validation_error_alternatives_ssot"
+          `Quick
+          test_validation_error_alternatives
       ; Alcotest.test_case
           "rfc_0198_phaseb_defaults_inherit_emits_no_ir_entries"
           `Quick

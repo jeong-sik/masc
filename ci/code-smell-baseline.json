@@ -3073,7 +3073,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 60,
+      "baseline": 61,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3127,6 +3127,10 @@
         {
           "file": "lib/goal/goal_janitor.ml",
           "value": 1
+        },
+        {
+          "file": "lib/keeper/agent_tool_execute_path.ml",
+          "value": 2
         },
         {
           "file": "lib/keeper/agent_tool_shared_runtime.ml",
@@ -3270,7 +3274,7 @@
         },
         {
           "file": "lib/tool_inline_dispatch_extra.ml",
-          "value": 3
+          "value": 2
         },
         {
           "file": "lib/tool_registry.ml",

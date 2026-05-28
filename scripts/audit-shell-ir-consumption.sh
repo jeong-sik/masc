@@ -9,8 +9,8 @@
 #   G1  Bash.parse_string caller count (lib/, non-test)
 #   G2  is_write_operation / is_destructive_bash_operation signature
 #       (string vs Shell_ir.t) — heuristic via grep
-#   G3  gh command gate_typed routing (heuristic — counts gate_typed
-#       callers in keeper handlers)
+#   G3  Shell IR centralized dispatcher adoption (counts keeper files
+#       referencing Agent_tool_execute_shell_ir, excluding the dispatcher)
 #   G4  Risk-stamped IR (existence of Shell_ir.simple.risk or
 #       'decided phantom envelope)
 #   G5  validate_shell_ir_paths caller count (target: 4 keeper ops)
@@ -149,9 +149,13 @@ done <<< "$g1_current_files"
 g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z]+ ?=' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
 g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Shell_ir' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
 
-# ---- G3: gate_typed routing in keeper handlers ----
-g3_gate_typed=$(rg -c 'Shell_(command_)?gate\.gate_typed|gate_typed ~' lib/keeper/ 2>/dev/null \
-  | awk -F: '{s+=$2} END{print s+0}')
+# ---- G3: Shell IR centralized dispatcher adoption ----
+# Architecture: all typed Execute commands route through Agent_tool_execute_shell_ir
+# which calls gate_typed once. Count keeper files that reference the dispatcher
+# (excluding the dispatcher itself) to measure keeper-op adoption.
+g3_gate_typed=$(rg -l 'Agent_tool_execute_shell_ir' lib/keeper/ 2>/dev/null \
+  | rg -v 'agent_tool_execute_shell_ir\.ml$' \
+  | wc -l | tr -d ' ')
 
 # ---- G4: risk stamp existence ----
 # Primary: phantom envelope module shell_ir_risk.ml/mli (RFC-0160 S3)
@@ -207,7 +211,7 @@ emit_json() {
   "g1_parse_string_total_refs_nontest": ${g1_total_refs},
   "g2_classifier_string_sig": ${g2_string_sig},
   "g2_classifier_ir_sig": ${g2_ir_sig},
-  "g3_gate_typed_refs_in_keeper": ${g3_gate_typed},
+  "g3_dispatcher_adopting_keeper_files": ${g3_gate_typed},
   "g4_risk_in_simple": ${g4_risk_in_simple},
   "g4_phantom_envelope": ${g4_phantom},
   "g4_dispatch_decided_consumers": ${g4_dispatch_decided},
@@ -236,8 +240,8 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
         string sig: ${g2_string_sig}, IR sig: ${g2_ir_sig}
                                                        (target: string=0, IR≥2)
 
-  G3  Shell_command_gate.gate_typed refs in lib/keeper/
-        ${g3_gate_typed} refs                          (target: ≥ 4 keeper ops covered)
+  G3  Agent_tool_execute_shell_ir dispatcher adoption
+        ${g3_gate_typed} keeper files                    (target: ≥ 4 keeper ops covered)
 
   G4  Risk-stamped IR (phantom envelope in shell_ir_risk.ml/mli)
         risk in simple: ${g4_risk_in_simple}, phantom: ${g4_phantom}

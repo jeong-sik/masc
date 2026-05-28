@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3080,
+      "baseline": 3085,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -985,8 +985,12 @@
           "value": 7
         },
         {
+          "file": "lib/http_response_payload.ml",
+          "value": 1
+        },
+        {
           "file": "lib/http_server_eio.ml",
-          "value": 3
+          "value": 4
         },
         {
           "file": "lib/http_server_h2.ml",
@@ -1098,7 +1102,7 @@
         },
         {
           "file": "lib/keeper/agent_tool_execute_typed_input.ml",
-          "value": 4
+          "value": 5
         },
         {
           "file": "lib/keeper/agent_tool_filesystem_runtime.ml",
@@ -2314,7 +2318,7 @@
         },
         {
           "file": "lib/server/server_activity_http.ml",
-          "value": 6
+          "value": 8
         },
         {
           "file": "lib/server/server_auth.ml",

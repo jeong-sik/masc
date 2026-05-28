@@ -364,9 +364,9 @@ let append_decision_record
                       | None -> []
                     in
                     [
-                      ("system_fingerprint", match t.system_fingerprint with Some s -> `String s | None -> `Null);
-                      ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
-                      ("request_latency_ms", match t.request_latency_ms with Some n -> `Int n | None -> `Null);
+                      ("system_fingerprint", Json_util.string_opt_to_json t.system_fingerprint);
+                      ("reasoning_tokens", Json_util.int_opt_to_json t.reasoning_tokens);
+                      ("request_latency_ms", Json_util.int_opt_to_json t.request_latency_ms);
                     ] @ timings_fields
                 | None -> []
               in

@@ -34,13 +34,8 @@ let fresh_task_status config ~(task_id : string)
       |> Option.map (fun (t : Masc_domain.task) -> t.task_status)
 
 (** [is_terminal status] returns [true] iff the status is [Done _] or
-    [Cancelled _]. *)
-let is_terminal : Masc_domain.task_status -> bool = function
-  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> true
-  | Masc_domain.Todo
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _
-  | Masc_domain.AwaitingVerification _ -> false
+    [Cancelled _].  SSOT: [Masc_domain.task_status_is_terminal]. *)
+let is_terminal = Masc_domain.task_status_is_terminal
 
 (** Clear the agent's [current_task] field on disk when it equals [task_id]
     and log a [cache_desync.cleared] diagnostic event. *)

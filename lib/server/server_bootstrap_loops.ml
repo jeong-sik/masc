@@ -471,9 +471,7 @@ let start_keeper_loops
         (Printexc.to_string exn));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
      can react to new tasks, mentions, or room activity immediately.
-     Coord_state.on_broadcast_mention is the active path (Coord.broadcast uses
-     Coord_state.broadcast); Coord_eio.on_broadcast_mention is kept in sync as
-     a safety net for any legacy callers. *)
+     SSOT: Coord_broadcast.on_broadcast_mention is the single ref wired here. *)
   let broadcast_mention_handler =
     fun mention ->
     match mention with
@@ -485,7 +483,6 @@ let start_keeper_loops
       Log.Keeper.info "broadcast → wakeup all keepers (reactive push)"
   in
   Coord_broadcast.on_broadcast_mention := broadcast_mention_handler;
-  Coord_eio.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
      let cancel_orchestrator =

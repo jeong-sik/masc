@@ -517,14 +517,6 @@ val resolve_strategy :
     - [backoff_cap_ms < backoff_base_ms] → clamped up to
       [backoff_base_ms]. *)
 
-val normalize_priority_tiers :
-  config_path:string ->
-  name:string ->
-  string list list ->
-  (string list list, string) result
-(** Validate and normalize a [priority_tier] tier matrix against the
-    configured candidate model ids for [name]. Returns [Error] when all
-    tiers collapse or when the profile has no configured candidates. *)
 
 val resolve_ollama_max_concurrent :
   ?config_path:string ->

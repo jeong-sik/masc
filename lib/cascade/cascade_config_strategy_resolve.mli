@@ -11,12 +11,6 @@
 
     @stability Internal *)
 
-val normalize_priority_tiers :
-  config_path:string ->
-  name:string ->
-  string list list ->
-  (string list list, string) result
-
 val resolve_strategy :
   ?config_path:string ->
   name:string ->

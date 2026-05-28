@@ -10,10 +10,7 @@ open Alcotest
 module AQ = Masc_mcp.Admission_queue
 
 let cascade_name raw =
-  let canonical =
-    if Cascade_name.is_canonical_prefix raw then raw else "route." ^ raw
-  in
-  Cascade_name.of_string_exn canonical
+  Cascade_name.of_string_exn raw
 
 (* ============================================================
    Passthrough Contract

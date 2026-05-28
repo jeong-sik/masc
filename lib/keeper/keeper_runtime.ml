@@ -137,7 +137,7 @@ let invalid_profile_defaults_error ~keeper_name detail =
 let effective_declarative_cascade_name
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  match defaults.cascade_name, defaults.manifest_path with
+  match defaults.model, defaults.manifest_path with
   | Some cascade_name, _ ->
       Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
   | None, Some _ -> (Keeper_config.default_cascade_name ())
@@ -216,13 +216,13 @@ let ensure_keeper_meta config name =
     with
     | Error detail ->
         let field =
-          match defaults.cascade_name, defaults.manifest_path with
+          match defaults.model, defaults.manifest_path with
           | Some _, _ -> "profile.cascade_name"
           | None, Some _ -> "manifest.default_cascade_name"
           | None, None -> "meta.cascade_name"
         in
         let raw_value =
-          match defaults.cascade_name, defaults.manifest_path with
+          match defaults.model, defaults.manifest_path with
           | Some cascade_name, _ -> cascade_name
           | None, Some _ -> (Keeper_config.default_cascade_name ())
           | None, None -> cascade_name_of_meta meta

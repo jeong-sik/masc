@@ -30,12 +30,7 @@ module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 let oas_error_cascade_name raw =
   let normalized = Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw in
-  let canonical =
-    if Cascade_name.is_canonical_prefix normalized
-    then normalized
-    else "tier-group." ^ normalized
-  in
-  Cascade_name.of_string_exn canonical
+  Cascade_name.of_string_exn normalized
 ;;
 
 let phase_buffer_cascade_name () =

@@ -61,13 +61,6 @@ let test_unknown_prefix () =
 let test_of_string_exn_ok () =
   check string "exn round-trip" "tier-group.x" (CN.to_string (CN.of_string_exn "tier-group.x"))
 
-let test_is_canonical_prefix () =
-  check bool "tier-group. is canonical" true (CN.is_canonical_prefix "tier-group.x");
-  check bool "tier. is canonical" true (CN.is_canonical_prefix "tier.x");
-  check bool "route. is canonical" true (CN.is_canonical_prefix "route.x");
-  check bool "bare is not canonical" false (CN.is_canonical_prefix "x");
-  check bool "empty is not canonical" false (CN.is_canonical_prefix "")
-
 let () =
   Alcotest.run "cascade_name"
     [ ( "valid"
@@ -84,6 +77,5 @@ let () =
         ] )
     ; ( "exn_and_helpers"
       , [ test_case "of_string_exn ok" `Quick test_of_string_exn_ok
-        ; test_case "is_canonical_prefix" `Quick test_is_canonical_prefix
         ] )
     ]

@@ -160,8 +160,6 @@ let test_r3_unknown_binding () =
       thinking_enabled = None;
       thinking_budget = None;
     }];
-    tiers = [];
-    tier_groups = [];
     routes = [];
     system_targets = [];
     profiles = [];

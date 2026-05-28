@@ -18,7 +18,7 @@ type health_status =
     persisted into skip observations and surfaced in fleet diagnostics. *)
 type runtime_pressure_class =
   | Client_capacity_full
-  | Tier_admission_full
+  | Admission_full
   | Provider_capacity
   | Provider_dns_failure
   | Provider_timeout

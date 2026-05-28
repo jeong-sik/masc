@@ -535,7 +535,7 @@ target = "tier-group.provider_k-coding-with-spark"
          "expected one provider config, got %d"
          (List.length cfgs))
 
-let test_runtime_resolution_preserves_tier_id () =
+let test_runtime_resolution_preserves_admission_key () =
   let toml =
     {|
 [providers.ollama_cloud]
@@ -573,7 +573,7 @@ fallback = false
   with
   | Error err -> fail err
   | Ok { tiered_providers = [ tiered ]; _ } ->
-    check string "tier id" "tier-group.provider_k-coding-with-spark" tiered.tier_id
+    check string "admission_key" "tier-group.provider_k-coding-with-spark" tiered.admission_key
   | Ok resolution ->
     fail
       (Printf.sprintf
@@ -642,10 +642,10 @@ fallback = false
   with
   | Error err -> fail err
   | Ok { tiered_providers = [ runpod; ollama ]; _ } ->
-    check string "runpod admission tier id"
-      "tier-group.strict_tool_candidates.tier-0" runpod.tier_id;
-    check string "ollama cloud admission tier id"
-      "tier-group.strict_tool_candidates.tier-1" ollama.tier_id
+    check string "runpod admission_key"
+      "tier-group.strict_tool_candidates.tier-0" runpod.admission_key;
+    check string "ollama cloud admission_key"
+      "tier-group.strict_tool_candidates.tier-1" ollama.admission_key
   | Ok resolution ->
     fail
       (Printf.sprintf
@@ -817,12 +817,11 @@ let test_partial_snapshot_errors_disjoint_from_profile_names () =
            relies on: a name in [snapshot.profiles] always points at a
            fully resolved profile. *)
         (* Exhaustive over Adapter.adapter_error. Subjects that name a
-           binding-like entity (provider/model/binding/alias/tier-group)
-           must not appear as snapshot profile_names. Strategy_mismatch
-           carries a tier name, Duplicate_route a route name, Internal an
-           internal message — none of those are binding subjects, so they
-           are excluded explicitly. Catch-all removed to force review on
-           new variants. *)
+           binding-like entity (provider/model/binding/alias)
+           must not appear as snapshot profile_names. Duplicate_route
+           a route name, Internal an internal message — none of those
+           are binding subjects, so they are excluded explicitly.
+           Catch-all removed to force review on new variants. *)
         let error_subjects =
           errors
           |> List.filter_map (function
@@ -830,8 +829,7 @@ let test_partial_snapshot_errors_disjoint_from_profile_names () =
               | Adapter.Model_not_found s
               | Adapter.Binding_resolution_failed s
               | Adapter.Alias_resolution_failed s -> Some s
-              (* #19327: Tier_group_empty constructor removed. *)
-              | Adapter.Strategy_mismatch _
+              (* #19327: Strategy_mismatch + Tier_group_empty constructors removed. *)
               | Adapter.Duplicate_route _
               | Adapter.Internal _ -> None)
         in
@@ -944,7 +942,7 @@ let () =
         test_case
           "runtime resolution preserves admission tier id"
           `Quick
-          test_runtime_resolution_preserves_tier_id;
+          test_runtime_resolution_preserves_admission_key;
         test_case
           "runtime resolution splits multi-tier group admission ids"
           `Quick

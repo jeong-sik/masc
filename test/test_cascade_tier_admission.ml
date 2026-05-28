@@ -28,25 +28,25 @@ let bool_check msg expected actual =
 let test_create_default_capacity () =
   let t = A.create () in
   int_check "default max 8 on unseen tier" 8
-    (A.configured_max t ~tier_id:"unseen")
+    (A.configured_max t ~admission_key:"unseen")
 
 let test_create_custom_default () =
   let t = A.create ~default_max_inflight:16 () in
   int_check "custom default 16 on unseen tier" 16
-    (A.configured_max t ~tier_id:"any")
+    (A.configured_max t ~admission_key:"any")
 
 let test_configure_overrides_default () =
   let t = A.create ~default_max_inflight:8 () in
-  A.configure t ~tier_id:"hot" ~max_inflight:4;
+  A.configure t ~admission_key:"hot" ~max_inflight:4;
   int_check "configure overrides default" 4
-    (A.configured_max t ~tier_id:"hot");
+    (A.configured_max t ~admission_key:"hot");
   int_check "other tier still default" 8
-    (A.configured_max t ~tier_id:"cold")
+    (A.configured_max t ~admission_key:"cold")
 
 let test_current_inflight_starts_zero () =
   let t = A.create () in
   int_check "inflight = 0 on unseen tier" 0
-    (A.current_inflight t ~tier_id:"unseen")
+    (A.current_inflight t ~admission_key:"unseen")
 
 (* {1 Bypass policy} *)
 
@@ -54,7 +54,7 @@ let test_bypass_runs_function () =
   let t = A.create ~default_max_inflight:1 () in
   let invocations = ref 0 in
   let result =
-    A.with_admission t ~tier_id:"saturated"
+    A.with_admission t ~admission_key:"saturated"
       ~admission_policy:A.Bypass
       (fun () ->
         incr invocations;
@@ -68,18 +68,18 @@ let test_bypass_runs_function () =
 let test_bypass_does_not_touch_inflight () =
   let t = A.create ~default_max_inflight:1 () in
   let _ =
-    A.with_admission t ~tier_id:"tier-x"
+    A.with_admission t ~admission_key:"tier-x"
       ~admission_policy:A.Bypass
       (fun () -> ())
   in
   int_check "inflight unchanged" 0
-    (A.current_inflight t ~tier_id:"tier-x")
+    (A.current_inflight t ~admission_key:"tier-x")
 
 let test_bypass_works_at_saturation () =
   let t = A.create ~default_max_inflight:0 () in
   (* default 0 = always capacity_full for Required, but Bypass should still work *)
   let result =
-    A.with_admission t ~tier_id:"any"
+    A.with_admission t ~admission_key:"any"
       ~admission_policy:A.Bypass
       (fun () -> 42)
   in
@@ -92,7 +92,7 @@ let test_bypass_works_at_saturation () =
 let test_required_within_capacity () =
   let t = A.create ~default_max_inflight:2 () in
   let result =
-    A.with_admission t ~tier_id:"main"
+    A.with_admission t ~admission_key:"main"
       ~admission_policy:A.Required
       (fun () -> "ok")
   in
@@ -101,25 +101,25 @@ let test_required_within_capacity () =
   | Ok v ->
       check string "Required returned f result" "ok" v;
       int_check "inflight released after success" 0
-        (A.current_inflight t ~tier_id:"main")
+        (A.current_inflight t ~admission_key:"main")
 
 (* {1 Required policy — capacity full} *)
 
 let test_required_at_capacity_full () =
   let t = A.create ~default_max_inflight:1 () in
   (* Manually acquire so the next Required hit is capacity_full *)
-  (match A.try_acquire t ~tier_id:"main" with
+  (match A.try_acquire t ~admission_key:"main" with
    | Granted _ -> ()
    | Capacity_full _ -> Alcotest.fail "expected first acquire to succeed");
   let result =
-    A.with_admission t ~tier_id:"main"
+    A.with_admission t ~admission_key:"main"
       ~admission_policy:A.Required
       (fun () -> Alcotest.fail "f should not run at capacity_full")
   in
   match result with
   | Ok _ -> Alcotest.fail "Required should have rejected"
-  | Error (S.Inflight_capacity_full { tier_id; max_inflight }) ->
-      check string "tier_id echoed" "main" tier_id;
+  | Error (S.Inflight_capacity_full { admission_key; max_inflight }) ->
+      check string "admission_key echoed" "main" admission_key;
       int_check "max_inflight echoed" 1 max_inflight
   | Error _other -> Alcotest.fail "wrong signal variant"
 
@@ -132,7 +132,7 @@ let test_required_releases_on_exception () =
   let raised = ref false in
   (try
      let _ =
-       A.with_admission t ~tier_id:"main"
+       A.with_admission t ~admission_key:"main"
          ~admission_policy:A.Required
          (fun () -> raise Test_exn)
      in
@@ -140,60 +140,60 @@ let test_required_releases_on_exception () =
    with Test_exn -> raised := true);
   bool_check "exception propagated" true !raised;
   int_check "counter released on exception" 0
-    (A.current_inflight t ~tier_id:"main")
+    (A.current_inflight t ~admission_key:"main")
 
 (* {1 try_acquire / release low-level pair} *)
 
 let test_try_acquire_release_pair () =
   let t = A.create ~default_max_inflight:2 () in
-  (match A.try_acquire t ~tier_id:"t1" with
+  (match A.try_acquire t ~admission_key:"t1" with
    | Granted { inflight_after_acquire = 1; max_inflight = 2 } -> ()
    | _ -> Alcotest.fail "expected Granted {1, 2}");
-  (match A.try_acquire t ~tier_id:"t1" with
+  (match A.try_acquire t ~admission_key:"t1" with
    | Granted { inflight_after_acquire = 2; max_inflight = 2 } -> ()
    | _ -> Alcotest.fail "expected Granted {2, 2}");
-  (match A.try_acquire t ~tier_id:"t1" with
+  (match A.try_acquire t ~admission_key:"t1" with
    | Capacity_full { inflight_at_check = 2; max_inflight = 2 } -> ()
    | _ -> Alcotest.fail "expected Capacity_full {2, 2}");
-  A.release t ~tier_id:"t1";
+  A.release t ~admission_key:"t1";
   int_check "inflight 1 after one release" 1
-    (A.current_inflight t ~tier_id:"t1");
-  A.release t ~tier_id:"t1";
+    (A.current_inflight t ~admission_key:"t1");
+  A.release t ~admission_key:"t1";
   int_check "inflight 0 after two releases" 0
-    (A.current_inflight t ~tier_id:"t1");
+    (A.current_inflight t ~admission_key:"t1");
   (* extra release is no-op at floor *)
-  A.release t ~tier_id:"t1";
+  A.release t ~admission_key:"t1";
   int_check "inflight 0 after extra release (floor)" 0
-    (A.current_inflight t ~tier_id:"t1")
+    (A.current_inflight t ~admission_key:"t1")
 
 let test_release_unknown_tier_is_noop () =
   let t = A.create () in
-  A.release t ~tier_id:"never-acquired";
+  A.release t ~admission_key:"never-acquired";
   int_check "unknown tier inflight stays 0" 0
-    (A.current_inflight t ~tier_id:"never-acquired")
+    (A.current_inflight t ~admission_key:"never-acquired")
 
 (* {1 Per-tier isolation} *)
 
 let test_tiers_are_independent () =
   let t = A.create ~default_max_inflight:1 () in
-  (match A.try_acquire t ~tier_id:"A" with
+  (match A.try_acquire t ~admission_key:"A" with
    | Granted _ -> ()
    | Capacity_full _ -> Alcotest.fail "A acquire failed");
-  (match A.try_acquire t ~tier_id:"B" with
+  (match A.try_acquire t ~admission_key:"B" with
    | Granted _ -> ()
    | Capacity_full _ -> Alcotest.fail "B acquire failed");
-  int_check "A inflight 1" 1 (A.current_inflight t ~tier_id:"A");
-  int_check "B inflight 1" 1 (A.current_inflight t ~tier_id:"B");
-  A.release t ~tier_id:"A";
+  int_check "A inflight 1" 1 (A.current_inflight t ~admission_key:"A");
+  int_check "B inflight 1" 1 (A.current_inflight t ~admission_key:"B");
+  A.release t ~admission_key:"A";
   int_check "A released, B unchanged" 1
-    (A.current_inflight t ~tier_id:"B");
-  int_check "A released to 0" 0 (A.current_inflight t ~tier_id:"A")
+    (A.current_inflight t ~admission_key:"B");
+  int_check "A released to 0" 0 (A.current_inflight t ~admission_key:"A")
 
 (* {1 Keeper turn driver wire-in} *)
 
 let test_keeper_policy_proactive_required () =
   match
-    KTD.cascade_tier_admission_policy_of_priority
+    KTD.cascade_admission_policy_of_priority
       Llm_provider.Request_priority.Proactive
   with
   | A.Required -> ()
@@ -201,7 +201,7 @@ let test_keeper_policy_proactive_required () =
 
 let test_keeper_policy_interactive_required () =
   match
-    KTD.cascade_tier_admission_policy_of_priority
+    KTD.cascade_admission_policy_of_priority
       Llm_provider.Request_priority.Interactive
   with
   | A.Required -> ()
@@ -209,7 +209,7 @@ let test_keeper_policy_interactive_required () =
 
 let test_keeper_policy_background_bypass () =
   match
-    KTD.cascade_tier_admission_policy_of_priority
+    KTD.cascade_admission_policy_of_priority
       Llm_provider.Request_priority.Background
   with
   | A.Bypass -> ()
@@ -217,15 +217,15 @@ let test_keeper_policy_background_bypass () =
 
 let test_keeper_wire_enabled_rejects_at_capacity () =
   let t = A.create ~default_max_inflight:1 () in
-  (match A.try_acquire t ~tier_id:"keeper-turn" with
+  (match A.try_acquire t ~admission_key:"keeper-turn" with
    | A.Granted _ -> ()
    | A.Capacity_full _ -> Alcotest.fail "expected setup acquire to succeed");
   let ran = ref false in
   let result =
-    KTD.with_cascade_tier_admission_for_testing
+    KTD.with_cascade_admission_for_testing
       ~admission:t
       ~enabled:true
-      ~tier_id:"keeper-turn"
+      ~admission_key:"keeper-turn"
       ~admission_policy:A.Required
       (fun () ->
          ran := true;
@@ -234,20 +234,20 @@ let test_keeper_wire_enabled_rejects_at_capacity () =
   bool_check "provider attempt not run at capacity" false !ran;
   (match result with
    | Ok () -> Alcotest.fail "expected tier admission rejection"
-   | Error (S.Inflight_capacity_full { tier_id; max_inflight }) ->
-       check string "tier id echoed" "keeper-turn" tier_id;
+   | Error (S.Inflight_capacity_full { admission_key; max_inflight }) ->
+       check string "admission_key echoed" "keeper-turn" admission_key;
        int_check "max inflight echoed" 1 max_inflight
    | Error _ -> Alcotest.fail "wrong saturation signal");
-  A.release t ~tier_id:"keeper-turn"
+  A.release t ~admission_key:"keeper-turn"
 
 let test_keeper_wire_disabled_is_passthrough () =
   let t = A.create ~default_max_inflight:0 () in
   let ran = ref false in
   let admission_result =
-    KTD.with_cascade_tier_admission_for_testing
+    KTD.with_cascade_admission_for_testing
       ~admission:t
       ~enabled:false
-      ~tier_id:"keeper-turn"
+      ~admission_key:"keeper-turn"
       ~admission_policy:A.Required
       (fun () ->
          ran := true;
@@ -260,15 +260,15 @@ let test_keeper_wire_disabled_is_passthrough () =
     (Ok "ok")
     admission_result;
   int_check "disabled path did not touch counter" 0
-    (A.current_inflight t ~tier_id:"keeper-turn")
+    (A.current_inflight t ~admission_key:"keeper-turn")
 
 let test_keeper_wire_bypass_policy_is_passthrough () =
   let t = A.create ~default_max_inflight:0 () in
   let admission_result =
-    KTD.with_cascade_tier_admission_for_testing
+    KTD.with_cascade_admission_for_testing
       ~admission:t
       ~enabled:true
-      ~tier_id:"keeper-turn"
+      ~admission_key:"keeper-turn"
       ~admission_policy:A.Bypass
       (fun () -> 7)
   in
@@ -278,7 +278,7 @@ let test_keeper_wire_bypass_policy_is_passthrough () =
     (Ok 7)
     admission_result;
   int_check "bypass path did not touch counter" 0
-    (A.current_inflight t ~tier_id:"keeper-turn")
+    (A.current_inflight t ~admission_key:"keeper-turn")
 
 (* {1 driver} *)
 

@@ -174,11 +174,11 @@ module For_testing : sig
 
   val success_selected_model_raw : Cascade_runtime_candidate.t -> string option
 
-  val cascade_tier_admission_policy_of_priority :
+  val cascade_admission_policy_of_priority :
     Llm_provider.Request_priority.t ->
     Cascade_tier_admission.admission_policy
 
-  val with_cascade_tier_admission_for_testing :
+  val with_cascade_admission_for_testing :
     admission:Cascade_tier_admission.t ->
     enabled:bool ->
     admission_key:string ->

@@ -105,6 +105,17 @@ let launch_supervised_fiber
     in
     fork_body (fun () ->
       let resolved = ref false in
+      (* Issue #18901 follow-up: distinguish parent-cancellation from
+         genuine missed-resolution in the finally branch. The body's
+         try/with re-raises [Eio.Cancel.Cancelled] (line 281 area)
+         which then propagates to the surrounding switch, leaving the
+         finally to fire with [resolved=false]. Without this flag the
+         finally cannot tell whether the unresolved drop was a parent
+         cancel (supervisor restart, sibling failure) or a real
+         missed-resolution bug — both collapsed into [Unexpected].
+         Setting the flag from the cancel handler keeps the typed
+         [fiber_drop_cause] payload accurate. *)
+      let cancelled_by_parent = ref false in
       let resolve_done value =
         if not !resolved then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
@@ -278,7 +289,9 @@ let launch_supervised_fiber
                    "normal exit"
                    ())
            with
-           | Eio.Cancel.Cancelled _ as e -> raise e
+           | Eio.Cancel.Cancelled _ as e ->
+             cancelled_by_parent := true;
+             raise e
            | exn ->
              (* RFC-0002: unified crash handler.
                 Keeper_fiber_crash carries no payload — failure_reason is
@@ -385,6 +398,25 @@ let launch_supervised_fiber
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
                 (* fire-and-forget: resolve_done signals completion *)
                 ignore (resolve_done (`Crashed "shutdown")))
+              else if !cancelled_by_parent
+              then (
+                (* Issue #18901 follow-up: parent-cancel branch. The
+                   body's try/with caught [Eio.Cancel.Cancelled] and set
+                   the flag before re-raising. Shutdown was not in
+                   progress, so this is a *supervisor-driven* cancel
+                   (restart, sibling failure propagating cancel) rather
+                   than a missed-resolution bug. WARN severity, separate
+                   cohort, no record_crash — parent cancels are
+                   expected lifecycle events, not restart-budget signal. *)
+                Log.Keeper.warn
+                  "%s: fiber unresolved after parent cancellation (transient)"
+                  meta.name;
+                Keeper_registry.set_failure_reason
+                  ~base_path
+                  meta.name
+                  (Some (Keeper_registry.Fiber_unresolved Cancelled_by_parent));
+                Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
+                ignore (resolve_done (`Crashed "cancelled_by_parent")))
               else (
 	                let reason =
 	                  Keeper_registry.failure_reason_to_string

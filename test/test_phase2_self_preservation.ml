@@ -99,6 +99,26 @@ let test_failure_reason_fiber () =
   let s = R.failure_reason_to_string (R.Fiber_unresolved R.Unexpected) in
   check string "fiber reason" "fiber_unresolved" s
 
+let test_failure_reason_fiber_graceful () =
+  (* Issue #18901: Graceful_shutdown cause emits a distinct suffix so
+     SIGTERM-race artifacts no longer collapse into the legacy
+     ERROR-level cohort. *)
+  let s =
+    R.failure_reason_to_string (R.Fiber_unresolved R.Graceful_shutdown)
+  in
+  check string "fiber graceful reason"
+    "fiber_unresolved(graceful_shutdown)" s
+
+let test_failure_reason_fiber_cancelled_by_parent () =
+  (* Issue #18901 follow-up: Cancelled_by_parent cause separates
+     supervisor-driven cancels (restart, sibling failure propagating
+     cancel) from genuine missed-resolution bugs. *)
+  let s =
+    R.failure_reason_to_string (R.Fiber_unresolved R.Cancelled_by_parent)
+  in
+  check string "fiber cancelled-by-parent reason"
+    "fiber_unresolved(cancelled_by_parent)" s
+
 let test_failure_reason_exception () =
   let s = R.failure_reason_to_string (R.Exception "Sys_error(disk full)") in
   check string "exception reason" "exception(Sys_error(disk full))" s
@@ -213,13 +233,28 @@ let test_cohort_key_heartbeat () =
 
 let test_cohort_key_fiber () =
   (* Issue #18901: Unexpected cause keeps the legacy
-     "fiber_unresolved" cohort key for backward-compat. The new
-     Graceful_shutdown cause maps to a separate cohort
-     ("fiber_unresolved_graceful") covered elsewhere. *)
+     "fiber_unresolved" cohort key for backward-compat. *)
   let key =
     Sup.cohort_key_of_reason (Some (R.Fiber_unresolved R.Unexpected))
   in
   check string "fiber cohort" "fiber_unresolved" key
+
+let test_cohort_key_fiber_graceful () =
+  let key =
+    Sup.cohort_key_of_reason
+      (Some (R.Fiber_unresolved R.Graceful_shutdown))
+  in
+  check string "fiber graceful cohort" "fiber_unresolved_graceful" key
+
+let test_cohort_key_fiber_cancelled_by_parent () =
+  (* Issue #18901 follow-up: parent cancel cohort separates from
+     [Unexpected] so the supervisor pause policy does not treat
+     restart-driven cancels as a fiber-drop epidemic. *)
+  let key =
+    Sup.cohort_key_of_reason
+      (Some (R.Fiber_unresolved R.Cancelled_by_parent))
+  in
+  check string "fiber cancelled cohort" "fiber_unresolved_cancelled" key
 
 let test_cohort_key_exception () =
   let key = Sup.cohort_key_of_reason
@@ -261,6 +296,10 @@ let () =
     "failure_reason", [
       test_case "heartbeat" `Quick test_failure_reason_heartbeat;
       test_case "fiber_unresolved" `Quick test_failure_reason_fiber;
+      test_case "fiber_unresolved graceful" `Quick
+        test_failure_reason_fiber_graceful;
+      test_case "fiber_unresolved cancelled_by_parent" `Quick
+        test_failure_reason_fiber_cancelled_by_parent;
       test_case "exception" `Quick test_failure_reason_exception;
       test_case "ambiguous partial commit" `Quick
         test_failure_reason_ambiguous_partial_commit;
@@ -284,6 +323,9 @@ let () =
     "cohort_detection", [
       test_case "heartbeat key" `Quick test_cohort_key_heartbeat;
       test_case "fiber key" `Quick test_cohort_key_fiber;
+      test_case "fiber key graceful" `Quick test_cohort_key_fiber_graceful;
+      test_case "fiber key cancelled_by_parent" `Quick
+        test_cohort_key_fiber_cancelled_by_parent;
       test_case "exception key" `Quick test_cohort_key_exception;
       test_case "none key" `Quick test_cohort_key_none;
     ];

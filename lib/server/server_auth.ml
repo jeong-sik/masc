@@ -407,10 +407,9 @@ let host_port_of_request request =
           host_header (Printexc.to_string exn);
         None)
 
-(* Evaluated at module init time (eager). MASC_ALLOW_ANONYMOUS_MUTATIONS
-   must be set before the module is loaded. This is safe because the
-   server process sets all env vars at startup before any module init. *)
-let allow_anonymous_mutations =
+(* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
+   can be toggled without restarting the server process. *)
+let allow_anonymous_mutations () =
   match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
   | Some ("1" | "true") -> true
   | _ -> false
@@ -441,15 +440,34 @@ let is_allowlisted_loopback_dev_origin origin =
       |> List.exists (fun allowed -> allowed = candidate)
   | _ -> false
 
+(* Browsers omit Origin for same-origin requests per the Fetch spec, but
+   always include Referer.  If the Referer's host:port matches the
+   request's Host header, the request is same-origin and trusted. *)
+let is_same_server_referer referer request =
+  match host_port_scheme_of_origin referer, host_port_of_request request with
+  | Some (ref_host, ref_port, scheme), Some (req_host, req_port)
+    when String.equal
+           (normalize_loopback_host ref_host)
+           (normalize_loopback_host req_host) ->
+    let default = default_port_of_scheme scheme in
+    let norm p = match p with Some _ -> p | None -> default in
+    norm ref_port = norm req_port
+  | _ -> false
+
 let ensure_same_origin_browser_request request :
     (unit, Masc_domain.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None ->
-    if allow_anonymous_mutations then Ok ()
-    else
-      Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-        "Authentication required: provide a bearer token or Origin header. \
-         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."))
+    (* Same-origin browser requests don't send Origin.  Check Referer
+       as a fallback — browsers always include it even for same-origin. *)
+    (match Httpun.Headers.get request.Httpun.Request.headers "referer" with
+     | Some referer when is_same_server_referer referer request -> Ok ()
+     | _ ->
+       if allow_anonymous_mutations () then Ok ()
+       else
+         Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+           "Authentication required: provide a bearer token or Origin header. \
+            Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development.")))
   | Some origin -> (
       match host_port_scheme_of_origin origin, host_port_of_request request with
       | Some (origin_host, origin_port, scheme),

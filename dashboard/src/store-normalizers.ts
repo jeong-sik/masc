@@ -1,6 +1,7 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { normalizeKeeperTrust } from './keeper-store-normalize'
 import { normalizeStopCause } from './lib/stop-cause'
+import { parseAgentStatus } from './lib/agent-status'
 import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
@@ -38,19 +39,11 @@ import type {
 
 export function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (
-    raw === 'active'
-    || raw === 'busy'
-    || raw === 'listening'
-    || raw === 'idle'
-    || raw === 'inactive'
-    || raw === 'offline'
-  ) {
-    return raw
-  }
+  // Backend aliases that normalize to canonical AgentStatus tokens.
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
   if (raw === 'dead' || raw === 'left') return 'offline'
-  return undefined
+  // Canonical tokens — validated by parseAgentStatus SSOT.
+  return parseAgentStatus(raw) ?? undefined
 }
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {

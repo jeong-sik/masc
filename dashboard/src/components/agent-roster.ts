@@ -76,9 +76,10 @@ type StatusFilter = 'all' | RuntimeBand
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
 
+// PipelineStage SSOT: branches aligned to `types/core.ts#PipelineStage`.
+// Legacy `tool_use` / `scheduled_autonomous` / `thinking` removed — the
+// backend never emits them as pipeline_stage.
 function stageBadgeClass(stageKey: string): string {
-  if (stageKey === 'tool_use') return 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
-  if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
   if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
   if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[var(--err-border)] bg-[var(--bad-soft)] text-[var(--color-status-err)]'
   if (stageKey === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--purple)]'

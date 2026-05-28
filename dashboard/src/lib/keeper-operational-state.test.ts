@@ -10,10 +10,10 @@ import {
   deriveKeeperDisplayReason,
   deriveKeeperOperationalState,
   deriveKeeperTurnPhase,
-  toKsmPhase,
   type KeeperAttention,
-  type KeeperKsmPhase,
 } from './keeper-operational-state'
+import { toKeeperPhase } from '../keeper-store-normalize'
+import type { KeeperPhase } from '../types/core'
 
 function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
   return {
@@ -446,37 +446,46 @@ interface DeriveInputsLite {
   composite: KeeperCompositeSnapshot | null
 }
 
-describe('toKsmPhase — RFC-0135 PR-11 wire-boundary narrow', () => {
-  it.each<KeeperKsmPhase>([
-    'offline', 'running', 'failing', 'overflowed', 'compacting',
-    'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-    'restarting', 'dead', 'zombie',
-  ])('accepts canonical KSM phase %s', (phase) => {
-    expect(toKsmPhase(phase)).toBe(phase)
+describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () => {
+  it.each<KeeperPhase>([
+    'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
+    'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
+    'Restarting', 'Dead', 'Zombie',
+  ])('accepts PascalCase KeeperPhase %s', (phase) => {
+    expect(toKeeperPhase(phase)).toBe(phase)
+  })
+  it.each([
+    ['offline', 'Offline'],
+    ['running', 'Running'],
+    ['failing', 'Failing'],
+    ['handing_off', 'HandingOff'],
+    ['dead', 'Dead'],
+  ])('accepts lowercase wire format %s → %s', (input, expected) => {
+    expect(toKeeperPhase(input)).toBe(expected)
   })
   it('returns null on unknown string', () => {
-    expect(toKsmPhase('plotting_revenge')).toBeNull()
+    expect(toKeeperPhase('plotting_revenge')).toBeNull()
   })
   it('returns null on null/undefined', () => {
-    expect(toKsmPhase(null)).toBeNull()
-    expect(toKsmPhase(undefined)).toBeNull()
+    expect(toKeeperPhase(null)).toBeNull()
+    expect(toKeeperPhase(undefined)).toBeNull()
   })
   it('returns null on empty string', () => {
-    expect(toKsmPhase('')).toBeNull()
+    expect(toKeeperPhase('')).toBeNull()
   })
 })
 
-describe('compositePhaseTone — RFC-0135 PR-11 exhaustive switch', () => {
-  it.each<KeeperKsmPhase>(['offline', 'running'])('phase %s ⇒ active', (phase) => {
+describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
+  it.each<KeeperPhase>(['Offline', 'Running'])('phase %s ⇒ active', (phase) => {
     expect(compositePhaseTone(phase)).toBe('active')
   })
-  it.each<KeeperKsmPhase>([
-    'overflowed', 'compacting', 'handing_off', 'draining', 'paused', 'restarting',
+  it.each<KeeperPhase>([
+    'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
   ])('phase %s ⇒ warn', (phase) => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })
-  it.each<KeeperKsmPhase>([
-    'failing', 'stopped', 'crashed', 'dead', 'zombie',
+  it.each<KeeperPhase>([
+    'Failing', 'Stopped', 'Crashed', 'Dead', 'Zombie',
   ])('phase %s ⇒ err', (phase) => {
     expect(compositePhaseTone(phase)).toBe('err')
   })

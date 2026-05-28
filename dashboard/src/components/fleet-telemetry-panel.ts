@@ -43,6 +43,7 @@ import {
   formatActivitySignal,
   formatLatency,
   formatPercent,
+  isOfflineDiagnosticHealthState,
   pressureClass,
   sourceCountClass,
   sourceDetail,
@@ -406,7 +407,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   : null
               )
             const rowHintClass =
-              diagnosticState === 'offline' || diagnosticState === 'dead'
+              isOfflineDiagnosticHealthState(diagnosticState)
                 ? 'text-[var(--bad-light)]'
                 : 'text-[var(--color-status-warn)]'
             return html`

@@ -204,6 +204,7 @@ const RUNNING_STATUS_TOKENS = new Set<string>([
   'running',
   'idle',
   'busy',
+  'listening',
 ])
 
 const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>([

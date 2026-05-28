@@ -247,64 +247,32 @@ function computeKeeperAttention(
 // invariant-analysis (N-of-M anti-pattern; software-development.md
 // §AI 코드 생성 안티패턴 #2).
 //
-// `KeeperKsmPhase` is the closed sum of states emitted by the backend
-// KeeperStateMachine TLA spec (KSM_STATES in keeper-fsm-specs.ts).
-// `compositePhaseTone` is total and exhaustive — adding a new variant
-// here requires touching every consumer at compile time.
-
-export type KeeperKsmPhase =
-  | 'offline'
-  | 'running'
-  | 'failing'
-  | 'overflowed'
-  | 'compacting'
-  | 'handing_off'
-  | 'draining'
-  | 'paused'
-  | 'stopped'
-  | 'crashed'
-  | 'restarting'
-  | 'dead'
-  | 'zombie'
-
-const KSM_PHASE_VALUES: ReadonlySet<string> = new Set<KeeperKsmPhase>([
-  'offline', 'running', 'failing', 'overflowed', 'compacting',
-  'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-  'restarting', 'dead', 'zombie',
-])
-
-/** Narrow `string` to `KeeperKsmPhase` if it is a known value, else
- *  return `null`. Use at the schema/wire boundary; downstream code
- *  should consume the typed sum directly. */
-export function toKsmPhase(raw: string | null | undefined): KeeperKsmPhase | null {
-  if (raw == null) return null
-  return KSM_PHASE_VALUES.has(raw) ? (raw as KeeperKsmPhase) : null
-}
-
 /** Three-valued tone classification used by FSM-graph node rendering
  *  and invariant cards: terminal/error phases → 'err', long-running
  *  rare-state phases → 'warn', live forward-progress phases → 'active'.
  *
- *  Exhaustive over `KeeperKsmPhase`. If TypeScript reports a missing
+ *  Exhaustive over `KeeperPhase` (the SSOT PascalCase sum from
+ *  `types/core.ts`). Callers with a lowercase wire-format string should
+ *  narrow via `toKeeperPhase` first. If TypeScript reports a missing
  *  case after adding a new variant, route it to the appropriate tone —
  *  do not add a `default:` (RFC-0135 §9-4 forbids catch-all). */
-export function compositePhaseTone(phase: KeeperKsmPhase): 'active' | 'warn' | 'err' {
+export function compositePhaseTone(phase: KeeperPhase): 'active' | 'warn' | 'err' {
   switch (phase) {
-    case 'offline':
-    case 'running':
+    case 'Offline':
+    case 'Running':
       return 'active'
-    case 'overflowed':
-    case 'compacting':
-    case 'handing_off':
-    case 'draining':
-    case 'paused':
-    case 'restarting':
+    case 'Overflowed':
+    case 'Compacting':
+    case 'HandingOff':
+    case 'Draining':
+    case 'Paused':
+    case 'Restarting':
       return 'warn'
-    case 'failing':
-    case 'stopped':
-    case 'crashed':
-    case 'dead':
-    case 'zombie':
+    case 'Failing':
+    case 'Stopped':
+    case 'Crashed':
+    case 'Dead':
+    case 'Zombie':
       return 'err'
   }
 }

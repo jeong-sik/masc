@@ -12,7 +12,7 @@ import {
 import type { KeeperPriority, LibCrashCategory } from './keeper-classifiers'
 
 describe('keeperPriority', () => {
-  it.each(['active', 'running', 'thinking', 'tool_use', 'claimed', 'in_progress'] as const)
+  it.each(['active', 'running', 'busy', 'listening', 'claimed', 'in_progress'] as const)
   ('returns 1 for active status: %s', (status) => {
     expect(keeperPriority(status)).toBe<KeeperPriority>(1)
   })
@@ -28,11 +28,15 @@ describe('keeperPriority', () => {
     expect(keeperPriority('crashed')).toBe<KeeperPriority>(2)
     expect(keeperPriority('')).toBe<KeeperPriority>(2)
     expect(keeperPriority('something_new')).toBe<KeeperPriority>(2)
+    // Trajectory content types are NOT keeper statuses — they map to
+    // intermediate priority (2), not active (1).
+    expect(keeperPriority('thinking')).toBe<KeeperPriority>(2)
+    expect(keeperPriority('tool_use')).toBe<KeeperPriority>(2)
   })
 })
 
 describe('isOfflineStatus', () => {
-  it.each(['offline', 'inactive', 'dead', 'crashed'])
+  it.each(['offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped'])
   ('returns true for %s', (status) => {
     expect(isOfflineStatus(status)).toBe(true)
   })

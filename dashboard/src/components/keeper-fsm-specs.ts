@@ -2,7 +2,8 @@
 // Each returns an FsmGraphSpec consumed by CytoscapeFsm.
 
 import type { FsmGraphSpec, FsmNode, FsmEdge } from './common/cytoscape-fsm'
-import { compositePhaseTone, toKsmPhase } from '../lib/keeper-operational-state'
+import { compositePhaseTone } from '../lib/keeper-operational-state'
+import { toKeeperPhase } from '../keeper-store-normalize'
 
 
 // ================================================================
@@ -143,7 +144,7 @@ export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec 
   // `fsm-hub-invariant-analysis.ts` (N-of-M anti-pattern). Unknown wire
   // values fall back to 'active' to match the previous fall-through
   // semantics of the inline OR chain.
-  const ksmPhase = toKsmPhase(params.phase)
+  const ksmPhase = toKeeperPhase(params.phase)
   const ksmTone: 'active' | 'warn' | 'err' = ksmPhase === null ? 'active' : compositePhaseTone(ksmPhase)
   const nodes: FsmNode[] = [
     ...clusterNodes('KSM', 'KSM · keeper lifecycle', KSM_STATES, params.phase, ksmTone),

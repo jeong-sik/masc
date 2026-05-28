@@ -25,8 +25,10 @@ function pressureColor(ratio: number): string {
   return 'bg-[var(--color-status-ok)]'
 }
 
-function stageIndicator(stage: string): string {
-  if (stage === 'thinking') return 'border-[var(--color-accent-soft)]'
+// PipelineStage SSOT: `types/core.ts#PipelineStage` does not include
+// `'thinking'` (that's a trajectory content type). The prior check for
+// `stage === 'thinking'` was dead code.
+function stageIndicator(_stage: string): string {
   return 'border-transparent'
 }
 

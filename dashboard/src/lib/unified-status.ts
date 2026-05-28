@@ -26,7 +26,8 @@ export function resolveUnifiedStatus(
   const primary = (keeperStatus ?? agentStatus ?? '').toLowerCase()
   const signal = (signalTruth ?? '').toLowerCase()
 
-  // Offline / inactive — process not running
+  // Offline / inactive — process not running.
+  // Matches agent-status.ts SSOT: isAgentOffline checks the same two tokens.
   if (primary === 'offline' || primary === 'inactive') {
     return {
       canonical: 'offline',
@@ -47,7 +48,8 @@ export function resolveUnifiedStatus(
     }
   }
 
-  // Active states
+  // Active states. `'working'` is a UI-derived PulseState, not a backend
+  // agent status — intentionally outside ACTIVE_STATUSES SSOT.
   if (primary === 'active' || primary === 'running' || primary === 'busy' || primary === 'working') {
     const desc = signal === 'stale'
       ? '프로세스 활성 (미션 활동은 오래됨)'

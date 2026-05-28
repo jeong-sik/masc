@@ -9,9 +9,14 @@ import type { Keeper } from '../types'
 import { DialogOverlay } from './common/dialog'
 import { TextArea } from './common/input'
 import { Checkbox } from './common/checkbox'
+import { isOfflineStatus } from '../lib/keeper-classifiers'
 
 export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; effectiveStatus: string }) {
-  const isOffline = ['offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped'].includes(effectiveStatus)
+  // SSOT: `isOfflineStatus` from keeper-classifiers.ts (includes crashed,
+  // unbooted, stopped). `'working'` is a UI-derived PulseState, not a
+  // backend agent status — kept inline for the running check since no
+  // SSOT predicate covers the full display-status union.
+  const isOffline = isOfflineStatus(effectiveStatus)
   const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(effectiveStatus)
 
   if (isOffline) return html`

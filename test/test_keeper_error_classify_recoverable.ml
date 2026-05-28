@@ -359,12 +359,14 @@ let test_server_error_502_is_recoverable () =
   | None ->
     fail "ServerError 502 should be recoverable (trigger cascade rotation)"
 
-let test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry () =
+let test_server_error_524_is_transient_network_error_and_cascade_rotation () =
   let err =
     Agent_sdk.Error.Api
       (Retry.ServerError { status = 524; message = "a timeout occurred" })
   in
-  check bool "524 not same-cascade transient" false (KEC.is_transient_network_error err);
+  (* 524 is transient: a different provider may succeed where one origin
+     timed out, so the cascade should advance. *)
+  check bool "524 is transient network error" true (KEC.is_transient_network_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "524 -> capacity_backpressure" "capacity_backpressure"

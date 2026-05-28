@@ -11497,12 +11497,12 @@ let () =
                        { status = 522
                        ; message = "Connection timed out"
                        }))))
-        ; test_case "ServerError 524 short-circuits same-cascade transient retry" `Quick
+        ; test_case "ServerError 524 advances cascade to next provider" `Quick
           (fun () ->
             check
               bool
-              "524 cloudflare timeout is not same-cascade transient"
-              false
+              "524 cloudflare timeout is transient — advances cascade"
+              true
               (EC.is_transient_network_error
                  (Agent_sdk.Error.Api
                     (ServerError

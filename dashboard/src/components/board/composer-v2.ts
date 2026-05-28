@@ -5,7 +5,6 @@ import { currentDashboardActor, sendBroadcast } from '../../api'
 import {
   dispatchOperatorAction,
   operatorActionBusy,
-  operatorSnapshot,
 } from '../../operator-store'
 import { showToast } from '../common/toast'
 import { ActionButton } from '../common/button'
@@ -16,15 +15,11 @@ import {
   stateBlockKeys,
   STATE_BLOCK_TEMPLATE,
 } from '../ops/ops-state'
-import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
 import {
   keeperNameFromTarget,
-  mentionQueryFromMessage,
-  trailingMentionNameFromMessage,
-  onlineKeeperNameForMention,
-  mentionCandidates,
   replaceTrailingMentionDraft,
 } from '../../lib/mention-utils'
+import { useOperatorMentionContext } from '../common/use-operator-mention-context'
 
 export type ComposerV2Mode = 'broadcast' | 'dm' | 'state-block'
 
@@ -109,41 +104,36 @@ export function ComposerV2({ roomId }: { roomId?: string | null }) {
   const [keeperTarget, setKeeperTarget] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
-  const [dismissedMentionQuery, setDismissedMentionQuery] = useState<string | null>(null)
   const room = normalizeRoomId(roomId)
-  const snapshot = operatorSnapshot.value
   const busy = submitting || operatorActionBusy.value
-  // Paused keepers stay targetable so operators can DM/probe/resume them,
-  // even when another lifecycle axis still carries an offline-ish token.
-  const onlineKeepers = (snapshot?.keepers ?? [])
-    .filter(isKeeperOperatorTargetable)
-    .map(keeper => ({ name: keeper.name, status: keeper.status }))
-  const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
-  const selectedKeeper = keeperNameFromTarget(keeperTarget)
-  const selectedKeeperOnline = !!selectedKeeper && onlineKeepers.some(k => k.name === selectedKeeper)
-  const mentionQuery = mode === 'dm' ? mentionQueryFromMessage(draft) : null
-  const trailingMention = mode === 'dm' ? trailingMentionNameFromMessage(draft) : null
-  const trailingMentionTarget = mode === 'dm' ? onlineKeeperNameForMention(onlineKeepers, trailingMention) : null
-  const unresolvedTrailingMention = mode === 'dm' && !!trailingMention && !trailingMentionTarget
-  const effectiveKeeper = trailingMentionTarget ?? selectedKeeper
-  const effectiveKeeperOnline = !!trailingMentionTarget || selectedKeeperOnline
-  const mentionMatches = mode === 'dm' ? mentionCandidates(onlineKeepers, mentionQuery, effectiveKeeper) : []
-  const mentionListOpen = mentionQuery !== null && dismissedMentionQuery !== mentionQuery
-  const activeMention = mentionListOpen ? mentionMatches[activeMentionIndex] ?? mentionMatches[0] : null
-  const activeMentionOptionId = activeMention
-    ? `${MENTION_LISTBOX_ID}-option-${Math.max(mentionMatches.indexOf(activeMention), 0)}`
-    : undefined
+  const mention = useOperatorMentionContext({
+    message: draft,
+    target: keeperTarget,
+    dmActive: mode === 'dm',
+    listboxId: MENTION_LISTBOX_ID,
+  })
+  const {
+    onlineKeepers,
+    onlineKeeperNames,
+    selectedKeeperOnline,
+    mentionQuery,
+    trailingMentionTarget,
+    unresolvedTrailingMention,
+    effectiveKeeper,
+    effectiveKeeperOnline,
+    mentionMatches,
+    mentionListOpen,
+    activeMentionOptionId,
+    activeMentionIndex,
+    setActiveMentionIndex,
+    dismissedMentionQuery,
+    setDismissedMentionQuery,
+  } = mention
   const stateKeys = mode === 'state-block' ? stateBlockKeys(draft) : []
   const sendDisabled = busy
     || draft.trim() === ''
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
     || (mode === 'state-block' && stateKeys.length === 0)
-
-  useEffect(() => {
-    setActiveMentionIndex(0)
-    setDismissedMentionQuery(null)
-  }, [mentionQuery, onlineKeeperNames])
 
   useEffect(() => {
     if (mode !== 'dm') return

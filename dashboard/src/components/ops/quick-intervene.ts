@@ -6,10 +6,7 @@ import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
 import { TextArea, TextInput } from '../common/input'
 import { Select } from '../common/select'
-import {
-  operatorActionBusy,
-  operatorSnapshot,
-} from '../../operator-store'
+import { operatorActionBusy } from '../../operator-store'
 import { route } from '../../router'
 import {
   actorName,
@@ -24,16 +21,14 @@ import {
   type QuickComposerMode,
 } from './ops-state'
 import { executeAction } from './helpers'
-import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
 import {
   type OnlineKeeper,
   keeperNameFromTarget,
-  mentionQueryFromMessage,
-  trailingMentionNameFromMessage,
   onlineKeeperNameForMention,
-  mentionCandidates,
   replaceTrailingMentionDraft,
+  trailingMentionNameFromMessage,
 } from '../../lib/mention-utils'
+import { useOperatorMentionContext } from '../common/use-operator-mention-context'
 
 interface ComposerTarget {
   action_type: 'broadcast' | 'keeper_message'
@@ -110,43 +105,39 @@ async function submitQuickMessage(onlineKeepers: OnlineKeeper[]) {
 
 export function QuickIntervene() {
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
-  const [dismissedMentionQuery, setDismissedMentionQuery] = useState<string | null>(null)
   const appliedRouteFocus = useRef<string | null>(null)
-  const snapshot = operatorSnapshot.value
-  const keepers = snapshot?.keepers ?? []
   const busy = operatorActionBusy.value
   const currentRoute = route.value
-
-  // Keep paused keepers targetable for operator DMs even if their agent
-  // status is currently offline-ish.
-  const onlineKeepers = keepers.filter(isKeeperOperatorTargetable)
-  const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
   const mode = quickComposerMode.value
+
+  const mention = useOperatorMentionContext({
+    message: quickMessage.value,
+    target: quickTarget.value,
+    dmActive: mode === 'dm',
+    listboxId: MENTION_LISTBOX_ID,
+  })
+  const {
+    onlineKeepers,
+    onlineKeeperNames,
+    selectedKeeperOnline,
+    mentionQuery,
+    unresolvedTrailingMention,
+    effectiveKeeper,
+    effectiveKeeperOnline,
+    mentionMatches,
+    mentionListOpen,
+    activeMentionOptionId,
+    activeMentionIndex,
+    setActiveMentionIndex,
+    dismissedMentionQuery,
+    setDismissedMentionQuery,
+  } = mention
+
   const stateKeys = mode === 'state' ? stateBlockKeys(quickMessage.value) : []
-  const selectedKeeper = keeperNameFromTarget(quickTarget.value)
-  const selectedKeeperOnline = !!selectedKeeper && onlineKeepers.some(k => k.name === selectedKeeper)
-  const mentionQuery = mode === 'dm' ? mentionQueryFromMessage(quickMessage.value) : null
-  const trailingMention = mode === 'dm' ? trailingMentionNameFromMessage(quickMessage.value) : null
-  const trailingMentionTarget = mode === 'dm' ? onlineKeeperNameForMention(onlineKeepers, trailingMention) : null
-  const unresolvedTrailingMention = mode === 'dm' && !!trailingMention && !trailingMentionTarget
-  const effectiveKeeper = trailingMentionTarget ?? selectedKeeper
-  const effectiveKeeperOnline = !!trailingMentionTarget || selectedKeeperOnline
-  const mentionMatches = mode === 'dm' ? mentionCandidates(onlineKeepers, mentionQuery, effectiveKeeper) : []
-  const mentionListOpen = mentionQuery !== null && dismissedMentionQuery !== mentionQuery
-  const activeMention = mentionListOpen ? mentionMatches[activeMentionIndex] ?? mentionMatches[0] : null
-  const activeMentionOptionId = activeMention
-    ? `${MENTION_LISTBOX_ID}-option-${Math.max(mentionMatches.indexOf(activeMention), 0)}`
-    : undefined
   const sendDisabled = busy
     || quickMessage.value.trim() === ''
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
     || (mode === 'state' && stateKeys.length === 0)
-
-  useEffect(() => {
-    setActiveMentionIndex(0)
-    setDismissedMentionQuery(null)
-  }, [mentionQuery, onlineKeeperNames])
 
   useEffect(() => {
     const focus = currentRoute.params.focus ?? null

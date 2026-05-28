@@ -176,10 +176,16 @@ let validate_strategy ~config_path ~name =
   if strategy_errors <> [] then
     Error strategy_errors
   else
+    (* Bypass Cascade_config facade.  Calling through it would create the
+       Cascade_config → Cascade_config_resolve → Cascade_routes →
+       Cascade_catalog_runtime → Cascade_catalog_runtime_validate →
+       Cascade_config cycle. *)
     Ok
-      ( Cascade_config.resolve_strategy ~config_path ~name (),
-        Cascade_config.resolve_ollama_max_concurrent ~config_path ~name (),
-        Cascade_config.resolve_cli_max_concurrent ~config_path ~name () )
+      ( Cascade_config_strategy_resolve.resolve_strategy ~config_path ~name (),
+        Cascade_config_strategy_resolve.resolve_ollama_max_concurrent
+          ~config_path ~name (),
+        Cascade_config_strategy_resolve.resolve_cli_max_concurrent
+          ~config_path ~name () )
 
 let rejection_of_path ~config_path ~attempted_mtime ~checked_at
     ~(errors : string list) ~(profiles : profile_rejection list) =
@@ -265,34 +271,35 @@ let profile_build_of_declarative
     required_capability_profile = None;
   }
 
-let runtime_required_profiles ~config_path =
-  let keepers_from_catalog =
-    match load_declarative_catalog_info ~config_path with
-    | Some { declarative_parse_errors = []; declarative_profile_names; _ } ->
-      declarative_profile_names
-    | Some { declarative_parse_errors = _ :: _; _ } | None -> []
-  in
-  List.sort_uniq String.compare
-    (keepers_from_catalog
-    @ Cascade_routes.configured_route_targets ~config_path ())
+(* #19327/#19340 follow-up: [runtime_required_profile_names] and its helper
+   [runtime_required_profiles] had no callers (grep on the whole tree returned
+   zero matches), and were the only sites in this module that pulled in
+   [Cascade_routes.configured_route_targets].  Deleting them removes one of
+   the four back-edges into [Cascade_routes] that closed the
+   Cascade_routes ↔ Cascade_catalog_runtime_validate module-level cycle.
+   See PR cycle resolution section. *)
 
 let config_path_opt () =
   Config_dir_resolver.log_warnings ~context:"CascadeCatalogRuntime" ();
   Config_dir_resolver.cascade_path_opt ()
 
-let runtime_required_profile_names ?config_path () =
-  let config_path =
-    match config_path with
-    | Some path -> path
-    | None -> (
-        match config_path_opt () with
-        | Some path -> path
-        | None -> "")
-  in
-  if String.equal config_path "" then []
-  else runtime_required_profiles ~config_path
+(* #19327/#19340 follow-up: DI envelope for the post-profile route-target
+   cross-check that was previously buried in [validate_path_result] and
+   reached up into [Cascade_routes] — the back-edge that closed the
+   Cascade_routes ↔ Cascade_catalog_runtime_validate module-level cycle. *)
+type route_data = {
+  keeper_turn_target : string;
+  route_targets : string list;
+  unknown_route_keys : string list;
+}
 
-let validate_path_result ?sw ?net ~config_path () =
+let empty_route_data : route_data =
+  { keeper_turn_target = "route.keeper_turn"
+  ; route_targets = []
+  ; unknown_route_keys = []
+  }
+
+let validate_path_result ?sw ?net ~route_data ~config_path () =
   let checked_at = Unix.gettimeofday () in
   let source_state = active_source_state ~config_path in
   let source_path = source_state.info.source_path in
@@ -398,12 +405,20 @@ let validate_path_result ?sw ?net ~config_path () =
                  ~errors:[ "active cascade catalog declares no profiles" ]
                  ~profiles:[])
           else
-            let required_default_profile =
-              Cascade_routes.cascade_name_for_use ~config_path
-                Cascade_routes.Keeper_turn
-            in
+            (* #19327/#19340 follow-up: route-target cross-checks moved out of
+               the validate function body and exposed as injected parameters
+               (DI).  Internal callers (resolve.ml) pass empty data so they do
+               not need [Cascade_routes].  External callers (dashboard) fetch
+               from [Cascade_routes] and pass typed [route_data].  This breaks
+               the Cascade_routes ↔ Cascade_catalog_runtime_validate cycle.
+
+               Empty defaults preserve internal behavior — the route checks
+               were duplicated against [validate_route_data] anyway from the
+               dashboard side. *)
+            let route_data = route_data in
+            let required_default_profile = route_data.keeper_turn_target in
             let route_target_errors =
-              Cascade_routes.configured_route_targets ~config_path ()
+              route_data.route_targets
               |> List.filter_map (fun target ->
                      if List.mem target profiles then None
                      else
@@ -413,7 +428,7 @@ let validate_path_result ?sw ?net ~config_path () =
                             target))
             in
             let route_key_errors =
-              Cascade_routes.configured_unknown_route_keys ~config_path ()
+              route_data.unknown_route_keys
               |> List.map (fun key ->
                      Printf.sprintf "unknown cascade route key %S" key)
             in
@@ -582,8 +597,8 @@ let validate_path_result ?sw ?net ~config_path () =
                 then Error rejection
                 else Ok { snapshot; rejected_update = Some rejection })
 
-let validate_path ?sw ?net ?clock ~config_path () =
+let validate_path ?sw ?net ?clock ~route_data ~config_path () =
   let (_ : float Eio.Time.clock_ty Eio.Resource.t option) = clock in
-  match validate_path_result ?sw ?net ~config_path () with
+  match validate_path_result ?sw ?net ~route_data ~config_path () with
   | Ok result -> Ok result.snapshot
   | Error _ as e -> e

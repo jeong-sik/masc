@@ -23,7 +23,6 @@ import {
 import { TimeAgo } from './common/time-ago'
 import { LoadingState } from './common/feedback-state'
 import { getPhaseStyle } from './keeper-phase-indicator'
-import { toPascalPhase } from './keeper-phase-strip'
 
 // ── Module-level signals ──────────────────────────────────────────────────
 
@@ -99,7 +98,7 @@ export async function refreshKeeperLifecycleTimeline() {
 function LifecycleEventRow({ ev }: { ev: KeeperLifecycleEvent }) {
   const tone = lifecycleEventTone(ev.event)
   const style = toneStyle(tone)
-  const phaseStyle = ev.phase ? getPhaseStyle(toPascalPhase(ev.phase)) : null
+  const phaseStyle = ev.phase ? getPhaseStyle(ev.phase) : null
 
   return html`
     <div

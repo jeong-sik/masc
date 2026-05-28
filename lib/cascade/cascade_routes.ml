@@ -207,27 +207,6 @@ let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
       route_key target fallback
   end
 
-let cascade_name_for_use ?config_path use =
-  let route_key = logical_use_key use in
-  let route_target =
-    configured_route_bindings ?config_path ()
-    |> List.find_map (fun (key, target) ->
-           if String.equal key route_key then Some target else None)
-  in
-  let catalog_names =
-    match Cascade_catalog_runtime.known_profile_names () with
-    | Ok names -> names
-    | Error _ -> []
-  in
-  let fallback = fallback_name_for_catalog use ~catalog:catalog_names in
-  match route_target with
-  | Some target when catalog_names = [] ->
-      Cascade_metrics.on_route_resolve_fallback ~reason:"catalog_unvalidated";
-      warn_unvalidated_route_target_once ~route_key ~target ~fallback;
-      target
-  | Some target when List.mem target catalog_names -> target
-  | Some target ->
-      Cascade_metrics.on_route_resolve_fallback ~reason:"target_not_in_catalog";
-      warn_invalid_route_target_once ~route_key ~target ~fallback;
-      fallback
-  | None -> fallback
+(* #19327/#19340 follow-up: [cascade_name_for_use] moved to
+   {!Cascade_routes_resolve} so this module no longer depends on
+   {!Cascade_catalog_runtime} — that dep closed a module-level cycle. *)

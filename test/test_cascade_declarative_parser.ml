@@ -146,8 +146,7 @@ let test_minimal_parse () =
   check int "models" 1 (List.length cfg.models);
   check int "bindings" 1 (List.length cfg.bindings);
   check int "aliases" 0 (List.length cfg.aliases);
-  check int "tiers" 0 (List.length cfg.tiers);
-  check int "tier_groups" 0 (List.length cfg.tier_groups);
+  (* #19327: tier/tier_groups fields removed from cascade_config. *)
   check int "routes" 0 (List.length cfg.routes);
   check int "system_targets" 0 (List.length cfg.system_targets)
 ;;
@@ -225,65 +224,9 @@ let test_layer4_aliases () =
   | None -> failwith "missing governance alias"
 ;;
 
-let test_layer5_tiers () =
-  let cfg = ok_config (parse_string full_toml) in
-  check int "tiers" 3 (List.length cfg.tiers);
-  (match List.find_opt (fun (t : cascade_tier) -> t.name = "rerank") cfg.tiers with
-   | Some t ->
-     check
-       (list string)
-       "rerank members"
-       [ "agent_llm_a-code.haiku.for-scoring" ]
-       t.members;
-     check (option bool) "rerank keeper_assignable" (Some false)
-       t.keeper_assignable;
-     check
-       string
-       "rerank strategy"
-       "Cascade_declarative_types.Failover"
-       (show_cascade_strategy t.strategy)
-   | None -> failwith "missing rerank tier");
-  match List.find_opt (fun (t : cascade_tier) -> t.name = "primary") cfg.tiers with
-  | Some t ->
-    check
-      (list string)
-      "primary members"
-      [ "agent_llm_a-code.sonnet"; "agent_llm_a-code.haiku" ]
-      t.members;
-    check opt_int "primary max_concurrent" (Some 5) t.max_concurrent
-  | None -> failwith "missing primary tier"
-;;
 
-let test_layer5_tier_groups () =
-  let cfg = ok_config (parse_string full_toml) in
-  check int "tier_groups" 1 (List.length cfg.tier_groups);
-  match
-    List.find_opt (fun (g : cascade_tier_group) -> g.name = "primary") cfg.tier_groups
-  with
-  | Some g ->
-    check (list string) "tiers" [ "primary"; "local" ] g.tiers;
-    check bool "fallback" true g.fallback;
-    check (option bool) "keeper_assignable" (Some true) g.keeper_assignable;
-    check
-      string
-      "strategy"
-      "Cascade_declarative_types.Priority_tier"
-      (show_cascade_strategy g.strategy)
-  | None -> failwith "missing primary tier group"
-;;
-
-let test_keeper_assignable_duplicate_keys_rejected () =
-  let toml =
-    {|
-[tier.t]
-members = []
-keeper-assignable = true
-keeper_assignable = false
-|}
-  in
-  let errs = is_error (parse_string toml) in
-  has_error_at "tier.t.keeper-assignable" errs
-;;
+(* #19327/#19340 tier-group purge: layer5_tiers, layer5_tier_groups,
+   keeper_assignable_duplicate_keys_rejected removed. *)
 
 let test_routes () =
   let cfg = ok_config (parse_string full_toml) in
@@ -516,273 +459,11 @@ let test_api_format_of_protocol () =
   check bool "unknown" true (api_format_of_protocol "unknown" |> Result.is_error)
 ;;
 
-let test_supported_config_strategies_parse () =
-  let strategies =
-    [ "failover", Failover
-    ; "priority_tier", Priority_tier
-    ]
-  in
-  List.iter
-    (fun (name, expected) ->
-       let toml =
-         Printf.sprintf
-           {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
 
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "%s"
-|}
-           name
-       in
-       let cfg = ok_config (parse_string toml) in
-       match cfg.tiers with
-       | [ t ] ->
-         check
-           string
-           (name ^ " strategy")
-           (show_cascade_strategy expected)
-           (show_cascade_strategy t.strategy)
-       | _ -> failwith "expected exactly one tier")
-    strategies
-;;
-
-let test_retired_config_strategies_rejected () =
-  let retired =
-    [
-      "capacity_aware";
-      "weighted_random";
-      "circuit_breaker_cycling";
-      "sticky";
-      "round_robin";
-    ]
-  in
-  List.iter
-    (fun name ->
-       let toml =
-         Printf.sprintf
-           {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "%s"
-|}
-           name
-       in
-       match parse_string toml with
-       | Ok _ -> failwith ("expected retired strategy rejection: " ^ name)
-       | Error errs -> has_error_at "tier.t.strategy" errs)
-    retired
-;;
-
-(* --- Strategy-specific field tests --- *)
-
-let test_cycle_policy () =
-  let toml =
-    {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-max-cycles = 3
-backoff-base-ms = 500
-backoff-cap-ms = 10000
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.tiers with
-  | [ t ] ->
-    (match t.cycle_policy with
-     | Some cp ->
-       check int "max_cycles" 3 cp.max_cycles;
-       check int "backoff_base_ms" 500 cp.backoff_base_ms;
-       check int "backoff_cap_ms" 10000 cp.backoff_cap_ms
-     | None -> failwith "expected cycle_policy")
-  | _ -> failwith "expected exactly one tier"
-;;
-
-let test_cycle_policy_absent () =
-  let toml =
-    {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.tiers with
-  | [ t ] -> check bool "no cycle_policy" true (t.cycle_policy = None)
-  | _ -> failwith "expected exactly one tier"
-;;
-
-let test_cycle_policy_partial_ignored () =
-  let toml =
-    {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-max-cycles = 3
-backoff-base-ms = 500
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.tiers with
-  | [ t ] -> check bool "partial yields None" true (t.cycle_policy = None)
-  | _ -> failwith "expected exactly one tier"
-;;
-
-let test_sticky_ttl_ms () =
-  let toml =
-    {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-sticky-ttl-ms = 600000
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.tiers with
-  | [ t ] -> check opt_int "sticky_ttl_ms" (Some 600000) t.sticky_ttl_ms
-  | _ -> failwith "expected exactly one tier"
-;;
-
-let test_sticky_ttl_ms_absent () =
-  let toml =
-    {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.tiers with
-  | [ t ] -> check opt_int "no sticky_ttl_ms" None t.sticky_ttl_ms
-  | _ -> failwith "expected exactly one tier"
-;;
-
-let test_scoring_params () =
-  let toml =
-    {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-latency-baseline-ms = 200.0
-rate-limit-recency-window-s = 60.0
-rate-limit-decay-base = 0.5
-rate-limit-skip-after = 3
-server-error-recency-window-s = 120.0
-server-error-decay-base = 0.3
-server-error-skip-after = 5
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.tiers with
-  | [ t ] ->
-    (match t.scoring_params with
-     | Some sp ->
-       check float_testable "latency_baseline" 200.0 sp.latency_baseline_ms;
-       check float_testable "rl_recency" 60.0 sp.rate_limit_recency_window_s;
-       check float_testable "rl_decay" 0.5 sp.rate_limit_decay_base;
-       check int "rl_skip" 3 sp.rate_limit_skip_after;
-       check float_testable "se_recency" 120.0 sp.server_error_recency_window_s;
-       check float_testable "se_decay" 0.3 sp.server_error_decay_base;
-       check int "se_skip" 5 sp.server_error_skip_after
-     | None -> failwith "expected scoring_params")
-  | _ -> failwith "expected exactly one tier"
-;;
-
-let test_scoring_params_partial_ignored () =
-  let toml =
-    {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-latency-baseline-ms = 200.0
-rate-limit-recency-window-s = 60.0
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.tiers with
-  | [ t ] -> check bool "partial scoring yields None" true (t.scoring_params = None)
-  | _ -> failwith "expected exactly one tier"
-;;
+(* #19327/#19340 tier-group purge: supported_config_strategies_parse,
+   retired_config_strategies_rejected, cycle_policy, sticky_ttl_ms,
+   scoring_params test groups removed.  All accessed cfg.tiers field or
+   Priority_tier strategy variant that no longer exist. *)
 
 (* --- Capabilities tests (#14608 tool/event fields + RFC-0058 §2.4 Phase 5.1 dispatch fields) --- *)
 
@@ -1563,14 +1244,7 @@ let () =
     ; "layer2_models", [ test_case "model specs" `Quick test_layer2_models ]
     ; "layer3_bindings", [ test_case "bindings" `Quick test_layer3_bindings ]
     ; "layer4_aliases", [ test_case "aliases" `Quick test_layer4_aliases ]
-    ; ( "layer5_tiers"
-      , [ test_case "tiers" `Quick test_layer5_tiers
-        ; test_case "tier groups" `Quick test_layer5_tier_groups
-        ; test_case
-            "duplicate keeper assignability keys rejected"
-            `Quick
-            test_keeper_assignable_duplicate_keys_rejected
-        ] )
+    (* #19327/#19340: layer5_tiers test group removed (functions deleted). *)
     ; ( "routes"
       , [ test_case "routes" `Quick test_routes
         ; test_case "system targets" `Quick test_system_targets
@@ -1595,25 +1269,8 @@ let () =
         ; test_case "key formatters" `Quick test_key_formatters
         ; test_case "api_format_of_protocol" `Quick test_api_format_of_protocol
         ] )
-    ; ( "strategies"
-      , [ test_case "supported strategies parse" `Quick
-            test_supported_config_strategies_parse
-        ; test_case "retired strategies rejected" `Quick
-            test_retired_config_strategies_rejected
-        ] )
-    ; ( "cycle_policy"
-      , [ test_case "parses all-or-nothing" `Quick test_cycle_policy
-        ; test_case "absent yields None" `Quick test_cycle_policy_absent
-        ; test_case "partial yields None" `Quick test_cycle_policy_partial_ignored
-        ] )
-    ; ( "sticky_ttl"
-      , [ test_case "parses sticky-ttl-ms" `Quick test_sticky_ttl_ms
-        ; test_case "absent yields None" `Quick test_sticky_ttl_ms_absent
-        ] )
-    ; ( "scoring_params"
-      , [ test_case "parses all 7 fields" `Quick test_scoring_params
-        ; test_case "partial yields None" `Quick test_scoring_params_partial_ignored
-        ] )
+    (* #19327/#19340: strategies / cycle_policy / sticky_ttl / scoring_params
+       test groups removed (functions deleted). *)
     ; ( "capabilities"
       , [ test_case "present parses with defaults" `Quick test_capabilities_present
         ; test_case "absent yields None" `Quick test_capabilities_absent

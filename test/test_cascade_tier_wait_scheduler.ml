@@ -27,7 +27,7 @@ let test_immediate_admit () =
   let admission = A.create ~default_max_inflight:2 () in
   let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
   Eio.Switch.run @@ fun sw ->
-  match W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+  match W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
           (fun () -> 42) with
   | Ok v -> check int "immediate admit returns 42" 42 v
   | Error re ->
@@ -38,12 +38,12 @@ let test_immediate_admit_simple () =
   let admission = A.create ~default_max_inflight:2 () in
   let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
   Eio.Switch.run @@ fun sw ->
-  match W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+  match W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
           (fun () -> "hello") with
   | Ok v ->
       check string "immediate admit returns hello" "hello" v;
       check int "inflight back to 0 after f returns"
-        0 (A.current_inflight admission ~tier_id:"test")
+        0 (A.current_inflight admission ~admission_key:"test")
   | Error re ->
       fail ("unexpected rejection: " ^ Format.asprintf "%a" W.pp_rejection_detail re))
 
@@ -58,7 +58,7 @@ let test_wait_then_admit () =
   let blocker_started, blocker_started_r = Eio.Promise.create () in
   let release_blocker, resolve_release = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-      ignore (W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+      ignore (W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
                 (fun () ->
                    Eio.Promise.resolve blocker_started_r ();
                    Eio.Promise.await release_blocker;
@@ -66,7 +66,7 @@ let test_wait_then_admit () =
   (* Wait for blocker to take the slot *)
   Eio.Promise.await blocker_started;
   check int "blocker holds the slot" 1
-    (A.current_inflight admission ~tier_id:"test");
+    (A.current_inflight admission ~admission_key:"test");
   (* Configure very short wait for test speed *)
   let fast_config = {
     W.backoff = W.Constant 0.01;
@@ -76,7 +76,7 @@ let test_wait_then_admit () =
   (* Start waiter in a fork — it will block until release *)
   let waiter_done, waiter_done_r = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-      let r = W.try_admission_or_wait scheduler ~tier_id:"test"
+      let r = W.try_admission_or_wait scheduler ~admission_key:"test"
                 ~wait_config:fast_config ~sw
                 (fun () -> "waiter_done") in
       Eio.Promise.resolve waiter_done_r r);
@@ -104,7 +104,7 @@ let test_timeout_expired () =
   let blocker_started, blocker_started_r = Eio.Promise.create () in
   let blocker_never_release_p, _ = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      ignore (W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+      ignore (W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
                 (fun () ->
                    Eio.Promise.resolve blocker_started_r ();
                    Eio.Promise.await blocker_never_release_p;
@@ -117,11 +117,11 @@ let test_timeout_expired () =
     timeout_s = 0.05;
     max_retries = None;
   } in
-  match W.try_admission_or_wait scheduler ~tier_id:"test"
+  match W.try_admission_or_wait scheduler ~admission_key:"test"
           ~wait_config:fast_timeout ~sw
           (fun () -> "should_not_run") with
-  | Error (W.Timeout_expired { tier_id; attempts; _ }) ->
-      check string "tier_id matches" "test" tier_id;
+  | Error (W.Timeout_expired { admission_key; attempts; _ }) ->
+      check string "admission_key matches" "test" admission_key;
       check bool "attempts > 0" true (attempts > 0)
   | Error other ->
       fail ("wrong rejection type: " ^ Format.asprintf "%a" W.pp_rejection_detail other)
@@ -138,7 +138,7 @@ let test_max_retries_exceeded () =
   let blocker_started, blocker_started_r = Eio.Promise.create () in
   let blocker_never_p, _ = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      ignore (W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+      ignore (W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
                 (fun () ->
                    Eio.Promise.resolve blocker_started_r ();
                    Eio.Promise.await blocker_never_p;
@@ -150,11 +150,11 @@ let test_max_retries_exceeded () =
     timeout_s = 60.0;
     max_retries = Some 3;
   } in
-  match W.try_admission_or_wait scheduler ~tier_id:"test"
+  match W.try_admission_or_wait scheduler ~admission_key:"test"
           ~wait_config:fast_config ~sw
           (fun () -> "should_not_run") with
-  | Error (W.Max_retries_exceeded { tier_id; retries; _ }) ->
-      check string "tier_id matches" "test" tier_id;
+  | Error (W.Max_retries_exceeded { admission_key; retries; _ }) ->
+      check string "admission_key matches" "test" admission_key;
       check bool "retries <= 3" true (retries <= 3)
   | Error other ->
       fail ("wrong rejection: " ^ Format.asprintf "%a" W.pp_rejection_detail other)
@@ -169,13 +169,13 @@ let test_exception_releases_slot () =
   let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
   Eio.Switch.run @@ fun sw ->
   (try
-     ignore (W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+     ignore (W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
                (fun () -> failwith "boom"));
      fail "should have raised"
    with Failure msg ->
      check string "exception message preserved" "boom" msg);
   check int "slot released after exception" 0
-    (A.current_inflight admission ~tier_id:"test"))
+    (A.current_inflight admission ~admission_key:"test"))
 
 (* {1 Stats observability} *)
 
@@ -185,11 +185,11 @@ let test_stats_no_wait () =
   let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
   Eio.Switch.run @@ fun sw ->
   (* Immediate admission — no wait stats *)
-  ignore (W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+  ignore (W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
             (fun () -> ()));
   check bool "stats is None (no wait activity)"
     true
-    (W.stats scheduler ~tier_id:"test" = None))
+    (W.stats scheduler ~admission_key:"test" = None))
 
 let test_stats_after_timeout () =
   Eio_main.run (fun _env ->
@@ -200,7 +200,7 @@ let test_stats_after_timeout () =
   let blocker_started, blocker_started_r = Eio.Promise.create () in
   let blocker_never_p, _ = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      ignore (W.try_admission_or_wait scheduler ~tier_id:"test" ~sw
+      ignore (W.try_admission_or_wait scheduler ~admission_key:"test" ~sw
                 (fun () ->
                    Eio.Promise.resolve blocker_started_r ();
                    Eio.Promise.await blocker_never_p;
@@ -212,10 +212,10 @@ let test_stats_after_timeout () =
     timeout_s = 0.05;
     max_retries = None;
   } in
-  ignore (W.try_admission_or_wait scheduler ~tier_id:"test"
+  ignore (W.try_admission_or_wait scheduler ~admission_key:"test"
             ~wait_config:fast_config ~sw
             (fun () -> ()));
-  match W.stats scheduler ~tier_id:"test" with
+  match W.stats scheduler ~admission_key:"test" with
   | Some s ->
       check bool "total_timeouts >= 1" true (s.total_timeouts >= 1);
       check bool "total_rejected >= 1" true (s.total_rejected >= 1)
@@ -230,7 +230,7 @@ let test_manual_release_wake () =
   let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
   Eio.Switch.run @@ fun sw ->
   (* Fill via raw admission, bypassing scheduler *)
-  match A.try_acquire admission ~tier_id:"test" with
+  match A.try_acquire admission ~admission_key:"test" with
   | A.Granted _ ->
       let fast_config = {
         W.backoff = W.Constant 0.01;
@@ -239,15 +239,15 @@ let test_manual_release_wake () =
       } in
       let waiter_done, waiter_done_r = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
-          let r = W.try_admission_or_wait scheduler ~tier_id:"test"
+          let r = W.try_admission_or_wait scheduler ~admission_key:"test"
                     ~wait_config:fast_config ~sw
                     (fun () -> "woken") in
           Eio.Promise.resolve waiter_done_r r);
       Eio.Fiber.yield ();
       Eio.Fiber.yield ();
       (* Manual release + notification *)
-      A.release admission ~tier_id:"test";
-      W.on_admission_release scheduler ~tier_id:"test";
+      A.release admission ~admission_key:"test";
+      W.on_admission_release scheduler ~admission_key:"test";
       (match Eio.Promise.await waiter_done with
        | Ok v -> check string "manual wake admitted" "woken" v
        | Error re ->
@@ -270,7 +270,7 @@ let test_deadline_shorter_than_amplifier_drives_timeout () =
   let blocker_started, blocker_started_r = Eio.Promise.create () in
   let blocker_never_release_p, _ = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      ignore (W.try_admission_or_wait scheduler ~tier_id:"deadline" ~sw
+      ignore (W.try_admission_or_wait scheduler ~admission_key:"deadline" ~sw
                 (fun () ->
                    Eio.Promise.resolve blocker_started_r ();
                    Eio.Promise.await blocker_never_release_p;
@@ -284,7 +284,7 @@ let test_deadline_shorter_than_amplifier_drives_timeout () =
   } in
   let deadline = D.of_seconds_from_now ~clock:(Eio.Stdenv.clock _env) 0.1 in
   let start = Unix.gettimeofday () in
-  match W.try_admission_or_wait scheduler ~tier_id:"deadline"
+  match W.try_admission_or_wait scheduler ~admission_key:"deadline"
           ~wait_config:long_amplifier ~deadline ~sw
           (fun () -> "should_not_run") with
   | Error (W.Timeout_expired _) ->
@@ -307,7 +307,7 @@ let test_no_deadline_falls_back_to_amplifier () =
   let blocker_started, blocker_started_r = Eio.Promise.create () in
   let blocker_never_release_p, _ = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      ignore (W.try_admission_or_wait scheduler ~tier_id:"no_dl" ~sw
+      ignore (W.try_admission_or_wait scheduler ~admission_key:"no_dl" ~sw
                 (fun () ->
                    Eio.Promise.resolve blocker_started_r ();
                    Eio.Promise.await blocker_never_release_p;
@@ -320,11 +320,11 @@ let test_no_deadline_falls_back_to_amplifier () =
     max_retries = None;
   } in
   (* No ~deadline argument: must time out at amplifier ≈ 0.05s. *)
-  match W.try_admission_or_wait scheduler ~tier_id:"no_dl"
+  match W.try_admission_or_wait scheduler ~admission_key:"no_dl"
           ~wait_config:short_amplifier ~sw
           (fun () -> "should_not_run") with
-  | Error (W.Timeout_expired { tier_id; _ }) ->
-      check string "tier_id matches" "no_dl" tier_id
+  | Error (W.Timeout_expired { admission_key; _ }) ->
+      check string "admission_key matches" "no_dl" admission_key
   | Error other ->
       fail ("wrong rejection: " ^ Format.asprintf "%a" W.pp_rejection_detail other)
   | Ok _ -> fail "should have timed out")
@@ -341,7 +341,7 @@ let test_expired_deadline_immediate_timeout () =
   let blocker_started, blocker_started_r = Eio.Promise.create () in
   let blocker_never_release_p, _ = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      ignore (W.try_admission_or_wait scheduler ~tier_id:"expired" ~sw
+      ignore (W.try_admission_or_wait scheduler ~admission_key:"expired" ~sw
                 (fun () ->
                    Eio.Promise.resolve blocker_started_r ();
                    Eio.Promise.await blocker_never_release_p;
@@ -355,7 +355,7 @@ let test_expired_deadline_immediate_timeout () =
     max_retries = None;
   } in
   let start = Unix.gettimeofday () in
-  match W.try_admission_or_wait scheduler ~tier_id:"expired"
+  match W.try_admission_or_wait scheduler ~admission_key:"expired"
           ~wait_config:long_amplifier ~deadline ~sw
           (fun () -> "should_not_run") with
   | Error (W.Timeout_expired _) ->

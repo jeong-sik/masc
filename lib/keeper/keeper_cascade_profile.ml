@@ -35,7 +35,7 @@ type logical_use = Cascade_ref.logical_use =
 let logical_use_key = Cascade_routes.logical_use_key
 let logical_use_of_string_opt = Cascade_routes.logical_use_of_string_opt
 let configured_route_targets = Cascade_routes.configured_route_targets
-let cascade_name_for_use = Cascade_routes.cascade_name_for_use
+let cascade_name_for_use = Cascade_routes_resolve.cascade_name_for_use
 
 let strip_declarative_profile_prefix name = name
 

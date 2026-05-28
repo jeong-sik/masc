@@ -3,7 +3,10 @@
     Extracted from [cascade_config.ml]. *)
 
 module Parser = Cascade_config_parser
-module Resolve = Cascade_config_resolve
+(* Removed dead alias [module Resolve = Cascade_config_resolve] — the only
+   reference was the alias itself.  Keeping it would re-introduce the
+   Cascade_routes ↔ Cascade_config cycle via the new direct call from
+   Cascade_catalog_runtime_validate (see PR cycle resolution). *)
 
 (* One-time warning per (cascade name, raw value) pair so misspelled
    strategy fields do not flood the log on every keeper turn. *)

@@ -26,13 +26,13 @@ let test_short_tag_client_capacity_exhausted () =
 
 let test_short_tag_tier_admission_exhausted_some () =
   check_tag "Tier_admission_exhausted Some" "tier_admission_exhausted"
-    (P.Tier_admission_exhausted
+    (P.Admission_exhausted
        { capability_profile = Some "strict_tool_candidates" })
 ;;
 
 let test_short_tag_tier_admission_exhausted_none () =
   check_tag "Tier_admission_exhausted None" "tier_admission_exhausted"
-    (P.Tier_admission_exhausted { capability_profile = None })
+    (P.Admission_exhausted { capability_profile = None })
 ;;
 
 let test_short_tag_backpressure () =
@@ -78,7 +78,7 @@ let test_raw_payload_typed_variants_are_none () =
     (P.raw_payload P.Client_capacity_exhausted);
   check (option raw_pair) "Tier_admission_exhausted" None
     (P.raw_payload
-       (P.Tier_admission_exhausted { capability_profile = None }));
+       (P.Admission_exhausted { capability_profile = None }));
   check (option raw_pair) "Backpressure" None
     (P.raw_payload
        (P.Backpressure

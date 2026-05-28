@@ -31,9 +31,7 @@ let assoc_set key value fields = (key, value) :: assoc_without key fields
 
 ;;
 
-let assoc_get key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
+let assoc_get = Json_util.assoc_member_opt
 ;;
 
 let assoc_keys = function

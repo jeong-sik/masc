@@ -304,11 +304,7 @@ let assoc_member_opt = Json_util.assoc_member_opt
 
 let assoc_string_opt = Json_util.assoc_string_opt
 
-let assoc_int_opt name json =
-  match assoc_member_opt name json with
-  | Some (`Int value) -> Some value
-  | Some (`Intlit raw) -> int_of_string_opt raw
-  | _ -> None
+let assoc_int_opt = Json_util.assoc_int_opt
 
 let goal_completion_to_json ~effective_policy ~open_request
     (goal : Goal_store.goal) (node : tree_node) ~attainment =

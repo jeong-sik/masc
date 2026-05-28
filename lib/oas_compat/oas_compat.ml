@@ -156,7 +156,7 @@ module Http_client = struct
         when List.mem code [ 400; 422 ] && is_http_body_parse_error body ->
           Provider_parse_error
       | Llm_provider.Http_client.HttpError { code; _ } ->
-          if List.mem code Llm_provider.Constants.Http.cascadable_codes then
+          if List.mem code Llm_provider.Constants.Http.cascadable_codes || code = 524 then
             Transient_http code
           else
             Terminal_http code

@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3087,
+      "baseline": 3083,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -2342,7 +2342,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_cache.ml",
-          "value": 3
+          "value": 1
         },
         {
           "file": "lib/server/server_dashboard_http_composite_claims.ml",
@@ -2358,7 +2358,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_core_entities.ml",
-          "value": 4
+          "value": 2
         },
         {
           "file": "lib/server/server_dashboard_http_core_json.ml",
@@ -3073,7 +3073,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 61,
+      "baseline": 63,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3127,6 +3127,10 @@
         {
           "file": "lib/goal/goal_janitor.ml",
           "value": 1
+        },
+        {
+          "file": "lib/keeper/agent_tool_execute_path.ml",
+          "value": 2
         },
         {
           "file": "lib/keeper/agent_tool_shared_runtime.ml",

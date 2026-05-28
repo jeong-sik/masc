@@ -91,6 +91,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | Some uid -> Keeper_id.uid_to_yojson uid
         | None -> `Null )
     ; "oas_env", `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
+    ; "cascade_ref",
+      (match m.cascade_ref with
+       | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
+       | None -> `Null)
     ; "meta_version", `Int m.meta_version
     ]
 ;;
@@ -158,6 +162,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "current_task_id"
   ; "keeper_id"
   ; "oas_env"
+  ; "cascade_ref"
   ; "meta_version"
   ]
 ;;

@@ -297,14 +297,20 @@ let of_command = function
   | Shell_ir_typed.W (Scp { source; dest; recursive }) ->
     let flag_args = if recursive then [ arg "-r" ] else [] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Scp, flag_args @ [ arg source; arg dest ]) ]
-  | Shell_ir_typed.W (Tar { action; archive; paths; gzip }) ->
+  | Shell_ir_typed.W (Tar { action; archive; paths; compression }) ->
     let action_flag =
       match action with `Create -> "-c" | `Extract -> "-x" | `List -> "-t"
     in
+    let compression_flags =
+      match compression with
+      | `None -> []
+      | `Gzip -> [ arg "-z" ]
+      | `Bzip2 -> [ arg "-j" ]
+      | `Xz -> [ arg "-J" ]
+      | `Zstd -> [ arg "--zstd" ]
+    in
     let flag_args =
-      arg action_flag
-      :: (if gzip then [ arg "-z" ] else [])
-      @ [ arg "-f"; arg archive ]
+      arg action_flag :: compression_flags @ [ arg "-f"; arg archive ]
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Tar, flag_args @ List.map arg paths) ]
   | Shell_ir_typed.W (Make { target; jobs }) ->

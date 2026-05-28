@@ -235,7 +235,7 @@ and (_, _, _, _) command =
       { action : [ `Create | `Extract | `List ]
       ; archive : string
       ; paths : string list
-      ; gzip : bool
+      ; compression : [ `None | `Gzip | `Bzip2 | `Xz | `Zstd ]
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Make :

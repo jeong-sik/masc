@@ -321,15 +321,20 @@ let pp fmt = function
       command
   | W (Scp { source; dest; recursive }) ->
     Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b)" source dest recursive
-  | W (Tar { action; archive; paths; gzip }) ->
+  | W (Tar { action; archive; paths; compression }) ->
     Format.fprintf
       fmt
-      "Tar(action=%s, archive=%s, paths=%a, gzip=%b)"
+      "Tar(action=%s, archive=%s, paths=%a, compression=%s)"
       (match action with `Create -> "create" | `Extract -> "extract" | `List -> "list")
       archive
       (Format.pp_print_list Format.pp_print_string)
       paths
-      gzip
+      (match compression with
+       | `None -> "none"
+       | `Gzip -> "gzip"
+       | `Bzip2 -> "bzip2"
+       | `Xz -> "xz"
+       | `Zstd -> "zstd")
   | W (Make { target; jobs }) ->
     Format.fprintf
       fmt

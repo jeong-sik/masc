@@ -69,7 +69,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Wget { url = "http://x"; output = None })
   ; W (Ssh { host = "x"; user = None; command = None })
   ; W (Scp { source = "a"; dest = "b"; recursive = false })
-  ; W (Tar { action = `Create; archive = "x.tar"; paths = []; gzip = false })
+  ; W (Tar { action = `Create; archive = "x.tar"; paths = []; compression = `None })
   ; W (Make { target = None; jobs = None })
   ; W (Diff { file1 = "a"; file2 = "b"; unified = false })
   ; W (Sed { expression = "s/x/y/"; file = "/tmp/x"; in_place = false })
@@ -266,7 +266,7 @@ let test_of_simple_round_trip () =
     ; W (Wget { url = "http://example.com/file"; output = Some "/tmp/file" })
     ; W (Ssh { host = "server"; user = Some "root"; command = Some "uptime" })
     ; W (Scp { source = "/tmp/a"; dest = "server:/tmp/b"; recursive = true })
-    ; W (Tar { action = `Extract; archive = "x.tar.gz"; paths = [ "a"; "b" ]; gzip = true })
+    ; W (Tar { action = `Extract; archive = "x.tar.gz"; paths = [ "a"; "b" ]; compression = `Gzip })
     ; W (Make { target = Some "install"; jobs = Some 4 })
     ; W (Diff { file1 = "old.ml"; file2 = "new.ml"; unified = true })
     ; W (Sed { expression = "s/foo/bar/g"; file = "input.txt"; in_place = true })
@@ -420,6 +420,7 @@ let test_all_wrapped_minimal_round_trip () =
     all_wrapped
 ;;
 
+(* TEL-OK: test-only function; no runtime telemetry required. *)
 (* Verify that of_simple correctly identifies the binary from a
    Shell_ir.simple produced by to_simple — tests the bin_variant
    dispatch path in the generated parser. *)

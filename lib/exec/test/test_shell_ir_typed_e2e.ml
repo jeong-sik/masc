@@ -176,7 +176,7 @@ let test_basic_commands () =
     ; "tail -n 20 log.txt", "Tail"
     ; "mkdir -p /tmp/a/b", "Mkdir"
     ; "rm -r -f /tmp/x", "Rm"
-    ; "find . -name *.ml", "Find"
+    ; "find . -name '*.ml'", "Find"
     ; "sort -n file.txt", "Sort"
     ; "cut -d : -f 1 /etc/passwd", "Cut"
     ; "tr a-z A-Z", "Tr"
@@ -200,6 +200,17 @@ let test_basic_commands () =
     ; "test -f file.txt", "Test"
     ; "printf '%s\\n' hello", "Printf"
     ; "uniq -c file.txt", "Uniq"
+    (* Combined short flags — expanded by [expand_combined_short_flags] *)
+    ; "ls -la", "Ls"
+    ; "ls -lah", "Ls"
+    ; "ls -lah /tmp", "Ls"
+    ; "rm -rf /tmp/x", "Rm"
+    ; "grep -ri pattern src/", "Grep"
+    ; "sort -nr file.txt", "Sort"
+    ; "du -sh /tmp", "Du"
+    ; "tar czf archive.tar.gz dir/", "Tar"
+    ; "tar xzf archive.tar.gz", "Tar"
+    ; "tar tf archive.tar", "Tar"
     ]
 ;;
 

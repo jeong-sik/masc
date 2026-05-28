@@ -423,6 +423,24 @@ parse false false [] args|}
     ; parse_body =
         Some
           {|
+(* find -exec / -ok consume all args until ";" or "+"; skip them entirely *)
+let rec skip_exec = function
+  | [] -> []
+  | ";" :: rest -> rest
+  | "+" :: rest -> rest
+  | _ :: rest -> skip_exec rest
+in
+(* Flags that take the next argument as a value *)
+let value_flags =
+  [ "-newer"; "-newermt"; "-newerct"; "-neweraa"
+  ; "-perm"; "-user"; "-group"; "-uid"; "-gid"
+  ; "-size"; "-mtime"; "-mmin"; "-atime"; "-amin"
+  ; "-ctime"; "-cmin"; "-maxdepth"; "-mindepth"
+  ; "-regex"; "-path"; "-lname"; "-ilname"; "-iname"
+  ; "-samefile"; "-inum"; "-links"; "-used"; "-fstype"
+  ; "-printf"; "-fprintf"; "-fls"; "-fprint0"; "-fprint"
+  ]
+in
 let rec parse name type_ path = function
   | [] ->
     (match path with
@@ -431,9 +449,17 @@ let rec parse name type_ path = function
   | "-name" :: n :: rest -> parse (Some n) type_ path rest
   | "-type" :: "f" :: rest -> parse name (Some `File) path rest
   | "-type" :: "d" :: rest -> parse name (Some `Dir) path rest
+  | "-exec" :: rest | "-ok" :: rest -> parse name type_ path (skip_exec rest)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then (
+      (* Skip unknown flag; consume next arg if it's a known value-flag *)
+      if List.mem arg value_flags
+      then (
+        match rest with
+        | _ :: rest' -> parse name type_ path rest'
+        | [] -> parse name type_ path rest)
+      else parse name type_ path rest)
     else (
       match path with
       | None -> parse name type_ (Some arg) rest
@@ -1715,7 +1741,7 @@ parse false None None args|}
     }
   ; { name = "Tar"
     ; anon_pattern = "Tar _"
-    ; bind_pattern = "Tar { action; archive; paths; gzip }"
+    ; bind_pattern = "Tar { action; archive; paths; compression }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -1726,9 +1752,17 @@ parse false None None args|}
         | `Extract -> "-x"
         | `List -> "-t"
       in
+      let compression_flag =
+        match compression with
+        | `None -> []
+        | `Gzip -> [ "-z" ]
+        | `Bzip2 -> [ "-j" ]
+        | `Xz -> [ "-J" ]
+        | `Zstd -> [ "--zstd" ]
+      in
       let args =
         [ action_flag ]
-        @ (if gzip then [ "-z" ] else [])
+        @ compression_flag
         @ [ "-f"; archive ]
         @ paths
       in
@@ -1743,26 +1777,42 @@ parse false None None args|}
     ; parse_body =
         Some
           {|
-let rec parse action gzip archive paths = function
+let expand_bare_tar_flags args =
+  List.concat_map
+    (fun arg ->
+       if String.length arg >= 2
+          && arg.[0] <> '-'
+          && String.for_all (fun c -> c >= 'a' && c <= 'z') arg
+       then
+         List.init (String.length arg) (fun i ->
+           Printf.sprintf "-%c" arg.[i])
+       else [ arg ])
+    args
+in
+let args = expand_bare_tar_flags args in
+let rec parse action compression archive paths = function
   | [] ->
     (match action, archive with
      | Some a, Some f ->
        Some
          (Shell_ir_typed_types.W
             (Shell_ir_typed_types.Tar
-               { action = a; archive = f; paths = List.rev paths; gzip }))
+               { action = a; archive = f; paths = List.rev paths; compression }))
      | _ -> None)
-  | "-c" :: rest -> parse (Some `Create) gzip archive paths rest
-  | "-x" :: rest -> parse (Some `Extract) gzip archive paths rest
-  | "-t" :: rest -> parse (Some `List) gzip archive paths rest
-  | "-z" :: rest -> parse action true archive paths rest
-  | "-f" :: f :: rest -> parse action gzip (Some f) paths rest
+  | "-c" :: rest -> parse (Some `Create) compression archive paths rest
+  | "-x" :: rest -> parse (Some `Extract) compression archive paths rest
+  | "-t" :: rest -> parse (Some `List) compression archive paths rest
+  | "-z" :: rest -> parse action `Gzip archive paths rest
+  | "-j" :: rest -> parse action `Bzip2 archive paths rest
+  | "-J" :: rest -> parse action `Xz archive paths rest
+  | "--zstd" :: rest -> parse action `Zstd archive paths rest
+  | "-f" :: f :: rest -> parse action compression (Some f) paths rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse action gzip archive paths rest
-    else parse action gzip archive (arg :: paths) rest
+    then parse action compression archive paths rest
+    else parse action compression archive (arg :: paths) rest
 in
-parse None false None [] args|}
+parse None `None None [] args|}
     }
   ; { name = "Make"
     ; anon_pattern = "Make _"
@@ -2331,6 +2381,30 @@ let emit_parse_functions buf spec =
     spec
 ;;
 
+let emit_flag_expander buf =
+  Buffer.add_string
+    buf
+    {|(** Expand combined short flags into individual flags.
+    ["-la"] → ["-l"; "-a"]; ["-rf"] → ["-r"; "-f"].
+    Long flags (--foo), flag+value (-n5), and bare "-" are unchanged. *)
+let expand_combined_short_flags (args : string list) : string list =
+  List.concat_map
+    (fun arg ->
+       if String.length arg >= 3
+          && String.length arg <= 4
+          && Char.code arg.[0] = Char.code '-'
+          && Char.code arg.[1] <> Char.code '-'
+          && String.for_all (fun c -> c >= 'a' && c <= 'z') (String.sub arg 1 (String.length arg - 1))
+       then
+         List.init (String.length arg - 1) (fun i ->
+           Printf.sprintf "-%c" arg.[i + 1])
+       else [ arg ])
+    args
+;;
+
+|}
+;;
+
 let emit_of_simple buf spec =
   (* Collect entries that have parse_body, grouped by bin_variant.
      Git entries are special-cased for subcommand dispatch. *)
@@ -2418,17 +2492,35 @@ let emit_of_simple buf spec =
        Buffer.add_string
          buf
          (Printf.sprintf
-            "           | %S :: rest -> %s rest\n" subcmd_name parse_fn))
+            "           | %S :: rest -> %s (expand_combined_short_flags rest)\n" subcmd_name parse_fn))
     git_entries;
   Buffer.add_string buf "           | _ -> None)\n";
-  (* Non-Git entries with parse_body — auto-generated from spec *)
+  (* Non-Git entries with parse_body — auto-generated from spec.
+     Commands that store raw flag strings (rsync, ssh, docker, etc.)
+     skip expansion to preserve round-trip fidelity. *)
+  let no_expand_variants =
+    [ "Rsync"; "Ssh"; "Docker"; "Make"; "Npm"; "Cargo"; "Go"; "Gh"
+    ; "Glab"; "Opam"; "Npx"; "Yarn"; "Pnpm"; "Uv"; "Pip"; "Python"
+    ; "Python3"; "Pytest"; "Pyright"; "Ruff"; "Ocamlfind"; "Tsc"
+    ; "Rustc"; "Gofmt"; "Gradle"; "Ninja"; "Java"; "Javac"; "Mvn"
+    ; "Cmake"; "Node"; "Dune_local_sh"; "Osascript"; "Terminal_notifier"
+    ; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
+    ; "Curl"; "Wget"; "Sudo"; "Su"; "Dd"; "Mkfs"
+    ]
+  in
   List.iter
     (fun (variant, parse_name) ->
+       let do_expand = not (List.mem variant no_expand_variants) in
+       let arg_expr =
+         if do_expand
+         then "(expand_combined_short_flags lit_argv)"
+         else "lit_argv"
+       in
        Buffer.add_string
          buf
          (Printf.sprintf
-            "        | Some Exec_program.%s -> gen_parse_%s lit_argv\n"
-            variant parse_name))
+            "        | Some Exec_program.%s -> gen_parse_%s %s\n"
+            variant parse_name arg_expr))
     non_git_with_parse;
   (* Untyped variants — grouped into None *)
   (match unhandled with
@@ -2464,6 +2556,7 @@ let () =
   emit_sandbox buf shell_ir_typed_spec;
   emit_to_simple buf shell_ir_typed_spec;
   emit_parse_functions buf shell_ir_typed_spec;
+  emit_flag_expander buf;
   emit_of_simple buf shell_ir_typed_spec;
   emit_constructor_names buf shell_ir_typed_spec;
   print_string (Buffer.contents buf)

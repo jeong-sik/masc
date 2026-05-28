@@ -95,13 +95,13 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
     ("id", `String s.id);
     ("generated_at", `Float s.generated_at);
     ("submitted_by", `String s.submitted_by);
-    ("model", match s.model with Some m -> `String m | None -> `Null);
-    ("summary", match s.summary with Some v -> `String v | None -> `Null);
+    ("model", Json_util.string_opt_to_json s.model);
+    ("summary", Json_util.string_opt_to_json s.summary);
     ("ordering", `List (List.map (fun id -> `String id) s.ordering));
     ("highlights", `List (List.map (fun id -> `String id) s.highlights));
     ("tag_suggestions", `List (List.map tag_suggestion_to_yojson s.tag_suggestions));
     ("answer_matches", `List (List.map answer_match_to_yojson s.answer_matches));
-    ("health_score", match s.health_score with Some score -> `Float score | None -> `Null);
+    ("health_score", Json_util.float_opt_to_json s.health_score);
     ("health_components", `List (List.map health_component_to_yojson s.health_components));
     ("rationale", `String s.rationale);
     ("provenance", s.provenance);

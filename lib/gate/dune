@@ -23,6 +23,17 @@
    unix
    eio
    eio.unix
+   ; RFC-0203 Phase 1.2b — Discord Gateway WSS client
+   uri
+   ca-certs
+   tls
+   tls-eio
+   httpun
+   httpun-eio
+   httpun-ws
+   httpun-ws-eio
+   digestif
+   ; existing
    masc_config
    masc_core
    masc_pulse

@@ -111,7 +111,7 @@ let diagnosis_of_readonly_category category =
       { Exec_core.rule_id = "readonly_redirect_blocked"
       ; explanation = "> and >> modify the filesystem; readonly shell forbids writes."
       ; rewrite = None
-      ; tool_suggestion = Some "WriteFile"
+      ; tool_suggestion = Some "Write"
       }
   | "git_write" ->
     Some
@@ -194,7 +194,7 @@ let diagnosis_of_block_reason reason =
           "Redirect syntax changes process I/O outside the typed command \
            contract."
       ; rewrite = None
-      ; tool_suggestion = Some "WriteFile"
+      ; tool_suggestion = Some "Write"
       }
   | Exec_policy.Injection ->
     Some

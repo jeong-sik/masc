@@ -165,7 +165,7 @@ let find_tool name tools =
   List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools
 ;;
 
-let find_read_tool tools = find_tool "ReadFile" tools
+let find_read_tool tools = find_tool "Read" tools
 
 let read_repo_dir meta =
   Filename.concat "repos" meta.Keeper_types.name
@@ -246,7 +246,7 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
        let config = Coord.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
        let execute = find_tool "Execute" tools in
-       let search_files = find_tool "SearchFiles" tools in
+       let search_files = find_tool "Grep" tools in
        check bool
          "Execute description names typed command front door"
          true
@@ -1378,7 +1378,7 @@ let test_failure_boundary_accepts_typed_workflow_rejection_skip () =
 
 let test_deterministic_recovery_plan_fields_promote_next_tool () =
   let raw =
-    {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"SearchFiles","next_args":{"pattern":"term","path":"lib"},"instruction":"Use SearchFiles with a scoped path.","reason":"shell_shape_requires_visible_search_tool","confidence":"high","do_not_retry_same_args":true}}|}
+    {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"Grep","next_args":{"pattern":"term","path":"lib"},"instruction":"Use Grep with a scoped path.","reason":"shell_shape_requires_visible_search_tool","confidence":"high","do_not_retry_same_args":true}}|}
   in
   let fields = Keeper_tools_oas_deterministic_error.deterministic_recovery_plan_fields raw in
   let normalized =
@@ -1388,9 +1388,9 @@ let test_deterministic_recovery_plan_fields_promote_next_tool () =
       raw
   in
   let json = parse normalized in
-  check string "required next tool" "SearchFiles" (json_string "required_next_tool" json);
+  check string "required next tool" "Grep" (json_string "required_next_tool" json);
   let plan = Yojson.Safe.Util.member "recovery_plan" json in
-  check string "plan next tool" "SearchFiles" (json_string "next_tool" plan);
+  check string "plan next tool" "Grep" (json_string "next_tool" plan);
   check
     string
     "plan pattern"

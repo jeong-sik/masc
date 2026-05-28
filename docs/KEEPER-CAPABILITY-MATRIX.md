@@ -86,11 +86,11 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | Workflow | Primary tools |
 |----------|---------------|
 | 의견 내기 / 토론 참여 | `keeper_board_post`, `keeper_board_comment` |
-| 최신 정보 / 외부 자료 확인 | `SearchWeb` -> `FetchWeb` |
+| 최신 정보 / 외부 자료 확인 | `WebSearch` -> `WebFetch` |
 | 찬성 / 반대 신호 | `keeper_board_vote` |
 | 거버넌스 의견 제출 | retired as keeper tools; use board discussion/vote paths and governance dashboard read models |
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify` |
-| 코드 작성 / 수정 | `ReadFile` / `SearchFiles` -> `EditFile` / `WriteFile`, then `Execute` with typed `git` argv |
+| 코드 작성 / 수정 | `Read` / `Grep` -> `Edit` / `Write`, then `Execute` with typed `git` argv |
 | 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
 | GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
 

@@ -1305,12 +1305,12 @@ let test_keeper_zombie_field_contracts () =
       terminal_reason_code = "turn_complete";
       response_text_present = true;
       model_used = Some "test-model";
-      requested_tools = [ "ReadFile" ];
-      reported_tools = [ "ReadFile" ];
-      observed_tools = [ "ReadFile" ];
-      canonical_tools = [ "ReadFile" ];
+      requested_tools = [ "Read" ];
+      reported_tools = [ "Read" ];
+      observed_tools = [ "Read" ];
+      canonical_tools = [ "Read" ];
       unexpected_tools = [];
-      tools_used = [ "ReadFile" ];
+      tools_used = [ "Read" ];
       tool_contract_result =
         Masc_mcp.Keeper_execution_receipt.Contract_satisfied_completion;
       tool_surface =
@@ -1327,7 +1327,7 @@ let test_keeper_zombie_field_contracts () =
           visible_tool_count = 1;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
-          required_tools = [ "ReadFile" ];
+          required_tools = [ "Read" ];
           required_tool_candidates = [];
           missing_required_tools = [];
           materialized_tools = [];
@@ -1364,7 +1364,7 @@ let test_keeper_zombie_field_contracts () =
   let json = R.to_json receipt in
   check bool "execution receipt wire serializes tools_used" true
     (match Yojson.Safe.Util.member "tools_used" json with
-     | `List [ `String "ReadFile" ] -> true
+     | `List [ `String "Read" ] -> true
      | _ -> false);
   check bool "execution receipt wire does not reintroduce last_tools_used" true
     (match Yojson.Safe.Util.member "last_tools_used" json with
@@ -1471,7 +1471,7 @@ let test_keeper_required_tool_contracts () =
     (file_not_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
        retired_preflight_tool_name
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
-          "SearchFiles"
+          "Grep"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "review wrappers"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
@@ -1754,10 +1754,10 @@ let test_tool_execution_substrate_ratchet_contracts () =
           "masc_web_search"
      && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md"
           "masc_web_fetch"
-     && file_contains_pattern "config/prompts/keeper.unified.system.md" "SearchWeb"
-     && file_contains_pattern "config/prompts/keeper.unified.system.md" "FetchWeb"
-     && file_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "SearchWeb"
-     && file_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "FetchWeb")
+     && file_contains_pattern "config/prompts/keeper.unified.system.md" "WebSearch"
+     && file_contains_pattern "config/prompts/keeper.unified.system.md" "WebFetch"
+     && file_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "WebSearch"
+     && file_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "WebFetch")
 
 let test_keeper_behavior_hardcoding_ratchet_contracts () =
   check bool "keeper behavior hardcoding ratchet script exists" true

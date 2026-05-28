@@ -1077,7 +1077,7 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
   in
   let decision =
     cb
-      ~tool_name:"WriteFile"
+      ~tool_name:"Write"
       ~input:
         (`Assoc
           [
@@ -1133,7 +1133,7 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
     (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
        ~config
        ~meta:unclaimed_meta
-       ~tool_name:"WriteFile"
+       ~tool_name:"Write"
        ~input:worktree_input
        ~risk_level:AQ.High);
   Alcotest.(check (option string))
@@ -1142,7 +1142,7 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
     (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
        ~config
        ~meta:claimed_meta
-       ~tool_name:"WriteFile"
+       ~tool_name:"Write"
        ~input:root_checkout_input
        ~risk_level:AQ.High)
 

@@ -44,11 +44,11 @@ let test_hidden_alias_reports_blocker () =
     (option string)
     "hidden tool_execute has no model-callable name"
     None
-    (Projection.model_name ~visible_tool_names:[ "ReadFile" ] "tool_execute");
+    (Projection.model_name ~visible_tool_names:[ "Read" ] "tool_execute");
   let text =
     Projection.render_reference
       ~context:Model_facing
-      ~visible_tool_names:[ "ReadFile" ]
+      ~visible_tool_names:[ "Read" ]
       "tool_execute"
   in
   check_contains "blocker text mentions no active schema name" "No active schema name" text;
@@ -90,7 +90,7 @@ let test_blocker_guidance_only_when_hidden () =
     "visible alias has no blocker"
     None
     (Projection.blocker_guidance ~visible_tool_names:[ "Execute" ] "tool_execute");
-  match Projection.blocker_guidance ~visible_tool_names:[ "ReadFile" ] "tool_execute" with
+  match Projection.blocker_guidance ~visible_tool_names:[ "Read" ] "tool_execute" with
   | None -> fail "expected hidden alias blocker guidance"
   | Some text ->
     check_contains "blocker names internal subject" "tool_execute" text;
@@ -104,28 +104,28 @@ let test_filter_model_visible_suggestions () =
       ; "tool_execute"
       ; "Execute"
       ; "tool_search_files"
-      ; "ReadFile"
+      ; "Read"
       ; "tool_edit_file"
       ]
   in
   check int "public names preserved" 1 (List.length (List.filter (String.equal "Execute") result));
   check int "masc names preserved" 1 (List.length (List.filter (String.equal "masc_status") result));
-  check int "ReadFile preserved" 1 (List.length (List.filter (String.equal "ReadFile") result));
+  check int "Read preserved" 1 (List.length (List.filter (String.equal "Read") result));
   check bool "no tool_execute in output" false (List.exists (String.equal "tool_execute") result);
   check bool "no tool_search_files in output" false (List.exists (String.equal "tool_search_files") result);
-  (* tool_search_files -> "SearchFiles", tool_edit_file -> "EditFile". *)
-  check bool "tool_search_files mapped to SearchFiles" true
-    (List.exists (String.equal "SearchFiles") result);
-  check bool "tool_edit_file mapped to EditFile" true
-    (List.exists (String.equal "EditFile") result)
+  (* tool_search_files -> "Grep", tool_edit_file -> "Edit". *)
+  check bool "tool_search_files mapped to Grep" true
+    (List.exists (String.equal "Grep") result);
+  check bool "tool_edit_file mapped to Edit" true
+    (List.exists (String.equal "Edit") result)
 ;;
 
 let test_public_alias_for_internal () =
   check (option string) "tool_execute -> Execute" (Some "Execute")
     (Projection.public_alias_for_internal "tool_execute");
-  check (option string) "tool_search_files -> SearchFiles" (Some "SearchFiles")
+  check (option string) "tool_search_files -> Grep" (Some "Grep")
     (Projection.public_alias_for_internal "tool_search_files");
-  check (option string) "tool_edit_file -> EditFile" (Some "EditFile")
+  check (option string) "tool_edit_file -> Edit" (Some "Edit")
     (Projection.public_alias_for_internal "tool_edit_file");
   check (option string) "unknown -> None" None
     (Projection.public_alias_for_internal "keeper_not_real");

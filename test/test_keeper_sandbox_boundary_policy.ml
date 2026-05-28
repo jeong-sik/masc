@@ -687,7 +687,7 @@ let test_public_alias_projection_uses_core_axis () =
 
 let test_tool_call_contract_uses_public_descriptor_surface () =
   let rel = "specs/boundary/ToolCallContract.tla" in
-  assert_contains rel "ToolRegistry == {\"Execute\", \"SearchFiles\"";
+  assert_contains rel "ToolRegistry == {\"Execute\", \"Grep\"";
   assert_contains rel "tools_used' = {\"Execute\"}";
   assert_not_contains rel "\"keeper_shell\""
 

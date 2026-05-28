@@ -76,27 +76,27 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
     bool
     "ReadFile readOnlyHint from descriptor"
     true
-    (bool_annotation "readOnlyHint" "ReadFile");
+    (bool_annotation "readOnlyHint" "Read");
   check
     bool
     "ReadFile openWorldHint closed"
     false
-    (bool_annotation "openWorldHint" "ReadFile");
+    (bool_annotation "openWorldHint" "Read");
   check
     bool
     "SearchFiles readOnlyHint from descriptor"
     true
-    (bool_annotation "readOnlyHint" "SearchFiles");
+    (bool_annotation "readOnlyHint" "Grep");
   check
     bool
     "WriteFile readOnlyHint false from descriptor"
     false
-    (bool_annotation "readOnlyHint" "WriteFile");
+    (bool_annotation "readOnlyHint" "Write");
   check
     bool
     "WriteFile destructiveHint from canonical internal capability"
     true
-    (bool_annotation "destructiveHint" "WriteFile");
+    (bool_annotation "destructiveHint" "Write");
   check
     bool
     "Execute destructiveHint from canonical internal capability"
@@ -105,7 +105,7 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
 ;;
 
 let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
-  let read_file = tool_json "ReadFile" in
+  let read_file = tool_json "Read" in
   check
     string
     "ReadFile descriptor id"
@@ -121,7 +121,7 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     "ReadFile effect domain"
     "read_only"
     (json_string_field "effectDomain" read_file);
-  let write_file = tool_json "WriteFile" in
+  let write_file = tool_json "Write" in
   check
     string
     "WriteFile effect domain"
@@ -133,7 +133,7 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     "filesystem"
     (json_string_field "descriptorExecutor" write_file)
   ;
-  let search_files = tool_json "SearchFiles" in
+  let search_files = tool_json "Grep" in
   check
     string
     "SearchFiles canonical descriptor name"
@@ -149,22 +149,22 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
     bool
     "ReadFile read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "ReadFile");
+    (capability_has Masc_mcp.Tool_capability.Read_only "Read");
   check
     bool
     "SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "SearchFiles");
+    (capability_has Masc_mcp.Tool_capability.Read_only "Grep");
   check
     bool
     "mcp-prefixed SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "mcp__masc__SearchFiles");
+    (capability_has Masc_mcp.Tool_capability.Read_only "mcp__masc__Grep");
   check
     bool
     "WriteFile destructive via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Destructive "WriteFile");
+    (capability_has Masc_mcp.Tool_capability.Destructive "Write");
   check
     bool
     "Execute destructive via descriptor resolution"
@@ -174,7 +174,7 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
     bool
     "ReadFile not destructive via descriptor resolution"
     false
-    (capability_has Masc_mcp.Tool_capability.Destructive "ReadFile")
+    (capability_has Masc_mcp.Tool_capability.Destructive "Read")
 ;;
 
 let () =

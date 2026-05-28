@@ -81,7 +81,7 @@ let policy_validation_tool_names =
   ; "tool_search_files"
   ; "tool_execute"
   ; "Execute"
-  ; "ReadFile"
+  ; "Read"
   ; "keeper_task_done"
   ; "keeper_time_now"
   ; "masc_status"

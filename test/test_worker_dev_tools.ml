@@ -1188,7 +1188,7 @@ let () =
         in
         Alcotest.(check bool) "still suggests tool_edit_file for A.B names"
           true
-          (contains_substring msg "EditFile"));
+          (contains_substring msg "Edit"));
     ];
     "attribution", [
       Alcotest.test_case "Ok () → Passed with cmd in evidence" `Quick (fun () ->

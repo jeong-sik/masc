@@ -113,7 +113,7 @@ let is_stay_silent_tool_name name =
 
 let is_keeper_observation_alias name =
   match Keeper_tool_alias.strip_mcp_masc_prefix name with
-  | "SearchFiles" | "ReadFile" -> true
+  | "Grep" | "Read" -> true
   | _ -> false
 ;;
 

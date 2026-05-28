@@ -27,7 +27,7 @@ Live findings:
 
 - 1차: Live logs and Bash census were queried from `/Users/dancer/me/.masc` for the current six-hour window.
 - 2차: GitHub open PRs were queried on `jeong-sik/masc-mcp`; OAS downstream pin was checked with `scripts/check-oas-pin.sh`.
-- 3차: Prompt/code guidance was changed so model-facing hints render public aliases (`Execute`, `ReadFile`, `SearchFiles`, `EditFile`, `WriteFile`) and typed repository workflows instead of internal `tool_execute` call recipes.
+- 3차: Prompt/code guidance was changed so model-facing hints render public aliases (`Execute`, `Read`, `Grep`, `Edit`, `Write`) and typed repository workflows instead of internal `tool_execute` call recipes.
 - 재현 결과: prompt/tool-surface grep for private keeper tool names, legacy raw-command Bash examples, and stale `cmd` examples returned no matches after the change. `ocamlformat --check lib/keeper/keeper_tool_guidance.ml lib/keeper/keeper_unified_prompt.ml test/test_keeper_unified.ml`, `git diff --check`, and this evidence-record validator passed. Focused Dune validation command was `scripts/dune-local.sh build ./test/test_keeper_unified.exe`, but it was not completed because `/tmp/me-dune-local.lock` was held by PID 5198 running `test/test_keeper_fd_pressure_fleet.exe` for another worktree; the waiting command was cancelled to avoid adding more queue pressure.
 
 ## 불확실성

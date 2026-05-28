@@ -774,10 +774,10 @@ let append_execution_receipt
       response_text_present = true;
       model_used = Some "custom:mock";
       requested_tools = [ "keeper_task_claim"; "tool_read_file" ];
-      reported_tools = [ "ReadFile" ];
+      reported_tools = [ "Read" ];
       observed_tools = [ "tool_read_file" ];
       canonical_tools = [ "tool_read_file" ];
-      unexpected_tools = [ "SearchWeb" ];
+      unexpected_tools = [ "WebSearch" ];
       tools_used;
       tool_contract_result;
       tool_surface =
@@ -1573,7 +1573,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
     (row |> member "trust" |> member "execution_summary"
      |> member "mutation_guard_summary" |> to_string);
   check (list string) "route surfaces unexpected tools"
-    [ "SearchWeb" ]
+    [ "WebSearch" ]
     (row |> member "trust" |> member "execution_summary"
      |> member "unexpected_tools" |> to_list |> List.map to_string);
   check int "route surfaces unexpected tool count" 1
@@ -1663,12 +1663,12 @@ let test_composite_routes_surface_latest_execution_receipt () =
     (execution |> member "tool_surface" |> member "tool_surface_fallback_used"
      |> to_bool);
   check (list string) "composite exposes unexpected tools"
-    [ "SearchWeb" ]
+    [ "WebSearch" ]
     (execution |> member "unexpected_tools" |> to_list |> List.map to_string);
   check int "composite exposes unexpected tool count" 1
     (execution |> member "unexpected_tool_count" |> to_int);
   check (list string) "composite tool surface exposes unexpected tools"
-    [ "SearchWeb" ]
+    [ "WebSearch" ]
     (execution |> member "tool_surface" |> member "unexpected_tools" |> to_list
      |> List.map to_string);
   check (list string) "composite tool surface exposes required tool candidates"

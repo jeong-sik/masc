@@ -60,9 +60,9 @@ let deterministic_prefilter_names
       |> List.exists (fun (found, _) -> String.equal found name)
     in
     let preferred_source_tools =
-      [ (allow_deterministic_tool ~query_text "tool_read_file", [ "tool_read_file"; "ReadFile" ])
+      [ (allow_deterministic_tool ~query_text "tool_read_file", [ "tool_read_file"; "Read" ])
       ; ( allow_deterministic_tool ~query_text "tool_search_files"
-        , [ "tool_search_files"; "SearchFiles" ] )
+        , [ "tool_search_files"; "Grep" ] )
       ]
       |> List.concat_map (fun (enabled, names) ->
         if enabled

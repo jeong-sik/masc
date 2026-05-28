@@ -104,12 +104,12 @@ let to_string : t -> string = function
 ;;
 
 let of_string : string -> t = function
-  | "search_files" | "searchfiles" -> `Search_files
+  | "search_files" | "searchfiles" | "grep" -> `Search_files
   | "glob" -> `Glob
   | "search" -> `Search
   | "list_dir" -> `List_dir
   | "find_file" -> `Find_file
-  | "read_file" | "readfile" -> `Read_file
+  | "read_file" | "readfile" | "read" -> `Read_file
   | "find_symbol" -> `Find_symbol
   | "get_symbols_overview" -> `Get_symbols_overview
   | "find_referencing_symbols" -> `Find_referencing_symbols
@@ -123,8 +123,8 @@ let of_string : string -> t = function
   | "task_list" -> `Task_list
   | "task_get" -> `Task_get
   | "task_output" -> `Task_output
-  | "write_file" | "writefile" -> `Write_file
-  | "edit_file" | "editfile" -> `Edit_file
+  | "write_file" | "writefile" | "write" -> `Write_file
+  | "edit_file" | "editfile" | "edit" -> `Edit_file
   | "create_text_file" -> `Create_text_file
   | "replace_content" -> `Replace_content
   | "rename_symbol" -> `Rename_symbol
@@ -138,8 +138,8 @@ let of_string : string -> t = function
   | "team_create" -> `Team_create
   | "team_delete" -> `Team_delete
   | "ask_user_question" -> `Ask_user_question
-  | "fetch_web" | "fetchweb" -> `Fetch_web
-  | "search_web" | "searchweb" -> `Search_web
+  | "fetch_web" | "fetchweb" | "webfetch" -> `Fetch_web
+  | "search_web" | "searchweb" | "websearch" -> `Search_web
   | "navigate" -> `Navigate
   | "computer" -> `Computer
   | "find" -> `Find

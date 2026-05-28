@@ -106,7 +106,7 @@ let append_keeper_receipt
     ?(outcome : Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
     ?(requested_tools = [ "tool_read_file" ])
-    ?(reported_tools = [ "ReadFile" ])
+    ?(reported_tools = [ "Read" ])
     ?(observed_tools = [ "tool_read_file" ])
     ?(canonical_tools = [ "tool_read_file" ])
     ?(tools_used = [ "tool_read_file" ])

@@ -324,7 +324,7 @@ let test_public_edit_file_maps_top_relative_single_repo_path () =
   Fs_compat.save_file path "let x = 1\n";
   let raw =
     public_fs_edit_call
-      ~public:"EditFile"
+      ~public:"Edit"
       ~config
       ~meta
       (`Assoc
@@ -344,7 +344,7 @@ let test_public_write_file_maps_top_relative_single_repo_path () =
   let path = Filename.concat repo "lib/generated.ml" in
   let raw =
     public_fs_edit_call
-      ~public:"WriteFile"
+      ~public:"Write"
       ~config
       ~meta
       (`Assoc
@@ -384,9 +384,9 @@ let () =
             test_spaces_only_mode_is_rejected;
           Alcotest.test_case "tab-only mode rejected" `Quick
             test_tab_only_mode_is_rejected;
-          Alcotest.test_case "public EditFile maps top-relative single repo path" `Quick
+          Alcotest.test_case "public Edit maps top-relative single repo path" `Quick
             test_public_edit_file_maps_top_relative_single_repo_path;
-          Alcotest.test_case "public WriteFile maps top-relative single repo path" `Quick
+          Alcotest.test_case "public Write maps top-relative single repo path" `Quick
             test_public_write_file_maps_top_relative_single_repo_path;
         ] );
     ]

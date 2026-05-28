@@ -443,7 +443,14 @@ let keeper_toml_config_error_for_name name =
   | None -> None
   | Some path -> keeper_toml_config_error_of_path path
 
-let load_keeper_profile_defaults name : keeper_profile_defaults =
+(* Profile defaults cache — TOML/JSON config files are static at runtime.
+   Eliminates per-tool-call disk reads for the same keeper name.
+   Key includes config_dir so tests with isolated MASC_CONFIG_DIR don't collide. *)
+let profile_defaults_cache : (string * string, keeper_profile_defaults) Hashtbl.t =
+  Hashtbl.create 32
+let profile_defaults_mu = Stdlib.Mutex.create ()
+
+let load_keeper_profile_defaults_uncached name : keeper_profile_defaults =
   match load_keeper_profile_defaults_result name with
   | Ok defaults -> defaults
   | Error e ->
@@ -455,6 +462,22 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
          ()
      | None -> ());
     load_keeper_profile_defaults_from_persona name
+
+let load_keeper_profile_defaults name : keeper_profile_defaults =
+  let config_dir = Option.value ~default:"" (Sys.getenv_opt "MASC_CONFIG_DIR") in
+  let key = (config_dir, name) in
+  Stdlib.Mutex.lock profile_defaults_mu;
+  match Hashtbl.find_opt profile_defaults_cache key with
+  | Some defaults ->
+    Stdlib.Mutex.unlock profile_defaults_mu;
+    defaults
+  | None ->
+    Stdlib.Mutex.unlock profile_defaults_mu;
+    let defaults = load_keeper_profile_defaults_uncached name in
+    Stdlib.Mutex.lock profile_defaults_mu;
+    Hashtbl.replace profile_defaults_cache key defaults;
+    Stdlib.Mutex.unlock profile_defaults_mu;
+    defaults
 
 (** Clamp a profile-provided max-turns override to [1, 100] — the same range
     enforced by [Keeper_runtime_resolved.reactive_max_turns_per_call].

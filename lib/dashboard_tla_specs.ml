@@ -303,15 +303,8 @@ let list_tlc_results () =
     cfg_entries_for_spec spec |> List.map (result_for_cfg ~results_dir spec))
 ;;
 
-let option_int_json = function
-  | Some v -> `Int v
-  | None -> `Null
-;;
-
-let option_string_json = function
-  | Some v -> `String v
-  | None -> `Null
-;;
+let option_int_json = Json_util.option_to_yojson (fun v -> `Int v)
+let option_string_json = Json_util.option_to_yojson (fun v -> `String v)
 
 let option_time_json = function
   | Some v -> `String (iso_of_unix_time v)

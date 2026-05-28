@@ -155,9 +155,9 @@ val host_port_scheme_of_origin :
 val host_port_of_request : Httpun.Request.t -> (string * int option) option
 (** Host/port from the request's [Host] header. *)
 
-val allow_anonymous_mutations : bool
-(** Compile-time toggle: when [true] non-loopback mutations skip auth
-    (test fixtures only). *)
+val allow_anonymous_mutations : unit -> bool
+(** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
+    When [true] non-loopback mutations skip auth (test fixtures only). *)
 
 val default_loopback_dev_mutation_origins : string list
 (** Built-in allowlist of dev-loopback origins (e.g. Vite). *)

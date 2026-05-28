@@ -274,8 +274,23 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let base_path = current_room_base_path_opt () in
   let phase_counts = keeper_phase_counts ?base_path () in
   let keeper_fibers = phase_counts.running in
+  (* Single-pass fleet meta scan: reads each keeper meta file once,
+     shared by paused-keepers and fleet-safety sections. *)
+  let fleet_meta_scan =
+    match current_server_state_opt () with
+    | Some state ->
+      Some (keeper_fleet_meta_scan state.Mcp_server.room_config)
+    | None -> None
+  in
   let paused_keepers_json =
-    compute_section ~name:"paused_keepers" ?section_timings_ref paused_keepers_health_json
+    compute_section ~name:"paused_keepers" ?section_timings_ref
+      (fun () ->
+        match fleet_meta_scan with
+        | Some scan ->
+          paused_keepers_health_json_of_scan
+            ~running_names:(running_paused_keeper_names ())
+            scan.paused_scan
+        | None -> paused_keepers_health_json ())
   in
   let reaction_ledger_json =
     compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
@@ -286,7 +301,17 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   in
   let keeper_fleet_safety =
     compute_section ~name:"keeper_fleet_safety" ?section_timings_ref
-      (fun () -> keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ())
+      (fun () ->
+        match fleet_meta_scan with
+        | Some scan ->
+          keeper_fleet_safety_health_json
+            ~bootable_names:scan.bootable_names
+            ~autoboot_scan:scan.autoboot_scan
+            ~phase_counts
+            ~paused_keepers_json
+            ()
+        | None ->
+          keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ())
   in
   let cdal_health_json =
     compute_section ~name:"cdal" ?section_timings_ref cdal_health_json

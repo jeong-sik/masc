@@ -301,6 +301,11 @@ val success_rate : t -> provider_key:string -> float
 (** Whether the provider is currently in cooldown (should be skipped). *)
 val is_in_cooldown : t -> provider_key:string -> bool
 
+(** Whether the provider is in capacity backpressure cooldown specifically.
+    Used for pre-admission filtering to skip providers that recently
+    signalled capacity exhaustion, avoiding wasted OAS body budget. *)
+val is_capacity_constrained : t -> provider_key:string -> bool
+
 (** Compute effective weight for weighted cascade selection.
 
     [effective_weight = config_weight * success_rate]

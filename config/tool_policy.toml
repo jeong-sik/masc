@@ -62,6 +62,9 @@ tools = ["tool_edit_file", "tool_write_file"]
 [groups.library]
 tools = ["keeper_library_search", "keeper_library_read"]
 
+[groups.git_pr]
+tools = ["tool_git_clone", "tool_git_commit", "tool_git_push", "tool_pr_create", "tool_pr_review"]
+
 # Tools allowed on the keeper's last turn (safety constraint).
 # On last turn, visible tools are intersected with this set.
 [groups.last_turn_safe]
@@ -180,13 +183,13 @@ masc_groups = ["essential", "dispatch", "goal", "coordination"]
 # still flow through the risk-tiered approval gate in
 # [keeper_routine_allowlist.ml].
 [presets.research]
-groups = ["base", "filesystem", "filesystem_write", "library", "search_files", "execute", "coordination", "board_core"]
+groups = ["base", "filesystem", "filesystem_write", "library", "search_files", "execute", "coordination", "board_core", "git_pr"]
 masc_groups = ["essential", "goal", "coordination"]
 
 # Delivery preset: research plus write/execute access for keepers that need to produce changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
-groups = ["base", "filesystem", "filesystem_write", "library", "search_files", "execute", "coordination", "board_core", "voice"]
+groups = ["base", "filesystem", "filesystem_write", "library", "search_files", "execute", "coordination", "board_core", "voice", "git_pr"]
 masc_groups = ["essential", "goal", "coordination"]
 
 [presets.full]

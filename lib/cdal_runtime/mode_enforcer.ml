@@ -172,6 +172,17 @@ let register_tool_class name cls =
   Hashtbl.replace tool_registry (String.lowercase_ascii name) cls
 ;;
 
+(* ── RFC-0202: Git/PR tool effect classifications ──────────────── *)
+(* Local_mutation: workspace-local filesystem + VCS operations.
+   External_effect: affects remote state (GitHub servers). *)
+let () =
+  register_tool_class "tool_git_clone" Local_mutation;
+  register_tool_class "tool_git_commit" Local_mutation;
+  register_tool_class "tool_git_push" External_effect;
+  register_tool_class "tool_pr_create" External_effect;
+  register_tool_class "tool_pr_review" External_effect
+;;
+
 type state =
   { effective_mode : Execution_mode.t
   ; allowed_mutations : string list

@@ -521,6 +521,11 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Time_now
     | Tool_name.Keeper.Tool_search
     | Tool_name.Keeper.Tools_list -> "meta"
+    | Tool_name.Keeper.Git_clone
+    | Tool_name.Keeper.Git_commit
+    | Tool_name.Keeper.Git_push
+    | Tool_name.Keeper.Pr_create
+    | Tool_name.Keeper.Pr_review -> "git_pr"
   in
   let categorize n =
     match Tool_name.of_string n with

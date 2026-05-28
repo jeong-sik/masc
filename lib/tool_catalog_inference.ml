@@ -55,6 +55,11 @@ module TMK = Tool_name.Masc_keeper
 
 let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Execute | TN.Keeper TK.Search_files -> Some Host_repo_write
+  | TN.Keeper TK.Git_clone | TN.Keeper TK.Git_commit -> Some Host_repo_write
+  | TN.Keeper TK.Git_push
+  | TN.Keeper TK.Pr_create
+  | TN.Keeper TK.Pr_review ->
+      Some Host_repo_write
   | TN.Keeper TK.Board_get
   | TN.Keeper TK.Board_list
   | TN.Keeper TK.Board_curation_read
@@ -245,6 +250,8 @@ let tool_group_of_typed_tool_name = function
       Some Voice
   | TN.Keeper
       (TK.Execute | TK.Fs_edit | TK.Fs_read | TK.Ide_annotate | TK.Search_files) ->
+      Some Filesystem
+  | TN.Keeper (TK.Git_clone | TK.Git_commit | TK.Git_push | TK.Pr_create | TK.Pr_review) ->
       Some Filesystem
   | TN.Keeper
       ( TK.Broadcast

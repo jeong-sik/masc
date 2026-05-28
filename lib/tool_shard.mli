@@ -62,6 +62,9 @@ val shard_filesystem : shard
 val shard_search_files : shard
 (** SearchFiles structured repo inspection access. *)
 
+val shard_git_pr : shard
+(** Git/PR: repository operations and pull request management. *)
+
 (** {1 Lookup} *)
 
 val get_shard : string -> shard option
@@ -71,7 +74,7 @@ val get_shard : string -> shard option
 
 val default_shard_names : string list
 (** Default shards for a new keeper: base, board, filesystem, search_files,
-    library, taskboard. *)
+    library, taskboard, git_pr. *)
 
 val tools_of_shards : string list -> Masc_domain.tool_schema list
 (** Combine tools from multiple shard names. *)

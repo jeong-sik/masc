@@ -124,6 +124,15 @@ let shard_taskboard : shard =
   }
 ;;
 
+let shard_git_pr : shard =
+  { name = "git_pr"
+  ; tools = git_pr_tools
+  ; read_only_tools = []
+  ; removable = true
+  ; description = "Git/PR: repository operations and pull request management"
+  }
+;;
+
 (** Per-agent shard overrides.  Read-modify-write is serialised by
     [agent_shards_mutex] so concurrent keeper setup calls cannot lose updates.
 
@@ -169,6 +178,7 @@ let all_shards : shard StringMap.t =
     ; shard_voice
     ; shard_library
     ; shard_taskboard
+    ; shard_git_pr
     ]
 ;;
 

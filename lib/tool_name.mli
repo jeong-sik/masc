@@ -50,6 +50,11 @@ module Keeper : sig
     | Voice_session_start
     | Voice_sessions
     | Voice_speak
+    | Git_clone
+    | Git_commit
+    | Git_push
+    | Pr_create
+    | Pr_review
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -57,6 +62,9 @@ module Keeper : sig
   val board_write_tool_names : string list
   val is_board : t -> bool
   val is_board_write : t -> bool
+  val is_git_pr : t -> bool
+  val git_pr_tools : t list
+  val git_pr_tool_names : string list
   val board_write_action_kind : t -> string option
   val pp : Stdlib.Format.formatter -> t -> unit
 end

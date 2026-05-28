@@ -173,6 +173,8 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   | Tools_list
   | Voice_session_end
   | Voice_sessions -> Ungated
+  | Git_clone | Git_commit -> Filesystem_write
+  | Git_push | Pr_create | Pr_review -> Generic_write
 ;;
 
 let classify_masc_tool (tool : Tool_name.Masc.t) =

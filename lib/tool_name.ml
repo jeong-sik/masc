@@ -68,6 +68,11 @@ module Keeper = struct
     | Voice_session_start
     | Voice_sessions
     | Voice_speak
+    | Git_clone
+    | Git_commit
+    | Git_push
+    | Pr_create
+    | Pr_review
 
   let to_string = function
     | Execute -> "tool_execute"
@@ -115,6 +120,11 @@ module Keeper = struct
     | Voice_session_start -> "keeper_voice_session_start"
     | Voice_sessions -> "keeper_voice_sessions"
     | Voice_speak -> "keeper_voice_speak"
+    | Git_clone -> "tool_git_clone"
+    | Git_commit -> "tool_git_commit"
+    | Git_push -> "tool_git_push"
+    | Pr_create -> "tool_pr_create"
+    | Pr_review -> "tool_pr_review"
   ;;
 
   let of_string = function
@@ -163,6 +173,11 @@ module Keeper = struct
     | "keeper_voice_session_start" -> Some Voice_session_start
     | "keeper_voice_sessions" -> Some Voice_sessions
     | "keeper_voice_speak" -> Some Voice_speak
+    | "tool_git_clone" -> Some Git_clone
+    | "tool_git_commit" -> Some Git_commit
+    | "tool_git_push" -> Some Git_push
+    | "tool_pr_create" -> Some Pr_create
+    | "tool_pr_review" -> Some Pr_review
     | _ -> None
   ;;
 
@@ -192,6 +207,14 @@ module Keeper = struct
     | Board_post | Board_comment | Board_vote | Board_curation_submit -> true
     | _ -> false
   ;;
+
+  let is_git_pr = function
+    | Git_clone | Git_commit | Git_push | Pr_create | Pr_review -> true
+    | _ -> false
+  ;;
+
+  let git_pr_tools = [ Git_clone; Git_commit; Git_push; Pr_create; Pr_review ]
+  let git_pr_tool_names = List.map to_string git_pr_tools
 
   let board_write_action_kind = function
     | Board_post -> Some "post"

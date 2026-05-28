@@ -192,11 +192,6 @@ val message_to_json : message -> Yojson.Safe.t
 (** Deserialize a message from JSON. *)
 val message_of_json : Yojson.Safe.t -> (message, string) result
 
-(** Notification callback invoked after a successful broadcast with
-    the mention target (if any).  Set by Keeper bootstrap to wire
-    up wakeup signals. *)
-val on_broadcast_mention : (string option -> unit) ref
-
 (** Broadcast a message from [from_agent] with [content].
     Extracts @mention automatically. *)
 val broadcast :

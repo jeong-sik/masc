@@ -207,26 +207,10 @@ let json_assoc_table_fields key json =
   | Some (`Assoc fields) -> fields
   | Some _ | None -> []
 
-let json_bool_field key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-
-let json_string_list_field key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`List values) ->
-      values
-      |> List.filter_map (function
-        | `String value ->
-            let trimmed = String.trim value in
-            if String.equal trimmed "" then None else Some trimmed
-        | _ -> None)
-  | _ -> []
-
 let json_keeper_assignable_opt json =
-  match json_bool_field "keeper-assignable" json with
+  match Json_util.assoc_bool_opt "keeper-assignable" json with
   | Some _ as value -> value
-  | None -> json_bool_field "keeper_assignable" json
+  | None -> Json_util.assoc_bool_opt "keeper_assignable" json
 
 let qualified_name_for_public _meta public_name = public_name
 

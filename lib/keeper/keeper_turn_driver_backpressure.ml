@@ -8,6 +8,12 @@
 open Cascade_internal_error
 open Cascade_name
 
+(* Synthetic backoff default for paths where the upstream provides no
+   [retry_after] hint.  Mirrors the downstream fallback in
+   [Cascade_health_tracker] so that telemetry never emits [null]. *)
+let synthetic_retry_after_sec =
+  Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec
+
 let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.NetworkError
       { kind = Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
@@ -55,7 +61,7 @@ let capacity_backpressure_of_http_error ?source ~cascade_name last_err =
            cascade_name;
            source = Option.value source ~default:Cascade_slot;
            detail = message;
-           retry_after_sec = None;
+           retry_after_sec = Some synthetic_retry_after_sec;
          })
   | Some
       (Llm_provider.Http_client.HttpError _
@@ -106,7 +112,7 @@ let capacity_backpressure_of_sdk_error
               cascade_name;
               source = Provider_capacity;
               detail = msg;
-              retry_after_sec = None;
+              retry_after_sec = Some synthetic_retry_after_sec;
             }))
   | Agent_sdk.Error.Api _
   | Agent_sdk.Error.Provider _

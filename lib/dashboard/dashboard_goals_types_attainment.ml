@@ -22,8 +22,7 @@ let attainment_unit_to_string = function
   | Count -> "count"
   | Unknown -> "unknown"
 
-let contains_ci haystack needle =
-  String_util.contains_substring_ci haystack needle
+
 
 (* Token-split that respects camelCase AND acronym boundaries.
 
@@ -91,7 +90,7 @@ let metric_implies_percent metric =
   match metric with
   | None -> false
   | Some raw ->
-      contains_ci raw "%"
+      String_util.contains_substring_ci raw "%"
       || List.exists metric_word_implies_percent (metric_word_tokens raw)
 
 let metric_count_token = function
@@ -118,9 +117,9 @@ let metric_supports_count_target metric =
       || metric_has_pull_request_phrase tokens
 
 let target_value_implies_percent raw =
-  contains_ci raw "%"
-  || contains_ci raw "percent"
-  || contains_ci raw "pct"
+  String_util.contains_substring_ci raw "%"
+  || String_util.contains_substring_ci raw "percent"
+  || String_util.contains_substring_ci raw "pct"
 
 let strip_number_group_separators token =
   let buffer = Buffer.create (String.length token) in

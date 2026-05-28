@@ -658,7 +658,7 @@ let handle_keeper_get_subroutes state req request reqd =
     in
     let json =
       `Assoc [
-        "generated_at", `Float (Unix.gettimeofday ());
+        "generated_at", `String (Masc_domain.now_iso ());
         "count", `Int (List.length snapshots);
         "snapshots",
           `List

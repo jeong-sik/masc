@@ -9,7 +9,6 @@ let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
     ; "coordination_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
-    ; "cluster", `String (Env_config_core.cluster_name ())
     ; "project", `String room_state.project
     ; "tempo_interval_s", `Float tempo.current_interval_s
     ; "paused", `Bool room_state.paused

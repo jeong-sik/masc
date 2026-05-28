@@ -53,7 +53,9 @@ let of_command = function
   | Shell_ir_typed.W (Git_clone { repo; branch; depth }) ->
     let args =
       (arg "clone"
-       :: (if depth <> 1 then [ arg "--depth"; arg (string_of_int depth) ] else []))
+       :: (match depth with
+          | Some d -> [ arg "--depth"; arg (string_of_int d) ]
+          | None -> []))
       @ (match branch with
          | None -> []
          | Some b -> [ arg "-b"; arg b ])
@@ -116,10 +118,14 @@ let of_command = function
     let args = (if parents then [ arg "-p" ] else []) @ [ arg path ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Mkdir, args) ]
   | Shell_ir_typed.W (Wc { path; mode }) ->
-    let flag =
-      arg (match mode with `Lines -> "-l" | `Words -> "-w" | `Chars -> "-c")
+    let flag_args =
+      match mode with
+      | Some `Lines -> [ arg "-l" ]
+      | Some `Words -> [ arg "-w" ]
+      | Some `Chars -> [ arg "-c" ]
+      | None -> []
     in
-    let args = [ flag; arg path ] in
+    let args = flag_args @ [ arg path ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Wc, args) ]
   | Shell_ir_typed.W (Git_diff { stat; cached; paths }) ->
     let flag_args =

@@ -28,7 +28,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Cat { path = "/dev/null" })
   ; W (Rg { pattern = "."; path = None; case_sensitive = false })
   ; W (Git_status { short = false })
-  ; W (Git_clone { repo = "x"; branch = None; depth = 1 })
+  ; W (Git_clone { repo = "x"; branch = None; depth = None })
   ; W (Curl { url = "http://x"; method_ = `GET; headers = None; body = None })
   ; W (Rm { paths = [ "/tmp/x" ]; recursive = false; force = false })
   ; W (Sudo { target_argv = [ "sh"; "-c"; "echo hi" ] })
@@ -37,7 +37,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Tail { path = "/dev/null"; lines = 10 })
   ; W (Grep { pattern = "."; path = None; recursive = false; case_sensitive = false })
   ; W (Mkdir { path = "/tmp/x"; parents = false })
-  ; W (Wc { path = "/dev/null"; mode = `Lines })
+  ; W (Wc { path = "/dev/null"; mode = None })
   ; W (Git_diff { stat = false; cached = false; paths = [] })
   ; W (Git_log { oneline = false; max_count = None })
   ; W (Git_commit { message = "test"; amend = false })
@@ -219,7 +219,7 @@ let test_of_simple_round_trip () =
     ; W (Cat { path = "/etc/passwd" })
     ; W (Rg { pattern = "TODO"; path = Some "."; case_sensitive = true })
     ; W (Git_status { short = true })
-    ; W (Git_clone { repo = "git@github.com:x/y.git"; branch = Some "main"; depth = 1 })
+    ; W (Git_clone { repo = "git@github.com:x/y.git"; branch = Some "main"; depth = Some 1 })
     ; W
         (Curl
            { url = "http://example.com"
@@ -234,7 +234,7 @@ let test_of_simple_round_trip () =
     ; W (Tail { path = "/var/log/syslog"; lines = 20 })
     ; W (Grep { pattern = "TODO"; path = Some "lib/"; recursive = true; case_sensitive = false })
     ; W (Mkdir { path = "/tmp/newdir"; parents = true })
-    ; W (Wc { path = "README.md"; mode = `Words })
+    ; W (Wc { path = "README.md"; mode = Some `Words })
     ; W (Git_diff { stat = true; cached = false; paths = [ "lib/" ] })
     ; W (Git_log { oneline = true; max_count = Some 10 })
     ; W (Git_commit { message = "feat: add feature"; amend = false })

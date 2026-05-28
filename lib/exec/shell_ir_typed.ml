@@ -53,10 +53,11 @@ let pp fmt = function
   | W (Git_clone { repo; branch; depth }) ->
     Format.fprintf
       fmt
-      "Git_clone(repo=%s, branch=%a, depth=%d)"
+      "Git_clone(repo=%s, branch=%a, depth=%a)"
       repo
       (Format.pp_print_option Format.pp_print_string)
       branch
+      (Format.pp_print_option Format.pp_print_int)
       depth
   | W (Curl { url; method_; headers; body }) ->
     Format.fprintf
@@ -117,9 +118,12 @@ let pp fmt = function
   | W (Wc { path; mode }) ->
     Format.fprintf
       fmt
-      "Wc(path=%s, mode=%s)"
+      "Wc(path=%s, mode=%a)"
       path
-      (match mode with `Lines -> "lines" | `Words -> "words" | `Chars -> "chars")
+      (Format.pp_print_option (fun fmt m ->
+         Format.pp_print_string fmt
+           (match m with `Lines -> "lines" | `Words -> "words" | `Chars -> "chars")))
+      mode
   | W (Git_diff { stat; cached; paths }) ->
     Format.fprintf
       fmt

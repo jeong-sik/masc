@@ -32,7 +32,8 @@ and (_, _, _, _) command =
   | Git_clone :
       { repo : string
       ; branch : string option
-      ; depth : int
+      ; depth : int option
+        (** [None] = unlimited (no [--depth] flag); [Some n] = shallow clone. *)
       }
       -> (unit, string, [ `Audited ], [ `Host | `Docker ]) command
   | Curl :
@@ -81,7 +82,8 @@ and (_, _, _, _) command =
       -> (unit, unit, [ `Safe ], [ `Host ]) command
   | Wc :
       { path : string
-      ; mode : [ `Lines | `Words | `Chars ]
+      ; mode : [ `Lines | `Words | `Chars ] option
+        (** [None] = all three counts (no flag); [Some m] = specific mode. *)
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Git_diff :

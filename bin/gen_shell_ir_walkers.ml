@@ -228,7 +228,7 @@ parse false args|}
     ; to_simple_body =
         {|
       let args =
-        (if depth <> 1 then [ "--depth"; string_of_int depth ] else [])
+        (match depth with Some d -> [ "--depth"; string_of_int d ] | None -> [])
         @ (match branch with None -> [] | Some b -> [ "-b"; b ])
         @ [ repo ]
       in
@@ -250,7 +250,7 @@ let rec parse depth branch repo = function
      | None -> None)
   | "--depth" :: n :: rest ->
     (match int_of_string_opt n with
-     | Some d -> parse d branch repo rest
+     | Some d -> parse (Some d) branch repo rest
      | None -> None)
   | "-b" :: b :: rest | "--branch" :: b :: rest -> parse depth (Some b) repo rest
   | arg :: rest ->
@@ -261,7 +261,7 @@ let rec parse depth branch repo = function
       | None -> parse depth branch (Some arg) rest
       | Some _ -> None)
 in
-parse 1 None None args|}
+parse None None None args|}
     }
   ; { name = "Curl"
     ; anon_pattern = "Curl _"
@@ -609,7 +609,11 @@ parse false None args|}
     ; to_simple_body =
         {|
       let flag_args =
-        match mode with `Lines -> [ "-l" ] | `Words -> [ "-w" ] | `Chars -> [ "-c" ]
+        match mode with
+        | Some `Lines -> [ "-l" ]
+        | Some `Words -> [ "-w" ]
+        | Some `Chars -> [ "-c" ]
+        | None -> []
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Wc
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ [ path ])
@@ -627,9 +631,9 @@ let rec parse mode path = function
     (match path with
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wc { path = p; mode }))
      | None -> None)
-  | "-l" :: rest | "--lines" :: rest -> parse `Lines path rest
-  | "-w" :: rest | "--words" :: rest -> parse `Words path rest
-  | "-c" :: rest | "--bytes" :: rest | "--chars" :: rest -> parse `Chars path rest
+  | "-l" :: rest | "--lines" :: rest -> parse (Some `Lines) path rest
+  | "-w" :: rest | "--words" :: rest -> parse (Some `Words) path rest
+  | "-c" :: rest | "--bytes" :: rest | "--chars" :: rest -> parse (Some `Chars) path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then None
@@ -638,7 +642,7 @@ let rec parse mode path = function
       | None -> parse mode (Some arg) rest
       | Some _ -> None)
 in
-parse `Lines None args|}
+parse None None args|}
     }
   ; { name = "Git_diff"
     ; anon_pattern = "Git_diff _"

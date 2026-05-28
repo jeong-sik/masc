@@ -862,7 +862,7 @@ let handle_persona_generate ctx args =
              |> Option.value ~default:Archetypes.default_max_tokens
            in
            let proactive_enabled =
-             get_bool args "proactive_enabled" Archetypes.default_proactive_enabled
+             get_bool args "proactive_enabled" Archetypes.default_generation_proactive_enabled
            in
            let language =
              get_string args "language" Archetypes.default_generation_language

@@ -139,7 +139,7 @@ let keeper_schemas : tool_schema list = [
         ("risk_posture", persona_axis_schema Persona_contract.risk_posture_axis);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
-          ("default", `Bool Persona_contract.default_proactive_enabled);
+          ("default", `Bool Persona_contract.default_generation_proactive_enabled);
           ("description", `String "Default keeper.proactive_enabled for the draft.");
         ]);
         ("cascade_name", `Assoc [

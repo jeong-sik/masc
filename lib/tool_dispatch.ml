@@ -231,6 +231,7 @@ type module_tag =
   | Mod_library | Mod_keeper
   | Mod_inline
   | Mod_shard
+  | Mod_discord
 
 let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   match tool with

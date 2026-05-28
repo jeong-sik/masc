@@ -78,7 +78,14 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.
-   Only Tool_schemas_inline (sub-library) and Board remain here. *)
+   Only Tool_schemas_inline (sub-library) and Board remain here.
+
+   RFC-0203 Phase 3 — Tool_discord_dispatch has no runtime symbol
+   called outside itself (the handler is reached only through
+   Tool_dispatch's string lookup), so without an explicit reference
+   the linker would prune the module and the [let () = register]
+   side-effect would never run. Touching [tool_name] forces load. *)
+let () = ignore Tool_discord_dispatch.tool_name
 let () =
   let open Tool_dispatch in
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;

@@ -449,6 +449,33 @@ let bind ~channel_id ~keeper_name ~actor_name =
         rollback_bindings original_bindings;
         Error msg
 
+type send_error =
+  | Missing_token
+  | Rest_error of Discord_rest_client.error
+
+let pp_send_error fmt = function
+  | Missing_token ->
+      Format.pp_print_string fmt "DISCORD_BOT_TOKEN env var is unset or empty"
+  | Rest_error e ->
+      Format.fprintf fmt "Discord REST: %a" Discord_rest_client.pp_error e
+
+let resolve_bot_token () =
+  match Sys.getenv_opt "DISCORD_BOT_TOKEN" |> Env_config_core.trim_opt with
+  | Some t when t <> "" -> Some t
+  | _ -> None
+
+let send_message ~channel_id ~content =
+  let channel_id = String.trim channel_id in
+  if channel_id = "" then
+    Error (Rest_error (Discord_rest_client.Other "channel_id is required"))
+  else
+    match resolve_bot_token () with
+    | None -> Error Missing_token
+    | Some token ->
+      (match Discord_rest_client.send_message ~token ~channel_id ~content with
+       | Ok id -> Ok id
+       | Error e -> Error (Rest_error e))
+
 let unbind ~channel_id ~actor_name =
   let channel_id = String.trim channel_id in
   if channel_id = "" then

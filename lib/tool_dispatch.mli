@@ -142,6 +142,7 @@ type module_tag =
   | Mod_library | Mod_keeper
   | Mod_inline
   | Mod_shard
+  | Mod_discord  (** RFC-0203 — in-process Discord connector outbound tool. *)
 
 val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)

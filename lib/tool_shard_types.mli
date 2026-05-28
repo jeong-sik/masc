@@ -82,3 +82,6 @@ val library_tools : Masc_domain.tool_schema list
 
 val taskboard_tools : Masc_domain.tool_schema list
 (** Taskboard tool schemas. *)
+
+val git_pr_tools : Masc_domain.tool_schema list
+(** Git/PR tool schemas. *)

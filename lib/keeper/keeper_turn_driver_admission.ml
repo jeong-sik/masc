@@ -1,25 +1,25 @@
-(** Keeper cascade tier admission helpers + provider candidate identity,
+(** Keeper cascade admission helpers + provider candidate identity,
     extracted from keeper_turn_driver.ml — sibling pattern (same flat
     masc_mcp library, no sub-library).
 
     Used by the keeper turn driver's [run_named] entry to gate cascade
-    attempts via [Cascade_tier_admission] and to map tiered providers
-    to runtime candidates with deterministic tier ids. *)
+    attempts via [Cascade_tier_admission] and to map providers
+    to runtime candidates with deterministic admission keys. *)
 
 open Result.Syntax
 
-let keeper_cascade_tier_admission = Cascade_tier_admission.create ()
+let keeper_cascade_admission = Cascade_tier_admission.create ()
 
 let keeper_cascade_wait_scheduler =
-  Cascade_tier_wait_scheduler.create keeper_cascade_tier_admission
+  Cascade_tier_wait_scheduler.create keeper_cascade_admission
 
-let cascade_tier_admission_policy_of_priority priority =
+let cascade_admission_policy_of_priority priority =
   (* RFC-0126: exhaustive typed match over Llm_provider.Request_priority.t
      instead of the previous string-classifier (`to_string |> match`) so that
      future variants in the upstream agent_sdk surface as a compile error
      here rather than silently routing through a permissive default.
      Semantics: only [Background] (P2 heartbeat / status ticks) bypasses
-     tier admission per Cascade_tier_admission.mli side-task starvation
+     admission per Cascade_tier_admission.mli side-task starvation
      defence; main-path priorities all require admission.  [Unspecified]
      is unreachable after [resolve] (it maps to [Proactive]) but the arm
      keeps the match exhaustive without a catch-all. *)
@@ -28,13 +28,13 @@ let cascade_tier_admission_policy_of_priority priority =
   | Resume | Interactive | Proactive | Unspecified ->
       Cascade_tier_admission.Required
 
-let with_keeper_cascade_tier_admission
-    ?(admission = keeper_cascade_tier_admission)
+let with_keeper_cascade_admission
+    ?(admission = keeper_cascade_admission)
     ?(wait_scheduler = keeper_cascade_wait_scheduler)
     ?(enabled = Env_config_keeper.CascadeTierAdmission.enabled ())
     ?sw
     ?wait_timeout_sec
-    ~tier_id
+    ~admission_key
     ~admission_policy
     f =
   if not enabled then
@@ -54,7 +54,7 @@ let with_keeper_cascade_tier_admission
               (* No switch available — wait scheduler requires one for
                  fork_daemon.  Fall back to non-blocking admission. *)
               Cascade_tier_admission.with_admission admission
-                ~tier_id ~admission_policy f
+                ~admission_key ~admission_policy f
           | Some sw ->
               (* Phase C.2: bounded wait with backoff *)
               let wait_config =
@@ -81,36 +81,36 @@ let with_keeper_cascade_tier_admission
                 | _ -> None
               in
               (match Cascade_tier_wait_scheduler.try_admission_or_wait
-                       wait_scheduler ~tier_id ~wait_config ?deadline ~sw f with
+                       wait_scheduler ~admission_key ~wait_config ?deadline ~sw f with
                | Ok v -> Ok v
                | Error (Cascade_tier_wait_scheduler.Timeout_expired _
                        | Cascade_tier_wait_scheduler.Max_retries_exceeded _) ->
                    Error (Cascade_saturation_signal.Inflight_capacity_full
-                            { tier_id;
+                            { admission_key;
                               max_inflight =
                                 Cascade_tier_admission.configured_max admission
-                                  ~tier_id })
+                                  ~admission_key })
                | Error (Cascade_tier_wait_scheduler.Cancelled _) ->
                    Error (Cascade_saturation_signal.Inflight_capacity_full
-                            { tier_id;
+                            { admission_key;
                               max_inflight =
                                 Cascade_tier_admission.configured_max admission
-                                  ~tier_id }))
+                                  ~admission_key }))
         end
         else
           (* Phase B.2: non-blocking admission *)
-          Cascade_tier_admission.with_admission admission ~tier_id
+          Cascade_tier_admission.with_admission admission ~admission_key
             ~admission_policy f
   end
 
-let cascade_tier_admission_blocked_decision signal =
+let cascade_admission_blocked_decision signal =
   `Assoc
     [
-      ("blocker", `String "cascade_tier_admission_full");
+      ("blocker", `String "cascade_admission_full");
       ("signal", Cascade_saturation_signal.to_yojson signal);
     ]
 
-let emit_cascade_tier_admission_signal_metric ~cascade_name signal =
+let emit_cascade_admission_signal_metric ~cascade_name signal =
   Prometheus.inc_counter
     Keeper_metrics.(to_string CascadeSaturationSignal)
     ~labels:
@@ -139,7 +139,7 @@ let provider_config_identity_key (cfg : Llm_provider.Provider_config.t) =
       cfg.headers,
       cfg.supports_tool_choice_override )
 
-let runtime_candidates_of_tiered_providers tiered_providers provider_cfgs =
+let runtime_candidates_of_providers tiered_providers provider_cfgs =
   let tier_index = Hashtbl.create (List.length tiered_providers) in
   List.iter
     (fun (tiered : Cascade_catalog_runtime_named_providers.tiered_provider) ->
@@ -152,16 +152,16 @@ let runtime_candidates_of_tiered_providers tiered_providers provider_cfgs =
            Hashtbl.add tier_index key queue;
            queue
        in
-       Queue.add tiered.tier_id queue)
+       Queue.add tiered.admission_key queue)
     tiered_providers;
   List.map
     (fun provider_cfg ->
-       let tier_id =
+       let admission_key =
          match Hashtbl.find_opt tier_index (provider_config_identity_key provider_cfg) with
          | Some queue when not (Queue.is_empty queue) -> Some (Queue.pop queue)
          | _ -> None
        in
-        Cascade_runtime_candidate.of_provider_config ?tier_id provider_cfg)
+        Cascade_runtime_candidate.of_provider_config ?admission_key provider_cfg)
     provider_cfgs
 
 (* ================================================================ *)

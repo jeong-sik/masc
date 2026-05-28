@@ -1,10 +1,10 @@
-(** Cascade_tier_admission — per-tier inflight admission control.
+(** Cascade_tier_admission — per-cascade inflight admission control.
 
-    RFC-0153 Phase B.1. Provides a per-[tier_id] non-blocking
+    RFC-0153 Phase B.1. Provides a per-cascade non-blocking
     admission counter that caps how many concurrent cascade attempts
-    can occupy a tier at once. Designed to be the consumer of
+    can occupy a cascade at once. Designed to be the consumer of
     {!Cascade_saturation_signal} emissions from Phase A.2: when a
-    tier saturates, this module rejects new admissions with a typed
+    cascade saturates, this module rejects new admissions with a typed
     signal instead of letting N keepers stampede the same provider.
 
     Phase B.1 is the module + tests only. Phase B.2 wires it into
@@ -20,7 +20,7 @@
     External validation:
     - Rust [tower::limit::ConcurrencyLimit] uses the same per-target
       semaphore pattern in production.
-    - OpenClaw and Hermes do not have a tier-level admission concept
+    - OpenClaw and Hermes do not have a cascade-level admission concept
       (single-session model). MASC's multi-keeper concurrency is
       novel territory; see RFC-0153 §6.7 + §6.8.
 
@@ -28,9 +28,9 @@
 
 (** {1 Types} *)
 
-type tier_id = string
-(** Stable identifier for a cascade tier (e.g. ["strict_tool_candidates"]).
-    Matches the [tier-group.<name>] keys in [cascade.toml]. *)
+type admission_key = string
+(** Stable identifier for a cascade admission key (e.g. ["strict_tool_candidates"]).
+    Uses the cascade name as the admission key. *)
 
 type admission_policy =
   | Required
@@ -45,18 +45,18 @@ type admission_policy =
           (RFC-0153 §6.8). *)
 
 type t
-(** Per-process admission state. Holds a map of [tier_id] to inflight
-    counter + per-tier configured capacity. Thread-safe under Eio. *)
+(** Per-process admission state. Holds a map of [admission_key] to inflight
+    counter + per-cascade configured capacity. Thread-safe under Eio. *)
 
 (** {1 Construction} *)
 
 val create : ?default_max_inflight:int -> unit -> t
 (** [create ?default_max_inflight ()] returns a fresh admission state.
-    Tiers not explicitly {!configure}d use [default_max_inflight]
+    Cascades not explicitly {!configure}d use [default_max_inflight]
     (default: 8) for their capacity. *)
 
-val configure : t -> tier_id:tier_id -> max_inflight:int -> unit
-(** Pre-configure (or update) a tier's capacity. Safe to call before
+val configure : t -> admission_key:admission_key -> max_inflight:int -> unit
+(** Pre-configure (or update) a cascade's capacity. Safe to call before
     or during operation; updates take effect for subsequent
     admission decisions. Existing inflight count is preserved. *)
 
@@ -64,22 +64,22 @@ val configure : t -> tier_id:tier_id -> max_inflight:int -> unit
 
 val with_admission :
   t ->
-  tier_id:tier_id ->
+  admission_key:admission_key ->
   admission_policy:admission_policy ->
   (unit -> 'a) ->
   ('a, Cascade_saturation_signal.t) result
-(** [with_admission t ~tier_id ~admission_policy f] is the safe
-    wrapper for tier-bounded execution.
+(** [with_admission t ~admission_key ~admission_policy f] is the safe
+    wrapper for cascade-bounded execution.
 
     Behaviour by policy:
     - [Bypass] — calls [f ()] immediately, returns [Ok (f ())]. Does
-      not touch the inflight counter for [tier_id]. Used by probes,
+      not touch the inflight counter for [admission_key]. Used by probes,
       memory summary, and other side tasks.
-    - [Required] — tries to acquire one admission slot in [tier_id].
+    - [Required] — tries to acquire one admission slot for [admission_key].
       If capacity is available, [f ()] runs and the slot is released
       when [f] returns (whether normally or by exception). If
       capacity is full, returns
-      [Error (Inflight_capacity_full { tier_id; max_inflight })]
+      [Error (Inflight_capacity_full { admission_key; max_inflight })]
       *without* calling [f].
 
     Exception safety: if [f] raises, the slot is released before
@@ -94,27 +94,27 @@ type try_decision =
   | Granted of { inflight_after_acquire : int; max_inflight : int }
   | Capacity_full of { inflight_at_check : int; max_inflight : int }
 
-val try_acquire : t -> tier_id:tier_id -> try_decision
+val try_acquire : t -> admission_key:admission_key -> try_decision
 (** Non-blocking admission attempt. [Granted] increments the
     inflight counter and the caller MUST call {!release} exactly
     once. [Capacity_full] does not change state.
 
     This is the lower-level building block of {!with_admission}.
     Direct use is for callers that need to interleave admission with
-    other concerns (e.g. trying another tier on capacity_full
+    other concerns (e.g. trying another cascade on capacity_full
     before deciding). Most callers should use {!with_admission}. *)
 
-val release : t -> tier_id:tier_id -> unit
-(** Decrement the inflight counter for [tier_id]. Idempotent at the
+val release : t -> admission_key:admission_key -> unit
+(** Decrement the inflight counter for [admission_key]. Idempotent at the
     floor — release on a zero-counter is a no-op (no negative
     inflight). Pairs 1:1 with a [Granted] from {!try_acquire}. *)
 
 (** {1 Observability} *)
 
-val current_inflight : t -> tier_id:tier_id -> int
-(** Current inflight count for [tier_id], or 0 if the tier has
+val current_inflight : t -> admission_key:admission_key -> int
+(** Current inflight count for [admission_key], or 0 if the cascade has
     never been seen. Read-only; intended for metrics and tests. *)
 
-val configured_max : t -> tier_id:tier_id -> int
-(** Configured capacity for [tier_id]. Returns the default if the
-    tier has not been explicitly configured. Read-only. *)
+val configured_max : t -> admission_key:admission_key -> int
+(** Configured capacity for [admission_key]. Returns the default if the
+    cascade has not been explicitly configured. Read-only. *)

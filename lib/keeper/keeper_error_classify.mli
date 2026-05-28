@@ -100,10 +100,8 @@ type degraded_retry_reason =
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
 val normalized_cascade_name : catalog_names:string list -> string -> string
-(** Normalize a cascade name for rotation matching. When the input is a bare
-    catalog name (stripped of [tier.]/[tier-group.] prefix), requalifies it
-    with the canonical prefix so downstream [Cascade_name.of_string_exn] does
-    not crash. *)
+(** Normalize a cascade name for rotation matching.
+    All cascade names are plain provider:model strings. *)
 
 type degraded_retry =
   { next_cascade : string

@@ -3,7 +3,7 @@
 #
 # This file is the SSOT for: provider credentials, model capabilities,
 # per-binding capacity (max-concurrent) and pricing, per-use aliases,
-# tier composition, tier-group fallback chains, and route assignments.
+# and route assignments.
 # Code MUST NOT hard-code provider or model names; it dispatches by
 # api_format (Messages_api / Chat_completions_api / Ollama_api) and
 # reads everything else from this file. See RFC-0058 §2.4.

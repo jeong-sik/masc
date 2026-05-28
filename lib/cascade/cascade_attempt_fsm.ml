@@ -50,7 +50,7 @@ let capacity_backpressure_source_to_failure_scope = function
     Llm_provider.Http_client.Failure_scope_provider
   | Cascade_error_classify.Client_capacity ->
     Llm_provider.Http_client.Failure_scope_account
-  | Cascade_error_classify.Tier_admission ->
+  | Cascade_error_classify.Admission_capacity ->
     Llm_provider.Http_client.Failure_scope_model
   | Cascade_error_classify.Cascade_slot ->
     Llm_provider.Http_client.Failure_scope_unknown

@@ -5,7 +5,7 @@
     Layer 2: [models.*]        — What it can do
     Layer 3: [<p>.<m>]         — How much, at what cost
     Layer 4: [<p>.<m>.<a>]     — Per-use overrides
-    Layer 5: [tier.*] + [tier-group.*] + [routes] — Routing strategy
+    Layer 5: [routes] — Routing strategy
 
     Code knows API formats, not provider brands. See RFC-0058 §2.1.
 

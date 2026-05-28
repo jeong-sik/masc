@@ -505,9 +505,6 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.A2a _
          | Agent_sdk.Error.Internal _ -> None)
 
-(* Tier/tier-group purge: all cascade names are plain provider:model strings.
-   No prefix qualification, canonical form, or bare-name requalification. *)
-
 let normalized_cascade_name ~catalog_names name =
   let trimmed = String.trim name in
   if List.exists (String.equal trimmed) catalog_names then trimmed
@@ -517,9 +514,6 @@ let normalized_cascade_name ~catalog_names name =
     || String.equal trimmed Keeper_config.tool_required_cascade_name
   then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
-
-(* Tier/tier-group purge: no tier/tier-group prefixes exist. *)
-let direct_tier_duplicates_attempted_group ~attempted:_ ~candidate:_ = false
 
 let required_tool_rotation_candidate
     ?(allow_phase_recovery = false)
@@ -653,8 +647,7 @@ let degraded_rotation_after_recoverable_error
         ~fallback_hint
         ~base_cascade ~effective_cascade ~tool_requirement
       |> List.find_opt (fun candidate ->
-             (not (List.exists (String.equal candidate) attempted))
-             && not (direct_tier_duplicates_attempted_group ~attempted ~candidate))
+             not (List.exists (String.equal candidate) attempted))
       |> Option.map (fun next_cascade -> { next_cascade; fallback_reason })
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =

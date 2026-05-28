@@ -54,7 +54,7 @@ type try_cascade_ctx =
     health_cooldown_fail_open : bool
   ; base_path : string option
   ; session_id : string option
-  ; tier_admission_policy : Cascade_tier_admission.admission_policy
+  ; admission_policy : Cascade_tier_admission.admission_policy
   ; (* Cascade accept predicate *)
     accept : Agent_sdk_response.api_response -> bool
   ; (* Error cascade name for backpressure *)
@@ -138,10 +138,10 @@ let emit_capacity_blocked_manifest ctx ~capacity_key =
     ~decision:(client_capacity_full_decision ~capacity_key)
     Keeper_runtime_manifest.Pre_dispatch_blocked
 
-let emit_tier_admission_blocked_manifest ctx signal =
+let emit_admission_blocked_manifest ctx signal =
   ctx.emit_runtime_manifest
     ~status:"blocked"
-    ~decision:(Keeper_turn_driver_admission.cascade_tier_admission_blocked_decision signal)
+    ~decision:(Keeper_turn_driver_admission.cascade_admission_blocked_decision signal)
     Keeper_runtime_manifest.Pre_dispatch_blocked
 
 let capacity_backpressure_of_http_error ctx ?source last_err =
@@ -382,7 +382,7 @@ let rec run
         ~pre_dispatch_required_tool_rejections_rev
         ?last_capacity_source ?last_capacity_backpressure ctx rest last_err)
     else
-    let tier_admission_id = Cascade_runtime_candidate.tier_id candidate in
+    let admission_key = Cascade_runtime_candidate.admission_key candidate in
     let health_cooldown =
       Cascade_runtime_candidate.first_health_cooldown candidate
     in
@@ -545,9 +545,9 @@ let rec run
         ~model_id:runtime_candidate_label ~latency_ms ~error
     in
     let attempt_with_admission =
-      Keeper_turn_driver_admission.with_keeper_cascade_tier_admission
-        ~tier_id:tier_admission_id
-        ~admission_policy:ctx.tier_admission_policy
+      Keeper_turn_driver_admission.with_keeper_cascade_admission
+        ~admission_key
+        ~admission_policy:ctx.admission_policy
         ?wait_timeout_sec:ctx.wait_timeout_sec
         (fun () ->
            Eio.Switch.run (fun provider_attempt_sw ->
@@ -719,27 +719,27 @@ let rec run
     match attempt_with_admission with
     | Error signal ->
       Keeper_turn_driver_admission.release_client_capacity_quietly capacity_release;
-      emit_tier_admission_blocked_manifest ctx signal;
-      Keeper_turn_driver_admission.emit_cascade_tier_admission_signal_metric
+      emit_admission_blocked_manifest ctx signal;
+      Keeper_turn_driver_admission.emit_cascade_admission_signal_metric
         ~cascade_name:ctx.cascade_name signal;
-      record_cascade_attempt ctx candidate ~outcome:(`Failure "tier_admission_full") ();
+      record_cascade_attempt ctx candidate ~outcome:(`Failure "admission_full") ();
       Cascade_observation.record_fallback_event ctx.capture
         ~from_model:runtime_candidate_label
         ~to_model:runtime_candidate_label
-        ~reason:"tier_admission_full";
+        ~reason:"admission_full";
       Log.Misc.info
-        "[cascade-fallback] cascade %s: %s skipped because tier admission \
+        "[cascade-fallback] cascade %s: %s skipped because admission \
          %s is full, trying next"
         ctx.cascade_name
         runtime_candidate_label
-        tier_admission_id;
+        admission_key;
       let capacity_detail =
-        Printf.sprintf "tier admission %s is full" tier_admission_id
+        Printf.sprintf "admission %s is full" admission_key
       in
       run ~on_success ?resume_checkpoint ?per_provider_timeout_s
         ~pre_dispatch_required_tool_rejections_rev
         ~last_capacity_backpressure:
-          (Tier_admission, capacity_detail, Some Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec)
+          (Admission_capacity, capacity_detail, Some Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec)
         ctx rest last_err
     | Ok (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) ->
     let record_accepted_liveness_sample () =

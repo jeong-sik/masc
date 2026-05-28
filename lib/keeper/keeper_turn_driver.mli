@@ -181,7 +181,7 @@ module For_testing : sig
   val with_cascade_tier_admission_for_testing :
     admission:Cascade_tier_admission.t ->
     enabled:bool ->
-    tier_id:string ->
+    admission_key:string ->
     admission_policy:Cascade_tier_admission.admission_policy ->
     (unit -> 'a) ->
     ('a, Cascade_saturation_signal.t) result

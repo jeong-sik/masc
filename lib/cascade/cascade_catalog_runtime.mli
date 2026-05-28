@@ -39,9 +39,9 @@ type profile_build = {
   probes : candidate_probe list;
   required_capability_profile : string option;
       (** Profile-scoped capability lint hint. The RFC-0058 declarative
-          namespaces ([providers], [models], [tier], [tier-group] +
-          provider binding tables) do not carry this field yet, so callers
-          normally see [None] under fully-declarative configs. *)
+          namespaces ([providers], [models] + provider binding tables)
+          do not carry this field yet, so callers normally see [None]
+          under fully-declarative configs. *)
 }
 
 type snapshot = {

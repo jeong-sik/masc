@@ -44,7 +44,7 @@ type t =
       (** Local in-flight admission cap reached; the failure is on
           our side, not the provider.  RFC-0042 / RFC-0058 territory.
           Reactor: pause new admission, drain in-flight. *)
-  | Tier_admission_exhausted of { capability_profile : string option }
+  | Admission_exhausted of { capability_profile : string option }
       (** Cascade admission denied because every model in the strict
           capability profile is saturated or unavailable.
           [capability_profile] is the canonical profile name (e.g.

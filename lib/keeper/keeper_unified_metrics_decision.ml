@@ -354,12 +354,12 @@ let append_decision_record
                              tokens_per_second (output_tokens / latency_ms) below. Dashboards
                              should prefer hw_decode_* name; legacy name kept for backward compat. *)
                           [
-                            ("prompt_ms", match ti.prompt_ms with Some v -> `Float v | None -> `Null);
-                            ("predicted_ms", match ti.predicted_ms with Some v -> `Float v | None -> `Null);
-                            ("provider_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
-                            ("hw_decode_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
-                            ("prompt_per_second", match ti.prompt_per_second with Some v -> `Float v | None -> `Null);
-                            ("cache_n", match ti.cache_n with Some v -> `Int v | None -> `Null);
+                            ("prompt_ms", Json_util.float_opt_to_json ti.prompt_ms);
+                            ("predicted_ms", Json_util.float_opt_to_json ti.predicted_ms);
+                            ("provider_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
+                            ("hw_decode_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
+                            ("prompt_per_second", Json_util.float_opt_to_json ti.prompt_per_second);
+                            ("cache_n", Json_util.int_opt_to_json ti.cache_n);
                           ]
                       | None -> []
                     in

@@ -46,7 +46,7 @@ let strategy_trace_json ?limit ?cascade () =
           () )
     ; ( "query"
       , cascade_query_json
-          [ "limit", (match limit with None -> `Null | Some n -> `Int n)
+          [ "limit", Json_util.int_opt_to_json limit
           ; optional_string_field "cascade" cascade
           ] )
     ; "total_events", `Int (List.length events)

@@ -18,7 +18,6 @@ type adapter_error =
   | Model_not_found of string
   | Binding_resolution_failed of string
   | Alias_resolution_failed of string
-  | Strategy_mismatch of string
   | Duplicate_route of string
   | Internal of string
 [@@deriving show]

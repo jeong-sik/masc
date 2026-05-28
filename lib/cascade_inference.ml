@@ -120,7 +120,7 @@ let should_log_auto_max_tokens_clamp ~cascade_name ~source ~max_tokens ~ceiling 
     visibility into the silent reduction.
 
     The narrowest ceiling is a property of cascade-internal fallback
-    structure (multilane tier-groups can union members of differing output
+    structure (multilane fallback chains can union members of differing output
     budgets), so callers cannot infer it.
 
     Runtime overrides supplied by internal keeper callers should also flow

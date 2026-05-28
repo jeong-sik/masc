@@ -266,7 +266,7 @@ let lookup_active_profile ?sw ?net ?clock raw_name =
         | Error `Invalid_prefix ->
             Error
               (Printf.sprintf
-                 "cascade_name %S lacks required prefix (tier-group|tier|route)"
+                 "cascade_name %S lacks required prefix (route.)"
                  trimmed)
         | Error `Empty ->
             (* Defensive: empty case is handled above, but [of_string]

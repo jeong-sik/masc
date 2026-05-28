@@ -27,7 +27,6 @@ type logical_use = Cascade_ref.logical_use =
 
 val logical_use_key : logical_use -> string
 val logical_use_of_string_opt : string -> logical_use option
-val task_use_of_logical_use : logical_use -> Cascade_routing_policy.task_use
 
 val all_logical_uses : logical_use list
 (** Logical call-site uses known by the route registry. *)
@@ -43,10 +42,7 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
     remains the boot-time boundary that prevents this state from being
     reached at runtime.
 
-    This returns a cascade profile name, never a provider/model string.
-    Phonebook model/provider resolution is exposed separately through
-    {!cascade_models_for_use_via_phonebook} and
-    {!cascade_provider_configs_for_use_via_phonebook}. *)
+    This returns a cascade profile name, never a provider/model string. *)
 
 val route_bindings_from_json : Yojson.Safe.t -> (string * string) list
 (** Decode the [routes] object of the in-memory cascade view into a
@@ -66,20 +62,3 @@ val fallback_name_for_catalog : logical_use -> catalog:string list -> string
 (** Catalog-only fallback used by string normalizers that already have an
     explicit active profile list.  Returns the first catalog entry, or the
     canonical [route.<key>] name when [catalog] is empty. *)
-
-val cascade_models_for_use_via_phonebook :
-  ?config_path:string -> logical_use -> string list option
-(** Resolve a logical use to model strings via the phonebook.
-    Maps canonical route use → [task_use] → tier-group → model strings.
-    Returns [None] when the phonebook is unavailable. *)
-
-val cascade_provider_configs_for_use_via_phonebook :
-  ?config_path:string ->
-  ?temperature:float ->
-  ?max_tokens:int ->
-  logical_use ->
-  Llm_provider.Provider_config.t list option
-(** Resolve a logical use to [Provider_config.t] list via the phonebook.
-    Full phonebook path: route use → task_use → tier-group → models →
-    providers → endpoint/auth → Provider_config.t.
-    Returns [None] when phonebook is unavailable or no models resolve. *)

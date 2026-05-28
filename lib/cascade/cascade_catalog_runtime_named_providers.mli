@@ -26,7 +26,7 @@ val resolve_named_providers_strict :
 
 type tiered_provider = {
   provider_cfg : Llm_provider.Provider_config.t;
-  tier_id : string;
+  admission_key : string;
 }
 
 type secondary_resolution = {

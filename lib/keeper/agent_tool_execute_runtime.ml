@@ -60,6 +60,22 @@ let input_with_cwd cwd = function
   | Agent_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Agent_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
+let input_with_env extra_env = function
+  | Agent_tool_execute_typed_input.Exec
+      { executable; argv; cwd; env; stdin; stdout; stderr } ->
+    Agent_tool_execute_typed_input.Exec
+      { executable
+      ; argv
+      ; cwd
+      ; env = extra_env @ env
+      ; stdin
+      ; stdout
+      ; stderr
+      }
+  | Agent_tool_execute_typed_input.Pipeline { stages; cwd; env } ->
+    Agent_tool_execute_typed_input.Pipeline
+      { stages; cwd; env = extra_env @ env }
+
 let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input =
   match Agent_tool_execute_typed_input.to_shell_ir_unvalidated ~mode input with
   | Error _ -> cwd, None
@@ -162,6 +178,17 @@ let handle_tool_execute_typed
            This removes the previous double-parse (mutation classifier
            re-tokenized cmd:string via the legacy string tokenizer before IR
            was even built). *)
+        let input =
+          match Keeper_host_config_provider.resolve
+                  ~config ~identity:meta.name with
+          | Ok binding ->
+            if binding.env = [] then input
+            else input_with_env binding.env input
+          | Error _ ->
+            (* Credential resolution failure is non-fatal for Execute;
+               the command may not need credentials (e.g. local fs ops). *)
+            input
+        in
         match Agent_tool_execute_typed_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
         | Error e ->
           let alts = Agent_tool_execute_typed_input.validation_error_alternatives e in

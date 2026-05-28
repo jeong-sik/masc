@@ -56,7 +56,7 @@ let rec json_at_path json segments =
 let string_of_json value =
   match value with
   | `String s -> s
-  | _ -> Yojson.Safe.to_string value
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> Yojson.Safe.to_string value
 
 let evaluate_json_check ~(target : Yojson.Safe.t option) (check : json_check) =
   let actual =

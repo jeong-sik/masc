@@ -72,7 +72,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
     || contains "inflight_capacity_full"
     || Option.is_some cascade_name
     || contains "admission="
-  then Admission_full
+  then Tier_admission_full
   else if
     contains "capacity_backpressure"
     || contains "capacity exhausted"

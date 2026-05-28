@@ -160,8 +160,7 @@ let test_r3_unknown_binding () =
       thinking_enabled = None;
       thinking_budget = None;
     }];
-    tiers = [];
-    tier_groups = [];
+    (* #19327: tier/tier_groups fields removed from cascade_config. *)
     routes = [];
     system_targets = [];
     profiles = [];

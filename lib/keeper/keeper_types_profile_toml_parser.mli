@@ -137,7 +137,6 @@ val is_terminal : network_mode -> bool
 val is_active : network_mode -> bool
 val is_idle : network_mode -> bool
 val sandbox_profile_to_string : sandbox_profile -> string
-val reserved_cascade_names : string list
 val sandbox_profile_of_string : string -> sandbox_profile option
 val all_sandbox_profiles : sandbox_profile list
 val valid_sandbox_profile_strings : string list
@@ -190,7 +189,7 @@ type keeper_profile_defaults =
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  cascade_name : string option;
+  model : string option;
   models : string list option;
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
@@ -213,7 +212,6 @@ val keeper_oas_context_of_defaults :
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
-val normalize_cascade_name_opt : string option -> string option
 val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list

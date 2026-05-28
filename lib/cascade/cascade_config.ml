@@ -128,9 +128,7 @@ let apply_provider_filter = Cascade_config_provider_filter.apply_provider_filter
 let apply_provider_filter_strict =
   Cascade_config_provider_filter.apply_provider_filter_strict
 
-(* Strategy / priority-tier / concurrency resolution (this PR) *)
-let normalize_priority_tiers =
-  Cascade_config_strategy_resolve.normalize_priority_tiers
+(* Strategy / concurrency resolution (priority-tier removed in #19327). *)
 let resolve_strategy = Cascade_config_strategy_resolve.resolve_strategy
 let resolve_ollama_max_concurrent =
   Cascade_config_strategy_resolve.resolve_ollama_max_concurrent

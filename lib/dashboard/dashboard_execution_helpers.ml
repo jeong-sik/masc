@@ -70,12 +70,7 @@ type tool_audit_snapshot = {
   tool_audit_at : string option;
 }
 
-let json_string_option value =
-  match value with
-  | Some text ->
-      let trimmed = String.trim text in
-      if trimmed <> "" then `String trimmed else `Null
-  | None -> `Null
+let json_string_option = Json_util.string_opt_to_json_trimmed
 
 let option_or_else fallback = function
   | Some _ as value -> value
@@ -112,17 +107,7 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let compact_text ?(max_len = 160) raw =
-  let normalized =
-    String.trim raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun value -> value <> "")
-    |> String.concat " "
-    |> String.trim
-  in
-  if normalized = "" then ""
-  else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
+let compact_text = String_util.compact_text
 
 
 let latest_iso_timestamp values =

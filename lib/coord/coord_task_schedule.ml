@@ -118,8 +118,6 @@ let json_raw_string_path = Coord_task_receipts.json_raw_string_path
 let json_string_path = Coord_task_receipts.json_string_path
 let receipt_sort_key = Coord_task_receipts.receipt_sort_key
 let latest_execution_receipt_json = Coord_task_receipts.latest_execution_receipt_json
-let json_string_list = Coord_task_receipts.json_string_list
-
 let latest_receipt_blocks_required_tool_claim =
   Coord_task_receipts.latest_receipt_blocks_required_tool_claim
 ;;

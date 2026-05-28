@@ -61,8 +61,6 @@ val json_raw_string_path : string list -> Yojson.Safe.t -> string option
 val json_string_path : string list -> Yojson.Safe.t -> string option
 val receipt_sort_key : Yojson.Safe.t -> string
 val latest_execution_receipt_json : config -> agent_name:string -> Yojson.Safe.t option
-val json_string_list : string -> Yojson.Safe.t -> string list
-
 val latest_receipt_blocks_required_tool_claim
   :  config
   -> agent_name:string

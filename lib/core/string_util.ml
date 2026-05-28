@@ -219,3 +219,15 @@ let escape_xml s =
   |> replace_substring ~needle:">" ~by:"&gt;"
   |> replace_substring ~needle:"\"" ~by:"&quot;"
   |> replace_substring ~needle:"'" ~by:"&apos;"
+
+let compact_text ?(max_len = 160) raw =
+  let normalized =
+    String.trim raw
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun v -> v <> "")
+    |> String.concat " "
+    |> String.trim
+  in
+  if normalized = "" then ""
+  else utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> to_string

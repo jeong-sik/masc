@@ -149,6 +149,43 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
   | None -> `Null
 
 
+(** {1 Assoc field extraction}
+
+    Canonical [Assoc] field accessors for building typed JSON parsers.
+    Replaces per-module [assoc_member_opt] / [assoc_string_opt] etc. *)
+
+let assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let assoc_string_opt name json =
+  match assoc_member_opt name json with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+
+let assoc_int_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Int value) -> Some value
+  | Some (`Intlit raw) -> int_of_string_opt raw
+  | _ -> None
+
+let assoc_bool_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+
+let json_string_list_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `List values ->
+    values
+    |> List.filter_map (function
+      | `String value ->
+        let trimmed = String.trim value in
+        if trimmed <> "" then Some trimmed else None
+      | _ -> None)
+  | _ -> []
+
+
 (** List utilities *)
 
 let dedupe_keep_order xs =

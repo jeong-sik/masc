@@ -86,9 +86,7 @@ type context = {
 (* Local helpers (duplicated from tool_misc to avoid circular deps) *)
 (* ================================================================ *)
 
-let json_string_option = function
-  | Some value when not (String.equal (String.trim value) "") -> `String (String.trim value)
-  | _ -> `Null
+let json_string_option = Json_util.string_opt_to_json_trimmed
 
 let bool_arg_opt args key =
   match U.member key args with

@@ -64,6 +64,25 @@ val option_to_yojson : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
 val kind_name : Yojson.Safe.t -> string
 val excerpt : ?max:int -> Yojson.Safe.t -> string
 
+(** {1 Assoc field extraction} *)
+
+val assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
+(** [assoc_member_opt name json] extracts field [name] from [`Assoc] *)
+
+val assoc_string_opt : string -> Yojson.Safe.t -> string option
+(** [assoc_string_opt name json] extracts non-empty string field *)
+
+val assoc_int_opt : string -> Yojson.Safe.t -> int option
+(** [assoc_int_opt name json] extracts int field, supports Intlit *)
+
+val assoc_bool_opt : string -> Yojson.Safe.t -> bool option
+(** [assoc_bool_opt name json] extracts bool field *)
+
+val json_string_list_member : string -> Yojson.Safe.t -> string list
+(** [json_string_list_member name json] extracts a list of non-empty
+    trimmed strings from the JSON array at field [name]. Returns [[]]
+    if the field is missing or not an array. *)
+
 (** List utilities *)
 
 val dedupe_keep_order : 'a list -> 'a list

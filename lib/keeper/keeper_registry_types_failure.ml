@@ -45,10 +45,19 @@ type fiber_drop_cause =
   (** Supervisor saw shutdown in progress (flag, cancel context, or
             explicit shutdown reason). Emitted at INFO severity, does not
             count toward restart budget or trigger cascade enrichment. *)
+  | Cancelled_by_parent
+  (** Fiber observed [Eio.Cancel.Cancelled] from a parent switch
+            (supervisor restart, sibling failure propagating cancel)
+            while shutdown was not in progress. Operationally a transient
+            cancel that the supervisor itself triggered — restart budget
+            should not count it the same as a genuine missed-resolution
+            bug. Emitted at WARN severity, separate cohort from
+            [Unexpected]. *)
   | Unexpected
   (** Fiber finally ran with [resolved=false] outside any shutdown
-            context. Emitted at ERROR severity. Drives the existing
-            [cohort=fiber_unresolved] supervisor pause path. *)
+            context and without a parent cancellation signal. Genuine
+            missed-resolution bug. Emitted at ERROR severity. Drives the
+            existing [cohort=fiber_unresolved] supervisor pause path. *)
 
 type failure_reason =
   | Heartbeat_consecutive_failures of int
@@ -129,12 +138,15 @@ let failure_reason_to_string = function
       (ambiguous_partial_commit_kind_to_string kind)
       detail
   | Fiber_unresolved Graceful_shutdown -> "fiber_unresolved(graceful_shutdown)"
+  | Fiber_unresolved Cancelled_by_parent -> "fiber_unresolved(cancelled_by_parent)"
   | Fiber_unresolved Unexpected -> "fiber_unresolved"
   (* Backward-compat string form: [Unexpected] preserves the legacy
      "fiber_unresolved" wire value so existing log-line / dashboard
-     greps and persisted crash_log rows continue to match. The graceful
-     variant gets a distinct suffix so 24h fleet audits can split the
-     26:9 noise:signal ratio (Issue #18901 diagnosis). *)
+     greps and persisted crash_log rows continue to match. Graceful
+     and cancelled-by-parent variants get distinct suffixes so 24h
+     fleet audits can split the noise:signal ratio (Issue #18901) and
+     supervisor restart/back-off can treat parent-cancel differently
+     from genuine missed-resolution. *)
   | Exception s -> Printf.sprintf "exception(%s)" s
   | Turn_overflow_pause -> "turn_overflow_pause"
   | Turn_livelock_pause -> "turn_livelock_pause"
@@ -160,13 +172,14 @@ let failure_reason_cohort_key = function
   | Some (Tool_required_unsatisfied _) -> "tool_required_unsatisfied"
   | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
   | Some (Fiber_unresolved Graceful_shutdown) -> "fiber_unresolved_graceful"
+  | Some (Fiber_unresolved Cancelled_by_parent) -> "fiber_unresolved_cancelled"
   | Some (Fiber_unresolved Unexpected) -> "fiber_unresolved"
-  (* Cohort split: graceful shutdown gets its own cohort so the
-     supervisor self-preservation pause policy
-     [keeper_supervisor_pause_policy.ml] no longer treats SIGTERM
-     races as a fiber-drop epidemic. The legacy "fiber_unresolved"
-     key stays bound to [Unexpected] for dashboard / metrics
-     backward-compat. *)
+  (* Cohort split: graceful shutdown and parent-cancelled each get
+     their own cohort so the supervisor self-preservation pause
+     policy [keeper_supervisor_pause_policy.ml] no longer treats
+     SIGTERM races *or* parent-cancel restarts as a fiber-drop
+     epidemic. The legacy "fiber_unresolved" key stays bound to
+     [Unexpected] for dashboard / metrics backward-compat. *)
   | Some (Exception _) -> "exception"
   | Some Turn_overflow_pause -> "turn_overflow_pause"
   | Some Turn_livelock_pause -> "turn_livelock_pause"

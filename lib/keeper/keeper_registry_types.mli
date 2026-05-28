@@ -68,6 +68,7 @@ val stale_kill_class_to_string : stale_kill_class -> string
     missed-resolutions inside the same supervisor crash log. *)
 type fiber_drop_cause =
   | Graceful_shutdown
+  | Cancelled_by_parent
   | Unexpected
 
 type failure_reason =

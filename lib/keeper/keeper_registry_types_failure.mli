@@ -24,6 +24,7 @@ val stale_kill_class_to_string :
     missed-resolution bugs. *)
 type fiber_drop_cause =
   | Graceful_shutdown
+  | Cancelled_by_parent
   | Unexpected
 type failure_reason =
     Heartbeat_consecutive_failures of int

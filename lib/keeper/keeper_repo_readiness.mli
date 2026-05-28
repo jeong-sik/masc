@@ -67,3 +67,25 @@ val inspect :
   ?default_branch:string ->
   unit ->
   Yojson.Safe.t
+
+(** Look up the repository URL from [repositories.toml] by repo name. *)
+val find_repo_url :
+  config:Coord.config -> repo_name:string -> string option
+
+(** Resolve the keeper's mapped credential from [keeper_repo_mappings.toml]. *)
+val resolve_keeper_credential :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  (Repo_manager_types.credential, string) result
+
+(** [ensure_ready ~config ~meta ~repo_name ()] probes the sandbox repo
+    via [inspect]. If the repo is [missing_clone] or [not_git_repo],
+    attempts to clone it from the configured repository URL using the
+    keeper's mapped credential. Returns [Ok ()] when the repo is ready,
+    or [Error msg] if repair failed or was not possible. *)
+val ensure_ready :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  repo_name:string ->
+  unit ->
+  (unit, string) result

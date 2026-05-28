@@ -238,3 +238,116 @@ let inspect
         @ string_opt_field "upstream" upstream_name
         @ int_opt_field "ahead" ahead
         @ int_opt_field "behind" behind)
+
+(* ── Sandbox repo auto-repair ─────────────────────────────────── *)
+
+(** Look up the repository URL from [repositories.toml] by repo name. *)
+let find_repo_url ~(config : Coord.config) ~repo_name =
+  Repo_store.find_url_by_id ~base_path:config.Coord.base_path repo_name
+
+(** Resolve the keeper's mapped credential from [keeper_repo_mappings.toml]. *)
+let resolve_keeper_credential ~(config : Coord.config) ~(meta : keeper_meta) =
+  match
+    Keeper_repo_mapping.credentials_for_keeper
+      ~base_path:config.Coord.base_path ~keeper_id:meta.name
+  with
+  | Error reason ->
+    Error (Printf.sprintf "credential mapping error for keeper %s: %s" meta.name reason)
+  | Ok [] ->
+    Error
+      (Printf.sprintf
+         "keeper %s has no credential mapping; add [mapping.%s] to keeper_repo_mappings.toml"
+         meta.name meta.name)
+  | Ok (cred :: _) -> Ok cred
+
+(** Clone a sandbox repo using the keeper's mapped credential.
+    Constructs a minimal [repository] record and delegates to [Repo_git.clone]. *)
+let clone_sandbox_repo ~(config : Coord.config) ~(meta : keeper_meta)
+    ~repo_name ~url ~clone_path ~(credential : Repo_manager_types.credential) =
+  let open Repo_manager_types in
+  let repo = {
+    id = repo_name;
+    name = repo_name;
+    url;
+    local_path = clone_path;
+    aliases = [];
+    default_branch = "main";
+    credential_id = credential.id;
+    keepers = [ meta.name ];
+    status = Active;
+    auto_sync = false;
+    sync_interval = 0;
+    created_at = 0L;
+    updated_at = 0L;
+  }
+  in
+  Repo_git.clone ~repository:repo ~credential
+
+(** [ensure_ready ~config ~meta ~repo_name ()] probes the sandbox repo
+    via [inspect]. If the repo is [missing_clone] or [not_git_repo],
+    attempts to clone it from the configured repository URL using the
+    keeper's mapped credential. Returns [Ok ()] when the repo is ready,
+    or [Error msg] if repair failed or was not possible. *)
+let ensure_ready ~(config : Coord.config) ~(meta : keeper_meta) ~repo_name () :
+    (unit, string) result =
+  if not (safe_repo_component repo_name) then
+    Error (Printf.sprintf "invalid repo_name: %s" repo_name)
+  else
+    let probe =
+      inspect ~config ~meta ~repo_name ()
+    in
+    let state =
+      match Yojson.Safe.Util.member "state" probe with
+      | `String s -> s
+      | _ -> "unknown"
+    in
+    match state with
+    | "ready" -> Ok ()
+    | "missing_clone" | "not_git_repo" -> (
+        let path = clone_path ~config ~meta ~repo_name in
+        (* Remove corrupt directory if present *)
+        if state = "not_git_repo" && safe_is_dir path then (
+          let _ =
+            Masc_exec.Exec_gate.run_argv_with_status
+              ~actor:`Coord_git
+              ~raw_source:(Printf.sprintf "rm -rf %s" (Filename.quote path))
+              ~summary:"remove corrupt sandbox repo before reclone"
+              ~timeout_sec:read_only_probe_timeout_sec
+              [ "rm"; "-rf"; path ]
+          in
+          ());
+        match find_repo_url ~config ~repo_name with
+        | None ->
+          Error
+            (Printf.sprintf
+               "repo %s not found in repositories.toml; cannot auto-clone"
+               repo_name)
+        | Some url -> (
+            match resolve_keeper_credential ~config ~meta with
+            | Error _ as err -> err
+            | Ok credential -> (
+                match
+                  clone_sandbox_repo ~config ~meta ~repo_name ~url
+                    ~clone_path:path ~credential
+                with
+                | Error msg ->
+                  Error (Printf.sprintf "auto-clone failed for %s: %s" repo_name msg)
+                | Ok () ->
+                  (* Verify post-clone state *)
+                  let post = inspect ~config ~meta ~repo_name () in
+                  let post_state =
+                    match Yojson.Safe.Util.member "state" post with
+                    | `String s -> s
+                    | _ -> "unknown"
+                  in
+                  if post_state = "ready" then Ok ()
+                  else
+                    Error
+                      (Printf.sprintf
+                         "auto-clone succeeded but post-clone state is %s"
+                         post_state))))
+    | other ->
+      Error
+        (Printf.sprintf
+           "repo %s is in state %s; auto-repair not applicable"
+           repo_name other)

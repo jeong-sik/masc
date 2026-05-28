@@ -1,12 +1,19 @@
-(* RFC-0203 Phase 1.2b.2 — TLS+WSS handshake.
+(* RFC-0203 Phase 1.2b.2 + 1.4b — TLS+WSS handshake with explicit
+   close.
 
-   Mirrors discordml's [Httpx.Ws.connect'] reduced to our single use case
-   (Discord Gateway, system trust store, no extra headers). See the .mli
-   header for the stack-choice rationale. *)
+   Mirrors discordml's [Httpx.Ws.connect'] reduced to our single use
+   case (Discord Gateway, system trust store, no extra headers). See
+   the .mli header for the stack-choice rationale.
 
-(* RNG init is required for both TLS handshake (ephemeral key exchange)
-   and the Sec-WebSocket-Key nonce. [use_default] is safe to call
-   multiple times — it only installs if no generator is set. *)
+   Lifecycle (1.4b): the socket, TLS flow, and writer fiber all live
+   inside a per-session [Eio.Switch] that is created inside an outer
+   fork. Closing the connection resolves a promise, which lets that
+   inner [Switch.run] return, which in turn cancels child fibers and
+   closes the socket. No fiber leaks across reconnect cycles. *)
+
+(* RNG init is required for both TLS handshake (ephemeral key
+   exchange) and the Sec-WebSocket-Key nonce. [use_default] is safe
+   to call multiple times — it only installs if no generator is set. *)
 let rng_initialized = ref false
 let init_rng () =
   if not !rng_initialized then begin
@@ -22,6 +29,7 @@ let random_string n =
 type conn = {
   read_frame : unit -> Websocket.Frame.t;
   write_frame : Websocket.Frame.t -> unit;
+  close : unit -> unit;
 }
 
 let client_tls_config () =
@@ -81,8 +89,10 @@ let drain_handshake req ic oc nonce =
    | Some _ -> failwith "ws handshake: Sec-WebSocket-Accept mismatch"
    | None -> failwith "ws handshake: Sec-WebSocket-Accept header missing")
 
-let connect ~sw ~env ~url =
-  init_rng ();
+(* Builds the session-local resources (socket, TLS flow, writer fiber)
+   on the given inner switch. Returns the read/write closures only —
+   close is wired by the outer [connect] via the promise pair. *)
+let build_session ~sw ~env ~url =
   let uri = Uri.of_string url in
   (match Uri.scheme uri with
    | Some "wss" -> ()
@@ -101,7 +111,8 @@ let connect ~sw ~env ~url =
   let addr =
     match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
     | [] ->
-      failwith ("discord_wss_connection: getaddrinfo returned no result for " ^ host)
+      failwith
+        ("discord_wss_connection: getaddrinfo returned no result for " ^ host)
     | a :: _ -> a
   in
   let socket = Eio.Net.connect ~sw net addr in
@@ -112,23 +123,21 @@ let connect ~sw ~env ~url =
   let nonce = Base64.encode_exn (random_string 16) in
   let headers =
     Cohttp.Header.of_list
-      [ "Host", host;
-        "Upgrade", "websocket";
-        "Connection", "Upgrade";
-        "Sec-WebSocket-Key", nonce;
-        "Sec-WebSocket-Version", "13" ]
+      [ "Host", host
+      ; "Upgrade", "websocket"
+      ; "Connection", "Upgrade"
+      ; "Sec-WebSocket-Key", nonce
+      ; "Sec-WebSocket-Version", "13"
+      ]
   in
   let req =
-    Cohttp.Request.make ~meth:`GET ~headers
-      (Uri.of_string resource)
+    Cohttp.Request.make ~meth:`GET ~headers (Uri.of_string resource)
   in
 
   let ic = Eio.Buf_read.of_flow ~max_size:max_int flow in
   Eio.Buf_write.with_flow flow (fun oc ->
     drain_handshake req ic oc nonce);
 
-  (* Writer fiber: Eio.Flow.write is not thread-safe across fibers, so
-     all writes must be serialized through a single fiber. *)
   let write_queue = Eio.Stream.create 16 in
   let writer () =
     try
@@ -150,7 +159,32 @@ let connect ~sw ~env ~url =
       Ws_io.make_read_frame ~mode:(Client random_string) ic oc ())
   in
   let write_frame frame = Eio.Stream.add write_queue frame in
-  { read_frame; write_frame }
+  (read_frame, write_frame)
+
+let connect ~sw ~env ~url =
+  init_rng ();
+  let setup_promise, setup_resolver = Eio.Promise.create () in
+  let close_signal, close_trigger = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run (fun session_sw ->
+      let result =
+        try Ok (build_session ~sw:session_sw ~env ~url)
+        with e -> Error e
+      in
+      Eio.Promise.resolve setup_resolver result;
+      match result with
+      | Error _ -> ()  (* let session_sw exit; socket/flow get released *)
+      | Ok _ -> Eio.Promise.await close_signal));
+  match Eio.Promise.await setup_promise with
+  | Error e -> raise e
+  | Ok (read_frame, write_frame) ->
+    let close () =
+      match Eio.Promise.peek close_signal with
+      | Some () -> ()  (* idempotent *)
+      | None -> Eio.Promise.resolve close_trigger ()
+    in
+    { read_frame; write_frame; close }
 
 let read c = c.read_frame ()
 let write c frame = c.write_frame frame
+let close c = c.close ()

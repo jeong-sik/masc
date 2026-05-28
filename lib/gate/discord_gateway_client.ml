@@ -129,13 +129,6 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
     let open Discord_gateway_state in
     match eff with
     | Open_wss { url } ->
-      (* WORKAROUND: Phase 1.4a does not tear down the previous
-         reader/writer fibers when a reconnect path issues Open_wss
-         after Close_wss has cleared conn_ref. The old fibers exit
-         naturally once the underlying flow is GC'd by the OS-level
-         close; we leak the fiber slot until then. Root: needs
-         per-session Eio.Switch. Phase 1.4b will refactor with
-         Discord_wss_connection.close + nested switch. *)
       (match !conn_ref with
        | Some _ ->
          log_effect `Warn
@@ -146,10 +139,16 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
          conn_ref := Some conn;
          Eio.Fiber.fork ~sw (fun () -> reader_loop conn))
     | Close_wss _ ->
-      (* Drop our reference. The reader fiber will hit End_of_file or
-         an exception on the next read once the OS closes the socket
-         and surface that as Wss_closed via the mailbox — but that
-         input is now a no-op (state already Reconnect_pending). *)
+      (* Phase 1.4b: explicit close. Discord_wss_connection.close
+         resolves the inner session switch's close-signal promise,
+         which lets that switch return, which cancels reader/writer
+         fibers and releases the socket + TLS flow. The reader's
+         pending read raises Cancelled; our reader_loop exception
+         arm pushes a redundant Wss_closed input that the state
+         machine no-ops because it is already in Reconnect_pending. *)
+      (match !conn_ref with
+       | Some c -> Discord_wss_connection.close c
+       | None -> ());
       conn_ref := None
     | Send_frame f ->
       (match !conn_ref with

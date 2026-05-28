@@ -34,3 +34,8 @@ val read : conn -> Websocket.Frame.t
 
 val write : conn -> Websocket.Frame.t -> unit
 (** Enqueue a frame onto the writer fiber. Returns immediately. *)
+
+val close : conn -> unit
+(** Tear down this connection: cancels the writer fiber, closes the
+    TLS flow and the underlying socket. Idempotent — subsequent calls
+    are no-ops. After [close], [read] / [write] raise. *)

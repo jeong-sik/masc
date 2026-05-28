@@ -134,8 +134,43 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; cascade_name = None
          })
   | Some
+      (Cascade_error_classify.No_tool_capable_provider
+         { cascade_name = ntcp_cascade_name
+         ; configured_labels
+         ; required_tool_names
+         ; provider_rejections
+         }) ->
+    let rejection_summary =
+      match provider_rejections with
+      | [] -> ""
+      | rejections ->
+        Printf.sprintf
+          " [%d providers rejected: %s]"
+          (List.length rejections)
+          (String.concat
+             "; "
+             (List.map
+                (fun (r : Cascade_internal_error.provider_rejection) ->
+                   Printf.sprintf "%s: %s" r.provider_label r.reason)
+                rejections))
+    in
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = "no_tool_capable_provider"
+         ; detail =
+             Printf.sprintf
+               "no tool-capable provider found (cascade=%s labels=[%s] \
+                required_tools=[%s]%s)"
+               (Cascade_name.to_string ntcp_cascade_name)
+               (String.concat ", " configured_labels)
+               (String.concat ", " required_tool_names)
+               rejection_summary
+         ; provider_id = None
+         ; http_status = None
+         ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
+         })
+  | Some
       ( Cascade_error_classify.Resumable_cli_session _
-      | Cascade_error_classify.No_tool_capable_provider _
       | Cascade_error_classify.Accept_rejected _
       | Cascade_error_classify.Admission_queue_timeout _
       | Cascade_error_classify.Admission_queue_rejected _

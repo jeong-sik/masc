@@ -45,7 +45,6 @@ let normalize_tool_names names =
   |> dedupe_keep_order
 ;;
 
-<<<<<<< HEAD
 let write_tools =
   [ "tool_edit_file"; "tool_write_file"; "tool_execute" ]
 ;;

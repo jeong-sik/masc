@@ -489,17 +489,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           acc)
     empty_metrics_summary lines
 
-let json_string_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List items ->
-      items
-      |> List.filter_map (function
-             | `String value ->
-                 let trimmed = String.trim value in
-                 if trimmed = "" then None else Some trimmed
-             | _ -> None)
-  | _ -> []
-
 let json_int_opt_member key json =
   match Yojson.Safe.Util.member key json with
   | `Int value -> Some value
@@ -612,7 +601,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
                 ~detail:"decision log row is not a JSON object";
               raise Exit
         in
-        let tools = json_string_list_member "tools_used" json in
+        let tools = Json_util.json_string_list_member "tools_used" json in
         let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
         let tool_call_count =
           match raw_tool_call_count with
@@ -677,7 +666,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
             raise Exit
       in
       let tools =
-        json_string_list_member "tools_used" json
+        Json_util.json_string_list_member "tools_used" json
         |> List.sort_uniq String.compare
       in
       let raw_tool_call_count = json_int_opt_member "tool_call_count" json in

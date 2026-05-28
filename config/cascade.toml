@@ -733,58 +733,58 @@ temperature = 0.3
 # default model directly via provider:model string format.
 
 [routes.keeper_turn]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.phase_recovery]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.phase_buffer]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.tool_required]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.governance_judge]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.operator_judge]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.cross_verifier]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.verifier]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.adversarial_reviewer]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.auto_responder]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.routing]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.openai_compat]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.persona_generation]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.provider_benchmark]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.llm_rerank]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.simple_task]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.moderate_task]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.complex_task]
-target = "runpod:glm-coding-with-spark"
+target = "runpod_mtp.qwen-runpod"
 
 # ── Profiles (capability requirements per route class) ─────────
 

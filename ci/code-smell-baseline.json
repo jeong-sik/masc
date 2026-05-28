@@ -41,7 +41,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3101,
+      "baseline": 3105,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -931,6 +931,10 @@
         {
           "file": "lib/gate/discord_gateway_state.ml",
           "value": 8
+        },
+        {
+          "file": "lib/gate/discord_rest_client.ml",
+          "value": 4
         },
         {
           "file": "lib/gate/gate_protocol.ml",

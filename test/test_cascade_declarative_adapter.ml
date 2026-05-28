@@ -658,18 +658,7 @@ let test_alias_parent_missing () =
           ; thinking_budget = None
           }
         ]
-    ; tiers =
-        [ { name = "t"
-          ; members = [ "x.m.a" ]
-          ; strategy = Failover
-          ; max_concurrent = None
-          ; cycle_policy = None
-          ; sticky_ttl_ms = None
-          ; scoring_params = None
-          ; keeper_assignable = None
-          }
-        ]
-    ; tier_groups = []
+    (* #19327: tier/tier_groups fields removed from cascade_config. *)
     ; routes = []
     ; system_targets = []
     ; profiles = []
@@ -855,18 +844,7 @@ let test_duplicate_routes () =
           }
         ]
     ; aliases = []
-    ; tiers =
-        [ { name = "primary"
-          ; members = [ "cli_tool_d.haiku" ]
-          ; strategy = Failover
-          ; max_concurrent = None
-          ; cycle_policy = None
-          ; sticky_ttl_ms = None
-          ; scoring_params = None
-          ; keeper_assignable = None
-          }
-        ]
-    ; tier_groups = []
+    (* #19327: tier/tier_groups fields removed from cascade_config. *)
     ; routes =
         [ { name = "dup"; target = "tier.primary" }
         ; { name = "dup"; target = "tier.primary" }

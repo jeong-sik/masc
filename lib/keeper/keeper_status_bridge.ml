@@ -26,7 +26,10 @@ let effective_declarative_cascade_name
       (defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  match defaults.cascade_name, defaults.manifest_path with
+  (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model. The
+     value is still routed through normalize_keeper_runtime_declared_name;
+     reviewer should confirm provider:model strings normalize correctly. *)
+  match defaults.model, defaults.manifest_path with
   | Some cascade_name, _ ->
     Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
   | None, Some _ -> (Keeper_config.default_cascade_name ())

@@ -829,8 +829,8 @@ let test_partial_snapshot_errors_disjoint_from_profile_names () =
               | Adapter.Provider_not_found s
               | Adapter.Model_not_found s
               | Adapter.Binding_resolution_failed s
-              | Adapter.Alias_resolution_failed s
-              | Adapter.Tier_group_empty s -> Some s
+              | Adapter.Alias_resolution_failed s -> Some s
+              (* #19327: Tier_group_empty constructor removed. *)
               | Adapter.Strategy_mismatch _
               | Adapter.Duplicate_route _
               | Adapter.Internal _ -> None)

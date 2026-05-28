@@ -31,6 +31,30 @@
   CDAL verdict payload can be embedded in the rejection envelope
   without a schema break (RFC-0109 Phase D).
 
+## [0.19.35] - 2026-05-28
+
+### Added
+- RFC-0201 Steps 2+3+5: wait-free snapshot for activity graph and
+  swimlane views, retired PR #19150 cache wrapper for activity events.
+
+### Changed
+- Optimized HTTP dispatch, encoding, prefix route lookup, response
+  header, and body chunk accumulation hot paths.
+- Bumped agent SDK pin to 0.200.6.
+- Dashboard refactors: extracted `errorMessageOr`, `UNKNOWN_STATUS_LABEL`,
+  `MISSING_DATA_DASH`, `isRecord`, `isNonEmptyString`, `isAbortError` to
+  shared `lib/format-string` and `lib/type-guards`; removed inspector pin
+  wrapper, session trace trigger aliases, and agent identity tuple wrapper.
+- Removed retired PR tool family wording and helper guard labels.
+- Removed code smell ratchet wrapper and MCP server Eio transport mode
+  reexport.
+- Fixed `Execute` tool `rg` context path args.
+
+### Fixed
+- Regenerated `runtime-tunables.md` to fix env knob catalog drift.
+- Resolved pre-existing CI gate failures (version truth, code-smell
+  baseline drift, RFC numbering).
+
 ## [0.19.31] - 2026-05-26
 
 ### Changed

@@ -310,15 +310,17 @@ let pp fmt = function
       url
       (Format.pp_print_option Format.pp_print_string)
       output
-  | W (Ssh { host; user; command }) ->
+  | W (Ssh { host; user; command; port }) ->
     Format.fprintf
       fmt
-      "Ssh(host=%s, user=%a, command=%a)"
+      "Ssh(host=%s, user=%a, command=%a, port=%a)"
       host
       (Format.pp_print_option Format.pp_print_string)
       user
       (Format.pp_print_option Format.pp_print_string)
       command
+      (Format.pp_print_option Format.pp_print_int)
+      port
   | W (Scp { source; dest; recursive; port }) ->
     Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b, port=%a)" source dest recursive
       (Format.pp_print_option Format.pp_print_int) port

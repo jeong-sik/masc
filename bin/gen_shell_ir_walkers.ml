@@ -1842,7 +1842,7 @@ parse None None args|}
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
-    ; bind_pattern = "Ssh { host; user; command }"
+    ; bind_pattern = "Ssh { host; user; command; port }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -1852,8 +1852,11 @@ parse None None args|}
         | None -> host
         | Some u -> u ^ "@" ^ host
       in
+      let port_args = match port with Some p -> [ "-p"; string_of_int p ] | None -> [] in
       let args =
-        [ host_str ] @ (match command with None -> [] | Some c -> [ c ])
+        port_args
+        @ [ host_str ]
+        @ (match command with None -> [] | Some c -> [ c ])
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Ssh
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
@@ -1866,22 +1869,41 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let parse host_arg rest =
-  let user, host =
-    match String.split_on_char '@' host_arg with
-    | [ u; h ] -> (Some u, h)
-    | _ -> (None, host_arg)
-  in
-  let command =
-    match rest with
-    | [] -> None
-    | cmd_parts -> Some (String.concat " " cmd_parts)
-  in
-  Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host; user; command }))
+let rec parse port host user command = function
+  | [] ->
+    (match host with
+     | Some h ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host = h; user; command; port }))
+     | None -> None)
+  | "-p" :: p_str :: rest ->
+    (match int_of_string_opt p_str with
+     | Some p -> parse (Some p) host user command rest
+     | None -> parse port host user command rest)
+  | "-i" :: _ :: rest -> parse port host user command rest
+  | "-o" :: _ :: rest -> parse port host user command rest
+  | "-L" :: _ :: rest -> parse port host user command rest
+  | "-R" :: _ :: rest -> parse port host user command rest
+  | "-D" :: _ :: rest -> parse port host user command rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse port host user command rest
+    else (
+      match host with
+      | None ->
+        (* First positional: [user@]host *)
+        let u, h =
+          match String.split_on_char '@' arg with
+          | [ u; h ] -> (Some u, h)
+          | _ -> (None, arg)
+        in
+        parse port (Some h) u command rest
+      | Some _ ->
+        (* Remaining positional tokens are the remote command *)
+        let cmd = String.concat " " (arg :: rest) in
+        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh
+          { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port })))
 in
-match args with
-| [] -> None
-| host_arg :: rest -> parse host_arg rest|}
+parse None None None None args|}
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"

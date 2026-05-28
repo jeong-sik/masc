@@ -288,12 +288,13 @@ let of_command = function
   | Shell_ir_typed.W (Wget { url; output }) ->
     let flag_args = match output with None -> [] | Some o -> [ arg "-O"; arg o ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Wget, flag_args @ [ arg url ]) ]
-  | Shell_ir_typed.W (Ssh { host; user; command }) ->
+  | Shell_ir_typed.W (Ssh { host; user; command; port }) ->
     let target =
       match user with None -> host | Some u -> u ^ "@" ^ host
     in
+    let port_args = match port with Some p -> [ arg "-p"; arg (string_of_int p) ] | None -> [] in
     let cmd_args = match command with None -> [] | Some c -> [ arg c ] in
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, arg target :: cmd_args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, port_args @ [ arg target ] @ cmd_args) ]
   | Shell_ir_typed.W (Scp { source; dest; recursive; port }) ->
     let port_args = match port with Some p -> [ arg "-P"; arg (string_of_int p) ] | None -> [] in
     let flag_args = port_args @ (if recursive then [ arg "-r" ] else []) in

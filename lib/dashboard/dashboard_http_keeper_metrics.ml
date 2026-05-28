@@ -139,18 +139,6 @@ let jaccard_similarity_text (a : string) (b : string) : float =
     let union = na + nb - inter in
     if union <= 0 then 0.0 else float_of_int inter /. float_of_int union
 
-let take_last (n : int) (xs : 'a list) : 'a list =
-  let n = max 0 n in
-  let len = List.length xs in
-  let drop = max 0 (len - n) in
-  let rec drop_n k ys =
-    if k <= 0 then ys
-    else
-      match ys with
-      | [] -> []
-      | _ :: tl -> drop_n (k - 1) tl
-  in
-  drop_n drop xs
 
 let proactive_preview_similarity_stats
     ?(window = 8)
@@ -160,7 +148,7 @@ let proactive_preview_similarity_stats
     previews
     |> List.map String.trim
     |> List.filter (fun s -> s <> "")
-    |> take_last window
+    |> List_util.take_last window
   in
   let sample_count = List.length previews in
   let rec pairwise acc = function

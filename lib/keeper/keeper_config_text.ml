@@ -233,20 +233,7 @@ let split_semicolon_clauses (raw : string) : string list =
   |> List.map String.trim
   |> List.filter (fun s -> s <> "")
 
-let take_last n xs =
-  if n <= 0 then []
-  else
-    let len = List.length xs in
-    if len <= n then xs
-    else
-      let rec drop k ys =
-        if k <= 0 then ys
-        else
-          match ys with
-          | [] -> []
-          | _ :: tl -> drop (k - 1) tl
-      in
-      drop (len - n) xs
+let take_last = List_util.take_last
 
 let compact_self_model_text
     ?(max_clauses = default_drift_max_clauses)

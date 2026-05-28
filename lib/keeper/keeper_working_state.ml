@@ -86,10 +86,6 @@ let drop n values =
   in
   loop n values
 
-let take_last n values =
-  let len = List.length values in
-  if len <= n then values else drop (len - n) values
-
 let ids loops = List.map (fun loop -> loop.id) loops
 
 let prompt_digest_for ?(max_digest = 32) ~active_loops ~resolved_loops () =
@@ -158,7 +154,7 @@ let archive_resolved_loop ?max_digest ?(max_archived = 128) state ~loop_id =
   match move_resolved [] state.resolved_loops with
   | None -> Error (Printf.sprintf "resolved working-state loop not found: %s" loop_id)
   | Some (resolved_loops, archived) ->
-    let archived_loops = take_last max_archived (state.archived_loops @ [ archived ]) in
+    let archived_loops = List_util.take_last max_archived (state.archived_loops @ [ archived ]) in
     Ok (compact ?max_digest { state with resolved_loops; archived_loops })
 
 let is_blank s = String.trim s = ""

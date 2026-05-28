@@ -137,9 +137,7 @@ let latest_store_ts source dir label : float option =
 let sort_newest_first entries =
   List.sort (fun a b -> Float.compare (extract_ts b) (extract_ts a)) entries
 
-let take_first n entries =
-  if n <= 0 then []
-  else List.filteri (fun i _ -> i < n) entries
+let take_first = List.take
 
 let freshness_fields ~now latest_ts =
   match latest_ts with

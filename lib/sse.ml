@@ -114,14 +114,7 @@ let session_kind_to_string = function
   | Coordinator -> "coordinator"
   | Presence -> "presence"
 
-let take n xs =
-  let rec loop acc remaining items =
-    match (remaining, items) with
-    | remaining, _ when remaining <= 0 -> List.rev acc
-    | _, [] -> List.rev acc
-    | remaining, x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
+let take = List.take
 
 let sync_transport_snapshot () =
   let now = Time_compat.now () in

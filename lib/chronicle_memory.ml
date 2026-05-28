@@ -1,12 +1,6 @@
 (** Chronicle_memory -- inject git chronicle candidates into episodic memory. *)
 
-let take n xs =
-  let rec loop remaining acc = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
+let take = List.take
 
 let sanitize_id raw =
   let buf = Buffer.create (String.length raw) in

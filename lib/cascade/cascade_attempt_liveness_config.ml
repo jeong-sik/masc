@@ -103,13 +103,7 @@ let normalize_candidate_key raw =
   let key = String.trim raw in
   if key = "" then None else Some runtime_candidate_key
 
-let take limit values =
-  let rec loop n acc = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: rest -> loop (n - 1) (x :: acc) rest
-  in
-  loop limit [] values
+let take = List.take
 
 let take_drop limit values =
   let rec loop n kept = function

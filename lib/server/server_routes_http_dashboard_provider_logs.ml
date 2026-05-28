@@ -19,9 +19,7 @@ let provider_log_hard_max_bytes = 4_194_304
 
 let clamp_int ~min_value ~max_value value = max min_value (min max_value value)
 
-let string_starts_with ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
+let string_starts_with = String.starts_with
 
 let expand_provider_log_path raw =
   let path = String.trim raw in

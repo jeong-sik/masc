@@ -17,7 +17,7 @@ let with_tmpdir f =
 let make_acc dir =
   Trajectory.create_accumulator
     ~masc_root:dir ~keeper_name:"test-keeper"
-    ~trace_id:"gate-test" ~generation:0
+    ~trace_id:"gate-test" ~generation:0 ()
 
 let default_config = Eval_gate.default_config
 

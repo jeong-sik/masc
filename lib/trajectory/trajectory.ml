@@ -316,6 +316,10 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
 (* Trajectory accumulator (mutable, per-session)                    *)
 (* ================================================================ *)
 
+type pending_entry = {
+  pe_json : Yojson.Safe.t;
+}
+
 type accumulator = {
   mutable entries : tool_call_entry list;
   mutable total_cost : float;
@@ -330,10 +334,28 @@ type accumulator = {
   (** Claimed task ID for cost attribution.
       Starts as None; set via [set_task_id] when keeper claims a task.
       Propagated to trajectory record on [finalize]. *)
+  pending_queue : pending_entry Queue.t;
+  pending_mu : Stdlib.Mutex.t;
+  mutable last_flush : float;
+  mutable on_flush_error : (exn -> unit) option;
 }
 
-let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulator =
-  { entries = [];
+(* Global registry of active accumulators for batch flush.
+   The background flush fiber iterates this to drain pending queues. *)
+let active_accumulators : (string * string, accumulator) Hashtbl.t = Hashtbl.create 16
+let active_acc_mu = Stdlib.Mutex.create ()
+
+let register_accumulator (acc : accumulator) =
+  Stdlib.Mutex.protect active_acc_mu (fun () ->
+    Hashtbl.replace active_accumulators (acc.keeper_name, acc.trace_id) acc)
+
+let unregister_accumulator (acc : accumulator) =
+  Stdlib.Mutex.protect active_acc_mu (fun () ->
+    Hashtbl.remove active_accumulators (acc.keeper_name, acc.trace_id))
+
+let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~generation () : accumulator =
+  let acc = {
+    entries = [];
     total_cost = 0.0;
     total_calls = 0;
     turn = 0;
@@ -343,7 +365,13 @@ let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulat
     started_at = Time_compat.now ();
     masc_root;
     task_id = None;
-  }
+    pending_queue = Queue.create ();
+    pending_mu = Stdlib.Mutex.create ();
+    last_flush = 0.0;
+    on_flush_error;
+  } in
+  register_accumulator acc;
+  acc
 
 (** Bind a claimed task to this trajectory for cost attribution. *)
 let set_task_id (acc : accumulator) (id : string) : unit =
@@ -361,16 +389,42 @@ let record_entry ?runtime_contract ?action_radius ?on_persist_error
   acc.entries <- entry :: acc.entries;
   acc.total_cost <- acc.total_cost +. entry.cost_usd;
   acc.total_calls <- acc.total_calls + 1;
-  (* Persist immediately for crash recovery *)
-  (try
-     append_entry ?runtime_contract ?action_radius ~masc_root:acc.masc_root
-       ~keeper_name:acc.keeper_name ~trace_id:acc.trace_id entry
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Keeper.error "Failed to persist entry for %s: %s" acc.trace_id
-         (Printexc.to_string exn);
-       (match on_persist_error with
+  (* Store on_persist_error for use during batch flush *)
+  (match on_persist_error, acc.on_flush_error with
+   | Some cb, None -> acc.on_flush_error <- Some cb
+   | _ -> ());
+  (* Enqueue for batched write instead of synchronous disk I/O *)
+  let json = entry_to_json ?runtime_contract ?action_radius entry in
+  Stdlib.Mutex.protect acc.pending_mu (fun () ->
+    Queue.push { pe_json = json } acc.pending_queue)
+
+(** Drain the pending queue and write all entries in a single batch.
+    Acquires the per-accumulator mutex to safely drain the queue. *)
+let flush_pending (acc : accumulator) : unit =
+  let entries_to_flush =
+    Stdlib.Mutex.protect acc.pending_mu (fun () ->
+      if Queue.is_empty acc.pending_queue then []
+      else
+        let items = Queue.fold (fun acc pe -> pe :: acc) [] acc.pending_queue in
+        Queue.clear acc.pending_queue;
+        List.rev items)
+  in
+  match entries_to_flush with
+  | [] -> ()
+  | _ ->
+    let dir = trajectories_dir acc.masc_root acc.keeper_name in
+    Fs_compat.mkdir_p dir;
+    let path = trajectory_path acc.masc_root acc.keeper_name acc.trace_id in
+    let jsons = List.map (fun pe -> pe.pe_json) entries_to_flush in
+    (try
+       Fs_compat.append_jsonl_batch path jsons;
+       acc.last_flush <- Time_compat.now ()
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.error "Failed to flush trajectory batch for %s: %s"
+         acc.trace_id (Printexc.to_string exn);
+       (match acc.on_flush_error with
         | None -> ()
         | Some report ->
             try report exn
@@ -378,11 +432,21 @@ let record_entry ?runtime_contract ?action_radius ?on_persist_error
             | Eio.Cancel.Cancelled _ as e -> raise e
             | report_exn ->
                 Log.Keeper.warn
-                  "Failed to report trajectory persist gap for %s: %s"
+                  "Failed to report trajectory flush error for %s: %s"
                   acc.trace_id
                   (Printexc.to_string report_exn)))
 
+(** Flush pending entries for all active accumulators.
+    Called by the background flush fiber in server_runtime_bootstrap. *)
+let flush_all_pending () : unit =
+  let accs = Stdlib.Mutex.protect active_acc_mu (fun () ->
+    Hashtbl.fold (fun _ acc accs -> acc :: accs) active_accumulators []) in
+  List.iter flush_pending accs
+
 let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
+  (* Flush any remaining pending entries before writing summary *)
+  flush_pending acc;
+  unregister_accumulator acc;
   let traj = {
     scenario_id = None;
     keeper_name = acc.keeper_name;

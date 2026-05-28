@@ -5913,7 +5913,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
            ~masc_root
            ~keeper_name
            ~trace_id
-           ~generation:9
+           ~generation:9 ()
        in
        KTCL.reset_for_testing ();
        KTCL.init ~base_path:base_dir ();

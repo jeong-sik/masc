@@ -354,6 +354,19 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       loop ()
     in
     loop ());
+  (* Background fiber: flush pending trajectory entries every 2 seconds.
+     Batches per-tool-call JSONL writes to reduce disk I/O. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 2.0;
+      (try Trajectory.flush_all_pending ()
+       with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn "trajectory flush_all_pending failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in

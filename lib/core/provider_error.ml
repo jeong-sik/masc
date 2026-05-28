@@ -51,9 +51,7 @@ let to_error_kind = function
 let string_list_to_yojson values =
   `List (List.map (fun value -> `String value) values)
 
-let float_option_to_yojson = function
-  | Some value -> `Float value
-  | None -> `Null
+let float_option_to_yojson = Json_util.float_opt_to_json
 
 let public_runtime_provider_label = "runtime"
 let public_runtime_model_label = "runtime"
@@ -113,20 +111,14 @@ let to_yojson = function
           ("kind", `String "cli_wrapped_resumable_session");
           ("provider", `String public_runtime_provider_label);
           ("detail", `String detail);
-          ("exit_code",
-           match exit_code with
-           | Some code -> `Int code
-           | None -> `Null);
+          ("exit_code", Json_util.int_opt_to_json exit_code);
         ]
   | PermissionDenied { resource } ->
       `Assoc
         [
           ("kind", `String "permission_denied");
           ("provider", `String public_runtime_provider_label);
-          ("resource",
-           match resource with
-           | Some r -> `String r
-           | None -> `Null);
+          ("resource", Json_util.string_opt_to_json resource);
         ]
   | ModelNotFound ->
       `Assoc

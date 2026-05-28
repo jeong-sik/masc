@@ -53,16 +53,8 @@ let provider_info_to_json (info : H.provider_info) : Yojson.Safe.t =
              [ ("fingerprint", `String fp); ("count", `Int count) ])
          info.top_fingerprints)
   in
-  let last_failure_at =
-    match info.last_failure_at with
-    | Some t -> `Float t
-    | None -> `Null
-  in
-  let cooldown_expires_at =
-    match info.cooldown_expires_at with
-    | Some t -> `Float t
-    | None -> `Null
-  in
+  let last_failure_at = Json_util.float_opt_to_json info.last_failure_at in
+  let cooldown_expires_at = Json_util.float_opt_to_json info.cooldown_expires_at in
   `Assoc
     [ ("provider_key", `String info.provider_key)
     ; ("success_rate", `Float info.success_rate)

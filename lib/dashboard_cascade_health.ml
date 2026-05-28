@@ -69,10 +69,6 @@ let provider_entry_to_json
       (info : Health.provider_info)
   : Yojson.Safe.t
   =
-  let opt_float = function
-    | Some f -> `Float f
-    | None -> `Null
-  in
   let trust_score = Cascade_trust.trust_score info in
   let health_score =
     let score = Float.max 0.0 (Float.min 1.0 trust_score) in
@@ -96,12 +92,12 @@ let provider_entry_to_json
       ; "request_count", `Null
       ]
     | Some (stats : Model_inference_metrics.provider_stats) ->
-      [ "avg_prompt_tok_per_sec", opt_float stats.ps_avg_prompt_tok_per_sec
-      ; "avg_decode_tok_per_sec", opt_float stats.ps_avg_decode_tok_per_sec
-      ; "avg_tok_per_sec", opt_float stats.ps_avg_tok_per_sec
-      ; "avg_latency_ms", opt_float stats.ps_avg_latency_ms
-      ; "p50_latency_ms", opt_float stats.ps_p50_latency_ms
-      ; "p95_latency_ms", opt_float stats.ps_p95_latency_ms
+      [ "avg_prompt_tok_per_sec", Json_util.float_opt_to_json stats.ps_avg_prompt_tok_per_sec
+      ; "avg_decode_tok_per_sec", Json_util.float_opt_to_json stats.ps_avg_decode_tok_per_sec
+      ; "avg_tok_per_sec", Json_util.float_opt_to_json stats.ps_avg_tok_per_sec
+      ; "avg_latency_ms", Json_util.float_opt_to_json stats.ps_avg_latency_ms
+      ; "p50_latency_ms", Json_util.float_opt_to_json stats.ps_p50_latency_ms
+      ; "p95_latency_ms", Json_util.float_opt_to_json stats.ps_p95_latency_ms
       ; "request_count", `Int stats.ps_entry_count
       ]
   in
@@ -117,9 +113,7 @@ let provider_entry_to_json
      ; "consecutive_failures", `Int info.consecutive_failures
      ; "in_cooldown", `Bool info.in_cooldown
      ; ( "cooldown_expires_at"
-       , match info.cooldown_expires_at with
-         | Some t -> `Float t
-         | None -> `Null )
+       , Json_util.float_opt_to_json info.cooldown_expires_at )
      ; "events_in_window", `Int info.events_in_window
      ; "trust_score", `Float trust_score
      ; "health_score", `Int health_score

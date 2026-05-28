@@ -345,10 +345,7 @@ let watched_agent_to_yojson (agent : watched_agent) =
       ("agent_name", `String agent.agent_name);
       ("credential_present", `Bool agent.credential_present);
       (option_field "role" agent.credential_role);
-      ( "can_admin",
-        match agent.can_admin with
-        | Some value -> `Bool value
-        | None -> `Null );
+      ( "can_admin", Json_util.bool_opt_to_json agent.can_admin );
       (option_field "expires_at" agent.expires_at);
       ("raw_token_file_present", `Bool agent.raw_token_file_present);
     ]

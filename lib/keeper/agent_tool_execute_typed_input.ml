@@ -661,3 +661,10 @@ let pp_validation_error ppf = function
   | Env_key_invalid k ->
     Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
 ;;
+
+let validation_error_alternatives : validation_error -> string list = function
+  | Argv_contains_shell_metachar _ -> [ "Pipeline" ]
+  | Argv_contains_shell_redirection _ ->
+    [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
+  | _ -> []
+;;

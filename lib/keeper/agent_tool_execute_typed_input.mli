@@ -157,3 +157,10 @@ val pp_validation_error : Format.formatter -> validation_error -> unit
     classification.  ERROR text intentionally lacks the retired
     path-tokenizer prefix so the 4-layer log amplification is severed
     at PR-2 lexer deletion. *)
+
+val validation_error_alternatives : validation_error -> string list
+(** Structured alternatives for machine consumers (JSON responses).
+    Returns tool names or field names the LLM should use instead of the
+    rejected pattern.  Empty list when no typed alternative exists.
+    SSOT: each variant maps to exactly one alternatives list here;
+    callers must not add ad-hoc alternatives at the JSON layer. *)

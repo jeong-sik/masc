@@ -425,17 +425,29 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
       ?agent_tool_names ()
   in
   (match result with
-   | Ok _ ->
+   | Ok outcome ->
        sync_keeper_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
+       (* Issue #18839: surface auto-released task IDs to subscribers so an
+          MCP operator (or LLM keeper consuming the event stream) can react
+          to an implicit hot-potato instead of substring-parsing
+          ["… (auto-released X, Y)"] out of the response message. Empty
+          list when the claim did not displace any prior holding. *)
+       let auto_released_json =
+         `List (List.map (fun id -> `String id) outcome.Coord.auto_released_task_ids)
+       in
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
          ("task_id", `String task_id);
          ("agent_name", `String ctx.agent_name);
+         ("auto_released_task_ids", auto_released_json);
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error e -> Log.Task.warn ~keeper_name:task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
-  result_to_response ~tool_name ~start_time result
+  let response_result =
+    Result.map (fun (o : Coord.claim_outcome) -> o.message) result
+  in
+  result_to_response ~tool_name ~start_time response_result
 
 (* Look up the current Goal_store phase for each goal id in the agent's
    active_goal_ids. Returns a list of "<goal_id>=<phase>" strings, e.g.

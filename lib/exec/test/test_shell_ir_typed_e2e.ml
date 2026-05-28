@@ -1183,6 +1183,33 @@ let test_tar_farchive_combined () =
     ~expected_action:`Extract ~expected_archive:"archive.tar" ~expected_compression:`None
 ;;
 
+(* ── Curl -o/-L/-k ────────────────────────────────────────────── *)
+
+let test_curl_flags () =
+  let check_curl cmd ~expected_output ~expected_follow ~expected_insecure =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Curl { output_file; follow_redirects; insecure; _ }) ->
+      check (option string) (Printf.sprintf "\"%s\" → output" cmd) expected_output output_file;
+      check bool (Printf.sprintf "\"%s\" → follow_redirects" cmd) expected_follow follow_redirects;
+      check bool (Printf.sprintf "\"%s\" → insecure" cmd) expected_insecure insecure
+    | _ -> failf "expected Curl for: %s" cmd
+  in
+  check_curl "curl https://example.com"
+    ~expected_output:None ~expected_follow:false ~expected_insecure:false;
+  check_curl "curl -o /tmp/out https://example.com"
+    ~expected_output:(Some "/tmp/out") ~expected_follow:false ~expected_insecure:false;
+  check_curl "curl -L https://example.com"
+    ~expected_output:None ~expected_follow:true ~expected_insecure:false;
+  check_curl "curl -k https://example.com"
+    ~expected_output:None ~expected_follow:false ~expected_insecure:true;
+  check_curl "curl -o /tmp/page.html -L -k https://example.com"
+    ~expected_output:(Some "/tmp/page.html") ~expected_follow:true ~expected_insecure:true;
+  check_curl "curl --output /tmp/data.json --location --insecure https://api.example.com"
+    ~expected_output:(Some "/tmp/data.json") ~expected_follow:true ~expected_insecure:true
+;;
+
 (* ── Test runner ───────────────────────────────────────────────── *)
 
 let suite =
@@ -1250,6 +1277,8 @@ let suite =
     , [ test_case "field values" `Quick test_tar_farchive_combined ] )
   ; ( "E2E: Ssh -i identity file"
     , [ test_case "field values" `Quick test_ssh_identity_file ] )
+  ; ( "E2E: Curl -o/-L/-k"
+    , [ test_case "field values" `Quick test_curl_flags ] )
   ]
 
 let () = run "shell_ir_typed_e2e" suite

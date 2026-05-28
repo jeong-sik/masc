@@ -59,10 +59,10 @@ let pp fmt = function
       branch
       (Format.pp_print_option Format.pp_print_int)
       depth
-  | W (Curl { url; method_; headers; body }) ->
+  | W (Curl { url; method_; headers; body; output_file; follow_redirects; insecure }) ->
     Format.fprintf
       fmt
-      "Curl(url=%s, method=%s, headers=%a, body=%a)"
+      "Curl(url=%s, method=%s, headers=%a, body=%a, output=%a, follow=%b, insecure=%b)"
       url
       (match method_ with
        | `GET -> "GET"
@@ -74,6 +74,10 @@ let pp fmt = function
       headers
       (Format.pp_print_option Format.pp_print_string)
       body
+      (Format.pp_print_option Format.pp_print_string)
+      output_file
+      follow_redirects
+      insecure
   | W (Rm { paths; recursive; force }) ->
     Format.fprintf
       fmt

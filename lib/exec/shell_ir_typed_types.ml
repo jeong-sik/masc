@@ -45,6 +45,9 @@ and (_, _, _, _) command =
       ; method_ : [ `GET | `POST | `PUT | `DELETE ]
       ; headers : (string * string) list option
       ; body : string option
+      ; output_file : string option
+      ; follow_redirects : bool
+      ; insecure : bool
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Rm :

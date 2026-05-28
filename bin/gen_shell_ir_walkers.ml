@@ -265,7 +265,7 @@ parse None None None args|}
     }
   ; { name = "Curl"
     ; anon_pattern = "Curl _"
-    ; bind_pattern = "Curl { url; method_; headers; body }"
+    ; bind_pattern = "Curl { url; method_; headers; body; output_file; follow_redirects; insecure }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -284,7 +284,10 @@ parse None None None args|}
           List.concat_map (fun (k, v) -> [ "-H"; k ^ ": " ^ v ]) hs
       in
       let body_args = match body with None -> [] | Some d -> [ "-d"; d ] in
-      let args = method_args @ header_args @ body_args @ [ url ] in
+      let output_args = match output_file with None -> [] | Some o -> [ "-o"; o ] in
+      let follow_args = if follow_redirects then [ "-L" ] else [] in
+      let insecure_args = if insecure then [ "-k" ] else [] in
+      let args = method_args @ header_args @ body_args @ output_args @ follow_args @ insecure_args @ [ url ] in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Curl
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
@@ -296,7 +299,7 @@ parse None None None args|}
     ; parse_body =
         Some
           {|
-let rec parse method_ headers body url = function
+let rec parse method_ headers body url output_file follow_redirects insecure = function
   | [] ->
     (match url with
      | Some u ->
@@ -310,30 +313,39 @@ let rec parse method_ headers body url = function
                     | [] -> None
                     | _ -> Some (List.rev headers))
                ; body
+               ; output_file
+               ; follow_redirects
+               ; insecure
                }))
      | None -> None)
   | "-X" :: m :: rest | "--request" :: m :: rest ->
     (match String.uppercase_ascii m with
-     | "GET" -> parse `GET headers body url rest
-     | "POST" -> parse `POST headers body url rest
-     | "PUT" -> parse `PUT headers body url rest
-     | "DELETE" -> parse `DELETE headers body url rest
+     | "GET" -> parse `GET headers body url output_file follow_redirects insecure rest
+     | "POST" -> parse `POST headers body url output_file follow_redirects insecure rest
+     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
+     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
      | _ -> None)
   | "-H" :: h :: rest | "--header" :: h :: rest ->
     (match String.index_opt h ':' with
      | Some i ->
        let key = String.trim (String.sub h 0 i) in
        let value = String.trim (String.sub h (i + 1) (String.length h - i - 1)) in
-       parse method_ ((key, value) :: headers) body url rest
+       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure rest
      | None -> None)
   | "-d" :: d :: rest | "--data" :: d :: rest ->
     (match body with
-     | None -> parse method_ headers (Some d) url rest
+     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
      | Some _ -> None)
+  | "-o" :: o :: rest | "--output" :: o :: rest ->
+    parse method_ headers body url (Some o) follow_redirects insecure rest
+  | "-L" :: rest | "--location" :: rest ->
+    parse method_ headers body url output_file true insecure rest
+  | "-k" :: rest | "--insecure" :: rest ->
+    parse method_ headers body url output_file follow_redirects true rest
   (* Flags that take an argument value *)
   | ( "--retry" | "--retry-max" | "--connect-timeout" | "--max-time"
     | "--max-filesize" | "--limit-rate" | "--retry-delay" | "--retry-count"
-    | "-w" | "--write-out" | "-o" | "--output" | "-e" | "--referer"
+    | "-w" | "--write-out" | "-e" | "--referer"
     | "-A" | "--user-agent" | "-U" | "--proxy-user" | "-x" | "--proxy"
     | "--dns-servers" | "--resolve" | "--interface" | "-Y" | "--speed-limit"
     | "-y" | "--speed-time" | "--keepalive-time"
@@ -353,16 +365,16 @@ let rec parse method_ headers body url = function
     | "--tlsuser" | "--tlsv1.0" | "--tlsv1.1" | "--tlsv1.2"
     | "--trace" | "--trace-ascii" | "-u" | "--user" )
     :: _val :: rest ->
-    parse method_ headers body url rest
+    parse method_ headers body url output_file follow_redirects insecure rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse method_ headers body url rest
+    then parse method_ headers body url output_file follow_redirects insecure rest
     else (
       match url with
-      | None -> parse method_ headers body (Some arg) rest
+      | None -> parse method_ headers body (Some arg) output_file follow_redirects insecure rest
       | Some _ -> None)
 in
-parse `GET [] None None args|}
+parse `GET [] None None None false false args|}
     }
   ; { name = "Rm"
     ; anon_pattern = "Rm _"

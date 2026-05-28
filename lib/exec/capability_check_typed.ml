@@ -62,7 +62,7 @@ let of_command = function
       @ [ arg repo ]
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Git, args) ]
-  | Shell_ir_typed.W (Curl { url; method_; headers; body }) ->
+  | Shell_ir_typed.W (Curl { url; method_; headers; body; output_file; follow_redirects; insecure }) ->
     let method_args =
       match method_ with
       | `GET -> []
@@ -80,7 +80,10 @@ let of_command = function
       | None -> []
       | Some d -> [ arg "-d"; arg d ]
     in
-    let args = method_args @ header_args @ body_args @ [ arg url ] in
+    let output_args = match output_file with None -> [] | Some o -> [ arg "-o"; arg o ] in
+    let follow_args = if follow_redirects then [ arg "-L" ] else [] in
+    let insecure_args = if insecure then [ arg "-k" ] else [] in
+    let args = method_args @ header_args @ body_args @ output_args @ follow_args @ insecure_args @ [ arg url ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Curl, args) ]
   | Shell_ir_typed.W (Rm { paths; recursive; force }) ->
     let flag_args =

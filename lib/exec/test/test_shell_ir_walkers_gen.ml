@@ -29,7 +29,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Rg { pattern = "."; path = None; case_sensitive = false })
   ; W (Git_status { short = false })
   ; W (Git_clone { repo = "x"; branch = None; depth = None })
-  ; W (Curl { url = "http://x"; method_ = `GET; headers = None; body = None })
+  ; W (Curl { url = "http://x"; method_ = `GET; headers = None; body = None; output_file = None; follow_redirects = false; insecure = false })
   ; W (Rm { paths = [ "/tmp/x" ]; recursive = false; force = false })
   ; W (Sudo { target_argv = [ "sh"; "-c"; "echo hi" ] })
   ; W (Find { path = "."; name = None; type_ = None; maxdepth = None })
@@ -226,6 +226,9 @@ let test_of_simple_round_trip () =
            ; method_ = `POST
            ; headers = Some [ "A", "B" ]
            ; body = Some "data"
+           ; output_file = Some "/tmp/out"
+           ; follow_redirects = true
+           ; insecure = true
            })
     ; W (Rm { paths = [ "a"; "b" ]; recursive = true; force = false })
     ; W (Sudo { target_argv = [ "whoami" ] })

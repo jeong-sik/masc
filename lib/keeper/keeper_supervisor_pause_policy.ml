@@ -234,7 +234,7 @@ let failure_reason_policy_decision
       ( Keeper_registry.Heartbeat_consecutive_failures _
       | Keeper_registry.Stale_fleet_batch _
       | Keeper_registry.Provider_runtime_error _
-      | Keeper_registry.Fiber_unresolved
+      | Keeper_registry.Fiber_unresolved _
       | Keeper_registry.Exception _ )
   | None ->
     None

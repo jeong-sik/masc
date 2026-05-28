@@ -63,6 +63,13 @@ val stale_kill_class_to_string : stale_kill_class -> string
     [Stale_turn_timeout] arm and exposed for dashboards / metrics that
     want to attribute kills by class. *)
 
+(** Issue #18901: cause carried inside [Fiber_unresolved]. Splits the
+    24h fleet ratio of 26 graceful-shutdown artifacts to 9 real
+    missed-resolutions inside the same supervisor crash log. *)
+type fiber_drop_cause =
+  | Graceful_shutdown
+  | Unexpected
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
@@ -98,7 +105,7 @@ type failure_reason =
       (** Latched when an actionable required-tool turn returned no useful
           keeper tool progress. *)
   | Ambiguous_partial_commit of ambiguous_partial_commit
-  | Fiber_unresolved
+  | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_pause
       (** Keeper paused after context-overflow compact-retry exhaustion.

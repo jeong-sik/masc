@@ -934,7 +934,7 @@ let test_runtime_surface_maps_registry_failure_reason_blockers () =
         "turn_failures",
         "4 consecutive" );
       ( "fiber-unresolved",
-        KR.Fiber_unresolved,
+        KR.Fiber_unresolved KR.Unexpected,
         "fiber_unresolved",
         "did not resolve" );
       ( "exception",

@@ -112,7 +112,7 @@ let runtime_pressure_class_of_failure_reason = function
     Some Keeper_liveness_failure
   | Some (Keeper_registry.Tool_required_unsatisfied _) -> Some Tool_contract_failure
   | Some
-      ( Keeper_registry.Fiber_unresolved
+      ( Keeper_registry.Fiber_unresolved _
       | Keeper_registry.Exception _
       | Keeper_registry.Turn_overflow_pause
       | Keeper_registry.Turn_livelock_pause

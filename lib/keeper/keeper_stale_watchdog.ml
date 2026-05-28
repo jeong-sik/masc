@@ -232,7 +232,7 @@ let failure_reason_batch_root_cause
   | Turn_livelock_pause
   | Tool_required_unsatisfied _
   | Ambiguous_partial_commit _
-  | Fiber_unresolved
+  | Fiber_unresolved _
   | Exception _ ->
       None
 

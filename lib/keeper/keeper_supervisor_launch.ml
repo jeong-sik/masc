@@ -194,7 +194,7 @@ let launch_supervised_fiber
                   | Some Keeper_registry.Turn_overflow_pause
                   | Some Keeper_registry.Turn_livelock_pause
                   | Some (Keeper_registry.Ambiguous_partial_commit _)
-                  | Some Keeper_registry.Fiber_unresolved
+                  | Some (Keeper_registry.Fiber_unresolved _)
                   | Some (Keeper_registry.Exception _)
                   | None -> false)
                | None -> false
@@ -368,16 +368,27 @@ let launch_supervised_fiber
             then
               if Shutdown.is_shutting_down_global ()
               then (
-                Log.Keeper.warn
-                  "%s: fiber unresolved during shutdown (not a crash)"
+                (* Issue #18901: graceful-shutdown branch. Tag the failure
+                   reason with [Graceful_shutdown] cause so the cohort
+                   key splits away from the legacy "fiber_unresolved"
+                   ERROR cohort. Severity stays at INFO via the
+                   [Log.Keeper.info] call below — record_crash is not
+                   invoked here because shutdown drops are bookkeeping,
+                   not restart-budget signal. *)
+                Log.Keeper.info
+                  "%s: fiber unresolved during shutdown (graceful, not a crash)"
                   meta.name;
+                Keeper_registry.set_failure_reason
+                  ~base_path
+                  meta.name
+                  (Some (Keeper_registry.Fiber_unresolved Graceful_shutdown));
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
                 (* fire-and-forget: resolve_done signals completion *)
                 ignore (resolve_done (`Crashed "shutdown")))
               else (
 	                let reason =
 	                  Keeper_registry.failure_reason_to_string
-	                    Keeper_registry.Fiber_unresolved
+	                    (Keeper_registry.Fiber_unresolved Unexpected)
 	                in
 	                let outcome =
 	                  Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
@@ -388,7 +399,7 @@ let launch_supervised_fiber
 	                Keeper_registry.set_failure_reason
 	                  ~base_path
                   meta.name
-                  (Some Keeper_registry.Fiber_unresolved);
+                  (Some (Keeper_registry.Fiber_unresolved Unexpected));
                 (* 2026-05-05 fleet-stuck cycle: keeper meta runtime
                  [last_blocker] stayed null for 5+ hours while supervisor
                  self-preservation suppressed restarts under

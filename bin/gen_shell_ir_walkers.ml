@@ -265,7 +265,7 @@ parse None None None args|}
     }
   ; { name = "Curl"
     ; anon_pattern = "Curl _"
-    ; bind_pattern = "Curl { url; method_; headers; body }"
+    ; bind_pattern = "Curl { url; method_; headers; body; output_file; follow_redirects; insecure }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -284,7 +284,10 @@ parse None None None args|}
           List.concat_map (fun (k, v) -> [ "-H"; k ^ ": " ^ v ]) hs
       in
       let body_args = match body with None -> [] | Some d -> [ "-d"; d ] in
-      let args = method_args @ header_args @ body_args @ [ url ] in
+      let output_args = match output_file with None -> [] | Some o -> [ "-o"; o ] in
+      let follow_args = if follow_redirects then [ "-L" ] else [] in
+      let insecure_args = if insecure then [ "-k" ] else [] in
+      let args = method_args @ header_args @ body_args @ output_args @ follow_args @ insecure_args @ [ url ] in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Curl
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
@@ -296,7 +299,7 @@ parse None None None args|}
     ; parse_body =
         Some
           {|
-let rec parse method_ headers body url = function
+let rec parse method_ headers body url output_file follow_redirects insecure = function
   | [] ->
     (match url with
      | Some u ->
@@ -310,30 +313,39 @@ let rec parse method_ headers body url = function
                     | [] -> None
                     | _ -> Some (List.rev headers))
                ; body
+               ; output_file
+               ; follow_redirects
+               ; insecure
                }))
      | None -> None)
   | "-X" :: m :: rest | "--request" :: m :: rest ->
     (match String.uppercase_ascii m with
-     | "GET" -> parse `GET headers body url rest
-     | "POST" -> parse `POST headers body url rest
-     | "PUT" -> parse `PUT headers body url rest
-     | "DELETE" -> parse `DELETE headers body url rest
+     | "GET" -> parse `GET headers body url output_file follow_redirects insecure rest
+     | "POST" -> parse `POST headers body url output_file follow_redirects insecure rest
+     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
+     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
      | _ -> None)
   | "-H" :: h :: rest | "--header" :: h :: rest ->
     (match String.index_opt h ':' with
      | Some i ->
        let key = String.trim (String.sub h 0 i) in
        let value = String.trim (String.sub h (i + 1) (String.length h - i - 1)) in
-       parse method_ ((key, value) :: headers) body url rest
+       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure rest
      | None -> None)
   | "-d" :: d :: rest | "--data" :: d :: rest ->
     (match body with
-     | None -> parse method_ headers (Some d) url rest
+     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
      | Some _ -> None)
+  | "-o" :: o :: rest | "--output" :: o :: rest ->
+    parse method_ headers body url (Some o) follow_redirects insecure rest
+  | "-L" :: rest | "--location" :: rest ->
+    parse method_ headers body url output_file true insecure rest
+  | "-k" :: rest | "--insecure" :: rest ->
+    parse method_ headers body url output_file follow_redirects true rest
   (* Flags that take an argument value *)
   | ( "--retry" | "--retry-max" | "--connect-timeout" | "--max-time"
     | "--max-filesize" | "--limit-rate" | "--retry-delay" | "--retry-count"
-    | "-w" | "--write-out" | "-o" | "--output" | "-e" | "--referer"
+    | "-w" | "--write-out" | "-e" | "--referer"
     | "-A" | "--user-agent" | "-U" | "--proxy-user" | "-x" | "--proxy"
     | "--dns-servers" | "--resolve" | "--interface" | "-Y" | "--speed-limit"
     | "-y" | "--speed-time" | "--keepalive-time"
@@ -353,16 +365,16 @@ let rec parse method_ headers body url = function
     | "--tlsuser" | "--tlsv1.0" | "--tlsv1.1" | "--tlsv1.2"
     | "--trace" | "--trace-ascii" | "-u" | "--user" )
     :: _val :: rest ->
-    parse method_ headers body url rest
+    parse method_ headers body url output_file follow_redirects insecure rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse method_ headers body url rest
+    then parse method_ headers body url output_file follow_redirects insecure rest
     else (
       match url with
-      | None -> parse method_ headers body (Some arg) rest
+      | None -> parse method_ headers body (Some arg) output_file follow_redirects insecure rest
       | Some _ -> None)
 in
-parse `GET [] None None args|}
+parse `GET [] None None None false false args|}
     }
   ; { name = "Rm"
     ; anon_pattern = "Rm _"
@@ -423,7 +435,7 @@ parse false false [] args|}
     }
   ; { name = "Find"
     ; anon_pattern = "Find _"
-    ; bind_pattern = "Find { path; name; type_ }"
+    ; bind_pattern = "Find { path; name; type_; maxdepth }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -435,6 +447,7 @@ parse false false [] args|}
            | None -> []
            | Some `File -> [ "-type"; "f" ]
            | Some `Dir -> [ "-type"; "d" ])
+        @ (match maxdepth with None -> [] | Some d -> [ "-maxdepth"; string_of_int d ])
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Find
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
@@ -465,15 +478,19 @@ let value_flags =
   ; "-printf"; "-fprintf"; "-fls"; "-fprint0"; "-fprint"
   ]
 in
-let rec parse name type_ path = function
+let rec parse name type_ maxdepth path = function
   | [] ->
     let resolved = match path with Some p -> p | None -> "." in
-    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = resolved; name; type_ }))
-  | "-name" :: n :: rest -> parse (Some n) type_ path rest
-  | "-type" :: "f" :: rest -> parse name (Some `File) path rest
-  | "-type" :: "d" :: rest -> parse name (Some `Dir) path rest
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = resolved; name; type_; maxdepth }))
+  | "-name" :: n :: rest -> parse (Some n) type_ maxdepth path rest
+  | "-type" :: "f" :: rest -> parse name (Some `File) maxdepth path rest
+  | "-type" :: "d" :: rest -> parse name (Some `Dir) maxdepth path rest
+  | "-maxdepth" :: d :: rest ->
+    (match int_of_string_opt d with
+     | Some n -> parse name type_ (Some n) path rest
+     | None -> parse name type_ maxdepth path rest)
   | "-exec" :: rest | "-ok" :: rest
-  | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ path (skip_exec rest)
+  | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ maxdepth path (skip_exec rest)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then (
@@ -481,15 +498,15 @@ let rec parse name type_ path = function
       if List.mem arg value_flags
       then (
         match rest with
-        | _ :: rest' -> parse name type_ path rest'
-        | [] -> parse name type_ path rest)
-      else parse name type_ path rest)
+        | _ :: rest' -> parse name type_ maxdepth path rest'
+        | [] -> parse name type_ maxdepth path rest)
+      else parse name type_ maxdepth path rest)
     else (
       match path with
-      | None -> parse name type_ (Some arg) rest
+      | None -> parse name type_ maxdepth (Some arg) rest
       | Some _ -> None)
 in
-parse None None None args|}
+parse None None None None args|}
     }
   ; { name = "Head"
     ; anon_pattern = "Head _"
@@ -603,7 +620,7 @@ parse 10 None args|}
     }
   ; { name = "Grep"
     ; anon_pattern = "Grep _"
-    ; bind_pattern = "Grep { pattern; path; recursive; case_sensitive }"
+    ; bind_pattern = "Grep { pattern; path; recursive; case_sensitive; files_with_matches }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -611,6 +628,7 @@ parse 10 None args|}
       let flag_args =
         (if recursive then [ "-r" ] else [])
         @ (if case_sensitive then [] else [ "-i" ])
+        @ (if files_with_matches then [ "-l" ] else [])
       in
       let args =
         flag_args
@@ -628,41 +646,46 @@ parse 10 None args|}
     ; parse_body =
         Some
           {|
-let rec parse recursive case_sensitive pattern path = function
+let rec parse recursive case_sensitive files_with_matches pattern path = function
   | [] ->
     (match pattern with
-     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Grep { pattern = p; path; recursive; case_sensitive }))
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Grep { pattern = p; path; recursive; case_sensitive; files_with_matches }))
      | None -> None)
   | "-r" :: rest | "-R" :: rest | "--recursive" :: rest ->
-    parse true case_sensitive pattern path rest
+    parse true case_sensitive files_with_matches pattern path rest
   | "-i" :: rest | "--ignore-case" :: rest ->
-    parse recursive false pattern path rest
+    parse recursive false files_with_matches pattern path rest
+  | "-l" :: rest | "--files-with-matches" :: rest ->
+    parse recursive case_sensitive true pattern path rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
-      (* Combined flags: -ri, -ir, -rni, etc. *)
+      (* Combined flags: -ri, -ir, -rli, etc. *)
       let has_r = ref false in
       let has_i = ref false in
+      let has_l = ref false in
       for j = 1 to String.length arg - 1 do
         match arg.[j] with
         | 'r' | 'R' -> has_r := true
         | 'i' -> has_i := true
+        | 'l' -> has_l := true
         | _ -> ()
       done;
       let r' = recursive || !has_r in
       let cs' = if !has_i then false else case_sensitive in
-      parse r' cs' pattern path rest)
+      let l' = files_with_matches || !has_l in
+      parse r' cs' l' pattern path rest)
     else if String.length arg > 0 && arg.[0] = '-'
-    then parse recursive case_sensitive pattern path rest
+    then parse recursive case_sensitive files_with_matches pattern path rest
     else (
       match pattern with
-      | None -> parse recursive case_sensitive (Some arg) path rest
+      | None -> parse recursive case_sensitive files_with_matches (Some arg) path rest
       | Some _ ->
         (match path with
-         | None -> parse recursive case_sensitive pattern (Some arg) rest
+         | None -> parse recursive case_sensitive files_with_matches pattern (Some arg) rest
          | Some _ -> None))
 in
-parse false true None None args|}
+parse false true false None None args|}
     }
   ; { name = "Mkdir"
     ; anon_pattern = "Mkdir _"
@@ -1253,7 +1276,7 @@ match args with
     }
   ; { name = "Uniq"
     ; anon_pattern = "Uniq _"
-    ; bind_pattern = "Uniq { count; duplicates; unique; file }"
+    ; bind_pattern = "Uniq { count; duplicates; unique; skip_fields; skip_chars; file }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -1262,6 +1285,8 @@ match args with
     (if count then [ Shell_ir.Lit ("-c", Shell_ir.default_meta) ] else [])
     @ (if duplicates then [ Shell_ir.Lit ("-d", Shell_ir.default_meta) ] else [])
     @ (if unique then [ Shell_ir.Lit ("-u", Shell_ir.default_meta) ] else [])
+    @ (match skip_fields with Some n -> [ Shell_ir.Lit ("-f", Shell_ir.default_meta); Shell_ir.Lit (string_of_int n, Shell_ir.default_meta) ] | None -> [])
+    @ (match skip_chars with Some n -> [ Shell_ir.Lit ("-s", Shell_ir.default_meta); Shell_ir.Lit (string_of_int n, Shell_ir.default_meta) ] | None -> [])
   in
   let file_args = match file with None -> [] | Some f -> [ Shell_ir.Lit (f, Shell_ir.default_meta) ] in
   { Shell_ir.bin = Exec_program.of_known Exec_program.Uniq
@@ -1275,19 +1300,25 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse count duplicates unique file = function
-  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; file }))
-  | "-c" :: rest -> parse true duplicates unique file rest
-  | "-d" :: rest -> parse count true unique file rest
-  | "-u" :: rest -> parse count duplicates true file rest
-  | "-f" :: _ :: rest -> parse count duplicates unique file rest  (* -f N — skip N fields *)
-  | "-s" :: _ :: rest -> parse count duplicates unique file rest  (* -s N — skip N chars *)
+let rec parse count duplicates unique skip_fields skip_chars file = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file }))
+  | "-c" :: rest -> parse true duplicates unique skip_fields skip_chars file rest
+  | "-d" :: rest -> parse count true unique skip_fields skip_chars file rest
+  | "-u" :: rest -> parse count duplicates true skip_fields skip_chars file rest
+  | "-f" :: n_str :: rest ->
+    (match int_of_string_opt n_str with
+     | Some n -> parse count duplicates unique (Some n) skip_chars file rest
+     | None -> parse count duplicates unique skip_fields skip_chars file rest)
+  | "-s" :: n_str :: rest ->
+    (match int_of_string_opt n_str with
+     | Some n -> parse count duplicates unique skip_fields (Some n) file rest
+     | None -> parse count duplicates unique skip_fields skip_chars file rest)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse count duplicates unique file rest
-    else parse count duplicates unique (Some arg) rest
+    then parse count duplicates unique skip_fields skip_chars file rest
+    else parse count duplicates unique skip_fields skip_chars (Some arg) rest
 in
-parse false false false None args|}
+parse false false false None None None args|}
     }
   ; { name = "Basename"
     ; anon_pattern = "Basename _"
@@ -1799,13 +1830,15 @@ match args with
     }
   ; { name = "Wget"
     ; anon_pattern = "Wget _"
-    ; bind_pattern = "Wget { url; output }"
+    ; bind_pattern = "Wget { url; output; continue_; no_check_certificate }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
-        (match output with None -> [] | Some o -> [ "-O"; o ])
+        (if continue_ then [ "--continue" ] else [])
+        @ (if no_check_certificate then [ "--no-check-certificate" ] else [])
+        @ (match output with None -> [] | Some o -> [ "-O"; o ])
         @ [ url ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Wget
@@ -1819,30 +1852,33 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse output url = function
+let rec parse output continue_ ncc url = function
   | [] ->
     (match url with
      | Some u ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wget { url = u; output }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wget { url = u; output; continue_; no_check_certificate = ncc }))
      | None -> None)
-  | "-O" :: o :: rest -> parse (Some o) url rest
-  | "--output-document" :: o :: rest -> parse (Some o) url rest
+  | "-O" :: o :: rest -> parse (Some o) continue_ ncc url rest
+  | "--output-document" :: o :: rest -> parse (Some o) continue_ ncc url rest
+  | "-c" :: rest -> parse output true ncc url rest
+  | "--continue" :: rest -> parse output true ncc url rest
+  | "--no-check-certificate" :: rest -> parse output continue_ true url rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
-     | [ "--output-document"; o ] -> parse (Some o) url rest
+     | [ "--output-document"; o ] -> parse (Some o) continue_ ncc url rest
      | _ ->
        if String.length arg > 0 && arg.[0] = '-'
-       then parse output url rest
+       then parse output continue_ ncc url rest
        else (
          match url with
-         | None -> parse output (Some arg) rest
+         | None -> parse output continue_ ncc (Some arg) rest
          | Some _ -> None))
 in
-parse None None args|}
+parse None false false None args|}
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
-    ; bind_pattern = "Ssh { host; user; command }"
+    ; bind_pattern = "Ssh { host; user; command; port; identity_file }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -1852,8 +1888,13 @@ parse None None args|}
         | None -> host
         | Some u -> u ^ "@" ^ host
       in
+      let port_args = match port with Some p -> [ "-p"; string_of_int p ] | None -> [] in
+      let id_args = match identity_file with Some f -> [ "-i"; f ] | None -> [] in
       let args =
-        [ host_str ] @ (match command with None -> [] | Some c -> [ c ])
+        port_args
+        @ id_args
+        @ [ host_str ]
+        @ (match command with None -> [] | Some c -> [ c ])
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Ssh
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
@@ -1866,32 +1907,52 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let parse host_arg rest =
-  let user, host =
-    match String.split_on_char '@' host_arg with
-    | [ u; h ] -> (Some u, h)
-    | _ -> (None, host_arg)
-  in
-  let command =
-    match rest with
-    | [] -> None
-    | cmd_parts -> Some (String.concat " " cmd_parts)
-  in
-  Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host; user; command }))
+let rec parse port id_file host user command = function
+  | [] ->
+    (match host with
+     | Some h ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host = h; user; command; port; identity_file = id_file }))
+     | None -> None)
+  | "-p" :: p_str :: rest ->
+    (match int_of_string_opt p_str with
+     | Some p -> parse (Some p) id_file host user command rest
+     | None -> parse port id_file host user command rest)
+  | "-i" :: f :: rest -> parse port (Some f) host user command rest
+  | "-o" :: _ :: rest -> parse port id_file host user command rest
+  | "-L" :: _ :: rest -> parse port id_file host user command rest
+  | "-R" :: _ :: rest -> parse port id_file host user command rest
+  | "-D" :: _ :: rest -> parse port id_file host user command rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse port id_file host user command rest
+    else (
+      match host with
+      | None ->
+        (* First positional: [user@]host *)
+        let u, h =
+          match String.split_on_char '@' arg with
+          | [ u; h ] -> (Some u, h)
+          | _ -> (None, arg)
+        in
+        parse port id_file (Some h) u command rest
+      | Some _ ->
+        (* Remaining positional tokens are the remote command *)
+        let cmd = String.concat " " (arg :: rest) in
+        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh
+          { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port; identity_file = id_file })))
 in
-match args with
-| [] -> None
-| host_arg :: rest -> parse host_arg rest|}
+parse None None None None None args|}
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"
-    ; bind_pattern = "Scp { source; dest; recursive }"
+    ; bind_pattern = "Scp { source; dest; recursive; port }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
-        (if recursive then [ "-r" ] else [])
+        (match port with Some p -> [ "-P"; string_of_int p ] | None -> [])
+        @ (if recursive then [ "-r" ] else [])
         @ [ source; dest ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Scp
@@ -1905,25 +1966,33 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse recursive src dest = function
+let rec parse recursive port src dest = function
   | [] ->
     (match src, dest with
      | Some s, Some d ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive; port }))
      | _ -> None)
-  | "-r" :: rest -> parse true src dest rest
+  | "-r" :: rest -> parse true port src dest rest
+  | "-P" :: p_str :: rest ->
+    (match int_of_string_opt p_str with
+     | Some p -> parse recursive (Some p) src dest rest
+     | None -> parse recursive port src dest rest)
+  | "-p" :: rest -> parse recursive port src dest rest
+  | "-C" :: rest -> parse recursive port src dest rest
+  | "-v" :: rest -> parse recursive port src dest rest
+  | "-q" :: rest -> parse recursive port src dest rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse recursive src dest rest
+    then parse recursive port src dest rest
     else (
       match src with
-      | None -> parse recursive (Some arg) dest rest
+      | None -> parse recursive port (Some arg) dest rest
       | Some _ ->
         match dest with
-        | None -> parse recursive src (Some arg) rest
+        | None -> parse recursive port src (Some arg) rest
         | Some _ -> None)
 in
-parse false None None args|}
+parse false None None None args|}
     }
   ; { name = "Tar"
     ; anon_pattern = "Tar _"
@@ -2092,13 +2161,14 @@ parse None None args|}
     }
   ; { name = "Diff"
     ; anon_pattern = "Diff _"
-    ; bind_pattern = "Diff { file1; file2; unified }"
+    ; bind_pattern = "Diff { file1; file2; unified; brief }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
         (if unified then [ "-u" ] else [])
+        @ (if brief then [ "--brief" ] else [])
         @ [ file1; file2 ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Diff
@@ -2112,30 +2182,34 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let rec parse unified files = function
+let rec parse unified brief files = function
   | [] ->
     (match files with
      | [ f1; f2 ] ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified; brief }))
      | _ -> None)
-  | "-u" :: rest -> parse true files rest
-  | "--unified" :: rest -> parse true files rest
+  | "-u" :: rest -> parse true brief files rest
+  | "--unified" :: rest -> parse true brief files rest
+  | "-q" :: rest -> parse unified true files rest
+  | "--brief" :: rest -> parse unified true files rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse unified files rest
-    else parse unified (files @ [ arg ]) rest
+    then parse unified brief files rest
+    else parse unified brief (files @ [ arg ]) rest
 in
-parse false [] args|}
+parse false false [] args|}
     }
   ; { name = "Sed"
     ; anon_pattern = "Sed _"
-    ; bind_pattern = "Sed { expression; file; in_place }"
+    ; bind_pattern = "Sed { expression; file; in_place; extended_regex; suppress_output }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
         (if in_place then [ "-i" ] else [])
+        @ (if extended_regex then [ "-E" ] else [])
+        @ (if suppress_output then [ "-n" ] else [])
         @ [ expression; file ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Sed
@@ -2149,42 +2223,49 @@ parse false [] args|}
     ; parse_body =
         Some
           {|
-let rec parse in_place expr file = function
+let rec parse in_place ext_re suppress expr file = function
   | [] ->
     (match expr, file with
      | Some e, Some f ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place; extended_regex = ext_re; suppress_output = suppress }))
      | _ -> None)
   | "-i" :: rest ->
     (* macOS sed -i '' takes an empty suffix; GNU sed -i has no suffix.
        Only skip the next token if it's an explicit empty string (macOS style).
        Non-empty non-flag tokens are the expression, not a suffix. *)
     (match rest with
-     | "" :: rest' -> parse true expr file rest'   (* -i '' — macOS empty suffix *)
-     | _ -> parse true expr file rest)              (* -i at end or GNU style *)
-  | "-e" :: e :: rest -> parse in_place (Some e) file rest  (* explicit expression *)
-  | "-n" :: rest -> parse in_place expr file rest   (* suppress output — boolean *)
+     | "" :: rest' -> parse true ext_re suppress expr file rest'   (* -i '' — macOS empty suffix *)
+     | _ -> parse true ext_re suppress expr file rest)              (* -i at end or GNU style *)
+  | "-e" :: e :: rest -> parse in_place ext_re suppress (Some e) file rest  (* explicit expression *)
+  | "-E" :: rest | "--regexp-extended" :: rest -> parse in_place true suppress expr file rest
+  | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest -> parse in_place ext_re true expr file rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse in_place expr file rest
+    then parse in_place ext_re suppress expr file rest
     else (
       match expr with
-      | None -> parse in_place (Some arg) file rest
+      | None -> parse in_place ext_re suppress (Some arg) file rest
       | Some _ ->
         match file with
-        | None -> parse in_place expr (Some arg) rest
+        | None -> parse in_place ext_re suppress expr (Some arg) rest
         | Some _ -> None)
 in
-parse false None None args|}
+parse false false false None None args|}
     }
   ; { name = "Rsync"
     ; anon_pattern = "Rsync _"
-    ; bind_pattern = "Rsync { source; dest; flags }"
+    ; bind_pattern = "Rsync { source; dest; archive; delete; dry_run; compress; flags }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let args = flags @ [ source; dest ] in
+      let typed_flags =
+        (if archive then [ "-a" ] else [])
+        @ (if delete then [ "--delete" ] else [])
+        @ (if dry_run then [ "--dry-run" ] else [])
+        @ (if compress then [ "-z" ] else [])
+      in
+      let args = typed_flags @ flags @ [ source; dest ] in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Rsync
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
@@ -2211,41 +2292,52 @@ let rsync_value_flags =
   ; "--block-size"; "--checksum-choice"
   ]
 in
-let rec parse flags src dst = function
+let rec parse flags archive delete dry_run compress src dst = function
   | [] ->
     (match src, dst with
      | Some s, Some d ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; flags = List.rev flags }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; archive; delete; dry_run; compress; flags = List.rev flags }))
      | _ -> None)
+  | "-a" :: rest -> parse flags true delete dry_run compress src dst rest
+  | "--archive" :: rest -> parse flags true delete dry_run compress src dst rest
+  | "--delete" :: rest -> parse flags archive true dry_run compress src dst rest
+  | "--dry-run" :: rest -> parse flags archive delete true compress src dst rest
+  | "-n" :: rest -> parse flags archive delete true compress src dst rest
+  | "-z" :: rest -> parse flags archive delete dry_run true src dst rest
+  | "--compress" :: rest -> parse flags archive delete dry_run true src dst rest
   | arg :: val_ :: rest
     when String.length arg > 0 && arg.[0] = '-'
          && List.mem arg rsync_value_flags ->
-    parse (val_ :: arg :: flags) src dst rest
+    parse (val_ :: arg :: flags) archive delete dry_run compress src dst rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ flag; value ] when List.mem flag rsync_value_flags ->
-       parse (value :: flag :: flags) src dst rest
+       parse (value :: flag :: flags) archive delete dry_run compress src dst rest
      | _ ->
        if String.length arg > 0 && arg.[0] = '-'
-       then parse (arg :: flags) src dst rest
+       then parse (arg :: flags) archive delete dry_run compress src dst rest
        else (
          match src with
-         | None -> parse flags (Some arg) dst rest
+         | None -> parse flags archive delete dry_run compress (Some arg) dst rest
          | Some _ ->
            match dst with
-           | None -> parse flags src (Some arg) rest
+           | None -> parse flags archive delete dry_run compress src (Some arg) rest
            | Some _ -> None))
 in
-parse [] None None args|}
+parse [] false false false false None None args|}
     }
   ; { name = "Node"
     ; anon_pattern = "Node _"
-    ; bind_pattern = "Node { script; args }"
+    ; bind_pattern = "Node { script; args; inline }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let all_args = script :: args in
+      let all_args =
+        match inline with
+        | Some code -> [ "-e"; code ] @ args
+        | None -> script :: args
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Node
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
       ; env = []
@@ -2257,27 +2349,38 @@ parse [] None None args|}
     ; parse_body =
         Some
           {|
-let rec parse script extra = function
+let rec parse inline script extra = function
   | [] ->
-    (match script with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = s; args = List.rev extra }))
-     | None -> None)
+    (match inline, script with
+     | Some code, _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = ""; args = List.rev extra; inline = Some code }))
+     | None, Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = s; args = List.rev extra; inline = None }))
+     | None, None -> None)
+  | "-e" :: code :: rest -> parse (Some code) script extra rest
   | arg :: rest ->
-    (match script with
-     | None -> parse (Some arg) extra rest
-     | Some _ -> parse script (arg :: extra) rest)
+    (match inline, script with
+     | Some _, _ -> parse inline script (arg :: extra) rest
+     | None, Some _ -> parse inline script (arg :: extra) rest
+     | None, None ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra rest
+       else parse inline (Some arg) extra rest)
 in
-parse None [] args|}
+parse None None [] args|}
     }
   ; { name = "Python"
     ; anon_pattern = "Python _"
-    ; bind_pattern = "Python { script; args }"
+    ; bind_pattern = "Python { script; args; inline }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let all_args = script :: args in
+      let all_args =
+        match inline with
+        | Some code -> [ "-c"; code ] @ args
+        | None -> script :: args
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Python
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
       ; env = []
@@ -2289,27 +2392,38 @@ parse None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse script extra = function
+let rec parse inline script extra = function
   | [] ->
-    (match script with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = s; args = List.rev extra }))
-     | None -> None)
+    (match inline, script with
+     | Some code, _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = ""; args = List.rev extra; inline = Some code }))
+     | None, Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = s; args = List.rev extra; inline = None }))
+     | None, None -> None)
+  | "-c" :: code :: rest -> parse (Some code) script extra rest
   | arg :: rest ->
-    (match script with
-     | None -> parse (Some arg) extra rest
-     | Some _ -> parse script (arg :: extra) rest)
+    (match inline, script with
+     | Some _, _ -> parse inline script (arg :: extra) rest
+     | None, Some _ -> parse inline script (arg :: extra) rest
+     | None, None ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra rest
+       else parse inline (Some arg) extra rest)
 in
-parse None [] args|}
+parse None None [] args|}
     }
   ; { name = "Python3"
     ; anon_pattern = "Python3 _"
-    ; bind_pattern = "Python3 { script; args }"
+    ; bind_pattern = "Python3 { script; args; inline }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let all_args = script :: args in
+      let all_args =
+        match inline with
+        | Some code -> [ "-c"; code ] @ args
+        | None -> script :: args
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Python3
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
       ; env = []
@@ -2321,18 +2435,25 @@ parse None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse script extra = function
+let rec parse inline script extra = function
   | [] ->
-    (match script with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = s; args = List.rev extra }))
-     | None -> None)
+    (match inline, script with
+     | Some code, _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = ""; args = List.rev extra; inline = Some code }))
+     | None, Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = s; args = List.rev extra; inline = None }))
+     | None, None -> None)
+  | "-c" :: code :: rest -> parse (Some code) script extra rest
   | arg :: rest ->
-    (match script with
-     | None -> parse (Some arg) extra rest
-     | Some _ -> parse script (arg :: extra) rest)
+    (match inline, script with
+     | Some _, _ -> parse inline script (arg :: extra) rest
+     | None, Some _ -> parse inline script (arg :: extra) rest
+     | None, None ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra rest
+       else parse inline (Some arg) extra rest)
 in
-parse None [] args|}
+parse None None [] args|}
     }
   ; { name = "Pip"
     ; anon_pattern = "Pip _"
@@ -2417,13 +2538,17 @@ parse None None 0 false args|}
   ; subcommand_args_ctor ~name:"Gh" ~risk:"`Audited" ~sandbox:"`Host"
   ; { name = "Chmod"
     ; anon_pattern = "Chmod _"
-    ; bind_pattern = "Chmod { mode; path }"
+    ; bind_pattern = "Chmod { mode; path; recursive }"
     ; risk = "`Privileged"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
+      let args =
+        (if recursive then [ "-R" ] else [])
+        @ [ mode; path ]
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Chmod
-      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) [ mode; path ]
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -2433,34 +2558,40 @@ parse None None 0 false args|}
     ; parse_body =
         Some
           {|
-let rec parse mode path = function
+let rec parse recursive mode path = function
   | [] ->
     (match mode, path with
      | Some m, Some p ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chmod { mode = m; path = p }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chmod { mode = m; path = p; recursive }))
      | _ -> None)
+  | "-R" :: rest -> parse true mode path rest
+  | "--recursive" :: rest -> parse true mode path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse mode path rest
+    then parse recursive mode path rest
     else (
       match mode with
-      | None -> parse (Some arg) path rest
+      | None -> parse recursive (Some arg) path rest
       | Some _ ->
         (match path with
-         | None -> parse mode (Some arg) rest
+         | None -> parse recursive mode (Some arg) rest
          | Some _ -> None))
 in
-parse None None args|}
+parse false None None args|}
     }
   ; { name = "Chown"
     ; anon_pattern = "Chown _"
-    ; bind_pattern = "Chown { owner; path }"
+    ; bind_pattern = "Chown { owner; path; recursive }"
     ; risk = "`Privileged"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
+      let args =
+        (if recursive then [ "-R" ] else [])
+        @ [ owner; path ]
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Chown
-      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) [ owner; path ]
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -2470,24 +2601,26 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let rec parse owner path = function
+let rec parse recursive owner path = function
   | [] ->
     (match owner, path with
      | Some o, Some p ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chown { owner = o; path = p }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chown { owner = o; path = p; recursive }))
      | _ -> None)
+  | "-R" :: rest -> parse true owner path rest
+  | "--recursive" :: rest -> parse true owner path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse owner path rest
+    then parse recursive owner path rest
     else (
       match owner with
-      | None -> parse (Some arg) path rest
+      | None -> parse recursive (Some arg) path rest
       | Some _ ->
         (match path with
-         | None -> parse owner (Some arg) rest
+         | None -> parse recursive owner (Some arg) rest
          | Some _ -> None))
 in
-parse None None args|}
+parse false None None args|}
     }
   ; subcommand_args_ctor ~name:"Docker" ~risk:"`Audited" ~sandbox:"`Docker"
   ; subcommand_args_ctor ~name:"Opam" ~risk:"`Audited" ~sandbox:"`Host"

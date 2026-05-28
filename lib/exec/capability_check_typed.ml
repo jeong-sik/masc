@@ -62,7 +62,7 @@ let of_command = function
       @ [ arg repo ]
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Git, args) ]
-  | Shell_ir_typed.W (Curl { url; method_; headers; body }) ->
+  | Shell_ir_typed.W (Curl { url; method_; headers; body; output_file; follow_redirects; insecure }) ->
     let method_args =
       match method_ with
       | `GET -> []
@@ -80,7 +80,10 @@ let of_command = function
       | None -> []
       | Some d -> [ arg "-d"; arg d ]
     in
-    let args = method_args @ header_args @ body_args @ [ arg url ] in
+    let output_args = match output_file with None -> [] | Some o -> [ arg "-o"; arg o ] in
+    let follow_args = if follow_redirects then [ arg "-L" ] else [] in
+    let insecure_args = if insecure then [ arg "-k" ] else [] in
+    let args = method_args @ header_args @ body_args @ output_args @ follow_args @ insecure_args @ [ arg url ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Curl, args) ]
   | Shell_ir_typed.W (Rm { paths; recursive; force }) ->
     let flag_args =
@@ -90,7 +93,7 @@ let of_command = function
   | Shell_ir_typed.W (Sudo { target_argv }) ->
     let args = List.map arg target_argv in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sudo, args) ]
-  | Shell_ir_typed.W (Find { path; name; type_ }) ->
+  | Shell_ir_typed.W (Find { path; name; type_; maxdepth }) ->
     let args =
       arg path
       :: (match name with None -> [] | Some n -> [ arg "-name"; arg n ])
@@ -98,6 +101,7 @@ let of_command = function
          | None -> []
          | Some `File -> [ arg "-type"; arg "f" ]
          | Some `Dir -> [ arg "-type"; arg "d" ])
+      @ (match maxdepth with None -> [] | Some d -> [ arg "-maxdepth"; arg (string_of_int d) ])
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Find, args) ]
   | Shell_ir_typed.W (Head { path; lines }) ->
@@ -106,10 +110,11 @@ let of_command = function
   | Shell_ir_typed.W (Tail { path; lines }) ->
     let args = [ arg "-n"; arg (string_of_int lines); arg path ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Tail, args) ]
-  | Shell_ir_typed.W (Grep { pattern; path; recursive; case_sensitive }) ->
+  | Shell_ir_typed.W (Grep { pattern; path; recursive; case_sensitive; files_with_matches }) ->
     let args =
       (if recursive then [ arg "-r" ] else [])
       @ (if case_sensitive then [] else [ arg "-i" ])
+      @ (if files_with_matches then [ arg "-l" ] else [])
       @ arg pattern
         :: (match path with None -> [] | Some p -> [ arg p ])
     in
@@ -211,11 +216,13 @@ let of_command = function
   | Shell_ir_typed.W (Printenv { name }) ->
     let args = match name with None -> [] | Some n -> [ arg n ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Printenv, args) ]
-  | Shell_ir_typed.W (Uniq { count; duplicates; unique; file }) ->
+  | Shell_ir_typed.W (Uniq { count; duplicates; unique; skip_fields; skip_chars; file }) ->
     let flag_args =
       (if count then [ arg "-c" ] else [])
       @ (if duplicates then [ arg "-d" ] else [])
       @ (if unique then [ arg "-u" ] else [])
+      @ (match skip_fields with Some n -> [ arg "-f"; arg (string_of_int n) ] | None -> [])
+      @ (match skip_chars with Some n -> [ arg "-s"; arg (string_of_int n) ] | None -> [])
     in
     let file_args = match file with None -> [] | Some f -> [ arg f ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Uniq, flag_args @ file_args) ]
@@ -285,17 +292,24 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Ps, flag_args) ]
   | Shell_ir_typed.W (Tty ()) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Tty, []) ]
-  | Shell_ir_typed.W (Wget { url; output }) ->
-    let flag_args = match output with None -> [] | Some o -> [ arg "-O"; arg o ] in
+  | Shell_ir_typed.W (Wget { url; output; continue_; no_check_certificate }) ->
+    let flag_args =
+      (if continue_ then [ arg "--continue" ] else [])
+      @ (if no_check_certificate then [ arg "--no-check-certificate" ] else [])
+      @ (match output with None -> [] | Some o -> [ arg "-O"; arg o ])
+    in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Wget, flag_args @ [ arg url ]) ]
-  | Shell_ir_typed.W (Ssh { host; user; command }) ->
+  | Shell_ir_typed.W (Ssh { host; user; command; port; identity_file }) ->
     let target =
       match user with None -> host | Some u -> u ^ "@" ^ host
     in
+    let port_args = match port with Some p -> [ arg "-p"; arg (string_of_int p) ] | None -> [] in
+    let id_args = match identity_file with Some f -> [ arg "-i"; arg f ] | None -> [] in
     let cmd_args = match command with None -> [] | Some c -> [ arg c ] in
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, arg target :: cmd_args) ]
-  | Shell_ir_typed.W (Scp { source; dest; recursive }) ->
-    let flag_args = if recursive then [ arg "-r" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, port_args @ id_args @ [ arg target ] @ cmd_args) ]
+  | Shell_ir_typed.W (Scp { source; dest; recursive; port }) ->
+    let port_args = match port with Some p -> [ arg "-P"; arg (string_of_int p) ] | None -> [] in
+    let flag_args = port_args @ (if recursive then [ arg "-r" ] else []) in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Scp, flag_args @ [ arg source; arg dest ]) ]
   | Shell_ir_typed.W (Tar { action; archive; paths; compression }) ->
     let action_flag =
@@ -317,20 +331,36 @@ let of_command = function
     let flag_args = match jobs with None -> [] | Some j -> [ arg "-j"; arg (string_of_int j) ] in
     let target_args = match target with None -> [] | Some t -> [ arg t ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Make, flag_args @ target_args) ]
-  | Shell_ir_typed.W (Diff { file1; file2; unified }) ->
-    let flag_args = if unified then [ arg "-u" ] else [] in
+  | Shell_ir_typed.W (Diff { file1; file2; unified; brief }) ->
+    let flag_args =
+      (if unified then [ arg "-u" ] else [])
+      @ (if brief then [ arg "--brief" ] else [])
+    in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Diff, flag_args @ [ arg file1; arg file2 ]) ]
-  | Shell_ir_typed.W (Sed { expression; file; in_place }) ->
-    let flag_args = if in_place then [ arg "-i" ] else [] in
+  | Shell_ir_typed.W (Sed { expression; file; in_place; extended_regex; suppress_output }) ->
+    let flag_args =
+      (if in_place then [ arg "-i" ] else [])
+      @ (if extended_regex then [ arg "-E" ] else [])
+      @ (if suppress_output then [ arg "-n" ] else [])
+    in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sed, flag_args @ [ arg "-e"; arg expression; arg file ]) ]
-  | Shell_ir_typed.W (Rsync { source; dest; flags }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rsync, List.map arg flags @ [ arg source; arg dest ]) ]
-  | Shell_ir_typed.W (Node { script; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Node, arg script :: List.map arg args) ]
-  | Shell_ir_typed.W (Python { script; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python, arg script :: List.map arg args) ]
-  | Shell_ir_typed.W (Python3 { script; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python3, arg script :: List.map arg args) ]
+  | Shell_ir_typed.W (Rsync { source; dest; archive; delete; dry_run; compress; flags }) ->
+    let typed_flags =
+      (if archive then [ arg "-a" ] else [])
+      @ (if delete then [ arg "--delete" ] else [])
+      @ (if dry_run then [ arg "--dry-run" ] else [])
+      @ (if compress then [ arg "-z" ] else [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rsync, typed_flags @ List.map arg flags @ [ arg source; arg dest ]) ]
+  | Shell_ir_typed.W (Node { script; args; inline }) ->
+    let entry = match inline with Some code -> [ arg "-e"; arg code ] | None -> [ arg script ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Node, entry @ List.map arg args) ]
+  | Shell_ir_typed.W (Python { script; args; inline }) ->
+    let entry = match inline with Some code -> [ arg "-c"; arg code ] | None -> [ arg script ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python, entry @ List.map arg args) ]
+  | Shell_ir_typed.W (Python3 { script; args; inline }) ->
+    let entry = match inline with Some code -> [ arg "-c"; arg code ] | None -> [ arg script ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Python3, entry @ List.map arg args) ]
   | Shell_ir_typed.W (Pip { subcommand; packages }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Pip, arg subcommand :: List.map arg packages) ]
   | Shell_ir_typed.W (Patch { file; patchfile; strip; reverse }) ->
@@ -349,10 +379,12 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Go, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Gh { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Gh, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Chmod { mode; path }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chmod, [ arg mode; arg path ]) ]
-  | Shell_ir_typed.W (Chown { owner; path }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chown, [ arg owner; arg path ]) ]
+  | Shell_ir_typed.W (Chmod { mode; path; recursive }) ->
+    let flag_args = if recursive then [ arg "-R" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chmod, flag_args @ [ arg mode; arg path ]) ]
+  | Shell_ir_typed.W (Chown { owner; path; recursive }) ->
+    let flag_args = if recursive then [ arg "-R" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chown, flag_args @ [ arg owner; arg path ]) ]
   | Shell_ir_typed.W (Docker { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Docker, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Opam { subcommand; args }) ->

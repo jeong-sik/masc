@@ -845,6 +845,37 @@ let test_grep_combined_flags () =
     ~expected_recursive:false ~expected_case_sensitive:false ~expected_pattern:"pattern" ~expected_path:(Some "path")
 ;;
 
+(** Verify that [grep] captures -l/--files-with-matches as a typed field. *)
+let test_grep_files_with_matches () =
+  let check_grep cmd ~expected_recursive ~expected_case_sensitive ~expected_fwm ~expected_pattern ~expected_path =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Grep { pattern; path; recursive; case_sensitive; files_with_matches }) ->
+      check bool (Printf.sprintf "\"%s\" → recursive" cmd) expected_recursive recursive;
+      check bool (Printf.sprintf "\"%s\" → case_sensitive" cmd) expected_case_sensitive case_sensitive;
+      check bool (Printf.sprintf "\"%s\" → files_with_matches" cmd) expected_fwm files_with_matches;
+      check string (Printf.sprintf "\"%s\" → pattern" cmd) expected_pattern pattern;
+      check (option string) (Printf.sprintf "\"%s\" → path" cmd) expected_path path
+    | _ -> failf "expected Grep for: %s" cmd
+  in
+  (* -l standalone *)
+  check_grep "grep -l pattern path"
+    ~expected_recursive:false ~expected_case_sensitive:true ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* --files-with-matches long form *)
+  check_grep "grep --files-with-matches pattern path"
+    ~expected_recursive:false ~expected_case_sensitive:true ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* combined -rl *)
+  check_grep "grep -rl pattern path"
+    ~expected_recursive:true ~expected_case_sensitive:true ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* combined -rli *)
+  check_grep "grep -rli pattern path"
+    ~expected_recursive:true ~expected_case_sensitive:false ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* -r only (no -l) *)
+  check_grep "grep -r pattern path"
+    ~expected_recursive:true ~expected_case_sensitive:true ~expected_fwm:false ~expected_pattern:"pattern" ~expected_path:(Some "path")
+;;
+
 let test_wget_long_form () =
   let check_wget cmd ~expected_url ~expected_output ~expected_continue ~expected_ncc =
     let simple = parse_simple cmd in
@@ -1117,6 +1148,8 @@ let suite =
     , [ test_case "field values" `Quick test_uniq_value_flags ] )
   ; ( "E2E: Grep combined flags"
     , [ test_case "field values" `Quick test_grep_combined_flags ] )
+  ; ( "E2E: Grep -l/--files-with-matches"
+    , [ test_case "field values" `Quick test_grep_files_with_matches ] )
   ; ( "E2E: Wget --output-document=X"
     , [ test_case "field values" `Quick test_wget_long_form ] )
   ; ( "E2E: Diff --brief"

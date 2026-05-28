@@ -107,10 +107,11 @@ let of_command = function
   | Shell_ir_typed.W (Tail { path; lines }) ->
     let args = [ arg "-n"; arg (string_of_int lines); arg path ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Tail, args) ]
-  | Shell_ir_typed.W (Grep { pattern; path; recursive; case_sensitive }) ->
+  | Shell_ir_typed.W (Grep { pattern; path; recursive; case_sensitive; files_with_matches }) ->
     let args =
       (if recursive then [ arg "-r" ] else [])
       @ (if case_sensitive then [] else [ arg "-i" ])
+      @ (if files_with_matches then [ arg "-l" ] else [])
       @ arg pattern
         :: (match path with None -> [] | Some p -> [ arg p ])
     in

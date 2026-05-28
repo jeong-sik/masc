@@ -84,6 +84,7 @@ and (_, _, _, _) command =
       ; path : string option
       ; recursive : bool
       ; case_sensitive : bool
+      ; files_with_matches : bool
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Mkdir :

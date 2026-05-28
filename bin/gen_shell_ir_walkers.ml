@@ -608,7 +608,7 @@ parse 10 None args|}
     }
   ; { name = "Grep"
     ; anon_pattern = "Grep _"
-    ; bind_pattern = "Grep { pattern; path; recursive; case_sensitive }"
+    ; bind_pattern = "Grep { pattern; path; recursive; case_sensitive; files_with_matches }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -616,6 +616,7 @@ parse 10 None args|}
       let flag_args =
         (if recursive then [ "-r" ] else [])
         @ (if case_sensitive then [] else [ "-i" ])
+        @ (if files_with_matches then [ "-l" ] else [])
       in
       let args =
         flag_args
@@ -633,41 +634,46 @@ parse 10 None args|}
     ; parse_body =
         Some
           {|
-let rec parse recursive case_sensitive pattern path = function
+let rec parse recursive case_sensitive files_with_matches pattern path = function
   | [] ->
     (match pattern with
-     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Grep { pattern = p; path; recursive; case_sensitive }))
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Grep { pattern = p; path; recursive; case_sensitive; files_with_matches }))
      | None -> None)
   | "-r" :: rest | "-R" :: rest | "--recursive" :: rest ->
-    parse true case_sensitive pattern path rest
+    parse true case_sensitive files_with_matches pattern path rest
   | "-i" :: rest | "--ignore-case" :: rest ->
-    parse recursive false pattern path rest
+    parse recursive false files_with_matches pattern path rest
+  | "-l" :: rest | "--files-with-matches" :: rest ->
+    parse recursive case_sensitive true pattern path rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
-      (* Combined flags: -ri, -ir, -rni, etc. *)
+      (* Combined flags: -ri, -ir, -rli, etc. *)
       let has_r = ref false in
       let has_i = ref false in
+      let has_l = ref false in
       for j = 1 to String.length arg - 1 do
         match arg.[j] with
         | 'r' | 'R' -> has_r := true
         | 'i' -> has_i := true
+        | 'l' -> has_l := true
         | _ -> ()
       done;
       let r' = recursive || !has_r in
       let cs' = if !has_i then false else case_sensitive in
-      parse r' cs' pattern path rest)
+      let l' = files_with_matches || !has_l in
+      parse r' cs' l' pattern path rest)
     else if String.length arg > 0 && arg.[0] = '-'
-    then parse recursive case_sensitive pattern path rest
+    then parse recursive case_sensitive files_with_matches pattern path rest
     else (
       match pattern with
-      | None -> parse recursive case_sensitive (Some arg) path rest
+      | None -> parse recursive case_sensitive files_with_matches (Some arg) path rest
       | Some _ ->
         (match path with
-         | None -> parse recursive case_sensitive pattern (Some arg) rest
+         | None -> parse recursive case_sensitive files_with_matches pattern (Some arg) rest
          | Some _ -> None))
 in
-parse false true None None args|}
+parse false true false None None args|}
     }
   ; { name = "Mkdir"
     ; anon_pattern = "Mkdir _"

@@ -106,15 +106,16 @@ let pp fmt = function
     Format.fprintf fmt "Head(path=%s, lines=%d)" path lines
   | W (Tail { path; lines }) ->
     Format.fprintf fmt "Tail(path=%s, lines=%d)" path lines
-  | W (Grep { pattern; path; recursive; case_sensitive }) ->
+  | W (Grep { pattern; path; recursive; case_sensitive; files_with_matches }) ->
     Format.fprintf
       fmt
-      "Grep(pattern=%s, path=%a, recursive=%b, case_sensitive=%b)"
+      "Grep(pattern=%s, path=%a, recursive=%b, case_sensitive=%b, files_with_matches=%b)"
       pattern
       (Format.pp_print_option Format.pp_print_string)
       path
       recursive
       case_sensitive
+      files_with_matches
   | W (Mkdir { path; parents }) ->
     Format.fprintf fmt "Mkdir(path=%s, parents=%b)" path parents
   | W (Wc { path; mode }) ->

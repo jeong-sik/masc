@@ -207,7 +207,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
              ~generated_at ~generated_at_unix
              ~fresh_until:(Dashboard_utils.iso_of_unix fresh_until_unix)
              ~fresh_until_unix ~keeper_name ())
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)

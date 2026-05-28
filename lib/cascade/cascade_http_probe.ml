@@ -99,7 +99,7 @@ let parse_response ?(total = 1) json =
          ; source = Llm_provider.Provider_throttle.Discovered
          }
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 (* ── HTTP probe ─────────────────────────────────────────────── *)

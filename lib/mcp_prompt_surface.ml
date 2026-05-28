@@ -60,7 +60,7 @@ let assoc_string args key =
   | Some (`String value) ->
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
-  | _ -> None
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | None -> None
 
 let message_json text =
   `Assoc

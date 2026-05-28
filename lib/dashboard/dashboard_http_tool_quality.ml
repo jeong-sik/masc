@@ -55,7 +55,7 @@ let classify_process_status (json : Yojson.Safe.t) : string option =
       if code = 0 then None else Some (Printf.sprintf "%s_exit_%d" op code)
     | _ -> None
     end
-  | _ -> None
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> None
 
 let classify_failure_output (output : string) : string =
   if String.length output = 0 then "empty_output"
@@ -351,7 +351,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     in
     let was_truncated = match record with
       | `Assoc fields -> List.assoc_opt "truncated_to" fields <> None
-      | _ -> false
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
     in
     if ok then incr success;
     (* hourly trend bucketing *)

@@ -16,7 +16,7 @@ let yojson_variant_name : Yojson.Safe.t -> string = function
 let lookup (json : Yojson.Safe.t) (key : string) : Yojson.Safe.t option =
   match json with
   | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let string json key : string extraction =
   match lookup json key with

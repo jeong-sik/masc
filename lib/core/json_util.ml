@@ -16,7 +16,7 @@
 let get_string : Yojson.Safe.t -> string -> string option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `String s -> Some s
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
 
 let get_string_with_default json ~key ~default =
   match Yojson.Safe.Util.member key json with
@@ -37,18 +37,18 @@ let get_int : Yojson.Safe.t -> string -> int option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Int n -> Some n
   | `Intlit s -> int_of_string_opt s
-  | _ -> None
+  | `Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 
 let get_float : Yojson.Safe.t -> string -> float option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Float f -> Some f
   | `Int n -> Some (Float.of_int n)
-  | _ -> None
+  | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> None
 
 let get_bool : Yojson.Safe.t -> string -> bool option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Bool b -> Some b
-  | _ -> None
+  | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 
 let get_string_list : Yojson.Safe.t -> string -> string list = fun json key ->
   match Yojson.Safe.Util.member key json with
@@ -61,12 +61,12 @@ let get_string_list : Yojson.Safe.t -> string -> string list = fun json key ->
 let get_object : Yojson.Safe.t -> string -> Yojson.Safe.t option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Assoc _ as json' -> Some json'
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let get_array : Yojson.Safe.t -> string -> Yojson.Safe.t option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `List _ as json' -> Some json'
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None
 
 (** {1 Required field extraction (Result-returning)} *)
 

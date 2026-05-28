@@ -149,7 +149,7 @@ let tool_access_to_json access =
 let json_member_present key (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields -> List.mem_assoc key fields
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
 let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =

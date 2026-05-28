@@ -38,7 +38,7 @@ let is_jsonrpc_response json =
       let has_method = has_field "method" json in
       let has_id = has_field "id" json in
       is_jsonrpc_v2 json && has_id && (has_result || has_error) && not has_method
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 let is_notification req = req.id = None
 

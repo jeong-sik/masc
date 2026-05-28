@@ -50,7 +50,7 @@ let append_archive_tasks config (tasks : task list) =
             | Some (`List items) -> items
             | _ -> []
           end
-        | _ -> []
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> []
       in
       let new_tasks = List.map task_to_yojson tasks in
       let seen = Hashtbl.create 64 in

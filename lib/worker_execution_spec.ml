@@ -30,7 +30,7 @@ let option_string json =
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
   | `Null -> None
-  | _ -> None
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
 
 let allowed_fields =
   [

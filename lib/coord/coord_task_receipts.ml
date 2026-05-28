@@ -141,7 +141,7 @@ let json_member_path path json =
 let json_raw_string_path path json =
   match json_member_path path json with
   | `String value -> Some (String.trim value)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
 ;;
 
 let json_string_path path json =

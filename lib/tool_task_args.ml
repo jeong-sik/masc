@@ -47,7 +47,7 @@ let synthesize_summary_from_siblings args =
     | Some (`String s) ->
         let trimmed = String.trim s in
         if String.equal trimmed "" then None else Some trimmed
-    | _ -> None
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | None -> None
   in
   let first_line s =
     match String.index_opt s '\n' with

@@ -179,7 +179,7 @@ let parse_manifest json =
              | _ -> [])
             |> List.filter_map parse_recommendation;
         }
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let stat_mtime path =
   try Some ((Unix.stat path).Unix.st_mtime) with Unix.Unix_error _ -> None

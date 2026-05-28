@@ -90,7 +90,7 @@ let body_jsonrpc_id body_str =
   try
     match Yojson.Safe.from_string body_str with
     | `Assoc fields -> List.assoc_opt "id" fields
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   with Yojson.Json_error _ -> None
 
 (* RFC-0100 PR-3: extract [params.name] from a [tools/call] body for

@@ -106,7 +106,7 @@ let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
              let keeper_name =
                match raw_keeper_name with
                | `String value -> String.trim value
-               | _ -> ""
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> ""
              in
              if channel_id = "" || keeper_name = "" then None
              else Some ({ channel_id; keeper_name } : binding))

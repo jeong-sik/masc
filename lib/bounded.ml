@@ -287,7 +287,7 @@ let resolve_path json path =
             (match List.assoc_opt part fields with
              | Some v -> walk v rest
              | None -> None)
-        | _ -> None
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   walk json parts
 

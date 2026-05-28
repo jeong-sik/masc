@@ -169,7 +169,7 @@ let reject_retired_goal_list_status args =
          ; expected = Some "phase"
          ; received = Some (Yojson.Safe.to_string json)
          })
-  | _ -> Ok ()
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Ok ()
 ;;
 
 let goal_upsert_lifecycle_error ~tool_name ~start_time field =

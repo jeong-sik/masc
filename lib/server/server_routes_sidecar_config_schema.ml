@@ -130,7 +130,7 @@ let parse_declared_type json : declared_type option =
      | Some (`String "number") -> Some `Number
      | Some (`String "boolean") -> Some `Boolean
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let schema_field_types ?base_path id : (string * declared_type) list =

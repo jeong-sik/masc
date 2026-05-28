@@ -154,7 +154,7 @@ let workflow_rejection_payload_of_json json =
        (try
           match Yojson.Safe.from_string raw with
           | `Assoc _ as nested -> payload_from_json nested
-          | _ -> None
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
         with
         | Yojson.Json_error _ -> None)
      | None -> None)
@@ -358,7 +358,7 @@ let workflow_scope_key_of_input ~tool_name input =
           Some (Printf.sprintf "%s:task=%s%s" tool_name task_id correction_marker))
      | "keeper_task_claim" -> Some "keeper_task_claim"
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let workflow_rejection_scope_block_fields ~tool_name block =

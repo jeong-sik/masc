@@ -76,7 +76,7 @@ let load_file_config path =
           | `String value ->
               let trimmed = String.trim value in
               if trimmed = "" then None else Some trimmed
-          | _ -> None
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
         in
         {
           worker_spawn =

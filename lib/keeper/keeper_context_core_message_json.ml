@@ -29,7 +29,7 @@ let content_blocks_of_json
   | Some (`List blocks) ->
       let parsed = List.filter_map Agent_sdk.Api.content_block_of_json blocks in
       if List.length parsed = List.length blocks then Some parsed else None
-  | _ -> None
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> None
 
 let string_field_opt key value =
   match value with

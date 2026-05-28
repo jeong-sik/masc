@@ -22,7 +22,7 @@ let structured_error_json = function
        (try
           match Yojson.Safe.from_string raw with
           | `Assoc _ as json -> Some json
-          | _ -> None
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
         with
         | Yojson.Json_error _ -> None)
      | _ -> None)

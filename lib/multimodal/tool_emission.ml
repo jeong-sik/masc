@@ -16,7 +16,7 @@ let lookup_field (result : Yojson.Safe.t) (key : string)
     : Yojson.Safe.t option =
   match result with
   | `Assoc kv -> List.assoc_opt key kv
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let extract_kind_from_result (result : Yojson.Safe.t)
     : Artifact.kind_tag option =

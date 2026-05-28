@@ -543,7 +543,7 @@ let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
             let snapshot =
               match json with
               | `Assoc _ -> parse_snapshot line
-              | _ -> None
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
             in
             match snapshot with
             | Some _ as snapshot -> snapshot

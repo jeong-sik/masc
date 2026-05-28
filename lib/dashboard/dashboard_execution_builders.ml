@@ -211,7 +211,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     match member_assoc "context_ratio" keeper with
     | `Float value -> Some value
     | `Int value -> Some (float_of_int value)
-    | _ -> None
+    | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> None
   in
   let last_action_at =
     String_util.trim_to_option (string_field "last_autonomous_action_at" keeper)

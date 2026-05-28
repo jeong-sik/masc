@@ -589,7 +589,7 @@ let handle_request
       if
         match json with
         | `List _ -> true
-        | _ -> false
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> false
       then
         make_error_typed
           ~id:`Null

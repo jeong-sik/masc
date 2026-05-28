@@ -268,7 +268,7 @@ let tool_called_detail_from_fields fields =
     when tag = "Tool_called" || tag = "tool_called" -> (
       match detail with
       | `Assoc _ -> Some detail
-      | _ -> None)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
   | _ -> None
 
 let tool_called_event_detail json =

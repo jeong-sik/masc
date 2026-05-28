@@ -126,7 +126,7 @@ let dashboard_issue_event_to_json (json : Yojson.Safe.t) : Yojson.Safe.t option 
           ; "cooldown_remaining_ms", `Int 0
           ; "source", `String "heuristic_metrics"
           ])
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let dashboard_issue_events events = List.filter_map dashboard_issue_event_to_json events
@@ -280,7 +280,7 @@ let is_known_degenerate (json : Yojson.Safe.t) : bool =
        , Some (`Float 0.0 | `Int 0)
        , Some (`Bool true) ) -> true
      | _ -> false)
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
 let scrub_legacy_degenerate_rows path =

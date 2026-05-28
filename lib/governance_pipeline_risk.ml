@@ -227,7 +227,7 @@ let rec collect_string_values ~keys json =
             if List.mem normalized_key keys then
               match value with
               | `String text -> [ text ]
-              | _ -> []
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> []
             else
               []
           in

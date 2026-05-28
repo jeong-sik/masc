@@ -254,7 +254,7 @@ let normalize_tool_result
     try
       match Yojson.Safe.from_string error_msg with
       | `Assoc fields -> Some fields
-      | _ -> None
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     with
     | Yojson.Json_error _ -> None
   in

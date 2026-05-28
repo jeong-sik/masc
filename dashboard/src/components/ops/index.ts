@@ -19,8 +19,7 @@ import {
 } from '../../workflow-context'
 import type { OperatorActionLogEntry, OperatorReviewDecision } from '../../types'
 import { QuickIntervene } from './quick-intervene'
-import { KeeperUtilitiesPanel } from './keeper-utilities'
-import { KeeperActionPanel } from '../keeper-action-panel'
+import { RouteLink } from '../common/route-link'
 import {
   actionTypeLabel,
   formatMessageContent,
@@ -235,8 +234,25 @@ export function Ops() {
       <section class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1" aria-label="Operations controls">
         <div class="grid gap-4 order-1 max-[1200px]:order-2">
           <${QuickIntervene} />
-          <${KeeperActionPanel} />
-          <${KeeperUtilitiesPanel} />
+          <section
+            class="${CARD_STANDARD} grid gap-2"
+            data-testid="ops-keeper-fleet-link"
+            aria-label="Keeper fleet pointer"
+          >
+            <h2 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Keeper Fleet</h2>
+            <p class="text-xs text-[var(--color-fg-muted)]">
+              Per-keeper pause, resume, boot, and shutdown live on Monitor → Keeper Fleet.
+              Operations focuses on intervention, governance, and approvals.
+            </p>
+            <${RouteLink}
+              tab="monitoring"
+              params=${{ section: 'agents' }}
+              class="inline-flex w-fit items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
+              title="Open Monitor → Keeper Fleet"
+            >
+              Open Keeper Fleet →
+            <//>
+          </section>
         </div>
 
         <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1" aria-label="Recent operator activity">

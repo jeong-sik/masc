@@ -9,7 +9,7 @@
 # disabling autoboot for this file. discover_keepers_toml still loads it
 # as a profile-defaults source for downstream keepers.
 autoboot_enabled = false
-cascade_name = "primary"
+model = "runpod:glm-coding-with-spark"
 sandbox_profile = "docker"
 network_mode = "inherit"
 repo_cli_identity = "anyang-keepers"

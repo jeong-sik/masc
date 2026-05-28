@@ -15,45 +15,13 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
     naming the "1 day" intent at the call site. *)
 let one_day_seconds_int = Masc_time_constants.day_int
 
-(** Default cascade name for keeper turns. Resolved through the live
-    [Cascade_catalog_runtime] snapshot so the answer reflects the
-    currently-installed catalog rather than module-init state. Falls
-    back to [Cascade_routes.cascade_name_for_use Keeper_turn] (canonical
-    route path) when the snapshot is not yet available, which matches
-    pre-RFC-0066 behavior during early boot.
-
-    RFC-0066 Phase 1: was a string value evaluated at module init,
-    freezing to the static fallback when the catalog was empty at
-    init time. See issue #14624. *)
-let default_cascade_name () =
-  match Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" () with
-  | Ok name -> Cascade_name.to_string name
-  | Error _ ->
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Keeper_turn
-
-
-(** Cascade name for recovery turns when keeper is in Failing phase.
-    Two-profile deployments no longer maintain a separate local recovery lane;
-    recovery reuses the canonical keeper cascade. *)
-let phase_recovery_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Phase_recovery
-
-(** Cascade name for buffer operations (compacting, handing off). *)
-let phase_buffer_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Phase_buffer
-
-let phase_routing_cascade_names =
-  [ phase_buffer_cascade_name; phase_recovery_cascade_name ]
-  |> List.sort_uniq String.compare
-;;
-
-(** Cascade name for turns that must use a tool-capable provider lane. *)
-let tool_required_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Tool_required
+(* Tier/tier-group purge: cascade names are now simple provider:model
+   strings.  All phase routing collapses to the same default. *)
+let default_cascade_name () = "runpod:glm-coding-with-spark"
+let phase_recovery_cascade_name = "runpod:glm-coding-with-spark"
+let phase_buffer_cascade_name = "runpod:glm-coding-with-spark"
+let phase_routing_cascade_names = [ "runpod:glm-coding-with-spark" ]
+let tool_required_cascade_name = "runpod:glm-coding-with-spark"
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward
@@ -491,17 +459,11 @@ let keeper_llm_rerank_enabled () : bool =
   Runtime_params.get keeper_llm_rerank_enabled_rp
 
 (** Named cascade profile for the LLM reranker.
-    Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: [routes.llm_rerank]. *)
+    Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: same global model. *)
 let keeper_llm_rerank_cascade () : string =
   match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
-  | Some v when String.trim v <> "" -> (
-      let trimmed = String.trim v in
-      match Keeper_cascade_profile.logical_use_of_string_opt trimmed with
-      | Some use -> Keeper_cascade_profile.cascade_name_for_use use
-      | None -> trimmed)
-  | _ ->
-      Keeper_cascade_profile.cascade_name_for_use
-        Keeper_cascade_profile.Tool_rerank_use
+  | Some v when String.trim v <> "" -> String.trim v
+  | _ -> default_cascade_name ()
 
 include Keeper_config_rule_thresholds
 

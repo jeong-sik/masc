@@ -100,21 +100,20 @@ let json_string_list_member key = function
       | _ -> [])
   | _ -> []
 
-let profile_names_from_namespace ~prefix = function
-  | Some (`Assoc fields) ->
-    fields
-    |> List.filter_map (fun (name, _value) ->
-           let name = String.trim name in
-           if String.equal name ""
-           then None
-           else Some (Printf.sprintf "%s.%s" prefix name))
-  | _ -> []
-
 let discover_profiles_from_materialized_json json =
-  profile_names_from_namespace ~prefix:"tier" (assoc_opt "tier" json)
-  @ profile_names_from_namespace ~prefix:"tier-group"
-      (assoc_opt "tier-group" json)
-  |> List.sort_uniq String.compare
+  (* Tier/tier-group purge: profiles are route targets (provider:model strings).
+     Discovery reads [routes.*.target] from the materialized JSON. *)
+  match assoc_opt "routes" json with
+  | Some (`Assoc routes) ->
+    routes
+    |> List.filter_map (fun (_name, route_json) ->
+           match assoc_opt "target" route_json with
+           | Some (`String target) ->
+               let trimmed = String.trim target in
+               if String.equal trimmed "" then None else Some trimmed
+           | _ -> None)
+    |> List.sort_uniq String.compare
+  | _ -> []
 
 let discover_profiles_impl ~emit_telemetry ~config_path =
   let load_catalog_source =
@@ -132,39 +131,11 @@ let discover_profiles ~config_path =
 let discover_profiles_for_diagnostics ~config_path =
   discover_profiles_impl ~emit_telemetry:false ~config_path
 
-let materialized_tier_members json tier_name =
-  match
-    Option.bind (assoc_opt "tier" json) (fun tiers_json ->
-        assoc_opt tier_name tiers_json)
-  with
-  | Some tier_json -> json_string_list_member "members" tier_json
-  | None -> []
-
-let materialized_tier_group_tiers json group_name =
-  match
-    Option.bind (assoc_opt "tier-group" json) (fun groups_json ->
-        assoc_opt group_name groups_json)
-  with
-  | Some group_json -> json_string_list_member "tiers" group_json
-  | None -> []
-
-let materialized_model_specs_for_profile json profile =
-  let tier_group_prefix = "tier-group." in
-  let tier_prefix = "tier." in
-  if String.starts_with ~prefix:tier_group_prefix profile then
-    let group_name =
-      String.sub profile (String.length tier_group_prefix)
-        (String.length profile - String.length tier_group_prefix)
-    in
-    materialized_tier_group_tiers json group_name
-    |> List.concat_map (materialized_tier_members json)
-  else if String.starts_with ~prefix:tier_prefix profile then
-    let tier_name =
-      String.sub profile (String.length tier_prefix)
-        (String.length profile - String.length tier_prefix)
-    in
-    materialized_tier_members json tier_name
-  else []
+(* Tier/tier-group purge: [materialized_model_specs_for_profile] and its
+   helpers [materialized_tier_members] / [materialized_tier_group_tiers]
+   are removed.  Profile model specs now come exclusively from the
+   declarative snapshot or runtime profile build; there is no JSON
+   materialized fallback for tier-based resolution. *)
 
 let model_ids_of_specs (specs : string list) : string list =
   specs
@@ -180,57 +151,8 @@ let format_spec_errors specs =
   |> List.map (fun (spec, msg) -> Printf.sprintf "%S (%s)" spec msg)
   |> String.concat ", "
 
-let priority_tier_issue ~profile configured_specs raw_tiers =
-  let configured_model_ids = model_ids_of_specs configured_specs in
-  if configured_model_ids = [] then
-    Some
-      {
-        profile = Some profile;
-        severity = Catalog_error;
-        message =
-          Printf.sprintf
-            "Cascade preset %s uses priority_tier but has no configured \
-             models to validate."
-            profile;
-      }
-  else
-    let normalized =
-      raw_tiers
-      |> List.filter_map (fun tier ->
-             let tier_model_ids =
-               model_ids_of_specs tier
-               |> List.filter (fun model_id ->
-                      List.mem model_id configured_model_ids)
-             in
-             if tier_model_ids = [] then None else Some tier_model_ids)
-    in
-    if normalized = [] then
-      Some
-        {
-          profile = Some profile;
-          severity = Catalog_error;
-          message =
-            Printf.sprintf
-              "Cascade preset %s uses priority_tier, but every tier \
-               collapses after model-id normalization; runtime will fall \
-               back to failover."
-              profile;
-        }
-    else if List.length normalized < List.length raw_tiers then
-      Some
-        {
-          profile = Some profile;
-          severity = Catalog_warn;
-          message =
-            Printf.sprintf
-              "Cascade preset %s uses priority_tier, but %d/%d tier(s) \
-               collapse after model-id normalization."
-              profile
-              (List.length raw_tiers - List.length normalized)
-              (List.length raw_tiers);
-        }
-    else
-      None
+(* Tier/tier-group purge: [priority_tier_issue] removed with the
+   [priority_tier] strategy concept. *)
 
 (* Catalog warn: a cascade carrying [cli_tool_a] with no
    bound-actor-tolerant fallback will reject every keeper-bound
@@ -448,7 +370,7 @@ let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
       List.map
         (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
         p.weighted_entries
-    | None -> materialized_model_specs_for_profile materialized_json profile
+    | None -> []
   in
   let candidate_model_strings =
     match snapshot_profile with

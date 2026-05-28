@@ -45,19 +45,8 @@ let sandbox_profile_to_string profile =
   |> Keeper_sandbox_config.sandbox_profile_to_string
 ;;
 
-let legacy_reserved_cascade_names =
-  [ "local_only"; "local_recovery"; "tool_use_strict" ]
-;;
-
-let reserved_cascade_names =
-  List.sort_uniq
-    String.compare
-    (legacy_reserved_cascade_names
-     @ Keeper_config.phase_routing_cascade_names
-     @ [ Keeper_config.default_cascade_name ()
-       ; Keeper_config.tool_required_cascade_name
-       ])
-;;
+(* reserved_cascade_names removed: tier/tier-group purge.
+   Keeper profiles now use plain provider:model strings. *)
 
 (** Parse a sandbox profile string. Canonical values are ["local"] and
     ["docker"]. *)

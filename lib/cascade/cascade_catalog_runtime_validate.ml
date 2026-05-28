@@ -43,20 +43,8 @@ let deprecated_logical_profile_name_error ~kind name :
   else None
 
 let deprecated_logical_profile_name_errors
-    (cfg : Cascade_declarative_types.cascade_config) =
-  let tier_errors =
-    List.filter_map
-      (fun (tier : Cascade_declarative_types.cascade_tier) ->
-        deprecated_logical_profile_name_error ~kind:"tier" tier.name)
-      cfg.tiers
-  in
-  let tier_group_errors =
-    List.filter_map
-      (fun (group : Cascade_declarative_types.cascade_tier_group) ->
-        deprecated_logical_profile_name_error ~kind:"tier-group" group.name)
-      cfg.tier_groups
-  in
-  tier_errors @ tier_group_errors
+    (_cfg : Cascade_declarative_types.cascade_config) =
+  []
 
 (* RFC-0058 Phase 8.3: operator opt-in flag for cold-boot tolerance of
    partial cascade catalogs. Default is [false], preserving the existing
@@ -183,24 +171,6 @@ let validate_strategy ~config_path ~name =
         match Cascade_strategy.parse_config_kind raw_kind with
         | Error msg ->
             [ Printf.sprintf "unknown strategy %S: %s" raw_kind msg ]
-        | Ok Cascade_strategy.Priority_tier -> (
-            match cfg.tiers with
-            | None ->
-                [
-                  "priority_tier requires a non-empty <name>_tiers \
-                   configuration";
-                ]
-            | Some raw_tiers -> (
-                match
-                  Cascade_config.normalize_priority_tiers ~config_path
-                    ~name raw_tiers
-                with
-                | Ok _ -> []
-                | Error msg ->
-                    [
-                      Printf.sprintf
-                        "priority_tier normalization failed: %s" msg;
-                    ]))
         | Ok _ -> [])
   in
   if strategy_errors <> [] then

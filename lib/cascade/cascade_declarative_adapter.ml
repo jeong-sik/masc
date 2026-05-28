@@ -19,7 +19,6 @@ type adapter_error =
   | Binding_resolution_failed of string
   | Alias_resolution_failed of string
   | Strategy_mismatch of string
-  | Tier_group_empty of string
   | Duplicate_route of string
   | Internal of string
 [@@deriving show]
@@ -365,7 +364,6 @@ let apply_alias_overrides (base : Llm_provider.Provider_config.t)
 let map_strategy_kind (decl : cascade_strategy) : Cascade_strategy.kind =
   match decl with
   | Failover -> Cascade_strategy.Failover
-  | Priority_tier -> Cascade_strategy.Priority_tier
 
 let map_cycle_policy (cp : cascade_cycle_policy) :
     Cascade_strategy.cycle_policy =
@@ -373,34 +371,6 @@ let map_cycle_policy (cp : cascade_cycle_policy) :
     Cascade_strategy.max_cycles = cp.max_cycles;
     backoff_base_ms = cp.backoff_base_ms;
     backoff_cap_ms = cp.backoff_cap_ms;
-  }
-
-let build_strategy (tier : cascade_tier) : Cascade_strategy.t =
-  let kind = map_strategy_kind tier.strategy in
-  let cycle =
-    match tier.cycle_policy with
-    | Some cp -> map_cycle_policy cp
-    | None -> Cascade_strategy.default_cycle_policy
-  in
-  ignore tier.sticky_ttl_ms;
-  ignore tier.scoring_params;
-  { Cascade_strategy.kind; cycle; tiers = [] }
-
-let build_tier_group_strategy (tg : cascade_tier_group)
-    (tier_tiers : string list list) : Cascade_strategy.t =
-  let kind = map_strategy_kind tg.strategy in
-  let cycle =
-    match kind with
-    | Cascade_strategy.Priority_tier ->
-      { Cascade_strategy.default_cycle_policy with
-        max_cycles = max 1 (List.length tier_tiers)
-      }
-    | Cascade_strategy.Failover -> Cascade_strategy.default_cycle_policy
-  in
-  {
-    Cascade_strategy.kind;
-    cycle;
-    tiers = tier_tiers;
   }
 
 (* --- Member resolution --- *)
@@ -442,71 +412,6 @@ let resolve_member (cfg : cascade_config)
          errors := Binding_resolution_failed member :: !errors;
          None)
 
-(* --- Tier → adapted_profile --- *)
-
-let build_profile_from_tier (cfg : cascade_config)
-    (bindings_by_key : (string, cascade_binding) Hashtbl.t)
-    (aliases_by_key : (string, cascade_alias) Hashtbl.t)
-    (resolved_configs : (string, provider_config_with_override) Hashtbl.t)
-    (errors : adapter_error list ref)
-    (tier : cascade_tier) :
-    adapted_profile =
-  let provider_configs =
-    List.filter_map
-      (resolve_member cfg bindings_by_key aliases_by_key
-         resolved_configs errors)
-      tier.members
-  in
-  let strategy = build_strategy tier in
-  {
-    name = Printf.sprintf "tier.%s" tier.name;
-    provider_configs;
-    strategy;
-    ollama_max_concurrent = tier.max_concurrent;
-    cli_max_concurrent = tier.max_concurrent;
-    required_capability_profile = None;
-  }
-
-(* --- Tier-group → adapted_profile --- *)
-
-let build_profile_from_tier_group (cfg : cascade_config)
-    (bindings_by_key : (string, cascade_binding) Hashtbl.t)
-    (aliases_by_key : (string, cascade_alias) Hashtbl.t)
-    (resolved_configs : (string, provider_config_with_override) Hashtbl.t)
-    (tiers_by_name : (string, cascade_tier) Hashtbl.t)
-    (errors : adapter_error list ref)
-    (tg : cascade_tier_group) :
-    adapted_profile =
-  let resolved_tiers =
-    List.filter_map
-      (fun name -> Hashtbl.find_opt tiers_by_name name)
-      tg.tiers
-  in
-  let resolved_configs_by_tier =
-    List.map
-      (fun (tier : cascade_tier) ->
-         List.filter_map
-           (resolve_member cfg bindings_by_key aliases_by_key
-              resolved_configs errors)
-           tier.members)
-      resolved_tiers
-  in
-  let provider_configs = List.concat resolved_configs_by_tier in
-  let tier_member_keys =
-    List.map
-      (List.map (fun (cfg, _) -> provider_health_key_of_config cfg))
-      resolved_configs_by_tier
-  in
-  let strategy = build_tier_group_strategy tg tier_member_keys in
-  {
-    name = Printf.sprintf "tier-group.%s" tg.name;
-    provider_configs;
-    strategy;
-    ollama_max_concurrent = None;
-    cli_max_concurrent = None;
-    required_capability_profile = tg.required_capability_profile;
-  }
-
 (* --- Route target resolution --- *)
 
 let resolve_route_target (target : string)
@@ -526,18 +431,11 @@ let resolve_system_target (target : string)
 
 (* --- Default profile detection --- *)
 
-let find_default_profile (cfg : cascade_config)
-    (profile_names : string list)
-    (bindings_by_key : (string, cascade_binding) Hashtbl.t) :
+let find_default_profile (_cfg : cascade_config)
+    (_profile_names : string list)
+    (_bindings_by_key : (string, cascade_binding) Hashtbl.t) :
     string option =
-  let has_default =
-    List.exists (fun (b : cascade_binding) -> b.is_default) cfg.bindings
-  in
-  if not has_default then None
-  else List.find_opt (fun name ->
-    String.starts_with ~prefix:"tier." name ||
-    String.starts_with ~prefix:"tier-group." name)
-    profile_names
+  None
 
 (* --- Duplicate route detection --- *)
 
@@ -573,11 +471,6 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
     Hashtbl.replace aliases_by_key key a)
     cfg.aliases;
 
-  let tiers_by_name = Hashtbl.create 8 in
-  List.iter (fun (t : cascade_tier) ->
-    Hashtbl.replace tiers_by_name t.name t)
-    cfg.tiers;
-
   (* Resolved configs cache (member key → provider_config_with_override) *)
   let resolved_configs = Hashtbl.create 32 in
 
@@ -589,61 +482,14 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
     | None -> ())
     cfg.bindings;
 
-  (* Build profiles from tiers *)
-  let tier_profiles =
-    List.map
-      (build_profile_from_tier cfg bindings_by_key aliases_by_key
-         resolved_configs errors)
-      cfg.tiers
-  in
-
-  (* Build profiles from tier-groups *)
-  let tg_profiles =
-    List.map
-      (build_profile_from_tier_group cfg bindings_by_key aliases_by_key
-         resolved_configs tiers_by_name errors)
-      cfg.tier_groups
-  in
-
-  let all_profiles = tier_profiles @ tg_profiles in
-  let profile_names = List.map (fun p -> p.name) all_profiles in
+  let all_profiles = [] in
+  let profile_names = [] in
 
   (* Resolve routes *)
   let route_errors = check_duplicate_routes cfg.routes in
   let routes =
     List.filter_map (fun (r : cascade_route) ->
-      (* Route target can be: tier-group.X, tier.X, or a binding key *)
-      let target_profile =
-        if String.starts_with ~prefix:"tier-group." r.target then
-          resolve_route_target r.target profile_names
-        else if String.starts_with ~prefix:"tier." r.target then
-          resolve_route_target r.target profile_names
-        else
-          (* Binding or alias key → find the profile that contains it *)
-          let matching_profile =
-            List.find_opt (fun (p : adapted_profile) ->
-              List.exists
-                (fun (pc, _override) ->
-                  let model_string =
-                    Printf.sprintf "%s:%s"
-                      (Llm_provider.Provider_kind.to_string pc.Llm_provider.Provider_config.kind)
-                      pc.Llm_provider.Provider_config.model_id
-                  in
-                  String.starts_with ~prefix:r.target model_string)
-                p.provider_configs)
-            all_profiles
-          in
-          match matching_profile with
-          | Some p -> Some p.name
-          | None -> None
-      in
-      match target_profile with
-      | Some name -> Some (r.name, name)
-      | None ->
-        errors := Internal
-          (Printf.sprintf "route %S target %S unresolved" r.name r.target)
-          :: !errors;
-        None)
+      Some (r.name, r.target))
       cfg.routes
   in
 

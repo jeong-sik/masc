@@ -142,57 +142,15 @@ let weighted_entry_of_materialized_member json member =
       | None -> None)
   | _ -> None
 
-let materialized_tier_members json tier_name =
-  match
-    Option.bind (json_assoc_opt "tier" json) (fun tiers_json ->
-        json_assoc_opt tier_name tiers_json)
-  with
-  | Some tier_json -> json_string_list_member "members" tier_json
-  | None -> []
+(* Tier/tier-group purge: [materialized_tier_members] /
+   [materialized_tier_group_tiers] / [configured_weighted_entries_from_materialized_json]
+   are retired.  Profile resolution now routes through the declarative
+   snapshot or runtime catalog exclusively; there is no JSON-materialized
+   tier-based fallback.  [weighted_entry_of_materialized_member] is kept
+   for the direct-provider:model path in future refactor phases. *)
 
-let materialized_tier_group_tiers json group_name =
-  match
-    Option.bind (json_assoc_opt "tier-group" json) (fun groups_json ->
-        json_assoc_opt group_name groups_json)
-  with
-  | Some group_json -> json_string_list_member "tiers" group_json
-  | None -> []
-
-let configured_weighted_entries_from_materialized_json json ~name =
-  let trimmed = String.trim name in
-  let candidates =
-    if String.starts_with ~prefix:"tier-group." trimmed
-       || String.starts_with ~prefix:"tier." trimmed
-    then [ trimmed ]
-    else [ trimmed; "tier-group." ^ trimmed; "tier." ^ trimmed ]
-  in
-  let resolve_profile profile_name =
-    if String.starts_with ~prefix:"tier-group." profile_name then
-      let group_name =
-        String.sub profile_name 11 (String.length profile_name - 11)
-      in
-      Some
-        (materialized_tier_group_tiers json group_name
-         |> List.concat_map (materialized_tier_members json)
-         |> List.filter_map (weighted_entry_of_materialized_member json))
-    else if String.starts_with ~prefix:"tier." profile_name then
-      let tier_name =
-        String.sub profile_name 5 (String.length profile_name - 5)
-      in
-      Some
-        (materialized_tier_members json tier_name
-         |> List.filter_map (weighted_entry_of_materialized_member json))
-    else None
-  in
-  match
-    candidates
-    |> List.find_map (fun candidate ->
-           match resolve_profile candidate with
-           | Some (_ :: _ as entries) -> Some entries
-           | Some [] | None -> None)
-  with
-  | Some entries -> entries
-  | None -> []
+let configured_weighted_entries_from_materialized_json _json ~name:_ =
+  []
 
 (* ── resolve_model_strings family ────────────────────── *)
 

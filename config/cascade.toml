@@ -728,186 +728,63 @@ temperature = 0.3
 max-output = 8192
 temperature = 0.3
 
-# ── Layer 5: Tiers ─────────────────────────────────────────────
-
-[tier.primary]
-# Canonical keeper/workflow tier. Operator priority:
-# RunPod -> local llama-server :8080 -> GLM Coding -> Codex Spark.
-members = [
-  "runpod_mtp.qwen-runpod.keeper",
-  "local_mtp.qwen-local.keeper",
-  "glm-coding.glm-5-turbo",
-  "glm-coding.glm-flashx",
-  "cli_tool_a.codex-spark.for-keeper-turn",
-]
-strategy = "failover"
-
-[tier.keeper_diverse]
-# Fallback tier for contract violation retry. Different model
-# composition from primary to break correlated failure.
-members = ["cli_tool_b.gemini-flash", "cli_tool_a.codex-spark", "openai_compat.qwen3-5.for-keeper-turn"]
-strategy = "failover"
-
-[tier.strict_tool_candidates]
-# Tool-strict lane for providers that can carry runtime MCP tools and headers.
-keeper-assignable = true
-members = ["runpod_mtp.qwen-runpod.keeper"]
-strategy = "failover"
-
-[tier.scoring]
-# System-only short-output tier for rerank/scoring calls.
-# Members are aliases (Layer 4) with reduced max-output.
-keeper-assignable = false
-members = [
-  "cli_tool_a.codex-spark.for-scoring",
-]
-strategy = "failover"
-
-[tier.governance]
-# System-only baseline for governance / judge calls.
-keeper-assignable = false
-members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
-strategy = "failover"
-
-[tier.tier_small]
-# Operator opt-in slot for 4B-class local models. Empty by default;
-# routes fall through to tier_medium via tier-group fallback.
-members = []
-strategy = "failover"
-
-[tier.tier_medium]
-# 9B-class cloud-coding models for moderate tasks.
-members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
-strategy = "failover"
-
-[tier.__safe_lane]
-# System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
-# target that satisfies every capability profile. Not keeper-assignable.
-# Diversity invariant: __safe_lane MUST NOT share both members with tier.primary
-# (D11 fix 2026-05-21). When the dominant provider (GLM) degrades, primary and
-# __safe_lane must not fail in correlation — keep at least one non-GLM provider
-# from a different vendor family (cli_tool_a) to break the correlated failure path.
-keeper-assignable = false
-members = ["cli_tool_a.codex-spark.for-keeper-turn", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
-strategy = "failover"
-
-# ── Tier-Groups (fallback chains) ──────────────────────────────
-
-[tier-group.primary]
-tiers = ["primary"]
-strategy = "priority_tier"
-fallback = true
-
-[tier-group.tier_small]
-tiers = ["tier_small", "tier_medium", "primary"]
-strategy = "priority_tier"
-fallback = true
-
-[tier-group.tier_medium]
-tiers = ["tier_medium", "primary"]
-strategy = "priority_tier"
-fallback = true
-
-[tier-group.scoring]
-tiers = ["scoring", "__safe_lane"]
-strategy = "priority_tier"
-fallback = true
-keeper-assignable = false
-
-[tier-group.governance]
-tiers = ["governance", "__safe_lane"]
-strategy = "priority_tier"
-fallback = true
-keeper-assignable = false
-
-[tier-group.strict_tool_candidates]
-# Tier-group for routes requiring tool_strict profile capabilities
-# (runtime_mcp_tools, runtime_tool_events, runtime_mcp_http_headers).
-tiers = ["strict_tool_candidates"]
-strategy = "priority_tier"
-fallback = true
-required_capability_profile = "tool_strict"
-
-[tier-group.ollama_cloud_stable]
-# Recovery target for cascade_exhausted on local Ollama lanes.
-# Referenced by keeper turn disposition (test_keeper_turn_disposition.ml:280)
-# and by error classifier fallback hints (test_keeper_error_classify_recoverable.ml:187).
-tiers = ["tier_medium", "primary", "__safe_lane"]
-strategy = "priority_tier"
-fallback = true
-keeper-assignable = false
-
-[tier-group.provider_inventory_sweep]
-# Sweep lane for full provider inventory performance measurement
-# (docs/CASCADE-ROUTES.md §sweep). Background only; isolated from
-# production fallback chains to avoid resource contention with live work.
-tiers = ["primary", "keeper_diverse", "__safe_lane"]
-strategy = "priority_tier"
-fallback = true
-keeper-assignable = false
-
-# ── Routes (logical usage → tier-group) ────────────────────────
-#
-# RFC-0058 §4 R6: route targets resolve to tier-groups, tiers,
-# bindings, or aliases (validated by `Cascade_declarative_validator`
-# rule R7). The seed below targets tier-groups exclusively because
-# routing through a tier-group keeps fallback chains explicit and
-# discourages callers from depending on a single tier without a
-# documented degradation path.
+# ── Routes (simplified: direct model reference) ────────────────
+# Tier/tier-group concept removed. All routes reference the global
+# default model directly via provider:model string format.
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.phase_recovery]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.phase_buffer]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.tool_required]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.governance_judge]
-target = "tier-group.governance"
+target = "runpod:glm-coding-with-spark"
 
 [routes.operator_judge]
-target = "tier-group.governance"
+target = "runpod:glm-coding-with-spark"
 
 [routes.cross_verifier]
-target = "tier-group.governance"
+target = "runpod:glm-coding-with-spark"
 
 [routes.verifier]
-target = "tier-group.governance"
+target = "runpod:glm-coding-with-spark"
 
 [routes.adversarial_reviewer]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.auto_responder]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.routing]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.openai_compat]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.persona_generation]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.provider_benchmark]
-target = "tier-group.provider_inventory_sweep"
+target = "runpod:glm-coding-with-spark"
 
 [routes.llm_rerank]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.simple_task]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.moderate_task]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 [routes.complex_task]
-target = "tier-group.primary"
+target = "runpod:glm-coding-with-spark"
 
 # ── Profiles (capability requirements per route class) ─────────
 

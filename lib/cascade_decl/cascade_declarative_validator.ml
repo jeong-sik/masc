@@ -1,16 +1,15 @@
 (** Declarative cascade config cross-reference validator (RFC-0058 v2).
 
-    Validates 11 load-time invariants on a parsed [cascade_config]:
+    Validates load-time invariants on a parsed [cascade_config].
+    Tier/tier-group purge: R5-R6 removed, R7 simplified.
+
     R1: Every binding references an existing provider
     R2: Every binding references an existing model
     R3: Every alias references an existing binding
     R4: Alias max-input ≤ model max-context
-    R5: Tier members resolve to valid bindings or aliases
-    R6: Tier-group tiers reference existing tiers
-    R7: Route targets reference existing tier-groups, tiers, or bindings
+    R7: Route targets reference existing bindings or aliases
     R8: System targets reference existing bindings or aliases
     R9: At most one is-default=true per provider
-    R10: Strategy-specific fields match the declared strategy
     R11: Binding max-concurrent required and positive (RFC-0058 §3.4)
     R12: Protocol ↔ transport consistency (RFC-0058 §2.1) *)
 
@@ -45,19 +44,8 @@ let alias_keys (cfg : cascade_config) : string list =
     cfg.aliases
 ;;
 
-let tier_names (cfg : cascade_config) : string list =
-  List.map (fun (t : cascade_tier) -> Printf.sprintf "tier.%s" t.name) cfg.tiers
-;;
-
-let tier_names_bare (cfg : cascade_config) : string list =
-  List.map (fun (t : cascade_tier) -> t.name) cfg.tiers
-;;
-
-let tier_group_names (cfg : cascade_config) : string list =
-  List.map
-    (fun (g : cascade_tier_group) -> Printf.sprintf "tier-group.%s" g.name)
-    cfg.tier_groups
-;;
+(* Tier/tier-group purge: tier_names, tier_names_bare, tier_group_names
+   removed.  Route targets resolve directly to bindings/aliases. *)
 
 (* Build a name-keyed Hashtbl once for O(1) membership.  Eight
    validator rules below (R1-R8) used to do [List.mem key list]
@@ -155,58 +143,12 @@ let validate_alias_max_input (cfg : cascade_config) : validation_error list =
     cfg.aliases
 ;;
 
-(* --- R5: Tier members resolve to binding or alias --- *)
-
-let validate_tier_members (cfg : cascade_config) : validation_error list =
-  let all_valid_set = name_set (binding_keys cfg @ alias_keys cfg) in
-  List.concat_map
-    (fun (t : cascade_tier) ->
-       List.filter_map
-         (fun member ->
-            if Hashtbl.mem all_valid_set member
-            then None
-            else
-              Some
-                { rule = "R5"
-                ; path = Printf.sprintf "tier.%s.members" t.name
-                ; message =
-                    Printf.sprintf
-                      "tier member %S does not resolve to any binding or alias"
-                      member
-                })
-         t.members)
-    cfg.tiers
-;;
-
-(* --- R6: Tier-group tiers reference existing tiers --- *)
-
-let validate_tier_group_refs (cfg : cascade_config) : validation_error list =
-  let tnames_set = name_set (tier_names_bare cfg) in
-  List.concat_map
-    (fun (g : cascade_tier_group) ->
-       List.filter_map
-         (fun tier_name ->
-            if Hashtbl.mem tnames_set tier_name
-            then None
-            else
-              Some
-                { rule = "R6"
-                ; path = Printf.sprintf "tier-group.%s.tiers" g.name
-                ; message =
-                    Printf.sprintf "tier-group references unknown tier %S" tier_name
-                })
-         g.tiers)
-    cfg.tier_groups
-;;
-
-(* --- R7: Route targets exist --- *)
+(* --- R7: Route targets exist ---
+   Tier/tier-group purge: route targets resolve directly to bindings
+   or aliases. No tier-group or tier indirection. *)
 
 let validate_route_targets (cfg : cascade_config) : validation_error list =
-  let all_targets_set =
-    name_set
-      (tier_group_names cfg @ tier_names cfg
-      @ binding_keys cfg @ alias_keys cfg)
-  in
+  let all_targets_set = name_set (binding_keys cfg @ alias_keys cfg) in
   List.filter_map
     (fun (r : cascade_route) ->
        if Hashtbl.mem all_targets_set r.target
@@ -217,8 +159,7 @@ let validate_route_targets (cfg : cascade_config) : validation_error list =
            ; path = Printf.sprintf "routes.%s.target" r.name
            ; message =
                Printf.sprintf
-                 "route target %S does not resolve to any tier-group, tier, binding, or \
-                  alias"
+                 "route target %S does not resolve to any binding or alias"
                  r.target
            })
     cfg.routes
@@ -268,41 +209,7 @@ let validate_single_default (cfg : cascade_config) : validation_error list =
     counts
 ;;
 
-(* --- R10: Strategy-specific fields match declared strategy --- *)
-
-let validate_strategy_fields (cfg : cascade_config) : validation_error list =
-  List.concat_map
-    (fun (t : cascade_tier) ->
-       let path = Printf.sprintf "tier.%s" t.name in
-       let retired_field_errors field_name retired_strategy =
-         err
-           "R10"
-           (Printf.sprintf "%s.%s" path field_name)
-           (Printf.sprintf
-              "%s belongs to retired internal strategy %S and is not \
-               supported by cascade.toml strategy %s"
-              field_name
-              retired_strategy
-              (show_cascade_strategy t.strategy))
-       in
-       let cycle_errs =
-         match t.cycle_policy with
-         | None -> []
-         | Some _ -> retired_field_errors "cycle-policy" "circuit_breaker_cycling"
-       in
-       let sticky_errs =
-         match t.sticky_ttl_ms with
-         | None -> []
-         | Some _ -> retired_field_errors "sticky-ttl-ms" "sticky"
-       in
-       let scoring_errs =
-         match t.scoring_params with
-         | None -> []
-         | Some _ -> retired_field_errors "scoring-params" "weighted_random"
-       in
-       cycle_errs @ sticky_errs @ scoring_errs)
-    cfg.tiers
-;;
+(* R10 (strategy fields) removed with tier/tier-group purge. *)
 
 (* --- R11: Binding max-concurrent is required and positive ---
 
@@ -387,12 +294,9 @@ let validate (cfg : cascade_config) : validation_error list =
   @ validate_binding_models cfg
   @ validate_alias_bindings cfg
   @ validate_alias_max_input cfg
-  @ validate_tier_members cfg
-  @ validate_tier_group_refs cfg
   @ validate_route_targets cfg
   @ validate_system_targets cfg
   @ validate_single_default cfg
-  @ validate_strategy_fields cfg
   @ validate_binding_capacity cfg
   @ validate_protocol_transport cfg
 ;;

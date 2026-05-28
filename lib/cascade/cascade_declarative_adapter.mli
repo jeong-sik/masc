@@ -20,8 +20,6 @@ type adapter_error =
   (** Alias "provider.model.alias" parent binding does not exist. *)
   | Strategy_mismatch of string
   (** Tier declares strategy-specific fields for the wrong strategy kind. *)
-  | Tier_group_empty of string
-  (** Tier-group references no tiers. *)
   | Duplicate_route of string
   (** Two routes with the same name. *)
   | Internal of string

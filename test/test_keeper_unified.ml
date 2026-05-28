@@ -28,14 +28,10 @@ module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_types_support = Masc_mcp.Keeper_types_support
 
+(* #19327 tier-group purge: Cascade_name is a plain string alias now. *)
 let oas_error_cascade_name raw =
-  let normalized = Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw in
-  let canonical =
-    if Cascade_name.is_canonical_prefix normalized
-    then normalized
-    else "tier-group." ^ normalized
-  in
-  Cascade_name.of_string_exn canonical
+  Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw
+  |> Cascade_name.of_string_exn
 ;;
 
 let phase_buffer_cascade_name () =

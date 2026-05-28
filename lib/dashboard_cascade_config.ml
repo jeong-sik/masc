@@ -301,7 +301,13 @@ let config_json ?base_path () =
         then None
         else (
           let cascade_name =
-            match doc.Keeper_types_profile.cascade_name with
+            (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model
+               in keeper_profile_defaults but this consumer was missed.
+               Reading [.model] preserves the prior behavior of treating the
+               keeper-declared string as a cascade name. Root: separate review
+               needed — [.model] now stores a direct provider:model string per
+               #19327, which may not round-trip through cascade-name routing. *)
+            match doc.Keeper_types_profile.model with
             | Some c -> c
             | None -> (Keeper_config.default_cascade_name ())
           in

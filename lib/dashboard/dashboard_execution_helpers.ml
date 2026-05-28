@@ -70,8 +70,6 @@ type tool_audit_snapshot = {
   tool_audit_at : string option;
 }
 
-let json_string_option = Json_util.string_opt_to_json_trimmed
-
 let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()

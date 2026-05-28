@@ -52,6 +52,4 @@ let float_json ?(default = 0.0) json =
 let int_field = Dashboard_utils.int_field
 let take = List.take
 
-let option_string_json = Json_util.string_opt_to_json_trimmed
-
 

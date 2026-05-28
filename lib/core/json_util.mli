@@ -49,6 +49,9 @@ val json_string_list : string list -> Yojson.Safe.t
     Canonical [None -> `Null] converters for building JSON. *)
 
 val string_opt_to_json : string option -> Yojson.Safe.t
+val string_opt_to_json_trimmed : string option -> Yojson.Safe.t
+(** [string_opt_to_json_trimmed] trims whitespace and returns [`Null]
+    for empty or whitespace-only strings. *)
 val int_opt_to_json : int option -> Yojson.Safe.t
 val float_opt_to_json : float option -> Yojson.Safe.t
 val bool_opt_to_json : bool option -> Yojson.Safe.t

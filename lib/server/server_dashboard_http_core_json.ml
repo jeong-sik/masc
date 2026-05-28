@@ -5,16 +5,9 @@ let json_string_opt = Json_util.string_opt_to_json
 
 let json_bool_opt = Json_util.bool_opt_to_json
 
-let json_assoc_field_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
+let json_assoc_field_opt = Json_util.assoc_member_opt
 
-let json_assoc_string_opt key json =
-  match json_assoc_field_opt key json with
-  | Some (`String value) -> Some value
-  | _ -> None
-;;
+let json_assoc_string_opt = Json_util.assoc_string_opt
 
 let json_assoc_int_opt key json =
   match json_assoc_field_opt key json with

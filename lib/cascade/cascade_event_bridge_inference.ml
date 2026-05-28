@@ -1,24 +1,8 @@
-let json_string_opt = function
-  | Some value when String.trim value <> "" -> `String value
-  | _ -> `Null
-;;
+let json_string_opt = Json_util.string_opt_to_json_trimmed
 
-let payload_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) when String.trim value <> "" -> Some value
-     | _ -> None)
-  | _ -> None
-;;
+let payload_string_opt = Json_util.assoc_string_opt
 
-let payload_int_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`Int value) -> Some value
-     | Some (`Intlit value) -> int_of_string_opt value
-     | _ -> None)
-  | _ -> None
-;;
+let payload_int_opt = Json_util.assoc_int_opt
 
 (* RFC-0166: the previous body of [inference_model_bucket] was a
    substring classifier over upstream LLM provider names

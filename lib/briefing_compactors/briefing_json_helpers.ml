@@ -69,10 +69,6 @@ let rec take n = function
   | _ when n <= 0 -> []
   | x :: xs -> x :: take (n - 1) xs
 
-let option_string_json = function
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed <> "" then `String trimmed else `Null
-  | None -> `Null
+let option_string_json = Json_util.string_opt_to_json_trimmed
 
 

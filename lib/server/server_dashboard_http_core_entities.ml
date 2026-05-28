@@ -92,13 +92,7 @@ let dashboard_message_json (message : Masc_domain.message) =
 let dashboard_tasks_safe config = Coord.get_tasks_safe config
 let dashboard_agents_safe config = Coord.get_active_agents config
 
-let json_assoc_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> Some value
-     | _ -> None)
-  | _ -> None
-;;
+let json_assoc_string_opt = Json_util.assoc_string_opt
 
 let active_agent_summary_json json =
   match json_assoc_string_opt "status" json with

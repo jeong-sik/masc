@@ -460,13 +460,7 @@ let relay_stage_to_string = function
   | Broadcast -> "broadcast"
 ;;
 
-let json_field_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) when String.trim value <> "" -> Some value
-     | _ -> None)
-  | _ -> None
-;;
+let json_field_string_opt = Json_util.assoc_string_opt
 
 let relay_event_type json =
   match json_field_string_opt "event_type" json with

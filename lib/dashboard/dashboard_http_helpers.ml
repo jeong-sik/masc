@@ -108,8 +108,6 @@ let percentile_int (values : int list) ~(pct : float) : int option =
       in
       List.nth_opt sorted idx
 
-let json_int_opt = Json_util.int_opt_to_json
-
 let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
   let delta = now_ts -. event_ts in
   if Float.is_nan delta || Float.is_infinite delta then None

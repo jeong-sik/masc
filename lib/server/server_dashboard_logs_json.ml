@@ -8,15 +8,8 @@
    Pure JSON builder over [Log.Ring.entry list] - the ring read happens
    in the caller. *)
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
-
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
-;;
+let option_int_json = Json_util.option_to_yojson (fun v -> `Int v)
+let option_string_json = Json_util.option_to_yojson (fun v -> `String v)
 
 let store_path ~masc_root =
   Filename.concat

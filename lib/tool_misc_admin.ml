@@ -86,8 +86,6 @@ type context = {
 (* Local helpers (duplicated from tool_misc to avoid circular deps) *)
 (* ================================================================ *)
 
-let json_string_option = Json_util.string_opt_to_json_trimmed
-
 let bool_arg_opt args key =
   match U.member key args with
   | `Bool value -> Some value
@@ -133,7 +131,7 @@ let auth_snapshot_json ctx =
                ("agent_name", `String cred.agent_name);
                ("admin", `Bool ((=) cred.role Masc_domain.Admin));
                ("created_at", `String cred.created_at);
-               ("expires_at", json_string_option cred.expires_at);
+               ("expires_at", Json_util.string_opt_to_json_trimmed cred.expires_at);
              ])
   in
   `Assoc
@@ -290,7 +288,7 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args : tool_result =
           ok_result_typed ~tool_name ~start_time
             [
               ("section", `String "auth");
-              ("room_secret", json_string_option room_secret);
+              ("room_secret", Json_util.string_opt_to_json_trimmed room_secret);
               ("result", auth_snapshot_json ctx);
             ])
   | _ ->

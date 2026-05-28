@@ -25,11 +25,6 @@ type toml_doc = (string * toml_value) list
 
 let is_ws c = c = ' ' || c = '\t'
 
-let strip_trailing_cr s =
-  let len = String.length s in
-  if len > 0 && s.[len - 1] = '\r' then String.sub s 0 (len - 1) else s
-;;
-
 let trim_leading_ws s =
   let len = String.length s in
   let rec scan i = if i >= len then len else if is_ws s.[i] then scan (i + 1) else i in
@@ -443,7 +438,7 @@ let parse_toml (content : string) : (toml_doc, string) result =
   List.iter
     (fun raw_line ->
        state.line_num <- state.line_num + 1;
-       let raw_line = strip_trailing_cr raw_line in
+       let raw_line = String_util.strip_trailing_cr raw_line in
        if Option.is_none state.error
        then (
          match state.multiline_string, state.multiline_array with

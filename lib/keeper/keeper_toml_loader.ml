@@ -77,7 +77,7 @@ let update_field_in_content
   let insert_before_next_table = ref false in
   List.iter
     (fun raw_line ->
-       let line = strip_trailing_cr raw_line in
+       let line = String_util.strip_trailing_cr raw_line in
        let trimmed = String.trim line in
        if !insert_before_next_table && String.length trimmed > 0 && trimmed.[0] = '['
        then (

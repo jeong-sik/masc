@@ -96,6 +96,8 @@ val compact_text : ?max_len:int -> string -> string
     filters empty lines, then truncates to [max_len] characters (UTF-8 safe).
     Default [max_len] is 160. Returns [""] for empty/whitespace-only input. *)
 
+val strip_trailing_cr : string -> string
+(** [strip_trailing_cr s] removes a trailing ['\\r'] character if present. *)
 val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.

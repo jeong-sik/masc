@@ -159,17 +159,141 @@ let parse_trigger_policy s =
 
 (* ── Opaque state ──────────────────────────────────────────────── *)
 
+let gateway_url = "wss://gateway.discord.gg/?v=10&encoding=json"
+
 type t =
   { state : connection_state
   ; config : config
-  ; reconnect_attempts : int  (* For exponential backoff in Phase 1.4. *)
+  ; reconnect_attempts : int        (* Exponential backoff in Phase 1.4. *)
+  ; last_seq : int option           (* Latest dispatch sequence number. *)
+  ; heartbeat_interval_ms : int option  (* From Op_hello, used by Heartbeat_tick. *)
+  ; resume_gateway_url : string option  (* From READY, used by Resuming in Phase 1.4. *)
   }
 
 let create ~config =
-  { state = Disconnected; config; reconnect_attempts = 0 }
+  { state = Disconnected
+  ; config
+  ; reconnect_attempts = 0
+  ; last_seq = None
+  ; heartbeat_interval_ms = None
+  ; resume_gateway_url = None
+  }
 
 let state t = t.state
 let config t = t.config
+
+(* ── JSON helpers (internal) ───────────────────────────────────── *)
+
+let assoc_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let field_int_opt name json =
+  match assoc_opt name json with
+  | Some (`Int n) -> Some n
+  | Some (`Intlit s) -> int_of_string_opt s
+  | _ -> None
+
+let field_string_opt name json =
+  match assoc_opt name json with
+  | Some (`String s) -> Some s
+  | _ -> None
+
+let field_bool_opt name json =
+  match assoc_opt name json with
+  | Some (`Bool b) -> Some b
+  | _ -> None
+
+(* ── Frame parse / encode ──────────────────────────────────────── *)
+
+let parse_frame (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "op" fields with
+       | None -> Error "frame: missing 'op' field"
+       | Some (`Int op_int) ->
+           (match opcode_of_int op_int with
+            | Error e -> Error e
+            | Ok op ->
+                let s =
+                  match List.assoc_opt "s" fields with
+                  | Some (`Int n) -> Some n
+                  | _ -> None
+                in
+                let t = field_string_opt "t" json in
+                let d =
+                  match List.assoc_opt "d" fields with
+                  | Some v -> v
+                  | None -> `Null
+                in
+                Ok { op; s; t; d })
+       | Some _ -> Error "frame: 'op' field is not an integer")
+  | _ -> Error "frame: top-level is not a JSON object"
+
+let encode_frame (f : frame) : Yojson.Safe.t =
+  let base = [ ("op", `Int (opcode_to_int f.op)); ("d", f.d) ] in
+  let with_s =
+    match f.s with Some n -> ("s", `Int n) :: base | None -> base
+  in
+  let with_t =
+    match f.t with Some s -> ("t", `String s) :: with_s | None -> with_s
+  in
+  `Assoc with_t
+
+(* ── Dispatch decoder ──────────────────────────────────────────── *)
+
+let decode_ready ~payload =
+  let session_id = field_string_opt "session_id" payload in
+  let resume_gateway_url = field_string_opt "resume_gateway_url" payload in
+  let user = assoc_opt "user" payload in
+  let bot_user_id =
+    match user with
+    | Some user_json -> field_string_opt "id" user_json
+    | None -> None
+  in
+  match session_id, resume_gateway_url, bot_user_id with
+  | Some session_id, Some resume_gateway_url, Some bot_user_id ->
+      Ok (Ready { session_id; resume_gateway_url; bot_user_id })
+  | _ ->
+      Error
+        "READY payload: missing session_id / resume_gateway_url / user.id"
+
+let decode_dispatch ~bot_user_id:_ ~event_name ~payload =
+  match event_name with
+  | "READY" -> decode_ready ~payload
+  | "MESSAGE_CREATE" -> Error "MESSAGE_CREATE: not implemented (Phase 1.5)"
+  | "MESSAGE_REACTION_ADD" ->
+      Error "MESSAGE_REACTION_ADD: not implemented (Phase 1.5)"
+  | other -> Ok (Ignored other)
+
+(* ── Outbound frame builders (internal) ────────────────────────── *)
+
+let identify_frame ~config =
+  let intents = intents_bitmask config.intents in
+  let properties =
+    `Assoc
+      [ ("os", `String "linux")
+      ; ("browser", `String "masc-mcp")
+      ; ("device", `String "masc-mcp")
+      ]
+  in
+  let payload =
+    `Assoc
+      [ ("token", `String config.token)
+      ; ("intents", `Int intents)
+      ; ("compress", `Bool false)
+      ; ("properties", properties)
+      ]
+  in
+  { op = Op_identify; s = None; t = None; d = payload }
+
+let heartbeat_frame ~last_seq =
+  let d =
+    match last_seq with
+    | Some n -> `Int n
+    | None -> `Null
+  in
+  { op = Op_heartbeat; s = None; t = None; d }
 
 (* ── Transition function ────────────────────────────────────────
 
@@ -177,36 +301,134 @@ let config t = t.config
    Adding a new [input] constructor is a compile-time error (-w +4)
    until this match is updated — that is the point. *)
 
-let step t ~now_mono:_ input =
-  let pending phase =
-    let msg =
-      Printf.sprintf "Discord_gateway_state.step: %s pending" phase
-    in
-    ( { t with state = Failed msg }
-    , [ Log { level = `Error; message = msg } ] )
-  in
-  match input with
-  | Connect_requested -> pending "RFC-0203 Phase 1.2"
-  | Frame_received _ -> pending "RFC-0203 Phase 1.2 / 1.3 / 1.4 / 1.5"
-  | Frame_parse_error reason ->
-      ( t
-      , [ Log
-            { level = `Warn
-            ; message = Printf.sprintf "frame parse error: %s" reason
-            }
+let pending t phase =
+  let msg = Printf.sprintf "Discord_gateway_state.step: %s pending" phase in
+  ({ t with state = Failed msg }, [ Log { level = `Error; message = msg } ])
+
+let log_warn t msg = (t, [ Log { level = `Warn; message = msg } ])
+let log_info t msg = (t, [ Log { level = `Info; message = msg } ])
+let no_op t = (t, [])
+
+(* ── Per-opcode handlers (state-sensitive cases enumerate every
+      connection_state variant; no [_] wildcards, so adding a state
+      breaks the build at every relevant site — RFC-0203 §Non-goals). *)
+
+let handle_hello t (frame : frame) =
+  match t.state with
+  | Awaiting_hello ->
+      (match field_int_opt "heartbeat_interval" frame.d with
+       | None ->
+           log_warn t "Op_hello missing heartbeat_interval; staying in Awaiting_hello"
+       | Some interval_ms ->
+           let identify = identify_frame ~config:t.config in
+           ( { t with
+               state = Identifying
+             ; heartbeat_interval_ms = Some interval_ms
+             }
+           , [ Schedule_heartbeat { interval_ms }
+             ; Send_frame identify
+             ; Log
+                 { level = `Info
+                 ; message =
+                     Printf.sprintf "received Hello, identifying (heartbeat=%dms)"
+                       interval_ms
+                 }
+             ] ))
+  | Disconnected | Identifying | Resuming
+  | Connected _ | Reconnect_pending _ | Failed _ ->
+      log_warn t "Op_hello received in unexpected state; ignoring"
+
+let handle_dispatch t (frame : frame) =
+  let t' = { t with last_seq = frame.s } in
+  match frame.t with
+  | None -> log_warn t' "dispatch frame missing 't' (event name)"
+  | Some event_name ->
+      (match
+         decode_dispatch
+           ~bot_user_id:t.config.bot_user_id
+           ~event_name
+           ~payload:frame.d
+       with
+       | Error reason ->
+           log_warn t'
+             (Printf.sprintf "dispatch %s decode failed: %s" event_name reason)
+       | Ok (Ready { session_id; resume_gateway_url; bot_user_id }) ->
+           let new_config =
+             { t'.config with bot_user_id = Some bot_user_id }
+           in
+           ( { t' with
+               state = Connected { session_id; last_seq = frame.s }
+             ; config = new_config
+             ; resume_gateway_url = Some resume_gateway_url
+             ; reconnect_attempts = 0
+             }
+           , [ Emit_event
+                 (Ready { session_id; resume_gateway_url; bot_user_id })
+             ; Log
+                 { level = `Info
+                 ; message = Printf.sprintf "READY (bot_user_id=%s)" bot_user_id
+                 }
+             ] )
+       | Ok (Message_create _ as ev)
+       | Ok (Reaction_add _ as ev) ->
+           (t', [ Emit_event ev ])
+       | Ok (Ignored _) ->
+           no_op t')
+
+let handle_server_heartbeat_demand t =
+  ( t
+  , [ Send_frame (heartbeat_frame ~last_seq:t.last_seq)
+    ; Log
+        { level = `Info; message = "server requested immediate heartbeat" }
+    ] )
+
+(* Sub-handler: incoming frame. Outer dispatch is by opcode (8-arm,
+   no wildcard). State-sensitive opcodes delegate to per-opcode
+   handlers that enumerate every state variant. *)
+let step_frame t ~now_mono:_ (frame : frame) =
+  match frame.op with
+  | Op_hello -> handle_hello t frame
+  | Op_dispatch -> handle_dispatch t frame
+  | Op_heartbeat_ack -> no_op t
+  | Op_heartbeat -> handle_server_heartbeat_demand t
+  | Op_reconnect -> pending t "RFC-0203 Phase 1.4 (Op_reconnect)"
+  | Op_invalid_session ->
+      pending t "RFC-0203 Phase 1.4 (Op_invalid_session)"
+  | Op_identify ->
+      log_warn t "Op_identify received from server (unexpected)"
+  | Op_resume ->
+      log_warn t "Op_resume received from server (unexpected)"
+
+(* ── Per-input handlers for state-sensitive non-frame inputs ── *)
+
+let handle_connect_requested t =
+  match t.state with
+  | Disconnected ->
+      ( { t with state = Awaiting_hello }
+      , [ Open_wss { url = gateway_url }
+        ; Log
+            { level = `Info; message = "connecting to Discord Gateway" }
         ] )
-  | Wss_closed _ -> pending "RFC-0203 Phase 1.4"
-  | Heartbeat_tick -> pending "RFC-0203 Phase 1.2"
-  | Heartbeat_ack_timeout -> pending "RFC-0203 Phase 1.4"
-  | Backoff_elapsed -> pending "RFC-0203 Phase 1.4"
+  | Awaiting_hello | Identifying | Resuming
+  | Connected _ | Reconnect_pending _ | Failed _ ->
+      log_warn t "Connect_requested in non-Disconnected state; ignoring"
 
-(* ── Frame parse / encode ──────────────────────────────────────── *)
+let handle_heartbeat_tick t =
+  match t.state with
+  | Connected _ | Identifying | Resuming ->
+      (t, [ Send_frame (heartbeat_frame ~last_seq:t.last_seq) ])
+  | Disconnected | Awaiting_hello
+  | Reconnect_pending _ | Failed _ ->
+      log_info t "Heartbeat_tick in pre-connection state; skipping"
 
-let parse_frame (_json : Yojson.Safe.t) =
-  Error "Discord_gateway_state.parse_frame: not implemented (Phase 1.2)"
-
-let encode_frame (_f : frame) : Yojson.Safe.t =
-  failwith "Discord_gateway_state.encode_frame: not implemented (Phase 1.2)"
-
-let decode_dispatch ~bot_user_id:_ ~event_name:_ ~payload:_ =
-  Error "Discord_gateway_state.decode_dispatch: not implemented (Phase 1.5)"
+let step t ~now_mono input =
+  match input with
+  | Connect_requested -> handle_connect_requested t
+  | Frame_received frame -> step_frame t ~now_mono frame
+  | Frame_parse_error reason ->
+      log_warn t (Printf.sprintf "frame parse error: %s" reason)
+  | Wss_closed _ -> pending t "RFC-0203 Phase 1.4 (Wss_closed)"
+  | Heartbeat_tick -> handle_heartbeat_tick t
+  | Heartbeat_ack_timeout ->
+      pending t "RFC-0203 Phase 1.4 (Heartbeat_ack_timeout)"
+  | Backoff_elapsed -> pending t "RFC-0203 Phase 1.4 (Backoff_elapsed)"

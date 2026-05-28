@@ -127,12 +127,6 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
-let json_int_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
 let json_string_member_opt name json =
   match Yojson.Safe.Util.member name json with
   | `String value -> Some value
@@ -275,8 +269,8 @@ let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
     match turn_id with
     | None -> true
     | Some wanted ->
-      json_int_member_opt "keeper_turn_id" json = Some wanted
-      || json_int_member_opt "keeper_turn_id" contract = Some wanted
+      Json_util.assoc_int_opt "keeper_turn_id" json = Some wanted
+      || Json_util.assoc_int_opt "keeper_turn_id" contract = Some wanted
   in
   keeper_matches && trace_matches && turn_matches
 

@@ -1,9 +1,3 @@
-let json_string_opt = Json_util.string_opt_to_json_trimmed
-
-let payload_string_opt = Json_util.assoc_string_opt
-
-let payload_int_opt = Json_util.assoc_int_opt
-
 (* RFC-0166: the previous body of [inference_model_bucket] was a
    substring classifier over upstream LLM provider names
    ("provider_c"/"agent_llm_a"/"provider_d"/"provider_f"/"provider_k"/"provider_h"/"llama"). The

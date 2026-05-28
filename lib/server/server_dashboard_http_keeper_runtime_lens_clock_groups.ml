@@ -8,8 +8,6 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let json_string_opt = Json_util.string_opt_to_json
-
 let edge_string key edge = json_string_member_opt key edge
 let edge_int key edge = json_int_member_opt key edge
 let edge_string_list key edge = json_string_list_member key edge
@@ -158,8 +156,8 @@ let runtime_lens_clock_groups_json scan =
       ; "lanes", Json_util.json_string_list group.lanes
       ; "events", Json_util.json_string_list group.events
       ; "statuses", Json_util.json_string_list group.statuses
-      ; "first_observed_at", json_string_opt group.first_observed_at
-      ; "last_observed_at", json_string_opt group.last_observed_at
+      ; "first_observed_at", Json_util.string_opt_to_json group.first_observed_at
+      ; "last_observed_at", Json_util.string_opt_to_json group.last_observed_at
       ; "closed", `Bool (group.terminal_events <> [])
       ; "terminal_events", Json_util.json_string_list group.terminal_events
       ; "parent_event_ids", Json_util.json_string_list group.parent_event_ids

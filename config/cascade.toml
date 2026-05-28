@@ -733,58 +733,58 @@ temperature = 0.3
 # default model directly via provider:model string format.
 
 [routes.keeper_turn]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.phase_recovery]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.phase_buffer]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.tool_required]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.governance_judge]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.operator_judge]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.cross_verifier]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.verifier]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.adversarial_reviewer]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.auto_responder]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.routing]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.openai_compat]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.persona_generation]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.provider_benchmark]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.llm_rerank]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.simple_task]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.moderate_task]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 [routes.complex_task]
-target = "runpod_mtp:qwen-runpod"
+target = "runpod_mtp.qwen-runpod"
 
 # ── Profiles (capability requirements per route class) ─────────
 

@@ -481,8 +481,57 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
     | None -> ())
     cfg.bindings;
 
-  let all_profiles = [] in
-  let profile_names = [] in
+  (* Generate adapted profiles from bindings *)
+  let binding_profiles =
+    List.filter_map (fun (b : cascade_binding) ->
+      let key = Printf.sprintf "%s.%s" b.provider_id b.model_id in
+      match Hashtbl.find_opt resolved_configs key with
+      | Some config ->
+        let strategy : Cascade_strategy.t =
+          { kind = Failover
+          ; cycle = Cascade_strategy.default_cycle_policy
+          ; tiers = []
+          }
+        in
+        Some
+          { name = Printf.sprintf "binding.%s" key
+          ; provider_configs = [ config ]
+          ; strategy
+          ; ollama_max_concurrent =
+              (if b.max_concurrent > 0 then Some b.max_concurrent else None)
+          ; cli_max_concurrent =
+              (if b.max_concurrent > 0 then Some b.max_concurrent else None)
+          ; required_capability_profile = None
+          }
+      | None -> None)
+      cfg.bindings
+  in
+  (* Generate route-mapped profiles: "route.<route_name>" → resolved config
+     for the route's target.  The runtime validation expects these names
+     (e.g. "route.keeper_turn") for its required-default-profile check. *)
+  let route_profiles =
+    List.filter_map (fun (r : cascade_route) ->
+      match Hashtbl.find_opt resolved_configs r.target with
+      | Some config ->
+        let strategy : Cascade_strategy.t =
+          { kind = Failover
+          ; cycle = Cascade_strategy.default_cycle_policy
+          ; tiers = []
+          }
+        in
+        Some
+          { name = Printf.sprintf "route.%s" r.name
+          ; provider_configs = [ config ]
+          ; strategy
+          ; ollama_max_concurrent = None
+          ; cli_max_concurrent = None
+          ; required_capability_profile = None
+          }
+      | None -> None)
+      cfg.routes
+  in
+  let all_profiles = binding_profiles @ route_profiles in
+  let profile_names = List.map (fun p -> p.name) all_profiles in
 
   (* Resolve routes *)
   let route_errors = check_duplicate_routes cfg.routes in

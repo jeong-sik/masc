@@ -137,7 +137,7 @@ let to_prompt_form ~max_bytes (p : raw_personality) : raw_personality =
   (* Delegate to the SSOT helper so render layer auto-inherits any future
      normalization fixes (e.g. PR #10557 idempotency hardening on
      [normalize_self_model_text]).  Behaviour today is identical to the
-     prior inline [trim → utf8_safe_prefix_bytes] sequence; the value is
+     prior inline [trim → String_util.utf8_prefix] sequence; the value is
      in not having two copies of the trim/cap recipe drift apart. *)
   let render s = Keeper_config.normalize_self_model_text ~max_bytes s in
   {

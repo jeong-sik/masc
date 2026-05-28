@@ -153,26 +153,6 @@ let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
 
-let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
-  if max_bytes <= 0 then ""
-  else
-    let len = String.length s in
-    if len <= max_bytes then s
-    else
-      let rec loop i last_good =
-        if i >= len || i >= max_bytes then last_good
-        else
-          let dec = String.get_utf_8_uchar s i in
-          let dlen = Uchar.utf_decode_length dec in
-          if dlen <= 0 then last_good
-          else
-            let next = i + dlen in
-            if next > max_bytes then last_good
-            else loop next next
-      in
-      let cut = loop 0 0 in
-      if cut <= 0 then ""
-      else String.sub s 0 cut
 
 let utf8_repair_string (s : string) : string =
   let len = String.length s in
@@ -194,8 +174,8 @@ let utf8_repair_string (s : string) : string =
 
 (* ── Self-model / goal-horizon text normalization ───────────── *)
 
-(* #10552: trim BOTH before and after [utf8_safe_prefix_bytes].  The
-   pre-fix sequence was [trim → prefix], but [utf8_safe_prefix_bytes]
+(* #10552: trim BOTH before and after [String_util.utf8_prefix].  The
+   pre-fix sequence was [trim → prefix], but [String_util.utf8_prefix]
    can cut at a position that leaves trailing ASCII whitespace
    (e.g. nick0cave's 322-byte desires field ends with [...는 것.] —
    the prefix at max_bytes=320 backs up to byte 318, ending at the
@@ -210,13 +190,13 @@ let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
   else
-    let cut = utf8_safe_prefix_bytes s ~max_bytes in
+    let cut = String_util.utf8_prefix ~max_bytes s in
     String.trim cut
 
 let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len
+  else String_util.utf8_prefix ~max_bytes:max_len s
 
 let normalize_goal_horizon_opt (raw_opt : string option) : string option =
   match raw_opt with

@@ -195,6 +195,13 @@ let was_truncated = function
   | Untouched _ -> false
   | Truncated _ -> true
 
+let utf8_prefix ~max_bytes s =
+  if max_bytes <= 0 then ""
+  else
+    let len = String.length s in
+    if len <= max_bytes then s
+    else String.sub s 0 (utf8_char_boundary s max_bytes)
+
 let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v

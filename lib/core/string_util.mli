@@ -79,6 +79,12 @@ val to_string : truncation -> string
 val was_truncated : truncation -> bool
 (** [true] iff the argument is the [Truncated] constructor. *)
 
+val utf8_prefix : max_bytes:int -> string -> string
+(** [utf8_prefix ~max_bytes s]: returns at most [max_bytes] bytes of [s],
+    cutting at a UTF-8 character boundary. Returns [""] when
+    [max_bytes <= 0]. Lighter than {!utf8_safe} when the caller does not
+    need the [truncation] metadata or suffix. *)
+
 val trim_nonempty : string -> string option
 (** [trim_nonempty s] trims whitespace and returns [Some s] if non-empty,
     [None] otherwise. SSOT for the per-module [trim_nonempty] helpers. *)

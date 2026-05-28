@@ -612,9 +612,9 @@ let maybe_emit_interesting_alert
           meta.name score (String.concat "," (if reasons = [] then [ "signal" ] else reasons))
       in
       let gh_body =
-        utf8_safe_prefix_bytes
-          (alert_text ^ "\n\n---\n\nraw alert json:\n" ^ Yojson.Safe.pretty_to_string alert_json)
+        String_util.utf8_prefix
           ~max_bytes:(max 800 Env_config.KeeperAlert.max_body_chars)
+          (alert_text ^ "\n\n---\n\nraw alert json:\n" ^ Yojson.Safe.pretty_to_string alert_json)
       in
       let github_result =
         run_alert_channel_with_retry ctx

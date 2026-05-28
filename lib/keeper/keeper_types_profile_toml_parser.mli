@@ -38,7 +38,6 @@ val reject_removed_keeper_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 val reject_removed_keeper_msg_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
-val utf8_safe_prefix_bytes : string -> max_bytes:int -> string
 val utf8_repair_string : string -> string
 val normalize_self_model_text : max_bytes:int -> string -> string
 val normalize_goal_horizon_text : ?max_len:int -> string -> string

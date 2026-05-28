@@ -121,7 +121,7 @@ let rec parse flags path = function
   | "-h" :: rest | "--human-readable" :: rest -> parse (`Human :: flags) path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse flags path rest
     else (
       match path with
       | None -> parse flags (Some arg) rest
@@ -182,7 +182,7 @@ let rec parse case_sensitive pattern path = function
   | "-i" :: rest | "--ignore-case" :: rest -> parse false pattern path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse case_sensitive pattern path rest
     else (
       match pattern with
       | None -> parse case_sensitive (Some arg) path rest
@@ -216,7 +216,7 @@ let rec parse short = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_status { short }))
   | "-s" :: rest | "--short" :: rest -> parse true rest
   | "--porcelain" :: rest -> parse true rest
-  | _ :: _ -> None
+  | _ :: rest -> parse short rest
 in
 parse false args|}
     }
@@ -255,7 +255,7 @@ let rec parse depth branch repo = function
   | "-b" :: b :: rest | "--branch" :: b :: rest -> parse depth (Some b) repo rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse depth branch repo rest
     else (
       match repo with
       | None -> parse depth branch (Some arg) rest
@@ -330,9 +330,18 @@ let rec parse method_ headers body url = function
     (match body with
      | None -> parse method_ headers (Some d) url rest
      | Some _ -> None)
+  (* Flags that take an argument value *)
+  | ( "--retry" | "--retry-max" | "--connect-timeout" | "--max-time"
+    | "--max-filesize" | "--limit-rate" | "--retry-delay" | "--retry-count"
+    | "-w" | "--write-out" | "-o" | "--output" | "-e" | "--referer"
+    | "-A" | "--user-agent" | "-U" | "--proxy-user" | "-x" | "--proxy"
+    | "--dns-servers" | "--resolve" | "--interface" | "-Y" | "--speed-limit"
+    | "-y" | "--speed-time" | "--keepalive-time" )
+    :: _val :: rest ->
+    parse method_ headers body url rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse method_ headers body url rest
     else (
       match url with
       | None -> parse method_ headers body (Some arg) rest
@@ -371,7 +380,7 @@ let rec parse recursive force paths = function
   | "-f" :: rest | "--force" :: rest -> parse recursive true paths rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse recursive force paths rest
     else parse recursive force (arg :: paths) rest
 in
 parse false false [] args|}
@@ -495,9 +504,18 @@ let rec parse lines path = function
     (match int_of_string_opt n with
      | Some l -> parse l path rest
      | None -> None)
+  (* Combined form: -n5 → lines = 5 *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] = 'n'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let l = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse l path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse lines path rest
     else (
       match path with
       | None -> parse lines (Some arg) rest
@@ -533,9 +551,18 @@ let rec parse lines path = function
     (match int_of_string_opt n with
      | Some l -> parse l path rest
      | None -> None)
+  (* Combined form: -n5 → lines = 5 *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] = 'n'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let l = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse l path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse lines path rest
     else (
       match path with
       | None -> parse lines (Some arg) rest
@@ -581,7 +608,7 @@ let rec parse recursive case_sensitive pattern path = function
     parse recursive false pattern path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse recursive case_sensitive pattern path rest
     else (
       match pattern with
       | None -> parse recursive case_sensitive (Some arg) path rest
@@ -619,7 +646,7 @@ let rec parse parents path = function
   | "-p" :: rest | "--parents" :: rest -> parse true path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse parents path rest
     else (
       match path with
       | None -> parse parents (Some arg) rest
@@ -662,7 +689,7 @@ let rec parse mode path = function
   | "-c" :: rest | "--bytes" :: rest | "--chars" :: rest -> parse (Some `Chars) path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse mode path rest
     else (
       match path with
       | None -> parse mode (Some arg) rest
@@ -733,8 +760,20 @@ let rec parse oneline max_count = function
     (match int_of_string_opt n with
      | Some c -> parse oneline (Some c) rest
      | None -> None)
+  (* Combined form: -n5 → max_count = Some 5 *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] = 'n'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let c = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse oneline (Some c) rest
   | "--graph" :: rest | "--all" :: rest | "--decorate" :: rest -> parse oneline max_count rest
-  | _ :: _ -> None
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse oneline max_count rest
+    else parse oneline max_count rest
 in
 parse false None args|}
     }
@@ -1262,10 +1301,20 @@ match args with
 let rec parse format = function
   | [] -> None
   | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Stat { format; path }))
-  | "-f" :: f :: rest -> parse (Some f) rest
-  | arg :: _ ->
+  | "-f" :: f :: rest
+    when String.length f > 0
+         && (f.[0] = '%' || String.contains f '%') ->
+    (* -f format: next token is a format string (contains %) *)
+    parse (Some f) rest
+  | "-f" :: rest ->
+    (* -f flag without format string *)
+    parse format rest
+  | "-c" :: c :: rest ->
+    (* -c format (GNU stat) *)
+    parse (Some c) rest
+  | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse format rest
     else Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Stat { format; path = arg }))
 in
 parse None args|}
@@ -1370,7 +1419,7 @@ let rec parse human_readable summary max_depth = function
         | None -> None)
      | _ ->
        if String.length arg > 0 && arg.[0] = '-'
-       then None
+       then parse human_readable summary max_depth rest
        else
          Some
            (Shell_ir_typed_types.W
@@ -1423,9 +1472,9 @@ let rec parse human_readable fs_type = function
             { path = None; human_readable; filesystem_type = fs_type }))
   | "-h" :: rest -> parse true fs_type rest
   | "-t" :: t :: rest -> parse human_readable (Some t) rest
-  | arg :: _ ->
+  | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse human_readable fs_type rest
     else
       Some
         (Shell_ir_typed_types.W
@@ -1464,9 +1513,9 @@ let rec parse mime brief = function
          (Shell_ir_typed_types.File { path; mime; brief }))
   | "-b" :: rest -> parse mime true rest
   | "-i" :: rest -> parse true brief rest
-  | arg :: _ ->
+  | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse mime brief rest
     else
       Some
         (Shell_ir_typed_types.W
@@ -1542,10 +1591,7 @@ let rec parse all kn rel mach = function
   | "-s" :: rest -> parse all true rel mach rest
   | "-r" :: rest -> parse all kn true mach rest
   | "-m" :: rest -> parse all kn rel true rest
-  | arg :: _ ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then None
-    else None
+  | _ :: rest -> parse all kn rel mach rest
 in
 parse false false false false args|}
     }
@@ -1585,10 +1631,10 @@ let rec parse all full user = function
   | "-e" :: rest | "-A" :: rest -> parse true full user rest
   | "-f" :: rest -> parse all true user rest
   | "-u" :: u :: rest -> parse all full (Some u) rest
-  | arg :: _ ->
+  | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
-    else None
+    then parse all full user rest
+    else parse all full user rest
 in
 parse false false None args|}
     }
@@ -1646,7 +1692,7 @@ let rec parse output url = function
   | "--output-document" :: o :: rest -> parse (Some o) url rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse output url rest
     else (
       match url with
       | None -> parse output (Some arg) rest
@@ -1728,7 +1774,7 @@ let rec parse recursive src dest = function
   | "-r" :: rest -> parse true src dest rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then None
+    then parse recursive src dest rest
     else (
       match src with
       | None -> parse recursive (Some arg) dest rest
@@ -1843,6 +1889,16 @@ let rec parse jobs target = function
     (match int_of_string_opt n with
      | Some j -> parse (Some j) target rest
      | None -> None)
+  (* Combined form: -j4 → jobs = Some 4 *)
+  | arg :: rest
+    when String.length arg > 2
+         && String.length arg <= 5
+         && arg.[0] = '-'
+         && arg.[1] = 'j'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let j = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse (Some j) target rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse jobs target rest

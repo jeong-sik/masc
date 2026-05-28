@@ -230,7 +230,7 @@ let parse_body_pairs body_str : ((string * string) list, string) result =
              | `Float f -> Printf.sprintf "%g" f
              | `Bool b -> if b then "true" else "false"
              | `Null -> ""
-             | _ -> Yojson.Safe.to_string v
+             | `Intlit _ | `Assoc _ | `List _ -> Yojson.Safe.to_string v
            in
            k, s)
         assoc

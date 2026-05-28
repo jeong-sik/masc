@@ -47,7 +47,7 @@ let sample_all_filtered =
 
 let sample_inflight_full =
   S.Inflight_capacity_full
-    { tier_id = "strict_tool_candidates"; max_inflight = 8 }
+    { admission_key = "strict_tool_candidates"; max_inflight = 8 }
 
 let all_samples =
   [ sample_provider_rate_limited;

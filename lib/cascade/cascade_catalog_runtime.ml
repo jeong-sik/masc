@@ -87,6 +87,13 @@ type secondary_resolution =
 (* === Function re-exports ============================================== *)
 
 let inspect_active = Cascade_catalog_runtime_resolve.inspect_active
+
+type route_data = Cascade_catalog_runtime_validate.route_data = {
+  keeper_turn_target : string;
+  route_targets : string list;
+  unknown_route_keys : string list;
+}
+let empty_route_data = Cascade_catalog_runtime_validate.empty_route_data
 let validate_path = Cascade_catalog_runtime_validate.validate_path
 let resolve_declared_name ?sw ?net ?clock ~raw_name () =
   match Cascade_catalog_runtime_resolve.resolve_declared_name ?sw ?net ?clock
@@ -133,8 +140,7 @@ let candidate_probe_to_yojson = Cascade_catalog_runtime_json.candidate_probe_to_
 
 let invalidate_path = Cascade_catalog_runtime_cache.invalidate_path
 
-let runtime_required_profile_names =
-  Cascade_catalog_runtime_validate.runtime_required_profile_names
+(* #19327/#19340 follow-up: [runtime_required_profile_names] removed (dead). *)
 
 let install_snapshot_for_tests =
   Cascade_catalog_runtime_cache.install_snapshot_for_tests

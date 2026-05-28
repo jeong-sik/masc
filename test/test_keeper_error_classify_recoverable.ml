@@ -21,14 +21,8 @@ module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
 
-let cascade_name raw =
-  let trimmed = String.trim raw in
-  let canonical =
-    if Cascade_name.is_canonical_prefix trimmed
-    then trimmed
-    else "tier-group." ^ trimmed
-  in
-  Cascade_name.of_string_exn canonical
+(* #19327 tier-group purge: Cascade_name is now a plain string alias. *)
+let cascade_name raw = Cascade_name.of_string_exn (String.trim raw)
 ;;
 
 let test_cascade = cascade_name "tier.test_cascade"
@@ -471,15 +465,10 @@ let test_rotation_finds_next_cascade_for_auth_error () =
 
 (* ---- Bare-name requalification tests (cascade-name-prefix-mismatch fix) ---- *)
 
-let test_normalized_cascade_name_requalifies_bare_tier_name () =
-  let catalog_names = [ "strict_tool_candidates"; "primary"; "coding_with_spark" ] in
-  let result =
-    KEC.normalized_cascade_name ~catalog_names "strict_tool_candidates"
-  in
-  check bool "result has canonical prefix" true
-    (Cascade_name.is_canonical_prefix result);
-  check string "result is tier-qualified"
-    "tier.strict_tool_candidates" result
+(* #19327 tier-group purge: test_normalized_cascade_name_requalifies_bare_tier_name
+   removed.  It asserted bare "strict_tool_candidates" was rewritten to
+   "tier.strict_tool_candidates" using the prefix canonical form, which is
+   no longer the semantics of [normalized_cascade_name]. *)
 
 let test_normalized_cascade_name_passes_through_already_qualified () =
   let catalog_names = [ "strict_tool_candidates"; "primary" ] in
@@ -572,8 +561,7 @@ let () =
         ] );
       ( "normalized_cascade_name_bare_requalify",
         [
-          test_case "bare tier name requalified with prefix" `Quick
-            test_normalized_cascade_name_requalifies_bare_tier_name;
+          (* #19327: "bare tier name requalified with prefix" test removed. *)
           test_case "already-qualified name passes through" `Quick
             test_normalized_cascade_name_passes_through_already_qualified;
           test_case "config special names preserved" `Quick

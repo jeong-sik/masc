@@ -301,7 +301,8 @@ let config_json ?base_path () =
         then None
         else (
           let cascade_name =
-            match doc.Keeper_types_profile.cascade_name with
+            (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model. *)
+            match doc.Keeper_types_profile.model with
             | Some c -> c
             | None -> (Keeper_config.default_cascade_name ())
           in

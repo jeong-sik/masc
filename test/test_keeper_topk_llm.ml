@@ -413,24 +413,24 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request () 
   Alcotest.(check bool) "Execute appears in final visible surface"
     true (List.mem "Execute" visible)
 
-let test_execute_aliases_exclude_forge_workflow () =
+let test_execute_aliases_exclude_repo_pr_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "Execute"
   in
-  Alcotest.(check bool) "Execute aliases exclude forge draft token"
+  Alcotest.(check bool) "Execute aliases exclude PR draft token"
     false (List.mem ("dra" ^ "ft") aliases);
-  Alcotest.(check bool) "Execute aliases exclude forge request token"
+  Alcotest.(check bool) "Execute aliases exclude PR request token"
     false (List.mem ("pu" ^ "ll") aliases);
   Alcotest.(check bool) "Execute aliases omit Korean create intent"
     false (List.mem ("생" ^ "성") aliases)
 
-let test_search_aliases_exclude_forge_workflow () =
+let test_search_aliases_exclude_repo_pr_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "tool_search_files"
   in
-  Alcotest.(check bool) "tool_search_files aliases exclude forge draft token"
+  Alcotest.(check bool) "tool_search_files aliases exclude PR draft token"
     false (List.mem ("dra" ^ "ft") aliases);
-  Alcotest.(check bool) "tool_search_files aliases exclude forge request token"
+  Alcotest.(check bool) "tool_search_files aliases exclude PR request token"
     false (List.mem ("pu" ^ "ll") aliases);
   Alcotest.(check bool) "tool_search_files aliases omit Korean create intent"
     false (List.mem ("생" ^ "성") aliases)
@@ -604,10 +604,10 @@ let () =
         test_deterministic_prefilter_hides_source_read_for_generic_file_read;
       Alcotest.test_case "deterministic prefilter surfaces shell execute" `Quick
         test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request;
-      Alcotest.test_case "Execute aliases exclude forge workflow" `Quick
-        test_execute_aliases_exclude_forge_workflow;
-      Alcotest.test_case "tool_search_files aliases exclude forge workflow" `Quick
-        test_search_aliases_exclude_forge_workflow;
+      Alcotest.test_case "Execute aliases exclude repo PR workflow" `Quick
+        test_execute_aliases_exclude_repo_pr_workflow;
+      Alcotest.test_case "tool_search_files aliases exclude repo PR workflow" `Quick
+        test_search_aliases_exclude_repo_pr_workflow;
       Alcotest.test_case "public aliases reuse internal search aliases" `Quick
         test_public_aliases_reuse_internal_search_aliases;
       Alcotest.test_case "visible Execute covers shell request" `Quick

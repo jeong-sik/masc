@@ -322,10 +322,10 @@ let fallback_externalized_bullet key =
        deciding."
   else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
     Some
-      "- Repo and forge inspection is observation, not progress by itself. \
+      "- Repo and remote PR/issue inspection is observation, not progress by itself. \
        If you decide to do code-changing task work, claim first, then use \
        only the visible file, edit, and Execute tools from the repo \
-       worktree. Do not invent hidden shell or forge tools when they are \
+       worktree. Do not invent hidden shell or repo-hosting tools when they are \
        not listed."
   else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
     Some
@@ -362,7 +362,7 @@ let fallback_externalized_bullet key =
        claiming unrelated work.\n\
        - If you choose to take code-changing task work, claim first and then \
        work through the visible file, edit, and Execute tools from the repo \
-       worktree. Create or update a forge PR only after the branch is \
+       worktree. Create or update a remote PR only after the branch is \
        prepared and the task requires it."
   else None
 

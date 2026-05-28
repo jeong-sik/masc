@@ -81,7 +81,12 @@ let supervise_keepalive
        Log.Keeper.error "supervisor room init failed: %s" (Printexc.to_string exn));
     let live_meta =
       try
-        let synced = ensure_keeper_room_presence ctx.config meta in
+        let (synced, presence_errors) = ensure_keeper_room_presence ctx.config meta in
+        List.iter
+          (fun (e : Keeper_context_runtime.room_presence_error) ->
+            Log.Keeper.warn "supervisor_room_presence_error keeper=%s room=%s exn=%s"
+              meta.name e.room_id e.exn_msg)
+          presence_errors;
         (match write_meta ctx.config synced with
          | Ok () -> ()
          | Error msg ->

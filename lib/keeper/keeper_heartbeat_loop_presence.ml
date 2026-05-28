@@ -142,7 +142,12 @@ let sync_keeper_presence
     meta_current)
   else (
     try
-      let synced = ensure_keeper_room_presence ctx.config meta_current in
+      let (synced, presence_errors) = ensure_keeper_room_presence ctx.config meta_current in
+      List.iter
+        (fun (e : Keeper_context_runtime.room_presence_error) ->
+          Log.Keeper.warn "room_presence_error keeper=%s room=%s exn=%s"
+            meta_current.name e.room_id e.exn_msg)
+        presence_errors;
       if synced.joined_room_ids = []
       then (
         incr consecutive_failures;

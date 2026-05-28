@@ -513,9 +513,10 @@ let make_hooks
           | _ -> "-"
         in
         let outcome, out_len = match output with
-          | Ok { Agent_sdk.Types.content; _ } -> "ok", String.length content
-          | Error { Agent_sdk.Types.message; _ } -> "error", String.length message
+          | Ok { Agent_sdk.Types.content; _ } -> Tool_result.Ok, String.length content
+          | Error { Agent_sdk.Types.message; _ } -> Tool_result.Error, String.length message
         in
+        let outcome_s = Tool_result.string_of_tool_call_outcome outcome in
         let input_shape = tool_input_shape_for_log input in
         let error_preview =
           match output with
@@ -525,9 +526,11 @@ let make_hooks
             |> Observability_redact.redact_preview ~max_len:240
             |> one_line_preview_for_log
         in
-        Log.Keeper.info
+        (match outcome with
+         | Tool_result.Error -> Log.Keeper.error
+         | Tool_result.Ok | Tool_result.Unknown -> Log.Keeper.info)
           "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s out_len=%d error_preview=%s"
-          (!meta_ref).name tool_name input_keys input_shape outcome out_len error_preview;
+          (!meta_ref).name tool_name input_keys input_shape outcome_s out_len error_preview;
         (* Persistent tool call I/O log for dashboard inspector.
            tool_start_time is keeper-local (one ref per make_hooks call).
            Tool calls within Agent.run are sequential, so no race. *)
@@ -543,7 +546,7 @@ let make_hooks
           tool_execution_summary
             ~tool_name
             ~model
-            ~success:(outcome = "ok")
+            ~success:(outcome = Tool_result.Ok)
             ~duration_ms
         in
         record_keeper_tool_duration_metric
@@ -578,7 +581,7 @@ let make_hooks
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
-             ~success:(outcome = "ok") ~duration_ms
+             ~success:(outcome = Tool_result.Ok) ~duration_ms
              ~model:(current_keeper_model !meta_ref)
              ?lane ?tool_choice ?thinking_enabled ?thinking_budget
              ?prompt_fingerprint
@@ -623,9 +626,9 @@ let make_hooks
                ~keeper_name
                ~tool_name
                ~input:safe_input
-               ~success:(outcome = "ok")
+               ~success:(outcome = Tool_result.Ok)
                ~duration_ms
-               ?error:(if outcome = "ok" then None else Some safe_output)
+               ?error:(if outcome = Tool_result.Ok then None else Some safe_output)
                ()
            in
            let now = Time_compat.now () in
@@ -640,7 +643,7 @@ let make_hooks
                gate_decision = Trajectory.Pass;
                result = Some safe_output;
                duration_ms = trajectory_duration_ms duration_ms;
-               error = (if outcome = "ok" then None else Some safe_output);
+               error = (if outcome = Tool_result.Ok then None else Some safe_output);
                cost_usd = Trajectory.tool_cost_estimate tool_name;
              }
            in
@@ -668,7 +671,7 @@ let make_hooks
              ~tool_name
              ~input
              ~output_text
-             ~success:(outcome = "ok")
+             ~success:(outcome = Tool_result.Ok)
              ~duration_ms:summary.duration_ms
              ~provider:summary.provider
              ~typed_outcome

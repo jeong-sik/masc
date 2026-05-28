@@ -55,6 +55,22 @@ let log_level_of_failure_class = function
   | Runtime_failure -> Log.Error
 ;;
 
+(** Lightweight outcome classification for MCP/keeper tool call logging.
+    Unlike {!tool_failure_class} (which carries retry/telemetry semantics),
+    this tri-state maps directly from the wire format or result variant. *)
+type tool_call_outcome = Ok | Error | Unknown
+
+let string_of_tool_call_outcome = function
+  | Ok -> "ok"
+  | Error -> "error"
+  | Unknown -> "unknown"
+;;
+
+let log_level_of_tool_call_outcome = function
+  | Error -> Log.Error
+  | Ok | Unknown -> Log.Info
+;;
+
 (** Classify a tool failure from an exception raised during execution.
     Constructor-only fallback.  Semantic classes from exception messages must
     be passed explicitly at the catch boundary. *)

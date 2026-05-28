@@ -17,11 +17,10 @@
     override] (both default and live are options).
 
     Pure builders — no parent state, no I/O. Verbatim extract from
-    [Keeper_status_bridge]; [string_list_to_json] is a 1-line local
+    [Keeper_status_bridge]; [Json_util.json_string_list] is a 1-line local
     duplicate because the parent's copy is in flight on a different
     extract path and this 1-line helper isn't worth a third sibling. *)
 
-let string_list_to_json = Json_util.json_string_list
 
 type override_field_detail =
   { field : string
@@ -52,8 +51,8 @@ let maybe_string_list_override field default live acc =
   | Some authored when authored <> live ->
     override_field
       field
-      ~default_value:(string_list_to_json authored)
-      ~live_value:(string_list_to_json live)
+      ~default_value:(Json_util.json_string_list authored)
+      ~live_value:(Json_util.json_string_list live)
     :: acc
   | _ -> acc
 ;;
@@ -63,8 +62,8 @@ let nonempty_string_list_override field default live acc =
   then
     override_field
       field
-      ~default_value:(string_list_to_json default)
-      ~live_value:(string_list_to_json live)
+      ~default_value:(Json_util.json_string_list default)
+      ~live_value:(Json_util.json_string_list live)
     :: acc
   else acc
 ;;

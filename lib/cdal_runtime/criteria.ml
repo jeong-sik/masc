@@ -49,8 +49,6 @@ let criteria_kind = function
   | Persona_probe _ -> "persona_probe"
   | Free _ -> "free"
 
-let string_list_to_json xs = `List (List.map (fun s -> `String s) xs)
-let string_opt_to_json = function None -> `Null | Some s -> `String s
 
 (* Wire-byte-exact encoding for the two pre-RFC-0109 producer shapes
    (Keeper_turn_capture_v1, Contract_catalog_invariants). Adding a
@@ -69,18 +67,18 @@ let to_yojson (t : t) : Yojson.Safe.t =
       ; "agent_name", `String r.agent_name
       ; "sandbox_profile", `String r.sandbox_profile
       ; "network_mode", `String r.network_mode
-      ; "sandbox_image", string_opt_to_json r.sandbox_image
+      ; "sandbox_image", Json_util.string_opt_to_json r.sandbox_image
       ; "tool_access", r.tool_access
-      ; "tool_denylist", string_list_to_json r.tool_denylist
-      ; "allowed_paths", string_list_to_json r.allowed_paths
-      ; "active_goal_ids", string_list_to_json r.active_goal_ids
-      ; "current_task_id_at_start", string_opt_to_json r.current_task_id
+      ; "tool_denylist", Json_util.json_string_list r.tool_denylist
+      ; "allowed_paths", Json_util.json_string_list r.allowed_paths
+      ; "active_goal_ids", Json_util.json_string_list r.active_goal_ids
+      ; "current_task_id_at_start", Json_util.string_opt_to_json r.current_task_id
       ]
   | Contract_catalog_invariants r ->
     `Assoc
       [ "contract_name", `String r.contract_name
       ; "description", `String r.description
-      ; "invariants", string_list_to_json r.invariants
+      ; "invariants", Json_util.json_string_list r.invariants
       ]
   | Verification_request r ->
     `Assoc

@@ -61,6 +61,12 @@ val string_opt_field : string -> string option -> string * Yojson.Safe.t
 val option_to_yojson : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
 (** Higher-order: [option_to_yojson f] maps [f] over [Some] or returns [`Null]. *)
 
+val int_option_to_yojson : int option -> Yojson.Safe.t
+(** [int_option_to_yojson] maps [Some n] to [`Int n] or [None] to [`Null]. *)
+
+val string_option_to_yojson : string option -> Yojson.Safe.t
+(** [string_option_to_yojson] maps [Some s] to [`String s] or [None] to [`Null]. *)
+
 
 (** {1 Diagnostic helpers} *)
 

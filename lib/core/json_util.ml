@@ -112,6 +112,14 @@ let option_to_yojson (f : 'a -> Yojson.Safe.t) : 'a option -> Yojson.Safe.t = fu
   | Some value -> f value
   | None -> `Null
 
+let int_option_to_yojson : int option -> Yojson.Safe.t = function
+  | Some n -> `Int n
+  | None -> `Null
+
+let string_option_to_yojson : string option -> Yojson.Safe.t = function
+  | Some s -> `String s
+  | None -> `Null
+
 let kind_name : Yojson.Safe.t -> string = function
   | `Null -> "null"
   | `Bool _ -> "bool"

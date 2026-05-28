@@ -285,8 +285,12 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Ps, flag_args) ]
   | Shell_ir_typed.W (Tty ()) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Tty, []) ]
-  | Shell_ir_typed.W (Wget { url; output }) ->
-    let flag_args = match output with None -> [] | Some o -> [ arg "-O"; arg o ] in
+  | Shell_ir_typed.W (Wget { url; output; continue_; no_check_certificate }) ->
+    let flag_args =
+      (if continue_ then [ arg "--continue" ] else [])
+      @ (if no_check_certificate then [ arg "--no-check-certificate" ] else [])
+      @ (match output with None -> [] | Some o -> [ arg "-O"; arg o ])
+    in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Wget, flag_args @ [ arg url ]) ]
   | Shell_ir_typed.W (Ssh { host; user; command; port }) ->
     let target =
@@ -319,8 +323,11 @@ let of_command = function
     let flag_args = match jobs with None -> [] | Some j -> [ arg "-j"; arg (string_of_int j) ] in
     let target_args = match target with None -> [] | Some t -> [ arg t ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Make, flag_args @ target_args) ]
-  | Shell_ir_typed.W (Diff { file1; file2; unified }) ->
-    let flag_args = if unified then [ arg "-u" ] else [] in
+  | Shell_ir_typed.W (Diff { file1; file2; unified; brief }) ->
+    let flag_args =
+      (if unified then [ arg "-u" ] else [])
+      @ (if brief then [ arg "--brief" ] else [])
+    in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Diff, flag_args @ [ arg file1; arg file2 ]) ]
   | Shell_ir_typed.W (Sed { expression; file; in_place }) ->
     let flag_args = if in_place then [ arg "-i" ] else [] in

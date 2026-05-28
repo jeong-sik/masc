@@ -1799,13 +1799,15 @@ match args with
     }
   ; { name = "Wget"
     ; anon_pattern = "Wget _"
-    ; bind_pattern = "Wget { url; output }"
+    ; bind_pattern = "Wget { url; output; continue_; no_check_certificate }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
-        (match output with None -> [] | Some o -> [ "-O"; o ])
+        (if continue_ then [ "--continue" ] else [])
+        @ (if no_check_certificate then [ "--no-check-certificate" ] else [])
+        @ (match output with None -> [] | Some o -> [ "-O"; o ])
         @ [ url ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Wget
@@ -1819,26 +1821,29 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse output url = function
+let rec parse output continue_ ncc url = function
   | [] ->
     (match url with
      | Some u ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wget { url = u; output }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wget { url = u; output; continue_; no_check_certificate = ncc }))
      | None -> None)
-  | "-O" :: o :: rest -> parse (Some o) url rest
-  | "--output-document" :: o :: rest -> parse (Some o) url rest
+  | "-O" :: o :: rest -> parse (Some o) continue_ ncc url rest
+  | "--output-document" :: o :: rest -> parse (Some o) continue_ ncc url rest
+  | "-c" :: rest -> parse output true ncc url rest
+  | "--continue" :: rest -> parse output true ncc url rest
+  | "--no-check-certificate" :: rest -> parse output continue_ true url rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
-     | [ "--output-document"; o ] -> parse (Some o) url rest
+     | [ "--output-document"; o ] -> parse (Some o) continue_ ncc url rest
      | _ ->
        if String.length arg > 0 && arg.[0] = '-'
-       then parse output url rest
+       then parse output continue_ ncc url rest
        else (
          match url with
-         | None -> parse output (Some arg) rest
+         | None -> parse output continue_ ncc (Some arg) rest
          | Some _ -> None))
 in
-parse None None args|}
+parse None false false None args|}
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
@@ -2123,13 +2128,14 @@ parse None None args|}
     }
   ; { name = "Diff"
     ; anon_pattern = "Diff _"
-    ; bind_pattern = "Diff { file1; file2; unified }"
+    ; bind_pattern = "Diff { file1; file2; unified; brief }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
         (if unified then [ "-u" ] else [])
+        @ (if brief then [ "--brief" ] else [])
         @ [ file1; file2 ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Diff
@@ -2143,20 +2149,22 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let rec parse unified files = function
+let rec parse unified brief files = function
   | [] ->
     (match files with
      | [ f1; f2 ] ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified; brief }))
      | _ -> None)
-  | "-u" :: rest -> parse true files rest
-  | "--unified" :: rest -> parse true files rest
+  | "-u" :: rest -> parse true brief files rest
+  | "--unified" :: rest -> parse true brief files rest
+  | "-q" :: rest -> parse unified true files rest
+  | "--brief" :: rest -> parse unified true files rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse unified files rest
-    else parse unified (files @ [ arg ]) rest
+    then parse unified brief files rest
+    else parse unified brief (files @ [ arg ]) rest
 in
-parse false [] args|}
+parse false false [] args|}
     }
   ; { name = "Sed"
     ; anon_pattern = "Sed _"

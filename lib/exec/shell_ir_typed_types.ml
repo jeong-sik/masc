@@ -227,6 +227,8 @@ and (_, _, _, _) command =
   | Wget :
       { url : string
       ; output : string option
+      ; continue_ : bool
+      ; no_check_certificate : bool
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Ssh :
@@ -259,6 +261,7 @@ and (_, _, _, _) command =
       { file1 : string
       ; file2 : string
       ; unified : bool
+      ; brief : bool
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Sed :

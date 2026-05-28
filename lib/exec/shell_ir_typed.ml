@@ -303,13 +303,15 @@ let pp fmt = function
       (Format.pp_print_option Format.pp_print_string)
       user
   | W (Tty ()) -> Format.fprintf fmt "Tty"
-  | W (Wget { url; output }) ->
+  | W (Wget { url; output; continue_; no_check_certificate }) ->
     Format.fprintf
       fmt
-      "Wget(url=%s, output=%a)"
+      "Wget(url=%s, output=%a, continue=%b, no_check_cert=%b)"
       url
       (Format.pp_print_option Format.pp_print_string)
       output
+      continue_
+      no_check_certificate
   | W (Ssh { host; user; command; port }) ->
     Format.fprintf
       fmt
@@ -346,8 +348,8 @@ let pp fmt = function
       target
       (Format.pp_print_option Format.pp_print_int)
       jobs
-  | W (Diff { file1; file2; unified }) ->
-    Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b)" file1 file2 unified
+  | W (Diff { file1; file2; unified; brief }) ->
+    Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b, brief=%b)" file1 file2 unified brief
   | W (Sed { expression; file; in_place }) ->
     Format.fprintf fmt "Sed(expression=%s, file=%s, in_place=%b)" expression file in_place
   | W (Rsync { source; dest; flags }) ->

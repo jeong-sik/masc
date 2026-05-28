@@ -359,6 +359,7 @@ let test_system_tools () =
     ; "tar -c -J -f archive.tar.xz dir/", "Tar"
     ; "diff file1 file2", "Diff"
     ; "diff -u file1 file2", "Diff"
+    ; "diff --brief a b", "Diff"
     ; "sed s/foo/bar/g file.txt", "Sed"
     ; "rsync -a -v -z dir/ user@host:/backup/", "Rsync"
     ; "patch -p1", "Patch"
@@ -450,6 +451,8 @@ let test_round_trip_e2e () =
     ; "tar -c -f archive.tar file1"
     ; "tar -x -z -f archive.tar.gz"
     ; "diff -u file1 file2"
+    ; "diff --brief a b"
+    ; "wget -c --no-check-certificate https://example.com/file"
     ; "sed s/foo/bar/g file.txt"
     ; "sed -i s/foo/bar/g file.txt"
     ; "sed -e s/foo/bar/g file.txt"
@@ -810,24 +813,62 @@ let test_grep_combined_flags () =
 ;;
 
 let test_wget_long_form () =
-  let check_wget cmd ~expected_url ~expected_output =
+  let check_wget cmd ~expected_url ~expected_output ~expected_continue ~expected_ncc =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Wget { url; output }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Wget { url; output; continue_; no_check_certificate }) ->
       check string (Printf.sprintf "\"%s\" → url" cmd) expected_url url;
-      check (option string) (Printf.sprintf "\"%s\" → output" cmd) expected_output output
+      check (option string) (Printf.sprintf "\"%s\" → output" cmd) expected_output output;
+      check bool (Printf.sprintf "\"%s\" → continue" cmd) expected_continue continue_;
+      check bool (Printf.sprintf "\"%s\" → no_check_certificate" cmd) expected_ncc no_check_certificate
     | _ -> failf "expected Wget for: %s" cmd
   in
   (* space-separated *)
   check_wget "wget -O file.html https://example.com"
-    ~expected_url:"https://example.com" ~expected_output:(Some "file.html");
+    ~expected_url:"https://example.com" ~expected_output:(Some "file.html")
+    ~expected_continue:false ~expected_ncc:false;
   (* long form with = *)
   check_wget "wget --output-document=file.html https://example.com"
-    ~expected_url:"https://example.com" ~expected_output:(Some "file.html");
+    ~expected_url:"https://example.com" ~expected_output:(Some "file.html")
+    ~expected_continue:false ~expected_ncc:false;
   (* no output flag *)
   check_wget "wget https://example.com"
     ~expected_url:"https://example.com" ~expected_output:None
+    ~expected_continue:false ~expected_ncc:false;
+  (* --continue resume *)
+  check_wget "wget --continue https://example.com/big.iso"
+    ~expected_url:"https://example.com/big.iso" ~expected_output:None
+    ~expected_continue:true ~expected_ncc:false;
+  (* -c short form *)
+  check_wget "wget -c https://example.com/big.iso"
+    ~expected_url:"https://example.com/big.iso" ~expected_output:None
+    ~expected_continue:true ~expected_ncc:false;
+  (* --no-check-certificate *)
+  check_wget "wget --no-check-certificate https://self-signed.example.com"
+    ~expected_url:"https://self-signed.example.com" ~expected_output:None
+    ~expected_continue:false ~expected_ncc:true;
+  (* both flags combined *)
+  check_wget "wget -c --no-check-certificate -O out.bin https://example.com"
+    ~expected_url:"https://example.com" ~expected_output:(Some "out.bin")
+    ~expected_continue:true ~expected_ncc:true
+;;
+
+let test_diff_brief () =
+  let check_diff cmd ~expected_unified ~expected_brief =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Diff { file1; file2; unified; brief }) ->
+      ignore (file1, file2);
+      check bool (Printf.sprintf "\"%s\" → unified" cmd) expected_unified unified;
+      check bool (Printf.sprintf "\"%s\" → brief" cmd) expected_brief brief
+    | _ -> failf "expected Diff for: %s" cmd
+  in
+  check_diff "diff a b" ~expected_unified:false ~expected_brief:false;
+  check_diff "diff -u a b" ~expected_unified:true ~expected_brief:false;
+  check_diff "diff --brief a b" ~expected_unified:false ~expected_brief:true;
+  check_diff "diff -q -u a b" ~expected_unified:true ~expected_brief:true
 ;;
 
 let test_uname_combined_flags () =
@@ -1021,6 +1062,8 @@ let suite =
     , [ test_case "field values" `Quick test_grep_combined_flags ] )
   ; ( "E2E: Wget --output-document=X"
     , [ test_case "field values" `Quick test_wget_long_form ] )
+  ; ( "E2E: Diff --brief"
+    , [ test_case "field values" `Quick test_diff_brief ] )
   ; ( "E2E: Uname combined -srm"
     , [ test_case "field values" `Quick test_uname_combined_flags ] )
   ; ( "E2E: File combined -bi"

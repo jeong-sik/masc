@@ -287,8 +287,10 @@ let test_network_tools () =
     ; "wget https://example.com/file.txt", "Wget"
     ; "ssh user@host", "Ssh"
     ; "ssh user@host ls -la", "Ssh"
+    ; "ssh -p 2222 user@host", "Ssh"
     ; "scp file.txt user@host:/tmp/", "Scp"
     ; "scp -r dir/ user@host:/tmp/", "Scp"
+    ; "scp -P 2222 file.txt user@host:/tmp/", "Scp"
     ]
 ;;
 
@@ -338,7 +340,9 @@ let test_privileged_commands () =
     [ "sudo ls /root", "Sudo"
     ; "sudo sh -c \"echo hi\"", "Sudo"
     ; "chmod 755 script.sh", "Chmod"
+    ; "chmod -R 755 dir/", "Chmod"
     ; "chown user:group file.txt", "Chown"
+    ; "chown -R user:group dir/", "Chown"
     ; "su root", "Su"
     ; "dd if=/dev/zero of=/tmp/zeros bs=1M count=10", "Dd"
     ; "mkfs -t ext4 /dev/sdb1", "Mkfs"
@@ -355,12 +359,17 @@ let test_system_tools () =
     ; "tar -c -J -f archive.tar.xz dir/", "Tar"
     ; "diff file1 file2", "Diff"
     ; "diff -u file1 file2", "Diff"
+    ; "diff --brief a b", "Diff"
     ; "sed s/foo/bar/g file.txt", "Sed"
     ; "rsync -a -v -z dir/ user@host:/backup/", "Rsync"
+    ; "rsync -a --delete --dry-run -z src/ dest/", "Rsync"
     ; "patch -p1", "Patch"
     ; "node script.js", "Node"
+    ; "node -e process.exit", "Node"
     ; "python script.py", "Python"
+    ; "python -c pass", "Python"
     ; "python3 script.py", "Python3"
+    ; "python3 -c pass", "Python3"
     ; "pip install requests", "Pip"
     ]
 ;;
@@ -407,7 +416,9 @@ let test_round_trip_e2e () =
     ; "curl -u user:pass https://example.com"
     ; "wget https://example.com/file.txt"
     ; "ssh user@host ls -l -a"
+    ; "ssh -p 2222 user@host ls -la"
     ; "scp file.txt user@host:/tmp/"
+    ; "scp -r -P 2222 dir/ user@host:/tmp/"
     ; "make -j4"
     ; "npm test"
     ; "cargo build"
@@ -434,19 +445,28 @@ let test_round_trip_e2e () =
     ; "cmake --build ."
     ; "sudo ls /root"
     ; "chmod 755 script.sh"
+    ; "chmod -R 755 dir/"
     ; "chown user:group file.txt"
+    ; "chown -R user:group dir/"
     ; "su root"
     ; "tar -c -f archive.tar file1"
     ; "tar -x -z -f archive.tar.gz"
     ; "diff -u file1 file2"
+    ; "diff --brief a b"
+    ; "wget -c --no-check-certificate https://example.com/file"
     ; "sed s/foo/bar/g file.txt"
     ; "sed -i s/foo/bar/g file.txt"
     ; "sed -e s/foo/bar/g file.txt"
     ; "rsync -a -v -z dir/ user@host:/backup/"
     ; "rsync --exclude '*.log' -a src/ dest/"
+    ; "rsync -a --delete --dry-run -z src/ dest/"
     ; "node script.js"
+    ; "node -e process.exit"
+    ; "node -e process.exit --max-old-space-size=4096"
     ; "python script.py"
+    ; "python -c pass"
     ; "python3 script.py"
+    ; "python3 -c pass"
     ; "pip install requests"
     ; "sort -n file.txt"
     ; "cut -d: -f1 /etc/passwd"
@@ -508,6 +528,7 @@ let test_round_trip_e2e () =
     ; "tty"
     ; "whoami"
     ; "python3 script.py"
+    ; "python3 -c pass"
     ; "patch -p1 < fix.patch"
     ; "rg pattern src/"
     ; "git clone https://github.com/x/y.git"
@@ -629,28 +650,74 @@ let test_combined_value_flag_round_trip () =
 
 (** Verify that [sed -i / -e / -n] correctly parses fields. *)
 let test_sed_flags () =
-  let check_sed cmd ~expected_expr ~expected_file ~expected_in_place =
+  let check_sed cmd ~expected_expr ~expected_file ~expected_in_place ~expected_ext_re ~expected_suppress =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Sed { expression; file; in_place }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Sed { expression; file; in_place; extended_regex; suppress_output }) ->
       check bool (Printf.sprintf "\"%s\" → in_place" cmd) expected_in_place in_place;
+      check bool (Printf.sprintf "\"%s\" → extended_regex" cmd) expected_ext_re extended_regex;
+      check bool (Printf.sprintf "\"%s\" → suppress_output" cmd) expected_suppress suppress_output;
       check string (Printf.sprintf "\"%s\" → expression" cmd) expected_expr expression;
       check string (Printf.sprintf "\"%s\" → file" cmd) expected_file file
     | _ -> failf "expected Sed for: %s" cmd
   in
   (* basic *)
   check_sed "sed s/foo/bar/g file.txt"
-    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false;
+    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false
+    ~expected_ext_re:false ~expected_suppress:false;
   (* -i without suffix *)
   check_sed "sed -i s/foo/bar/g file.txt"
-    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:true;
+    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:true
+    ~expected_ext_re:false ~expected_suppress:false;
   (* -e explicit expression *)
   check_sed "sed -e s/foo/bar/g file.txt"
-    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false;
+    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false
+    ~expected_ext_re:false ~expected_suppress:false;
   (* -n suppress output *)
   check_sed "sed -n '1,5p' file.txt"
     ~expected_expr:"1,5p" ~expected_file:"file.txt" ~expected_in_place:false
+    ~expected_ext_re:false ~expected_suppress:true
+;;
+
+(** Verify that [sed -E / --regexp-extended / -n / --quiet / --silent / -En] parse correctly. *)
+let test_sed_extended () =
+  let check_sed cmd ~expected_expr ~expected_file ~expected_in_place ~expected_ext_re ~expected_suppress =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Sed { expression; file; in_place; extended_regex; suppress_output }) ->
+      check bool (Printf.sprintf "\"%s\" → in_place" cmd) expected_in_place in_place;
+      check bool (Printf.sprintf "\"%s\" → extended_regex" cmd) expected_ext_re extended_regex;
+      check bool (Printf.sprintf "\"%s\" → suppress_output" cmd) expected_suppress suppress_output;
+      check string (Printf.sprintf "\"%s\" → expression" cmd) expected_expr expression;
+      check string (Printf.sprintf "\"%s\" → file" cmd) expected_file file
+    | _ -> failf "expected Sed for: %s" cmd
+  in
+  (* -E extended regex *)
+  check_sed "sed -E 's/(foo)/bar/' file.txt"
+    ~expected_expr:"s/(foo)/bar/" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:true ~expected_suppress:false;
+  (* --regexp-extended long form *)
+  check_sed "sed --regexp-extended 's/(foo)/bar/' file.txt"
+    ~expected_expr:"s/(foo)/bar/" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:true ~expected_suppress:false;
+  (* --quiet alias for -n *)
+  check_sed "sed --quiet '1,5p' file.txt"
+    ~expected_expr:"1,5p" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:false ~expected_suppress:true;
+  (* --silent alias for -n *)
+  check_sed "sed --silent '1,5p' file.txt"
+    ~expected_expr:"1,5p" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:false ~expected_suppress:true;
+  (* -En combined *)
+  check_sed "sed -En 's/(foo)/bar/p' file.txt"
+    ~expected_expr:"s/(foo)/bar/p" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:true ~expected_suppress:true;
+  (* -iE combined with -n *)
+  check_sed "sed -iE -n 's/(foo)/bar/p' file.txt"
+    ~expected_expr:"s/(foo)/bar/p" ~expected_file:"file.txt"
+    ~expected_in_place:true ~expected_ext_re:true ~expected_suppress:true
 ;;
 
 (** Verify that [sort] handles combined -kN and -t value flag. *)
@@ -731,34 +798,70 @@ let test_du_max_depth () =
     ~expected_depth:None ~expected_human:true ~expected_summary:true ~expected_path:(Some "/tmp")
 ;;
 
-(** Verify that [uniq] handles -f and -s value flags. *)
-let test_uniq_value_flags () =
-  let check_uniq cmd ~expected_count ~expected_duplicates ~expected_unique ~expected_file =
+(** Verify that [find] captures -maxdepth as a typed field. *)
+let test_find_maxdepth () =
+  let check_find cmd ~expected_name ~expected_type ~expected_maxdepth ~expected_path =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Uniq { count; duplicates; unique; file }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Find { path; name; type_; maxdepth }) ->
+      check (option string) (Printf.sprintf "\"%s\" → name" cmd) expected_name name;
+      (match expected_type, type_ with
+       | None, None -> ()
+       | Some `File, Some `File -> ()
+       | Some `Dir, Some `Dir -> ()
+       | _ -> failf "\"%s\" → type_ mismatch" cmd);
+      check (option int) (Printf.sprintf "\"%s\" → maxdepth" cmd) expected_maxdepth maxdepth;
+      check string (Printf.sprintf "\"%s\" → path" cmd) expected_path path
+    | _ -> failf "expected Find for: %s" cmd
+  in
+  (* with -maxdepth *)
+  check_find "find . -maxdepth 2 -name '*.ml'"
+    ~expected_name:(Some "*.ml") ~expected_type:None ~expected_maxdepth:(Some 2) ~expected_path:".";
+  (* without -maxdepth *)
+  check_find "find /tmp -name 'foo' -type f"
+    ~expected_name:(Some "foo") ~expected_type:(Some `File) ~expected_maxdepth:None ~expected_path:"/tmp";
+  (* -maxdepth 1 with -type d *)
+  check_find "find . -maxdepth 1 -type d"
+    ~expected_name:None ~expected_type:(Some `Dir) ~expected_maxdepth:(Some 1) ~expected_path:".";
+  (* -maxdepth 0 edge case *)
+  check_find "find / -maxdepth 0 -name 'etc'"
+    ~expected_name:(Some "etc") ~expected_type:None ~expected_maxdepth:(Some 0) ~expected_path:"/"
+;;
+
+(** Verify that [uniq] handles -f and -s value flags. *)
+let test_uniq_value_flags () =
+  let check_uniq cmd ~expected_count ~expected_duplicates ~expected_unique ~expected_skip_fields ~expected_skip_chars ~expected_file =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Uniq { count; duplicates; unique; skip_fields; skip_chars; file }) ->
       check bool (Printf.sprintf "\"%s\" → count" cmd) expected_count count;
       check bool (Printf.sprintf "\"%s\" → duplicates" cmd) expected_duplicates duplicates;
       check bool (Printf.sprintf "\"%s\" → unique" cmd) expected_unique unique;
+      check (option int) (Printf.sprintf "\"%s\" → skip_fields" cmd) expected_skip_fields skip_fields;
+      check (option int) (Printf.sprintf "\"%s\" → skip_chars" cmd) expected_skip_chars skip_chars;
       check (option string) (Printf.sprintf "\"%s\" → file" cmd) expected_file file
     | _ -> failf "expected Uniq for: %s" cmd
   in
   (* basic *)
   check_uniq "uniq file.txt"
-    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:None ~expected_skip_chars:None ~expected_file:(Some "file.txt");
   (* -c *)
   check_uniq "uniq -c file.txt"
-    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:None ~expected_skip_chars:None ~expected_file:(Some "file.txt");
   (* -f skips fields *)
   check_uniq "uniq -f 2 file.txt"
-    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:(Some 2) ~expected_skip_chars:None ~expected_file:(Some "file.txt");
   (* -s skips chars *)
   check_uniq "uniq -s 5 file.txt"
-    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:None ~expected_skip_chars:(Some 5) ~expected_file:(Some "file.txt");
   (* combined -f and -c *)
   check_uniq "uniq -f 1 -c file.txt"
-    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt")
+    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:(Some 1) ~expected_skip_chars:None ~expected_file:(Some "file.txt");
+  (* combined -f and -s *)
+  check_uniq "uniq -f 3 -s 7 file.txt"
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:(Some 3) ~expected_skip_chars:(Some 7) ~expected_file:(Some "file.txt")
 ;;
 
 let test_grep_combined_flags () =
@@ -793,25 +896,123 @@ let test_grep_combined_flags () =
     ~expected_recursive:false ~expected_case_sensitive:false ~expected_pattern:"pattern" ~expected_path:(Some "path")
 ;;
 
-let test_wget_long_form () =
-  let check_wget cmd ~expected_url ~expected_output =
+(** Verify that [grep] captures -l/--files-with-matches as a typed field. *)
+let test_grep_files_with_matches () =
+  let check_grep cmd ~expected_recursive ~expected_case_sensitive ~expected_fwm ~expected_pattern ~expected_path =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Wget { url; output }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Grep { pattern; path; recursive; case_sensitive; files_with_matches }) ->
+      check bool (Printf.sprintf "\"%s\" → recursive" cmd) expected_recursive recursive;
+      check bool (Printf.sprintf "\"%s\" → case_sensitive" cmd) expected_case_sensitive case_sensitive;
+      check bool (Printf.sprintf "\"%s\" → files_with_matches" cmd) expected_fwm files_with_matches;
+      check string (Printf.sprintf "\"%s\" → pattern" cmd) expected_pattern pattern;
+      check (option string) (Printf.sprintf "\"%s\" → path" cmd) expected_path path
+    | _ -> failf "expected Grep for: %s" cmd
+  in
+  (* -l standalone *)
+  check_grep "grep -l pattern path"
+    ~expected_recursive:false ~expected_case_sensitive:true ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* --files-with-matches long form *)
+  check_grep "grep --files-with-matches pattern path"
+    ~expected_recursive:false ~expected_case_sensitive:true ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* combined -rl *)
+  check_grep "grep -rl pattern path"
+    ~expected_recursive:true ~expected_case_sensitive:true ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* combined -rli *)
+  check_grep "grep -rli pattern path"
+    ~expected_recursive:true ~expected_case_sensitive:false ~expected_fwm:true ~expected_pattern:"pattern" ~expected_path:(Some "path");
+  (* -r only (no -l) *)
+  check_grep "grep -r pattern path"
+    ~expected_recursive:true ~expected_case_sensitive:true ~expected_fwm:false ~expected_pattern:"pattern" ~expected_path:(Some "path")
+;;
+
+let test_wget_long_form () =
+  let check_wget cmd ~expected_url ~expected_output ~expected_continue ~expected_ncc =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Wget { url; output; continue_; no_check_certificate }) ->
       check string (Printf.sprintf "\"%s\" → url" cmd) expected_url url;
-      check (option string) (Printf.sprintf "\"%s\" → output" cmd) expected_output output
+      check (option string) (Printf.sprintf "\"%s\" → output" cmd) expected_output output;
+      check bool (Printf.sprintf "\"%s\" → continue" cmd) expected_continue continue_;
+      check bool (Printf.sprintf "\"%s\" → no_check_certificate" cmd) expected_ncc no_check_certificate
     | _ -> failf "expected Wget for: %s" cmd
   in
   (* space-separated *)
   check_wget "wget -O file.html https://example.com"
-    ~expected_url:"https://example.com" ~expected_output:(Some "file.html");
+    ~expected_url:"https://example.com" ~expected_output:(Some "file.html")
+    ~expected_continue:false ~expected_ncc:false;
   (* long form with = *)
   check_wget "wget --output-document=file.html https://example.com"
-    ~expected_url:"https://example.com" ~expected_output:(Some "file.html");
+    ~expected_url:"https://example.com" ~expected_output:(Some "file.html")
+    ~expected_continue:false ~expected_ncc:false;
   (* no output flag *)
   check_wget "wget https://example.com"
     ~expected_url:"https://example.com" ~expected_output:None
+    ~expected_continue:false ~expected_ncc:false;
+  (* --continue resume *)
+  check_wget "wget --continue https://example.com/big.iso"
+    ~expected_url:"https://example.com/big.iso" ~expected_output:None
+    ~expected_continue:true ~expected_ncc:false;
+  (* -c short form *)
+  check_wget "wget -c https://example.com/big.iso"
+    ~expected_url:"https://example.com/big.iso" ~expected_output:None
+    ~expected_continue:true ~expected_ncc:false;
+  (* --no-check-certificate *)
+  check_wget "wget --no-check-certificate https://self-signed.example.com"
+    ~expected_url:"https://self-signed.example.com" ~expected_output:None
+    ~expected_continue:false ~expected_ncc:true;
+  (* both flags combined *)
+  check_wget "wget -c --no-check-certificate -O out.bin https://example.com"
+    ~expected_url:"https://example.com" ~expected_output:(Some "out.bin")
+    ~expected_continue:true ~expected_ncc:true
+;;
+
+let test_ssh_identity_file () =
+  let check_ssh cmd ~expected_host ~expected_user ~expected_port ~expected_id =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Ssh { host; user; command = _; port; identity_file }) ->
+      check string (Printf.sprintf "\"%s\" → host" cmd) expected_host host;
+      check (option string) (Printf.sprintf "\"%s\" → user" cmd) expected_user user;
+      check (option int) (Printf.sprintf "\"%s\" → port" cmd) expected_port port;
+      check (option string) (Printf.sprintf "\"%s\" → identity_file" cmd) expected_id identity_file
+    | _ -> failf "expected Ssh for: %s" cmd
+  in
+  (* basic - no identity file *)
+  check_ssh "ssh user@host"
+    ~expected_host:"host" ~expected_user:(Some "user") ~expected_port:None ~expected_id:None;
+  (* -i flag *)
+  check_ssh "ssh -i ~/.ssh/id_rsa user@host"
+    ~expected_host:"host" ~expected_user:(Some "user") ~expected_port:None
+    ~expected_id:(Some "~/.ssh/id_rsa");
+  (* -i with port *)
+  check_ssh "ssh -p 2222 -i /path/key user@host"
+    ~expected_host:"host" ~expected_user:(Some "user") ~expected_port:(Some 2222)
+    ~expected_id:(Some "/path/key");
+  (* -i before user@host, no user *)
+  check_ssh "ssh -i key.pem host"
+    ~expected_host:"host" ~expected_user:None ~expected_port:None
+    ~expected_id:(Some "key.pem")
+;;
+
+let test_diff_brief () =
+  let check_diff cmd ~expected_unified ~expected_brief =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Diff { file1; file2; unified; brief }) ->
+      ignore (file1, file2);
+      check bool (Printf.sprintf "\"%s\" → unified" cmd) expected_unified unified;
+      check bool (Printf.sprintf "\"%s\" → brief" cmd) expected_brief brief
+    | _ -> failf "expected Diff for: %s" cmd
+  in
+  check_diff "diff a b" ~expected_unified:false ~expected_brief:false;
+  check_diff "diff -u a b" ~expected_unified:true ~expected_brief:false;
+  check_diff "diff --brief a b" ~expected_unified:false ~expected_brief:true;
+  check_diff "diff -q -u a b" ~expected_unified:true ~expected_brief:true
 ;;
 
 let test_uname_combined_flags () =
@@ -866,26 +1067,48 @@ let test_file_combined_flags () =
 ;;
 
 let test_rsync_long_form () =
-  let check_rsync cmd ~expected_src ~expected_dst ~expected_flags =
+  let check_rsync cmd ~expected_src ~expected_dst ~expected_archive ~expected_delete ~expected_dry_run ~expected_compress ~expected_flags =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Rsync { source; dest; flags }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Rsync { source; dest; archive; delete; dry_run; compress; flags }) ->
       check string (Printf.sprintf "\"%s\" → source" cmd) expected_src source;
       check string (Printf.sprintf "\"%s\" → dest" cmd) expected_dst dest;
+      check bool (Printf.sprintf "\"%s\" → archive" cmd) expected_archive archive;
+      check bool (Printf.sprintf "\"%s\" → delete" cmd) expected_delete delete;
+      check bool (Printf.sprintf "\"%s\" → dry_run" cmd) expected_dry_run dry_run;
+      check bool (Printf.sprintf "\"%s\" → compress" cmd) expected_compress compress;
       check (list string) (Printf.sprintf "\"%s\" → flags" cmd) expected_flags flags
     | _ -> failf "expected Rsync for: %s" cmd
   in
   (* two-token form *)
   check_rsync "rsync --exclude .git src/ dest/"
-    ~expected_src:"src/" ~expected_dst:"dest/" ~expected_flags:["--exclude"; ".git"];
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["--exclude"; ".git"];
   (* long form with = *)
   check_rsync "rsync --exclude=.git src/ dest/"
-    ~expected_src:"src/" ~expected_dst:"dest/" ~expected_flags:["--exclude"; ".git"];
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["--exclude"; ".git"];
   (* multiple long forms with = *)
   check_rsync "rsync --exclude=.git --exclude=node_modules --progress src/ dest/"
     ~expected_src:"src/" ~expected_dst:"dest/"
-    ~expected_flags:["--exclude"; ".git"; "--exclude"; "node_modules"; "--progress"]
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["--exclude"; ".git"; "--exclude"; "node_modules"; "--progress"];
+  (* typed boolean flags *)
+  check_rsync "rsync -a --delete --dry-run -z src/ dest/"
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:true ~expected_delete:true ~expected_dry_run:true ~expected_compress:true
+    ~expected_flags:[];
+  check_rsync "rsync -avz src/ dest/"
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["-avz"];
+  check_rsync "rsync --archive --compress --exclude='*.log' src/ dest/"
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:true ~expected_delete:false ~expected_dry_run:false ~expected_compress:true
+    ~expected_flags:["--exclude"; "*.log"]
 ;;
 
 let test_df_combined_and_long_form () =
@@ -960,6 +1183,33 @@ let test_tar_farchive_combined () =
     ~expected_action:`Extract ~expected_archive:"archive.tar" ~expected_compression:`None
 ;;
 
+(* ── Curl -o/-L/-k ────────────────────────────────────────────── *)
+
+let test_curl_flags () =
+  let check_curl cmd ~expected_output ~expected_follow ~expected_insecure =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Curl { output_file; follow_redirects; insecure; _ }) ->
+      check (option string) (Printf.sprintf "\"%s\" → output" cmd) expected_output output_file;
+      check bool (Printf.sprintf "\"%s\" → follow_redirects" cmd) expected_follow follow_redirects;
+      check bool (Printf.sprintf "\"%s\" → insecure" cmd) expected_insecure insecure
+    | _ -> failf "expected Curl for: %s" cmd
+  in
+  check_curl "curl https://example.com"
+    ~expected_output:None ~expected_follow:false ~expected_insecure:false;
+  check_curl "curl -o /tmp/out https://example.com"
+    ~expected_output:(Some "/tmp/out") ~expected_follow:false ~expected_insecure:false;
+  check_curl "curl -L https://example.com"
+    ~expected_output:None ~expected_follow:true ~expected_insecure:false;
+  check_curl "curl -k https://example.com"
+    ~expected_output:None ~expected_follow:false ~expected_insecure:true;
+  check_curl "curl -o /tmp/page.html -L -k https://example.com"
+    ~expected_output:(Some "/tmp/page.html") ~expected_follow:true ~expected_insecure:true;
+  check_curl "curl --output /tmp/data.json --location --insecure https://api.example.com"
+    ~expected_output:(Some "/tmp/data.json") ~expected_follow:true ~expected_insecure:true
+;;
+
 (* ── Test runner ───────────────────────────────────────────────── *)
 
 let suite =
@@ -993,18 +1243,26 @@ let suite =
       ] )
   ; ( "E2E: Sed flags"
     , [ test_case "field values" `Quick test_sed_flags ] )
+  ; ( "E2E: Sed -E/-n"
+    , [ test_case "extended flags" `Quick test_sed_extended ] )
   ; ( "E2E: Sort combined -kN + -t"
     , [ test_case "field values" `Quick test_sort_flags ] )
   ; ( "E2E: Cut long forms"
     , [ test_case "field values" `Quick test_cut_long_forms ] )
   ; ( "E2E: Du --max-depth"
     , [ test_case "field values" `Quick test_du_max_depth ] )
+  ; ( "E2E: Find -maxdepth"
+    , [ test_case "field values" `Quick test_find_maxdepth ] )
   ; ( "E2E: Uniq -f/-s"
     , [ test_case "field values" `Quick test_uniq_value_flags ] )
   ; ( "E2E: Grep combined flags"
     , [ test_case "field values" `Quick test_grep_combined_flags ] )
+  ; ( "E2E: Grep -l/--files-with-matches"
+    , [ test_case "field values" `Quick test_grep_files_with_matches ] )
   ; ( "E2E: Wget --output-document=X"
     , [ test_case "field values" `Quick test_wget_long_form ] )
+  ; ( "E2E: Diff --brief"
+    , [ test_case "field values" `Quick test_diff_brief ] )
   ; ( "E2E: Uname combined -srm"
     , [ test_case "field values" `Quick test_uname_combined_flags ] )
   ; ( "E2E: File combined -bi"
@@ -1017,6 +1275,10 @@ let suite =
     , [ test_case "field values" `Quick test_ps_combined_flags ] )
   ; ( "E2E: Tar -fARCHIVE combined"
     , [ test_case "field values" `Quick test_tar_farchive_combined ] )
+  ; ( "E2E: Ssh -i identity file"
+    , [ test_case "field values" `Quick test_ssh_identity_file ] )
+  ; ( "E2E: Curl -o/-L/-k"
+    , [ test_case "field values" `Quick test_curl_flags ] )
   ]
 
 let () = run "shell_ir_typed_e2e" suite

@@ -44,4 +44,5 @@
    masc_config
    masc_core
    masc_pulse
+   masc_mcp.http_client
    fs_compat))

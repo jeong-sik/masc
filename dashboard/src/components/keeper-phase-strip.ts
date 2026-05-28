@@ -12,19 +12,12 @@ import { getPhaseStyle } from './keeper-phase-indicator'
 const transitionData = signal<Map<string, KeeperTransitionsResponse>>(new Map())
 const loading = signal(false)
 
-/** Server sends lowercase (e.g. "running", "handing_off"); PHASE_STYLES uses PascalCase. */
-export function toPascalPhase(phase: string): string {
-  return phase.toLowerCase()
-    .replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
-    .replace(/^./, s => s.toUpperCase())
-}
-
 function phaseColor(phase: string): string {
-  return getPhaseStyle(toPascalPhase(phase)).color
+  return getPhaseStyle(phase).color
 }
 
 function phaseInlineStyle(phase: string): string {
-  const style = getPhaseStyle(toPascalPhase(phase))
+  const style = getPhaseStyle(phase)
   return `color: ${style.color}; background: ${style.bg}; border: 1px solid ${style.border};`
 }
 
@@ -108,7 +101,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
   const transitions = data.transitions
 
   return html`
-    <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" role="listitem" aria-label="${name}: ${getPhaseStyle(toPascalPhase(phase)).label}, 전환 ${transitions.length}건">
+    <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" role="listitem" aria-label="${name}: ${getPhaseStyle(phase).label}, 전환 ${transitions.length}건">
       <div class="w-24 shrink-0">
         <div class="text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${name}</div>
         <div
@@ -116,7 +109,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
           style="${phaseInlineStyle(phase)}"
           role="status"
         >
-          ${getPhaseStyle(toPascalPhase(phase)).icon} ${getPhaseStyle(toPascalPhase(phase)).label}
+          ${getPhaseStyle(phase).icon} ${getPhaseStyle(phase).label}
         </div>
       </div>
       <div class="flex-1 flex items-center gap-1.5 overflow-x-auto min-h-6">

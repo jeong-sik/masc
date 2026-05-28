@@ -291,7 +291,7 @@ let routes_json ~path value =
       | (key, field_value) :: rest ->
         let item_path = Printf.sprintf "%s.%s" path key in
         (* Route entries are declarative subtables:
-               [routes.keeper_turn] target = "tier-group.primary"
+               [routes.keeper_turn] target = "provider:model"
            The subtable is materialized as a JSON object, leaving target
            extraction to [Cascade_declarative_parser]. *)
         (match field_value with
@@ -299,7 +299,7 @@ let routes_json ~path value =
            loop ((key, otoml_to_yojson field_value) :: acc) rest
          | _ ->
            errorf
-             "%s must be a subtable with target = \"tier-or-tier-group\""
+             "%s must be a subtable with target = \"provider:model\""
              item_path)
     in
     loop [] fields
@@ -364,11 +364,11 @@ let render_toml_to_yojson toml =
   | Error _ as err -> err
   | Ok fields ->
     (* RFC-0058 v2 5-layer declarative namespaces. These tables describe
-         providers, models, bindings, tiers, tier-groups, etc. and are
+         providers, models, bindings, etc. and are
          consumed by the declarative loader. Passthrough preserves the TOML
          shape for JSON-shaped readers such as route decoding. *)
     let is_rfc_0058_namespace = function
-      | "providers" | "models" | "tier" | "tier-group" -> true
+      | "providers" | "models" -> true
       | _ -> false
     in
     let rec loop acc = function
@@ -416,7 +416,7 @@ let render_toml_to_yojson toml =
             errorf
               "flat cascade TOML profile %S is no longer supported; use \
                RFC-0058 declarative namespaces ([providers.*], [models.*], \
-               [<provider>.<binding>], [tier.*], [tier-group.*], [routes.*])"
+               [<provider>.<binding>], [routes.*])"
               key)
     in
     loop [] fields

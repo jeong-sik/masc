@@ -1,6 +1,6 @@
 type t =
   { provider_cfg : Llm_provider.Provider_config.t
-  ; tier_id : string
+  ; admission_key : string
   ; health_key : string
   ; model_health_key : string
   ; capacity_key : string
@@ -133,15 +133,17 @@ let capacity_key_of_config (cfg : Llm_provider.Provider_config.t) =
 let http_probe_url_of_config (cfg : Llm_provider.Provider_config.t) =
   Cascade_http_probe_url.of_provider_config cfg
 
-let default_tier_id_of_config provider_cfg =
+let default_admission_key_of_config provider_cfg =
   provider_health_key_of_config provider_cfg
 
-let of_provider_config ?tier_id provider_cfg =
+let of_provider_config ?admission_key provider_cfg =
   let health_key = provider_health_key_of_config provider_cfg in
   let model_health_key = provider_model_health_key_of_config provider_cfg in
-  let tier_id = Option.value tier_id ~default:(default_tier_id_of_config provider_cfg) in
+  let admission_key =
+    Option.value admission_key ~default:(default_admission_key_of_config provider_cfg)
+  in
   { provider_cfg
-  ; tier_id
+  ; admission_key
   ; health_key
   ; model_health_key
   ; capacity_key = capacity_key_of_config provider_cfg
@@ -281,7 +283,7 @@ let threshold_multipliers_of_runtime_id runtime_id =
   1.0, 1.0
 
 let health_key candidate = candidate.health_key
-let tier_id candidate = candidate.tier_id
+let admission_key candidate = candidate.admission_key
 let model_health_key candidate = candidate.model_health_key
 let provider_label candidate =
   provider_label_of_model_label
@@ -462,7 +464,11 @@ let register_http_probe_capable ~max_concurrent candidate =
   | Some url ->
       if not (Cascade_client_capacity.is_registered url) then
         Cascade_client_capacity.register ~url ~max_concurrent;
-      Cascade_http_probe.register_url ~url
+      (match candidate.provider_cfg.kind with
+       | Llm_provider.Provider_config.Ollama ->
+           Cascade_http_probe.register_url ~url
+       | _ ->
+           Cascade_openai_probe.register_url ~url)
 
 let strategy_adapter : t Cascade_strategy.adapter =
   { health_key; capacity_key }

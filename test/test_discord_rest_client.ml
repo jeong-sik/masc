@@ -1,0 +1,148 @@
+(* RFC-0203 Phase 2 — Discord_rest_client pure helper tests.
+
+   Verifies wire-format contract of build_request and the four
+   response classifications of parse_response. No HTTP round trip;
+   send_message itself is exercised by Phase 4 dual-run. *)
+
+open Alcotest
+module R = Discord_rest_client
+
+(* ---------------------------------------------------------------- *)
+(* build_request                                                    *)
+(* ---------------------------------------------------------------- *)
+
+let header_value headers name =
+  match List.assoc_opt name headers with
+  | Some v -> v
+  | None -> failf "missing header %s" name
+
+let test_build_request_url_targets_channel () =
+  let url, _, _ =
+    R.build_request ~token:"abc" ~channel_id:"1234567890" ~content:"hi"
+  in
+  check string "v10 channel URL"
+    "https://discord.com/api/v10/channels/1234567890/messages"
+    url
+
+let test_build_request_authorization_uses_bot_scheme () =
+  let _, headers, _ =
+    R.build_request ~token:"sekret" ~channel_id:"CH" ~content:"."
+  in
+  check string "Authorization header" "Bot sekret"
+    (header_value headers "Authorization");
+  check string "Content-Type header" "application/json"
+    (header_value headers "Content-Type")
+
+let test_build_request_user_agent_present () =
+  let _, headers, _ =
+    R.build_request ~token:"t" ~channel_id:"c" ~content:"."
+  in
+  let ua = header_value headers "User-Agent" in
+  (* Discord requires DiscordBot ($url, $version) shape. *)
+  check bool "User-Agent starts with DiscordBot" true
+    (String.length ua >= 10
+     && String.sub ua 0 10 = "DiscordBot")
+
+let test_build_request_body_is_content_object () =
+  let _, _, body =
+    R.build_request ~token:"t" ~channel_id:"c" ~content:"hello \"world\""
+  in
+  let json = Yojson.Safe.from_string body in
+  match json with
+  | `Assoc [ ("content", `String "hello \"world\"") ] -> ()
+  | _ ->
+      failf
+        "body shape wrong: %s"
+        (Yojson.Safe.to_string json)
+
+(* ---------------------------------------------------------------- *)
+(* parse_response                                                   *)
+(* ---------------------------------------------------------------- *)
+
+let test_parse_response_2xx_with_id_returns_ok () =
+  let body =
+    {|{"id":"MSG123","channel_id":"CH","content":"hi","author":{"id":"BOT"}}|}
+  in
+  match R.parse_response ~status:200 ~body with
+  | Ok "MSG123" -> ()
+  | Ok other -> failf "expected MSG123, got %s" other
+  | Error e ->
+      failf "expected Ok, got %s"
+        (Format.asprintf "%a" R.pp_error e)
+
+let test_parse_response_2xx_without_id_is_other () =
+  let body = {|{"foo":"bar"}|} in
+  match R.parse_response ~status:201 ~body with
+  | Error (R.Other _) -> ()
+  | Ok _ -> fail "expected Error Other for 2xx without id"
+  | Error e ->
+      failf "expected Other, got %s"
+        (Format.asprintf "%a" R.pp_error e)
+
+let test_parse_response_2xx_non_json_is_other () =
+  match R.parse_response ~status:200 ~body:"<html>oops</html>" with
+  | Error (R.Other _) -> ()
+  | _ -> fail "expected Error Other for 2xx non-JSON body"
+
+let test_parse_response_discord_error_envelope () =
+  (* 50007: Cannot send messages to this user — real Discord error
+     code from the published API documentation. *)
+  let body =
+    {|{"code":50007,"message":"Cannot send messages to this user"}|}
+  in
+  match R.parse_response ~status:403 ~body with
+  | Error
+      (R.Discord_api
+        { code = 50007
+        ; message = "Cannot send messages to this user"
+        }) ->
+      ()
+  | _ -> fail "expected Discord_api { 50007; ... }"
+
+let test_parse_response_5xx_non_json_is_http_status () =
+  match R.parse_response ~status:502 ~body:"Bad Gateway" with
+  | Error (R.Http_status { code = 502; body = "Bad Gateway" }) -> ()
+  | _ -> fail "expected Http_status { 502; \"Bad Gateway\" }"
+
+let test_parse_response_non2xx_json_without_envelope_falls_back () =
+  (* Non-2xx with a JSON object that has no Discord code/message —
+     parse_response falls back to (status, body) as code/message. *)
+  let body = {|{"hint":"bad request"}|} in
+  match R.parse_response ~status:400 ~body with
+  | Error (R.Discord_api { code = 400; _ }) -> ()
+  | _ ->
+      fail
+        "expected Discord_api with code=400 fallback when JSON lacks \
+         'code' field"
+
+(* ---------------------------------------------------------------- *)
+(* Entry                                                            *)
+(* ---------------------------------------------------------------- *)
+
+let () =
+  run "discord_rest_client"
+    [ ( "build_request"
+      , [ test_case "URL targets channel" `Quick
+            test_build_request_url_targets_channel
+        ; test_case "Authorization uses Bot scheme" `Quick
+            test_build_request_authorization_uses_bot_scheme
+        ; test_case "User-Agent present (Discord-required)" `Quick
+            test_build_request_user_agent_present
+        ; test_case "body is { content: <content> } JSON" `Quick
+            test_build_request_body_is_content_object
+        ] )
+    ; ( "parse_response"
+      , [ test_case "2xx with id => Ok id" `Quick
+            test_parse_response_2xx_with_id_returns_ok
+        ; test_case "2xx without id => Other" `Quick
+            test_parse_response_2xx_without_id_is_other
+        ; test_case "2xx non-JSON => Other" `Quick
+            test_parse_response_2xx_non_json_is_other
+        ; test_case "Discord error envelope => Discord_api" `Quick
+            test_parse_response_discord_error_envelope
+        ; test_case "5xx non-JSON => Http_status" `Quick
+            test_parse_response_5xx_non_json_is_http_status
+        ; test_case "non-2xx JSON without envelope => Discord_api fallback"
+            `Quick test_parse_response_non2xx_json_without_envelope_falls_back
+        ] )
+    ]

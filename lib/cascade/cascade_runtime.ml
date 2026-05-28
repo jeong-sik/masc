@@ -649,7 +649,8 @@ let local_capacity_for_selections ~sw ~net selections =
            | _ :: _ as urls -> urls
            | [] ->
              let fallback_profile =
-               Cascade_routes.cascade_name_for_use Cascade_routes.Keeper_turn
+               Cascade_routes_resolve.cascade_name_for_use
+                 Cascade_routes.Keeper_turn
              in
              local_urls_of_named_selection ~sw ~net fallback_profile)
     |> List.sort_uniq String.compare

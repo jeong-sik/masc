@@ -146,7 +146,7 @@ let test_minimal_parse () =
   check int "models" 1 (List.length cfg.models);
   check int "bindings" 1 (List.length cfg.bindings);
   check int "aliases" 0 (List.length cfg.aliases);
-  (* tiers and tier_groups checks removed per tier/tier-group purge *)
+  (* #19327: tier/tier_groups fields removed from cascade_config. *)
   check int "routes" 0 (List.length cfg.routes);
   check int "system_targets" 0 (List.length cfg.system_targets)
 ;;
@@ -224,18 +224,9 @@ let test_layer4_aliases () =
   | None -> failwith "missing governance alias"
 ;;
 
-let test_keeper_assignable_duplicate_keys_rejected () =
-  let toml =
-    {|
-[tier.t]
-members = []
-keeper-assignable = true
-keeper_assignable = false
-|}
-  in
-  let errs = is_error (parse_string toml) in
-  has_error_at "tier.t.keeper-assignable" errs
-;;
+
+(* #19327/#19340 tier-group purge: layer5_tiers, layer5_tier_groups,
+   keeper_assignable_duplicate_keys_rejected removed. *)
 
 let test_routes () =
   let cfg = ok_config (parse_string full_toml) in
@@ -468,6 +459,11 @@ let test_api_format_of_protocol () =
   check bool "unknown" true (api_format_of_protocol "unknown" |> Result.is_error)
 ;;
 
+
+(* #19327/#19340 tier-group purge: supported_config_strategies_parse,
+   retired_config_strategies_rejected, cycle_policy, sticky_ttl_ms,
+   scoring_params test groups removed.  All accessed cfg.tiers field or
+   Priority_tier strategy variant that no longer exist. *)
 
 (* --- Capabilities tests (#14608 tool/event fields + RFC-0058 §2.4 Phase 5.1 dispatch fields) --- *)
 
@@ -1248,12 +1244,7 @@ let () =
     ; "layer2_models", [ test_case "model specs" `Quick test_layer2_models ]
     ; "layer3_bindings", [ test_case "bindings" `Quick test_layer3_bindings ]
     ; "layer4_aliases", [ test_case "aliases" `Quick test_layer4_aliases ]
-    ; ( "tier_misc"
-      , [ test_case
-            "duplicate keeper assignability keys rejected"
-            `Quick
-            test_keeper_assignable_duplicate_keys_rejected
-        ] )
+    (* #19327/#19340: layer5_tiers test group removed (functions deleted). *)
     ; ( "routes"
       , [ test_case "routes" `Quick test_routes
         ; test_case "system targets" `Quick test_system_targets
@@ -1278,6 +1269,8 @@ let () =
         ; test_case "key formatters" `Quick test_key_formatters
         ; test_case "api_format_of_protocol" `Quick test_api_format_of_protocol
         ] )
+    (* #19327/#19340: strategies / cycle_policy / sticky_ttl / scoring_params
+       test groups removed (functions deleted). *)
     ; ( "capabilities"
       , [ test_case "present parses with defaults" `Quick test_capabilities_present
         ; test_case "absent yields None" `Quick test_capabilities_absent

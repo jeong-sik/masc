@@ -291,7 +291,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
       | Keeper_registry.Post_commit_failure -> "ambiguous_post_commit_failure"
     in
     Some { blocker_class; summary = detail; continue_gate = true }
-  | Keeper_registry.Fiber_unresolved ->
+  | Keeper_registry.Fiber_unresolved _ ->
     Some
       (runtime_blocker_surface_of_typed_class
          ~summary:

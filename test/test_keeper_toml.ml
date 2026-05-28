@@ -689,6 +689,7 @@ preset = "delivery"
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
+          (* #19327: field renamed cascade_name→model. *)
           check (option string) "base cascade" (Some "route.keeper_turn")
             defaults.model;
           check (option string) "base sandbox" (Some "docker")

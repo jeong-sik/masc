@@ -27,7 +27,6 @@ type logical_use = Cascade_ref.logical_use =
 
 val logical_use_key : logical_use -> string
 val logical_use_of_string_opt : string -> logical_use option
-val task_use_of_logical_use : logical_use -> Cascade_routing_policy.task_use
 
 val all_logical_uses : logical_use list
 (** Logical call-site uses known by the route registry. *)
@@ -35,18 +34,16 @@ val all_logical_uses : logical_use list
 val known_route_keys : string list
 (** Stable keys accepted under [routes]. *)
 
-val cascade_name_for_use : ?config_path:string -> logical_use -> string
-(** Resolve a logical use through [routes.<logical_use_key>] in the live
-    cascade catalog.  Falls back to the first catalog entry when no route
-    binding is declared.  Falls back to the canonical [route.<key>] name when the
-    catalog itself is empty — [Cascade_catalog_runtime.validate_path_result]
-    remains the boot-time boundary that prevents this state from being
-    reached at runtime.
+(** #19327/#19340 follow-up: [cascade_name_for_use] moved to
+    {!Cascade_routes_resolve} so this module no longer depends on
+    {!Cascade_catalog_runtime}.  Callers that need catalog cross-check use
+    the new module; callers that only need configured route data use
+    {!configured_route_bindings} / {!configured_route_targets} here. *)
 
-    This returns a cascade profile name, never a provider/model string.
-    Phonebook model/provider resolution is exposed separately through
-    {!cascade_models_for_use_via_phonebook} and
-    {!cascade_provider_configs_for_use_via_phonebook}. *)
+val configured_route_bindings :
+  ?config_path:string -> unit -> (string * string) list
+(** [(route_key, target_profile_name)] association list parsed from
+    [\[routes.*\]] in the live cascade config.  No catalog dependency. *)
 
 val route_bindings_from_json : Yojson.Safe.t -> (string * string) list
 (** Decode the [routes] object of the in-memory cascade view into a
@@ -67,19 +64,9 @@ val fallback_name_for_catalog : logical_use -> catalog:string list -> string
     explicit active profile list.  Returns the first catalog entry, or the
     canonical [route.<key>] name when [catalog] is empty. *)
 
-val cascade_models_for_use_via_phonebook :
-  ?config_path:string -> logical_use -> string list option
-(** Resolve a logical use to model strings via the phonebook.
-    Maps canonical route use → [task_use] → tier-group → model strings.
-    Returns [None] when the phonebook is unavailable. *)
+(** Reused by {!Cascade_routes_resolve}. *)
+val warn_unvalidated_route_target_once :
+  route_key:string -> target:string -> fallback:string -> unit
 
-val cascade_provider_configs_for_use_via_phonebook :
-  ?config_path:string ->
-  ?temperature:float ->
-  ?max_tokens:int ->
-  logical_use ->
-  Llm_provider.Provider_config.t list option
-(** Resolve a logical use to [Provider_config.t] list via the phonebook.
-    Full phonebook path: route use → task_use → tier-group → models →
-    providers → endpoint/auth → Provider_config.t.
-    Returns [None] when phonebook is unavailable or no models resolve. *)
+val warn_invalid_route_target_once :
+  route_key:string -> target:string -> fallback:string -> unit

@@ -88,7 +88,13 @@ let last ~base_path ~keeper_name =
 let freshness_threshold_sec = 120.0
 
 let enrich_fiber_unresolved_outcome ~base_path ~keeper_name outcome =
-  let fiber_unresolved = failure_reason_to_string Fiber_unresolved in
+  (* Only the [Unexpected] cause yields the bare ["fiber_unresolved"]
+     string and is the one that actually warrants cascade enrichment;
+     [Graceful_shutdown] / [Cancelled_by_parent] carry their own
+     suffixed labels and are not cascade failures. *)
+  let fiber_unresolved =
+    failure_reason_to_string (Fiber_unresolved Unexpected)
+  in
   if not (String.equal outcome fiber_unresolved)
   then outcome
   else

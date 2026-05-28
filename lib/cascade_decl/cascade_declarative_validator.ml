@@ -1,7 +1,6 @@
 (** Declarative cascade config cross-reference validator (RFC-0058 v2).
 
     Validates load-time invariants on a parsed [cascade_config].
-    Tier/tier-group purge: R5-R6 removed, R7 simplified.
 
     R1: Every binding references an existing provider
     R2: Every binding references an existing model
@@ -43,9 +42,6 @@ let alias_keys (cfg : cascade_config) : string list =
     (fun (a : cascade_alias) -> Printf.sprintf "%s.%s.%s" a.provider_id a.model_id a.name)
     cfg.aliases
 ;;
-
-(* Tier/tier-group purge: tier_names, tier_names_bare, tier_group_names
-   removed.  Route targets resolve directly to bindings/aliases. *)
 
 (* Build a name-keyed Hashtbl once for O(1) membership.  Eight
    validator rules below (R1-R8) used to do [List.mem key list]
@@ -143,9 +139,7 @@ let validate_alias_max_input (cfg : cascade_config) : validation_error list =
     cfg.aliases
 ;;
 
-(* --- R7: Route targets exist ---
-   Tier/tier-group purge: route targets resolve directly to bindings
-   or aliases. No tier-group or tier indirection. *)
+(* --- R7: Route targets exist --- *)
 
 let validate_route_targets (cfg : cascade_config) : validation_error list =
   let all_targets_set = name_set (binding_keys cfg @ alias_keys cfg) in
@@ -208,8 +202,6 @@ let validate_single_default (cfg : cascade_config) : validation_error list =
          (Printf.sprintf "provider %S has multiple bindings with is-default=true" pid))
     counts
 ;;
-
-(* R10 (strategy fields) removed with tier/tier-group purge. *)
 
 (* --- R11: Binding max-concurrent is required and positive ---
 

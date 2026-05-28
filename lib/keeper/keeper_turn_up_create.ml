@@ -54,6 +54,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
   let selected_cascade_name =
+    (* WORKAROUND (#19327 follow-up): cascade_name→model field rename. *)
     match p.cascade_name_opt, p.profile_defaults.model with
     | Some name, _ -> name
     | None, Some name -> name

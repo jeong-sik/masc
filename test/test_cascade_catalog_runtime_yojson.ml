@@ -183,7 +183,8 @@ target = "tier-group.provider_k-coding-with-spark"
 
 let test_local_probe_without_eio_is_skipped_not_error () =
   with_temp_cascade_toml local_ollama_toml @@ fun config_path ->
-  match C.validate_path ~config_path () with
+  (* #19327/#19340 follow-up: validate_path now takes route_data. *)
+  match C.validate_path ~route_data:C.empty_route_data ~config_path () with
   | Error rejection ->
     Alcotest.failf
       "expected valid cascade, got rejection: %s"

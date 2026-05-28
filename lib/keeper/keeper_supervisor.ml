@@ -102,7 +102,7 @@ let sweep_and_recover (ctx : _ context) =
            | Keeper_registry.Provider_runtime_error _
            | Keeper_registry.Tool_required_unsatisfied _
            | Keeper_registry.Ambiguous_partial_commit _
-           | Keeper_registry.Fiber_unresolved
+           | Keeper_registry.Fiber_unresolved _
            | Keeper_registry.Exception _ )
        | None ->
          queue_standard_restart ())
@@ -134,7 +134,7 @@ let sweep_and_recover (ctx : _ context) =
     | Some Keeper_registry.Turn_overflow_pause
     | Some Keeper_registry.Turn_livelock_pause
     | Some (Keeper_registry.Ambiguous_partial_commit _)
-    | Some Keeper_registry.Fiber_unresolved
+    | Some (Keeper_registry.Fiber_unresolved _)
     | Some (Keeper_registry.Exception _)
     | None -> false
   in
@@ -167,7 +167,7 @@ let sweep_and_recover (ctx : _ context) =
       | Some Keeper_registry.Turn_overflow_pause
       | Some Keeper_registry.Turn_livelock_pause
       | Some (Keeper_registry.Ambiguous_partial_commit _)
-      | Some Keeper_registry.Fiber_unresolved
+      | Some (Keeper_registry.Fiber_unresolved _)
       | Some (Keeper_registry.Exception _)
       | None -> None
     in

@@ -637,7 +637,7 @@ let forced_tool_route_issue
   let target =
     try
       Some
-        (Cascade_routes.cascade_name_for_use
+        (Cascade_routes_resolve.cascade_name_for_use
            ~config_path:snapshot.source_path use)
     with
     | Failure _ | Sys_error _ | Unix.Unix_error _ -> None

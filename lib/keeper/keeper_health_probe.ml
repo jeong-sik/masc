@@ -11,7 +11,7 @@ type health_status =
 
 type runtime_pressure_class =
   | Client_capacity_full
-  | Tier_admission_full
+  | Admission_full
   | Provider_capacity
   | Provider_dns_failure
   | Provider_timeout
@@ -23,7 +23,7 @@ type runtime_pressure_class =
 
 let runtime_pressure_class_to_string = function
   | Client_capacity_full -> "client_capacity_full"
-  | Tier_admission_full -> "tier_admission_full"
+  | Admission_full -> "admission_full"
   | Provider_capacity -> "provider_capacity"
   | Provider_dns_failure -> "provider_dns_failure"
   | Provider_timeout -> "provider_timeout"
@@ -37,7 +37,7 @@ let runtime_pressure_class_to_string = function
 let runtime_pressure_class_of_label label =
   match label |> String.trim |> String.lowercase_ascii with
   | "client_capacity_full" | "client_capacity" -> Some Client_capacity_full
-  | "tier_admission_full" | "tier_admission" -> Some Tier_admission_full
+  | "admission_full" | "admission_capacity" -> Some Admission_full
   | "provider_capacity" | "provider_capacity_full" | "capacity_backpressure" ->
     Some Provider_capacity
   | "provider_dns_failure" | "provider_dns" -> Some Provider_dns_failure
@@ -68,11 +68,11 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
     || contains "client_capacity_full"
   then Client_capacity_full
   else if
-    contains "tier_admission"
+    contains "admission_capacity"
     || contains "inflight_capacity_full"
     || Option.is_some cascade_name
-    || contains "tier="
-  then Tier_admission_full
+    || contains "admission="
+  then Admission_full
   else if
     contains "capacity_backpressure"
     || contains "capacity exhausted"
@@ -112,7 +112,7 @@ let runtime_pressure_class_of_failure_reason = function
     Some Keeper_liveness_failure
   | Some (Keeper_registry.Tool_required_unsatisfied _) -> Some Tool_contract_failure
   | Some
-      ( Keeper_registry.Fiber_unresolved
+      ( Keeper_registry.Fiber_unresolved _
       | Keeper_registry.Exception _
       | Keeper_registry.Turn_overflow_pause
       | Keeper_registry.Turn_livelock_pause

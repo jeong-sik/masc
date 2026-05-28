@@ -658,6 +658,7 @@ let test_alias_parent_missing () =
           ; thinking_budget = None
           }
         ]
+    (* #19327: tier/tier_groups fields removed from cascade_config. *)
     ; routes = []
     ; system_targets = []
     ; profiles = []
@@ -843,6 +844,7 @@ let test_duplicate_routes () =
           }
         ]
     ; aliases = []
+    (* #19327: tier/tier_groups fields removed from cascade_config. *)
     ; routes =
         [ { name = "dup"; target = "tier.primary" }
         ; { name = "dup"; target = "tier.primary" }

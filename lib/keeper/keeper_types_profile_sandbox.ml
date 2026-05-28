@@ -45,9 +45,6 @@ let sandbox_profile_to_string profile =
   |> Keeper_sandbox_config.sandbox_profile_to_string
 ;;
 
-(* reserved_cascade_names removed: tier/tier-group purge.
-   Keeper profiles now use plain provider:model strings. *)
-
 (** Parse a sandbox profile string. Canonical values are ["local"] and
     ["docker"]. *)
 let sandbox_profile_of_string raw =

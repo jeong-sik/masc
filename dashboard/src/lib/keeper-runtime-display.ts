@@ -423,14 +423,19 @@ export function keeperRecentActionLabel(
 
 export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
+  // Use the SSOT predicate so a keeper paused by phase or pipeline_stage —
+  // not just by the `paused` flag — still surfaces the "일시정지" prefix.
+  // The same file already routes the *summary* and *short* axes through
+  // isKeeperPaused (L135, L166); the runtime hint had drifted to raw flag.
+  const paused = isKeeperPaused(keeper)
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
-  if (runtimeBlocker) return keeper.paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
+  if (runtimeBlocker) return paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
   const socialFallback = socialModelFallbackHint(keeper)
   if (socialFallback) return socialFallback
   const blocker = keeper.last_blocker?.trim()
-  if (keeper.paused && blocker) return `일시정지 · ${blocker}`
-  if (keeper.paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'
-  if (keeper.paused) return '일시정지됨'
+  if (paused && blocker) return `일시정지 · ${blocker}`
+  if (paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'
+  if (paused) return '일시정지됨'
   if (blocker) return `차단 요인 · ${blocker}`
   return null
 }

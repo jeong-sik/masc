@@ -517,7 +517,6 @@ val resolve_strategy :
     - [backoff_cap_ms < backoff_base_ms] → clamped up to
       [backoff_base_ms]. *)
 
-
 val resolve_ollama_max_concurrent :
   ?config_path:string ->
   name:string ->
@@ -539,20 +538,3 @@ val resolve_cli_max_concurrent :
     [None] means "use the env-var default
     ([MASC_CLI_MAX_CONCURRENT] or 1)".
     @since 0.9.8 *)
-
-(** {2 Phonebook loading (RFC Cascade-Phonebook)} *)
-
-val load_phonebook :
-  string -> (Cascade_phonebook_types.cascade_phonebook, string) result
-(** Load a TOML file as a typed phonebook with mtime-based caching.
-    @since RFC Cascade-Phonebook *)
-
-val invalidate_phonebook_cache : string -> unit
-(** Drop the cached phonebook entry for a path.
-    @since RFC Cascade-Phonebook *)
-
-val load_phonebook_from_config :
-  unit -> (Cascade_phonebook_types.cascade_phonebook, string) result option
-(** Resolve cascade TOML path and load phonebook. Returns [None] when
-    no config dir is configured.
-    @since RFC Cascade-Phonebook *)

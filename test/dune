@@ -299,15 +299,10 @@
   test_cascade_declarative_validator
   test_cascade_declarative_adapter
   test_cascade_declarative_hotpath
-  test_cascade_phonebook
-  test_cascade_phonebook_resolve
-  test_cascade_routing_policy
-  test_cascade_routing_policy_targets_exist
   test_cascade_judge_route_intent_golden
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_cascade_server_flavor
-  test_cascade_phonebook_integration
   test_keeper_cascade_profile_partial
   test_doctor_dispatch
   test_disk_hygiene_script
@@ -628,15 +623,10 @@
   test_cascade_declarative_validator
   test_cascade_declarative_adapter
   test_cascade_declarative_hotpath
-  test_cascade_phonebook
-  test_cascade_phonebook_resolve
-  test_cascade_routing_policy
-  test_cascade_routing_policy_targets_exist
   test_cascade_judge_route_intent_golden
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_cascade_server_flavor
-  test_cascade_phonebook_integration
   test_keeper_cascade_profile_partial
   test_doctor_dispatch
   test_disk_hygiene_script
@@ -1506,6 +1496,10 @@
 
 (include stanzas/test_channel_gate_metrics.inc)
 
+(include stanzas/test_discord_gateway_state.inc)
+
+(include stanzas/test_discord_rest_client.inc)
+
 (include stanzas/test_ci_hardening_source.inc)
 
 (include stanzas/test_ci_run_tests_script.inc)
@@ -1794,6 +1788,10 @@
 (include stanzas/test_personality_text_equal.inc)
 
 (include stanzas/test_phase2_self_preservation.inc)
+
+(include stanzas/test_shutdown_flag.inc)
+
+(include stanzas/test_executable_not_allowlisted_hint.inc)
 
 (include stanzas/test_parse_outcome.inc)
 

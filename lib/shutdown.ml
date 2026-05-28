@@ -95,6 +95,14 @@ let shutting_down_flag = Atomic.make false
 
 let is_shutting_down_global () = Atomic.get shutting_down_flag
 
+(* Async-signal-safe marker. [Atomic.set] is lock-free, so it can be invoked
+   from an OCaml signal handler. Idempotent; later calls are no-ops once the
+   sticky flag is [true]. Wiring this from [bin/main_eio.ml]'s signal handler
+   closes the gap where [Shutdown.initiate] is never called by the inline
+   shutdown path, leaving [is_shutting_down_global] permanently [false] and
+   making the keeper supervisor's graceful-shutdown branch unreachable. *)
+let mark_shutting_down () = Atomic.set shutting_down_flag true
+
 let hooks : hook list ref = ref []
 
 let register ~name ?(priority = 50) action =

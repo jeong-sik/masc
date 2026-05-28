@@ -130,6 +130,13 @@ val on_strategy_starvation_guard : cascade:string -> strategy:string -> unit
     pre-capacity-filter candidate list because every candidate
     reported capacity=0.  [strategy] must be [priority_tier]. *)
 
+val on_capacity_probe : url:string -> source:string -> unit
+(** Tick the capacity-probe result counter when a probe (ollama or
+    OpenAI-compatible) successfully returns capacity data.
+    [source] must be one of [discovered] or [fallback].  Provides
+    visibility into whether cascade capacity decisions are based on
+    live endpoint data or on static fallback assumptions. *)
+
 val on_default_label_fallback : cascade:string -> reason:string -> unit
 (** Tick the default-label-fallback counter at
     [Cascade_runtime.default_model_strings] when label resolution

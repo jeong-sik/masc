@@ -21,9 +21,8 @@ module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
 
-let cascade_name raw =
-  let trimmed = String.trim raw in
-  Cascade_name.of_string_exn trimmed
+(* #19327 tier-group purge: Cascade_name is now a plain string alias. *)
+let cascade_name raw = Cascade_name.of_string_exn (String.trim raw)
 ;;
 
 let test_cascade = cascade_name "tier.test_cascade"
@@ -354,12 +353,14 @@ let test_server_error_502_is_recoverable () =
   | None ->
     fail "ServerError 502 should be recoverable (trigger cascade rotation)"
 
-let test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry () =
+let test_server_error_524_is_transient_network_error_and_cascade_rotation () =
   let err =
     Agent_sdk.Error.Api
       (Retry.ServerError { status = 524; message = "a timeout occurred" })
   in
-  check bool "524 not same-cascade transient" false (KEC.is_transient_network_error err);
+  (* 524 is transient: a different provider may succeed where one origin
+     timed out, so the cascade should advance. *)
+  check bool "524 is transient network error" true (KEC.is_transient_network_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "524 -> capacity_backpressure" "capacity_backpressure"
@@ -466,15 +467,10 @@ let test_rotation_finds_next_cascade_for_auth_error () =
 
 (* ---- Bare-name requalification tests (cascade-name-prefix-mismatch fix) ---- *)
 
-let test_normalized_cascade_name_requalifies_bare_tier_name () =
-  let catalog_names = [ "strict_tool_candidates"; "primary"; "coding_with_spark" ] in
-  let result =
-    KEC.normalized_cascade_name ~catalog_names "strict_tool_candidates"
-  in
-  check bool "result has tier. prefix" true
-    (String.starts_with ~prefix:"tier." result);
-  check string "result is tier-qualified"
-    "tier.strict_tool_candidates" result
+(* #19327 tier-group purge: test_normalized_cascade_name_requalifies_bare_tier_name
+   removed.  It asserted bare "strict_tool_candidates" was rewritten to
+   "tier.strict_tool_candidates" using the prefix canonical form, which is
+   no longer the semantics of [normalized_cascade_name]. *)
 
 let test_normalized_cascade_name_passes_through_already_qualified () =
   let catalog_names = [ "strict_tool_candidates"; "primary" ] in
@@ -538,9 +534,9 @@ let () =
           test_case "ServerError 502 is recoverable" `Quick
             test_server_error_502_is_recoverable;
           test_case
-            "ServerError 524 is capacity backpressure but not transient retry"
+            "ServerError 524 is transient network error and cascade rotation"
             `Quick
-            test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry;
+            test_server_error_524_is_transient_network_error_and_cascade_rotation;
           test_case "wrapped ServerError 524 is capacity backpressure" `Quick
             test_wrapped_524_is_capacity_backpressure;
           test_case "AuthError is recoverable" `Quick
@@ -567,8 +563,7 @@ let () =
         ] );
       ( "normalized_cascade_name_bare_requalify",
         [
-          test_case "bare tier name requalified with prefix" `Quick
-            test_normalized_cascade_name_requalifies_bare_tier_name;
+          (* #19327: "bare tier name requalified with prefix" test removed. *)
           test_case "already-qualified name passes through" `Quick
             test_normalized_cascade_name_passes_through_already_qualified;
           test_case "config special names preserved" `Quick

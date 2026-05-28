@@ -275,6 +275,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          present; otherwise preserve the existing keeper's cascade_ref so
          dashboard drift remains visible.  See #6747. *)
       (let group =
+         (* WORKAROUND (#19327 follow-up): cascade_name→model field rename. *)
          match p.cascade_name_opt, p.profile_defaults.model with
          | Some name, _ -> name
          | None, Some name -> name

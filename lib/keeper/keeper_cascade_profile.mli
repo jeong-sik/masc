@@ -51,32 +51,10 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
        runtime.
 
     This returns a cascade profile name, never a provider/model string.
-    Phonebook model/provider resolution is exposed separately through
-    {!model_strings_for_use} and {!provider_configs_for_use}.
 
     This is the boundary for code that used to hardcode profile names such as
     ["governance_judge"], ["operator_judge"], ["phase_recovery"], or
     ["cross_verifier"]. *)
-
-val provider_configs_for_use :
-  ?config_path:string ->
-  ?temperature:float ->
-  ?max_tokens:int ->
-  logical_use ->
-  Llm_provider.Provider_config.t list option
-(** Resolve a logical use to [Provider_config.t] list via the phonebook.
-    Direct phonebook path: logical_use → task_use → models →
-    providers → endpoint/auth → Provider_config.t.
-    Returns [None] when phonebook is unavailable or no models resolve.
-    @since RFC Cascade-Phonebook Phase 4 *)
-
-val model_strings_for_use :
-  ?config_path:string ->
-  logical_use ->
-  string list option
-(** Resolve a logical use to model strings via the phonebook.
-    Returns [None] when phonebook is unavailable.
-    @since RFC Cascade-Phonebook Phase 4 *)
 
 val configured_route_targets : ?config_path:string -> unit -> string list
 (** Unique non-empty profile names referenced from [routes]. *)

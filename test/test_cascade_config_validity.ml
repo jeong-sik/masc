@@ -105,6 +105,12 @@ let test_cascade_json_absent () =
   check bool "config/cascade.json absent" false (Sys.file_exists (config_path "cascade.json"))
 ;;
 
+(* #19327/#19340 tier-group purge: helpers [find_tier_group] / [find_tier] /
+   [index_of] and the four tests that exercised them (ollama_cloud_stable,
+   strict_tool_group, no_deprecated_profile_names, primary_priority_order)
+   removed.  If equivalent invariants against the new direct-binding
+   cascade.toml schema are still desired, add them as a separate test. *)
+
 let check_qwen_thinking_control cfg model_id =
   match Types.model_capabilities_for_id cfg model_id with
   | Some c ->
@@ -129,12 +135,14 @@ let () =
   run
     "cascade config validity"
     [ ( "checked-in seed"
-      , [ test_case "cascade.toml parses, validates, and adapts" `Quick test_cascade_toml_validates
+      , [ test_case "cascade.toml parses, validates, and adapts" `Quick
+            test_cascade_toml_validates
         ; test_case
             "cascade.toml has no rejected runtime profiles"
             `Quick
             test_cascade_toml_runtime_validates_without_rejected_profiles
-        ; test_case "cascade.json is not a checked-in source" `Quick test_cascade_json_absent
+        ; test_case "cascade.json is not a checked-in source" `Quick
+            test_cascade_json_absent
         ; test_case
             "provider_h models use chat_template_kwargs thinking control"
             `Quick

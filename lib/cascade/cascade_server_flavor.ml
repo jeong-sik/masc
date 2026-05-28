@@ -4,13 +4,11 @@
     responses. The adapter system encapsulates these differences so
     the transport layer only sees a uniform interface.
 
-    Flavors are determined by the [cascade_server_flavor] in
-    {!Cascade_phonebook_types} (from TOML [providers.<id>.flavor]).
     The adapter is selected at OAS code level, not TOML level. *)
 
 (* ── Imports ─────────────────────────────────────────────────── *)
 
-type cascade_server_flavor = Cascade_phonebook_types.cascade_server_flavor =
+type cascade_server_flavor =
   | Llama_cpp
   | Ollama
   | Vllm

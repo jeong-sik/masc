@@ -184,6 +184,12 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
        (match parse_response json with
         | None -> None
         | Some cap ->
+          let source_label =
+            match cap.Cascade_throttle.source with
+            | Llm_provider.Provider_throttle.Discovered -> "discovered"
+            | Llm_provider.Provider_throttle.Fallback -> "fallback"
+          in
+          Cascade_metrics.on_capacity_probe ~url ~source:source_label;
           store_capacity ~url ~capacity:cap ~now;
           Some cap)
      | Error (`Json_parse_error msg) ->

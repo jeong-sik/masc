@@ -1,7 +1,7 @@
 (** Cascade preflight unhealthy-skip escalation state.
 
     Tracks repeated [preflight skipped N unhealthy ...] events per
-    (cascade_name, provider, reason) fingerprint. After [threshold_disable]
+    (tier_group, provider, reason) fingerprint. After [threshold_disable]
     consecutive skips of the same fingerprint, the provider is registered
     in an in-memory disabled list and a single ERROR-class escalation is
     emitted (instead of a WARN per skip).
@@ -46,7 +46,7 @@ type reason =
 
 (** Fingerprint of a single skip event. *)
 type fingerprint = {
-  cascade_name : string;  (** Cascade name (e.g. ["strict_tool_candidates"]). *)
+  tier_group : string;  (** Cascade name (e.g. ["strict_tool_candidates"]). *)
   provider : string;  (** Provider key or endpoint URL. *)
   reason : reason;
 }
@@ -95,7 +95,7 @@ val global : t
     transition). *)
 val record :
   ?clock:(unit -> float) ->
-  t -> cascade_name:string -> provider:string -> reason:reason -> record_outcome
+  t -> tier_group:string -> provider:string -> reason:reason -> record_outcome
 
 (** True iff the provider is currently in the disabled list (i.e. some
     fingerprint crossed threshold and recovery has not happened yet).

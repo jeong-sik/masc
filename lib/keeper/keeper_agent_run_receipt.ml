@@ -20,6 +20,8 @@ let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
     let candidates =
       [ trimmed
       ; normalized_declared
+      ; "tier." ^ trimmed
+      ; "tier-group." ^ trimmed
       ; "route." ^ trimmed
       ]
     in

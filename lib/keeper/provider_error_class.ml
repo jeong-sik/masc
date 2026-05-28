@@ -13,7 +13,7 @@ type response_timeout_kind =
 
 type t =
   | Client_capacity_exhausted
-  | Admission_exhausted of { capability_profile : string option }
+  | Tier_admission_exhausted of { capability_profile : string option }
   | Backpressure of
       { http_status : int
       ; retry_after_ms : int option
@@ -56,7 +56,7 @@ let response_timeout_kind_to_string = function
 
 let to_short_tag = function
   | Client_capacity_exhausted -> "client_capacity_exhausted"
-  | Admission_exhausted _ -> "admission_exhausted"
+  | Tier_admission_exhausted _ -> "tier_admission_exhausted"
   | Backpressure _ -> "backpressure"
   | Dns_resolution_failure _ -> "dns_resolution_failure"
   | Response_timeout _ -> "response_timeout"
@@ -66,7 +66,7 @@ let to_short_tag = function
 let raw_payload = function
   | Unspecified { raw_code; raw_detail } -> Some (raw_code, raw_detail)
   | Client_capacity_exhausted
-  | Admission_exhausted _
+  | Tier_admission_exhausted _
   | Backpressure _
   | Dns_resolution_failure _
   | Response_timeout _ -> None

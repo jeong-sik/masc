@@ -4,7 +4,23 @@ open Keeper_types
 open Keeper_context_runtime
 module EC = Keeper_error_classify
 
-let public_profile_name name = String.trim name
+let public_profile_name name =
+  let name = String.trim name in
+  let tier_group_prefix = "tier-group." in
+  let tier_prefix = "tier." in
+  if String.starts_with ~prefix:tier_group_prefix name
+  then
+    String.sub
+      name
+      (String.length tier_group_prefix)
+      (String.length name - String.length tier_group_prefix)
+  else if String.starts_with ~prefix:tier_prefix name
+  then
+    String.sub
+      name
+      (String.length tier_prefix)
+      (String.length name - String.length tier_prefix)
+  else name
 
 let fail_open_rotation_cascades_from_catalog
       ?(excluded_targets : string list = [])

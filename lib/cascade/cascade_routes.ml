@@ -176,6 +176,34 @@ let configured_unknown_route_keys ?config_path () =
   configured_route_keys ?config_path ()
   |> List.filter (fun key -> not (List.mem key known_route_keys))
 
+let declarative_catalog_names_from_json = function
+  | `Assoc fields ->
+      let keys_with_prefix table prefix =
+        match List.assoc_opt table fields with
+        | Some (`Assoc entries) ->
+            List.map (fun (name, _) -> prefix ^ name) entries
+        | _ -> []
+      in
+      keys_with_prefix "tier-group" "tier-group."
+      @ keys_with_prefix "tier" "tier."
+      |> List.sort_uniq String.compare
+  | _ -> []
+
+let declarative_catalog_names ?config_path () =
+  let path_opt =
+    match config_path with
+    | Some path -> Some path
+    | None -> Config_dir_resolver.cascade_path_opt ()
+  in
+  match path_opt with
+  | None -> []
+  | Some path -> (
+      match Cascade_config_loader.load_catalog_source path with
+      | Ok json -> declarative_catalog_names_from_json json
+      | Error _ -> [])
+
+let live_catalog_names ?config_path () =
+  declarative_catalog_names ?config_path ()
 
 let fallback_name_for_catalog use ~catalog =
   match catalog with
@@ -207,6 +235,81 @@ let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
       route_key target fallback
   end
 
+(* ── Phonebook-based routing (RFC Cascade-Phonebook Phase 4) ───── *)
+
+let task_use_of_logical_use = function
+  | Keeper_turn | Phase_recovery | Phase_buffer | Openai_compat
+  | Persona_generation ->
+      Cascade_routing_policy.Code_generation
+  | Tool_required | Tool_rerank_use -> Cascade_routing_policy.Tool_execution
+  | Governance_judge | Operator_judge | Cross_verifier | Verifier
+  | Adversarial_reviewer ->
+      Cascade_routing_policy.Code_review
+  | Auto_responder | Routing | Provider_benchmark | Simple_task
+  | Moderate_task ->
+      Cascade_routing_policy.Quick_decision
+  | Complex_task -> Cascade_routing_policy.Long_reasoning
+
+(** Resolve a logical_use to model strings via the phonebook.
+
+    Maps canonical route use → [task_use] → tier-group → model strings.
+    Returns [None] when the phonebook is unavailable. *)
+let cascade_models_for_use_via_phonebook
+    ?config_path
+    (use : logical_use)
+  : string list option =
+  let task = task_use_of_logical_use use in
+    let phonebook =
+      match config_path with
+      | Some path ->
+        (match Cascade_config_loader.load_phonebook path with
+         | Ok pb -> Some pb
+         | Error _ -> None)
+      | None ->
+        (match Cascade_config_loader.load_phonebook_from_config () with
+         | Some (Ok pb) -> Some pb
+         | _ -> None)
+    in
+    match phonebook with
+    | None -> None
+    | Some pb ->
+      let models =
+        Cascade_phonebook_resolve.resolve_model_strings_for_task pb task
+      in
+      if models = [] then None else Some models
+
+(** Resolve a logical_use to Provider_config.t list via the phonebook.
+
+    Full phonebook path: route use → task_use → tier-group → models →
+    providers → endpoint/auth → Provider_config.t.
+    Returns [None] when phonebook is unavailable or no models resolve. *)
+let cascade_provider_configs_for_use_via_phonebook
+    ?config_path
+    ?temperature
+    ?max_tokens
+    (use : logical_use)
+  : Llm_provider.Provider_config.t list option =
+  let task = task_use_of_logical_use use in
+    let phonebook =
+      match config_path with
+      | Some path ->
+        (match Cascade_config_loader.load_phonebook path with
+         | Ok pb -> Some pb
+         | Error _ -> None)
+      | None ->
+        (match Cascade_config_loader.load_phonebook_from_config () with
+         | Some (Ok pb) -> Some pb
+         | _ -> None)
+    in
+    match phonebook with
+    | None -> None
+    | Some pb ->
+      let configs =
+        Cascade_phonebook_resolve.resolve_provider_configs_for_task
+          ?temperature ?max_tokens pb task
+      in
+      if configs = [] then None else Some configs
+
 let cascade_name_for_use ?config_path use =
   let route_key = logical_use_key use in
   let route_target =
@@ -214,11 +317,7 @@ let cascade_name_for_use ?config_path use =
     |> List.find_map (fun (key, target) ->
            if String.equal key route_key then Some target else None)
   in
-  let catalog_names =
-    match Cascade_catalog_runtime.known_profile_names () with
-    | Ok names -> names
-    | Error _ -> []
-  in
+  let catalog_names = live_catalog_names ?config_path () in
   let fallback = fallback_name_for_catalog use ~catalog:catalog_names in
   match route_target with
   | Some target when catalog_names = [] ->

@@ -1,6 +1,6 @@
-(** Cascade_tier_wait_scheduler — bounded wait layer over cascade admission.
+(** Cascade_tier_wait_scheduler — bounded wait layer over tier admission.
 
-    RFC-0153 Phase C.1. Wraps {!Cascade_tier_admission} with per-cascade
+    RFC-0153 Phase C.1. Wraps {!Cascade_tier_admission} with per-tier
     FIFO queues, fiber-per-waiter backoff, and a configurable timeout.
 
     Design principles (from approved design report 2026-05-24):
@@ -46,16 +46,16 @@ val default_wait_config : wait_config
 
 type rejection_detail =
   | Timeout_expired of {
-      admission_key : string;
+      tier_id : string;
       total_waited_s : float;
       attempts : int;
     }
   | Max_retries_exceeded of {
-      admission_key : string;
+      tier_id : string;
       retries : int;
       total_waited_s : float;
     }
-  | Cancelled of { admission_key : string }
+  | Cancelled of { tier_id : string }
       (** The Eio switch was cancelled while waiting. *)
 
 val pp_rejection_detail : Format.formatter -> rejection_detail -> unit
@@ -64,7 +64,7 @@ val pp_rejection_detail : Format.formatter -> rejection_detail -> unit
 
 type t
 (** Per-process scheduler state. Wraps a {!Cascade_tier_admission.t}
-    with per-cascade wait queues. Thread-safe under Eio. *)
+    with per-tier wait queues. Thread-safe under Eio. *)
 
 val create :
   ?default_wait_config:wait_config ->
@@ -88,14 +88,14 @@ val clock : t -> float Eio.Time.clock_ty Eio.Resource.t option
 
 val try_admission_or_wait :
   t ->
-  admission_key:string ->
+  tier_id:string ->
   ?wait_config:wait_config ->
   ?deadline:Cascade_deadline.t ->
   sw:Eio.Switch.t ->
   (unit -> 'a) ->
   ('a, rejection_detail) result
-(** [try_admission_or_wait t ~admission_key ?wait_config ?deadline ~sw f] attempts
-    admission on the underlying cascade.
+(** [try_admission_or_wait t ~tier_id ?wait_config ?deadline ~sw f] attempts
+    admission on the underlying tier.
 
     If capacity is available, [f ()] runs immediately (zero wait).
     If full, the calling fiber enters a bounded wait loop with backoff
@@ -123,8 +123,8 @@ val try_admission_or_wait :
 
 (** {1 Notification (for external release paths)} *)
 
-val on_admission_release : t -> admission_key:string -> unit
-(** Signal that a slot was released in [admission_key]. Wakes the oldest
+val on_admission_release : t -> tier_id:string -> unit
+(** Signal that a slot was released in [tier_id]. Wakes the oldest
     waiting fiber (FIFO) if any.
 
     Callers using {!try_admission_or_wait} do NOT need this — release
@@ -132,8 +132,8 @@ val on_admission_release : t -> admission_key:string -> unit
 
 (** {1 Observability} *)
 
-type cascade_wait_stats = {
-  admission_key : string;
+type tier_wait_stats = {
+  tier_id : string;
   waiting_fibers : int;
   total_admitted : int;
   total_rejected : int;
@@ -141,9 +141,9 @@ type cascade_wait_stats = {
   avg_wait_s : float;
 }
 
-val stats : t -> admission_key:string -> cascade_wait_stats option
-(** Snapshot of wait statistics for a cascade. [None] if the cascade has
+val stats : t -> tier_id:string -> tier_wait_stats option
+(** Snapshot of wait statistics for a tier. [None] if the tier has
     never been waited on. Safe to call from any fiber. *)
 
-val all_stats : t -> cascade_wait_stats list
-(** Stats for all cascades that have seen wait activity. *)
+val all_stats : t -> tier_wait_stats list
+(** Stats for all tiers that have seen wait activity. *)

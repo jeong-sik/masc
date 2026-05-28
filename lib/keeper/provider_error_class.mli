@@ -45,8 +45,8 @@ type t =
           our side, not the provider.  RFC-0042 / RFC-0058 territory.
           Reactor: pause new admission, drain in-flight. *)
   | Tier_admission_exhausted of { capability_profile : string option }
-      (** Cascade admission denied because every model in the strict
-          capability profile is saturated or unavailable.
+      (** Cascade tier-group admission denied because every model in
+          the strict capability profile is saturated or unavailable.
           [capability_profile] is the canonical profile name (e.g.
           [Some "strict_tool_candidates"]) when the adapter can
           attribute the denial to a specific profile, [None]

@@ -101,6 +101,8 @@ let json_string_list_member key = function
   | _ -> []
 
 let discover_profiles_from_materialized_json json =
+  (* Tier/tier-group purge: profiles are route targets (provider:model strings).
+     Discovery reads [routes.*.target] from the materialized JSON. *)
   match assoc_opt "routes" json with
   | Some (`Assoc routes) ->
     routes
@@ -129,6 +131,12 @@ let discover_profiles ~config_path =
 let discover_profiles_for_diagnostics ~config_path =
   discover_profiles_impl ~emit_telemetry:false ~config_path
 
+(* Tier/tier-group purge: [materialized_model_specs_for_profile] and its
+   helpers [materialized_tier_members] / [materialized_tier_group_tiers]
+   are removed.  Profile model specs now come exclusively from the
+   declarative snapshot or runtime profile build; there is no JSON
+   materialized fallback for tier-based resolution. *)
+
 let model_ids_of_specs (specs : string list) : string list =
   specs
   |> Cascade_config.expand_auto_models
@@ -142,6 +150,9 @@ let format_spec_errors specs =
   specs
   |> List.map (fun (spec, msg) -> Printf.sprintf "%S (%s)" spec msg)
   |> String.concat ", "
+
+(* Tier/tier-group purge: [priority_tier_issue] removed with the
+   [priority_tier] strategy concept. *)
 
 (* Catalog warn: a cascade carrying [cli_tool_a] with no
    bound-actor-tolerant fallback will reject every keeper-bound

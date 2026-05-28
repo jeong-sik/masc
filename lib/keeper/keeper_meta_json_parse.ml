@@ -602,7 +602,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                              Error
                                (Printf.sprintf
                                   "invalid keeper meta cascade_name %S: expected \
-                                   canonical cascade prefix route."
+                                   canonical cascade prefix tier-group., tier., or \
+                                   route."
                                   identity.pk_cascade_name)
                  in
                  (match cascade_ref_result with

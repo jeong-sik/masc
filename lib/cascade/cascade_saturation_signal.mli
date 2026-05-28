@@ -54,11 +54,11 @@ type t =
           *Time_cap_fired 의 downstream symptom 이 아니라 독립
           신호인지* 는 caller 가 [observed_latency_ms] 와 함께 판단. *)
   | Inflight_capacity_full of {
-      admission_key : string;
+      tier_id : string;
       max_inflight : int;
     }
-      (** Phase B (cascade admission) 가 도입된 후 사용.
-          현재 cascade 의 동시 inflight 가 [max_inflight] 에 도달하여
+      (** Phase B (tier admission semaphore) 가 도입된 후 사용.
+          현재 tier 의 동시 inflight 가 [max_inflight] 에 도달하여
           새 요청을 받지 못하는 상태. Phase A.1 시점에는 이 variant
           가 emit 되지 않으나, type-level 에서 미리 자리를 잡아
           Phase B 추가 시 caller 의 match 가 자동으로 깨지도록 함. *)
@@ -70,7 +70,7 @@ val to_log_string : t -> string
     - ["provider_rate_limited provider=runpod_mtp retry_after_ms=1200"]
     - ["time_cap_fired observed_latency_ms=300100 cap_ms=300000 provider=provider_k-coding"]
     - ["all_tiers_filtered_after_cycles cascade=strict_tool_candidates cycles=3"]
-    - ["inflight_capacity_full admission_key=strict_tool_candidates max_inflight=8"]
+    - ["inflight_capacity_full tier=strict_tool_candidates max_inflight=8"]
 
     동일 형식이 Prometheus metric label 과 audit log 에 사용된다. *)
 

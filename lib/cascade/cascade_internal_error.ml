@@ -20,19 +20,19 @@ type provider_rejection = {
 type capacity_backpressure_source =
   | Provider_capacity
   | Client_capacity
-  | Admission_capacity
+  | Tier_admission
   | Cascade_slot
 
 let capacity_backpressure_source_to_string = function
   | Provider_capacity -> "provider_capacity"
   | Client_capacity -> "client_capacity"
-  | Admission_capacity -> "admission_capacity"
+  | Tier_admission -> "tier_admission"
   | Cascade_slot -> "cascade_slot"
 
 let capacity_backpressure_source_of_string = function
   | "provider_capacity" -> Some Provider_capacity
   | "client_capacity" -> Some Client_capacity
-  | "admission_capacity" -> Some Admission_capacity
+  | "tier_admission" -> Some Tier_admission
   | "cascade_slot" -> Some Cascade_slot
   | _ -> None
 

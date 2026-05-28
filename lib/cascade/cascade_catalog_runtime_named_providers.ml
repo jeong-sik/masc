@@ -20,7 +20,7 @@ let candidate_key_of_cfg (cfg : Llm_provider.Provider_config.t) =
 
 type tiered_provider = {
   provider_cfg : Llm_provider.Provider_config.t;
-  admission_key : string;
+  tier_id : string;
 }
 
 let direct_candidate_providers (profile : profile_snapshot) =
@@ -81,14 +81,14 @@ let tier_bucket_id (profile : profile_snapshot) tier_index =
   then profile.name
   else Printf.sprintf "%s.tier-%d" profile.name tier_index
 
-let admission_key_queues_by_health_key (profile : profile_snapshot) =
+let tier_id_queues_by_health_key (profile : profile_snapshot) =
   let tiers = profile.strategy.Cascade_strategy.tiers in
   let index : (string, string Queue.t) Hashtbl.t = Hashtbl.create 8 in
   if List.length tiers > 1
   then
     List.iteri
       (fun tier_index health_keys ->
-         let admission_key = tier_bucket_id profile tier_index in
+         let tier_id = tier_bucket_id profile tier_index in
          List.iter
            (fun health_key ->
               let queue =
@@ -99,12 +99,12 @@ let admission_key_queues_by_health_key (profile : profile_snapshot) =
                     Hashtbl.add index health_key queue;
                     queue
               in
-              Queue.add admission_key queue)
+              Queue.add tier_id queue)
            health_keys)
       tiers;
   index
 
-let admission_key_for_candidate
+let tier_id_for_candidate
     (profile : profile_snapshot)
     tier_index
     (candidate : candidate_runtime) =
@@ -122,13 +122,13 @@ let tiered_provider_of_candidate
     : tiered_provider =
   {
     provider_cfg = candidate.provider_cfg;
-    admission_key = admission_key_for_candidate profile tier_index candidate;
+    tier_id = tier_id_for_candidate profile tier_index candidate;
   }
 
 let tiered_providers_of_ordered_entries ~(profile : profile_snapshot)
     ~cascade_name:_
     (ordered_entries : Cascade_config_loader.weighted_entry list) =
-  let tier_index = admission_key_queues_by_health_key profile in
+  let tier_index = tier_id_queues_by_health_key profile in
   direct_candidates_ordered_by_entries profile ordered_entries
   |> List.map (tiered_provider_of_candidate profile tier_index)
 

@@ -20,7 +20,7 @@ type t =
       cycle_count : int;
     }
   | Inflight_capacity_full of {
-      admission_key : string;
+      tier_id : string;
       max_inflight : int;
     }
 
@@ -78,10 +78,10 @@ let to_yojson = function
           ("cascade_name", `String cascade_name);
           ("cycle_count", `Int cycle_count);
         ]
-  | Inflight_capacity_full { admission_key; max_inflight } ->
+  | Inflight_capacity_full { tier_id; max_inflight } ->
       `Assoc
         [ ("kind", `String "inflight_capacity_full");
-          ("admission_key", `String admission_key);
+          ("tier_id", `String tier_id);
           ("max_inflight", `Int max_inflight);
         ]
 
@@ -104,9 +104,9 @@ let to_log_string = function
   | All_tiers_filtered_after_cycles { cascade_name; cycle_count } ->
       Printf.sprintf "all_tiers_filtered_after_cycles cascade=%s cycles=%d"
         cascade_name cycle_count
-  | Inflight_capacity_full { admission_key; max_inflight } ->
-      Printf.sprintf "inflight_capacity_full admission_key=%s max_inflight=%d"
-        admission_key max_inflight
+  | Inflight_capacity_full { tier_id; max_inflight } ->
+      Printf.sprintf "inflight_capacity_full tier=%s max_inflight=%d"
+        tier_id max_inflight
 
 let pp ppf t = Format.fprintf ppf "%s" (to_log_string t)
 
@@ -125,9 +125,9 @@ let equal a b =
       All_tiers_filtered_after_cycles
         { cascade_name = n2; cycle_count = c2 } ) ->
       String.equal n1 n2 && Int.equal c1 c2
-  | ( Inflight_capacity_full { admission_key = a1; max_inflight = m1 },
-      Inflight_capacity_full { admission_key = a2; max_inflight = m2 } ) ->
-      String.equal a1 a2 && Int.equal m1 m2
+  | ( Inflight_capacity_full { tier_id = t1; max_inflight = m1 },
+      Inflight_capacity_full { tier_id = t2; max_inflight = m2 } ) ->
+      String.equal t1 t2 && Int.equal m1 m2
   | _, _ -> false
 
 (* Yojson deserialization — used only in tests for round-trip validation.
@@ -190,7 +190,7 @@ let of_yojson json =
                       (All_tiers_filtered_after_cycles
                          { cascade_name; cycle_count })))
         | "inflight_capacity_full" ->
-            bind (string_field "admission_key" fields) (fun admission_key ->
+            bind (string_field "tier_id" fields) (fun tier_id ->
                 bind (int_field "max_inflight" fields) (fun max_inflight ->
-                    Ok (Inflight_capacity_full { admission_key; max_inflight })))
+                    Ok (Inflight_capacity_full { tier_id; max_inflight })))
         | other -> Error (Printf.sprintf "unknown kind: %s" other)))

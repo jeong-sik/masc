@@ -49,8 +49,10 @@
     @since 0.6.0 *)
 val config_json : ?base_path:string -> unit -> Yojson.Safe.t
 
-(** Public profile display name for dashboard surfaces. All cascade
-    names are plain provider:model strings and pass through unchanged. *)
+(** Public profile display name for dashboard surfaces. Declarative
+    runtime names such as ["tier.primary"] and ["tier-group.primary"]
+    are rendered as ["primary"] for operator-facing JSON and route
+    payloads. *)
 val public_cascade_profile_name : string -> string
 
 val public_profile_names : string list -> string list
@@ -58,7 +60,10 @@ val public_profile_names : string list -> string list
 
 val invalid_profiles_with_internal_names :
   (string * string list) list -> (string * string list) list
-(** Merge validation errors by exact internal profile name. *)
+(** Merge validation errors by exact internal profile name. Names such as
+    ["tier.primary"] and ["tier-group.primary"] are intentionally kept
+    distinct; callers may separately apply {!public_cascade_profile_name}
+    only when a display-only label is needed. *)
 
 val invalid_assignments_for_public_profiles :
   known_internal_profiles:string list ->
@@ -66,7 +71,11 @@ val invalid_assignments_for_public_profiles :
   string list ->
   (string * string list) list
 (** Match keeper-facing profile names against internal invalid-profile
-    diagnostics using runtime profile preference order. *)
+    diagnostics using runtime profile preference order. Qualified names such
+    as ["tier.primary"] are checked exactly. For an unqualified legacy name
+    such as ["primary"], ["tier-group.primary"] is checked before
+    ["tier.primary"] so a valid preferred tier-group is not rejected because a
+    lower-priority tier with the same public name is invalid. *)
 
 (** Raw cascade TOML payload from the active resolved config root.
 
@@ -84,6 +93,8 @@ val invalid_assignments_for_public_profiles :
           "models": ["<model_a>", "<model_b>"],
           "bindings": ["<binding_a>", "<binding_b>"],
           "aliases": ["<alias_a>", "<alias_b>"],
+          "tiers": ["primary", ...],
+          "tier_groups": ["primary", ...],
           "routes": ["keeper_turn", ...],
           "feature_params": [
             { "key": "thinking-enabled",

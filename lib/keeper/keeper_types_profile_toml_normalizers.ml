@@ -33,6 +33,9 @@ let normalize_name_list_opt items =
   | [] -> None
   | xs -> Some xs
 
+(* normalize_cascade_name_opt removed: tier/tier-group purge.
+   Keeper profiles now use plain provider:model strings. *)
+
 let normalize_git_identity_mode_opt = function
   | None -> None
   | Some raw -> (

@@ -148,7 +148,7 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
 
    Order of preference (mirrors the filter's short-circuit):
    0. [Capability_profile_mismatch profile] — the provider's declared
-      capabilities do not satisfy the profile's
+      capabilities do not satisfy the tier-group's
       [required_capability_profile] (e.g. [tool_strict] requiring
       [runtime_mcp_tools], [runtime_tool_events], [runtime_mcp_http_headers]).
    1. [Codex_keeper_bound_actor_required] — cli_tool_a cannot carry a

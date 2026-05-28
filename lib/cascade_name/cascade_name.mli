@@ -1,4 +1,9 @@
-(** Cascade name — simple provider:model string alias. *)
+(** Cascade name — simple provider:model string alias.
+
+    Tier/tier-group prefix validation removed.  All cascade names are
+    now plain strings such as ["runpod:glm-coding-with-spark"].
+    This module is preserved as a string alias so downstream types do
+    not need to change in a single sweep. *)
 
 type t = string
 

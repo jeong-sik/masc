@@ -142,6 +142,13 @@ let weighted_entry_of_materialized_member json member =
       | None -> None)
   | _ -> None
 
+(* Tier/tier-group purge: [materialized_tier_members] /
+   [materialized_tier_group_tiers] / [configured_weighted_entries_from_materialized_json]
+   are retired.  Profile resolution now routes through the declarative
+   snapshot or runtime catalog exclusively; there is no JSON-materialized
+   tier-based fallback.  [weighted_entry_of_materialized_member] is kept
+   for the direct-provider:model path in future refactor phases. *)
+
 let configured_weighted_entries_from_materialized_json _json ~name:_ =
   []
 

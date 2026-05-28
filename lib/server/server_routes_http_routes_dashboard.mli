@@ -12,8 +12,9 @@ val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 val available_cascade_profiles : unit -> string list
-(** Snapshot of cascade profiles currently considered valid by the
-    runtime gate. Recomputed on each call. *)
+(** Snapshot of qualified cascade profiles currently considered valid by the
+    runtime gate, such as ["tier.primary"] or ["tier-group.primary"].
+    Recomputed on each call. *)
 
 val invalid_cascade_profiles : unit -> (string * string list) list
 (** Snapshot of [(profile_name, violations)] pairs for cascade

@@ -1,20 +1,20 @@
-(** Cascade admission helpers for keeper turn driver. *)
+(** Cascade tier admission helpers for keeper turn driver. *)
 
-val keeper_cascade_admission : Cascade_tier_admission.t
+val keeper_cascade_tier_admission : Cascade_tier_admission.t
 
-val cascade_admission_policy_of_priority :
+val cascade_tier_admission_policy_of_priority :
   Llm_provider.Request_priority.t -> Cascade_tier_admission.admission_policy
 
 val keeper_cascade_wait_scheduler :
   Cascade_tier_wait_scheduler.t
 
-val with_keeper_cascade_admission :
+val with_keeper_cascade_tier_admission :
   ?admission:Cascade_tier_admission.t ->
   ?wait_scheduler:Cascade_tier_wait_scheduler.t ->
   ?enabled:bool ->
   ?sw:Eio.Switch.t ->
   ?wait_timeout_sec:float ->
-  admission_key:string ->
+  tier_id:Cascade_tier_admission.tier_id ->
   admission_policy:Cascade_tier_admission.admission_policy ->
   (unit -> 'a) ->
   ('a, Cascade_saturation_signal.t) result
@@ -31,16 +31,16 @@ val with_keeper_cascade_admission :
     Backward-compat: omitting [?wait_timeout_sec] (or when the scheduler
     has no clock) yields the legacy [env amplifier] behaviour. *)
 
-val cascade_admission_blocked_decision :
+val cascade_tier_admission_blocked_decision :
   Cascade_saturation_signal.t -> Yojson.Safe.t
 
-val emit_cascade_admission_signal_metric :
+val emit_cascade_tier_admission_signal_metric :
   cascade_name:string -> Cascade_saturation_signal.t -> unit
 
 val release_client_capacity_quietly : (unit -> unit) option -> unit
 val provider_config_identity_key : Llm_provider.Provider_config.t -> int
 
-val runtime_candidates_of_providers :
+val runtime_candidates_of_tiered_providers :
   Cascade_catalog_runtime_named_providers.tiered_provider list ->
   Llm_provider.Provider_config.t list ->
   Cascade_runtime_candidate.t list

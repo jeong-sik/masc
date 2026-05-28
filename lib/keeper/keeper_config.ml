@@ -15,6 +15,8 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
     naming the "1 day" intent at the call site. *)
 let one_day_seconds_int = Masc_time_constants.day_int
 
+(* Tier/tier-group purge: cascade names are now simple provider:model
+   strings.  All phase routing collapses to the same default. *)
 let default_cascade_name () = "runpod:glm-coding-with-spark"
 let phase_recovery_cascade_name = "runpod:glm-coding-with-spark"
 let phase_buffer_cascade_name = "runpod:glm-coding-with-spark"

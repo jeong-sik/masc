@@ -37,6 +37,21 @@ let logical_use_of_string_opt = Cascade_routes.logical_use_of_string_opt
 let configured_route_targets = Cascade_routes.configured_route_targets
 let cascade_name_for_use = Cascade_routes.cascade_name_for_use
 
+(** Phonebook-based [Provider_config.t] resolution.
+    Directly returns typed provider configs without string intermediaries.
+    Returns [None] when phonebook is unavailable or no models resolve. *)
+let provider_configs_for_use ?config_path ?temperature ?max_tokens use =
+  Cascade_routes.cascade_provider_configs_for_use_via_phonebook
+    ?config_path ?temperature ?max_tokens use
+
+(** Phonebook-based model string list resolution.
+    Returns [None] when phonebook is unavailable. *)
+let model_strings_for_use ?config_path use =
+  Cascade_routes.cascade_models_for_use_via_phonebook ?config_path use
+
+(* Tier/tier-group purge: qualified profile names no longer exist.
+   All cascade names are simple provider:model strings. *)
+
 let strip_declarative_profile_prefix name = name
 
 let qualified_names_of_declarative_snapshot snapshot =
@@ -234,9 +249,17 @@ let json_keeper_assignable_opt json =
   | Some _ as value -> value
   | None -> json_bool_field "keeper_assignable" json
 
+(* Tier/tier-group purge: public names and qualified names are identical.
+   All cascade names are simple provider:model strings. *)
+
 let qualified_name_for_public _meta public_name = public_name
 
 let qualified_name_for_public_names _qualified_names public_name = public_name
+
+(* Tier/tier-group purge: cascade.toml no longer contains [tier] or
+   [tier-group] sections.  Only [routes] remains.  Profile names are
+   the route targets (provider:model strings).  All profiles are
+   keeper-assignable; system-only is retired. *)
 
 let catalog_metadata_of_materialized_json json =
   let routes = json_assoc_table_fields "routes" json in
@@ -342,6 +365,8 @@ let routed_query_target ?config_path raw =
 let normalized_query_name ?config_path raw =
   routed_query_target ?config_path raw |> public_name_of_target
 
+(* Tier/tier-group purge: system-only cascade concept retired.
+   All cascades are keeper-assignable. *)
 let is_system_only_cascade _raw = false
 
 let keeper_catalog_names ?config_path () =
@@ -401,6 +426,8 @@ let canonicalize_with_catalog ~catalog raw =
         | Some _ -> trimmed
         | None -> trimmed)
 
+(* Tier/tier-group purge: lookup catalog contains only plain
+   provider:model strings.  No canonical prefix or qualified names. *)
 let canonical_member_of_lookup_catalog ~catalog raw =
   let trimmed = String.trim raw in
   if List.mem trimmed catalog then Some trimmed else None

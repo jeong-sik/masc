@@ -6,7 +6,7 @@
     (include_subdirs no) only prevents source-file inclusion, not type
     name visibility.  Without prefixes, ppx_deriving-generated code
     references the wrong type when [provider], [transport], [binding],
-    or [strategy] exist in both libraries. *)
+    [strategy], or [tier] exist in both libraries. *)
 
 type cascade_api_format =
   | Messages_api

@@ -18,6 +18,10 @@ type adapter_error =
       Root cause is either [Provider_not_found] or [Model_not_found]. *)
   | Alias_resolution_failed of string
   (** Alias "provider.model.alias" parent binding does not exist. *)
+  | Strategy_mismatch of string
+  (** Tier declares strategy-specific fields for the wrong strategy kind. *)
+  | Tier_group_empty of string
+  (** Tier-group references no tiers. *)
   | Duplicate_route of string
   (** Two routes with the same name. *)
   | Internal of string
@@ -34,18 +38,19 @@ type provider_config_with_override =
 
 type adapted_profile = {
   name : string;
-  (** Profile name — a plain provider:model string. *)
+  (** Profile name derived from tier or tier-group (e.g. "tier.primary",
+      "tier-group.primary"). *)
   provider_configs : provider_config_with_override list;
   (** Resolved provider configs with optional per-provider capability
       overrides, in declaration order. *)
   strategy : Cascade_strategy.t;
   (** Mapped strategy with parameters. *)
   ollama_max_concurrent : int option;
-  (** Per-profile [max_concurrent] cap for Ollama providers, if set. *)
+  (** Per-tier [max_concurrent] cap for Ollama providers, if set. *)
   cli_max_concurrent : int option;
-  (** Per-profile [max_concurrent] cap for CLI providers, if set. *)
+  (** Per-tier [max_concurrent] cap for CLI providers, if set. *)
   required_capability_profile : string option;
-  (** Capability profile name required by this profile, if any. *)
+  (** Capability profile name required by this tier-group, if any. *)
 }
 
 type adapted_catalog = {

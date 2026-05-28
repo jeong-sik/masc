@@ -194,9 +194,7 @@ let approval_queue_summary () : approval_summary =
 
 (* ── JSON projection ─────────────────────────────────────── *)
 
-let json_of_float_opt = function
-  | None -> `Null
-  | Some f -> `Float f
+let json_of_float_opt = Json_util.float_opt_to_json
 
 let tool_rejections_json ?(top_n = 20)
     ~window_minutes ?(now_ts = Unix.gettimeofday ()) () : Yojson.Safe.t list =

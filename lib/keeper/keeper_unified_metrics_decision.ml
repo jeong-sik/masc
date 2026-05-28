@@ -99,17 +99,13 @@ let append_decision_record
     match social_state with
     | None -> []
     | Some state ->
-        let option_field key = function
-          | Some value -> (key, `String value)
-          | None -> (key, `Null)
-        in
         [
           ("social_model", `String state.Social.social_model);
           ("belief_summary", `String state.belief_summary);
-          option_field "active_desire" state.active_desire;
-          option_field "current_intention" state.current_intention;
-          option_field "blocker" state.blocker;
-          option_field "need" state.need;
+          Json_util.string_opt_field "active_desire" state.active_desire;
+          Json_util.string_opt_field "current_intention" state.current_intention;
+          Json_util.string_opt_field "blocker" state.blocker;
+          Json_util.string_opt_field "need" state.need;
           ("speech_act", `String (Social.speech_act_to_string state.speech_act));
           ( "delivery_surface",
             `String

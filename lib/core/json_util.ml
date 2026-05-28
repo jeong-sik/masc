@@ -148,6 +148,9 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
   | Some b -> `Bool b
   | None -> `Null
 
+let string_opt_field name (opt : string option) : string * Yojson.Safe.t =
+  (name, string_opt_to_json opt)
+
 
 (** {1 Assoc field extraction}
 

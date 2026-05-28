@@ -55,6 +55,9 @@ val string_opt_to_json_trimmed : string option -> Yojson.Safe.t
 val int_opt_to_json : int option -> Yojson.Safe.t
 val float_opt_to_json : float option -> Yojson.Safe.t
 val bool_opt_to_json : bool option -> Yojson.Safe.t
+val string_opt_field : string -> string option -> string * Yojson.Safe.t
+(** [string_opt_field name opt] returns [(name, `String v)] for [Some v]
+    or [(name, `Null)] for [None]. Common pattern for JSON assoc fields. *)
 val option_to_yojson : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
 (** Higher-order: [option_to_yojson f] maps [f] over [Some] or returns [`Null]. *)
 

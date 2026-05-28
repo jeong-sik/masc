@@ -114,10 +114,6 @@ let repo_config_seed_path (inputs : inputs) =
   | first :: _ -> Some first
   | [] -> None
 
-let option_field name = function
-  | Some value -> (name, `String value)
-  | None -> (name, `Null)
-
 type cascade_diagnosis = {
   issues : catalog_issue list;
   missing_source : bool;
@@ -803,9 +799,9 @@ let to_yojson (report : t) =
       ("config_root_source", `String report.config_root_source);
       ("local_base_config_root", `String report.local_base_config_root);
       ("local_base_config_initialized", `Bool report.local_base_config_initialized);
-      (option_field "explicit_config_dir" report.explicit_config_dir);
-      (option_field "explicit_personas_dir" report.explicit_personas_dir);
-      (option_field "repo_config_seed_path" report.repo_config_seed_path);
+      (Json_util.string_opt_field "explicit_config_dir" report.explicit_config_dir);
+      (Json_util.string_opt_field "explicit_personas_dir" report.explicit_personas_dir);
+      (Json_util.string_opt_field "repo_config_seed_path" report.repo_config_seed_path);
       ("keeper_runtime_toml_present", `Bool report.keeper_runtime_toml_present);
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
       ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));

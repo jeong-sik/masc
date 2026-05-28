@@ -14,6 +14,7 @@
    discord_gateway_client
    discord_gateway_state
    discord_rest_client
+   discord_wss_connection
    gate_protocol
    gate_time_util)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
@@ -31,6 +32,7 @@
    ca-certs
    tls
    tls-eio
+   domain-name
    cohttp
    cohttp-eio
    websocket

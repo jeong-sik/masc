@@ -164,8 +164,9 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
   {
     name = "masc_tasks";
     description = "List tasks in backlog with their status and assignee. \
-Defaults to active tasks (todo/claimed/in_progress). \
+Defaults to active tasks (todo/claimed/in_progress/awaiting_verification). \
 Use include_done/include_cancelled or status to filter. \
+awaiting_verification tasks are pending reviewer approval. \
 Output includes task ID, title, priority, assignee, timestamps. \
 Tip: Look for status='todo' tasks to claim.";
     input_schema = `Assoc [
@@ -173,7 +174,7 @@ Tip: Look for status='todo' tasks to claim.";
       ("properties", `Assoc [
         ("status", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional status filter: todo|claimed|in_progress|done|cancelled");
+          ("description", `String "Optional status filter: todo|claimed|in_progress|awaiting_verification|done|cancelled");
         ]);
         ("include_done", `Assoc [
           ("type", `String "boolean");

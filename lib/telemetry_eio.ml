@@ -246,31 +246,53 @@ let read_recent_events ?fs:_ config ~limit : event_record list =
       |> List.filteri (fun i _ -> i < limit)
       |> List.rev
 
+(* ── Tool usage summary cache ──────────────────────────────────────
+   The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
+   surfaces every 30 s. Each surface calls [summarize_tool_usage] on
+   the same store, opening and counting every day-file. With 30
+   day-files × 15 MB this becomes a hot read-side load.
+   Cache TTL matches the dashboard refresh interval. *)
+
+type tool_usage_cache_entry = {
+  cached_summary : tool_usage_summary;
+  cached_at : float;
+}
+
+let tool_usage_cache : tool_usage_cache_entry option Atomic.t = Atomic.make None
+let tool_usage_cache_ttl = 30.0  (* seconds *)
+
 let summarize_tool_usage ?fs config : tool_usage_summary =
-  let telemetry_path = telemetry_file config in
-  let store = get_telemetry_store config in
-  let telemetry_available =
-    Sys.file_exists telemetry_path
-    || Sys.file_exists (Dated_jsonl.base_dir store)
-  in
-  let stats_by_tool = Hashtbl.create 32 in
-  let total_calls = ref 0 in
-  let records = read_all_events ?fs config in
-  List.iter (fun (record : event_record) ->
-    match record.event with
-    | Tool_called { tool_name; success; _ } ->
-        incr total_calls;
-        update_tool_usage stats_by_tool ~tool_name ~success
-          ~timestamp:record.timestamp
-    | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
-    | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
-  ) records;
-  {
-    telemetry_path;
-    telemetry_available;
-    total_calls = !total_calls;
-    stats_by_tool;
-  }
+  let now = Time_compat.now () in
+  match Atomic.get tool_usage_cache with
+  | Some entry when now -. entry.cached_at < tool_usage_cache_ttl ->
+      entry.cached_summary
+  | _ ->
+      let telemetry_path = telemetry_file config in
+      let store = get_telemetry_store config in
+      let telemetry_available =
+        Sys.file_exists telemetry_path
+        || Sys.file_exists (Dated_jsonl.base_dir store)
+      in
+      let stats_by_tool = Hashtbl.create 32 in
+      let total_calls = ref 0 in
+      let records = read_all_events ?fs config in
+      List.iter (fun (record : event_record) ->
+        match record.event with
+        | Tool_called { tool_name; success; _ } ->
+            incr total_calls;
+            update_tool_usage stats_by_tool ~tool_name ~success
+              ~timestamp:record.timestamp
+        | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
+        | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
+      ) records;
+      let summary = {
+        telemetry_path;
+        telemetry_available;
+        total_calls = !total_calls;
+        stats_by_tool;
+      } in
+      Atomic.set tool_usage_cache (Some { cached_summary = summary; cached_at = now });
+      summary
 
 (** Agent activity summary from telemetry, filtered by time window. *)
 type agent_activity = {

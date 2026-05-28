@@ -119,6 +119,13 @@ val read_entries :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry list
 
+(** Get the next round number for a (keeper_name, trace_id, turn) without
+    reading the entire trajectory file. Lazily hydrates from disk on first
+    access per key, then increments in-memory. *)
+val next_round :
+  masc_root:string -> keeper_name:string -> trace_id:string -> turn:int ->
+  int
+
 val read_all_lines :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   trajectory_line list

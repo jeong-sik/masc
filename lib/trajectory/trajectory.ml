@@ -230,6 +230,49 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
    via its own registry, so the trajectory-local copy is redundant.
    Calls below delegate directly. *)
 
+(* ── In-memory round counter ──────────────────────────────────────
+   Replaces the read-all-entries-just-to-count-round pattern.
+   Key: (keeper_name, trace_id, turn) -> count of tool calls in that turn.
+   Hydrated lazily on first access per key. *)
+
+let round_counters : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
+let round_counters_mu = Stdlib.Mutex.create ()
+
+(** Get the next round number for a given (keeper_name, trace_id, turn).
+    Lazily hydrates from disk on first access, then increments in-memory.
+    This avoids reading the entire JSONL file on every tool call. *)
+let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string) ~(turn : int) : int =
+  let key = (keeper_name, trace_id, turn) in
+  Stdlib.Mutex.protect round_counters_mu (fun () ->
+    let current =
+      match Hashtbl.find_opt round_counters key with
+      | Some n -> n
+      | None ->
+          (* Hydrate from disk: count existing entries for this turn *)
+          let path = trajectory_path masc_root keeper_name trace_id in
+          if not (Sys.file_exists path) then 0
+          else
+            let content = Fs_compat.load_file path in
+            String.split_on_char '\n' content
+            |> List.filter (fun line -> String.trim line <> "")
+            |> List.fold_left (fun acc line ->
+                try
+                  let json = Yojson.Safe.from_string line in
+                  let open Yojson.Safe.Util in
+                  let entry_turn = json |> member "turn" |> to_int in
+                  if entry_turn = turn then acc + 1 else acc
+                with _ -> acc
+              ) 0
+    in
+    let next = current + 1 in
+    Hashtbl.replace round_counters key next;
+    next)
+
+(** Reset round counters for testing. *)
+let reset_round_counters_for_testing () =
+  Stdlib.Mutex.protect round_counters_mu (fun () ->
+    Hashtbl.reset round_counters)
+
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
     unit =

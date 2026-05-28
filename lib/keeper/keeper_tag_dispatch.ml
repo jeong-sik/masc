@@ -59,6 +59,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
   | Mod_compact -> "compact"
+  | Mod_discord -> "discord"
 ;;
 
 (** Helper: get optional fs. *)
@@ -164,6 +165,16 @@ let dispatch
       Some
         (workflow_err
            (Printf.sprintf "tool '%s' is an internal context tool (use MCP client)" name))
+    (* RFC-0203 — Discord outbound tool dispatches via Tool_dispatch.register
+       (Direct binding), not through the tag-routed keeper path. Reaching this
+       arm means a keeper invoked discord_send_message through the wrong
+       surface; reject explicitly rather than fall through. *)
+    | Mod_discord ->
+      Some
+        (workflow_err
+           (Printf.sprintf
+              "tool '%s' is an MCP-server outbound tool (use MCP client, not keeper tag dispatch)"
+              name))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

@@ -566,6 +566,14 @@ let execute_tool_eio
                      (if ok
                       then Tool_result.ok ~tool_name:name ~start_time message
                       else Tool_result.error ~tool_name:name ~start_time message)
+                 (* RFC-0203 — Discord outbound tool is registered with
+                    Direct binding via Tool_spec.register, so dispatch reaches
+                    its handler through Tool_dispatch.register, not through
+                    this tag-routed path. Returning None here surfaces as
+                    "Unknown tool" enriched with did-you-mean suggestions;
+                    that's the right signal if the static tag registry ever
+                    routes a Mod_discord lookup through here. *)
+                 | Mod_discord -> None
                  | Mod_inline ->
                    let inline_ctx : Tool_inline_dispatch.context =
                      { config

@@ -73,13 +73,16 @@ val keeper_for_channel : channel_id:string -> string option
     Returns [None] when no binding exists, when the channel id is
     blank, or when the binding store is unreadable. *)
 
-(** Typed failure modes for {!send_message}. Closed sum — adding
-    a new variant forces every consumer to handle it. *)
+(** {1 Outbound — RFC-0203} *)
+
+(** Typed failure from {!send_message}. Closed sum so the tool layer
+    can map each variant to a distinct [Tool_result.tool_failure_class]
+    at the boundary. *)
 type send_error =
   | Missing_token
-    (** [DISCORD_BOT_TOKEN] is unset or empty. *)
+    (** [DISCORD_BOT_TOKEN] env var is unset or empty. *)
   | Rest_error of Discord_rest_client.error
-    (** Discord REST returned a typed failure. *)
+    (** The Discord REST call returned a typed error. *)
 
 val pp_send_error : Format.formatter -> send_error -> unit
 
@@ -87,10 +90,14 @@ val send_message :
   channel_id:string ->
   content:string ->
   (string, send_error) result
-(** Post a single message to a Discord channel. Returns the created
-    message id on success. Bot token is resolved from
-    [DISCORD_BOT_TOKEN] at call time so a token rotation doesn't
-    require a server restart.
+(** [send_message ~channel_id ~content] resolves the bot token from
+    [DISCORD_BOT_TOKEN] and posts to the channel via
+    {!Discord_rest_client.send_message}. Returns the created message
+    id on success.
 
-    Must be called inside an Eio context (the underlying REST
-    client uses the piaf-backed http pool). *)
+    Snowflake [channel_id] covers guild text channels, DM channels,
+    and threads uniformly — no per-surface dispatch.
+
+    @raise nothing — failures are surfaced as typed {!send_error}.
+    Must be called inside an Eio context (the REST client's transport
+    relies on Eio fibers). *)

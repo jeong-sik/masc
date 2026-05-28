@@ -14,6 +14,7 @@
    discord_gateway_client
    discord_gateway_state
    discord_rest_client
+   discord_tool_helpers
    discord_wss_connection
    gate_protocol
    gate_time_util)
@@ -45,4 +46,6 @@
    masc_core
    masc_pulse
    masc_mcp.http_client
+   masc_mcp.tool_types
+   time_compat
    fs_compat))

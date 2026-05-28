@@ -332,24 +332,17 @@ type cascade_scoring_params =
   }
 [@@deriving show, eq]
 
-type cascade_tier =
+type cascade_profile_node =
   { name : string
   ; members : string list
+  ; child_profiles : string list option
   ; strategy : cascade_strategy
   ; max_concurrent : int option
   ; cycle_policy : cascade_cycle_policy option
   ; sticky_ttl_ms : int option
   ; scoring_params : cascade_scoring_params option
   ; keeper_assignable : bool option
-  }
-[@@deriving show, eq]
-
-type cascade_tier_group =
-  { name : string
-  ; tiers : string list
-  ; strategy : cascade_strategy
-  ; fallback : bool
-  ; keeper_assignable : bool option
+  ; fallback : bool option
   ; required_capability_profile : string option
   }
 [@@deriving show, eq]
@@ -372,11 +365,10 @@ type cascade_config =
   ; models : cascade_model_spec list
   ; bindings : cascade_binding list
   ; aliases : cascade_alias list
-  ; tiers : cascade_tier list
-  ; tier_groups : cascade_tier_group list
+  ; profiles : cascade_profile_node list
   ; routes : cascade_route list
   ; system_targets : cascade_route list
-  ; profiles : cascade_profile list
+  ; capability_profiles : cascade_profile list
   }
 [@@deriving show, eq]
 

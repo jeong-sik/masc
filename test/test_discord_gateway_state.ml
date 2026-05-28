@@ -291,6 +291,301 @@ let test_heartbeat_tick_when_connected () =
     (has_send_heartbeat effects)
 
 (* ---------------------------------------------------------------- *)
+(* Phase 1.5 — MESSAGE_CREATE / MESSAGE_REACTION_ADD + policy       *)
+(* ---------------------------------------------------------------- *)
+
+let message_create_payload
+    ~id ~channel_id ~author_id ~content ~mention_ids () : Yojson.Safe.t =
+  let mentions =
+    `List
+      (List.map
+         (fun uid -> `Assoc [ ("id", `String uid) ])
+         mention_ids)
+  in
+  `Assoc
+    [ ("id", `String id)
+    ; ("channel_id", `String channel_id)
+    ; ("author", `Assoc [ ("id", `String author_id) ])
+    ; ("content", `String content)
+    ; ("mentions", mentions)
+    ]
+
+let reaction_add_payload
+    ~channel_id ~message_id ~user_id ~emoji_name ?emoji_id () : Yojson.Safe.t =
+  let emoji_fields =
+    ("name", `String emoji_name)
+    :: (match emoji_id with
+        | Some i -> [ ("id", `String i) ]
+        | None -> [])
+  in
+  `Assoc
+    [ ("channel_id", `String channel_id)
+    ; ("message_id", `String message_id)
+    ; ("user_id", `String user_id)
+    ; ("emoji", `Assoc emoji_fields)
+    ]
+
+let test_decode_message_create_with_mention () =
+  let payload =
+    message_create_payload
+      ~id:"MSG1"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:"@BOT hi"
+      ~mention_ids:[ "BOT" ]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok
+      (S.Message_create
+        { channel_id = "CH1"
+        ; message_id = "MSG1"
+        ; author_id = "USER1"
+        ; content = "@BOT hi"
+        ; mentions_bot = true
+        }) ->
+      ()
+  | Ok _ -> fail "decoded wrong MESSAGE_CREATE fields"
+  | Error msg -> fail msg
+
+let test_decode_message_create_without_mention () =
+  let payload =
+    message_create_payload
+      ~id:"MSG2"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:"no mention here"
+      ~mention_ids:[]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok (S.Message_create { mentions_bot = false; _ }) -> ()
+  | Ok _ -> fail "expected mentions_bot=false"
+  | Error msg -> fail msg
+
+let test_decode_reaction_add_unicode () =
+  let payload =
+    reaction_add_payload
+      ~channel_id:"CH1"
+      ~message_id:"MSG1"
+      ~user_id:"USER1"
+      ~emoji_name:"👍"
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:None
+      ~event_name:"MESSAGE_REACTION_ADD"
+      ~payload
+  with
+  | Ok
+      (S.Reaction_add
+        { channel_id = "CH1"
+        ; message_id = "MSG1"
+        ; user_id = "USER1"
+        ; emoji = "👍"
+        }) ->
+      ()
+  | Ok _ -> fail "decoded wrong reaction fields"
+  | Error msg -> fail msg
+
+let test_decode_reaction_add_custom_emoji () =
+  let payload =
+    reaction_add_payload
+      ~channel_id:"CH1"
+      ~message_id:"MSG1"
+      ~user_id:"USER1"
+      ~emoji_name:"partyparrot"
+      ~emoji_id:"7777"
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:None
+      ~event_name:"MESSAGE_REACTION_ADD"
+      ~payload
+  with
+  | Ok (S.Reaction_add { emoji = "partyparrot:7777"; _ }) -> ()
+  | Ok _ -> fail "expected emoji=\"partyparrot:7777\" for custom emoji"
+  | Error msg -> fail msg
+
+(* Drive into Connected with the given policy + bot user id, then
+   feed a dispatch frame and inspect whether an Emit_event was
+   produced. Returns true iff some Emit_event _ was in the effects. *)
+let connected_with_policy ~policy ~bot_user_id =
+  let config : S.config =
+    { token = "test-token"
+    ; intents = [ S.Guilds; S.Guild_messages ]
+    ; bot_user_id = None
+    ; trigger_policy = policy
+    }
+  in
+  let m = S.create ~config in
+  let m, _ = S.step m ~now_mono:0.0 S.Connect_requested in
+  let m, _ =
+    S.step m ~now_mono:1.0
+      (S.Frame_received (hello_frame ~heartbeat_interval:41250))
+  in
+  let m, _ =
+    S.step m ~now_mono:2.0
+      (S.Frame_received
+         (ready_frame
+            ~session_id:"sess-1"
+            ~resume_url:"wss://resume.discord.gg/"
+            ~user_id:bot_user_id))
+  in
+  m
+
+let has_emit_event effects =
+  List.exists (function S.Emit_event _ -> true | _ -> false) effects
+
+let dispatch_frame ~event_name ~payload ~seq : S.frame =
+  { op = S.Op_dispatch
+  ; s = Some seq
+  ; t = Some event_name
+  ; d = payload
+  }
+
+let test_policy_mention_only_message_with_mention_passes () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"M1" ~channel_id:"C1" ~author_id:"U1" ~content:"hi @BOT"
+      ~mention_ids:[ "BOT" ] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:5))
+  in
+  check bool "Emit_event produced for mention_only + mentioned message"
+    true (has_emit_event effects)
+
+let test_policy_mention_only_message_without_mention_filtered () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"M2" ~channel_id:"C1" ~author_id:"U1" ~content:"just chatting"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:5))
+  in
+  check bool "Emit_event suppressed for mention_only + non-mention"
+    false (has_emit_event effects)
+
+let test_policy_mention_only_reaction_filtered () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"M1" ~user_id:"U1" ~emoji_name:"👍" ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload ~seq:5))
+  in
+  check bool "Emit_event suppressed for mention_only + reaction"
+    false (has_emit_event effects)
+
+let test_policy_user_only_message_matching_author_passes () =
+  let m =
+    connected_with_policy
+      ~policy:(S.User_only "VINCENT") ~bot_user_id:"BOT"
+  in
+  let payload =
+    message_create_payload
+      ~id:"M3" ~channel_id:"C1" ~author_id:"VINCENT" ~content:"hello"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:5))
+  in
+  check bool "Emit_event produced when author matches user_only id"
+    true (has_emit_event effects)
+
+let test_policy_user_only_message_other_author_filtered () =
+  let m =
+    connected_with_policy
+      ~policy:(S.User_only "VINCENT") ~bot_user_id:"BOT"
+  in
+  let payload =
+    message_create_payload
+      ~id:"M4" ~channel_id:"C1" ~author_id:"STRANGER" ~content:"hello"
+      ~mention_ids:[ "BOT" ] (* mention shouldn't help user_only path *)
+      ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:5))
+  in
+  check bool
+    "Emit_event suppressed when author doesn't match user_only \
+     (mention bypass not applied)"
+    false (has_emit_event effects)
+
+let test_policy_user_only_reaction_matching_reactor_passes () =
+  let m =
+    connected_with_policy
+      ~policy:(S.User_only "VINCENT") ~bot_user_id:"BOT"
+  in
+  let payload =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"M1" ~user_id:"VINCENT" ~emoji_name:"💯"
+      ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload ~seq:5))
+  in
+  check bool "Emit_event produced when reactor matches user_only id"
+    true (has_emit_event effects)
+
+let test_policy_all_emits_messages_and_reactions () =
+  let m = connected_with_policy ~policy:S.All ~bot_user_id:"BOT" in
+  let msg =
+    message_create_payload
+      ~id:"M5" ~channel_id:"C1" ~author_id:"ANYONE" ~content:"."
+      ~mention_ids:[] ()
+  in
+  let _, msg_effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload:msg ~seq:5))
+  in
+  check bool "Emit_event for any message under All" true
+    (has_emit_event msg_effects);
+  let react =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"M5" ~user_id:"ANYONE" ~emoji_name:"🎉"
+      ()
+  in
+  let _, react_effects =
+    S.step m ~now_mono:4.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload:react
+            ~seq:6))
+  in
+  check bool "Emit_event for any reaction under All" true
+    (has_emit_event react_effects)
+
+(* ---------------------------------------------------------------- *)
 (* Phase 1.4 — reconnect / resume arms                              *)
 (* ---------------------------------------------------------------- *)
 
@@ -544,6 +839,35 @@ let () =
             test_ready_transition
         ; test_case "Heartbeat_tick (Connected) → Send_frame Op_heartbeat"
             `Quick test_heartbeat_tick_when_connected
+        ] )
+    ; ( "dispatch decode"
+      , [ test_case "MESSAGE_CREATE with mention sets mentions_bot=true"
+            `Quick test_decode_message_create_with_mention
+        ; test_case "MESSAGE_CREATE without mention sets mentions_bot=false"
+            `Quick test_decode_message_create_without_mention
+        ; test_case "MESSAGE_REACTION_ADD unicode emoji" `Quick
+            test_decode_reaction_add_unicode
+        ; test_case "MESSAGE_REACTION_ADD custom emoji => name:id" `Quick
+            test_decode_reaction_add_custom_emoji
+        ] )
+    ; ( "trigger_policy filter"
+      , [ test_case "mention_only + mentioned message => Emit_event" `Quick
+            test_policy_mention_only_message_with_mention_passes
+        ; test_case "mention_only + plain message => suppressed" `Quick
+            test_policy_mention_only_message_without_mention_filtered
+        ; test_case "mention_only + reaction => suppressed (always)" `Quick
+            test_policy_mention_only_reaction_filtered
+        ; test_case "user_only id + matching author => Emit_event" `Quick
+            test_policy_user_only_message_matching_author_passes
+        ; test_case
+            "user_only id + other author + mention => suppressed (no \
+             bypass)"
+            `Quick test_policy_user_only_message_other_author_filtered
+        ; test_case
+            "user_only id + matching reactor => Emit_event"
+            `Quick test_policy_user_only_reaction_matching_reactor_passes
+        ; test_case "all + any message + any reaction => both Emit_event"
+            `Quick test_policy_all_emits_messages_and_reactions
         ] )
     ; ( "reconnect / resume"
       , [ test_case

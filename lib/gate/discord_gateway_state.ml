@@ -263,13 +263,89 @@ let decode_ready ~payload =
       Error
         "READY payload: missing session_id / resume_gateway_url / user.id"
 
-let decode_dispatch ~bot_user_id:_ ~event_name ~payload =
+let decode_message_create ~bot_user_id ~payload =
+  let channel_id = field_string_opt "channel_id" payload in
+  let message_id = field_string_opt "id" payload in
+  let content =
+    match field_string_opt "content" payload with
+    | Some s -> s
+    | None -> ""
+  in
+  let author = assoc_opt "author" payload in
+  let author_id =
+    match author with
+    | Some a -> field_string_opt "id" a
+    | None -> None
+  in
+  let mentions_bot =
+    match bot_user_id, assoc_opt "mentions" payload with
+    | None, _ | _, None -> false
+    | Some bot_id, Some (`List items) ->
+        List.exists
+          (fun item ->
+            match field_string_opt "id" item with
+            | Some id -> String.equal id bot_id
+            | None -> false)
+          items
+    | Some _, Some _ -> false
+  in
+  match channel_id, message_id, author_id with
+  | Some channel_id, Some message_id, Some author_id ->
+      Ok
+        (Message_create
+           { channel_id; message_id; author_id; content; mentions_bot })
+  | _ ->
+      Error "MESSAGE_CREATE payload: missing channel_id / id / author.id"
+
+let decode_reaction_add ~payload =
+  let channel_id = field_string_opt "channel_id" payload in
+  let message_id = field_string_opt "message_id" payload in
+  let user_id = field_string_opt "user_id" payload in
+  let emoji =
+    match assoc_opt "emoji" payload with
+    | None -> None
+    | Some emoji_json ->
+        let name = field_string_opt "name" emoji_json in
+        let id = field_string_opt "id" emoji_json in
+        (match name, id with
+         | Some n, None -> Some n
+         | Some n, Some i -> Some (Printf.sprintf "%s:%s" n i)
+         | None, _ -> None)
+  in
+  match channel_id, message_id, user_id, emoji with
+  | Some channel_id, Some message_id, Some user_id, Some emoji ->
+      Ok (Reaction_add { channel_id; message_id; user_id; emoji })
+  | _ ->
+      Error
+        "MESSAGE_REACTION_ADD payload: missing channel_id / message_id / \
+         user_id / emoji.name"
+
+let decode_dispatch ~bot_user_id ~event_name ~payload =
   match event_name with
   | "READY" -> decode_ready ~payload
-  | "MESSAGE_CREATE" -> Error "MESSAGE_CREATE: not implemented (Phase 1.5)"
-  | "MESSAGE_REACTION_ADD" ->
-      Error "MESSAGE_REACTION_ADD: not implemented (Phase 1.5)"
+  | "MESSAGE_CREATE" -> decode_message_create ~bot_user_id ~payload
+  | "MESSAGE_REACTION_ADD" -> decode_reaction_add ~payload
   | other -> Ok (Ignored other)
+
+(* ── Trigger policy filters ────────────────────────────────────────
+
+   Two functions, one per event type. Each exhaustively matches over
+   [trigger_policy]; adding a new policy variant breaks both bodies
+   at compile time. Reactions in [Mention_only] are deliberately
+   suppressed (the "quiet, mention-triggered bot" default), per
+   RFC-0203 §Shape interpretation. *)
+
+let message_passes_policy policy ~author_id ~mentions_bot =
+  match policy with
+  | All -> true
+  | Mention_only -> mentions_bot
+  | User_only id -> String.equal author_id id
+
+let reaction_passes_policy policy ~user_id =
+  match policy with
+  | All -> true
+  | Mention_only -> false
+  | User_only id -> String.equal user_id id
 
 (* ── Outbound frame builders (internal) ────────────────────────── *)
 
@@ -418,9 +494,16 @@ let handle_dispatch t (frame : frame) =
                  ; message = Printf.sprintf "READY (bot_user_id=%s)" bot_user_id
                  }
              ] )
-       | Ok (Message_create _ as ev)
-       | Ok (Reaction_add _ as ev) ->
-           (t', [ Emit_event ev ])
+       | Ok (Message_create { author_id; mentions_bot; _ } as ev) ->
+           if
+             message_passes_policy t'.config.trigger_policy ~author_id
+               ~mentions_bot
+           then (t', [ Emit_event ev ])
+           else no_op t'
+       | Ok (Reaction_add { user_id; _ } as ev) ->
+           if reaction_passes_policy t'.config.trigger_policy ~user_id
+           then (t', [ Emit_event ev ])
+           else no_op t'
        | Ok (Ignored "RESUMED") ->
            (* Successful resume — server has replayed missed events
               and signalled completion. Recover session_id from

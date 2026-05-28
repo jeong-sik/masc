@@ -30,12 +30,12 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Git_status { short = false })
   ; W (Git_clone { repo = "x"; branch = None; depth = 1 })
   ; W (Curl { url = "http://x"; method_ = `GET; headers = None; body = None })
-  ; W (Rm { paths = []; recursive = false; force = false })
-  ; W (Sudo { target_argv = [] })
+  ; W (Rm { paths = [ "/tmp/x" ]; recursive = false; force = false })
+  ; W (Sudo { target_argv = [ "sh"; "-c"; "echo hi" ] })
   ; W (Find { path = "."; name = None; type_ = None })
   ; W (Head { path = "/dev/null"; lines = 10 })
   ; W (Tail { path = "/dev/null"; lines = 10 })
-  ; W (Grep { pattern = "."; path = None; recursive = false; case_sensitive = false })
+  ; W (Grep { pattern = "."; path = None; recursive = true; case_sensitive = false })
   ; W (Mkdir { path = "/tmp/x"; parents = false })
   ; W (Wc { path = "/dev/null"; mode = `Lines })
   ; W (Git_diff { stat = false; cached = false; paths = [] })
@@ -394,6 +394,63 @@ let test_of_simple_generic_fallback () =
      | _ -> false)
 ;;
 
+(* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
+   in subcommand+args parsing when args are empty or minimal. *)
+let test_all_wrapped_minimal_round_trip () =
+  List.iter
+    (fun (Shell_ir_typed.W cmd as w) ->
+       (* Generic cannot round-trip (of_simple re-parses into a typed ctor) *)
+       match cmd with
+       | Shell_ir_typed.Generic _ -> ()
+       | _ ->
+         let simple = Shell_ir_typed.to_simple cmd in
+         let back = Shell_ir_typed.of_simple simple in
+         if not (w = back)
+         then
+           Alcotest.failf
+             "all_wrapped minimal round-trip failed for %a@\n  \
+              to_simple: bin=%s args=%d@\n  \
+              of_simple: %a"
+             Shell_ir_typed.pp
+             w
+             (Exec_program.to_string simple.bin)
+             (List.length simple.args)
+             Shell_ir_typed.pp
+             back)
+    all_wrapped
+;;
+
+(* Verify that of_simple correctly identifies the binary from a
+   Shell_ir.simple produced by to_simple — tests the bin_variant
+   dispatch path in the generated parser. *)
+let test_bin_variant_dispatch () =
+  let open Shell_ir_typed in
+  (* For each non-Generic constructor, to_simple should produce a simple
+     whose bin matches the expected Exec_program variant. *)
+  let cases =
+    [ W (Ls { path = None; flags = [] }), "ls"
+    ; W (Cat { path = "/dev/null" }), "cat"
+    ; W (Rg { pattern = "."; path = None; case_sensitive = false }), "rg"
+    ; W (Rm { paths = []; recursive = false; force = false }), "rm"
+    ; W (Docker { subcommand = "ps"; args = [] }), "docker"
+    ; W (Npm { subcommand = "test"; args = [] }), "npm"
+    ; W (Cargo { subcommand = "build"; args = [] }), "cargo"
+    ; W (Su { subcommand = "root"; args = [] }), "su"
+    ; W (Dd { subcommand = "if=/dev/null"; args = [] }), "dd"
+    ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdb1" ] }), "mkfs"
+    ]
+  in
+  List.iter
+    (fun (W cmd, expected_bin) ->
+       let simple = to_simple cmd in
+       let actual_bin = Exec_program.to_string simple.bin in
+       Alcotest.(check string)
+         (Printf.sprintf "bin dispatch for %s" expected_bin)
+         expected_bin
+         actual_bin)
+    cases
+;;
+
 let test_constructor_names_in_declaration_order () =
   Alcotest.(check (list string))
     "generated names match declaration order"
@@ -439,6 +496,11 @@ let () =
             "Generic fallback coverage"
             `Quick
             test_of_simple_generic_fallback
+        ; Alcotest.test_case
+            "all_wrapped minimal payload round-trip"
+            `Quick
+            test_all_wrapped_minimal_round_trip
+        ; Alcotest.test_case "bin variant dispatch" `Quick test_bin_variant_dispatch
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

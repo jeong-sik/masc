@@ -35,17 +35,18 @@ val cors_preflight_headers : string -> (string * string) list
 
 (** {1 JSON-RPC error envelope} *)
 
-val json_rpc_error : int -> string -> string
+val json_rpc_error : Mcp_error_code.t -> string -> string
 (** [json_rpc_error code message] returns the canonical
     JSON-RPC 2.0 error envelope as a string:
     [{"jsonrpc":"2.0","error":{"code":<code>,"message":"<msg>"},"id":null}].
+    Delegates to {!Mcp_error_code.jsonrpc_error_body}.
     Message is `String.escaped`-quoted; callers must not pre-
     escape. *)
 
 val is_http_error_response : Yojson.Safe.t -> bool
 (** [is_http_error_response json] returns [true] when [json] is
     a JSON-RPC 2.0 response with [id = null] AND [error.code]
-    in [-32700] (Parse error) / [-32600] (Invalid Request).
+    is {!Mcp_error_code.Parse_error} or {!Mcp_error_code.Invalid_request}.
     Mirrors the predicate in
     {!Server_mcp_transport_http_headers}; duplicated here
     because the route layer needs it before the transport

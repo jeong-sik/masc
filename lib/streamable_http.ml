@@ -97,12 +97,12 @@ let jsonrpc_is_batch = function
   | `List _ -> true
   | _ -> false
 
-let jsonrpc_error_response ~id ~code ~message =
+let jsonrpc_error_response ~id ~(code : Mcp_error_code.t) ~message =
   `Assoc [
     ("jsonrpc", `String "2.0");
     ("id", id);
     ("error", `Assoc [
-      ("code", `Int code);
+      ("code", `Int (Mcp_error_code.to_wire_code code));
       ("message", `String message);
     ]);
   ]
@@ -118,7 +118,7 @@ let jsonrpc_dispatch_request (handler : request_handler) request =
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     jsonrpc_error_response
       ~id:(jsonrpc_extract_id request)
-      ~code:(-32603)
+      ~code:Mcp_error_code.Internal_error
       ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error")
 
 (** Handle POST /mcp - JSON-RPC request processing *)
@@ -133,10 +133,10 @@ let handle_post ?session_id ~body ?request_handler () =
       ~default:(fun request ->
         let id = jsonrpc_extract_id request in
         if jsonrpc_is_valid_request request then
-          jsonrpc_error_response ~id ~code:(-32601)
+          jsonrpc_error_response ~id ~code:Mcp_error_code.Method_not_found
             ~message:"Method not found: no request handler configured"
         else
-          jsonrpc_error_response ~id ~code:(-32600) ~message:"Invalid Request")
+          jsonrpc_error_response ~id ~code:Mcp_error_code.Invalid_request ~message:"Invalid Request")
   in
 
   match json_result with

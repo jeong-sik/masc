@@ -253,7 +253,7 @@ let handle_tool_call
         { success = true; result_json; error_message = ""; error_code = 0 }
     | Error msg ->
       T.ToolCallResponse.
-        { success = false; result_json = ""; error_message = msg; error_code = -32603 }
+        { success = false; result_json = ""; error_message = msg; error_code = Mcp_error_code.(to_wire_code Internal_error) }
   in
   T.ToolCallResponse.to_bytes result
 ;;

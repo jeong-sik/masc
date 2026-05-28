@@ -733,7 +733,7 @@ let handle_request
                         in
                         let outcome = tool_call_outcome result in
                         Log.Mcp.emit
-                          Log.Info
+                          (if String.equal outcome "error" then Log.Error else Log.Info)
                           ~details:
                             (mcp_tool_call_log_details
                                ~phase:"completed"

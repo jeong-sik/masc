@@ -943,7 +943,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     String_util.utf8_safe ~max_bytes:83 ~suffix:"..." message |> String_util.to_string
   in
   let preview = String.map (function '\n' -> ' ' | c -> c) preview in
-  Log.Mcp.emit Log.Info
+  Log.Mcp.emit (if success then Log.Info else Log.Error)
     ~details:
       (`Assoc
         [

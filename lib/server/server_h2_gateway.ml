@@ -345,20 +345,20 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           (match validate_mcp_session_profile ~profile session_id with
            | Error msg ->
-               let body = json_rpc_error (-32600) msg in
+               let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                h2_respond_json h2_reqd body ~status:`Conflict ~extra_headers:cors
            | Ok () ->
                (match Server_mcp_transport_http.validate_protocol_version_continuity
                         ~session_id httpun_request with
                 | Error msg ->
-                    let body = json_rpc_error (-32600) msg in
+                    let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                     h2_respond_json h2_reqd body ~status:`Bad_request
                       ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                 | Ok () ->
                     remember_mcp_profile session_id profile;
                     (match auth_result with
                      | Error msg ->
-                         let body = json_rpc_error (-32001) msg in
+                         let body = json_rpc_error Mcp_error_code.Auth_error msg in
                          h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
                      | Ok _cred_opt ->
                          h2_read_body h2_reqd (fun body_str ->
@@ -373,7 +373,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              | Error
                                  (Server_mcp_request_context.Session_required msg)
                                ->
-                                 let body = json_rpc_error (-32600) msg in
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                                  h2_respond_json h2_reqd body
                                    ~status:`Bad_request
                                    ~extra_headers:
@@ -384,7 +384,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                  (Server_mcp_request_context.Unknown_session msg)
                                ->
                                   let new_session_id = Mcp_session.generate () in
-                                  let body = json_rpc_error (-32600) msg in
+                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                                   h2_respond_json h2_reqd body
                                     ~status:`Not_found
                                     ~extra_headers:
@@ -394,7 +394,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              | Error
                                  (Server_mcp_request_context.Invalid_accept msg)
                                ->
-                                 let body = json_rpc_error (-32600) msg in
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Ok post_context ->
@@ -463,7 +463,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           (match auth_result with
            | Error msg ->
-               let body = json_rpc_error (-32001) msg in
+               let body = json_rpc_error Mcp_error_code.Auth_error msg in
                h2_respond_json h2_reqd body ~status:`Unauthorized
                  ~extra_headers:(("www-authenticate", "Bearer") :: cors)
            | Ok _ ->
@@ -471,14 +471,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 | Some session_id -> (
                     match validate_mcp_session_delete_profile ~profile session_id with
                     | Error msg ->
-                        let body = json_rpc_error (-32600) msg in
+                        let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                         h2_respond_json h2_reqd body ~status:`Conflict
                           ~extra_headers:cors
                     | Ok () ->
                         (match Server_mcp_transport_http.validate_protocol_version_continuity
                                  ~session_id httpun_request with
                          | Error msg ->
-                             let body = json_rpc_error (-32600) msg in
+                             let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                              h2_respond_json h2_reqd body ~status:`Bad_request
                                ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
                          | Ok () ->

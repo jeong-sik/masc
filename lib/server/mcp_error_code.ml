@@ -84,6 +84,12 @@ let all =
     Quiet { reason = "<exemplar>"; recovered = false };
   ]
 
+let jsonrpc_error_body (t : t) ~(message : string) : string =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","error":{"code":%d,"message":"%s"},"id":null}|}
+    (to_wire_code t)
+    (String.escaped message)
+
 let pp fmt = function
   | Parse_error -> Format.pp_print_string fmt "Parse_error"
   | Invalid_request -> Format.pp_print_string fmt "Invalid_request"

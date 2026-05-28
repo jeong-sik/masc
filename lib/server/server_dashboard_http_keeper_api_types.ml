@@ -138,11 +138,6 @@ let json_string_member_opt name json =
   | `String value -> Some value
   | _ -> None
 
-let json_bool_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Bool value -> Some value
-  | _ -> None
-
 let json_string_list_member name json =
   match Yojson.Safe.Util.member name json with
   | `List values ->

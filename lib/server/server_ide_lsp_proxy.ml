@@ -127,7 +127,7 @@ let extract_uri params =
         | Some (`String uri) -> Some uri
         | _ -> None)
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 (** Decode percent-encoded URI component (e.g. [%20] -> [ ]). *)
@@ -516,7 +516,7 @@ let dispatch_message cs msg =
              (match List.assoc_opt "rootUri" pf with
               | Some (`String u) -> u
               | _ -> cs.base_path)
-           | _ -> cs.base_path
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> cs.base_path
          in
          let root = workspace_root_for_initialize ~base_path:cs.base_path root_uri in
          cs.workspace_root := root;
@@ -564,12 +564,12 @@ let dispatch_message cs msg =
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())
-    | _ ->
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       (match
          extract_id
            (match json with
             | `Assoc f -> f
-            | _ -> [])
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> [])
        with
        | Some n -> send_error cs n Mcp_error_code.(to_wire_code Parse_error) "Parse error"
        | None -> ())

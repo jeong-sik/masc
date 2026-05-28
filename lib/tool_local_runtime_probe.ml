@@ -191,9 +191,9 @@ let ollama_loaded_models_of_ps_json json =
     | `Assoc _ -> (
         match Json_util.assoc_member_opt "models" json with
         | Some (`List models) -> models
-        | _ -> [])
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> [])
     | `List models -> models
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> []
   in
   items
   |> List.map (fun item ->
@@ -217,7 +217,7 @@ let prompt_eval_duration_ms_of_run_json json =
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (Stdlib.Float.of_int value)
   | Some (`Intlit value) -> Option.map Stdlib.Float.of_int (parse_int_opt value)
-  | _ -> None
+  | Some (`Null | `Bool _ | `String _ | `Assoc _ | `List _) | None -> None
 
 let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms json =
   let duration_ms key = int_member json key |> ns_to_ms in
@@ -297,7 +297,7 @@ let kv_cache_assessment_json run_jsons =
                  match Json_util.assoc_member_opt "run_index" json with
                  | Some (`Int value) -> Some value
                  | Some (`Intlit value) -> parse_int_opt value
-                 | _ -> None
+                 | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) | None -> None
                in
                Some (run_index, duration_ms)
            | None -> None)
@@ -401,7 +401,7 @@ let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
                          context_length = int_member item "context_length";
                          expires_at = Json_util.get_string item "expires_at";
                        })
-                 | _ -> None)
+                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
         in
         (http_status, models, None)
   | Error err -> (None, [], Some err)
@@ -624,7 +624,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
          | Some (`String "no_visible_reuse") ->
              "Repeated prompt_eval_duration_ms did not show a strong reuse improvement."
              :: items
-         | _ -> items)
+         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> items)
     |> List.rev
   in
   let errors =

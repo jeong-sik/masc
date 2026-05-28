@@ -8,7 +8,7 @@ let json_string_opt_member key json = Json_util.get_string_nonempty json key
 
 let json_string_opt_value = function
   | `String value when String.trim value <> "" -> Some value
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 
 let json_bool_opt_member key json = Json_util.get_bool json key
 

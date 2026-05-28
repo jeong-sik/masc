@@ -275,7 +275,7 @@ let translate_read_file input =
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)
-  | _ -> input
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> input
 ;;
 
 let translate_edit_file input =
@@ -294,7 +294,7 @@ let translate_edit_file input =
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)
-  | _ -> input
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> input
 ;;
 
 let translate_write_file input =
@@ -310,7 +310,7 @@ let translate_write_file input =
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)
-  | _ -> input
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> input
 ;;
 
 let translate_search_files input =
@@ -331,7 +331,7 @@ let translate_search_files input =
              then (
                match v with
                | `String s -> `String ("(?i)" ^ s)
-               | _ -> v)
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> v)
              else v
            in
            out := (k, v') :: !out
@@ -340,7 +340,7 @@ let translate_search_files input =
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)
-  | _ -> input
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> input
 ;;
 
 let search_files_op (input : Yojson.Safe.t) : string option =
@@ -349,7 +349,7 @@ let search_files_op (input : Yojson.Safe.t) : string option =
     (match List.assoc_opt "op" fields with
      | Some (`String s) -> Some (String.lowercase_ascii (String.trim s))
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let search_files_readonly_of_input input =

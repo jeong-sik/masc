@@ -336,7 +336,22 @@ let rec parse method_ headers body url = function
     | "-w" | "--write-out" | "-o" | "--output" | "-e" | "--referer"
     | "-A" | "--user-agent" | "-U" | "--proxy-user" | "-x" | "--proxy"
     | "--dns-servers" | "--resolve" | "--interface" | "-Y" | "--speed-limit"
-    | "-y" | "--speed-time" | "--keepalive-time" )
+    | "-y" | "--speed-time" | "--keepalive-time"
+    | "-b" | "--cookie" | "-c" | "--cookie-jar"
+    | "-E" | "--cert" | "--cacert" | "--cert-type" | "--key"
+    | "-F" | "--form" | "-T" | "--upload-file"
+    | "-K" | "--config" | "--proto" | "--proto-default"
+    | "--data-raw" | "--data-binary" | "--data-urlencode"
+    | "-m" | "--max-redirs"
+    | "-t" | "--telnet-option" | "-z" | "--time-cond"
+    | "--netrc-file"
+    | "-P" | "--ftp-port" | "-Q" | "--quote"
+    | "--random-file"
+    | "--socks4" | "--socks4a"
+    | "--socks5" | "--socks5-hostname" | "--stderr"
+    | "--tls-max" | "--tlsauthtype" | "--tlspassword"
+    | "--tlsuser" | "--tlsv1.0" | "--tlsv1.1" | "--tlsv1.2"
+    | "--trace" | "--trace-ascii" | "-u" | "--user" )
     :: _val :: rest ->
     parse method_ headers body url rest
   | arg :: rest ->
@@ -452,13 +467,13 @@ let value_flags =
 in
 let rec parse name type_ path = function
   | [] ->
-    (match path with
-     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = p; name; type_ }))
-     | None -> None)
+    let resolved = match path with Some p -> p | None -> "." in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = resolved; name; type_ }))
   | "-name" :: n :: rest -> parse (Some n) type_ path rest
   | "-type" :: "f" :: rest -> parse name (Some `File) path rest
   | "-type" :: "d" :: rest -> parse name (Some `Dir) path rest
-  | "-exec" :: rest | "-ok" :: rest -> parse name type_ path (skip_exec rest)
+  | "-exec" :: rest | "-ok" :: rest
+  | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ path (skip_exec rest)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then (
@@ -513,6 +528,14 @@ let rec parse lines path = function
               (String.sub arg 2 (String.length arg - 2)) ->
     let l = int_of_string (String.sub arg 2 (String.length arg - 2)) in
     parse l path rest
+  (* POSIX shorthand: -5 → lines = 5 *)
+  | arg :: rest
+    when String.length arg > 1
+         && arg.[0] = '-'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let l = int_of_string (String.sub arg 1 (String.length arg - 1)) in
+    parse l path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse lines path rest
@@ -559,6 +582,14 @@ let rec parse lines path = function
          && String.for_all (fun c -> c >= '0' && c <= '9')
               (String.sub arg 2 (String.length arg - 2)) ->
     let l = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse l path rest
+  (* POSIX shorthand: -5 → lines = 5 *)
+  | arg :: rest
+    when String.length arg > 1
+         && arg.[0] = '-'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let l = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse l path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
@@ -607,7 +638,21 @@ let rec parse recursive case_sensitive pattern path = function
   | "-i" :: rest | "--ignore-case" :: rest ->
     parse recursive false pattern path rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
+    if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
+    then (
+      (* Combined flags: -ri, -ir, -rni, etc. *)
+      let has_r = ref false in
+      let has_i = ref false in
+      for j = 1 to String.length arg - 1 do
+        match arg.[j] with
+        | 'r' | 'R' -> has_r := true
+        | 'i' -> has_i := true
+        | _ -> ()
+      done;
+      let r' = recursive || !has_r in
+      let cs' = if !has_i then false else case_sensitive in
+      parse r' cs' pattern path rest)
+    else if String.length arg > 0 && arg.[0] = '-'
     then parse recursive case_sensitive pattern path rest
     else (
       match pattern with
@@ -768,6 +813,14 @@ let rec parse oneline max_count = function
          && String.for_all (fun c -> c >= '0' && c <= '9')
               (String.sub arg 2 (String.length arg - 2)) ->
     let c = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse oneline (Some c) rest
+  (* POSIX shorthand: -5 → max_count = Some 5 *)
+  | arg :: rest
+    when String.length arg > 1
+         && arg.[0] = '-'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let c = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse oneline (Some c) rest
   | "--graph" :: rest | "--all" :: rest | "--decorate" :: rest -> parse oneline max_count rest
   | arg :: rest ->
@@ -999,8 +1052,28 @@ let rec parse reverse numeric unique key file = function
   | "-k" :: n :: rest | "--key" :: n :: rest ->
     (try parse reverse numeric unique (Some (int_of_string n)) file rest
      with Failure _ -> None)
+  | "-t" :: _ :: rest -> parse reverse numeric unique key file rest  (* -t SEP — consume separator *)
+  | "--key=" :: _ :: rest -> parse reverse numeric unique key file rest  (* malformed — skip *)
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
+    (* Combined form: -k2, -k3rn — digits after -k, then optional flag chars *)
+    if String.length arg >= 3 && arg.[0] = '-' && arg.[1] = 'k'
+    then (
+      let suffix = String.sub arg 2 (String.length arg - 2) in
+      (* Extract leading digits *)
+      let digit_end = ref 0 in
+      while !digit_end < String.length suffix
+            && Char.code suffix.[!digit_end] >= Char.code '0'
+            && Char.code suffix.[!digit_end] <= Char.code '9'
+      do incr digit_end done;
+      if !digit_end > 0
+      then (
+        let n = int_of_string (String.sub suffix 0 !digit_end) in
+        let flags = String.sub suffix !digit_end (String.length suffix - !digit_end) in
+        let r = reverse || String.contains flags 'r' in
+        let n_num = numeric || String.contains flags 'n' in
+        parse r n_num unique (Some n) file rest)
+      else parse reverse numeric unique key file rest)
+    else if String.length arg > 0 && arg.[0] = '-'
     then parse reverse numeric unique key file rest
     else (
       match file with
@@ -1037,15 +1110,25 @@ let rec parse delimiter fields file = function
     (match fields with
      | Some f -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cut { delimiter; fields = f; file }))
      | None -> None)
-  | "-d" :: d :: rest -> parse (Some d) fields file rest
-  | "-f" :: f :: rest -> parse delimiter (Some f) file rest
+  | "-d" :: d :: rest | "--delimiter" :: d :: rest -> parse (Some d) fields file rest
+  | "-f" :: f :: rest | "--fields" :: f :: rest -> parse delimiter (Some f) file rest
+  | arg :: rest when String.length arg >= 3 && arg.[0] = '-' && arg.[1] = 'd' ->
+    (* Combined form: -d: means -d : *)
+    parse (Some (String.sub arg 2 (String.length arg - 2))) fields file rest
+  | arg :: rest when String.length arg >= 3 && arg.[0] = '-' && arg.[1] = 'f' ->
+    (* Combined form: -f1 means -f 1 *)
+    parse delimiter (Some (String.sub arg 2 (String.length arg - 2))) file rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse delimiter fields file rest
-    else (
-      match file with
-      | None -> parse delimiter fields (Some arg) rest
-      | Some _ -> None)
+    (match String.split_on_char '=' arg with
+     | [ "--delimiter"; d ] -> parse (Some d) fields file rest
+     | [ "--fields"; f ] -> parse delimiter (Some f) file rest
+     | _ ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse delimiter fields file rest
+       else (
+         match file with
+         | None -> parse delimiter fields (Some arg) rest
+         | Some _ -> None))
 in
 parse None None None args|}
     }
@@ -1197,6 +1280,8 @@ let rec parse count duplicates unique file = function
   | "-c" :: rest -> parse true duplicates unique file rest
   | "-d" :: rest -> parse count true unique file rest
   | "-u" :: rest -> parse count duplicates true file rest
+  | "-f" :: _ :: rest -> parse count duplicates unique file rest  (* -f N — skip N fields *)
+  | "-s" :: _ :: rest -> parse count duplicates unique file rest  (* -s N — skip N chars *)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse count duplicates unique file rest
@@ -1411,6 +1496,10 @@ let rec parse human_readable summary max_depth = function
             { path = None; human_readable; summary; max_depth }))
   | "-h" :: rest -> parse true summary max_depth rest
   | "-s" :: rest -> parse human_readable true max_depth rest
+  | "--max-depth" :: n :: rest ->
+    (match int_of_string_opt n with
+     | Some d -> parse human_readable summary (Some d) rest
+     | None -> None)
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ "--max-depth"; n ] ->
@@ -1473,13 +1562,18 @@ let rec parse human_readable fs_type = function
   | "-h" :: rest -> parse true fs_type rest
   | "-t" :: t :: rest -> parse human_readable (Some t) rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse human_readable fs_type rest
-    else
-      Some
-        (Shell_ir_typed_types.W
-           (Shell_ir_typed_types.Df
-              { path = Some arg; human_readable; filesystem_type = fs_type }))
+    (match String.split_on_char '=' arg with
+     | [ "--type"; t ] -> parse human_readable (Some t) rest
+     | _ ->
+       if String.length arg >= 3 && arg.[0] = '-' && arg.[1] = 't'
+       then parse human_readable (Some (String.sub arg 2 (String.length arg - 2))) rest
+       else if String.length arg > 0 && arg.[0] = '-'
+       then parse human_readable fs_type rest
+       else
+         Some
+           (Shell_ir_typed_types.W
+              (Shell_ir_typed_types.Df
+                 { path = Some arg; human_readable; filesystem_type = fs_type })))
 in
 parse false None args|}
     }
@@ -1514,7 +1608,19 @@ let rec parse mime brief = function
   | "-b" :: rest -> parse mime true rest
   | "-i" :: rest -> parse true brief rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
+    if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
+    then (
+      (* Combined flags: -bi, -ib, etc. *)
+      let m' = ref mime in
+      let b' = ref brief in
+      for j = 1 to String.length arg - 1 do
+        match arg.[j] with
+        | 'b' -> b' := true
+        | 'i' -> m' := true
+        | _ -> ()
+      done;
+      parse !m' !b' rest)
+    else if String.length arg > 0 && arg.[0] = '-'
     then parse mime brief rest
     else
       Some
@@ -1591,7 +1697,24 @@ let rec parse all kn rel mach = function
   | "-s" :: rest -> parse all true rel mach rest
   | "-r" :: rest -> parse all kn true mach rest
   | "-m" :: rest -> parse all kn rel true rest
-  | _ :: rest -> parse all kn rel mach rest
+  | arg :: rest ->
+    if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
+    then (
+      (* Combined flags: -srm, -arsm, etc. *)
+      let a' = ref all in
+      let s' = ref kn in
+      let r' = ref rel in
+      let m' = ref mach in
+      for j = 1 to String.length arg - 1 do
+        match arg.[j] with
+        | 'a' -> a' := true
+        | 's' -> s' := true
+        | 'r' -> r' := true
+        | 'm' -> m' := true
+        | _ -> ()
+      done;
+      parse !a' !s' !r' !m' rest)
+    else parse all kn rel mach rest
 in
 parse false false false false args|}
     }
@@ -1630,10 +1753,24 @@ let rec parse all full user = function
          (Shell_ir_typed_types.Ps { all; full; user }))
   | "-e" :: rest | "-A" :: rest -> parse true full user rest
   | "-f" :: rest -> parse all true user rest
-  | "-u" :: u :: rest -> parse all full (Some u) rest
+  | "-u" :: u :: rest when not (String.length u > 0 && u.[0] = '-') -> parse all full (Some u) rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse all full user rest
+    if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
+    then (
+      (* Combined flags: -ef, -aux, -eF, etc. *)
+      (* -uUSER: user flag with attached value *)
+      if arg.[1] = 'u' && String.length arg > 2
+      then parse all full (Some (String.sub arg 2 (String.length arg - 2))) rest
+      else (
+        let a' = ref all in
+        let f' = ref full in
+        for j = 1 to String.length arg - 1 do
+          match arg.[j] with
+          | 'e' | 'A' | 'a' -> a' := true
+          | 'f' | 'F' -> f' := true
+          | _ -> ()
+        done;
+        parse !a' !f' user rest))
     else parse all full user rest
 in
 parse false false None args|}
@@ -1691,12 +1828,15 @@ let rec parse output url = function
   | "-O" :: o :: rest -> parse (Some o) url rest
   | "--output-document" :: o :: rest -> parse (Some o) url rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse output url rest
-    else (
-      match url with
-      | None -> parse output (Some arg) rest
-      | Some _ -> None)
+    (match String.split_on_char '=' arg with
+     | [ "--output-document"; o ] -> parse (Some o) url rest
+     | _ ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse output url rest
+       else (
+         match url with
+         | None -> parse output (Some arg) rest
+         | Some _ -> None))
 in
 parse None None args|}
     }
@@ -1823,15 +1963,29 @@ parse false None None args|}
     ; parse_body =
         Some
           {|
+let is_valid_tar_flag_char c =
+  match c with
+  | 'c' | 't' | 'x' | 'r' | 'u' | 'v' | 'f' | 'w'
+  | 'z' | 'j' | 'J' | 'Z' | 'a' | 'o' | 'p' | 'k'
+  | 'L' | 'N' | 'P' | 'C' | 'S' | 'h' -> true
+  | _ -> false
+in
+(* Only expand the first positional arg as bare tar flags.
+   Subsequent positional args are archive or paths, NOT flags.
+   This prevents corruption of all-alphabetic filenames like README. *)
 let expand_bare_tar_flags args =
+  let found_positional = ref false in
   List.concat_map
     (fun arg ->
-       if String.length arg >= 2
-          && arg.[0] <> '-'
-          && String.for_all (fun c -> c >= 'a' && c <= 'z') arg
-       then
+       if !found_positional
+       then [ arg ]
+       else if String.length arg >= 2
+               && arg.[0] <> '-'
+               && String.for_all is_valid_tar_flag_char arg
+       then (
+         found_positional := true;
          List.init (String.length arg) (fun i ->
-           Printf.sprintf "-%c" arg.[i])
+           Printf.sprintf "-%c" arg.[i]))
        else [ arg ])
     args
 in
@@ -1854,7 +2008,34 @@ let rec parse action compression archive paths = function
   | "--zstd" :: rest -> parse action `Zstd archive paths rest
   | "-f" :: f :: rest -> parse action compression (Some f) paths rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
+    if String.length arg >= 3 && arg.[0] = '-'
+    then (
+      (* -fARCHIVE combined form: find 'f' in flag string, extract archive *)
+      let f_pos = ref (-1) in
+      for j = 1 to String.length arg - 1 do
+        if arg.[j] = 'f' && !f_pos = -1 then f_pos := j
+      done;
+      if !f_pos >= 0
+      then (
+        let prefix = String.sub arg 1 (!f_pos - 1) in
+        let archive_name = String.sub arg (!f_pos + 1) (String.length arg - !f_pos - 1) in
+        (* Re-parse prefix flags *)
+        let rec apply_flags a c paths = function
+          | [] -> parse a c (Some archive_name) paths rest
+          | ch :: tl ->
+            (match ch with
+             | 'c' -> apply_flags (Some `Create) c paths tl
+             | 'x' -> apply_flags (Some `Extract) c paths tl
+             | 't' -> apply_flags (Some `List) c paths tl
+             | 'z' -> apply_flags a `Gzip paths tl
+             | 'j' -> apply_flags a `Bzip2 paths tl
+             | 'J' -> apply_flags a `Xz paths tl
+             | _ -> apply_flags a c paths tl)
+        in
+        let prefix_chars = List.init (String.length prefix) (fun i -> prefix.[i]) in
+        apply_flags action compression paths prefix_chars)
+      else parse action compression archive paths rest)
+    else if String.length arg > 0 && arg.[0] = '-'
     then parse action compression archive paths rest
     else parse action compression archive (arg :: paths) rest
 in
@@ -1974,7 +2155,15 @@ let rec parse in_place expr file = function
      | Some e, Some f ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place }))
      | _ -> None)
-  | "-i" :: rest -> parse true expr file rest
+  | "-i" :: rest ->
+    (* macOS sed -i '' takes an empty suffix; GNU sed -i has no suffix.
+       Only skip the next token if it's an explicit empty string (macOS style).
+       Non-empty non-flag tokens are the expression, not a suffix. *)
+    (match rest with
+     | "" :: rest' -> parse true expr file rest'   (* -i '' — macOS empty suffix *)
+     | _ -> parse true expr file rest)              (* -i at end or GNU style *)
+  | "-e" :: e :: rest -> parse in_place (Some e) file rest  (* explicit expression *)
+  | "-n" :: rest -> parse in_place expr file rest   (* suppress output — boolean *)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse in_place expr file rest
@@ -2007,22 +2196,45 @@ parse false None None args|}
     ; parse_body =
         Some
           {|
+(* Value-flags that consume the next token as their argument *)
+let rsync_value_flags =
+  [ "-e"; "--rsh"
+  ; "--exclude"; "--include"; "--filter"
+  ; "--backup-dir"; "--compare-dest"; "--link-dest"; "--copy-dest"
+  ; "--partial-dir"; "--log-file"; "--address"; "--port"
+  ; "--sockopts"; "--out-format"; "--password-file"
+  ; "--bwlimit"; "--max-size"; "--min-size"; "--files-from"
+  ; "--usermap"; "--groupmap"; "--chmod"
+  ; "-M"; "--remote-option"; "--rsync-path"
+  ; "--timeout"; "--contimeout"; "--temp-dir"
+  ; "--suffix"; "--info"; "--debug"
+  ; "--block-size"; "--checksum-choice"
+  ]
+in
 let rec parse flags src dst = function
   | [] ->
     (match src, dst with
      | Some s, Some d ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; flags = List.rev flags }))
      | _ -> None)
+  | arg :: val_ :: rest
+    when String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg rsync_value_flags ->
+    parse (val_ :: arg :: flags) src dst rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse (arg :: flags) src dst rest
-    else (
-      match src with
-      | None -> parse flags (Some arg) dst rest
-      | Some _ ->
-        match dst with
-        | None -> parse flags src (Some arg) rest
-        | Some _ -> None)
+    (match String.split_on_char '=' arg with
+     | [ flag; value ] when List.mem flag rsync_value_flags ->
+       parse (value :: flag :: flags) src dst rest
+     | _ ->
+       if String.length arg > 0 && arg.[0] = '-'
+       then parse (arg :: flags) src dst rest
+       else (
+         match src with
+         | None -> parse flags (Some arg) dst rest
+         | Some _ ->
+           match dst with
+           | None -> parse flags src (Some arg) rest
+           | Some _ -> None))
 in
 parse [] None None args|}
     }
@@ -2450,7 +2662,7 @@ let expand_combined_short_flags (args : string list) : string list =
           && String.length arg <= 4
           && Char.code arg.[0] = Char.code '-'
           && Char.code arg.[1] <> Char.code '-'
-          && String.for_all (fun c -> c >= 'a' && c <= 'z') (String.sub arg 1 (String.length arg - 1))
+          && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) (String.sub arg 1 (String.length arg - 1))
        then
          List.init (String.length arg - 1) (fun i ->
            Printf.sprintf "-%c" arg.[i + 1])
@@ -2562,6 +2774,7 @@ let emit_of_simple buf spec =
     ; "Cmake"; "Node"; "Dune_local_sh"; "Osascript"; "Terminal_notifier"
     ; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
     ; "Curl"; "Wget"; "Sudo"; "Su"; "Dd"; "Mkfs"
+    ; "Find"
     ]
   in
   List.iter

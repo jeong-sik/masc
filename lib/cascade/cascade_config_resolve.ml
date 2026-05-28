@@ -24,19 +24,15 @@ let normalize_decl_provider_id = Binding.normalize_provider_id
 
 let default_registry = Llm_provider.Provider_registry.default ()
 
-let json_assoc_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-
 let json_string_member key json =
-  match json_assoc_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`String value) -> Some value
   | _ -> None
 
 let materialized_provider_json json provider_id =
   match
-    Option.bind (json_assoc_opt "providers" json) (fun providers_json ->
-        json_assoc_opt provider_id providers_json)
+    Option.bind (Json_util.assoc_member_opt "providers" json) (fun providers_json ->
+        Json_util.assoc_member_opt provider_id providers_json)
   with
   | Some _ as provider_json -> provider_json
   | None -> None
@@ -104,7 +100,7 @@ let materialized_member_model_string json provider_id api_name =
        | None -> None)
 
 let json_string_list_member key json =
-  match json_assoc_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`List values) ->
     values
     |> List.filter_map (function
@@ -114,8 +110,8 @@ let json_string_list_member key json =
 
 let materialized_model_api_name json model_id =
   match
-    Option.bind (json_assoc_opt "models" json) (fun models_json ->
-        json_assoc_opt model_id models_json)
+    Option.bind (Json_util.assoc_member_opt "models" json) (fun models_json ->
+        Json_util.assoc_member_opt model_id models_json)
   with
   | Some model_json -> (
     match json_string_member "api-name" model_json with

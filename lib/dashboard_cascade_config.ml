@@ -146,16 +146,6 @@ let source_assist_json source_text =
         )
       ; "bindings", string_list bindings
       ; "aliases", string_list aliases
-      ; ( "tiers"
-        , string_list
-            (List.map (fun (t : Cascade_declarative_types.cascade_tier) -> t.name) cfg.tiers)
-        )
-      ; ( "tier_groups"
-        , string_list
-            (List.map
-               (fun (tg : Cascade_declarative_types.cascade_tier_group) -> tg.name)
-               cfg.tier_groups)
-        )
       ; ( "routes"
         , string_list
             (List.map (fun (r : Cascade_declarative_types.cascade_route) -> r.name) cfg.routes)

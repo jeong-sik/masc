@@ -1,4 +1,4 @@
-let canonical_prefixes = [ "tier-group."; "tier."; "route." ]
+let canonical_prefixes = [ "route." ]
 
 let is_canonical_prefix s =
   List.exists (fun prefix -> String.starts_with ~prefix s) canonical_prefixes

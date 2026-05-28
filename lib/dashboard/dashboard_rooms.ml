@@ -4,14 +4,7 @@ let fetch_limit limit = clamp ~min_v:limit ~max_v:1000 (limit * 5)
 let default_room_id = "default"
 let default_room_name = "Room timeline"
 
-let take n xs =
-  let rec loop acc remaining = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
+let take = List.take
 
 let decode_message_entities content =
   content

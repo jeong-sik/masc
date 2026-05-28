@@ -198,13 +198,7 @@ let sort_desc (requests : V.verification_request list)
   List.sort (fun (a : V.verification_request) b ->
     compare b.V.created_at a.V.created_at) requests
 
-let take n lst =
-  let rec aux acc n = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: rest -> aux (x :: acc) (n - 1) rest
-  in
-  aux [] n lst
+let take = List.take
 
 let now_iso () = Masc_domain.now_iso ()
 let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()

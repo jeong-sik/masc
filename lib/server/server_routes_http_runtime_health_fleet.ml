@@ -8,13 +8,7 @@ open Server_auth
 open Server_routes_http_common
 open Server_routes_http_runtime_fleet_scan
 
-let take limit values =
-  let rec loop remaining acc = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | value :: rest -> loop (remaining - 1) (value :: acc) rest
-  in
-  loop limit [] values
+let take = List.take
 ;;
 
 let keeper_reaction_ledger_health_json () =

@@ -91,13 +91,7 @@ let run_latest_mtime config ~run_id =
   |> List.fold_left max_float_opt None
 ;;
 
-let take n xs =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
+let take = List.take
 ;;
 
 let all_digits value =

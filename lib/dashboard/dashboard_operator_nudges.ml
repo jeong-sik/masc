@@ -33,14 +33,7 @@ let clamp ~min_v ~max_v value = max min_v (min max_v value)
 let clamp_limit limit = clamp ~min_v:1 ~max_v:200 limit
 let fetch_limit limit = clamp ~min_v:limit ~max_v:1000 (limit * 10)
 
-let take n xs =
-  let rec loop acc remaining = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
+let take = List.take
 
 let assoc_opt key = function
   | `Assoc fields -> List.assoc_opt key fields

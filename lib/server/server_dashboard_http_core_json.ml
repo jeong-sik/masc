@@ -1,23 +1,15 @@
 (** JSON helpers + projection-diagnostic field readers + operator
     cache JSON wrapper, extracted from server_dashboard_http_core.ml. *)
 
-let json_string_opt = Json_util.string_opt_to_json
-
-let json_bool_opt = Json_util.bool_opt_to_json
-
-let json_assoc_field_opt = Json_util.assoc_member_opt
-
-let json_assoc_string_opt = Json_util.assoc_string_opt
-
 let json_assoc_int_opt key json =
-  match json_assoc_field_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`Int value) -> Some value
   | Some (`Float value) -> Some (int_of_float value)
   | _ -> None
 ;;
 
 let projection_diagnostics_fields json =
-  match json_assoc_field_opt "projection_diagnostics" json with
+  match Json_util.assoc_member_opt "projection_diagnostics" json with
   | Some (`Assoc fields) -> fields
   | _ -> []
 ;;
@@ -30,7 +22,7 @@ let operator_generated_at_iso json =
   match projection_diagnostics_field json "generated_at" with
   | Some (`String value) -> value
   | _ ->
-    (match json_assoc_string_opt "generated_at" json with
+    (match Json_util.assoc_string_opt "generated_at" json with
      | Some value -> value
      | None -> Masc_domain.now_iso ())
 ;;

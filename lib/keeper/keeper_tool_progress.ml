@@ -265,19 +265,14 @@ let classify_tool_progress_with_outcome name outcome =
   | None -> effect_of_progress_class (classify_tool_progress name)
 ;;
 
-let is_owned_task_coordination_progress_tool_name name =
-  let name = Keeper_tool_resolution.canonical_tool_name name in
-  match Tool_name.of_string name with
-  | Some (Tool_name.Keeper Tool_name.Keeper.Handoff) -> true
-  | _ -> false
-;;
-
 let is_owned_task_progress_tool_name name =
   if is_stay_silent_tool_name name
   then false
   else (
     let name = Keeper_tool_resolution.canonical_tool_name name in
-    if is_completion_tool_name name || is_owned_task_coordination_progress_tool_name name
+    if is_completion_tool_name name
+    then true
+    else if Keeper_tool_capability_axis.supports Board_activity name
     then true
     else (
       match effect_domain_for_tool_name name with

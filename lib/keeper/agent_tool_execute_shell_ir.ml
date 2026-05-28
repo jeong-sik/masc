@@ -123,7 +123,7 @@ let dispatch_classified
       ~caller
       ~ir
       ~allowlist:{ allowed_commands; allow_pipes; redirect_allowed }
-      ~path_policy:Shell_gate.allow_all_paths
+      ~path_policy:Shell_gate.forbid_masc_internal_state_paths
       ~sandbox:{ target = sandbox }
       ()
   in

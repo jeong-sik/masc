@@ -138,6 +138,12 @@ val allow_all_paths : path_policy
     caller has its own validator and only wants the Shell IR parse +
     allowlist check. *)
 
+val forbid_masc_internal_state_paths : path_policy
+(** Path policy that rejects probes against [.masc/] internal state
+    (backlog.json, goal-loop, traces, keepalives).  Diagnostic contains
+    [task_state_file_probe_blocked] so the deterministic retry classifier
+    recognises the rejection. *)
+
 val host_sandbox : sandbox_context
 (** Convenience: the default {!Masc_exec.Sandbox_target.host}
     sandbox. *)

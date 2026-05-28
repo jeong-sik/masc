@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3090,
+      "baseline": 3089,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -2322,7 +2322,7 @@
         },
         {
           "file": "lib/server/server_auth.ml",
-          "value": 9
+          "value": 8
         },
         {
           "file": "lib/server/server_bootstrap_http.ml",
@@ -3073,7 +3073,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 63,
+      "baseline": 61,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {

@@ -518,72 +518,21 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.A2a _
          | Agent_sdk.Error.Internal _ -> None)
 
-let requalify_bare_catalog_name bare =
-  let tier_q = "tier." ^ bare in
-  let tg_q = "tier-group." ^ bare in
-  (* Prefer tier. over tier-group. when the catalog only exposes public names;
-     qualified lookup catalogs below still disambiguate concrete members. *)
-  match
-    Cascade_name.of_string tier_q |> Result.is_ok,
-    Cascade_name.of_string tg_q |> Result.is_ok
-  with
-  | true, _ -> tier_q
-  | false, true -> tg_q
-  | false, false -> bare
+(* Tier/tier-group purge: all cascade names are plain provider:model strings.
+   No prefix qualification, canonical form, or bare-name requalification. *)
 
 let normalized_cascade_name ~catalog_names name =
   let trimmed = String.trim name in
-  let canonical_catalog_name =
-    if Cascade_name.is_canonical_prefix trimmed then Some trimmed
-    else
-      let tier_group = "tier-group." ^ trimmed in
-      let tier = "tier." ^ trimmed in
-      if List.mem tier_group catalog_names then Some tier_group
-      else if List.mem tier catalog_names then Some tier
-      else None
-  in
-  let is_live_catalog_profile =
-    List.exists (String.equal trimmed) catalog_names
-  in
-  (* Fallback candidates are concrete catalog profiles, not keeper-declared
-     logical routes.  Preserve live profile names like [local_recovery] so a
-     fallback_cascade does not collapse back to routes.phase_recovery.
-     When the input is a bare catalog name (stripped of tier/tier-group
-     prefix), re-qualify it so downstream [Cascade_name.of_string_exn]
-     does not crash on the missing canonical prefix. *)
-  if is_live_catalog_profile then
-    Option.value canonical_catalog_name
-      ~default:
-        (if Cascade_name.is_canonical_prefix trimmed
-         then trimmed
-         else requalify_bare_catalog_name trimmed)
+  if List.exists (String.equal trimmed) catalog_names then trimmed
   else if
     String.equal trimmed Keeper_config.phase_buffer_cascade_name
     || String.equal trimmed Keeper_config.phase_recovery_cascade_name
     || String.equal trimmed Keeper_config.tool_required_cascade_name
-  then Option.value canonical_catalog_name ~default:trimmed
+  then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
-let strip_prefix ~prefix value =
-  if String.starts_with ~prefix value then
-    Some
-      (String.sub value (String.length prefix)
-         (String.length value - String.length prefix))
-  else None
-
-let direct_tier_duplicates_attempted_group
-    ~(attempted : string list)
-    ~(candidate : string)
-  =
-  match strip_prefix ~prefix:"tier." candidate with
-  | None -> false
-  | Some suffix ->
-    List.exists
-      (fun attempted ->
-         match strip_prefix ~prefix:"tier-group." attempted with
-         | Some attempted_suffix -> String.equal suffix attempted_suffix
-         | None -> false)
-      attempted
+(* Tier/tier-group purge: no tier/tier-group prefixes exist. *)
+let direct_tier_duplicates_attempted_group ~attempted:_ ~candidate:_ = false
 
 let required_tool_rotation_candidate
     ?(allow_phase_recovery = false)

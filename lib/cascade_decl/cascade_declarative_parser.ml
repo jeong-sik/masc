@@ -1,8 +1,8 @@
 (** Declarative cascade TOML parser (RFC-0058 v2).
 
     Parses the 5-layer TOML schema into typed [cascade_config].
-    Reserved top-level namespaces: providers, models, system, tier,
-    tier-group, routes, profiles. Any other top-level table is a
+    Reserved top-level namespaces: providers, models, system, routes,
+    profiles. Any other top-level table is a
     provider alias, with sub-tables as model bindings or aliases. *)
 
 open Cascade_declarative_types
@@ -526,7 +526,7 @@ let parse_models (toml : Otoml.t) : (cascade_model_spec list, parse_error list) 
 (* --- Reserved namespace detection --- *)
 
 let reserved_namespaces =
-  [ "providers"; "models"; "system"; "tier"; "tier-group"; "routes"; "profiles" ]
+  [ "providers"; "models"; "system"; "routes"; "profiles" ]
 ;;
 
 let is_reserved (name : string) : bool = List.mem name reserved_namespaces
@@ -671,11 +671,10 @@ let parse_bindings_and_aliases (toml : Otoml.t)
 let strategy_of_string (s : string) : (cascade_strategy, string) result =
   match s with
   | "failover" -> Ok Failover
-  | "priority_tier" -> Ok Priority_tier
   | _ ->
     Error
       (Printf.sprintf
-         "unsupported strategy %S: expected one of failover, priority_tier"
+         "unsupported strategy %S: expected one of failover"
          s)
 ;;
 
@@ -723,85 +722,6 @@ let keeper_assignable_result path tbl =
           keeper-assignable or keeper_assignable")
   | Some _ as value, None | None, (Some _ as value) -> Ok value
   | None, None -> Ok None
-;;
-
-let parse_tier (name : string) (tbl : Otoml.t) : (cascade_tier, parse_error list) result =
-  let path = Printf.sprintf "tier.%s" name in
-  let members =
-    match Otoml.find_opt tbl (Otoml.get_array Otoml.get_string) [ "members" ] with
-    | Some m -> m
-    | None -> []
-  in
-  let strategy_result =
-    match Otoml.find_opt tbl Otoml.get_string [ "strategy" ] with
-    | Some s -> strategy_of_string s
-    | None -> Ok Failover
-  in
-  match strategy_result, keeper_assignable_result path tbl with
-  | Error e, _ -> Error (error (path ^ ".strategy") e)
-  | _, Error e -> Error e
-  | Ok strategy, Ok keeper_assignable ->
-    let max_concurrent = Otoml.find_opt tbl Otoml.get_integer [ "max-concurrent" ] in
-    let cycle_policy = parse_cycle_policy tbl in
-    let sticky_ttl_ms = Otoml.find_opt tbl Otoml.get_integer [ "sticky-ttl-ms" ] in
-    let scoring_params = parse_scoring_params tbl in
-    Ok
-      { name
-      ; members
-      ; strategy
-      ; max_concurrent
-      ; cycle_policy
-      ; sticky_ttl_ms
-      ; scoring_params
-      ; keeper_assignable
-      }
-;;
-
-let parse_tiers (toml : Otoml.t) : (cascade_tier list, parse_error list) result =
-  match Otoml.find_opt toml Fun.id [ "tier" ] with
-  | None -> Ok []
-  | Some tier_tbl ->
-    let entries = Otoml.get_table tier_tbl in
-    partition_results
-      (List.map (fun (name, tbl) -> parse_tier name tbl) entries)
-;;
-
-(* --- Layer 5b: Tier Groups --- *)
-
-let parse_tier_group (name : string) (tbl : Otoml.t)
-  : (cascade_tier_group, parse_error list) result
-  =
-  let path = Printf.sprintf "tier-group.%s" name in
-  let tiers =
-    match Otoml.find_opt tbl (Otoml.get_array Otoml.get_string) [ "tiers" ] with
-    | Some t -> t
-    | None -> []
-  in
-  let strategy_result =
-    match Otoml.find_opt tbl Otoml.get_string [ "strategy" ] with
-    | Some s -> strategy_of_string s
-    | None -> Ok Failover
-  in
-  match strategy_result, keeper_assignable_result path tbl with
-  | Error e, _ -> Error (error (path ^ ".strategy") e)
-  | _, Error e -> Error e
-  | Ok strategy, Ok keeper_assignable ->
-    let fallback = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "fallback" ] in
-    let required_capability_profile =
-      Otoml.find_opt tbl Otoml.get_string [ "required_capability_profile" ]
-    in
-    Ok { name; tiers; strategy; fallback; keeper_assignable; required_capability_profile }
-;;
-
-let parse_tier_groups (toml : Otoml.t)
-  : (cascade_tier_group list, parse_error list) result
-  =
-  match Otoml.find_opt toml Fun.id [ "tier-group" ] with
-  | None -> Ok []
-  | Some tg_tbl ->
-    let entries = Otoml.get_table tg_tbl in
-    partition_results
-      (List.map (fun (name, tbl) -> parse_tier_group name tbl) entries)
 ;;
 
 (* --- Layer 5c: Routes --- *)
@@ -885,12 +805,9 @@ let extract_after_all_errors_guard ~label = function
 let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
-  let tiers_result = parse_tiers toml in
-  let tier_groups_result = parse_tier_groups toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result @ errs models_result
-    @ errs tiers_result @ errs tier_groups_result
   in
   let bindings, aliases = parse_bindings_and_aliases toml in
   let routes = parse_routes toml in
@@ -903,12 +820,8 @@ let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
       extract_after_all_errors_guard ~label:"providers" providers_result
     in
     let models = extract_after_all_errors_guard ~label:"models" models_result in
-    let tiers = extract_after_all_errors_guard ~label:"tiers" tiers_result in
-    let tier_groups =
-      extract_after_all_errors_guard ~label:"tier_groups" tier_groups_result
-    in
     Ok
-      { providers; models; bindings; aliases; tiers; tier_groups; routes; system_targets; profiles })
+      { providers; models; bindings; aliases; routes; system_targets; profiles })
 ;;
 
 let parse_string (content : string) : (cascade_config, parse_error list) result =

@@ -41,7 +41,7 @@ type keeper_profile_defaults = {
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  cascade_name : string option;
+  model : string option;
   models : string list option;
   (* Turn budget overrides. None = inherit env default
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
@@ -102,7 +102,7 @@ let empty_keeper_profile_defaults =
     social_model = None;
     max_turns_per_call = None;
     max_turns_per_call_scheduled_autonomous = None;
-    cascade_name = None;
+    model = None;
     models = None;
     unknown_toml_keys = [];
     oas_env = [];

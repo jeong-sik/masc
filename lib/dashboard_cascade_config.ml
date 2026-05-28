@@ -35,7 +35,7 @@ let cascade_source_feature_params_json =
         ~example:"is-default = false"
     ; feature_param_json
         ~key:"max-concurrent"
-        ~scope:"binding,tier"
+        ~scope:"binding"
         ~value_type:"integer"
         ~example:"max-concurrent = 2"
     ; feature_param_json
@@ -83,21 +83,6 @@ let cascade_source_feature_params_json =
         ~scope:"binding"
         ~value_type:"float"
         ~example:"price-output = 0.60"
-    ; feature_param_json
-        ~key:"strategy"
-        ~scope:"tier,tier-group"
-        ~value_type:"string"
-        ~example:"strategy = \"priority_tier\""
-    ; feature_param_json
-        ~key:"max-cycles"
-        ~scope:"tier.cycle-policy"
-        ~value_type:"integer"
-        ~example:"max-cycles = 3"
-    ; feature_param_json
-        ~key:"sticky-ttl-ms"
-        ~scope:"tier"
-        ~value_type:"integer"
-        ~example:"sticky-ttl-ms = 30000"
     ]
 ;;
 
@@ -114,8 +99,6 @@ let source_assist_json source_text =
       ; "models", `List []
       ; "bindings", `List []
       ; "aliases", `List []
-      ; "tiers", `List []
-      ; "tier_groups", `List []
       ; "routes", `List []
       ; "feature_params", cascade_source_feature_params_json
       ; "errors", `List (List.map parse_error_to_json errors)
@@ -146,16 +129,6 @@ let source_assist_json source_text =
         )
       ; "bindings", string_list bindings
       ; "aliases", string_list aliases
-      ; ( "tiers"
-        , string_list
-            (List.map (fun (t : Cascade_declarative_types.cascade_tier) -> t.name) cfg.tiers)
-        )
-      ; ( "tier_groups"
-        , string_list
-            (List.map
-               (fun (tg : Cascade_declarative_types.cascade_tier_group) -> tg.name)
-               cfg.tier_groups)
-        )
       ; ( "routes"
         , string_list
             (List.map (fun (r : Cascade_declarative_types.cascade_route) -> r.name) cfg.routes)

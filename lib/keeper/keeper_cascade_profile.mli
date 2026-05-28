@@ -65,7 +65,7 @@ val provider_configs_for_use :
   logical_use ->
   Llm_provider.Provider_config.t list option
 (** Resolve a logical use to [Provider_config.t] list via the phonebook.
-    Direct phonebook path: logical_use → task_use → tier-group → models →
+    Direct phonebook path: logical_use → task_use → models →
     providers → endpoint/auth → Provider_config.t.
     Returns [None] when phonebook is unavailable or no models resolve.
     @since RFC Cascade-Phonebook Phase 4 *)
@@ -92,19 +92,16 @@ val catalog_names_result : ?config_path:string -> unit -> (string list, string) 
     dynamic profile set. *)
 
 val catalog_lookup_names : ?config_path:string -> unit -> string list
-(** Live catalog names usable for lookup. Includes canonical declarative
-    names such as ["tier-group.primary"] / ["tier.primary"] plus public
-    short aliases such as ["primary"]. *)
+(** Live catalog names usable for lookup. All cascade names are plain
+    provider:model strings; there are no qualified declarative prefixes. *)
 
 val catalog_names_for_validation :
   ?config_path:string -> unit -> (string list, string) result
 (** Accept-list source for the keeper cascade-name validator.
 
     Requires the declarative cascade catalog; retired flat-profile TOML and
-    flat-key catalog fallback are intentionally not accepted.  Includes both
-    public names, such as [primary], and qualified declarative names, such as
-    [tier.primary] / [tier-group.primary], so explicit keeper assignments do
-    not collapse to the public route target. *)
+    flat-key catalog fallback are intentionally not accepted.  All names are
+    plain provider:model strings; there are no qualified declarative prefixes. *)
 
 val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by
@@ -180,9 +177,9 @@ val canonicalize : string -> string
 
 val normalize_declared_name : ?config_path:string -> string -> string
 (** Normalizes keeper-side logical route aliases.
-    Logical route aliases resolve through {!cascade_name_for_use}; public live
-    catalog names resolve to their canonical [tier.*] / [tier-group.*] form;
-    otherwise the trimmed input is returned. *)
+    Logical route aliases resolve through {!cascade_name_for_use}; live
+    catalog names pass through unchanged; otherwise the trimmed input is
+    returned. *)
 
 val normalize_keeper_runtime_declared_name : ?config_path:string -> string -> string
 (** Like {!normalize_declared_name}, but ignores stale keeper-local profile

@@ -495,52 +495,11 @@ let declarative_member_exists (cfg : Cascade_declarative_types.cascade_config) m
             member)
        cfg.bindings
 
-let declarative_tier_members (cfg : Cascade_declarative_types.cascade_config)
-    tier_name =
-  let open Cascade_declarative_types in
-  match
-    cfg.tiers
-    |> List.find_opt (fun (tier : cascade_tier) ->
-         String.equal tier.name tier_name)
-  with
-  | Some tier -> tier.members
-  | None -> []
-
-let declarative_tier_group_members
-    (cfg : Cascade_declarative_types.cascade_config)
-    group_name =
-  let open Cascade_declarative_types in
-  let tiers_by_name = Hashtbl.create (List.length cfg.tiers) in
-  List.iter
-    (fun (tier : cascade_tier) -> Hashtbl.replace tiers_by_name tier.name tier)
-    cfg.tiers;
-  match
-    cfg.tier_groups
-    |> List.find_opt (fun (group : cascade_tier_group) ->
-         String.equal group.name group_name)
-  with
-  | None -> []
-  | Some group ->
-      group.tiers
-      |> List.filter_map (Hashtbl.find_opt tiers_by_name)
-      |> List.concat_map (fun (tier : cascade_tier) -> tier.members)
-
 let declarative_members_for_profile
     (cfg : Cascade_declarative_types.cascade_config)
     profile_name =
-  match strip_prefix ~prefix:"tier." profile_name with
-  | Some tier_name -> declarative_tier_members cfg tier_name
-  | None -> (
-      match strip_prefix ~prefix:"tier-group." profile_name with
-      | Some group_name -> declarative_tier_group_members cfg group_name
-      | None ->
-          let group_members = declarative_tier_group_members cfg profile_name in
-          if group_members <> [] then group_members
-          else
-            let tier_members = declarative_tier_members cfg profile_name in
-            if tier_members <> [] then tier_members
-            else if declarative_member_exists cfg profile_name then [ profile_name ]
-            else [])
+  if declarative_member_exists cfg profile_name then [ profile_name ]
+  else []
 
 let declarative_route_target
     (cfg : Cascade_declarative_types.cascade_config)
@@ -556,12 +515,6 @@ let declarative_route_target
     |> List.find_opt (fun (route : cascade_route) -> String.equal route.name route_key)
     |> Option.map (fun route -> route.target)
 
-let first_nonempty_members cfg candidates =
-  candidates
-  |> List.find_map (fun profile_name ->
-       let members = declarative_members_for_profile cfg profile_name in
-       if members = [] then None else Some members)
-
 let max_output_tokens_ceiling_of_cascade_name cascade_name =
   match cascade_config_path () with
   | None -> None
@@ -570,19 +523,15 @@ let max_output_tokens_ceiling_of_cascade_name cascade_name =
       | Error _ -> None
       | Ok cfg ->
           let raw_name = cascade_name_to_string cascade_name in
-          let resolved_name =
-            match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
-            | Ok resolved -> Some (Cascade_name.to_string resolved)
-            | Error _ -> None
+          let members =
+            if declarative_member_exists cfg raw_name then [ raw_name ]
+            else []
           in
-          [ resolved_name; declarative_route_target cfg raw_name; Some raw_name ]
-          |> List.filter_map Fun.id
-          |> first_nonempty_members cfg
-          |> Option.map (fun members ->
-               members
-               |> List.map (declarative_member_max_output_tokens cfg)
-               |> min_positive_int_options)
-          |> Option.join)
+          if members = [] then None
+          else
+            members
+            |> List.map (declarative_member_max_output_tokens cfg)
+            |> min_positive_int_options)
 
 let resolve_named_providers_result ?provider_filter
     ?(require_tool_choice_support = false)

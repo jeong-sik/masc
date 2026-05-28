@@ -1,15 +1,15 @@
-let canonical_prefixes = [ "tier-group."; "tier."; "route." ]
-
-let is_canonical_prefix s =
-  List.exists (fun prefix -> String.starts_with ~prefix s) canonical_prefixes
+(* Tier/tier-group prefix validation removed.  Cascade names are now
+   simple provider:model strings (e.g. "runpod:glm-coding-with-spark").
+   This module is preserved temporarily as a string alias so downstream
+   types do not need to change in a single sweep, but all validation
+   has been deleted per tier/tier-group purge. *)
 
 type t = string
 
 let of_string raw : (t, [ `Invalid_prefix | `Empty ]) result =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then Error `Empty
-  else if is_canonical_prefix trimmed then Ok trimmed
-  else Error `Invalid_prefix
+  else Ok trimmed
 
 let of_string_exn raw =
   match of_string raw with

@@ -49,24 +49,10 @@ let provider_configs_for_use ?config_path ?temperature ?max_tokens use =
 let model_strings_for_use ?config_path use =
   Cascade_routes.cascade_models_for_use_via_phonebook ?config_path use
 
-let tier_group_prefix = "tier-group."
-let tier_prefix = "tier."
+(* Tier/tier-group purge: qualified profile names no longer exist.
+   All cascade names are simple provider:model strings. *)
 
-let is_qualified_profile_name name =
-  String.starts_with ~prefix:tier_group_prefix name
-  || String.starts_with ~prefix:tier_prefix name
-
-let strip_declarative_profile_prefix name =
-  if String.starts_with ~prefix:tier_group_prefix name then
-    String.sub name (String.length tier_group_prefix)
-      (String.length name - String.length tier_group_prefix)
-  else if String.starts_with ~prefix:tier_prefix name then
-    String.sub name (String.length tier_prefix)
-      (String.length name - String.length tier_prefix)
-  else name
-
-let qualified_tier_name name = tier_prefix ^ name
-let qualified_tier_group_name name = tier_group_prefix ^ name
+let strip_declarative_profile_prefix name = name
 
 let qualified_names_of_declarative_snapshot snapshot =
   Cascade_declarative_hotpath.decl_snapshot_profile_names snapshot
@@ -74,12 +60,8 @@ let qualified_names_of_declarative_snapshot snapshot =
 
 let public_names_of_declarative_snapshot snapshot =
   qualified_names_of_declarative_snapshot snapshot
-  |> List.map strip_declarative_profile_prefix
-  |> List.sort_uniq String.compare
 
-let lookup_names_of_qualified_names names =
-  (names @ List.map strip_declarative_profile_prefix names)
-  |> List.sort_uniq String.compare
+let lookup_names_of_qualified_names names = names
 
 (* RFC-0058 Phase 8.2 + 8.1.5: partial-catalog warns route through
    [Log.Cascade] (dedicated namespace, RFC-0058 phase 8.1.5) and are
@@ -267,110 +249,51 @@ let json_keeper_assignable_opt json =
   | Some _ as value -> value
   | None -> json_bool_field "keeper_assignable" json
 
-let qualified_name_for_public meta public_name =
-  let group_name = qualified_tier_group_name public_name in
-  let tier_name = qualified_tier_name public_name in
-  if List.mem group_name meta.qualified_names then group_name
-  else if List.mem tier_name meta.qualified_names then tier_name
-  else public_name
+(* Tier/tier-group purge: public names and qualified names are identical.
+   All cascade names are simple provider:model strings. *)
 
-let qualified_name_for_public_names qualified_names public_name =
-  let group_name = qualified_tier_group_name public_name in
-  let tier_name = qualified_tier_name public_name in
-  if List.mem group_name qualified_names then group_name
-  else if List.mem tier_name qualified_names then tier_name
-  else public_name
+let qualified_name_for_public _meta public_name = public_name
+
+let qualified_name_for_public_names _qualified_names public_name = public_name
+
+(* Tier/tier-group purge: cascade.toml no longer contains [tier] or
+   [tier-group] sections.  Only [routes] remains.  Profile names are
+   the route targets (provider:model strings).  All profiles are
+   keeper-assignable; system-only is retired. *)
 
 let catalog_metadata_of_materialized_json json =
-  let tier_profiles =
-    json_assoc_table_fields "tier" json
-    |> List.map (fun (name, tier_json) ->
-      qualified_tier_name name, json_keeper_assignable_opt tier_json)
-  in
-  let tier_group_fields = json_assoc_table_fields "tier-group" json in
-  let tier_group_profiles =
-    tier_group_fields
-    |> List.map (fun (name, group_json) ->
-      qualified_tier_group_name name, json_keeper_assignable_opt group_json)
-  in
-  let profile_assignability = tier_profiles @ tier_group_profiles in
-  let qualified_names =
-    profile_assignability |> List.map fst |> List.sort_uniq String.compare
-  in
-  let public_names =
-    qualified_names
-    |> List.map strip_declarative_profile_prefix
+  let routes = json_assoc_table_fields "routes" json in
+  let route_targets =
+    routes
+    |> List.filter_map (fun (_name, route_json) ->
+      match json_assoc_member "target" route_json with
+      | Some (`String target) ->
+          let trimmed = String.trim target in
+          if String.equal trimmed "" then None else Some trimmed
+      | _ -> None)
     |> List.sort_uniq String.compare
-  in
-  let system_qualified_names =
-    profile_assignability
-    |> List.filter_map (fun (name, assignable) ->
-      if profile_is_keeper_assignable assignable then None else Some name)
-    |> List.sort_uniq String.compare
-  in
-  let keeper_assignable_public_names =
-    public_names
-    |> List.filter (fun public_name ->
-      let qualified_name =
-        qualified_name_for_public_names qualified_names public_name
-      in
-      match List.assoc_opt qualified_name profile_assignability with
-      | Some assignable -> profile_is_keeper_assignable assignable
-      | None -> true)
-  in
-  let keeper_assignable_qualified_names =
-    profile_assignability
-    |> List.filter_map (fun (name, assignable) ->
-      if profile_is_keeper_assignable assignable then Some name else None)
-  in
-  let keeper_assignable_names =
-    keeper_assignable_public_names @ keeper_assignable_qualified_names
-    |> List.sort_uniq String.compare
-  in
-  let system_names =
-    public_names
-    |> List.filter (fun name -> not (List.mem name keeper_assignable_public_names))
   in
   let fallback_hints =
-    tier_group_fields
-    |> List.concat_map (fun (name, group_json) ->
-      let fallback =
-        match json_bool_field "fallback" group_json with
-        | Some true -> true
-        | Some false | None -> false
-      in
-      let tiers = json_string_list_field "tiers" group_json in
-      if (not fallback) || List.length tiers < 2
-      then []
-      else (
-        let group_name = qualified_tier_group_name name in
-        let tier_edges =
-          let rec loop acc = function
-            | current :: ((next :: _) as rest) ->
-                loop
-                  ((qualified_tier_name current, qualified_tier_name next)
-                   :: acc)
-                  rest
-            | [] | [_] -> List.rev acc
-          in
-          loop [] tiers
-        in
-        match tiers with
-        | _first :: next :: _ ->
-            (group_name, qualified_tier_name next) :: tier_edges
-        | [] | [_] -> tier_edges))
+    routes
+    |> List.filter_map (fun (name, route_json) ->
+      match json_assoc_member "fallback_cascade" route_json with
+      | Some (`String target) ->
+          let trimmed = String.trim target in
+          if String.equal trimmed "" then None
+          else Some (String.trim name, trimmed)
+      | _ -> None)
     |> List.filter (fun (source, target) ->
       (not (String.equal source target))
-      && List.mem source qualified_names
-      && List.mem target qualified_names)
+      && List.mem source route_targets
+      && List.mem target route_targets)
   in
   Ok
     {
-      qualified_names;
-      public_names;
-      keeper_assignable_names;
-      system_qualified_names;
-      system_names;
+      qualified_names = route_targets;
+      public_names = route_targets;
+      keeper_assignable_names = route_targets;
+      system_qualified_names = [];
+      system_names = [];
       fallback_hints;
     }
 
@@ -442,17 +365,9 @@ let routed_query_target ?config_path raw =
 let normalized_query_name ?config_path raw =
   routed_query_target ?config_path raw |> public_name_of_target
 
-let is_system_only_cascade raw =
-  let routed = routed_query_target raw |> String.trim in
-  let public_name = public_name_of_target routed in
-  (* RFC-0143 PR-2 — typed catalog query. *)
-  match catalog_metadata_query () with
-  | Catalog_ok meta ->
-      if is_qualified_profile_name routed then
-        List.mem routed meta.system_qualified_names
-      else
-        List.mem public_name meta.system_names
-  | Catalog_unavailable _ -> false
+(* Tier/tier-group purge: system-only cascade concept retired.
+   All cascades are keeper-assignable. *)
+let is_system_only_cascade _raw = false
 
 let keeper_catalog_names ?config_path () =
   (* RFC-0143 PR-2 — typed catalog query.  On [Catalog_unavailable]
@@ -480,28 +395,21 @@ let fallback_cascade_for ?config_path name =
     match catalog_metadata_query ?config_path () with
     | Catalog_unavailable _ -> None
     | Catalog_ok meta -> (
-        let qualified_name =
-          let routed = routed_query_target ?config_path name |> String.trim in
-          if is_qualified_profile_name routed
-          then routed
-          else qualified_name_for_public meta public_name
-        in
-        match List.assoc_opt qualified_name meta.fallback_hints with
+        match List.assoc_opt public_name meta.fallback_hints with
         | None -> None
-        | Some qualified_target ->
-            let target = public_name_of_target qualified_target in
+        | Some target ->
             if String.equal target public_name then None
-            else if List.mem qualified_target meta.qualified_names
-            then Some qualified_target
+            else if List.mem target meta.public_names
+            then Some target
             else begin
               Cascade_metrics.on_fallback_hint_invalid ();
-              let key = (qualified_name, qualified_target) in
+              let key = (public_name, target) in
               if not (Hashtbl.mem logged_invalid_fallback key) then begin
                 Hashtbl.add logged_invalid_fallback key ();
                 Log.Misc.warn
                   "[CascadeConfig] profile %s declares fallback hint %s \
                    which is not in the live catalog; ignoring hint"
-                  qualified_name qualified_target
+                  public_name target
               end;
               None
             end)
@@ -518,16 +426,11 @@ let canonicalize_with_catalog ~catalog raw =
         | Some _ -> trimmed
         | None -> trimmed)
 
+(* Tier/tier-group purge: lookup catalog contains only plain
+   provider:model strings.  No canonical prefix or qualified names. *)
 let canonical_member_of_lookup_catalog ~catalog raw =
   let trimmed = String.trim raw in
-  if not (List.mem trimmed catalog) then None
-  else if Cascade_name.is_canonical_prefix trimmed then Some trimmed
-  else
-    let tier_group = qualified_tier_group_name trimmed in
-    let tier = qualified_tier_name trimmed in
-    if List.mem tier_group catalog then Some tier_group
-    else if List.mem tier catalog then Some tier
-    else None
+  if List.mem trimmed catalog then Some trimmed else None
 
 let normalize_declared_name ?config_path (raw : string) : string =
   let trimmed = String.trim raw in

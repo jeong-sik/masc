@@ -141,57 +141,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
-  let result =
-    Result.bind result (fun () ->
-        match str "cascade_name" with
-        | None -> Ok ()
-        | Some raw ->
-            let raw_normalized = String.trim raw |> String.lowercase_ascii in
-            let normalized =
-              Keeper_cascade_profile.normalize_declared_name raw
-              |> String.lowercase_ascii
-            in
-            if List.mem raw_normalized reserved_cascade_names
-               || List.mem normalized reserved_cascade_names
-            then Ok ()
-            else
-              match Keeper_cascade_profile.catalog_names_for_validation () with
-              | Ok catalog ->
-                  let all_valid =
-                    List.sort_uniq String.compare
-                      (reserved_cascade_names @ catalog)
-                  in
-                  if not (List.mem normalized all_valid) then
-                    Error
-                      (Printf.sprintf
-                         "invalid cascade_name '%s' (known: %s)"
-                         raw
-                         (String.concat ", " all_valid))
-                  else if Keeper_cascade_profile.is_system_only_cascade normalized
-                  then
-                    let assignable =
-                      Keeper_cascade_profile.keeper_catalog_names ()
-                    in
-                    let assignable_hint =
-                      if assignable = [] then "(none)"
-                      else String.concat ", " assignable
-                    in
-                    Error
-                      (Printf.sprintf
-                         "cascade_name '%s' is system-only \
-                          (keeper_assignable=false); keepers must \
-                          reference an assignable cascade. \
-                          Assignable: %s"
-                         raw assignable_hint)
-                  else Ok ()
-              | Error fallback_error ->
-                  Error
-                    (Printf.sprintf
-                       "invalid cascade_name '%s' (reserved: %s; %s)"
-                       raw
-                       (String.concat ", " reserved_cascade_names)
-                       fallback_error))
-  in
+  (* model field: simple provider:model string, no validation needed *)
   let result =
     Result.bind result (fun () ->
         let has_proactive_idle = has "proactive_idle_sec" in
@@ -266,7 +216,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
         social_model = normalize_social_model_opt (str "social_model");
-        cascade_name = normalize_cascade_name_opt (str "cascade_name");
+        model = str "model";
         models = None;
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
@@ -313,7 +263,7 @@ let parsed_field_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "cascade_name"
+  ; "model"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -362,7 +312,7 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "cascade_name"
+  ; "model"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -517,7 +467,7 @@ let merge_keeper_profile_defaults
     per_provider_timeout;
     always_approve = prefer overlay.always_approve base.always_approve;
     social_model = prefer overlay.social_model base.social_model;
-    cascade_name = prefer overlay.cascade_name base.cascade_name;
+    model = prefer overlay.model base.model;
     models = None;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =

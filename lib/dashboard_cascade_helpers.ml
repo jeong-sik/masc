@@ -56,17 +56,7 @@ let invalid_profile_to_json ((name, errors) : string * string list) =
   `Assoc [ "name", `String name; "errors", string_list_to_json errors ]
 ;;
 
-let public_cascade_profile_name name =
-  let tier_group_prefix = "tier-group." in
-  let tier_prefix = "tier." in
-  if String.starts_with ~prefix:tier_group_prefix name then
-    String.sub name (String.length tier_group_prefix)
-      (String.length name - String.length tier_group_prefix)
-  else if String.starts_with ~prefix:tier_prefix name then
-    String.sub name (String.length tier_prefix)
-      (String.length name - String.length tier_prefix)
-  else
-    name
+let public_cascade_profile_name name = name
 ;;
 
 let public_profile_names names =
@@ -89,11 +79,7 @@ let invalid_profiles_with_internal_names profiles =
 ;;
 
 let qualified_profile_candidates name =
-  let trimmed = String.trim name in
-  if String.starts_with ~prefix:"tier-group." trimmed
-     || String.starts_with ~prefix:"tier." trimmed
-  then [ trimmed ]
-  else [ "tier-group." ^ trimmed; "tier." ^ trimmed; trimmed ]
+  [ String.trim name ]
 ;;
 
 let invalid_assignment_reasons ~known_internal_profiles ~invalid_profiles name =

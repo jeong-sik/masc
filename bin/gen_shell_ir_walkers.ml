@@ -564,7 +564,7 @@ let rec parse recursive case_sensitive pattern path = function
          | None -> parse recursive case_sensitive pattern (Some arg) rest
          | Some _ -> None))
 in
-parse true true None None args|}
+parse false true None None args|}
     }
   ; { name = "Mkdir"
     ; anon_pattern = "Mkdir _"

@@ -35,7 +35,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Find { path = "."; name = None; type_ = None })
   ; W (Head { path = "/dev/null"; lines = 10 })
   ; W (Tail { path = "/dev/null"; lines = 10 })
-  ; W (Grep { pattern = "."; path = None; recursive = true; case_sensitive = false })
+  ; W (Grep { pattern = "."; path = None; recursive = false; case_sensitive = false })
   ; W (Mkdir { path = "/tmp/x"; parents = false })
   ; W (Wc { path = "/dev/null"; mode = `Lines })
   ; W (Git_diff { stat = false; cached = false; paths = [] })

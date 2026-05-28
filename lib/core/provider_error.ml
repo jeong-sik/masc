@@ -51,8 +51,6 @@ let to_error_kind = function
 let string_list_to_yojson values =
   `List (List.map (fun value -> `String value) values)
 
-let float_option_to_yojson = Json_util.float_opt_to_json
-
 let public_runtime_provider_label = "runtime"
 let public_runtime_model_label = "runtime"
 
@@ -61,7 +59,7 @@ let to_yojson = function
       `Assoc
         [
           ("kind", `String "rate_limit");
-          ("retry_after", float_option_to_yojson retry_after);
+          ("retry_after", Json_util.float_opt_to_json retry_after);
           ("provider", `String public_runtime_provider_label);
         ]
   | CapacityBackpressure { scope } ->

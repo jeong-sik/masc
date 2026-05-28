@@ -831,32 +831,37 @@ let test_find_maxdepth () =
 
 (** Verify that [uniq] handles -f and -s value flags. *)
 let test_uniq_value_flags () =
-  let check_uniq cmd ~expected_count ~expected_duplicates ~expected_unique ~expected_file =
+  let check_uniq cmd ~expected_count ~expected_duplicates ~expected_unique ~expected_skip_fields ~expected_skip_chars ~expected_file =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Uniq { count; duplicates; unique; file }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Uniq { count; duplicates; unique; skip_fields; skip_chars; file }) ->
       check bool (Printf.sprintf "\"%s\" → count" cmd) expected_count count;
       check bool (Printf.sprintf "\"%s\" → duplicates" cmd) expected_duplicates duplicates;
       check bool (Printf.sprintf "\"%s\" → unique" cmd) expected_unique unique;
+      check (option int) (Printf.sprintf "\"%s\" → skip_fields" cmd) expected_skip_fields skip_fields;
+      check (option int) (Printf.sprintf "\"%s\" → skip_chars" cmd) expected_skip_chars skip_chars;
       check (option string) (Printf.sprintf "\"%s\" → file" cmd) expected_file file
     | _ -> failf "expected Uniq for: %s" cmd
   in
   (* basic *)
   check_uniq "uniq file.txt"
-    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:None ~expected_skip_chars:None ~expected_file:(Some "file.txt");
   (* -c *)
   check_uniq "uniq -c file.txt"
-    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:None ~expected_skip_chars:None ~expected_file:(Some "file.txt");
   (* -f skips fields *)
   check_uniq "uniq -f 2 file.txt"
-    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:(Some 2) ~expected_skip_chars:None ~expected_file:(Some "file.txt");
   (* -s skips chars *)
   check_uniq "uniq -s 5 file.txt"
-    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt");
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:None ~expected_skip_chars:(Some 5) ~expected_file:(Some "file.txt");
   (* combined -f and -c *)
   check_uniq "uniq -f 1 -c file.txt"
-    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_file:(Some "file.txt")
+    ~expected_count:true ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:(Some 1) ~expected_skip_chars:None ~expected_file:(Some "file.txt");
+  (* combined -f and -s *)
+  check_uniq "uniq -f 3 -s 7 file.txt"
+    ~expected_count:false ~expected_duplicates:false ~expected_unique:false ~expected_skip_fields:(Some 3) ~expected_skip_chars:(Some 7) ~expected_file:(Some "file.txt")
 ;;
 
 let test_grep_combined_flags () =

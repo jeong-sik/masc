@@ -169,6 +169,8 @@ and (_, _, _, _) command =
       { count : bool
       ; duplicates : bool
       ; unique : bool
+      ; skip_fields : int option
+      ; skip_chars : int option
       ; file : string option
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command

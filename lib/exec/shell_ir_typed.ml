@@ -224,13 +224,17 @@ let pp fmt = function
       "Printenv(name=%a)"
       (Format.pp_print_option Format.pp_print_string)
       name
-  | W (Uniq { count; duplicates; unique; file }) ->
+  | W (Uniq { count; duplicates; unique; skip_fields; skip_chars; file }) ->
     Format.fprintf
       fmt
-      "Uniq(count=%b, duplicates=%b, unique=%b, file=%a)"
+      "Uniq(count=%b, duplicates=%b, unique=%b, skip_f=%a, skip_s=%a, file=%a)"
       count
       duplicates
       unique
+      (Format.pp_print_option Format.pp_print_int)
+      skip_fields
+      (Format.pp_print_option Format.pp_print_int)
+      skip_chars
       (Format.pp_print_option Format.pp_print_string)
       file
   | W (Basename { path; suffix }) ->

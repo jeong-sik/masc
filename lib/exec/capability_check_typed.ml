@@ -213,11 +213,13 @@ let of_command = function
   | Shell_ir_typed.W (Printenv { name }) ->
     let args = match name with None -> [] | Some n -> [ arg n ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Printenv, args) ]
-  | Shell_ir_typed.W (Uniq { count; duplicates; unique; file }) ->
+  | Shell_ir_typed.W (Uniq { count; duplicates; unique; skip_fields; skip_chars; file }) ->
     let flag_args =
       (if count then [ arg "-c" ] else [])
       @ (if duplicates then [ arg "-d" ] else [])
       @ (if unique then [ arg "-u" ] else [])
+      @ (match skip_fields with Some n -> [ arg "-f"; arg (string_of_int n) ] | None -> [])
+      @ (match skip_chars with Some n -> [ arg "-s"; arg (string_of_int n) ] | None -> [])
     in
     let file_args = match file with None -> [] | Some f -> [ arg f ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Uniq, flag_args @ file_args) ]

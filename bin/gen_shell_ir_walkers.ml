@@ -1264,7 +1264,7 @@ match args with
     }
   ; { name = "Uniq"
     ; anon_pattern = "Uniq _"
-    ; bind_pattern = "Uniq { count; duplicates; unique; file }"
+    ; bind_pattern = "Uniq { count; duplicates; unique; skip_fields; skip_chars; file }"
     ; risk = "`Safe"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -1273,6 +1273,8 @@ match args with
     (if count then [ Shell_ir.Lit ("-c", Shell_ir.default_meta) ] else [])
     @ (if duplicates then [ Shell_ir.Lit ("-d", Shell_ir.default_meta) ] else [])
     @ (if unique then [ Shell_ir.Lit ("-u", Shell_ir.default_meta) ] else [])
+    @ (match skip_fields with Some n -> [ Shell_ir.Lit ("-f", Shell_ir.default_meta); Shell_ir.Lit (string_of_int n, Shell_ir.default_meta) ] | None -> [])
+    @ (match skip_chars with Some n -> [ Shell_ir.Lit ("-s", Shell_ir.default_meta); Shell_ir.Lit (string_of_int n, Shell_ir.default_meta) ] | None -> [])
   in
   let file_args = match file with None -> [] | Some f -> [ Shell_ir.Lit (f, Shell_ir.default_meta) ] in
   { Shell_ir.bin = Exec_program.of_known Exec_program.Uniq
@@ -1286,19 +1288,25 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse count duplicates unique file = function
-  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; file }))
-  | "-c" :: rest -> parse true duplicates unique file rest
-  | "-d" :: rest -> parse count true unique file rest
-  | "-u" :: rest -> parse count duplicates true file rest
-  | "-f" :: _ :: rest -> parse count duplicates unique file rest  (* -f N — skip N fields *)
-  | "-s" :: _ :: rest -> parse count duplicates unique file rest  (* -s N — skip N chars *)
+let rec parse count duplicates unique skip_fields skip_chars file = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file }))
+  | "-c" :: rest -> parse true duplicates unique skip_fields skip_chars file rest
+  | "-d" :: rest -> parse count true unique skip_fields skip_chars file rest
+  | "-u" :: rest -> parse count duplicates true skip_fields skip_chars file rest
+  | "-f" :: n_str :: rest ->
+    (match int_of_string_opt n_str with
+     | Some n -> parse count duplicates unique (Some n) skip_chars file rest
+     | None -> parse count duplicates unique skip_fields skip_chars file rest)
+  | "-s" :: n_str :: rest ->
+    (match int_of_string_opt n_str with
+     | Some n -> parse count duplicates unique skip_fields (Some n) file rest
+     | None -> parse count duplicates unique skip_fields skip_chars file rest)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse count duplicates unique file rest
-    else parse count duplicates unique (Some arg) rest
+    then parse count duplicates unique skip_fields skip_chars file rest
+    else parse count duplicates unique skip_fields skip_chars (Some arg) rest
 in
-parse false false false None args|}
+parse false false false None None None args|}
     }
   ; { name = "Basename"
     ; anon_pattern = "Basename _"

@@ -7,8 +7,8 @@
 open Masc_domain
 
 (* Sibling dependencies — already extracted in earlier godfile decomp PRs. *)
-let json_string_opt = Server_dashboard_http_core_json.json_string_opt
-let json_bool_opt = Server_dashboard_http_core_json.json_bool_opt
+let json_string_opt = Json_util.string_opt_to_json
+let json_bool_opt = Json_util.bool_opt_to_json
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
 let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
 

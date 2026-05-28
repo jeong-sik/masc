@@ -10,10 +10,10 @@ open Server_utils
 
 let compact_preview = Server_dashboard_http_json_utils.compact_preview
 let json_member = Server_dashboard_http_json_utils.json_member
-let json_string = Server_dashboard_http_json_utils.json_string
-let json_int = Server_dashboard_http_json_utils.json_int
-let json_float = Server_dashboard_http_json_utils.json_float
-let json_bool = Server_dashboard_http_json_utils.json_bool
+let json_string key json = Json_util.get_string json key
+let json_int key json = Json_util.get_int json key
+let json_float key json = Json_util.get_float json key
+let json_bool key json = Json_util.get_bool json key
 
 let compact_receipt_error_json = Server_dashboard_compact_receipt_json.compact_receipt_error_json
 let compact_receipt_cascade_json = Server_dashboard_compact_receipt_json.compact_receipt_cascade_json

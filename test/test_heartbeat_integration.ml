@@ -128,8 +128,10 @@ let test_crash_fiber_unresolved () =
   R.clear ();
   let meta = make_meta "unresolved" in
   let reg = R.register ~base_path:bp "unresolved" meta in
-  (* Simulate: fiber exits without resolving done_r → finally fires *)
-  let fr = R.Fiber_unresolved in
+  (* Simulate: fiber exits without resolving done_r → finally fires.
+     Issue #18901: Unexpected cause (not shutdown) — represents the
+     genuine missed-resolution bug path the supervisor must restart. *)
+  let fr = R.Fiber_unresolved R.Unexpected in
   let reason_str = R.failure_reason_to_string fr in
   R.set_failure_reason ~base_path:bp "unresolved" (Some fr);
   R.record_crash ~base_path:bp "unresolved" 1002.0 reason_str;
@@ -141,7 +143,7 @@ let test_crash_fiber_unresolved () =
   | None -> fail "expected unresolved"
   | Some e ->
     (match e.last_failure_reason with
-     | Some R.Fiber_unresolved -> ()
+     | Some (R.Fiber_unresolved _) -> ()
      | _ -> fail "expected Fiber_unresolved reason");
     check string "state" "crashed" (KSM.phase_to_string e.phase)
 

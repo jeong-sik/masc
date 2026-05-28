@@ -100,7 +100,7 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Ambiguous_partial_commit
       { kind = Keeper_registry.Post_commit_failure; _ } ->
     Ambiguous_partial_commit_post_commit_failure
-  | Keeper_registry.Fiber_unresolved -> Fiber_unresolved
+  | Keeper_registry.Fiber_unresolved _ -> Fiber_unresolved
   | Keeper_registry.Turn_overflow_pause -> Turn_overflow_pause
   | Keeper_registry.Turn_livelock_pause -> Turn_livelock_pause
   | Keeper_registry.Exception msg -> Exception_unhandled msg

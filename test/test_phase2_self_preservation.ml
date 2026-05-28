@@ -94,7 +94,9 @@ let test_failure_reason_heartbeat () =
   check string "heartbeat reason" "heartbeat_consecutive_failures(5)" s
 
 let test_failure_reason_fiber () =
-  let s = R.failure_reason_to_string R.Fiber_unresolved in
+  (* Issue #18901: Unexpected cause preserves the legacy
+     "fiber_unresolved" wire format for backward-compat dashboards. *)
+  let s = R.failure_reason_to_string (R.Fiber_unresolved R.Unexpected) in
   check string "fiber reason" "fiber_unresolved" s
 
 let test_failure_reason_exception () =
@@ -191,7 +193,7 @@ let test_failure_reason_cleared_on_reregister () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
   R.set_failure_reason ~base_path:bp "k1"
-    (Some R.Fiber_unresolved);
+    (Some (R.Fiber_unresolved R.Unexpected));
   (* Re-register (simulates restart) clears the reason *)
   let _e2 = R.register ~base_path:bp "k1" (make_meta "k1") in
   match R.get ~base_path:bp "k1" with
@@ -210,7 +212,13 @@ let test_cohort_key_heartbeat () =
   check string "heartbeat cohort" "heartbeat_failures" key
 
 let test_cohort_key_fiber () =
-  let key = Sup.cohort_key_of_reason (Some R.Fiber_unresolved) in
+  (* Issue #18901: Unexpected cause keeps the legacy
+     "fiber_unresolved" cohort key for backward-compat. The new
+     Graceful_shutdown cause maps to a separate cohort
+     ("fiber_unresolved_graceful") covered elsewhere. *)
+  let key =
+    Sup.cohort_key_of_reason (Some (R.Fiber_unresolved R.Unexpected))
+  in
   check string "fiber cohort" "fiber_unresolved" key
 
 let test_cohort_key_exception () =

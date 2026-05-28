@@ -2218,12 +2218,18 @@ parse false None None args|}
     }
   ; { name = "Rsync"
     ; anon_pattern = "Rsync _"
-    ; bind_pattern = "Rsync { source; dest; flags }"
+    ; bind_pattern = "Rsync { source; dest; archive; delete; dry_run; compress; flags }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      let args = flags @ [ source; dest ] in
+      let typed_flags =
+        (if archive then [ "-a" ] else [])
+        @ (if delete then [ "--delete" ] else [])
+        @ (if dry_run then [ "--dry-run" ] else [])
+        @ (if compress then [ "-z" ] else [])
+      in
+      let args = typed_flags @ flags @ [ source; dest ] in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Rsync
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
@@ -2250,32 +2256,39 @@ let rsync_value_flags =
   ; "--block-size"; "--checksum-choice"
   ]
 in
-let rec parse flags src dst = function
+let rec parse flags archive delete dry_run compress src dst = function
   | [] ->
     (match src, dst with
      | Some s, Some d ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; flags = List.rev flags }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; archive; delete; dry_run; compress; flags = List.rev flags }))
      | _ -> None)
+  | "-a" :: rest -> parse flags true delete dry_run compress src dst rest
+  | "--archive" :: rest -> parse flags true delete dry_run compress src dst rest
+  | "--delete" :: rest -> parse flags archive true dry_run compress src dst rest
+  | "--dry-run" :: rest -> parse flags archive delete true compress src dst rest
+  | "-n" :: rest -> parse flags archive delete true compress src dst rest
+  | "-z" :: rest -> parse flags archive delete dry_run true src dst rest
+  | "--compress" :: rest -> parse flags archive delete dry_run true src dst rest
   | arg :: val_ :: rest
     when String.length arg > 0 && arg.[0] = '-'
          && List.mem arg rsync_value_flags ->
-    parse (val_ :: arg :: flags) src dst rest
+    parse (val_ :: arg :: flags) archive delete dry_run compress src dst rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ flag; value ] when List.mem flag rsync_value_flags ->
-       parse (value :: flag :: flags) src dst rest
+       parse (value :: flag :: flags) archive delete dry_run compress src dst rest
      | _ ->
        if String.length arg > 0 && arg.[0] = '-'
-       then parse (arg :: flags) src dst rest
+       then parse (arg :: flags) archive delete dry_run compress src dst rest
        else (
          match src with
-         | None -> parse flags (Some arg) dst rest
+         | None -> parse flags archive delete dry_run compress (Some arg) dst rest
          | Some _ ->
            match dst with
-           | None -> parse flags src (Some arg) rest
+           | None -> parse flags archive delete dry_run compress src (Some arg) rest
            | Some _ -> None))
 in
-parse [] None None args|}
+parse [] false false false false None None args|}
     }
   ; { name = "Node"
     ; anon_pattern = "Node _"

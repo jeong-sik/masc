@@ -332,8 +332,14 @@ let of_command = function
   | Shell_ir_typed.W (Sed { expression; file; in_place }) ->
     let flag_args = if in_place then [ arg "-i" ] else [] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sed, flag_args @ [ arg "-e"; arg expression; arg file ]) ]
-  | Shell_ir_typed.W (Rsync { source; dest; flags }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rsync, List.map arg flags @ [ arg source; arg dest ]) ]
+  | Shell_ir_typed.W (Rsync { source; dest; archive; delete; dry_run; compress; flags }) ->
+    let typed_flags =
+      (if archive then [ arg "-a" ] else [])
+      @ (if delete then [ arg "--delete" ] else [])
+      @ (if dry_run then [ arg "--dry-run" ] else [])
+      @ (if compress then [ arg "-z" ] else [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rsync, typed_flags @ List.map arg flags @ [ arg source; arg dest ]) ]
   | Shell_ir_typed.W (Node { script; args; inline }) ->
     let entry = match inline with Some code -> [ arg "-e"; arg code ] | None -> [ arg script ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Node, entry @ List.map arg args) ]

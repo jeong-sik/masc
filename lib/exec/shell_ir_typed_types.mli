@@ -263,6 +263,10 @@ and (_, _, _, _) command =
   | Rsync :
       { source : string
       ; dest : string
+      ; archive : bool
+      ; delete : bool
+      ; dry_run : bool
+      ; compress : bool
       ; flags : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command

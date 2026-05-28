@@ -362,6 +362,7 @@ let test_system_tools () =
     ; "diff --brief a b", "Diff"
     ; "sed s/foo/bar/g file.txt", "Sed"
     ; "rsync -a -v -z dir/ user@host:/backup/", "Rsync"
+    ; "rsync -a --delete --dry-run -z src/ dest/", "Rsync"
     ; "patch -p1", "Patch"
     ; "node script.js", "Node"
     ; "node -e process.exit", "Node"
@@ -458,6 +459,7 @@ let test_round_trip_e2e () =
     ; "sed -e s/foo/bar/g file.txt"
     ; "rsync -a -v -z dir/ user@host:/backup/"
     ; "rsync --exclude '*.log' -a src/ dest/"
+    ; "rsync -a --delete --dry-run -z src/ dest/"
     ; "node script.js"
     ; "node -e process.exit"
     ; "node -e process.exit --max-old-space-size=4096"
@@ -923,26 +925,48 @@ let test_file_combined_flags () =
 ;;
 
 let test_rsync_long_form () =
-  let check_rsync cmd ~expected_src ~expected_dst ~expected_flags =
+  let check_rsync cmd ~expected_src ~expected_dst ~expected_archive ~expected_delete ~expected_dry_run ~expected_compress ~expected_flags =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Rsync { source; dest; flags }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Rsync { source; dest; archive; delete; dry_run; compress; flags }) ->
       check string (Printf.sprintf "\"%s\" → source" cmd) expected_src source;
       check string (Printf.sprintf "\"%s\" → dest" cmd) expected_dst dest;
+      check bool (Printf.sprintf "\"%s\" → archive" cmd) expected_archive archive;
+      check bool (Printf.sprintf "\"%s\" → delete" cmd) expected_delete delete;
+      check bool (Printf.sprintf "\"%s\" → dry_run" cmd) expected_dry_run dry_run;
+      check bool (Printf.sprintf "\"%s\" → compress" cmd) expected_compress compress;
       check (list string) (Printf.sprintf "\"%s\" → flags" cmd) expected_flags flags
     | _ -> failf "expected Rsync for: %s" cmd
   in
   (* two-token form *)
   check_rsync "rsync --exclude .git src/ dest/"
-    ~expected_src:"src/" ~expected_dst:"dest/" ~expected_flags:["--exclude"; ".git"];
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["--exclude"; ".git"];
   (* long form with = *)
   check_rsync "rsync --exclude=.git src/ dest/"
-    ~expected_src:"src/" ~expected_dst:"dest/" ~expected_flags:["--exclude"; ".git"];
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["--exclude"; ".git"];
   (* multiple long forms with = *)
   check_rsync "rsync --exclude=.git --exclude=node_modules --progress src/ dest/"
     ~expected_src:"src/" ~expected_dst:"dest/"
-    ~expected_flags:["--exclude"; ".git"; "--exclude"; "node_modules"; "--progress"]
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["--exclude"; ".git"; "--exclude"; "node_modules"; "--progress"];
+  (* typed boolean flags *)
+  check_rsync "rsync -a --delete --dry-run -z src/ dest/"
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:true ~expected_delete:true ~expected_dry_run:true ~expected_compress:true
+    ~expected_flags:[];
+  check_rsync "rsync -avz src/ dest/"
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:false ~expected_delete:false ~expected_dry_run:false ~expected_compress:false
+    ~expected_flags:["-avz"];
+  check_rsync "rsync --archive --compress --exclude='*.log' src/ dest/"
+    ~expected_src:"src/" ~expected_dst:"dest/"
+    ~expected_archive:true ~expected_delete:false ~expected_dry_run:false ~expected_compress:true
+    ~expected_flags:["--exclude"; "*.log"]
 ;;
 
 let test_df_combined_and_long_form () =

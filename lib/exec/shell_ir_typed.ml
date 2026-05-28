@@ -352,8 +352,9 @@ let pp fmt = function
     Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b, brief=%b)" file1 file2 unified brief
   | W (Sed { expression; file; in_place }) ->
     Format.fprintf fmt "Sed(expression=%s, file=%s, in_place=%b)" expression file in_place
-  | W (Rsync { source; dest; flags }) ->
-    Format.fprintf fmt "Rsync(source=%s, dest=%s, flags=%a)" source dest
+  | W (Rsync { source; dest; archive; delete; dry_run; compress; flags }) ->
+    Format.fprintf fmt "Rsync(source=%s, dest=%s, archive=%b, delete=%b, dry_run=%b, compress=%b, flags=%a)" source dest
+      archive delete dry_run compress
       (Format.pp_print_list Format.pp_print_string) flags
   | W (Node { script; args; inline }) ->
     Format.fprintf fmt "Node(script=%s, args=%a, inline=%a)" script

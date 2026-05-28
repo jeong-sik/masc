@@ -138,7 +138,7 @@ describe('Ops surface', () => {
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
   }, 120000)
 
-  it('renders keeper utility actions from the server catalog', async () => {
+  it('points to Monitor → Keeper Fleet instead of rendering its own keeper roster', async () => {
     const {
       Ops,
       route,
@@ -177,13 +177,13 @@ describe('Ops surface', () => {
     render(html`<${Ops} />`, container)
     await flushUi()
 
-    const panel = container.querySelector('[data-testid="keeper-utilities-panel"]')
-    expect(panel).toBeTruthy()
-    expect(panel?.textContent).toContain('Keeper Utilities')
-    expect(panel?.textContent).toContain('probe from server')
-    expect(panel?.textContent).toContain('keeper_unknown_maintenance')
-    expect(panel?.textContent).toContain('UI adapter pending')
-    expect(panel?.textContent).not.toContain('Broadcast')
+    expect(container.querySelector('[data-testid="keeper-utilities-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-action-panel"]')).toBeNull()
+
+    const pointer = container.querySelector('[data-testid="ops-keeper-fleet-link"]')
+    expect(pointer).toBeTruthy()
+    const link = pointer?.querySelector('a')
+    expect(link?.getAttribute('href')).toBe('#monitoring?section=agents')
   }, 60000)
 
   it('renders the same single surface when active review items are present (no 3-column unhealthy branch)', async () => {

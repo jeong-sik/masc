@@ -45,12 +45,22 @@ let normalize_tool_names names =
   |> dedupe_keep_order
 ;;
 
+let write_tools =
+  [ "tool_edit_file"; "tool_write_file"; "tool_execute" ]
+;;
+
 let legacy_keeper_internal_tool_names =
   (* Keep legacy masc coordination defaults explicit in
      [legacy_session_min_tool_names]; new [masc_*] internal tools should not
-     silently expand missing [tool_access] migrations. *)
+     silently expand missing [tool_access] migrations.
+     Write tools are excluded so that keepers without explicit [tool_access]
+     cannot claim write-intent tasks.  Keepers that need write access must
+     set [tool_access] to a preset that includes write tools (e.g. Full)
+     or use [Custom] with explicit write tool names. *)
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-  |> List.filter (fun name -> not (String.starts_with ~prefix:"masc_" name))
+  |> List.filter (fun name ->
+         not (String.starts_with ~prefix:"masc_" name)
+         && not (List.exists (String.equal name) write_tools))
 ;;
 
 let legacy_session_min_tool_names =

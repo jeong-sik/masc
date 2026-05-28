@@ -294,8 +294,9 @@ let of_command = function
     in
     let cmd_args = match command with None -> [] | Some c -> [ arg c ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, arg target :: cmd_args) ]
-  | Shell_ir_typed.W (Scp { source; dest; recursive }) ->
-    let flag_args = if recursive then [ arg "-r" ] else [] in
+  | Shell_ir_typed.W (Scp { source; dest; recursive; port }) ->
+    let port_args = match port with Some p -> [ arg "-P"; arg (string_of_int p) ] | None -> [] in
+    let flag_args = port_args @ (if recursive then [ arg "-r" ] else []) in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Scp, flag_args @ [ arg source; arg dest ]) ]
   | Shell_ir_typed.W (Tar { action; archive; paths; compression }) ->
     let action_flag =
@@ -349,10 +350,12 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Go, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Gh { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Gh, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Chmod { mode; path }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chmod, [ arg mode; arg path ]) ]
-  | Shell_ir_typed.W (Chown { owner; path }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chown, [ arg owner; arg path ]) ]
+  | Shell_ir_typed.W (Chmod { mode; path; recursive }) ->
+    let flag_args = if recursive then [ arg "-R" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chmod, flag_args @ [ arg mode; arg path ]) ]
+  | Shell_ir_typed.W (Chown { owner; path; recursive }) ->
+    let flag_args = if recursive then [ arg "-R" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chown, flag_args @ [ arg owner; arg path ]) ]
   | Shell_ir_typed.W (Docker { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Docker, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Opam { subcommand; args }) ->

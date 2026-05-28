@@ -289,6 +289,7 @@ let test_network_tools () =
     ; "ssh user@host ls -la", "Ssh"
     ; "scp file.txt user@host:/tmp/", "Scp"
     ; "scp -r dir/ user@host:/tmp/", "Scp"
+    ; "scp -P 2222 file.txt user@host:/tmp/", "Scp"
     ]
 ;;
 
@@ -338,7 +339,9 @@ let test_privileged_commands () =
     [ "sudo ls /root", "Sudo"
     ; "sudo sh -c \"echo hi\"", "Sudo"
     ; "chmod 755 script.sh", "Chmod"
+    ; "chmod -R 755 dir/", "Chmod"
     ; "chown user:group file.txt", "Chown"
+    ; "chown -R user:group dir/", "Chown"
     ; "su root", "Su"
     ; "dd if=/dev/zero of=/tmp/zeros bs=1M count=10", "Dd"
     ; "mkfs -t ext4 /dev/sdb1", "Mkfs"
@@ -408,6 +411,7 @@ let test_round_trip_e2e () =
     ; "wget https://example.com/file.txt"
     ; "ssh user@host ls -l -a"
     ; "scp file.txt user@host:/tmp/"
+    ; "scp -r -P 2222 dir/ user@host:/tmp/"
     ; "make -j4"
     ; "npm test"
     ; "cargo build"
@@ -434,7 +438,9 @@ let test_round_trip_e2e () =
     ; "cmake --build ."
     ; "sudo ls /root"
     ; "chmod 755 script.sh"
+    ; "chmod -R 755 dir/"
     ; "chown user:group file.txt"
+    ; "chown -R user:group dir/"
     ; "su root"
     ; "tar -c -f archive.tar file1"
     ; "tar -x -z -f archive.tar.gz"

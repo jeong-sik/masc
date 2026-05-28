@@ -319,8 +319,9 @@ let pp fmt = function
       user
       (Format.pp_print_option Format.pp_print_string)
       command
-  | W (Scp { source; dest; recursive }) ->
-    Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b)" source dest recursive
+  | W (Scp { source; dest; recursive; port }) ->
+    Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b, port=%a)" source dest recursive
+      (Format.pp_print_option Format.pp_print_int) port
   | W (Tar { action; archive; paths; compression }) ->
     Format.fprintf
       fmt
@@ -378,10 +379,10 @@ let pp fmt = function
   | W (Gh { subcommand; args }) ->
     Format.fprintf fmt "Gh(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Chmod { mode; path }) ->
-    Format.fprintf fmt "Chmod(mode=%s, path=%s)" mode path
-  | W (Chown { owner; path }) ->
-    Format.fprintf fmt "Chown(owner=%s, path=%s)" owner path
+  | W (Chmod { mode; path; recursive }) ->
+    Format.fprintf fmt "Chmod(mode=%s, path=%s, recursive=%b)" mode path recursive
+  | W (Chown { owner; path; recursive }) ->
+    Format.fprintf fmt "Chown(owner=%s, path=%s, recursive=%b)" owner path recursive
   | W (Docker { subcommand; args }) ->
     Format.fprintf fmt "Docker(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args

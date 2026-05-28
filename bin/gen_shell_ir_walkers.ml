@@ -1885,13 +1885,14 @@ match args with
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"
-    ; bind_pattern = "Scp { source; dest; recursive }"
+    ; bind_pattern = "Scp { source; dest; recursive; port }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
-        (if recursive then [ "-r" ] else [])
+        (match port with Some p -> [ "-P"; string_of_int p ] | None -> [])
+        @ (if recursive then [ "-r" ] else [])
         @ [ source; dest ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Scp
@@ -1905,25 +1906,33 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse recursive src dest = function
+let rec parse recursive port src dest = function
   | [] ->
     (match src, dest with
      | Some s, Some d ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive; port }))
      | _ -> None)
-  | "-r" :: rest -> parse true src dest rest
+  | "-r" :: rest -> parse true port src dest rest
+  | "-P" :: p_str :: rest ->
+    (match int_of_string_opt p_str with
+     | Some p -> parse recursive (Some p) src dest rest
+     | None -> parse recursive port src dest rest)
+  | "-p" :: rest -> parse recursive port src dest rest
+  | "-C" :: rest -> parse recursive port src dest rest
+  | "-v" :: rest -> parse recursive port src dest rest
+  | "-q" :: rest -> parse recursive port src dest rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse recursive src dest rest
+    then parse recursive port src dest rest
     else (
       match src with
-      | None -> parse recursive (Some arg) dest rest
+      | None -> parse recursive port (Some arg) dest rest
       | Some _ ->
         match dest with
-        | None -> parse recursive src (Some arg) rest
+        | None -> parse recursive port src (Some arg) rest
         | Some _ -> None)
 in
-parse false None None args|}
+parse false None None None args|}
     }
   ; { name = "Tar"
     ; anon_pattern = "Tar _"
@@ -2417,13 +2426,17 @@ parse None None 0 false args|}
   ; subcommand_args_ctor ~name:"Gh" ~risk:"`Audited" ~sandbox:"`Host"
   ; { name = "Chmod"
     ; anon_pattern = "Chmod _"
-    ; bind_pattern = "Chmod { mode; path }"
+    ; bind_pattern = "Chmod { mode; path; recursive }"
     ; risk = "`Privileged"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
+      let args =
+        (if recursive then [ "-R" ] else [])
+        @ [ mode; path ]
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Chmod
-      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) [ mode; path ]
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -2433,34 +2446,40 @@ parse None None 0 false args|}
     ; parse_body =
         Some
           {|
-let rec parse mode path = function
+let rec parse recursive mode path = function
   | [] ->
     (match mode, path with
      | Some m, Some p ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chmod { mode = m; path = p }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chmod { mode = m; path = p; recursive }))
      | _ -> None)
+  | "-R" :: rest -> parse true mode path rest
+  | "--recursive" :: rest -> parse true mode path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse mode path rest
+    then parse recursive mode path rest
     else (
       match mode with
-      | None -> parse (Some arg) path rest
+      | None -> parse recursive (Some arg) path rest
       | Some _ ->
         (match path with
-         | None -> parse mode (Some arg) rest
+         | None -> parse recursive mode (Some arg) rest
          | Some _ -> None))
 in
-parse None None args|}
+parse false None None args|}
     }
   ; { name = "Chown"
     ; anon_pattern = "Chown _"
-    ; bind_pattern = "Chown { owner; path }"
+    ; bind_pattern = "Chown { owner; path; recursive }"
     ; risk = "`Privileged"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
+      let args =
+        (if recursive then [ "-R" ] else [])
+        @ [ owner; path ]
+      in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Chown
-      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) [ owner; path ]
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -2470,24 +2489,26 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let rec parse owner path = function
+let rec parse recursive owner path = function
   | [] ->
     (match owner, path with
      | Some o, Some p ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chown { owner = o; path = p }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chown { owner = o; path = p; recursive }))
      | _ -> None)
+  | "-R" :: rest -> parse true owner path rest
+  | "--recursive" :: rest -> parse true owner path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse owner path rest
+    then parse recursive owner path rest
     else (
       match owner with
-      | None -> parse (Some arg) path rest
+      | None -> parse recursive (Some arg) path rest
       | Some _ ->
         (match path with
-         | None -> parse owner (Some arg) rest
+         | None -> parse recursive owner (Some arg) rest
          | Some _ -> None))
 in
-parse None None args|}
+parse false None None args|}
     }
   ; subcommand_args_ctor ~name:"Docker" ~risk:"`Audited" ~sandbox:"`Docker"
   ; subcommand_args_ctor ~name:"Opam" ~risk:"`Audited" ~sandbox:"`Host"

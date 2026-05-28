@@ -239,6 +239,7 @@ and (_, _, _, _) command =
       { source : string
       ; dest : string
       ; recursive : bool
+      ; port : int option
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Tar :
@@ -321,11 +322,13 @@ and (_, _, _, _) command =
   | Chmod :
       { mode : string
       ; path : string
+      ; recursive : bool
       }
       -> (unit, string, [ `Privileged ], [ `Host ]) command
   | Chown :
       { owner : string
       ; path : string
+      ; recursive : bool
       }
       -> (unit, string, [ `Privileged ], [ `Host ]) command
   | Docker :

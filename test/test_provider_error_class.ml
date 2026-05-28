@@ -24,14 +24,14 @@ let test_short_tag_client_capacity_exhausted () =
     P.Client_capacity_exhausted
 ;;
 
-let test_short_tag_tier_admission_exhausted_some () =
-  check_tag "Tier_admission_exhausted Some" "tier_admission_exhausted"
+let test_short_tag_admission_exhausted_some () =
+  check_tag "Admission_exhausted Some" "admission_exhausted"
     (P.Admission_exhausted
        { capability_profile = Some "strict_tool_candidates" })
 ;;
 
-let test_short_tag_tier_admission_exhausted_none () =
-  check_tag "Tier_admission_exhausted None" "tier_admission_exhausted"
+let test_short_tag_admission_exhausted_none () =
+  check_tag "Admission_exhausted None" "admission_exhausted"
     (P.Admission_exhausted { capability_profile = None })
 ;;
 
@@ -76,7 +76,7 @@ let test_raw_payload_unspecified_preserves () =
 let test_raw_payload_typed_variants_are_none () =
   check (option raw_pair) "Client_capacity_exhausted" None
     (P.raw_payload P.Client_capacity_exhausted);
-  check (option raw_pair) "Tier_admission_exhausted" None
+  check (option raw_pair) "Admission_exhausted" None
     (P.raw_payload
        (P.Admission_exhausted { capability_profile = None }));
   check (option raw_pair) "Backpressure" None
@@ -130,10 +130,10 @@ let () =
     [ ( "to_short_tag"
       , [ test_case "client_capacity_exhausted" `Quick
             test_short_tag_client_capacity_exhausted
-        ; test_case "tier_admission_exhausted Some" `Quick
-            test_short_tag_tier_admission_exhausted_some
-        ; test_case "tier_admission_exhausted None" `Quick
-            test_short_tag_tier_admission_exhausted_none
+        ; test_case "admission_exhausted Some" `Quick
+            test_short_tag_admission_exhausted_some
+        ; test_case "admission_exhausted None" `Quick
+            test_short_tag_admission_exhausted_none
         ; test_case "backpressure" `Quick test_short_tag_backpressure
         ; test_case "dns_resolution_failure" `Quick
             test_short_tag_dns_resolution_failure

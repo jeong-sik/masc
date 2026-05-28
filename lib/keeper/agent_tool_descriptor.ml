@@ -1247,9 +1247,6 @@ let translate_input ~public input =
   | None -> input
 ;;
 
-let string_opt_to_json = Json_util.string_opt_to_json
-let bool_opt_to_json = Json_util.bool_opt_to_json
-;;
 
 let receipt_labels_json d =
   `Assoc (List.map (fun (key, value) -> key, `String value) d.receipt_labels)
@@ -1269,7 +1266,7 @@ let route_evidence_json d =
      ; "canonical_name", `String d.internal_name
      ; "description", `String d.description
      ; "visibility", `String (Tool_catalog.visibility_to_string policy.visibility)
-     ; "readonly", bool_opt_to_json policy.readonly_hint
+     ; "readonly", Json_util.bool_opt_to_json policy.readonly_hint
      ; "executor", `String (executor_to_string d.executor)
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)
@@ -1277,8 +1274,8 @@ let route_evidence_json d =
      ; "receipt_labels", receipt_labels_json d
      ; "approval", `String (approval_to_string policy.approval)
      ; "retryable", `Bool policy.retryable
-     ; "cwd_scope", string_opt_to_json policy.cwd_scope
-     ; "credential_profile", string_opt_to_json policy.credential_profile
+     ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
+     ; "credential_profile", Json_util.string_opt_to_json policy.credential_profile
      ]
      @ policy_fields)
 ;;

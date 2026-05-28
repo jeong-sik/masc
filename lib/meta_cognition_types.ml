@@ -127,11 +127,6 @@ let unique_non_empty values =
   |> List.filter (fun value -> value <> "")
   |> List.sort_uniq String.compare
 
-let clamp ~min_v ~max_v value =
-  if value < min_v then min_v
-  else if value > max_v then max_v
-  else value
-
 let salience_to_string = function
   | Stable -> "stable"
   | Contested_belief -> "contested_belief"

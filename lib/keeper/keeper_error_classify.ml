@@ -184,6 +184,10 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
       (Keeper_turn_driver.Cascade_exhausted
          { reason = Keeper_types.Max_turns_exceeded; _ }) ->
       true
+  | Some
+      (Keeper_turn_driver.Cascade_exhausted
+         { reason = Keeper_types.Capacity_exhausted; _ }) ->
+      true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
   | Some (Keeper_turn_driver.Cascade_exhausted _) ->
@@ -342,6 +346,10 @@ let degraded_retry_after_recoverable_error
         phase_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Capacity_exhausted; _ }) ->
+        phase_recovery_retry Capacity_backpressure
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
         phase_recovery_retry Cascade_candidates_filtered
     | Some
@@ -383,6 +391,10 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         Some Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
+        Some Capacity_backpressure
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Capacity_exhausted; _ }) ->
         Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted

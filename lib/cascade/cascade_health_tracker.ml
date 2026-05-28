@@ -552,6 +552,26 @@ let is_in_cooldown t ~provider_key =
         false
       end)
 
+(** [is_capacity_constrained t ~provider_key] returns [true] when the
+    provider's most recent event is [Capacity_backpressure] and the
+    resulting cooldown has not yet expired.  Used for pre-admission
+    filtering: skip providers that recently signalled capacity exhaustion
+    before spending OAS body budget on a doomed attempt. *)
+let is_capacity_constrained t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> false
+    | Some state ->
+      (* DET-OK: read-only time check, same pattern as is_in_cooldown:546 *)
+      let now = Unix.gettimeofday () in
+      (* If general cooldown is still active, check if it was capacity-induced *)
+      if state.cooldown_until > now
+      then (
+        match state.events with
+        | { outcome = Capacity_backpressure; _ } :: _ -> true
+        | _ -> false)
+      else false)
+
 let check_circuit_breaker t ~provider_key =
   with_lock t (fun () ->
     match Hashtbl.find_opt t.providers provider_key with

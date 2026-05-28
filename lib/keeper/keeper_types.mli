@@ -164,6 +164,7 @@ type cascade_exhaustion_reason = Keeper_meta_contract.cascade_exhaustion_reason 
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
+  | Capacity_exhausted
   | Other_detail of string
 
 type blocker_class = Keeper_meta_contract.blocker_class =

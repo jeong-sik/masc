@@ -173,6 +173,7 @@ let cascade_reason_is_structural_attempt_timeout
   | Keeper_types.All_providers_failed
   | Keeper_types.Candidates_filtered_after_cycles
   | Keeper_types.Max_turns_exceeded
+  | Keeper_types.Capacity_exhausted
   | Keeper_types.Other_detail _ -> false
 
 let degraded_retry_bypasses_slot_phase_guard

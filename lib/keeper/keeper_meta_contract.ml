@@ -100,6 +100,13 @@ type cascade_exhaustion_reason =
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
+  | Capacity_exhausted
+    (** Typed surface for capacity-induced cascade exhaustion.
+        Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
+        through to [Other_detail message], losing auto-recovery eligibility
+        and triggering the harsher [Cascade_exhausted { retryable = false }]
+        failure policy.  This variant enables the softer
+        [Soft_fail_turn + Provider_cooldown] path. *)
   | Other_detail of string
 
 type blocker_class =
@@ -223,6 +230,8 @@ let cascade_exhaustion_summary = function
     "Cascade exhausted after a provider hit its per-call turn budget."
   | Structural_attempt_timeout _ ->
     "Cascade exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
+  | Capacity_exhausted ->
+    "Cascade exhausted; all providers reported capacity backpressure."
   | Other_detail _ ->
     "Cascade exhausted; inspect cascade attempts for the dominant root cause."
 ;;
@@ -265,6 +274,7 @@ let cascade_exhaustion_reason_to_json = function
   | Max_turns_exceeded -> `String "max_turns_exceeded"
   | Structural_attempt_timeout { detail } ->
     `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
+  | Capacity_exhausted -> `String "capacity_exhausted"
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 ;;
 
@@ -275,6 +285,7 @@ let cascade_exhaustion_reason_of_json = function
   | `String "all_providers_failed" -> Some All_providers_failed
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
   | `String "max_turns_exceeded" -> Some Max_turns_exceeded
+  | `String "capacity_exhausted" -> Some Capacity_exhausted
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
      | Some (`String "structural_attempt_timeout") ->

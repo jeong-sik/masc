@@ -202,6 +202,9 @@ let rec run
       | Some (Llm_provider.Http_client.ProviderTerminal
           { kind = Llm_provider.Http_client.Other _; _ }) ->
           Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+      | Some (Llm_provider.Http_client.ProviderFailure
+          { kind = Llm_provider.Http_client.Capacity_exhausted _; _ }) ->
+          Keeper_types.Capacity_exhausted
       | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
           let message = Cascade_fsm.to_user_message (Some err) in
           Keeper_types.Other_detail message
@@ -362,6 +365,23 @@ let rec run
           (provider_rejection :: pre_dispatch_required_tool_rejections_rev)
         ?last_capacity_source ?last_capacity_backpressure ctx rest last_err
     | None ->
+    (* Pre-admission capacity check: skip providers in capacity backpressure
+       cooldown before spending OAS body budget on a doomed attempt. *)
+    let capacity_constrained =
+      Cascade_runtime_candidate.health_keys candidate
+      |> List.exists (fun key ->
+        Cascade_health_tracker.is_capacity_constrained
+          Cascade_health_tracker.global ~provider_key:key)
+    in
+    if capacity_constrained then (
+      Log.Misc.info
+        "cascade %s: pre-admission skip provider=%s reason=capacity_constrained"
+        ctx.cascade_name
+        (Cascade_runtime_candidate.provider_label candidate);
+      run ~on_success ?resume_checkpoint ?per_provider_timeout_s
+        ~pre_dispatch_required_tool_rejections_rev
+        ?last_capacity_source ?last_capacity_backpressure ctx rest last_err)
+    else
     let tier_admission_id = Cascade_runtime_candidate.tier_id candidate in
     let health_cooldown =
       Cascade_runtime_candidate.first_health_cooldown candidate

@@ -149,6 +149,11 @@ type cascade_exhaustion_reason =
           ceiling ([max_execution_time_s]). Distinct from transport-level
           provider timeouts. This variant is accepted only from typed
           envelopes; free-form messages stay [Other_detail]. *)
+  | Capacity_exhausted
+      (** Typed surface for capacity-induced cascade exhaustion.
+          Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
+          through to [Other_detail message], losing auto-recovery eligibility
+          and triggering the harsher failure policy. *)
   | Other_detail of string
 
 type blocker_class =

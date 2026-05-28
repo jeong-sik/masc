@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3091,
+      "baseline": 3097,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -210,7 +210,7 @@
         },
         {
           "file": "lib/cascade_catalog_validator.ml",
-          "value": 9
+          "value": 10
         },
         {
           "file": "lib/cascade_decl/cascade_declarative_parser.ml",
@@ -282,7 +282,7 @@
         },
         {
           "file": "lib/cascade/cascade_config_strategy_resolve.ml",
-          "value": 4
+          "value": 3
         },
         {
           "file": "lib/cascade/cascade_declarative_adapter.ml",
@@ -310,7 +310,7 @@
         },
         {
           "file": "lib/cascade/cascade_health_tracker.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/cascade/cascade_http_probe.ml",
@@ -1098,11 +1098,11 @@
         },
         {
           "file": "lib/keeper/agent_tool_execute_runtime.ml",
-          "value": 2
+          "value": 3
         },
         {
           "file": "lib/keeper/agent_tool_execute_typed_input.ml",
-          "value": 5
+          "value": 6
         },
         {
           "file": "lib/keeper/agent_tool_filesystem_runtime.ml",
@@ -1198,7 +1198,7 @@
         },
         {
           "file": "lib/keeper/keeper_cascade_profile.ml",
-          "value": 4
+          "value": 6
         },
         {
           "file": "lib/keeper/keeper_cascade_selector.ml",
@@ -1230,7 +1230,7 @@
         },
         {
           "file": "lib/keeper/keeper_config.ml",
-          "value": 2
+          "value": 3
         },
         {
           "file": "lib/keeper/keeper_context_core_accessors.ml",
@@ -1626,6 +1626,10 @@
         },
         {
           "file": "lib/keeper/keeper_supervisor_launch.ml",
+          "value": 1
+        },
+        {
+          "file": "lib/keeper/keeper_supervisor_pause_policy.ml",
           "value": 1
         },
         {
@@ -2938,7 +2942,7 @@
         },
         {
           "file": "lib/trajectory/trajectory.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/transport_metrics.ml",

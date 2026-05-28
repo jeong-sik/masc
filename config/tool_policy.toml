@@ -150,15 +150,17 @@ email_pattern = "{name}@masc.local"
 
 # ── Presets ─────────────────────────────────────────────────────────
 
+# Minimal: base tools + search_files for read-only git operations
+# (git_status, git_log, git_diff). Gives every keeper basic repo visibility.
 [presets.minimal]
-groups = ["base"]
+groups = ["base", "search_files"]
 masc_groups = ["essential"]
 masc_tools = ["masc_tool_help"]
 
-# Social: persona keepers that live on the board + web search.
-# ~15 tools. Optimal for 9B tool selection accuracy.
+# Social: persona keepers that live on the board + web search + git read.
+# ~16 tools. Optimal for 9B tool selection accuracy.
 [presets.social]
-groups = ["base", "board_core", "coordination_core", "filesystem", "voice"]
+groups = ["base", "board_core", "coordination_core", "filesystem", "search_files", "voice"]
 masc_groups = ["essential", "coordination"]
 
 # Messaging: social + search files and library for broader interaction.

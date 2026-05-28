@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3087,
+      "baseline": 3090,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -2322,7 +2322,7 @@
         },
         {
           "file": "lib/server/server_auth.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/server/server_bootstrap_http.ml",

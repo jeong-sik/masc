@@ -341,6 +341,19 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
      quick_stat does not walk the heap, so the call cost stays
      bounded next to the request path. *)
   Gc_sampler.run ~sw ~clock ~interval:30.0;
+  (* Background fiber: flush dirty tool-usage persistence every 5 seconds.
+     Avoids per-tool-call disk I/O in the hot path. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 5.0;
+      (try Keeper_registry_tool_usage_persistence.flush_all_dirty ()
+       with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn "tool_usage flush_all_dirty failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in

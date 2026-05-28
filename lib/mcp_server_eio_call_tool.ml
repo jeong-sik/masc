@@ -345,30 +345,13 @@ let record_runtime_mcp_keeper_trajectory
   let safe_output =
     Observability_redact.redact_preview ~max_len:4000 message
   in
-  let existing_entries =
-    try
-      Trajectory.read_entries
-        ~masc_root
-        ~keeper_name:ctx.keeper_name
-        ~trace_id
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        record_runtime_mcp_trajectory_coverage_gap
-          ~masc_root
-          ~keeper_name:ctx.keeper_name
-          ~trace_id
-          ~stale_reason:"runtime_mcp_trajectory_read_failed"
-          exn;
-        []
-  in
   let turn = Option.value ~default:0 ctx.turn in
   let round =
-    existing_entries
-    |> List.fold_left
-         (fun acc (entry : Trajectory.tool_call_entry) ->
-           if entry.turn = turn then acc + 1 else acc)
-         1
+    Trajectory.next_round
+      ~masc_root
+      ~keeper_name:ctx.keeper_name
+      ~trace_id
+      ~turn
   in
   let runtime_contract =
     Keeper_runtime_contract.runtime_contract_json_from_fields
@@ -761,7 +744,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
    | Some entry ->
        Keeper_registry.record_tool_use
          ~base_path:entry.base_path entry.name ~tool_name:name ~success;
-       Keeper_registry_tool_usage_persistence.flush ~base_path:entry.base_path entry.name
+       Keeper_registry_tool_usage_persistence.mark_dirty ~base_path:entry.base_path entry.name
    | None -> ());
 
   (* #10358: classify failure mode at the dispatch boundary so

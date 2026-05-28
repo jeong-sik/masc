@@ -246,20 +246,45 @@ let root_is_initialized config =
       Sys.is_directory (masc_root_dir config) &&
       (Sys.file_exists (root_state_path config) || Sys.file_exists (legacy_root_state_path config))
 
-(** Check if current room is initialized - backend-agnostic *)
+(* Server-level cache for is_initialized — avoids 3 syscalls per request.
+   Cache key is (base_path, cluster_name) to handle multi-config scenarios. *)
+type init_cache_entry = {
+  cached_result : bool;
+  cached_at : float;
+}
+
+let initialized_cache : init_cache_entry option Atomic.t = Atomic.make None
+let initialized_cache_ttl = 1.0  (* seconds *)
+
+(** Check if current room is initialized - backend-agnostic.
+    Cached with 1-second TTL to avoid 3 filesystem syscalls per request. *)
 let is_initialized config =
-  match config.backend with
-  | Memory _ ->
-      let state_key =
-        match key_of_path config (state_path config) with
-        | Some k -> k
-        | None -> "state.json"
+  let now = Time_compat.now () in
+  match Atomic.get initialized_cache with
+  | Some entry when now -. entry.cached_at < initialized_cache_ttl ->
+      entry.cached_result
+  | _ ->
+      let result =
+        match config.backend with
+        | Memory _ ->
+            let state_key =
+              match key_of_path config (state_path config) with
+              | Some k -> k
+              | None -> "state.json"
+            in
+            backend_exists config ~key:state_key
+        | FileSystem _ ->
+            Sys.file_exists (masc_dir config) &&
+            Sys.is_directory (masc_dir config) &&
+            Sys.file_exists (state_path config)
       in
-      backend_exists config ~key:state_key
-  | FileSystem _ ->
-      Sys.file_exists (masc_dir config) &&
-      Sys.is_directory (masc_dir config) &&
-      Sys.file_exists (state_path config)
+      Atomic.set initialized_cache (Some { cached_result = result; cached_at = now });
+      result
+
+(** Invalidate the is_initialized cache. Call this when room state
+    changes (e.g., after init, reset, or cleanup operations). *)
+let invalidate_initialized_cache () =
+  Atomic.set initialized_cache None
 
 (* ============================================ *)
 (* Validation helpers                           *)

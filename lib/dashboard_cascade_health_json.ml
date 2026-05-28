@@ -159,12 +159,14 @@ let health_json_compute ?(window_minutes = 30) ?(base_path : string option) () =
    Offload onto a worker domain so concurrent fibers stay served. TTL
    extended 10→30s — provider perf rollups move on minute scale, sub-10s
    freshness isn't actionable. *)
+let health_cache_ttl_s = 30.0
+
 let health_json ?(window_minutes = 30) ?(base_path : string option) () =
   let key =
     Printf.sprintf "cascade:health:%d:%s" window_minutes
       (Option.value ~default:"" base_path)
   in
-  Dashboard_cache.get_or_compute key ~ttl:30.0 (fun () ->
+  Dashboard_cache.get_or_compute key ~ttl:health_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       health_json_compute ~window_minutes ?base_path ()))
 ;;

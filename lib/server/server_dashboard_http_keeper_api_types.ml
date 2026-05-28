@@ -205,18 +205,7 @@ let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
         json_string_opt (decision_string "exception_kind") );
     ]
 
-let string_contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop idx =
-      if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
+let string_contains_substring = String_util.contains_substring
 
 let runtime_trace_keeps_provider_attempt_provenance_key = function
   | "model_source"

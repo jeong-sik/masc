@@ -28,7 +28,7 @@
         },
         {
           "file": "lib/server/server_routes_http_routes_dashboard.ml",
-          "value": 1072
+          "value": 1078
         },
         {
           "file": "lib/types/types_core.ml",
@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3087,
+      "baseline": 3090,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -2322,7 +2322,7 @@
         },
         {
           "file": "lib/server/server_auth.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/server/server_bootstrap_http.ml",
@@ -2494,7 +2494,7 @@
         },
         {
           "file": "lib/server/server_mcp_transport_http_headers.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/server/server_mcp_transport_http_protocol.ml",
@@ -2602,7 +2602,7 @@
         },
         {
           "file": "lib/server/server_routes_http_runtime.ml",
-          "value": 6
+          "value": 7
         },
         {
           "file": "lib/server/server_routes_http_sidecar_paths.ml",
@@ -3129,6 +3129,10 @@
           "value": 1
         },
         {
+          "file": "lib/keeper/agent_tool_execute_path.ml",
+          "value": 2
+        },
+        {
           "file": "lib/keeper/agent_tool_shared_runtime.ml",
           "value": 2
         },
@@ -3270,7 +3274,7 @@
         },
         {
           "file": "lib/tool_inline_dispatch_extra.ml",
-          "value": 4
+          "value": 2
         },
         {
           "file": "lib/tool_registry.ml",

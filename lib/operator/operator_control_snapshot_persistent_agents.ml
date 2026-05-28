@@ -87,6 +87,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
         | Some names -> names
         | None -> Keeper_types.persistent_agent_names config
       in
+      let agent_status_cache_ttl_s = 2.0 in
       List.filter_map
         (fun name ->
            match Keeper_types.read_meta config name with
@@ -94,7 +95,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
            | Ok (Some meta) ->
              let agent_json =
                let cache_key = "kas:" ^ meta.agent_name in
-               Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+               Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
                  Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name)
              in
              let agent_status =

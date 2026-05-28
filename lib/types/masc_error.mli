@@ -35,11 +35,16 @@ module Agent_error : sig
 end
 
 module Auth_error : sig
+  type unauthorized_reason =
+    | Actor_mismatch
+    | Missing_token
+    | Generic
   type t =
-    | Unauthorized of string
+    | Unauthorized of { reason: unauthorized_reason; message: string }
     | Forbidden of { agent: string; action: string }
     | TokenExpired of string
     | InvalidToken of string
+  val unauthorized_reason_to_string : unauthorized_reason -> string
   val to_string : t -> string
 end
 

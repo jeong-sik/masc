@@ -521,20 +521,20 @@ let handle_dashboard_ack_notification ?mcp_session_id params =
 
 let contains_casefold = Mcp_server_eio_call_tool.contains_casefold
 
-let tool_call_outcome (json : Yojson.Safe.t) =
+let tool_call_outcome (json : Yojson.Safe.t) : Tool_result.tool_call_outcome =
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "error" fields with
-     | Some _ -> "error"
+     | Some _ -> Tool_result.Error
      | None ->
        (match List.assoc_opt "result" fields with
         | Some (`Assoc result_fields) ->
           (match List.assoc_opt "isError" result_fields with
-           | Some (`Bool true) -> "error"
-           | Some (`Bool false) -> "ok"
-           | _ -> "unknown")
-        | _ -> "unknown"))
-  | _ -> "unknown"
+           | Some (`Bool true) -> Tool_result.Error
+           | Some (`Bool false) -> Tool_result.Ok
+           | _ -> Tool_result.Unknown)
+        | _ -> Tool_result.Unknown))
+  | _ -> Tool_result.Unknown
 ;;
 
 let jsonrpc_id_label = function
@@ -732,8 +732,9 @@ let handle_request
                             params
                         in
                         let outcome = tool_call_outcome result in
+                        let outcome_s = Tool_result.string_of_tool_call_outcome outcome in
                         Log.Mcp.emit
-                          Log.Info
+                          (Tool_result.log_level_of_tool_call_outcome outcome)
                           ~details:
                             (mcp_tool_call_log_details
                                ~phase:"completed"
@@ -741,12 +742,12 @@ let handle_request
                                ~tool_name:name
                                ~id
                                ?mcp_session_id
-                               ~outcome
+                               ~outcome:outcome_s
                                ())
                           (Printf.sprintf
                              "tools/call completed: %s (outcome=%s)"
                              name
-                             outcome);
+                             outcome_s);
                         result)
                     with
                     | Yojson.Safe.Util.Type_error (_, _) ->

@@ -27,6 +27,8 @@
     Pairs with `Server_dashboard_http_core_operator_digest_http`
     (#17389) for symmetric snapshot+digest handler extraction. *)
 
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+
 open Server_utils
 open Server_auth
 include Server_dashboard_http_cache
@@ -99,7 +101,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     cached_surface_or_first_success_json
       Core_operator.operator_snapshot_cache
       ~cache_key:default_cache_key
-      ~ttl:5.0
+      ~ttl:standard_cache_ttl_s
       ~clock
       ~timeout_sec:Core_cache.dashboard_request_timeout_s
       compute_default_summary
@@ -199,7 +201,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
        [Coord_hooks.on_task_mutation_fn] path. *)
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
-      ~ttl:5.0
+      ~ttl:standard_cache_ttl_s
       ~clock
       ~timeout_sec:Core_cache.dashboard_request_timeout_s
       compute

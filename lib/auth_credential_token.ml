@@ -255,10 +255,15 @@ let missing_credential_error config ~agent_name ~token : masc_error =
     record_bearer_token_mismatch ~expected_agent:agent_name ~actual_agent:owner.agent_name;
     Auth
       (Auth_error.Unauthorized
-         (bearer_token_owner_mismatch_message
-            ~requested_agent:agent_name
-            ~token_owner:owner.agent_name))
-  | _ -> Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name))
+         { reason = Actor_mismatch
+         ; message = bearer_token_owner_mismatch_message
+              ~requested_agent:agent_name
+              ~token_owner:owner.agent_name
+         })
+  | _ -> Auth (Auth_error.Unauthorized
+      { reason = Missing_token
+      ; message = "No credential found for " ^ agent_name
+      })
 ;;
 
 (** Verify a token.
@@ -285,9 +290,11 @@ let verify_token_owner_alias config ~agent_name ~token =
     Error
       (Auth
          (Auth_error.Unauthorized
-            (bearer_token_owner_mismatch_message
-               ~requested_agent:agent_name
-               ~token_owner:owner.agent_name)))
+            { reason = Actor_mismatch
+            ; message = bearer_token_owner_mismatch_message
+                 ~requested_agent:agent_name
+                 ~token_owner:owner.agent_name
+            }))
   | Error e -> Error e
 ;;
 

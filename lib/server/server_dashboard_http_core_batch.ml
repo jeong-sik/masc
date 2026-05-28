@@ -20,6 +20,16 @@ open Masc_domain
 include Dashboard_http_monitoring
 include Dashboard_http_keeper
 
+(* Monitoring alert thresholds for proactive refresh health display.
+   Fallback ratio = proportion of requests falling back to stale cache.
+   Similarity ratio = how close stale data is to fresh (1.0 = identical).
+   Toast cooldown = minimum seconds between repeated alert toasts. *)
+let proactive_fallback_warn = 0.20
+let proactive_fallback_bad = 0.40
+let proactive_similarity_warn = 0.90
+let proactive_similarity_bad = 0.97
+let alert_toast_cooldown_sec = 300
+
 let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
   let room_state = Coord.read_state config in
   let tempo = Tempo.get_tempo config in
@@ -32,11 +42,6 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
   let governance_monitor_json, governance_feed_ok =
     governance_monitoring_json ~now_ts ~base_path:config.base_path
   in
-  let proactive_fallback_warn = 0.20 in
-  let proactive_fallback_bad = 0.40 in
-  let proactive_similarity_warn = 0.90 in
-  let proactive_similarity_bad = 0.97 in
-  let alert_toast_cooldown_sec = 300 in
   let cluster = Env_config_core.cluster_name () in
   let status_json =
     `Assoc

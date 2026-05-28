@@ -4,6 +4,12 @@
 
 open Keeper_types
 
+(* Agent staleness threshold — 2 minutes. An agent that hasn't sent a
+   signal within this window is considered non-live. Used for live-signal
+   detection, live-work detection, startup-vs-never-started classification,
+   and zombie/stale assessment. *)
+let agent_staleness_threshold_s = 120.0
+
 let active_model_of_meta (m : keeper_meta) : string =
   let _ = m in
   ""
@@ -139,13 +145,13 @@ let agent_last_seen_ago_s agent_status =
 let agent_runtime_has_live_signal agent_status =
   match agent_status_text agent_status with
   | "active" | "busy" | "listening" | "idle" ->
-      agent_last_seen_ago_s agent_status <= 120.0
+      agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
   | _ -> false
 
 let agent_runtime_has_live_work agent_status =
   match agent_status_text agent_status with
   | "active" | "busy" | "listening" ->
-      agent_last_seen_ago_s agent_status <= 120.0
+      agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
   | _ -> false
 
 let string_contains_ci haystack needle =
@@ -282,7 +288,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in
-    if keeper_age_s <= 120.0 then Some "startup" else Some "never_started"
+    if keeper_age_s <= agent_staleness_threshold_s then Some "startup" else Some "never_started"
   else if quiet_active then
     Some "quiet_hours"
   else
@@ -339,7 +345,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
   let is_zombie = json_bool "is_zombie" agent_status false in
-  let stale_threshold_s = 120.0 in
+  let stale_threshold_s = agent_staleness_threshold_s in
   let last_turn_ago_s =
     if meta.runtime.usage.last_turn_ts <= 0.0 then max_float
     else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)

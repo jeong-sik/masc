@@ -234,9 +234,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       | Ok () -> Ok ()
       | Error msg ->
           let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
+            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
           in
           let headers =
             Httpun.Headers.of_list
@@ -252,9 +250,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       | Ok () -> Ok ()
       | Error msg ->
           let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
+            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
           in
           let headers =
             Httpun.Headers.of_list
@@ -285,9 +281,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         | Ok decision -> Ok decision
         | Error (Server_mcp_request_context.Session_required msg) ->
             let body =
-              Printf.sprintf
-                {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-                (Yojson.Safe.to_string (`String msg))
+              Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
             in
             let headers =
               Httpun.Headers.of_list
@@ -302,9 +296,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         | Error (Server_mcp_request_context.Unknown_session msg) ->
             let new_session_id = Mcp_session.generate () in
             let body =
-              Printf.sprintf
-                {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-                (Yojson.Safe.to_string (`String msg))
+              Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
             in
             let headers =
               Httpun.Headers.of_list
@@ -325,7 +317,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                     ( "error",
                       `Assoc
                         [
-                          ("code", `Int (-32600));
+                          ("code", `Int (Mcp_error_code.to_wire_code Invalid_request));
                           ("message", `String msg);
                         ] );
                   ])
@@ -547,9 +539,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
       match validate_protocol_version_continuity ~session_id request with
       | Error msg ->
           let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
+            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
           in
           let headers =
             Httpun.Headers.of_list
@@ -724,9 +714,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               match validate_protocol_version_continuity ~session_id request with
               | Error msg ->
                   let body =
-                    Printf.sprintf
-                      {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-                      (Yojson.Safe.to_string (`String msg))
+                    Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
                   in
                   let protocol_version =
                     get_protocol_version_for_session ~session_id request

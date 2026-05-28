@@ -197,7 +197,7 @@ let is_mcp_like_path path =
     Caller should short-circuit further handling in that case. *)
 let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd =
   if is_mcp_like && not (validate_origin request) then begin
-    let body = json_rpc_error (-32600) "Invalid origin" in
+    let body = json_rpc_error Masc_mcp.Mcp_error_code.Invalid_request "Invalid origin" in
     let headers = Httpun.Headers.of_list (
       ("content-length", string_of_int (String.length body))
       :: json_headers "-" protocol_version origin
@@ -208,7 +208,7 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
   end
   else if is_mcp_like && request.Httpun.Request.meth <> `OPTIONS &&
           not (is_valid_protocol_version protocol_version) then begin
-    let body = json_rpc_error (-32600) "Unsupported protocol version" in
+    let body = json_rpc_error Masc_mcp.Mcp_error_code.Invalid_request "Unsupported protocol version" in
     let headers = Httpun.Headers.of_list (
       ("content-length", string_of_int (String.length body))
       :: json_headers "-" protocol_version origin

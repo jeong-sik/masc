@@ -67,7 +67,8 @@ let test_auth_token_expired_retryable () =
 let test_auth_other_non_retryable () =
   assert (
     not
-      (E.is_retryable (E.Auth (E.Auth_error.Unauthorized "x"))));
+      (E.is_retryable (E.Auth (E.Auth_error.Unauthorized
+        { reason = Generic; message = "x" }))));
   assert (
     not
       (E.is_retryable

@@ -147,7 +147,10 @@ let resolve_agent_name_for_auth_raw ~base_path request ~token :
        | None ->
            Error
              (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                "Internal keeper auth requires x-masc-keeper-name header.")))
+                { reason = Missing_token
+                ; message = "Internal keeper auth requires x-masc-keeper-name header."
+                })))
+
   | Some t -> (
       match Auth.resolve_agent_from_token base_path ~token:t with
       | Ok agent_name -> Ok (Some agent_name)
@@ -448,8 +451,10 @@ let ensure_same_origin_browser_request request :
     if allow_anonymous_mutations then Ok ()
     else
       Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-        "Authentication required: provide a bearer token or Origin header. \
-         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."))
+        { reason = Missing_token
+        ; message = "Authentication required: provide a bearer token or Origin header. \
+                     Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."
+        }))
   | Some origin -> (
       match host_port_scheme_of_origin origin, host_port_of_request request with
       | Some (origin_host, origin_port, scheme),
@@ -734,7 +739,8 @@ let authorize_permission_request ~base_path ~permission request :
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   match ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg with
-  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg))
+  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+      { reason = Generic; message = msg }))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -746,7 +752,9 @@ let authorize_permission_request ~base_path ~permission request :
           then
             Error
               (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
+                 { reason = Missing_token
+                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"
+                 }))
           else
             Auth.check_permission base_path ~agent_name ~token ~permission)
 
@@ -766,7 +774,8 @@ let authorize_tool_request ~base_path ~tool_name request :
       (match ensure_strict_http_token_auth
                ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
        with
-  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg))
+  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+      { reason = Generic; message = msg }))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -778,7 +787,9 @@ let authorize_tool_request ~base_path ~tool_name request :
           then
             Error
               (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
+                 { reason = Missing_token
+                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"
+                 }))
           else
             Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name))
 
@@ -788,17 +799,23 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
   if not auth_cfg.enabled then
     Error
       (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-         "HTTP mutation requires room auth enabled with require_token=true."))
+         { reason = Missing_token
+         ; message = "HTTP mutation requires room auth enabled with require_token=true."
+         }))
   else if not auth_cfg.require_token then
     Error
       (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-         "HTTP mutation requires bearer token auth (require_token=true)."))
+         { reason = Missing_token
+         ; message = "HTTP mutation requires bearer token auth (require_token=true)."
+         }))
   else
     match auth_token_from_request request with
     | None ->
         Error
           (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-             "Authentication required. Use 'Authorization: Bearer <token>' header."))
+             { reason = Missing_token
+             ; message = "Authentication required. Use 'Authorization: Bearer <token>' header."
+             }))
     | Some token -> (
         match Auth.find_credential_by_token base_path ~token with
         | Error err -> Error err

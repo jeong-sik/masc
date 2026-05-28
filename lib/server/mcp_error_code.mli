@@ -78,5 +78,10 @@ val all : t list
     [Quiet] (reason = ["<exemplar>"], recovered = false). Used by
     {!test/test_mcp_error_code.ml} to assert wire-code uniqueness. *)
 
+val jsonrpc_error_body : t -> message:string -> string
+(** [jsonrpc_error_body t ~message] returns a complete JSON-RPC 2.0 error
+    response string with [id:null].  Replaces scattered [Printf.sprintf]
+    templates that baked raw integer literals into JSON bodies. *)
+
 val pp : Format.formatter -> t -> unit
 (** Pretty-printer for test failures and operator diagnostics. *)

@@ -5,6 +5,8 @@
 
 module Http = Http_server_eio
 
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+
 (* Duplicated locally to avoid sibling -> parent cycle. The parent file
    keeps its own copy because three sites there call it; both copies
    are identical 4-line helpers. *)
@@ -79,7 +81,7 @@ let handle_dashboard_task_history state req reqd =
         state.Mcp_server.room_config.base_path task_id limit
     in
     let json =
-      Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+      Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
         Domain_pool_ref.submit_io_or_inline (fun () ->
           Tool_task.task_history_events_json state.Mcp_server.room_config
             ~task_id ~limit))

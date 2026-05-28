@@ -7,6 +7,8 @@ include Server_dashboard_http_namespace_truth
 open Masc_domain
 open Server_utils
 
+let board_governance_cache_ttl_s = Server_dashboard_http_core_cache.board_governance_cache_ttl_s
+
 (* Wire task mutation hook: invalidate execution cache on any task
    add/transition so the dashboard serves fresh backlog data. *)
 let () = Atomic.set Coord_hooks.on_task_mutation_fn invalidate_execution_cache
@@ -55,7 +57,7 @@ let dashboard_board_json
       (Option.value ~default:"-" voter)
       blind_votes
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s (fun () ->
     (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
        fleets.  The compute below scans the post store, fetches the
        karma map, and per-post enriches with vote + contributor
@@ -181,7 +183,7 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let cache_key =
     Printf.sprintf "governance:%s;%d;%d" base_path limit offset
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter))
 ;;
@@ -286,7 +288,7 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let key =
     Printf.sprintf "dashboard.proof:%s;%d;%d" config.Coord.base_path limit recent
   in
-  Dashboard_cache.get_or_compute key ~ttl:10.0 (fun () ->
+  Dashboard_cache.get_or_compute key ~ttl:board_governance_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       dashboard_proof_compute ~config ~limit ~recent ()))
 ;;

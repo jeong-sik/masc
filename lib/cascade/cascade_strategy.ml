@@ -175,13 +175,24 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
   | Priority_tier ->
     priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
 
+(* p50 latency band thresholds (milliseconds).  Each band maps to a
+   latency_score multiplier: <=instant → 1.0, <=fast → 0.8,
+   <=moderate → 0.6, <=slow → 0.4, <=degraded → 0.2, else → 0.1.
+   Overlaps with p95 bands in {!Cascade_health_tracker} but p50
+   tolerances are tighter (median vs tail). *)
+let p50_latency_instant_ms = 1000.0
+let p50_latency_fast_ms = 3000.0
+let p50_latency_moderate_ms = 5000.0
+let p50_latency_slow_ms = 15000.0
+let p50_latency_degraded_ms = 30000.0
+
 let latency_score_of_p50_ms = function
   | ms when (not (Float.is_finite ms)) || ms <= 0.0 -> 1.0
-  | ms when ms <= 1000.0 -> 1.0
-  | ms when ms <= 3000.0 -> 0.8
-  | ms when ms <= 5000.0 -> 0.6
-  | ms when ms <= 15000.0 -> 0.4
-  | ms when ms <= 30000.0 -> 0.2
+  | ms when ms <= p50_latency_instant_ms -> 1.0
+  | ms when ms <= p50_latency_fast_ms -> 0.8
+  | ms when ms <= p50_latency_moderate_ms -> 0.6
+  | ms when ms <= p50_latency_slow_ms -> 0.4
+  | ms when ms <= p50_latency_degraded_ms -> 0.2
   | _ -> 0.1
 
 let latency_score_for_provider health ~provider_key =

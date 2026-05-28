@@ -4,6 +4,16 @@
 open Server_utils
 open Server_dashboard_http_core
 
+let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
+let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
+let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
+
+(* Transport health probe timeout — env-overridable with sane bounds.
+   SSOT: env_config_snapshot.ml also registers the same env var. *)
+let transport_health_timeout_default_s = 8.0
+let transport_health_timeout_min_s = 3.0
+let transport_health_timeout_max_s = 30.0
+
 (* Routed through Env_config_runtime.Dashboard so operators can raise
    the ceiling on slow-disk deployments without a rebuild. The outer
    wrapper at [server_runtime_bootstrap.ml] uses the matching
@@ -27,11 +37,11 @@ let warm_shell_cache (state : Mcp_server.server_state) =
          | Some clock ->
            Dashboard_cache.get_or_compute_with_timeout
              cache_key
-             ~ttl:15.0
+             ~ttl:shell_surface_cache_ttl_s
              ~clock
              ~timeout_sec:shell_prewarm_timeout_s
              compute
-         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:shell_surface_cache_ttl_s compute
        in
        (try
           let light_result = cache_shell_payload ~light:true in
@@ -334,7 +344,7 @@ let with_execution_metadata ~config ?cache_key ~query json =
     ~scope:"dashboard_execution"
     ~producer:"Dashboard_execution.json"
     ~store_kind:"process_cache"
-    ~ttl_s:120.0
+    ~ttl_s:deep_surface_cache_ttl_s
     ~timeout_s:Env_config_runtime.Dashboard.execution_timeout_sec
     ~background_refresh_interval_s:60.0
     ~query
@@ -353,7 +363,7 @@ let with_transport_health_metadata ~config ~timeout_s json =
     ~scope:"dashboard_transport_health"
     ~producer:"Transport_metrics.transport_health_json"
     ~store_kind:"process_cache"
-    ~ttl_s:30.0
+    ~ttl_s:config_cache_ttl_s
     ~timeout_s
     ~background_refresh_interval_s:30.0
     ~query:(transport_health_query_json ())
@@ -650,9 +660,9 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:8.0
-      ~min_v:3.0
-      ~max_v:30.0
+      ~default:transport_health_timeout_default_s
+      ~min_v:transport_health_timeout_min_s
+      ~max_v:transport_health_timeout_max_s
   in
   let compute () =
     mark_cached_surface_attempt transport_health_cache;
@@ -736,7 +746,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     cached_surface_or_first_success_json
       execution_cache
       ~cache_key:"execution:default:light"
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ~light:true)
@@ -756,7 +766,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ?actor ?fixture ~light)
@@ -769,7 +779,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~surface:"/api/v1/dashboard/execution-trust"
       ~source:"execution_receipt"
       ~cache_key:"execution-trust:default"
-      ~ttl_s:15.0
+      ~ttl_s:shell_surface_cache_ttl_s
       json
   in
   let compute () =
@@ -789,11 +799,11 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   | Some clock ->
     Dashboard_cache.get_or_compute_with_timeout
       "execution-trust:default"
-      ~ttl:15.0
+      ~ttl:shell_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
       compute
-  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:15.0 compute)
+  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:shell_surface_cache_ttl_s compute)
   |> attach_surface_envelope
 ;;
 
@@ -810,9 +820,9 @@ let dashboard_transport_health_http_json ~state =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:8.0
-      ~min_v:3.0
-      ~max_v:30.0
+      ~default:transport_health_timeout_default_s
+      ~min_v:transport_health_timeout_min_s
+      ~max_v:transport_health_timeout_max_s
   in
   let json = cached_surface_json transport_health_cache in
   extend_projection_diagnostics

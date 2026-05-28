@@ -943,7 +943,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     String_util.utf8_safe ~max_bytes:83 ~suffix:"..." message |> String_util.to_string
   in
   let preview = String.map (function '\n' -> ' ' | c -> c) preview in
-  Log.Mcp.emit Log.Info
+  let outcome = if success then Tool_result.Ok else Tool_result.Error in
+  Log.Mcp.emit (Tool_result.log_level_of_tool_call_outcome outcome)
     ~details:
       (`Assoc
         [
@@ -953,7 +954,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
           ("request_id", `String jsonrpc_id_str);
           ("session_id", mcp_session_detail);
           ("agent_name", `String agent_name);
-          ("outcome", `String (if success then "ok" else "error"));
+          ("outcome", `String (Tool_result.string_of_tool_call_outcome outcome));
           ("success", `Bool success);
           ("duration_ms", `Int duration_ms);
           ("attempts", `Int attempts);

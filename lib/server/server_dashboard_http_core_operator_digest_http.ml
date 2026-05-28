@@ -25,6 +25,8 @@
     Pure helper move (no callback injection). All references reach
     existing siblings or top-level libraries. *)
 
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+
 open Server_utils
 open Server_auth
 include Server_dashboard_http_cache
@@ -151,7 +153,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
     Ok
       (Dashboard_cache.get_or_compute_with_timeout
          cache_key
-         ~ttl:5.0
+         ~ttl:standard_cache_ttl_s
          ~clock
          ~timeout_sec:Core_cache.dashboard_request_timeout_s
          compute

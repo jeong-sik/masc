@@ -205,7 +205,8 @@ let ensure_board_post_author ~agent_name arguments =
     ~agent_name arguments
 
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name ~start_time =
-  ignore (config, state, sw, clock);
+  (* fire-and-forget: unused params kept for interface contract with callers *)
+  ignore (config, state, sw, clock, start_time);
   let arguments =
     match name with
     | "masc_board_post" ->
@@ -225,23 +226,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           arguments
     | _ -> arguments
   in
-  let arg_get_string key default =
-    Safe_ops.json_string ~default key arguments in
-  let arg_get_int key default =
-    Safe_ops.json_int ~default key arguments in
-  let arg_get_float key default =
-    Safe_ops.json_float ~default key arguments in
-  let arg_get_bool key default =
-    Safe_ops.json_bool ~default key arguments in
-  let arg_get_string_list key =
-    Safe_ops.json_string_list key arguments in
-  let arg_get_string_opt key =
-    match Safe_ops.json_string_opt key arguments with
-    | Some "" -> None
-    | other -> other in
-  let arg_get_float_opt key =
-    Safe_ops.json_float_opt key arguments in
-  ignore (arg_get_string, arg_get_int, arg_get_float, arg_get_bool, arg_get_string_list, arg_get_string_opt, arg_get_float_opt);
   match (name : string) with
   | "masc_board_post" ->
       let result_tr = Tool_board.handle_tool name arguments in

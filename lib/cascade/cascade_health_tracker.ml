@@ -706,15 +706,24 @@ let take_first_n n lst =
     with {!build_info_locked} which feeds [avg_cost_locked] through
     [cost_score_of_avg]; the dashboard's per-provider cost banding is
     therefore wired end-to-end (no longer a stub). *)
+
+(* p95 latency band thresholds (milliseconds).  Each band maps to a
+   speed_score multiplier: <=excellent → 1.0, <=good → 0.8,
+   <=fair → 0.6, <=poor → 0.4, else → 0.2. *)
+let p95_latency_excellent_ms = 5000.0
+let p95_latency_good_ms = 15000.0
+let p95_latency_fair_ms = 30000.0
+let p95_latency_poor_ms = 60000.0
+
 let compute_health_score ~success_rate ~p95_latency_ms_opt ~cost_score_opt =
   let speed_score =
     match p95_latency_ms_opt with
     | None -> 1.0
     | Some p95 ->
-        if p95 <= 5000.0 then 1.0
-        else if p95 <= 15000.0 then 0.8
-        else if p95 <= 30000.0 then 0.6
-        else if p95 <= 60000.0 then 0.4
+        if p95 <= p95_latency_excellent_ms then 1.0
+        else if p95 <= p95_latency_good_ms then 0.8
+        else if p95 <= p95_latency_fair_ms then 0.6
+        else if p95 <= p95_latency_poor_ms then 0.4
         else 0.2
   in
   let cost_score = match cost_score_opt with None -> 1.0 | Some s -> s in

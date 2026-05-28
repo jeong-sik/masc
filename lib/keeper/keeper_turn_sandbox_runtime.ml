@@ -299,7 +299,11 @@ let start_container (t : t) ~(timeout_sec : float) =
                List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) binding.env
              in
              mounts, envs
-           | Error _ -> [], []
+           | Error err ->
+             Log.Keeper.warn
+               "%s: credential resolution failed — container will start without git/gh credentials: %s"
+               t.meta.name (Keeper_credential_provider.pp_error err);
+             [], []
          in
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()

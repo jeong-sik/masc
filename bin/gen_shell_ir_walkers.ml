@@ -2179,13 +2179,15 @@ parse false false [] args|}
     }
   ; { name = "Sed"
     ; anon_pattern = "Sed _"
-    ; bind_pattern = "Sed { expression; file; in_place }"
+    ; bind_pattern = "Sed { expression; file; in_place; extended_regex; suppress_output }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
         (if in_place then [ "-i" ] else [])
+        @ (if extended_regex then [ "-E" ] else [])
+        @ (if suppress_output then [ "-n" ] else [])
         @ [ expression; file ]
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Sed
@@ -2199,33 +2201,34 @@ parse false false [] args|}
     ; parse_body =
         Some
           {|
-let rec parse in_place expr file = function
+let rec parse in_place ext_re suppress expr file = function
   | [] ->
     (match expr, file with
      | Some e, Some f ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place; extended_regex = ext_re; suppress_output = suppress }))
      | _ -> None)
   | "-i" :: rest ->
     (* macOS sed -i '' takes an empty suffix; GNU sed -i has no suffix.
        Only skip the next token if it's an explicit empty string (macOS style).
        Non-empty non-flag tokens are the expression, not a suffix. *)
     (match rest with
-     | "" :: rest' -> parse true expr file rest'   (* -i '' — macOS empty suffix *)
-     | _ -> parse true expr file rest)              (* -i at end or GNU style *)
-  | "-e" :: e :: rest -> parse in_place (Some e) file rest  (* explicit expression *)
-  | "-n" :: rest -> parse in_place expr file rest   (* suppress output — boolean *)
+     | "" :: rest' -> parse true ext_re suppress expr file rest'   (* -i '' — macOS empty suffix *)
+     | _ -> parse true ext_re suppress expr file rest)              (* -i at end or GNU style *)
+  | "-e" :: e :: rest -> parse in_place ext_re suppress (Some e) file rest  (* explicit expression *)
+  | "-E" :: rest | "--regexp-extended" :: rest -> parse in_place true suppress expr file rest
+  | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest -> parse in_place ext_re true expr file rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
-    then parse in_place expr file rest
+    then parse in_place ext_re suppress expr file rest
     else (
       match expr with
-      | None -> parse in_place (Some arg) file rest
+      | None -> parse in_place ext_re suppress (Some arg) file rest
       | Some _ ->
         match file with
-        | None -> parse in_place expr (Some arg) rest
+        | None -> parse in_place ext_re suppress expr (Some arg) rest
         | Some _ -> None)
 in
-parse false None None args|}
+parse false false false None None args|}
     }
   ; { name = "Rsync"
     ; anon_pattern = "Rsync _"

@@ -331,8 +331,12 @@ let of_command = function
       @ (if brief then [ arg "--brief" ] else [])
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Diff, flag_args @ [ arg file1; arg file2 ]) ]
-  | Shell_ir_typed.W (Sed { expression; file; in_place }) ->
-    let flag_args = if in_place then [ arg "-i" ] else [] in
+  | Shell_ir_typed.W (Sed { expression; file; in_place; extended_regex; suppress_output }) ->
+    let flag_args =
+      (if in_place then [ arg "-i" ] else [])
+      @ (if extended_regex then [ arg "-E" ] else [])
+      @ (if suppress_output then [ arg "-n" ] else [])
+    in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Sed, flag_args @ [ arg "-e"; arg expression; arg file ]) ]
   | Shell_ir_typed.W (Rsync { source; dest; archive; delete; dry_run; compress; flags }) ->
     let typed_flags =

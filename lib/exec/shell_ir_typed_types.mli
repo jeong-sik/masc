@@ -260,6 +260,8 @@ and (_, _, _, _) command =
       { expression : string
       ; file : string
       ; in_place : bool
+      ; extended_regex : bool
+      ; suppress_output : bool
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Rsync :

@@ -650,28 +650,74 @@ let test_combined_value_flag_round_trip () =
 
 (** Verify that [sed -i / -e / -n] correctly parses fields. *)
 let test_sed_flags () =
-  let check_sed cmd ~expected_expr ~expected_file ~expected_in_place =
+  let check_sed cmd ~expected_expr ~expected_file ~expected_in_place ~expected_ext_re ~expected_suppress =
     let simple = parse_simple cmd in
     let typed = Shell_ir_typed.of_simple simple in
     match typed with
-    | Shell_ir_typed.W (Shell_ir_typed.Sed { expression; file; in_place }) ->
+    | Shell_ir_typed.W (Shell_ir_typed.Sed { expression; file; in_place; extended_regex; suppress_output }) ->
       check bool (Printf.sprintf "\"%s\" → in_place" cmd) expected_in_place in_place;
+      check bool (Printf.sprintf "\"%s\" → extended_regex" cmd) expected_ext_re extended_regex;
+      check bool (Printf.sprintf "\"%s\" → suppress_output" cmd) expected_suppress suppress_output;
       check string (Printf.sprintf "\"%s\" → expression" cmd) expected_expr expression;
       check string (Printf.sprintf "\"%s\" → file" cmd) expected_file file
     | _ -> failf "expected Sed for: %s" cmd
   in
   (* basic *)
   check_sed "sed s/foo/bar/g file.txt"
-    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false;
+    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false
+    ~expected_ext_re:false ~expected_suppress:false;
   (* -i without suffix *)
   check_sed "sed -i s/foo/bar/g file.txt"
-    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:true;
+    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:true
+    ~expected_ext_re:false ~expected_suppress:false;
   (* -e explicit expression *)
   check_sed "sed -e s/foo/bar/g file.txt"
-    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false;
+    ~expected_expr:"s/foo/bar/g" ~expected_file:"file.txt" ~expected_in_place:false
+    ~expected_ext_re:false ~expected_suppress:false;
   (* -n suppress output *)
   check_sed "sed -n '1,5p' file.txt"
     ~expected_expr:"1,5p" ~expected_file:"file.txt" ~expected_in_place:false
+    ~expected_ext_re:false ~expected_suppress:true
+;;
+
+(** Verify that [sed -E / --regexp-extended / -n / --quiet / --silent / -En] parse correctly. *)
+let test_sed_extended () =
+  let check_sed cmd ~expected_expr ~expected_file ~expected_in_place ~expected_ext_re ~expected_suppress =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Sed { expression; file; in_place; extended_regex; suppress_output }) ->
+      check bool (Printf.sprintf "\"%s\" → in_place" cmd) expected_in_place in_place;
+      check bool (Printf.sprintf "\"%s\" → extended_regex" cmd) expected_ext_re extended_regex;
+      check bool (Printf.sprintf "\"%s\" → suppress_output" cmd) expected_suppress suppress_output;
+      check string (Printf.sprintf "\"%s\" → expression" cmd) expected_expr expression;
+      check string (Printf.sprintf "\"%s\" → file" cmd) expected_file file
+    | _ -> failf "expected Sed for: %s" cmd
+  in
+  (* -E extended regex *)
+  check_sed "sed -E 's/(foo)/bar/' file.txt"
+    ~expected_expr:"s/(foo)/bar/" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:true ~expected_suppress:false;
+  (* --regexp-extended long form *)
+  check_sed "sed --regexp-extended 's/(foo)/bar/' file.txt"
+    ~expected_expr:"s/(foo)/bar/" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:true ~expected_suppress:false;
+  (* --quiet alias for -n *)
+  check_sed "sed --quiet '1,5p' file.txt"
+    ~expected_expr:"1,5p" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:false ~expected_suppress:true;
+  (* --silent alias for -n *)
+  check_sed "sed --silent '1,5p' file.txt"
+    ~expected_expr:"1,5p" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:false ~expected_suppress:true;
+  (* -En combined *)
+  check_sed "sed -En 's/(foo)/bar/p' file.txt"
+    ~expected_expr:"s/(foo)/bar/p" ~expected_file:"file.txt"
+    ~expected_in_place:false ~expected_ext_re:true ~expected_suppress:true;
+  (* -iE combined with -n *)
+  check_sed "sed -iE -n 's/(foo)/bar/p' file.txt"
+    ~expected_expr:"s/(foo)/bar/p" ~expected_file:"file.txt"
+    ~expected_in_place:true ~expected_ext_re:true ~expected_suppress:true
 ;;
 
 (** Verify that [sort] handles combined -kN and -t value flag. *)
@@ -1136,6 +1182,8 @@ let suite =
       ] )
   ; ( "E2E: Sed flags"
     , [ test_case "field values" `Quick test_sed_flags ] )
+  ; ( "E2E: Sed -E/-n"
+    , [ test_case "extended flags" `Quick test_sed_extended ] )
   ; ( "E2E: Sort combined -kN + -t"
     , [ test_case "field values" `Quick test_sort_flags ] )
   ; ( "E2E: Cut long forms"

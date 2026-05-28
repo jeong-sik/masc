@@ -124,5 +124,12 @@ end
 
 (* ── Built-in probe registration ─────────────────────────────── *)
 
+(* Cascade_http_probe registration is safe here — Http_probe does NOT
+   depend back on Cascade_capacity_probe, so no cycle.
+
+   Cascade_openai_probe registration moved to [Cascade_probe_init] to
+   break the dependency cycle introduced by PR #19359/#19361:
+     Cascade_capacity_probe → Cascade_openai_probe → Cascade_capacity_probe
+   (Openai_probe's .mli references Cascade_capacity_probe.Probe).
+   See Issue #19367, PR #19357 for the full refactor. *)
 let () = register (module Cascade_http_probe.Http_probe)
-let () = register (module Cascade_openai_probe.Openai_probe)

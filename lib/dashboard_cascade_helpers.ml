@@ -142,7 +142,7 @@ let invalid_profiles_of_rejection_json rejection_json =
          | _ -> None)
       profiles
     |> invalid_profiles_with_internal_names
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 ;;
 
 let source_info ?config_path () =

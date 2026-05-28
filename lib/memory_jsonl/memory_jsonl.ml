@@ -220,7 +220,7 @@ let parse_line (line : string) : (string * Yojson.Safe.t option * float) option 
              (snippet_of_line trimmed);
            observe_parse_drop ~reason:"no_key";
            None)
-      | _ ->
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
         Log.Memory.warn
           "memory_jsonl: dropping JSONL line — top-level JSON is not \
            an Assoc record (snippet: %S)"

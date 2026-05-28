@@ -812,7 +812,7 @@ let transport_health_cache_diagnostics () =
     (match List.assoc_opt "projection_diagnostics" fields with
      | Some (`Assoc diagnostics) -> diagnostics
      | _ -> [])
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 ;;
 
 let dashboard_transport_health_http_json ~state =

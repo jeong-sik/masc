@@ -95,7 +95,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
              match Json_util.assoc_member_opt "count" obj with
              | Some (`Int count) when count > 0 -> Some (stage, count)
              | _ -> None)
-           | _ -> None)
+           | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> None)
         stages
   in
   `Assoc

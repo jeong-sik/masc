@@ -238,7 +238,7 @@ module Http_client = struct
               | Some (`String msg) -> msg
               | _ ->
                 Printf.sprintf "HTTP %d (body: %s)" code (truncate_body body))
-          | _ ->
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
             Printf.sprintf "HTTP %d (body: %s)" code (truncate_body body)
         with Yojson.Json_error _ ->
           Printf.sprintf "HTTP %d (body: %s)" code (truncate_body body))

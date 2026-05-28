@@ -882,7 +882,7 @@ let snapshot_json
                              (match List.assoc_opt "items" fields with
                               | Some (`List rows) -> rows
                               | _ -> [])
-                           | _ -> []
+                           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
                          in
                          persistent_agents_json
                            ~keeper_names:persistent_keeper_names

@@ -97,7 +97,7 @@ let restore ~base_path name =
              (match List.assoc_opt "tools" fields with
               | Some (`List items) -> items
               | _ -> [])
-           | _ -> []
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
          in
          List.iter
            (fun item ->

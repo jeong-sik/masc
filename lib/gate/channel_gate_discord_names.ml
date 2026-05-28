@@ -56,7 +56,7 @@ let string_assoc_of_member key json =
         | `String s -> Some (k, s)
         | _ -> None)
         items
-  | _ -> []
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> []
 
 let empty =
   {

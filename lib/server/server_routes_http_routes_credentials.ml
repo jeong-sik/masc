@@ -215,7 +215,7 @@ let add_routes router =
                        match List.assoc_opt "oauth_method" fields with
                        | Some (`String s) -> s
                        | _ -> "web")
-                   | _ -> "web"
+                   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> "web"
                  in
                  let token_opt =
                    match json with

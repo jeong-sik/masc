@@ -115,7 +115,7 @@ let restore_provider_of_json json =
               Some (fp, count)
             | _ -> None)
           rows
-      | _ -> []
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
     in
     Some
       H.

@@ -217,5 +217,5 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
          "keeper meta %s has unknown keys: %s"
          path
          (String.concat ", " unknown))
-  | _ -> ()
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ()
 ;;

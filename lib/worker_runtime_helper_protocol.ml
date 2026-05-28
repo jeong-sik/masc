@@ -243,7 +243,7 @@ let parse_stdout (stdout : string) :
               | _ -> Internal
             in
             Ok (Error { message; kind })
-        | _ -> Error "worker helper stdout did not contain ok or error")
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> Error "worker helper stdout did not contain ok or error")
   with
   (* Context-label the bare Failure so the operator reading the log
      can tell a parse_stdout failure apart from any other [failwith]

@@ -24,7 +24,7 @@ let read_archive_task_ids config =
           | Some (`List tasks) -> tasks
           | _ -> []
         end
-      | _ -> []
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> []
     in
     List.filter_map (fun task ->
       match Json_util.get_string task "id" with

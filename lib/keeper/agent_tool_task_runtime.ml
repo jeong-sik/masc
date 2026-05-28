@@ -109,7 +109,7 @@ let parse_task_contract_arg args =
       | Ok contract -> Ok (Some contract)
       | Error message ->
           Error (Printf.sprintf "Invalid contract payload: %s" message))
-  | _ -> Error "contract must be an object when provided"
+  | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> Error "contract must be an object when provided"
 ;;
 
 (* RFC-0034.v2: per-goal task creation cap moved to

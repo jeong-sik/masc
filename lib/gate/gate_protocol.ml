@@ -102,7 +102,7 @@ let inbound_of_json json =
           List.filter_map (fun (k, v) ->
             match v with `String s -> Some (k, s) | _ -> None
           ) pairs
-      | _ -> []
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> []
     in
     Ok {
       channel;

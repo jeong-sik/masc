@@ -236,6 +236,6 @@ let parse_body_pairs body_str : ((string * string) list, string) result =
         assoc
     in
     Ok pairs
-  | _ -> Error "body must be a JSON object"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "body must be a JSON object"
   | exception Yojson.Json_error _ -> Error "body is not valid JSON"
 ;;

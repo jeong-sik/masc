@@ -225,5 +225,5 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         | Error msg -> Error msg)
      | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
      | None -> Error "keeper tool_access.kind required")
-  | _ -> Error "keeper tool_access must be an object"
+  | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> Error "keeper tool_access must be an object"
 ;;

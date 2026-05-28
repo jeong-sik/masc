@@ -168,7 +168,7 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn 
         match List.assoc_opt "name" fields with
         | Some (`String n) -> n
         | _ -> "")
-    | _ -> ""
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ""
   in
   if not (is_file_write_tool tool_name) then ()
   else
@@ -178,7 +178,7 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn 
           match List.assoc_opt "arguments" fields with
           | Some (`Assoc args) -> args
           | _ -> [])
-      | _ -> []
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
     in
     let file_path =
       match List.assoc_opt "path" arguments with

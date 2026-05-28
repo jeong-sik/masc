@@ -177,7 +177,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
                 | Some (`String s) -> classify_session_source s
                 | _ -> "missing")
             | _ -> "no_last_event")
-        | _ -> "not_assoc"
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> "not_assoc"
       in
       Prometheus.inc_counter
         Keeper_metrics.(to_string BriefingSessionLastEventSource)

@@ -325,7 +325,7 @@ let load_credential config agent_name : agent_credential option =
             | None -> None)
          | Some _ -> None
          | None -> load_credential_from_path_raw config agent_name file)
-      | _ -> load_credential_from_path_raw config agent_name file
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> load_credential_from_path_raw config agent_name file
     with
     | Sys_error _ | Yojson.Json_error _ -> None)
 ;;

@@ -29,7 +29,7 @@ let event_type_of_event event =
     (match List.assoc_opt "type" fields with
      | Some (`String value) -> value
      | _ -> Keeper_state_machine.event_to_string event)
-  | _ -> Keeper_state_machine.event_to_string event
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Keeper_state_machine.event_to_string event
 ;;
 
 let operator_signal

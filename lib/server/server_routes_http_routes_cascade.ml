@@ -33,7 +33,7 @@ let config_source_text_of_body body_str =
           | _ ->
               Error
                 "expected JSON body with string field source_text"))
-  | _ -> Error "expected JSON object body"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "expected JSON object body"
 
 let add_routes router =
   router

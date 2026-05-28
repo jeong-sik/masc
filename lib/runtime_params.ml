@@ -189,7 +189,7 @@ let restore ~base_path =
                         Log.Config.warn
                           "Runtime_params.restore: skipping %s: %s" key msg))
               pairs)
-      | _ ->
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
           Log.Config.warn "Runtime_params.restore: invalid JSON in %s" path
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Config.error "Runtime_params.restore: %s" (Printexc.to_string exn))

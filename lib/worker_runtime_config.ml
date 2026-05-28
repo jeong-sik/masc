@@ -63,7 +63,7 @@ let load_file_config path =
               match Worker_execution_backend.of_string value with
               | Some backend -> backend
               | None -> default.worker_spawn.backend)
-          | _ -> default.worker_spawn.backend
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> default.worker_spawn.backend
         in
         let docker_json = m "docker" spawn_json in
         let image =

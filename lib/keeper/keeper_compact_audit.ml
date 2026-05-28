@@ -119,7 +119,7 @@ let str_field json key =
     (match List.assoc_opt key fs with
      | Some (`String s) -> s
      | _ -> "")
-  | _ -> ""
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ""
 
 let float_field json key =
   match json with
@@ -128,7 +128,7 @@ let float_field json key =
      | Some (`Float f) -> f
      | Some (`Int n) -> float_of_int n
      | _ -> 0.0)
-  | _ -> 0.0
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0.0
 
 let int_field json key =
   match json with
@@ -137,7 +137,7 @@ let int_field json key =
      | Some (`Int n) -> n
      | Some (`Float f) -> int_of_float f
      | _ -> 0)
-  | _ -> 0
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0
 
 let start_of_json json : start_record option =
   match str_field json "record_type" with

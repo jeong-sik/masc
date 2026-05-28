@@ -179,7 +179,7 @@ let worker_meta_of_yojson json =
                          follow-up cleanup adds the schema. *)
                       disclosure_strategy = None;
                     })))
-  | _ -> Error "worker meta must be a JSON object"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "worker meta must be a JSON object"
 
 let load_worker_meta ~base_path ~worker_name =
   let path = worker_meta_path ~base_path ~worker_name in

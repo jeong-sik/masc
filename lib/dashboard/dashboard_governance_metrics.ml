@@ -175,7 +175,7 @@ let approval_queue_summary () : approval_summary =
              | _ -> None)
           | _ -> None)
         items
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   let depth = List.length waits in
   if depth = 0 then

@@ -49,7 +49,7 @@ let parse_tool_usage_json (json : Yojson.Safe.t) : tool_stat list =
         Some { name; count; successes; failures }
       | None -> None
     ) items
-  | _ -> []
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
 
 (** Shannon entropy in bits from a list of counts.
     Returns 0.0 for empty input or all-zero counts. *)

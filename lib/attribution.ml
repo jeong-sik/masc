@@ -82,7 +82,7 @@ let outcome_of_yojson (json : Yojson.Safe.t) : (outcome, string) result =
               Ok (Partial_pass { score = float_of_int score; rationale })
           | _ -> Error "Partial_pass: missing fields")
       | _ -> Error "outcome: missing or invalid kind")
-  | _ -> Error "outcome: expected object"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "outcome: expected object"
 
 let of_yojson (json : Yojson.Safe.t) : (t, string) result =
   match json with
@@ -108,7 +108,7 @@ let of_yojson (json : Yojson.Safe.t) : (t, string) result =
               | Error e -> Error e)
           | s -> Error ("invalid origin: " ^ s))
       | _ -> Error "missing required fields")
-  | _ -> Error "expected JSON object"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "expected JSON object"
 
 (* --- Debug representation --- *)
 

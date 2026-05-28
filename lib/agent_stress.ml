@@ -210,7 +210,7 @@ let merge_event table (json : Yojson.Safe.t) =
                 | None, Some blocker -> acc.blocked_on <- Some blocker
                 | _ -> ())
            | _ -> ()))
-  | _ -> ()
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ()
 
 let board_row_to_json acc =
   let base = [

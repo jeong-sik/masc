@@ -446,7 +446,7 @@ module Ring = struct
           keeper_name; turn_id; message;
           details = Yojson.Safe.Util.member "details" json;
         }
-    | _ ->
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
         raise
           (Entry_decode_error
              (Printf.sprintf "expected JSON object, got %s"

@@ -75,7 +75,7 @@ let mapping_of_json keeper_id (json : Yojson.Safe.t) :
               mapped_credential_id = credential_id;
             }
       | Error msg, _ | _, Error msg -> Error msg)
-  | _ -> Error "expected JSON object body"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "expected JSON object body"
 
 let handle_list_mappings state req reqd =
   let base_path = state.Mcp_server.room_config.base_path in

@@ -392,7 +392,7 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
                 })
             | _ -> None
           ) items
-      | _ -> []
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
     in
 
     (* Parse tool expectations *)
@@ -411,7 +411,7 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
             }
             with Yojson.Safe.Util.Type_error _ -> None
           ) items
-      | _ -> []
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
     in
 
     Ok {

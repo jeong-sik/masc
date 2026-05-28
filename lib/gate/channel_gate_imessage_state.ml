@@ -112,7 +112,7 @@ let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
              else Some ({ channel_id; keeper_name } : binding))
       |> List.sort (fun (a : binding) (b : binding) ->
              String.compare a.channel_id b.channel_id)
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 
 let read_bindings () : binding list =
   match read_json_file_opt (binding_store_read_path ()) with

@@ -273,7 +273,7 @@ let maybe_enrich_error ~keeper_name ~(error_msg : string) : string =
            ("circuit_breaker", `Bool true) :: enriched
          in
          Yojson.Safe.to_string (`Assoc with_breaker)
-       | _ -> error_msg ^ hint
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> error_msg ^ hint
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _ -> error_msg ^ hint)
@@ -441,5 +441,5 @@ let classify_snapshot_json (json : Yojson.Safe.t)
       ) entries
     in
     Ok acc
-  | _ ->
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
     Error "classify_snapshot_json: expected top-level JSON array"

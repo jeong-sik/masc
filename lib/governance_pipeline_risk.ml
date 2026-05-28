@@ -234,7 +234,7 @@ let rec collect_string_values ~keys json =
           direct @ collect_string_values ~keys value)
         kvs
   | `List values -> List.concat_map (collect_string_values ~keys) values
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> []
 
 let rec collect_all_string_values json =
   match json with
@@ -242,7 +242,7 @@ let rec collect_all_string_values json =
       List.concat_map (fun (_, value) -> collect_all_string_values value) kvs
   | `List values -> List.concat_map collect_all_string_values values
   | `String text -> [ text ]
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> []
 
 let rec collect_string_list_values ~keys json =
   match json with

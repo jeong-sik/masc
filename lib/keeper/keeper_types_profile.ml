@@ -95,7 +95,7 @@ let room_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
                | `Intlit raw ->
                    Some (room_id, Safe_ops.int_of_string_with_default ~default:0 raw)
                | _ -> None)
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 
 
 include Keeper_types_profile_defaults

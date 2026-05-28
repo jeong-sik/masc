@@ -464,7 +464,11 @@ let register_http_probe_capable ~max_concurrent candidate =
   | Some url ->
       if not (Cascade_client_capacity.is_registered url) then
         Cascade_client_capacity.register ~url ~max_concurrent;
-      Cascade_http_probe.register_url ~url
+      (match candidate.provider_cfg.kind with
+       | Llm_provider.Provider_config.Ollama ->
+           Cascade_http_probe.register_url ~url
+       | _ ->
+           Cascade_openai_probe.register_url ~url)
 
 let strategy_adapter : t Cascade_strategy.adapter =
   { health_key; capacity_key }

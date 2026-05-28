@@ -125,3 +125,4 @@ end
 (* ── Built-in probe registration ─────────────────────────────── *)
 
 let () = register (module Cascade_http_probe.Http_probe)
+let () = register (module Cascade_openai_probe.Openai_probe)

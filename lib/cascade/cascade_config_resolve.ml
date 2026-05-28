@@ -24,11 +24,6 @@ let normalize_decl_provider_id = Binding.normalize_provider_id
 
 let default_registry = Llm_provider.Provider_registry.default ()
 
-let json_string_member key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`String value) -> Some value
-  | _ -> None
-
 let materialized_provider_json json provider_id =
   match
     Option.bind (Json_util.assoc_member_opt "providers" json) (fun providers_json ->
@@ -39,12 +34,12 @@ let materialized_provider_json json provider_id =
 
 let materialized_provider_protocol json provider_id =
   match materialized_provider_json json provider_id with
-  | Some provider_json -> json_string_member "protocol" provider_json
+  | Some provider_json -> Json_util.assoc_string_opt "protocol" provider_json
   | None -> None
 
 let materialized_provider_endpoint json provider_id =
   match materialized_provider_json json provider_id with
-  | Some provider_json -> json_string_member "endpoint" provider_json
+  | Some provider_json -> Json_util.assoc_string_opt "endpoint" provider_json
   | None -> None
 
 let direct_provider_cascade_prefix provider_id =
@@ -114,9 +109,9 @@ let materialized_model_api_name json model_id =
         Json_util.assoc_member_opt model_id models_json)
   with
   | Some model_json -> (
-    match json_string_member "api-name" model_json with
+    match Json_util.assoc_string_opt "api-name" model_json with
     | Some _ as api_name -> api_name
-    | None -> json_string_member "api_name" model_json)
+    | None -> Json_util.assoc_string_opt "api_name" model_json)
   | None -> None
 
 let weighted_entry_of_materialized_member json member =

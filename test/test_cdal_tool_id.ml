@@ -46,12 +46,12 @@ let test_normalised_lowercases () =
 let test_normalised_descriptor_public_names () =
   let cases =
     [ "Execute", `Execute
-    ; "SearchFiles", `Search_files
-    ; "ReadFile", `Read_file
-    ; "EditFile", `Edit_file
-    ; "WriteFile", `Write_file
-    ; "SearchWeb", `Search_web
-    ; "FetchWeb", `Fetch_web
+    ; "Grep", `Search_files
+    ; "Read", `Read_file
+    ; "Edit", `Edit_file
+    ; "Write", `Write_file
+    ; "WebSearch", `Search_web
+    ; "WebFetch", `Fetch_web
     ]
   in
   List.iter
@@ -74,12 +74,12 @@ let test_retired_public_names_are_opaque () =
        | other ->
          failf "expected retired %s to stay opaque, got %s" raw (Tool_id.to_string other))
     [ "Bash"
-    ; "Grep"
-    ; "Read"
-    ; "Write"
-    ; "Edit"
-    ; "WebFetch"
-    ; "WebSearch"
+    ; "SearchFiles"
+    ; "ReadFile"
+    ; "WriteFile"
+    ; "EditFile"
+    ; "FetchWeb"
+    ; "SearchWeb"
     ; "Workspace" ^ "Inspect"
     ]
 ;;

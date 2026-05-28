@@ -57,8 +57,8 @@ let test_block_reason_diagnoses_use_public_tool_suggestions () =
     (tool_suggestion_of_diagnosis
        (Shell.diagnosis_of_block_reason Worker.Direct_dune_invocation));
   Alcotest.(check (option string))
-    "unsafe redirect suggests public WriteFile"
-    (Some "WriteFile")
+    "unsafe redirect suggests public Write"
+    (Some "Write")
     (tool_suggestion_of_diagnosis
        (Shell.diagnosis_of_block_reason Worker.Unsafe_redirect));
   Alcotest.(check (option string))

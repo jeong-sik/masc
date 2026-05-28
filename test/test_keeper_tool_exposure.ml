@@ -381,21 +381,21 @@ let test_last_turn_safe_keeps_discovery_and_web_search () =
     "last turn allows masc_transition"
     true
     (has_tool "masc_transition" tools);
-  check bool "last turn allows ReadFile alias" true (has_tool "ReadFile" alias_expanded);
+  check bool "last turn allows Read alias" true (has_tool "Read" alias_expanded);
   check
     bool
-    "last turn allows SearchFiles alias"
+    "last turn allows Grep alias"
     true
-    (has_tool "SearchFiles" alias_expanded);
+    (has_tool "Grep" alias_expanded);
   check bool "last turn allows Execute alias" true (has_tool "Execute" alias_expanded);
-  check bool "last turn allows SearchWeb alias" true (has_tool "SearchWeb" alias_expanded)
+  check bool "last turn allows WebSearch alias" true (has_tool "WebSearch" alias_expanded)
 ;;
 
 let test_fallback_floor_has_no_implicit_repo_tools () =
   let floor = Keeper_agent_tool_surface.fallback_floor_tool_names in
   check bool "fallback floor omits Execute" false (List.mem "tool_execute" floor);
-  check bool "fallback floor omits SearchFiles" false (List.mem "tool_search_files" floor);
-  check bool "fallback floor omits ReadFile" false (List.mem "tool_read_file" floor)
+  check bool "fallback floor omits Grep" false (List.mem "tool_search_files" floor);
+  check bool "fallback floor omits Read" false (List.mem "tool_read_file" floor)
 ;;
 
 let test_core_coordination_presets_have_task_lifecycle_tools () =

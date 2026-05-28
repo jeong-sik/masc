@@ -354,7 +354,7 @@ let prepare_agent_setup
      internal allowlist, because tool_policy.toml / presets still express
      allowlists in descriptor/internal names (tool_execute, tool_read_file, ...).
      Stripping internals before the descriptor expansion check would leave
-     [descriptor_public_names] empty and drop "Execute"/"ReadFile"/... from the
+     [descriptor_public_names] empty and drop "Execute"/"Read"/... from the
      visible surface. See PR #14596 review. *)
   let descriptor_internal_names =
     Agent_tool_descriptor.public_descriptors

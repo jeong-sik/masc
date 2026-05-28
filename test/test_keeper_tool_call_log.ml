@@ -505,7 +505,7 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"ReadFile"
+      ~tool_name:"Read"
       ~input:(`Assoc [ ("file_path", `String "README.md") ])
       ~output_text:"file contents"
       ~success:true
@@ -517,13 +517,13 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
     | [ entry ] ->
       let evidence = Yojson.Safe.Util.member "route_evidence" entry in
       Alcotest.(check (option string)) "tool name"
-        (Some "ReadFile")
+        (Some "Read")
         (Safe_ops.json_string_opt "tool_name" evidence);
       Alcotest.(check (option string)) "descriptor id"
         (Some "agent.read_file")
         (Safe_ops.json_string_opt "descriptor_id" evidence);
       Alcotest.(check (option string)) "public name"
-        (Some "ReadFile")
+        (Some "Read")
         (Safe_ops.json_string_opt "public_name" evidence);
       Alcotest.(check (option string)) "canonical name"
         (Some "tool_read_file")

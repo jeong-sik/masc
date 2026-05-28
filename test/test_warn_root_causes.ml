@@ -78,7 +78,7 @@ let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
     Keeper_tool_registry.core_discovery_tools
 
 (* Direct write tools require delivery/full presets. *)
-let write_only_tools = [ "EditFile" ]
+let write_only_tools = [ "Edit" ]
 
 (* tool_execute stays visible across presets for read-only shell usage.
    Mutating shell commands are gated separately by privileged presets. *)
@@ -147,8 +147,8 @@ let test_core_tools_filtered_by_social_preset () =
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in
-  if List.mem "EditFile" filtered then
-    fail "EditFile should be excluded for social preset"
+  if List.mem "Edit" filtered then
+    fail "Edit should be excluded for social preset"
 
 let test_core_tools_include_write_for_delivery_preset () =
   ignore (init_registry ());

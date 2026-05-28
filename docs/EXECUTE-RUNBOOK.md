@@ -28,7 +28,7 @@ background task lifecycle are not part of the callable surface.
 
 - Covers: `Execute`, typed semantic exit, output truncation, Shell IR command
   gating, verification contract markers, and shell-gate counters.
-- `SearchFiles` owns file/content search. Execute owns typed command execution.
+- `Grep` owns file/content search. Execute owns typed command execution.
 - Does not cover: the cascade verifier itself or the approval layer for MCP
   tools.
 
@@ -71,7 +71,7 @@ Pipeline:
 
 Shell metacharacters inside `argv` are data. Use `pipeline` for pipes
 instead of embedding `|` in a string. For read-only observation prefer
-`SearchFiles`; for file edits use `EditFile`/`WriteFile`.
+`Grep`; for file edits use `Edit`/`Write`.
 
 ## Counter Endpoint
 

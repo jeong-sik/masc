@@ -491,10 +491,10 @@ let append_execution_receipt
       response_text_present = true;
       model_used = Some "custom:mock";
       requested_tools = [ "keeper_task_claim"; "tool_read_file" ];
-      reported_tools = [ "ReadFile" ];
+      reported_tools = [ "Read" ];
       observed_tools = [ "tool_read_file" ];
       canonical_tools = [ "tool_read_file" ];
-      unexpected_tools = [ "SearchWeb" ];
+      unexpected_tools = [ "WebSearch" ];
       tools_used = [ "tool_read_file" ];
       tool_contract_result;
       tool_surface =
@@ -732,7 +732,7 @@ let test_dashboard_execution_reconciles_stale_approval_attention () =
             let approval_id =
               Lib.Keeper_approval_queue.submit_pending
                 ~keeper_name:"sangsu"
-                ~tool_name:"WriteFile"
+                ~tool_name:"Write"
                 ~input:(`Assoc [ ("file_path", `String "lib/example.ml") ])
                 ~risk_level:Lib.Keeper_approval_queue.High
                 ~base_path:dir
@@ -885,7 +885,7 @@ let test_execution_trust_surfaces_latest_receipt () =
              |> member "rotation_attempts" |> to_list |> List.hd
              |> member "slot_release_at_phase" |> to_string);
             check (list string) "execution trust row preserves unexpected tools"
-              [ "SearchWeb" ]
+              [ "WebSearch" ]
               (trust_row |> member "trust" |> member "unexpected_tools"
              |> to_list |> List.map to_string);
             check int "execution trust row preserves unexpected tool count" 1
@@ -922,7 +922,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (execution_row |> member "trust" |> member "execution_summary"
              |> member "cascade_outcome" |> to_string);
             check (list string) "execution row exposes unexpected tools"
-              [ "SearchWeb" ]
+              [ "WebSearch" ]
               (execution_row |> member "trust" |> member "execution_summary"
              |> member "unexpected_tools" |> to_list |> List.map to_string);
             check int "execution row exposes unexpected tool count" 1

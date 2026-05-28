@@ -10,15 +10,15 @@ HTML companion: `docs/design/tool-execution-substrate-plan.html`
 MASC should keep a small, primitive, typed tool surface:
 
 - `Execute`
-- `SearchFiles`
-- `ReadFile`
-- `EditFile`
-- `WriteFile`
-- `SearchWeb`
-- `FetchWeb`
+- `Grep`
+- `Read`
+- `Edit`
+- `Write`
+- `WebSearch`
+- `WebFetch`
 
 `Shell_ir` is the first-class internal execution substrate behind `Execute`
-and `SearchFiles`. It is not a model-facing tool name and not a feature family.
+and `Grep`. It is not a model-facing tool name and not a feature family.
 It is the typed language-level representation that carries command structure,
 risk, path validation, sandbox target, and dispatch evidence.
 
@@ -44,10 +44,10 @@ Current main already points in the right direction.
 
 - `Agent_tool_descriptor.executor` is a closed set of `Shell_ir`,
   `Filesystem`, `Remote_mcp`, and `In_process`.
-- `Execute` and `SearchFiles` are descriptor-routed through `Shell_ir`.
-- `ReadFile`, `EditFile`, and `WriteFile` are descriptor-routed through
+- `Execute` and `Grep` are descriptor-routed through `Shell_ir`.
+- `Read`, `Edit`, and `Write` are descriptor-routed through
   `Filesystem`.
-- `SearchWeb` and `FetchWeb` are descriptor-routed through `Remote_mcp`.
+- `WebSearch` and `WebFetch` are descriptor-routed through `Remote_mcp`.
 - RFC-0160 is implemented: typed Execute lowers once to Shell IR, classifies
   the resulting IR, gates write/destructive behavior, validates paths, and
   dispatches via the decided IR path.
@@ -155,7 +155,7 @@ A new tool is admissible only when at least one condition holds:
   command, such as tasks, board posts, goals, approvals, memory, personas, or
   keeper lifecycle.
 - It needs structured review UX that a command cannot provide safely, such as
-  `EditFile` diff semantics.
+  `Edit` diff semantics.
 - It fronts a remote capability whose primary value is current evidence, such
   as web search/fetch with citations.
 - It is a discovery or introspection tool required to keep the tool surface
@@ -272,18 +272,18 @@ the active-surface lint/source guard.
 
 Normalize keeper-facing prompts to the active public names:
 
-- `SearchWeb`
-- `FetchWeb`
-- `SearchFiles`
-- `ReadFile`
-- `EditFile`
-- `WriteFile`
+- `WebSearch`
+- `WebFetch`
+- `Grep`
+- `Read`
+- `Edit`
+- `Write`
 - `Execute`
 
 Keep the `masc_web_search` / `masc_web_fetch` MCP contract documented only
 where MCP public compatibility requires it. Model-facing keeper instructions
 should not ask keepers to call `masc_web_search` when the active public alias is
-`SearchWeb`.
+`WebSearch`.
 
 Validation:
 
@@ -359,7 +359,7 @@ names, and should be classified separately instead of deleted by string match.
 Before adding any new public or internal tool, answer:
 
 1. Can this be done by `Execute` with typed argv?
-2. Can this be done by `ReadFile`, `EditFile`, `WriteFile`, or `SearchFiles`?
+2. Can this be done by `Read`, `Edit`, `Write`, or `Grep`?
 3. Is the state owned by MASC rather than by a CLI or remote service?
 4. Does the tool add a stable semantic contract, or just wrap a vendor command?
 5. What policy decision will the receipt record for each call?

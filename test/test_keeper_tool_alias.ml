@@ -1,6 +1,6 @@
 (** Tests for Keeper_tool_alias.
 
-    RFC-0064: two-surface routing table. Public names (Execute, ReadFile, …)
+    RFC-0064: two-surface routing table. Public names (Execute, Read, …)
     map to internal handler names (tool_execute, tool_read_file, …)
     via a single [route] type. No reverse lookup or tier classification. *)
 
@@ -24,25 +24,25 @@ let test_known_aliases_resolve () =
     (Some "tool_execute")
     (route_internal "Execute");
   Alcotest.(check (option string))
-    "ReadFile -> tool_read_file"
+    "Read -> tool_read_file"
     (Some "tool_read_file")
-    (route_internal "ReadFile");
+    (route_internal "Read");
   Alcotest.(check (option string))
-    "EditFile -> tool_edit_file"
+    "Edit -> tool_edit_file"
     (Some "tool_edit_file")
-    (route_internal "EditFile");
+    (route_internal "Edit");
   Alcotest.(check (option string))
-    "WriteFile -> tool_write_file"
+    "Write -> tool_write_file"
     (Some "tool_write_file")
-    (route_internal "WriteFile");
+    (route_internal "Write");
   Alcotest.(check (option string))
-    "SearchFiles -> tool_search_files"
+    "Grep -> tool_search_files"
     (Some "tool_search_files")
-    (route_internal "SearchFiles");
+    (route_internal "Grep");
   Alcotest.(check (option string))
-    "SearchWeb -> masc_web_search"
+    "WebSearch -> masc_web_search"
     (Some "masc_web_search")
-    (route_internal "SearchWeb")
+    (route_internal "WebSearch")
 ;;
 
 let test_internal_names_resolve_to_preferred_public_alias () =
@@ -51,16 +51,16 @@ let test_internal_names_resolve_to_preferred_public_alias () =
     (Some "Execute")
     (Alias.public_name_for_internal "tool_execute");
   Alcotest.(check (option string))
-    "tool_search_files -> SearchFiles"
-    (Some "SearchFiles")
+    "tool_search_files -> Grep"
+    (Some "Grep")
     (Alias.public_name_for_internal "tool_search_files");
   Alcotest.(check (option string))
-    "tool_search_files -> SearchFiles"
-    (Some "SearchFiles")
+    "tool_search_files -> Grep"
+    (Some "Grep")
     (Alias.public_name_for_internal "tool_search_files");
   Alcotest.(check (option string))
-    "tool_edit_file primary public alias is EditFile"
-    (Some "EditFile")
+    "tool_edit_file primary public alias is Edit"
+    (Some "Edit")
     (Alias.public_name_for_internal "tool_edit_file");
   Alcotest.(check (option string))
     "unaliased internal has no public alias"
@@ -91,15 +91,15 @@ let test_route_round_trip () =
        | None ->
          Alcotest.fail (Printf.sprintf "%s should have a route but got None" public))
     (Alias.public_names ());
-  (* EditFile and WriteFile now route to distinct descriptor-owned handlers. *)
+  (* Edit and Write now route to distinct descriptor-owned handlers. *)
   Alcotest.(check (option string))
-    "EditFile -> tool_edit_file"
+    "Edit -> tool_edit_file"
     (Some "tool_edit_file")
-    (route_internal "EditFile");
+    (route_internal "Edit");
   Alcotest.(check (option string))
-    "WriteFile -> tool_write_file"
+    "Write -> tool_write_file"
     (Some "tool_write_file")
-    (route_internal "WriteFile")
+    (route_internal "Write")
 ;;
 
 let test_route_unknown_returns_none () =
@@ -134,7 +134,7 @@ let test_alias_table_is_stable () =
 
 (** Mirrors the call sequence in [keeper_agent_run.ml:1875] after
     canonicalization is applied. Pins the contract: a turn whose only
-    tool calls are Provider_a Code aliases (Execute/ReadFile/EditFile/SearchFiles/SearchWeb/WriteFile)
+    tool calls are Provider_a Code aliases (Execute/Read/Edit/Grep/WebSearch/WebFetch/Write)
     must NOT produce any unexpected names. *)
 let allowed_keeper_surface =
   [ "tool_execute"
@@ -163,7 +163,7 @@ let test_pure_alias_turn_no_longer_unexpected () =
 ;;
 
 let test_mixed_alias_and_internal_no_unexpected () =
-  let observed = [ "ReadFile"; "keeper_board_post"; "EditFile"; "SearchWeb" ] in
+  let observed = [ "Read"; "keeper_board_post"; "Edit"; "WebSearch" ] in
   let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
     Observation.unexpected_tool_names
@@ -250,7 +250,7 @@ let test_legacy_public_names_hard_cut () =
          (Printf.sprintf "%s has no public schema" legacy)
          None
          (Option.map Yojson.Safe.to_string (Alias.public_input_schema legacy)))
-    [ "Bash"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
+    [ "Bash"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile"; "SearchWeb"; "FetchWeb" ]
 ;;
 
 let test_alias_canonical_internal_name_for_set_logic () =
@@ -259,9 +259,9 @@ let test_alias_canonical_internal_name_for_set_logic () =
     (Some "tool_execute")
     (Alias.canonical_internal_name "Execute");
   Alcotest.(check (option string))
-    "public SearchFiles canonicalises to tool_search_files"
+    "public Grep canonicalises to tool_search_files"
     (Some "tool_search_files")
-    (Alias.canonical_internal_name "SearchFiles");
+    (Alias.canonical_internal_name "Grep");
   Alcotest.(check (option string))
     "MCP-prefixed public MASC name canonicalises to internal keeper tool"
     (Some "keeper_board_post")
@@ -508,9 +508,9 @@ let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description 
 
 let test_descriptor_resolution_handles_public_prefixed_internal_and_dedupe () =
   Alcotest.(check (option string))
-    "public ReadFile resolves"
+    "public Read resolves"
     (Some "agent.read_file")
-    (descriptor_id_for_tool_name "ReadFile");
+    (descriptor_id_for_tool_name "Read");
   Alcotest.(check (option string))
     "internal tool_read_file resolves"
     (Some "agent.read_file")
@@ -531,7 +531,7 @@ let test_descriptor_resolution_handles_public_prefixed_internal_and_dedupe () =
     "descriptor list dedupes by descriptor id"
     [ "agent.read_file"; "keeper.time.now"; "agent.execute"; "masc.board.post" ]
     (Descriptor_resolution.descriptors_for_tool_names
-       [ "ReadFile"
+       [ "Read"
        ; "tool_read_file"
        ; "keeper_time_now"
        ; "mcp__masc__keeper_time_now"
@@ -558,8 +558,8 @@ let test_execution_receipt_descriptor_summary_projects_descriptors () =
     ; terminal_reason_code = "policy_denied:approval_required"
     ; response_text_present = false
     ; model_used = None
-    ; requested_tools = [ "ReadFile"; "Execute"; "keeper_time_now" ]
-    ; reported_tools = [ "ReadFile" ]
+    ; requested_tools = [ "Read"; "Execute"; "keeper_time_now" ]
+    ; reported_tools = [ "Read" ]
     ; observed_tools = [ "tool_read_file"; "keeper_time_now" ]
     ; canonical_tools = [ "tool_read_file"; "tool_execute"; "keeper_time_now" ]
     ; unexpected_tools = []
@@ -735,7 +735,7 @@ let test_public_names_stable_order () =
   let names = Alias.public_names () in
   let descriptor_names = Descriptor.public_names () in
   let expected =
-    [ "Execute"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile"; "SearchWeb"; "FetchWeb" ]
+    [ "Execute"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
   in
   Alcotest.(check (list string))
     "stable public name order"
@@ -754,7 +754,7 @@ let test_public_input_schema_present () =
          (Printf.sprintf "%s has tailored schema" name)
          true
          (Option.is_some (Alias.public_input_schema name)))
-    [ "Execute"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile"; "SearchWeb"; "FetchWeb" ];
+    [ "Execute"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ];
   Alcotest.(check bool)
     "unknown public name has no schema"
     true
@@ -811,18 +811,18 @@ let test_execute_schema_guides_typed_frontdoor () =
 ;;
 
 let test_read_schema_uses_file_path () =
-  let schema = Option.get (Alias.public_input_schema "ReadFile") in
+  let schema = Option.get (Alias.public_input_schema "Read") in
   let props = Option.get (yojson_field "properties" schema) in
   Alcotest.(check bool)
-    "ReadFile schema exposes 'file_path' (not 'path')"
+    "Read schema exposes 'file_path' (not 'path')"
     true
     (Option.is_some (yojson_field "file_path" props));
   Alcotest.(check bool)
-    "ReadFile schema does not expose 'path' directly"
+    "Read schema does not expose 'path' directly"
     true
     (Option.is_none (yojson_field "path" props));
   Alcotest.(check bool)
-    "ReadFile schema does not expose unsupported 'offset'"
+    "Read schema does not expose unsupported 'offset'"
     true
     (Option.is_none (yojson_field "offset" props))
 ;;
@@ -863,7 +863,7 @@ let test_translate_execute_input () =
 
 let test_translate_read_input () =
   let input = `Assoc [ "file_path", `String "/tmp/foo"; "limit", `Int 4096 ] in
-  let translated = Alias.translate_input ~public:"ReadFile" input in
+  let translated = Alias.translate_input ~public:"Read" input in
   let path = yojson_field "path" translated in
   let max_bytes = yojson_field "max_bytes" translated in
   Alcotest.(check (option string))
@@ -881,63 +881,63 @@ let test_translate_read_input () =
 ;;
 
 let test_edit_schema_uses_anthropic_fields () =
-  let schema = Option.get (Alias.public_input_schema "EditFile") in
+  let schema = Option.get (Alias.public_input_schema "Edit") in
   let props = Option.get (yojson_field "properties" schema) in
   List.iter
     (fun field ->
        Alcotest.(check bool)
-         (Printf.sprintf "EditFile schema exposes %S" field)
+         (Printf.sprintf "Edit schema exposes %S" field)
          true
          (Option.is_some (yojson_field field props)))
     [ "file_path"; "old_string"; "new_string"; "replace_all" ];
   Alcotest.(check bool)
-    "EditFile schema does not expose internal 'mode' to LLM"
+    "Edit schema does not expose internal 'mode' to LLM"
     true
     (Option.is_none (yojson_field "mode" props))
 ;;
 
 let test_write_schema_uses_anthropic_fields () =
-  let schema = Option.get (Alias.public_input_schema "WriteFile") in
+  let schema = Option.get (Alias.public_input_schema "Write") in
   let props = Option.get (yojson_field "properties" schema) in
   List.iter
     (fun field ->
        Alcotest.(check bool)
-         (Printf.sprintf "WriteFile schema exposes %S" field)
+         (Printf.sprintf "Write schema exposes %S" field)
          true
          (Option.is_some (yojson_field field props)))
     [ "file_path"; "content" ];
   Alcotest.(check bool)
-    "WriteFile schema does not expose internal 'mode' to LLM"
+    "Write schema does not expose internal 'mode' to LLM"
     true
     (Option.is_none (yojson_field "mode" props))
 ;;
 
 let test_search_files_schema_uses_public_fields () =
-  let schema = Option.get (Alias.public_input_schema "SearchFiles") in
+  let schema = Option.get (Alias.public_input_schema "Grep") in
   let props = Option.get (yojson_field "properties" schema) in
   Alcotest.(check bool)
-    "SearchFiles schema exposes 'pattern'"
+    "Grep schema exposes 'pattern'"
     true
     (Option.is_some (yojson_field "pattern" props));
   Alcotest.(check bool)
-    "SearchFiles schema does not expose internal 'op' to LLM"
+    "Grep schema does not expose internal 'op' to LLM"
     true
     (Option.is_none (yojson_field "op" props));
   Alcotest.(check bool)
-    "SearchFiles schema does not expose unsupported '-n'"
+    "Grep schema does not expose unsupported '-n'"
     true
     (Option.is_none (yojson_field "-n" props))
 ;;
 
 let test_web_search_schema_uses_public_fields () =
-  let schema = Option.get (Alias.public_input_schema "SearchWeb") in
+  let schema = Option.get (Alias.public_input_schema "WebSearch") in
   let props = Option.get (yojson_field "properties" schema) in
   Alcotest.(check bool)
-    "SearchWeb schema exposes 'query'"
+    "WebSearch schema exposes 'query'"
     true
     (Option.is_some (yojson_field "query" props));
   Alcotest.(check bool)
-    "SearchWeb schema exposes 'limit'"
+    "WebSearch schema exposes 'limit'"
     true
     (Option.is_some (yojson_field "limit" props));
   let required =
@@ -950,7 +950,7 @@ let test_web_search_schema_uses_public_fields () =
         items
     | _ -> []
   in
-  Alcotest.(check (list string)) "SearchWeb requires 'query'" [ "query" ] required
+  Alcotest.(check (list string)) "WebSearch requires 'query'" [ "query" ] required
 ;;
 
 let test_translate_edit_input () =
@@ -962,7 +962,7 @@ let test_translate_edit_input () =
       ; "replace_all", `Bool true
       ]
   in
-  let translated = Alias.translate_input ~public:"EditFile" input in
+  let translated = Alias.translate_input ~public:"Edit" input in
   Alcotest.(check (option string))
     "file_path -> path"
     (Some "/tmp/foo.ml")
@@ -992,7 +992,7 @@ let test_translate_edit_input () =
 ;;
 
 let test_translate_edit_drops_caller_supplied_mode () =
-  (* Defense-in-depth: if the LLM tries to write via EditFile by providing 'content',
+  (* Defense-in-depth: if the LLM tries to write via Edit by providing 'content',
      fallback to mode=overwrite instead of silently dropping it. *)
   let input =
     `Assoc
@@ -1001,7 +1001,7 @@ let test_translate_edit_drops_caller_supplied_mode () =
       ; "content", `String "fallback"
       ]
   in
-  let translated = Alias.translate_input ~public:"EditFile" input in
+  let translated = Alias.translate_input ~public:"Edit" input in
   Alcotest.(check (option string))
     "mode is fallback to overwrite"
     (Some "overwrite")
@@ -1020,7 +1020,7 @@ let test_translate_write_input () =
   let input =
     `Assoc [ "file_path", `String "/tmp/new.txt"; "content", `String "hello world" ]
   in
-  let translated = Alias.translate_input ~public:"WriteFile" input in
+  let translated = Alias.translate_input ~public:"Write" input in
   Alcotest.(check (option string))
     "file_path -> path"
     (Some "/tmp/new.txt")
@@ -1051,7 +1051,7 @@ let test_translate_search_files_input () =
       ; "-i", `Bool true
       ]
   in
-  let translated = Alias.translate_input ~public:"SearchFiles" input in
+  let translated = Alias.translate_input ~public:"Grep" input in
   Alcotest.(check (option string))
     "op injected as 'rg'"
     (Some "rg")
@@ -1084,9 +1084,9 @@ let test_translate_search_files_input () =
 
 let test_translate_web_search_input_is_identity () =
   let input = `Assoc [ "query", `String "OpenAI API release notes"; "limit", `Int 5 ] in
-  let translated = Alias.translate_input ~public:"SearchWeb" input in
+  let translated = Alias.translate_input ~public:"WebSearch" input in
   Alcotest.(check string)
-    "SearchWeb payload already matches masc_web_search"
+    "WebSearch payload already matches masc_web_search"
     (Yojson.Safe.to_string input)
     (Yojson.Safe.to_string translated)
 ;;
@@ -1115,8 +1115,8 @@ let test_public_names_adds_to_allowlist () =
      not the internal keeper_* names. *)
   let names = Alias.public_names () in
   Alcotest.(check bool) "Execute is in public_names" true (List.mem "Execute" names);
-  Alcotest.(check bool) "ReadFile is in public_names" true (List.mem "ReadFile" names);
-  Alcotest.(check bool) "SearchWeb is in public_names" true (List.mem "SearchWeb" names);
+  Alcotest.(check bool) "Read is in public_names" true (List.mem "Read" names);
+  Alcotest.(check bool) "WebSearch is in public_names" true (List.mem "WebSearch" names);
   (* Internal names are NOT in public_names. *)
   Alcotest.(check bool)
     "tool_execute is NOT in public_names"
@@ -1213,23 +1213,23 @@ let () =
             `Quick
             test_execute_schema_guides_typed_frontdoor
         ; Alcotest.test_case
-            "ReadFile schema uses 'file_path' field"
+            "Read schema uses 'file_path' field"
             `Quick
             test_read_schema_uses_file_path
         ; Alcotest.test_case
-            "EditFile schema uses Provider_a field names"
+            "Edit schema uses Provider_a field names"
             `Quick
             test_edit_schema_uses_anthropic_fields
         ; Alcotest.test_case
-            "WriteFile schema uses Provider_a field names"
+            "Write schema uses Provider_a field names"
             `Quick
             test_write_schema_uses_anthropic_fields
         ; Alcotest.test_case
-            "SearchFiles schema uses Provider_a field names"
+            "Grep schema uses Provider_a field names"
             `Quick
             test_search_files_schema_uses_public_fields
         ; Alcotest.test_case
-            "SearchWeb schema uses public field names"
+            "WebSearch schema uses public field names"
             `Quick
             test_web_search_schema_uses_public_fields
         ; Alcotest.test_case
@@ -1252,19 +1252,19 @@ let () =
             "translate Execute input shape"
             `Quick
             test_translate_execute_input
-        ; Alcotest.test_case "translate ReadFile input shape" `Quick test_translate_read_input
-        ; Alcotest.test_case "translate EditFile input shape" `Quick test_translate_edit_input
+        ; Alcotest.test_case "translate Read input shape" `Quick test_translate_read_input
+        ; Alcotest.test_case "translate Edit input shape" `Quick test_translate_edit_input
         ; Alcotest.test_case
-            "translate EditFile drops caller mode"
+            "translate Edit drops caller mode"
             `Quick
             test_translate_edit_drops_caller_supplied_mode
         ; Alcotest.test_case
-            "translate WriteFile input shape"
+            "translate Write input shape"
             `Quick
             test_translate_write_input
-        ; Alcotest.test_case "translate SearchFiles input shape" `Quick test_translate_search_files_input
+        ; Alcotest.test_case "translate Grep input shape" `Quick test_translate_search_files_input
         ; Alcotest.test_case
-            "translate SearchWeb input shape"
+            "translate WebSearch input shape"
             `Quick
             test_translate_web_search_input_is_identity
         ; Alcotest.test_case

@@ -443,7 +443,7 @@ let test_public_aliases_reuse_internal_search_aliases () =
   Alcotest.(check (list string))
     "SearchFiles shares tool_search_files aliases"
     (Keeper_agent_tool_surface.tool_search_aliases "tool_search_files")
-    (Keeper_agent_tool_surface.tool_search_aliases "SearchFiles")
+    (Keeper_agent_tool_surface.tool_search_aliases "Grep")
 
 let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
   let shell_tools =
@@ -499,15 +499,15 @@ let test_tool_search_partition_returns_allowed_core_hits () =
 let test_tool_search_partition_projects_allowed_internal_to_public_alias () =
   let partition =
     Keeper_run_tools.partition_tool_search_hits
-      ~core:[ "Execute"; "SearchFiles" ]
+      ~core:[ "Execute"; "Grep" ]
       ~core_always:[]
       ~allowed:[ "tool_execute"; "tool_search_files" ]
-      ~retrieved:[ "Execute", 1.0; "SearchFiles", 0.9; "ReadFile", 0.8 ]
+      ~retrieved:[ "Execute", 1.0; "Grep", 0.9; "Read", 0.8 ]
       ~max_results:10
   in
   Alcotest.(check (list string))
     "descriptor public aliases are visible when backing internals are allowed"
-    [ "Execute"; "SearchFiles" ]
+    [ "Execute"; "Grep" ]
     (List.map fst partition.visible_core_hits);
   Alcotest.(check int) "unbacked public hit is filtered" 1 partition.filtered_by_policy
 

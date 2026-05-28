@@ -41,20 +41,20 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (KTP.is_execution_progress_tool_name "keeper_memory_search");
   check bool "keeper_stay_silent satisfies as completion" true
     (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
-  check bool "ReadFile alias cannot satisfy required-action contract" false
-    (satisfies_required_tool "ReadFile" (`Assoc []));
-  check bool "SearchFiles alias cannot satisfy required-action contract" false
-    (satisfies_required_tool "SearchFiles" (`Assoc []));
-  check bool "mcp-prefixed SearchFiles remains passive" false
-    (satisfies_required_tool "mcp__masc__SearchFiles" (`Assoc []));
-  check bool "SearchWeb alias cannot satisfy required-action contract" false
-    (satisfies_required_tool "SearchWeb" (`Assoc []));
-  check bool "ReadFile alias remains passive progress" true
-    (KTP.is_passive_status_tool_name "ReadFile");
-  check bool "SearchFiles alias remains passive progress" true
-    (KTP.is_passive_status_tool_name "SearchFiles");
-  check bool "SearchWeb alias remains passive progress" true
-    (KTP.is_passive_status_tool_name "SearchWeb");
+  check bool "Read alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "Read" (`Assoc []));
+  check bool "Grep alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "Grep" (`Assoc []));
+  check bool "mcp-prefixed Grep remains passive" false
+    (satisfies_required_tool "mcp__masc__Grep" (`Assoc []));
+  check bool "WebSearch alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "WebSearch" (`Assoc []));
+  check bool "Read alias remains passive progress" true
+    (KTP.is_passive_status_tool_name "Read");
+  check bool "Grep alias remains passive progress" true
+    (KTP.is_passive_status_tool_name "Grep");
+  check bool "WebSearch alias remains passive progress" true
+    (KTP.is_passive_status_tool_name "WebSearch");
   check bool "tool_search_files gh op does not satisfy required-action contract" false
     (satisfies_required_tool
        "tool_search_files"
@@ -64,14 +64,14 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
 let test_required_tool_satisfaction_accepts_mutating_tools () =
   check bool "keeper_task_claim mutates" true
     (satisfies_required_tool "keeper_task_claim" (`Assoc []));
-  check bool "WriteFile alias mutates" true
-    (satisfies_required_tool "WriteFile" (`Assoc []));
-  check bool "mcp-prefixed WriteFile alias mutates" true
-    (satisfies_required_tool "mcp__masc__WriteFile" (`Assoc []));
-  check bool "WriteFile alias is execution progress" true
-    (KTP.is_execution_progress_tool_name "WriteFile");
-  check bool "mcp-prefixed WriteFile alias is execution progress" true
-    (KTP.is_execution_progress_tool_name "mcp__masc__WriteFile");
+  check bool "Write alias mutates" true
+    (satisfies_required_tool "Write" (`Assoc []));
+  check bool "mcp-prefixed Write alias mutates" true
+    (satisfies_required_tool "mcp__masc__Write" (`Assoc []));
+  check bool "Write alias is execution progress" true
+    (KTP.is_execution_progress_tool_name "Write");
+  check bool "mcp-prefixed Write alias is execution progress" true
+    (KTP.is_execution_progress_tool_name "mcp__masc__Write");
   check bool "mutating gh bash satisfies" true
     (satisfies_required_tool
        "tool_execute"
@@ -94,10 +94,10 @@ let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
        ~required_tool_names:[ "masc_web_search" ]
        "masc_web_search"
        (`Assoc []));
-  check bool "explicit required list canonicalizes SearchWeb alias" true
+  check bool "explicit required list canonicalizes WebSearch alias" true
     (satisfies_explicit_required_tool
        ~required_tool_names:[ "masc_web_search" ]
-       "SearchWeb"
+       "WebSearch"
        (`Assoc []));
   check bool "unlisted passive tool still rejected" false
     (satisfies_explicit_required_tool

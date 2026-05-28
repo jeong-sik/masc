@@ -409,7 +409,7 @@ let public_descriptors =
       ~translate:translate_identity
   ; descriptor
       ~id:"agent.search_files"
-      ~public_name:"SearchFiles"
+      ~public_name:"Grep"
       ~internal_name:"tool_search_files"
       ~description:
         "Inspect the project workspace through structured read-only operations \
@@ -431,7 +431,7 @@ let public_descriptors =
       ~translate:translate_search_files
   ; descriptor
       ~id:"agent.read_file"
-      ~public_name:"ReadFile"
+      ~public_name:"Read"
       ~internal_name:"tool_read_file"
       ~description:"Read one file from the keeper sandbox or an allowed path."
       ~input_schema:read_file_schema
@@ -449,7 +449,7 @@ let public_descriptors =
       ~translate:translate_read_file
   ; descriptor
       ~id:"agent.edit_file"
-      ~public_name:"EditFile"
+      ~public_name:"Edit"
       ~internal_name:"tool_edit_file"
       ~description:"Patch an existing file by replacing an exact string."
       ~input_schema:edit_file_schema
@@ -466,7 +466,7 @@ let public_descriptors =
       ~translate:translate_edit_file
   ; descriptor
       ~id:"agent.write_file"
-      ~public_name:"WriteFile"
+      ~public_name:"Write"
       ~internal_name:"tool_write_file"
       ~description:"Write full file content into the keeper sandbox or an allowed path."
       ~input_schema:write_file_schema
@@ -483,7 +483,7 @@ let public_descriptors =
       ~translate:translate_write_file
   ; descriptor
       ~id:"agent.search_web"
-      ~public_name:"SearchWeb"
+      ~public_name:"WebSearch"
       ~internal_name:"masc_web_search"
       ~description:"Search the public web for current information."
       ~input_schema:search_web_schema
@@ -501,7 +501,7 @@ let public_descriptors =
       ~translate:translate_identity
   ; descriptor
       ~id:"agent.fetch_web"
-      ~public_name:"FetchWeb"
+      ~public_name:"WebFetch"
       ~internal_name:"masc_web_fetch"
       ~description:"Fetch a selected web page for source-backed reading."
       ~input_schema:fetch_web_schema

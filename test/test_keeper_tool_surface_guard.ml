@@ -39,7 +39,7 @@ let test_unexpected_tool_names_accepts_public_alias_surface () =
     "public alias accepts internal handler"
     []
     (KTO.unexpected_tool_names
-       ~allowed_tool_names:[ "Execute"; "ReadFile"; "masc_board_post" ]
+       ~allowed_tool_names:[ "Execute"; "Read"; "masc_board_post" ]
        ~tool_names:[ "tool_execute"; "tool_read_file"; "keeper_board_post" ])
 ;;
 
@@ -62,7 +62,7 @@ let test_public_alias_guidance_blocks_internal_bash () =
        "tool_execute is an internal keeper implementation tool name, not a \
         model-facing tool. Use Execute instead.")
     (Resolution.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "Execute"; "ReadFile" ]
+       ~visible_tool_names:[ "Execute"; "Read" ]
        "tool_execute")
 ;;
 
@@ -87,7 +87,7 @@ let test_public_alias_guidance_prefers_visible_edit_alias () =
     "visible edit alias"
     expected
     (Resolution.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "EditFile" ]
+       ~visible_tool_names:[ "Edit" ]
        "tool_edit_file")
 ;;
 
@@ -136,8 +136,8 @@ let test_has_valid_tool_call_false_when_all_unexpected () =
     "pure hallucination turn has no valid tool"
     false
     (KTO.has_valid_tool_call
-       ~unexpected_tool_names:[ "Execute"; "Skill"; "ReadFile" ]
-       ~tool_names:[ "Execute"; "Skill"; "ReadFile" ])
+       ~unexpected_tool_names:[ "Execute"; "Skill"; "Read" ]
+       ~tool_names:[ "Execute"; "Skill"; "Read" ])
 ;;
 
 (* Empty turn (text-only response, no tool calls): has_valid returns

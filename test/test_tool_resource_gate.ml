@@ -59,32 +59,32 @@ let test_classifies_host_local_bottlenecks () =
            ]));
   check
     string
-    "SearchFiles public alias"
+    "Grep public alias"
     "filesystem_read"
     (classify
-       "SearchFiles"
+       "Grep"
        ~is_read_only:true
        ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
   check
     string
-    "ReadFile public alias"
+    "Read public alias"
     "filesystem_read"
     (classify
-       "ReadFile"
+       "Read"
        ~is_read_only:true
        ~args:(`Assoc [ "file_path", `String "lib/tool_resource_gate.ml" ]));
   check
     string
-    "WriteFile public alias"
+    "Write public alias"
     "filesystem_write"
     (classify
-       "WriteFile"
+       "Write"
        ~args:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   check
     string
-    "SearchWeb public alias"
+    "WebSearch public alias"
     "web"
-    (classify "SearchWeb" ~args:(`Assoc [ "query", `String "masc" ]));
+    (classify "WebSearch" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
     "tool_search_files unsupported op skips shell gate"

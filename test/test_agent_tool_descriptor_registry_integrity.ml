@@ -195,9 +195,9 @@ let test_readonly_policy_is_descriptor_input_aware () =
   in
   let internal_input = `Assoc [ "op", `String "rm"; "pattern", `String "x" ] in
   let descriptor =
-    match Descriptor.find_public "SearchFiles" with
+    match Descriptor.find_public "Grep" with
     | Some descriptor -> descriptor
-    | None -> Alcotest.fail "missing SearchFiles descriptor"
+    | None -> Alcotest.fail "missing Grep descriptor"
   in
   Alcotest.(check (option bool))
     "static readonly hint stays available for schema/evidence"
@@ -210,12 +210,12 @@ let test_readonly_policy_is_descriptor_input_aware () =
   Alcotest.(check (option bool))
     "public input is translated before readonly policy evaluation"
     (Some true)
-    (Resolution.readonly_for_tool_call ~tool_name:"SearchFiles" ~input:public_input);
+    (Resolution.readonly_for_tool_call ~tool_name:"Grep" ~input:public_input);
   Alcotest.(check (option bool))
     "MCP-prefixed public input follows the same descriptor policy"
     (Some true)
     (Resolution.readonly_for_tool_call
-       ~tool_name:"mcp__masc__SearchFiles"
+       ~tool_name:"mcp__masc__Grep"
        ~input:public_input);
   Alcotest.(check (option bool))
     "unknown internal op falls back to static read-only hint"
@@ -227,30 +227,30 @@ let test_readonly_policy_is_descriptor_input_aware () =
 let test_readonly_policy_projects_to_input_aware_registry () =
   let search_input = `Assoc [ "pattern", `String "Agent_tool_descriptor" ] in
   Alcotest.(check bool)
-    "SearchFiles public alias is input-aware read-only"
+    "Grep public alias is input-aware read-only"
     true
-    (Registry.is_read_only_with_input ~tool_name:"SearchFiles" ~input:search_input);
+    (Registry.is_read_only_with_input ~tool_name:"Grep" ~input:search_input);
   Alcotest.(check bool)
-    "MCP-prefixed SearchFiles is input-aware read-only"
+    "MCP-prefixed Grep is input-aware read-only"
     true
     (Registry.is_read_only_with_input
-       ~tool_name:"mcp__masc__SearchFiles"
+       ~tool_name:"mcp__masc__Grep"
        ~input:search_input);
   Alcotest.(check bool)
     "tool_search_files is descriptor read-only without legacy op"
     true
     (Registry.is_read_only_with_input ~tool_name:"tool_search_files" ~input:search_input);
   Alcotest.(check bool)
-    "ReadFile public alias is input-aware read-only"
+    "Read public alias is input-aware read-only"
     true
     (Registry.is_read_only_with_input
-       ~tool_name:"ReadFile"
+       ~tool_name:"Read"
        ~input:(`Assoc [ "file_path", `String "lib/keeper/keeper_tool_registry.ml" ]));
   Alcotest.(check bool)
-    "WriteFile public alias remains mutating"
+    "Write public alias remains mutating"
     false
     (Registry.is_read_only_with_input
-       ~tool_name:"WriteFile"
+       ~tool_name:"Write"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   Alcotest.(check bool)
     "tool_write_file remains mutating"
@@ -285,11 +285,11 @@ let test_public_name_projection_uses_descriptor_resolution () =
     (Resolution.public_names_for_internal "tool_execute");
   Alcotest.(check (option string))
     "tool_write_file preferred public projection"
-    (Some "WriteFile")
+    (Some "Write")
     (Resolution.public_name_for_internal "tool_write_file");
   Alcotest.(check (list string))
     "allowed internal routes project to public names"
-    [ "Execute"; "SearchFiles" ]
+    [ "Execute"; "Grep" ]
     (Resolution.public_names_for_allowed_internal_names
        [ "tool_execute"; "tool_search_files" ])
 ;;
@@ -297,14 +297,14 @@ let test_public_name_projection_uses_descriptor_resolution () =
 let test_mutation_boundary_delegates_to_descriptor_policy () =
   let search_input = `Assoc [ "pattern", `String "Agent_tool_descriptor" ] in
   Alcotest.(check bool)
-    "SearchFiles public alias is not mutating"
+    "Grep public alias is not mutating"
     false
-    (Exec.has_mutating_side_effect_with_input ~tool_name:"SearchFiles" ~input:search_input);
+    (Exec.has_mutating_side_effect_with_input ~tool_name:"Grep" ~input:search_input);
   Alcotest.(check bool)
-    "MCP-prefixed SearchFiles is not mutating"
+    "MCP-prefixed Grep is not mutating"
     false
     (Exec.has_mutating_side_effect_with_input
-       ~tool_name:"mcp__masc__SearchFiles"
+       ~tool_name:"mcp__masc__Grep"
        ~input:search_input);
   Alcotest.(check bool)
     "tool_search_files without legacy op is not mutating"
@@ -313,16 +313,16 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
        ~tool_name:"tool_search_files"
        ~input:search_input);
   Alcotest.(check bool)
-    "WriteFile public alias remains mutating"
+    "Write public alias remains mutating"
     true
     (Exec.has_mutating_side_effect_with_input
-       ~tool_name:"WriteFile"
+       ~tool_name:"Write"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   Alcotest.(check bool)
-    "WriteFile public alias follows descriptor checkpoint policy"
+    "Write public alias follows descriptor checkpoint policy"
     true
     (Registry.is_main_worktree_boundary_exempt_with_input
-       ~tool_name:"WriteFile"
+       ~tool_name:"Write"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   Alcotest.(check bool)
     "Execute public alias follows descriptor checkpoint policy"

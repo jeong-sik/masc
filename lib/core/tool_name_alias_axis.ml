@@ -7,12 +7,12 @@ type public_alias =
 
 let public_aliases =
   [ { public_name = "Execute"; internal_name = "tool_execute" }
-  ; { public_name = "EditFile"; internal_name = "tool_edit_file" }
-  ; { public_name = "FetchWeb"; internal_name = "masc_web_fetch" }
-  ; { public_name = "ReadFile"; internal_name = "tool_read_file" }
-  ; { public_name = "SearchFiles"; internal_name = "tool_search_files" }
-  ; { public_name = "SearchWeb"; internal_name = "masc_web_search" }
-  ; { public_name = "WriteFile"; internal_name = "tool_write_file" }
+  ; { public_name = "Edit"; internal_name = "tool_edit_file" }
+  ; { public_name = "WebFetch"; internal_name = "masc_web_fetch" }
+  ; { public_name = "Read"; internal_name = "tool_read_file" }
+  ; { public_name = "Grep"; internal_name = "tool_search_files" }
+  ; { public_name = "WebSearch"; internal_name = "masc_web_search" }
+  ; { public_name = "Write"; internal_name = "tool_write_file" }
   ]
 ;;
 

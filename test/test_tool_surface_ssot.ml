@@ -360,7 +360,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
      whatever name it finds — referencing [tool_search_files] in the [tool_execute]
      description causes the LLM to emit [tool_search_files] calls that bypass
      the alias routing layer (Keeper_tool_alias only routes public names
-     like [Execute], [SearchFiles], etc.). *)
+     like [Execute], [Grep], etc.). *)
   let contains_substring haystack needle =
     let hlen = String.length haystack in
     let nlen = String.length needle in
@@ -405,7 +405,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
     Alcotest.failf
       "Keeper-internal description cross-leak:\n%s\n\
        Internal names should not appear in descriptions; use public-facing \
-       terms (Execute, SearchFiles, EditFile, WriteFile, ReadFile) instead." msg
+       terms (Execute, Grep, Edit, Write, Read) instead." msg
   end
   else
     Alcotest.(check bool) "no cross-leak" true (!violations = [])

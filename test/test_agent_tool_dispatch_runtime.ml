@@ -313,7 +313,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "voice" "keeper_voice_speak");
   check bool "task tool grouped as coordination" true
     (member "coordination" "keeper_task_claim");
-  check bool "SearchFiles tool grouped" true
+  check bool "Grep tool grouped" true
     (member "search_files" "tool_search_files");
   check bool "fs tool grouped" true
     (member "fs" "tool_read_file");

@@ -2307,7 +2307,7 @@ let test_prompt_includes_operational_tool_guidance () =
     bool
     "mentions worktree inspection guidance"
     true
-    (contains_substring sys "ReadFile");
+    (contains_substring sys "Read");
   check
     bool
     "mentions server-managed heartbeat"
@@ -2456,7 +2456,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     "public read aliases are documented as passive"
     true
     (contains_substring prompt
-       "Read/observe aliases are passive: SearchFiles, ReadFile");
+       "Read/observe aliases are passive: Grep, Read");
   check
     bool
     "capabilities avoids legacy LS alias"
@@ -3203,7 +3203,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance includes web search when allowed"
     true
-    (contains_substring social_guidance "`SearchWeb` { query:");
+    (contains_substring social_guidance "`WebSearch` { query:");
   check
     bool
     "social guidance omits execute outside preset"
@@ -3228,7 +3228,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     bool
     "coding guidance includes web search schema"
     true
-    (contains_substring coding_guidance "`SearchWeb` { query:");
+    (contains_substring coding_guidance "`WebSearch` { query:");
   check
     bool
     "coding guidance omits hidden worktree schema"
@@ -4014,7 +4014,7 @@ let test_metrics_file_write_evidence_counts_as_visible () =
     ; has_file_write = true
     ; verification_pass_after_file_write = true
     ; final_text = None
-    ; tool_names = [ "WriteFile" ]
+    ; tool_names = [ "Write" ]
     ; stop_reason = None
     ; failure_reason = None
     }
@@ -7263,7 +7263,7 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
     "shell existence checks use public aliases"
     true
     (contains_substring sys
-       "Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call");
+       "Use `Read`, `Grep`, or one typed `Execute` argv call");
   check
     bool
     "Execute hint forbids shell existence tests"
@@ -7284,7 +7284,7 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash globs use public search tools"
     true
-    (contains_substring sys "Use SearchFiles or `tool_search_files file_pattern=glob`");
+    (contains_substring sys "Use Grep or `tool_search_files file_pattern=glob`");
   check
     bool
     "bash globs can use public file search"
@@ -10513,7 +10513,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
-       ~allowed_tool_names:[ "SearchFiles"; "Execute"; "keeper_board_post" ]
+       ~allowed_tool_names:[ "Grep"; "Execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
@@ -10525,7 +10525,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "tool_search_files" ]
-       ~allowed_tool_names:[ "SearchFiles" ]
+       ~allowed_tool_names:[ "Grep" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->

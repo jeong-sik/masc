@@ -534,9 +534,9 @@ let () =
           test_case "ServerError 502 is recoverable" `Quick
             test_server_error_502_is_recoverable;
           test_case
-            "ServerError 524 is capacity backpressure but not transient retry"
+            "ServerError 524 is transient network error and cascade rotation"
             `Quick
-            test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry;
+            test_server_error_524_is_transient_network_error_and_cascade_rotation;
           test_case "wrapped ServerError 524 is capacity backpressure" `Quick
             test_wrapped_524_is_capacity_backpressure;
           test_case "AuthError is recoverable" `Quick

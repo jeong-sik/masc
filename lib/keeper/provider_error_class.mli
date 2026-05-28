@@ -125,7 +125,7 @@ val timeout_http_statuses : int list
 
 val to_short_tag : t -> string
 (** Returns the stable short tag.  One of:
-    [client_capacity_exhausted], [tier_admission_exhausted],
+    [client_capacity_exhausted], [admission_exhausted],
     [backpressure], [dns_resolution_failure], [response_timeout],
     [unspecified]. *)
 

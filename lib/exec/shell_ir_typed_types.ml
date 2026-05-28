@@ -45,6 +45,9 @@ and (_, _, _, _) command =
       ; method_ : [ `GET | `POST | `PUT | `DELETE ]
       ; headers : (string * string) list option
       ; body : string option
+      ; output_file : string option
+      ; follow_redirects : bool
+      ; insecure : bool
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Rm :
@@ -66,6 +69,7 @@ and (_, _, _, _) command =
       { path : string
       ; name : string option
       ; type_ : [ `File | `Dir ] option
+      ; maxdepth : int option
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Head :
@@ -83,6 +87,7 @@ and (_, _, _, _) command =
       ; path : string option
       ; recursive : bool
       ; case_sensitive : bool
+      ; files_with_matches : bool
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Mkdir :
@@ -167,6 +172,8 @@ and (_, _, _, _) command =
       { count : bool
       ; duplicates : bool
       ; unique : bool
+      ; skip_fields : int option
+      ; skip_chars : int option
       ; file : string option
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
@@ -227,18 +234,23 @@ and (_, _, _, _) command =
   | Wget :
       { url : string
       ; output : string option
+      ; continue_ : bool
+      ; no_check_certificate : bool
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Ssh :
       { host : string
       ; user : string option
       ; command : string option
+      ; port : int option
+      ; identity_file : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Scp :
       { source : string
       ; dest : string
       ; recursive : bool
+      ; port : int option
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Tar :
@@ -257,33 +269,43 @@ and (_, _, _, _) command =
       { file1 : string
       ; file2 : string
       ; unified : bool
+      ; brief : bool
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Sed :
       { expression : string
       ; file : string
       ; in_place : bool
+      ; extended_regex : bool
+      ; suppress_output : bool
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Rsync :
       { source : string
       ; dest : string
+      ; archive : bool
+      ; delete : bool
+      ; dry_run : bool
+      ; compress : bool
       ; flags : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Node :
       { script : string
       ; args : string list
+      ; inline : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Python :
       { script : string
       ; args : string list
+      ; inline : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Python3 :
       { script : string
       ; args : string list
+      ; inline : string option
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Pip :
@@ -321,11 +343,13 @@ and (_, _, _, _) command =
   | Chmod :
       { mode : string
       ; path : string
+      ; recursive : bool
       }
       -> (unit, string, [ `Privileged ], [ `Host ]) command
   | Chown :
       { owner : string
       ; path : string
+      ; recursive : bool
       }
       -> (unit, string, [ `Privileged ], [ `Host ]) command
   | Docker :

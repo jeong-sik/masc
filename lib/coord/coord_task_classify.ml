@@ -227,8 +227,48 @@ let missing_required_tools ~allowed required =
     required
 ;;
 
+let write_intent_keywords =
+  [ "write"; "edit"; "create"; "implement"; "fix"; "refactor"
+  ; "pr "; "pull request"; "commit"; "push"; "merge"
+  ; "modify"; "update"; "add "; "delete"; "remove"
+  ; "test"; "spec"; "lint"; "build"; "generate"; "migrate"
+  ; "setup"; "configure"; "deploy"; "ship"; "patch"
+  ; "작성"; "수정"; "구현"; "추가"; "삭제"; "변경"; "생성"; "배포"
+  ]
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop i =
+      if i + needle_len > haystack_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let text_signals_write_intent ~title ~description =
+  let combined =
+    String.lowercase_ascii (title ^ " " ^ description)
+  in
+  List.exists
+    (fun keyword -> contains_substring ~needle:keyword combined)
+    write_intent_keywords
+
+let infer_required_tools_from_text ~title ~description =
+  if text_signals_write_intent ~title ~description
+  then [ "tool_edit_file"; "tool_execute" ]
+  else []
+
 let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
   let required_tools = task_required_tools task in
+  let required_tools =
+    if required_tools = []
+    then infer_required_tools_from_text ~title:task.title ~description:task.description
+    else required_tools
+  in
   match required_tools, agent_tool_names with
   | [], _ -> Ok ()
   | _ :: _, None ->
@@ -289,40 +329,6 @@ let default_completion_contract_text ~title ~description =
       ~max_len:220
       (Printf.sprintf "Task scope satisfied: %s - %s" title description)
 ;;
-
-let write_intent_keywords =
-  [ "write"; "edit"; "create file"; "implement"; "fix"; "refactor"
-  ; "pr "; "pull request"; "commit"; "push"; "merge"
-  ; "modify"; "update"; "add "; "delete"; "remove"
-  ; "test"; "spec"; "lint"; "build"
-  ; "작성"; "수정"; "구현"; "추가"; "삭제"; "변경"
-  ]
-
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop i =
-      if i + needle_len > haystack_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
-let text_signals_write_intent ~title ~description =
-  let combined =
-    String.lowercase_ascii (title ^ " " ^ description)
-  in
-  List.exists
-    (fun keyword -> contains_substring ~needle:keyword combined)
-    write_intent_keywords
-
-let infer_required_tools_from_text ~title ~description =
-  if text_signals_write_intent ~title ~description
-  then [ "tool_edit_file"; "tool_execute" ]
-  else []
 
 let ensure_task_contract_for_verification ?contract ~title ~description () =
   let base =

@@ -813,6 +813,9 @@ let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
   let routes = parse_routes toml in
   let system_targets = parse_system_targets toml in
   let profiles = parse_profiles toml in
+  let default_runtime_id =
+    Otoml.find_opt toml Otoml.get_string [ "runtime"; "default" ]
+  in
   if all_errors <> []
   then Error all_errors
   else (
@@ -821,7 +824,15 @@ let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
     in
     let models = extract_after_all_errors_guard ~label:"models" models_result in
     Ok
-      { providers; models; bindings; aliases; routes; system_targets; profiles })
+      { providers
+      ; models
+      ; bindings
+      ; aliases
+      ; routes
+      ; system_targets
+      ; profiles
+      ; default_runtime_id
+      })
 ;;
 
 let parse_string (content : string) : (cascade_config, parse_error list) result =

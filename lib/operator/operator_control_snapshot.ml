@@ -273,66 +273,25 @@ let keepers_json
                     let t_audit = Time_compat.now () in
                     let audit_json = cached_tool_audit_json ~lightweight config meta in
                     let allowed_tool_names =
-                      match U.to_list (U.member "allowed_tool_names" audit_json) with
-                      | l ->
-                        List.filter_map
-                          (function
-                            | `String s -> Some s
-                            | _ -> None)
-                          l
-                      | exception U.Type_error _ -> []
+                      Json_util.get_string_list audit_json "allowed_tool_names"
                     in
                     let recent_tool_names =
-                      match U.to_list (U.member "recent_tool_names" audit_json) with
-                      | l ->
-                        List.filter_map
-                          (function
-                            | `String s -> Some s
-                            | _ -> None)
-                          l
-                      | exception U.Type_error _ -> []
+                      Json_util.get_string_list audit_json "recent_tool_names"
                     in
                     let latest_tool_names =
-                      match U.to_list (U.member "latest_tool_names" audit_json) with
-                      | l ->
-                        List.filter_map
-                          (function
-                            | `String s -> Some s
-                            | _ -> None)
-                          l
-                      | exception U.Type_error _ -> []
+                      Json_util.get_string_list audit_json "latest_tool_names"
                     in
                     let latest_tool_call_count =
-                      match
-                        U.to_option
-                          U.to_int
-                          (U.member "latest_tool_call_count" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_int audit_json "latest_tool_call_count"
                     in
                     let latest_action_source =
-                      match
-                        U.to_option
-                          U.to_string
-                          (U.member "latest_action_source" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_string audit_json "latest_action_source"
                     in
                     let tool_audit_source =
-                      match
-                        U.to_option U.to_string (U.member "tool_audit_source" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_string audit_json "tool_audit_source"
                     in
                     let tool_audit_at =
-                      match
-                        U.to_option U.to_string (U.member "tool_audit_at" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_string audit_json "tool_audit_at"
                     in
                     dt_audit := Time_compat.now () -. t_audit;
                     let delivery_surface_view =

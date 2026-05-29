@@ -51,10 +51,7 @@ let judgment_write_json (ctx : 'a context) args =
           else normalized_actor ~context_actor:ctx.agent_name None
       | None -> normalized_actor ~context_actor:ctx.agent_name None
     in
-    let evidence_refs =
-      match U.member "evidence_refs" args with
-      | `List items -> List.filter_map U.to_string_option items
-      | _ -> []
+    let evidence_refs = Json_util.get_string_list args "evidence_refs"
     in
     let recommended_action =
       match U.member "recommended_action" args with

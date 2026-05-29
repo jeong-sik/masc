@@ -1,4 +1,3 @@
-module U = Yojson.Safe.Util
 open Operator_pending_confirm
 
 (** Severity levels for operator attention items and recommendations.

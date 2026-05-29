@@ -45,15 +45,13 @@ let state_to_json (state : tempo_state) : Yojson.Safe.t =
 
 (** State from JSON *)
 let state_of_json (json : Yojson.Safe.t) : tempo_state option =
-  let module U = Yojson.Safe.Util in
-  try
-    let current_interval_s = json |> U.member "current_interval_s" |> U.to_float in
-    let last_adjusted = json |> U.member "last_adjusted" |> U.to_float in
-    let reason = json |> U.member "reason" |> U.to_string in
+  let current_interval_s = Json_util.get_float json "current_interval_s" in
+  let last_adjusted = Json_util.get_float json "last_adjusted" in
+  let reason = Json_util.get_string json "reason" in
+  match current_interval_s, last_adjusted, reason with
+  | Some current_interval_s, Some last_adjusted, Some reason ->
     Some { current_interval_s; last_adjusted; reason }
-  with U.Type_error (msg, _) ->
-    Log.Misc.warn "state_of_json: %s" msg;
-    None
+  | _ -> None
 
 (** Load current tempo state *)
 let load_state (config : Coord_utils.config) : tempo_state =

@@ -1,8 +1,6 @@
 (** Tool audit helpers (lightweight fallback + cached JSON) for operator
     control snapshot, extracted from operator_control_snapshot.ml. *)
 
-module U = Yojson.Safe.Util
-
 let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
 let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
 

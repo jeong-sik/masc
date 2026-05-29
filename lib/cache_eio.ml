@@ -82,25 +82,16 @@ let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
 
 (** Entry from JSON *)
 let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
-  let module U = Yojson.Safe.Util in
-  try
-    let key = json |> U.member "key" |> U.to_string in
-    let value = json |> U.member "value" |> U.to_string in
-    let created_at = json |> U.member "created_at" |> U.to_float in
-    let expires_at =
-      match json |> U.member "expires_at" with
-      | `Null -> None
-      | `Float f -> Some f
-      | _ -> None
-    in
-    let tags = json |> U.member "tags" |> U.to_list |> List.map U.to_string in
+  let key = Json_util.get_string json "key" in
+  let value = Json_util.get_string json "value" in
+  let created_at = Json_util.get_float json "created_at" in
+  let expires_at = Json_util.get_float json "expires_at" in
+  let tags = Json_util.get_string_list json "tags" in
+  match key, value, created_at with
+  | Some key, Some value, Some created_at ->
     Some { key; value; created_at; expires_at; tags }
-  with
-  | U.Type_error (msg, _) ->
-    Log.Misc.error "JSON type error in entry_of_json: %s" msg;
-    None
-  | e ->
-    Log.Misc.error "Unexpected error in entry_of_json: %s" (Printexc.to_string e);
+  | _ ->
+    Log.Misc.error "JSON type error in entry_of_json: missing required fields";
     None
 ;;
 

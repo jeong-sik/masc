@@ -274,13 +274,11 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
 
 (* Add document *)
 let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
-  let module U = Yojson.Safe.Util in
-  let title = U.member "title" args |> U.to_string_option |> Option.value ~default:"" in
-  let source = U.member "source" args |> U.to_string_option |> Option.value ~default:"direct_experience" in
-  let confidence = U.member "confidence" args |> U.to_float_option |> Option.value ~default:0.7 in
-  let tags = try U.member "tags" args |> U.to_list |> List.filter_map U.to_string_option
-    with Yojson.Safe.Util.Type_error (_, _) -> [] in
-  let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
+  let title = Json_util.get_string args "title" |> Option.value ~default:"" in
+  let source = Json_util.get_string args "source" |> Option.value ~default:"direct_experience" in
+  let confidence = Json_util.get_float args "confidence" |> Option.value ~default:0.7 in
+  let tags = Json_util.get_string_list args "tags" in
+  let content = Json_util.get_string args "content" |> Option.value ~default:"" in
 
   if String.equal title "" then missing_required ~tool_name ~start_time "title"
   else if String.equal content "" then missing_required ~tool_name ~start_time "content"

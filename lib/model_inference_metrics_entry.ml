@@ -277,7 +277,7 @@ let json_float_field_opt key (fields : (string * Yojson.Safe.t) list) =
   match List.assoc_opt key fields with
   | Some (`Float f) -> Some f
   | Some (`Int n) -> Some (Float.of_int n)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 ;;
 
 let json_positive_float_field_opt key fields =
@@ -289,13 +289,13 @@ let json_positive_float_field_opt key fields =
 let json_int_field_opt key (fields : (string * Yojson.Safe.t) list) =
   match List.assoc_opt key fields with
   | Some (`Int n) -> Some n
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Float _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 ;;
 
 let json_bool_field_opt key (fields : (string * Yojson.Safe.t) list) =
   match List.assoc_opt key fields with
   | Some (`Bool b) -> Some b
-  | _ -> None
+  | None | Some (`Null | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 ;;
 
 let json_string_field_opt key (fields : (string * Yojson.Safe.t) list) =
@@ -303,7 +303,7 @@ let json_string_field_opt key (fields : (string * Yojson.Safe.t) list) =
   | Some (`String s) ->
     let trimmed = String.trim s in
     if trimmed = "" then None else Some trimmed
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> None
 ;;
 
 let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
@@ -314,9 +314,9 @@ let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
         | `String s ->
           let trimmed = String.trim s in
           if trimmed = "" then None else Some trimmed
-        | _ -> None)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None)
       xs
-  | _ -> []
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
 ;;
 
 (* ── Usage trust inference ──────────────────────────────── *)

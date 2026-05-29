@@ -31,7 +31,7 @@ let private_provider_hint_of_fields (fields : (string * Yojson.Safe.t) list) =
     | Some (`String raw) ->
       let trimmed = String.trim raw in
       if String.equal trimmed "" then None else Some trimmed
-    | _ -> None
+    | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> None
   in
   match read "provider_kind" with
   | Some _ as provider_kind -> provider_kind
@@ -48,7 +48,7 @@ let cascade_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list)
 let assoc_fields_opt key fields =
   match List.assoc_opt key fields with
   | Some (`Assoc nested) -> Some nested
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _) -> None
 ;;
 
 let first_json_string_field_opt key field_sets =
@@ -64,7 +64,7 @@ let first_candidate_model field_sets =
     (fun fields ->
        match List.assoc_opt "candidate_models" fields with
        | Some (`List (`String m :: _)) -> Some m
-       | _ -> None)
+       | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None)
     field_sets
 ;;
 
@@ -83,7 +83,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
       let outer_tool_call_count =
         match List.assoc_opt "tool_call_count" fields with
         | Some (`Int n) -> n
-        | _ -> 0
+        | None | Some (`Null | `Bool _ | `Float _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> 0
       in
       let outer_tools_used =
         match List.assoc_opt "tools_used" fields with
@@ -93,7 +93,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
               | `String s when String.length s > 0 -> Some s
               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> None)
             xs
-        | _ -> []
+        | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _) -> []
       in
       (match List.assoc_opt "telemetry" fields with
        | Some (`Assoc tfields) ->
@@ -191,7 +191,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              match List.assoc_opt "prompt_per_second" tfields with
              | Some (`Float f) when f > 0.0 -> Some f
              | Some (`Int n) when n > 0 -> Some (Float.of_int n)
-             | _ -> None
+             | None | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
            in
            (* hw_decode_tokens_per_second — preferred field; fall back to
               provider_tokens_per_second for backward compat. Treat explicit
@@ -201,7 +201,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                match List.assoc_opt key tfields with
                | Some (`Float f) when f > 0.0 -> Some f
                | Some (`Int n) when n > 0 -> Some (Float.of_int n)
-               | _ -> None
+               | None | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
              in
              match read "hw_decode_tokens_per_second" with
              | Some _ as v -> v
@@ -212,7 +212,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                match List.assoc_opt key tfields with
                | Some (`Float f) when f > 0.0 -> Some f
                | Some (`Int n) when n > 0 -> Some (Float.of_int n)
-               | _ -> None
+               | None | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
              in
              match read "peak_memory_gb" with
              | Some _ as v -> v
@@ -226,7 +226,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            let fallback_applied =
              match List.assoc_opt "fallback_applied" tfields with
              | Some (`Bool b) -> b
-             | _ -> false
+             | None | Some (`Null | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> false
            in
            let cost_usd_raw = json_float_field_opt "cost_usd" tfields in
            (* Per-turn thinking_enabled — emitted by keeper_unified_turn's
@@ -235,7 +235,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            let thinking_enabled =
              match List.assoc_opt "thinking_enabled" tfields with
              | Some (`Bool b) -> Some b
-             | _ -> None
+             | None | Some (`Null | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
            in
            let usage_reported =
              match json_bool_field_opt "usage_reported" tfields with
@@ -323,7 +323,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                   else json_string_field_opt "coverage_stage" tfields)
              ; is_error = false
              })
-       | _ -> Error No_telemetry_object)
+       | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _) -> Error No_telemetry_object)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error Not_assoc)
 ;;
 
@@ -334,7 +334,7 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
     match List.assoc_opt key fields with
     | Some (`Float f) when f > 0.0 -> Some f
     | Some (`Int n) when n > 0 -> Some (Float.of_int n)
-    | _ -> None
+    | None | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
   in
   match read "hw_decode_tokens_per_second" with
   | Some _ as v -> v
@@ -379,7 +379,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
       | None ->
         (match List.assoc_opt "timestamp" fields with
          | Some (`String s) -> Masc_domain.parse_iso8601_opt s
-         | _ -> None)
+         | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> None)
     in
     (match ts with
      | None -> Error Missing_ts_unix
@@ -460,7 +460,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          match List.assoc_opt "prompt_per_second" fields with
          | Some (`Float f) when f > 0.0 -> Some f
          | Some (`Int n) when n > 0 -> Some (Float.of_int n)
-         | _ -> None
+         | None | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
        in
        let hw_decode_tok_per_sec = read_hw_decode_tok_per_sec fields in
        let peak_memory_gb =

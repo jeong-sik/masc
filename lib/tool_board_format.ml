@@ -255,7 +255,7 @@ let sources_footer sources =
            match List.assoc_opt "quote" fields with
            | Some (`String value) when not (String.equal value "") ->
              " - \"" ^ value ^ "\""
-           | _ -> ""
+           | None | Some (`String _ | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> ""
          in
          Some ("- <" ^ url ^ ">" ^ quote)
        | _ -> None)
@@ -476,7 +476,7 @@ let source_entries_arg args =
              | Some (`String value) ->
                let normalized = normalize_source_string value in
                if String.equal normalized "" then None else Some normalized
-             | _ -> None
+             | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> None
            in
            Some
              (`Assoc
@@ -512,7 +512,7 @@ let merge_sources_into_meta meta_json sources =
   let fields =
     match meta_json with
     | Some (`Assoc fields) -> fields
-    | _ -> []
+    | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _) -> []
   in
   let fields = assoc_replace "sources" (`List sources) fields in
   let fields = assoc_replace "has_external_sources" (`Bool true) fields in
@@ -524,7 +524,7 @@ let assoc_field fields key = List.assoc_opt key fields
 let string_field fields key default =
   match assoc_field fields key with
   | Some (`String value) -> String.trim value
-  | _ -> default
+  | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> default
 ;;
 
 let float_field fields key default =
@@ -547,7 +547,7 @@ let string_list_field fields key =
         let trimmed = String.trim value in
         if String.equal trimmed "" then None else Some trimmed
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None)
-  | _ -> []
+  | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _) -> []
 ;;
 
 let trim_nonempty_string value =
@@ -586,7 +586,7 @@ let provenance_arg args =
          (Printf.sprintf
             "provenance must be an object (received %s)"
             (Json_util.kind_name other))
-     | _ -> Ok (`Assoc []))
+     | None -> Ok (`Assoc []))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Ok (`Assoc [])
 ;;
 

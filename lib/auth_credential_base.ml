@@ -297,7 +297,7 @@ let load_redirect_target config path =
         (match List.assoc_opt "redirect_to" fields with
          | Some (`String target) -> redirect_target_file config target
          | _ -> None)
-      | _ -> None
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     with
     | Sys_error _ | Yojson.Json_error _ -> None)
 ;;

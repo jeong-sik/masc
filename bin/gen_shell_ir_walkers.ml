@@ -2197,6 +2197,8 @@ let rec parse output continue_ ncc url = function
   | "-c" :: rest -> parse output true ncc url rest
   | "--continue" :: rest -> parse output true ncc url rest
   | "--no-check-certificate" :: rest -> parse output continue_ true url rest
+  (* POSIX end-of-options: skip --, remaining args are positional *)
+  | "--" :: rest -> parse output continue_ ncc url rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ "--output-document"; o ] -> parse (Some o) continue_ ncc url rest
@@ -2424,6 +2426,13 @@ let rec parse action compression archive paths = function
   | "-J" :: rest -> parse action `Xz archive paths rest
   | "--zstd" :: rest -> parse action `Zstd archive paths rest
   | "-f" :: f :: rest -> parse action compression (Some f) paths rest
+  (* POSIX end-of-options: all remaining args are paths *)
+  | "--" :: rest ->
+    let paths' = List.rev_append (List.filter (fun a -> String.length a > 0) rest) paths in
+    (match action, archive with
+     | Some a, Some f ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tar { action = a; archive = f; paths = List.rev paths'; compression }))
+     | _ -> None)
   | arg :: rest ->
     if String.length arg >= 3 && arg.[0] = '-'
     then (
@@ -2497,6 +2506,8 @@ let rec parse jobs target = function
               (String.sub arg 2 (String.length arg - 2)) ->
     let j = int_of_string (String.sub arg 2 (String.length arg - 2)) in
     parse (Some j) target rest
+  (* POSIX end-of-options: skip --, remaining args are positional *)
+  | "--" :: rest -> parse jobs target rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse jobs target rest

@@ -3156,10 +3156,7 @@ let rec parse inline script extra dd = function
          && List.mem arg node_value_flags ->
     parse inline script extra dd rest
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> let flag = String.sub arg 0 i in List.mem flag node_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg node_value_flags ->
     parse inline script extra dd rest
   | arg :: rest ->
     (match inline, script with
@@ -3212,10 +3209,7 @@ let rec parse inline script extra dd = function
     when not dd && List.mem arg python_value_flags ->
     parse inline script extra dd rest
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> let flag = String.sub arg 0 i in List.mem flag python_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg python_value_flags ->
     parse inline script extra dd rest
   | arg :: rest ->
     (match inline, script with
@@ -3268,10 +3262,7 @@ let rec parse inline script extra dd = function
     when not dd && List.mem arg python3_value_flags ->
     parse inline script extra dd rest
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> let flag = String.sub arg 0 i in List.mem flag python3_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg python3_value_flags ->
     parse inline script extra dd rest
   | arg :: rest ->
     (match inline, script with
@@ -3318,10 +3309,7 @@ let rec parse subcmd pkgs dd = function
          && List.mem arg pip_value_flags ->
     parse subcmd pkgs dd rest
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> let flag = String.sub arg 0 i in List.mem flag pip_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg pip_value_flags ->
     parse subcmd pkgs dd rest
   | arg :: rest ->
     (match subcmd with
@@ -3448,12 +3436,7 @@ let rec parse subcmd sd glb frc dd = function
     parse subcmd sd glb frc dd rest
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i ->
-                let flag = String.sub arg 0 i in
-                List.mem flag npm_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg npm_value_flags ->
     parse subcmd sd glb frc dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd sd glb frc true rest
@@ -3533,17 +3516,10 @@ let rec parse subcmd rel verb feat dd = function
     parse subcmd rel verb feat dd rest
   (* --flag=VALUE equal-sign form for value-consuming flags *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i ->
-                let flag = String.sub arg 0 i in
-                List.mem flag cargo_value_flags || flag = "--features"
-              | None -> false) ->
-    (match String.index_opt arg '=' with
-     | Some i when String.sub arg 0 i = "--features" ->
-       let f = String.sub arg (i + 1) (String.length arg - i - 1) in
-       parse subcmd rel verb (Some f) dd rest
-     | _ -> parse subcmd rel verb feat dd rest)
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ("--features" :: cargo_value_flags) ->
+    (match Shell_ir_typed_types.eq_form_flag_value arg [ "--features" ] with
+     | Some f -> parse subcmd rel verb (Some f) dd rest
+     | None -> parse subcmd rel verb feat dd rest)
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd rel verb feat true rest
   | arg :: rest ->
@@ -3933,12 +3909,7 @@ let rec parse subcmd rm priv det dd = function
     parse subcmd rm priv det dd rest
   (* --flag=VALUE equal-sign form for value-consuming flags *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i ->
-                let flag = String.sub arg 0 i in
-                List.mem flag docker_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg docker_value_flags ->
     parse subcmd rm priv det dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd rm priv det true rest
@@ -4000,10 +3971,7 @@ let opam_value_flags = [ "--repo"; "--root"; "--switch"; "--dir"; "--solver"; "-
       parse subcmd y dd rest
     (* --flag=VALUE equal-sign form *)
     | arg :: rest
-      when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-           && (match String.index_opt arg '=' with
-                | Some i -> let flag = String.sub arg 0 i in List.mem flag opam_value_flags
-                | None -> false) ->
+      when not dd && Shell_ir_typed_types.is_eq_form_flag arg opam_value_flags ->
       parse subcmd y dd rest
     | arg :: rest ->
       (match subcmd with
@@ -4062,10 +4030,7 @@ let npx_value_flags = [ "--package"; "--cache"; "--userconfig"; "--call"; "--she
       parse subcmd y dd rest
     (* --flag=VALUE equal-sign form *)
     | arg :: rest
-      when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-           && (match String.index_opt arg '=' with
-                | Some i -> let flag = String.sub arg 0 i in List.mem flag npx_value_flags
-                | None -> false) ->
+      when not dd && Shell_ir_typed_types.is_eq_form_flag arg npx_value_flags ->
       parse subcmd y dd rest
     | arg :: rest ->
       (match subcmd with
@@ -4133,10 +4098,7 @@ let rec parse subcmd dev glb prod fl dd = function
     parse subcmd dev glb prod fl dd rest
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> let flag = String.sub arg 0 i in List.mem flag yarn_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg yarn_value_flags ->
     parse subcmd dev glb prod fl dd rest
   | arg :: rest ->
     (match subcmd with
@@ -4201,10 +4163,7 @@ let rec parse subcmd sd glb frc prod dd = function
     parse subcmd sd glb frc prod dd rest
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> List.mem (String.sub arg 0 i) [ "--dir"; "--filter"; "--store-dir"; "--registry"; "--config"; "--global-dir"; "--reporter"; "--loglevel"; "--prefix"; "--color" ]
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--dir"; "--filter"; "--store-dir"; "--registry"; "--config"; "--global-dir"; "--reporter"; "--loglevel"; "--prefix"; "--color" ] ->
     parse subcmd sd glb frc prod dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd sd glb frc prod true rest
@@ -4265,10 +4224,7 @@ let rec parse subcmd nc sys dd = function
     parse subcmd nc sys dd rest
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> List.mem (String.sub arg 0 i) [ "--index-url"; "--extra-index-url"; "--python"; "--cache-dir"; "--find-links"; "--resolution"; "--prerelease"; "--index-strategy"; "--keyring-provider" ]
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--index-url"; "--extra-index-url"; "--python"; "--cache-dir"; "--find-links"; "--resolution"; "--prerelease"; "--index-strategy"; "--keyring-provider" ] ->
     parse subcmd nc sys dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd nc sys true rest
@@ -4330,10 +4286,7 @@ let rec parse subcmd y f dd = function
     parse subcmd y f dd rest
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> List.mem (String.sub arg 0 i) [ "--repo"; "--hostname"; "--group"; "--output"; "--per-page"; "--jq"; "--template" ]
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--repo"; "--hostname"; "--group"; "--output"; "--per-page"; "--jq"; "--template" ] ->
     parse subcmd y f dd rest
   | "--" :: rest -> parse subcmd y f true rest
   | arg :: rest ->
@@ -4392,10 +4345,7 @@ let rec parse subcmd v x dd = function
     parse subcmd v x dd rest
   (* --flag=VALUE equal-sign form (double-dash only) *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> List.mem (String.sub arg 0 i) [ "--tb"; "--deselect"; "--junitxml"; "--result-log"; "--confcutdir"; "--rootdir"; "--override-ini" ]
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--tb"; "--deselect"; "--junitxml"; "--result-log"; "--confcutdir"; "--rootdir"; "--override-ini" ] ->
     parse subcmd v x dd rest
   | "--" :: rest -> parse subcmd v x true rest
   | arg :: rest ->
@@ -4491,10 +4441,7 @@ let rec parse subcmd f s dd = function
          && List.mem arg ruff_value_flags ->
     parse subcmd f s dd rest
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> let flag = String.sub arg 0 i in List.mem flag ruff_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ruff_value_flags ->
     parse subcmd f s dd rest
   | arg :: rest ->
     (match subcmd with
@@ -4550,10 +4497,7 @@ let rec parse subcmd st dd = function
     parse subcmd st dd rest
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> List.mem (String.sub arg 0 i) [ "--pythonversion"; "--pythonplatform"; "--lib"; "--project"; "--venv-path" ]
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--pythonversion"; "--pythonplatform"; "--lib"; "--project"; "--venv-path" ] ->
     parse subcmd st dd rest
   | "--" :: rest -> parse subcmd st true rest
   | arg :: rest ->
@@ -4613,10 +4557,7 @@ let rec parse subcmd nw w dd = function
          && List.mem arg tsc_value_flags ->
     parse subcmd nw w dd rest
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i -> let flag = String.sub arg 0 i in List.mem flag tsc_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg tsc_value_flags ->
     parse subcmd nw w dd rest
   | arg :: rest ->
     (match subcmd with
@@ -4795,12 +4736,7 @@ let rec parse subcmd nd p dd = function
     parse subcmd nd p dd rest
   (* --flag=VALUE equal-sign form for value-consuming flags *)
   | arg :: rest
-    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-         && (match String.index_opt arg '=' with
-              | Some i ->
-                let flag = String.sub arg 0 i in
-                List.mem flag gradle_value_flags
-              | None -> false) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg gradle_value_flags ->
     parse subcmd nd p dd rest
   | arg :: rest ->
     (match subcmd with
@@ -4986,12 +4922,7 @@ parse None false false false args|}
       parse subcmd off bat q dd rest
     (* --flag=VALUE equal-sign form *)
     | arg :: rest
-      when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
-           && (match String.index_opt arg '=' with
-                | Some i ->
-                  let flag = String.sub arg 0 i in
-                  List.mem flag mvn_value_flags
-                | None -> false) ->
+      when not dd && Shell_ir_typed_types.is_eq_form_flag arg mvn_value_flags ->
       parse subcmd off bat q dd rest
     | "--" :: rest -> parse subcmd off bat q true rest
     | arg :: rest ->

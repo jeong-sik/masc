@@ -674,6 +674,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
+      (* RFC-0203 Phase 2 dual-run: spawn the in-process Discord gateway
+         when MASC_DISCORD_BUILTIN=true. Pure observation during the
+         dual-run window — events feed Discord_dual_run_stats counters,
+         the Python sidecar still owns keeper room delivery. *)
+      Server_discord_builtin_bootstrap.start_if_enabled ~sw ~env;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
       (* Create the shared Domain_pool for dashboard compute and optional

@@ -11,6 +11,8 @@
    channel_gate_discord_state
    channel_gate_imessage_state
    channel_gate_metrics
+   discord_builtin_config
+   discord_dual_run_stats
    discord_gateway_client
    discord_gateway_state
    discord_rest_client

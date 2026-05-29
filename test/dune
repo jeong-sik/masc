@@ -1502,6 +1502,10 @@
 
 (include stanzas/test_discord_rest_client.inc)
 
+(include stanzas/test_discord_dual_run_stats.inc)
+
+(include stanzas/test_discord_builtin_config.inc)
+
 (include stanzas/test_ci_hardening_source.inc)
 
 (include stanzas/test_ci_run_tests_script.inc)

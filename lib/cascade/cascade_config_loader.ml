@@ -295,37 +295,16 @@ type inference_params =
       [reasoning_effort]) happens downstream in OAS. *)
   }
 
-let read_float_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `Float f -> Some f
-  | `Int i -> Some (float_of_int i)
-  | _ -> None
-;;
+let read_float_field json key = Json_util.get_float key json
 
-let read_int_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `Int i -> Some i
-  | `Float f -> Some (int_of_float f)
-  | _ -> None
-;;
+let read_int_field json key = Json_util.get_int key json
 
 let read_string_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `String s ->
-    let trimmed = String.trim s in
-    if trimmed <> "" then Some trimmed else None
-  | _ -> None
-;;
+  Json_util.get_string key json
+  |> Option.map String.trim
+  |> Option.bind (fun s -> if s <> "" then Some s else None)
 
-let read_bool_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `Bool b -> Some b
-  | _ -> None
-;;
+let read_bool_field json key = Json_util.get_bool key json
 
 let resolve_inference_params ~config_path ~name =
   match load_catalog_source config_path with
@@ -401,8 +380,7 @@ let resolve_inference_params ~config_path ~name =
     Returns an association list of [(provider_name, env_var_name)].
     The special key ["*"] means "all providers". *)
 let read_api_key_env_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
+  match Option.value ~default:`Null (Json_util.assoc_member_opt key json) with
   | `String s ->
     let trimmed = String.trim s in
     if trimmed <> "" then [ "*", trimmed ] else []
@@ -476,8 +454,7 @@ type strategy_config =
    wrong shape; tier configuration must be all-or-nothing to avoid
    silent misroutes. *)
 let read_tiers_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
+  match Option.value ~default:`Null (Json_util.assoc_member_opt key json) with
   | `Null -> None
   | `List outer ->
     let parse_tier = function

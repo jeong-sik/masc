@@ -371,8 +371,7 @@ let strict_assoc_params params =
            (Json_util.kind_name other))
 
 let cursor_param payload =
-  let open Yojson.Safe.Util in
-  match payload |> member "cursor" with
+  match Option.value ~default:`Null (Json_util.assoc_member_opt "cursor" payload) with
   | `Null -> Ok None
   | `String value ->
       let trimmed = String.trim value in
@@ -386,8 +385,7 @@ let cursor_param payload =
            (Json_util.kind_name other))
 
 let bool_param payload key =
-  let open Yojson.Safe.Util in
-  match payload |> member key with
+  match Option.value ~default:`Null (Json_util.assoc_member_opt key payload) with
   | `Null -> Ok false
   | `Bool value -> Ok value
   | other ->
@@ -462,7 +460,6 @@ let validate_optional_meta payload =
            (Json_util.kind_name other))
 
 let requested_tool_list_params params =
-  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed =
     [ "_meta"; "names"; "include_hidden"; "include_usage"; "cursor" ]
@@ -480,7 +477,7 @@ let requested_tool_list_params params =
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
     let* names =
-      match payload |> member "names" with
+      match Option.value ~default:`Null (Json_util.assoc_member_opt "names" payload) with
       | `Null -> Ok None
       | `List items ->
           items
@@ -515,7 +512,6 @@ let requested_tool_list_params params =
       }
 
 let parse_cursor_only_params params =
-  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed = [ "_meta"; "cursor" ] in
   let unknown =
@@ -530,7 +526,7 @@ let parse_cursor_only_params params =
   else
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
-    match payload |> member "cursor" with
+    match Option.value ~default:`Null (Json_util.assoc_member_opt "cursor" payload) with
     | `Null -> Ok { cursor = None }
     | `String cursor -> Ok { cursor = Some cursor }
     | other ->

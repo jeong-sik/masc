@@ -41,6 +41,7 @@ from .status_store import (
     NamesStore,
     StatusStore,
 )
+from .traffic_audit import TrafficAuditStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -97,6 +98,10 @@ class GateBot(discord.Client):
         self.audit_store = BindingAuditStore(self.cfg.binding_audit_path())
         self.status_store = StatusStore(self.cfg.status_path())
         self.names_store = NamesStore(self.cfg.names_path())
+        # RFC-0203 Phase 2 dual-run: record sidecar-path counters
+        # alongside the in-process gateway so both can be cross-checked
+        # offline via .gate/runtime/discord/traffic_audit.jsonl.
+        self.traffic_audit = TrafficAuditStore()
         persisted_bindings = self.binding_store.load()
         if persisted_bindings is None:
             legacy_binding_store = BindingStore(self.cfg.legacy_binding_store_path())
@@ -167,6 +172,7 @@ class GateBot(discord.Client):
     async def on_ready(self) -> None:
         assert self.user is not None
         self._last_ready_at = utc_now_iso()
+        self.traffic_audit.record_inbound(path="sidecar", kind="ready")
         logger.info("Bot ready: %s (id=%s)", self.user.name, self.user.id)
         logger.info(
             "Keeper map (%s @ %s, audit %s): %s",
@@ -653,119 +659,141 @@ class GateBot(discord.Client):
 
     async def on_message(self, message: discord.Message) -> None:
         """Route channel messages to the mapped keeper via streaming."""
-        if message.author == self.user or message.author.bot:
-            return
-        if not message.guild:
-            return
-
-        self._maybe_reload_bindings()
-        keeper_name = self._resolve_keeper_for_channel(message.channel)
-        if keeper_name is None:
-            return
-
-        channel_id = message.channel.id
-        lock = self._processing.get(channel_id)
-        if lock is not None and lock.locked():
-            self._pending.setdefault(channel_id, []).append(
-                (message.id, message.created_at)
-            )
-            return
-
-        content = self._compose_gate_content(message)
-        if not content:
-            logger.info("Skipping empty Discord message %s", message.id)
-            return
-
-        # Try streaming first, fall back to batch
-        async with message.channel.typing():
-            streamed = await self._stream_to_channel(
-                message.channel,
-                keeper_name,
-                content,
-                channel_user_id=str(message.author.id),
-                channel_user_name=str(message.author),
-                channel_room_id=str(message.channel.id),
-            )
-            if streamed:
+        # RFC-0203 Phase 2: record one inbound traffic entry per
+        # invocation. Default to "ignored"; flip to "message_create"
+        # only at the point the message reaches the keeper.
+        kept = False
+        try:
+            if message.author == self.user or message.author.bot:
+                return
+            if not message.guild:
                 return
 
-            # Fallback: batch request via gate/message
-            response = await self.gate.send_message(
-                keeper_name=keeper_name,
-                content=content,
-                channel_user_id=str(message.author.id),
-                channel_user_name=str(message.author),
-                channel_room_id=str(message.channel.id),
-                message_id=str(message.id),
-            )
+            self._maybe_reload_bindings()
+            keeper_name = self._resolve_keeper_for_channel(message.channel)
+            if keeper_name is None:
+                return
 
-        await self._send_response(message.channel, response)
+            channel_id = message.channel.id
+            lock = self._processing.get(channel_id)
+            if lock is not None and lock.locked():
+                self._pending.setdefault(channel_id, []).append(
+                    (message.id, message.created_at)
+                )
+                return
+
+            content = self._compose_gate_content(message)
+            if not content:
+                logger.info("Skipping empty Discord message %s", message.id)
+                return
+
+            kept = True
+            # Try streaming first, fall back to batch
+            async with message.channel.typing():
+                streamed = await self._stream_to_channel(
+                    message.channel,
+                    keeper_name,
+                    content,
+                    channel_user_id=str(message.author.id),
+                    channel_user_name=str(message.author),
+                    channel_room_id=str(message.channel.id),
+                )
+                if streamed:
+                    return
+
+                # Fallback: batch request via gate/message
+                response = await self.gate.send_message(
+                    keeper_name=keeper_name,
+                    content=content,
+                    channel_user_id=str(message.author.id),
+                    channel_user_name=str(message.author),
+                    channel_room_id=str(message.channel.id),
+                    message_id=str(message.id),
+                )
+
+            await self._send_response(message.channel, response)
+        finally:
+            self.traffic_audit.record_inbound(
+                path="sidecar",
+                kind="message_create" if kept else "ignored",
+            )
 
     async def on_raw_reaction_add(
         self, payload: discord.RawReactionActionEvent
     ) -> None:
         """Trigger a keeper turn when a configured emoji reaction is added."""
-        configured = self.cfg.discord_reaction_trigger_emoji
-        if not configured:
-            return
+        # RFC-0203 Phase 2: same pattern as on_message — default to
+        # "ignored", flip to "reaction_add" only once the lock is
+        # acquired and we proceed to drain pending turns.
+        kept = False
+        try:
+            configured = self.cfg.discord_reaction_trigger_emoji
+            if not configured:
+                return
 
-        emoji_str = str(payload.emoji)
-        emoji_name = payload.emoji.name or ""
-        if configured not in (emoji_str, emoji_name):
-            return
+            emoji_str = str(payload.emoji)
+            emoji_name = payload.emoji.name or ""
+            if configured not in (emoji_str, emoji_name):
+                return
 
-        if self.user is not None and payload.user_id == self.user.id:
-            return
+            if self.user is not None and payload.user_id == self.user.id:
+                return
 
-        channel = self.get_channel(payload.channel_id)
-        if channel is None:
+            channel = self.get_channel(payload.channel_id)
+            if channel is None:
+                try:
+                    channel = await self.fetch_channel(payload.channel_id)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "Failed to fetch channel %s for reaction: %s",
+                        payload.channel_id,
+                        exc,
+                    )
+                    return
+
+            if not isinstance(channel, discord.abc.Messageable):
+                return
+
             try:
-                channel = await self.fetch_channel(payload.channel_id)
+                user = await self.fetch_user(payload.user_id)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
-                    "Failed to fetch channel %s for reaction: %s",
-                    payload.channel_id,
-                    exc,
+                    "Failed to fetch user %s for reaction: %s", payload.user_id, exc
+                )
+                return
+            if user.bot:
+                return
+
+            self._maybe_reload_bindings()
+            keeper_name = self._resolve_keeper_for_channel(channel)
+            if keeper_name is None:
+                return
+
+            channel_id_int = int(payload.channel_id)
+            trigger_user_id = str(payload.user_id)
+            trigger_user_name = str(user)
+            trigger_msg_id = int(payload.message_id)
+
+            lock = self._processing.setdefault(channel_id_int, asyncio.Lock())
+            if lock.locked():
+                self._pending.setdefault(channel_id_int, []).append(
+                    (trigger_msg_id, datetime.datetime.now(datetime.timezone.utc))
                 )
                 return
 
-        if not isinstance(channel, discord.abc.Messageable):
-            return
-
-        try:
-            user = await self.fetch_user(payload.user_id)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                "Failed to fetch user %s for reaction: %s", payload.user_id, exc
-            )
-            return
-        if user.bot:
-            return
-
-        self._maybe_reload_bindings()
-        keeper_name = self._resolve_keeper_for_channel(channel)
-        if keeper_name is None:
-            return
-
-        channel_id_int = int(payload.channel_id)
-        trigger_user_id = str(payload.user_id)
-        trigger_user_name = str(user)
-        trigger_msg_id = int(payload.message_id)
-
-        lock = self._processing.setdefault(channel_id_int, asyncio.Lock())
-        if lock.locked():
-            self._pending.setdefault(channel_id_int, []).append(
-                (trigger_msg_id, datetime.datetime.now(datetime.timezone.utc))
-            )
-            return
-
-        async with lock:
-            await self._drain_pending(
-                channel,
-                keeper_name,
-                trigger_msg_id,
-                trigger_user_id,
-                trigger_user_name,
+            kept = True
+            async with lock:
+                await self._drain_pending(
+                    channel,
+                    keeper_name,
+                    trigger_msg_id,
+                    trigger_user_id,
+                    trigger_user_name,
+                )
+        finally:
+            self.traffic_audit.record_inbound(
+                path="sidecar",
+                kind="reaction_add" if kept else "ignored",
             )
 
 

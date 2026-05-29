@@ -37,6 +37,7 @@ def bot() -> GateBot:
         patch("src.bot.BindingAuditStore"),
         patch("src.bot.StatusStore"),
         patch("src.bot.NamesStore"),
+        patch("src.bot.TrafficAuditStore"),
     ):
         cfg = MagicMock()
         cfg.discord_bot_token = "test-token"

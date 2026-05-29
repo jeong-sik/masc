@@ -389,7 +389,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
                   ("display_name", `String display_name);
                   ("is_live", `Bool (Option.is_some agent));
                   ( "archived_reason",
-                    json_string_option
+                    Json_util.string_opt_to_json
                       (if Option.is_some agent
                        then None
                        else archived_reason_for_session related_session) );

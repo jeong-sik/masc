@@ -43,7 +43,7 @@ let string_array_schema =
 let persona_axis_schema (axis : Persona_contract.archetype_axis) =
   `Assoc
     [ "type", `String "string"
-    ; "enum", Persona_contract.string_list_to_json axis.choices
+    ; "enum", Json_util.json_string_list axis.choices
     ; "description", `String axis.schema_description
     ]
 

@@ -223,7 +223,7 @@ let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ( "current_work",
-                        json_string_option
+                        Json_util.string_opt_to_json
                           (match String_util.trim_to_option (string_field "short_goal" keeper) with
                            | Some value -> Some value
                            | None -> String_util.trim_to_option (string_field "goal" keeper)) );
@@ -530,7 +530,7 @@ let session_timeline_json session_json =
              ("timestamp", member_assoc "ts_iso" event_json);
              ("event_type", member_assoc "event_type" event_json);
              ( "actor",
-               json_string_option
+               Json_util.string_opt_to_json
                  (match String_util.trim_to_option (string_field "actor" detail) with
                  | Some value -> Some value
                  | None -> String_util.trim_to_option (string_field "agent" detail)) );

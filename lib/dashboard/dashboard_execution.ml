@@ -295,11 +295,11 @@ let keeper_runtime_trust_json keeper =
 ;;
 
 let lowercase_json_string key json =
-  string_field_opt key json |> Option.map String.lowercase_ascii
+  Json_util.get_string json key |> Option.map String.lowercase_ascii
 ;;
 
 let terminal_reason_json trust = member_assoc "latest_terminal_reason" trust
-let terminal_reason_code trust = terminal_reason_json trust |> string_field_opt "code"
+let terminal_reason_code trust = terminal_reason_json trust |> (fun j -> Json_util.get_string j "code")
 
 let terminal_reason_severity trust =
   terminal_reason_json trust |> lowercase_json_string "severity"
@@ -307,7 +307,7 @@ let terminal_reason_severity trust =
 
 let terminal_reason_disposition trust =
   terminal_reason_json trust
-  |> string_field_opt "disposition"
+  |> (fun j -> Json_util.get_string j "disposition")
   |> Option.map Keeper_turn_disposition.of_wire
 ;;
 

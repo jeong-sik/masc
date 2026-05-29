@@ -48,26 +48,26 @@ let keeper_trust_json ?(include_receipt = false)
   in
   let requested_tools =
     match latest_receipt with
-    | Some receipt -> json_string_list_member "requested_tools" receipt
+    | Some receipt -> Json_util.get_string_list receipt "requested_tools"
     | None -> []
   in
   let required_tools, required_tool_candidates, missing_required_tools =
     match latest_receipt with
     | Some receipt ->
         let surface = Yojson.Safe.Util.member "tool_surface" receipt in
-        ( json_string_list_member "required_tools" surface,
-          json_string_list_member "required_tool_candidates" surface,
-          json_string_list_member "missing_required_tools" surface )
+        ( Json_util.get_string_list surface "required_tools",
+          Json_util.get_string_list surface "required_tool_candidates",
+          Json_util.get_string_list surface "missing_required_tools" )
     | None -> ([], [], [])
   in
   let tools_used =
     match latest_receipt with
-    | Some receipt -> json_string_list_member "tools_used" receipt
+    | Some receipt -> Json_util.get_string_list receipt "tools_used"
     | None -> []
   in
   let unexpected_tools =
     match latest_receipt with
-    | Some receipt -> json_string_list_member "unexpected_tools" receipt
+    | Some receipt -> Json_util.get_string_list receipt "unexpected_tools"
     | None -> []
   in
   `Assoc

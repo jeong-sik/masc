@@ -514,7 +514,7 @@ let test_agent_json_route_served_on_canonical_path () =
         fail "unreachable"
   in
   let (_json, name) = fetch_agent_card 3 in
-  check string "agent card name present" "MASC-MCP" name
+  check string "agent card name present" "MASC" name
 
 let () =
   run "operator_mcp_e2e"

@@ -288,7 +288,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             ~extra_headers:cors
 
       | `GET, "/" ->
-          h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
+          h2_respond_text h2_reqd "MASC Server (HTTP/2)" ~extra_headers:cors
 
       | `GET, "/favicon.ico" | `GET, "/favicon.svg" ->
           h2_respond_bytes

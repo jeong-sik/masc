@@ -169,7 +169,7 @@ let test_handle_agent_card () =
   Alcotest.(check bool) "agent card succeeds" true (Tool_result.is_success result);
   let json = Yojson.Safe.from_string (Tool_result.message result) in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "card name" "MASC-MCP"
+  Alcotest.(check string) "card name" "MASC"
     (json |> member "name" |> to_string);
   Alcotest.(check string) "card schema" "masc.agent_card.v1"
     (json |> member "schema" |> to_string);

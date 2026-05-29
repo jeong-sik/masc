@@ -94,7 +94,7 @@ let agent_card_json request =
   `Assoc
     [
       ("schema", `String "masc.agent_card.v1");
-      ("name", `String "MASC-MCP");
+      ("name", `String "MASC");
       ("description", `String "MASC multi-agent coordination MCP server");
       ("url", `String base_url);
       ("version", `String build.release_version);
@@ -154,7 +154,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     | None -> []
   in
   [
-      ("server", `String "masc-mcp");
+      ("server", `String "masc");
       ("version", `String build.release_version);
       ("release_version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
@@ -314,7 +314,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
           keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ())
   in
   Tool_args.ok_assoc [
-    ("server", `String "masc-mcp");
+    ("server", `String "masc");
     ("version", `String build.release_version);
     ("release_version", `String build.release_version);
     ("build", Build_identity.to_yojson build);

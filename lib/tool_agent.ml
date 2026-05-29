@@ -359,7 +359,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
       let json =
         `Assoc [
           ("schema", `String "masc.agent_card.v1");
-          ("name", `String "MASC-MCP");
+          ("name", `String "MASC");
           ("description", `String "MASC multi-agent coordination MCP server");
           ("action", `String (agent_card_action_to_string action));
           ("requested_by", `String ctx.agent_name);

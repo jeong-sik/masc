@@ -1956,7 +1956,7 @@ let test_root_redirect_contracts () =
        {|respond_redirect ~location:"/dashboard"|});
   check bool "h2 root responds with server identity" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)"|})
+       {|h2_respond_text h2_reqd "MASC Server (HTTP/2)"|})
 
 
 let test_dashboard_component_split_contracts () =

@@ -271,6 +271,28 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
     guard_penalties_total;
     updated_at;
   }
+    let last_selected_at = Json_util.get_float json "last_selected_at" |> Option.value ~default:0.0 in
+    let total_votes_up = Json_util.get_int json "total_votes_up" |> Option.value ~default:0 in
+    let total_votes_down = Json_util.get_int json "total_votes_down" |> Option.value ~default:0 in
+    let posts_created = Json_util.get_int json "posts_created" |> Option.value ~default:0 in
+    let comments_created = Json_util.get_int json "comments_created" |> Option.value ~default:0 in
+    let skips = Json_util.get_int json "skips" |> Option.value ~default:0 in
+    let guard_penalties_total = Json_util.get_int json "guard_penalties_total" |> Option.value ~default:0 in
+    let updated_at = Json_util.get_float json "updated_at" |> Option.value ~default:0.0 in
+    Some {
+      name;
+      alpha = Float.max min_prior alpha;
+      beta = Float.max min_prior beta;
+      selections;
+      last_selected_at;
+      total_votes_up;
+      total_votes_down;
+      posts_created;
+      comments_created;
+      skips;
+      guard_penalties_total;
+      updated_at;
+    }
 
 (** {1 Persistence} *)
 

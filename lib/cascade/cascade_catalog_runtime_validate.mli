@@ -13,7 +13,7 @@ val config_path_opt : unit -> string option
     {!empty_route_data} to skip route-target validation when they only
     need profile validation.  See PR cycle resolution. *)
 type route_data = {
-  keeper_turn_target : string;
+  keeper_turn_target : string option;
   route_targets : string list;
   unknown_route_keys : string list;
 }

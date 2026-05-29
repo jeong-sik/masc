@@ -8,7 +8,7 @@
       "files": [
         {
           "file": "lib/exec/test/test_shell_ir_typed_e2e.ml",
-          "value": 1022
+          "value": 1284
         },
         {
           "file": "lib/keeper/agent_tool_descriptor.ml",

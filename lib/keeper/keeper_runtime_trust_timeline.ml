@@ -1,42 +1,20 @@
-let json_member = Server_dashboard_http_json_utils.json_member
-
-let json_int_opt_member key json =
-  match json_member key json with
-  | `Int n -> Some n
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
-let json_float_opt_member key json =
-  match json_member key json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | `Intlit raw -> float_of_string_opt raw
-  | _ -> None
-
-let json_string_opt_member key json =
-  match json_member key json with
-  | `String value when String.trim value <> "" -> Some value
-  | _ -> None
+let json_member = Yojson.Safe.Util.member
+let json_int_opt_member key json = Json_util.get_int json key
+let json_float_opt_member key json = Json_util.get_float json key
+let json_string_opt_member key json = Json_util.get_string_nonempty json key
 
 let json_string_opt_value = function
   | `String value when String.trim value <> "" -> Some value
   | _ -> None
 
-let json_bool_opt_member key json =
-  match json_member key json with
-  | `Bool value -> Some value
-  | _ -> None
+let json_bool_opt_member key json = Json_util.get_bool json key
 
 let json_list_member key json =
   match json_member key json with
   | `List items -> items
   | _ -> []
 
-let json_string_list_member key json =
-  json_list_member key json
-  |> List.filter_map (function
-       | `String value when String.trim value <> "" -> Some value
-       | _ -> None)
+let json_string_list_member = Json_util.json_string_list_member
 
 let assoc_bool_default key ~default fields =
   match List.assoc_opt key fields with

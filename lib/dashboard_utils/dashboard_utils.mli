@@ -43,12 +43,6 @@ val string_list_of_json : Yojson.Safe.t -> string list
 (** From a [`List] of [`String], yield the trimmed non-empty entries.
     Other shapes return []. *)
 
-val json_string_option : string option -> Yojson.Safe.t
-(** [Some s] (with whitespace) → [`String (String.trim s)]; otherwise [`Null]. *)
-
-val option_to_json : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
-(** Map [Some v] via [f], else [`Null]. *)
-
 val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Lookup [key] inside [`Assoc fields], returning [`Null] if missing or
     if the input is not an [`Assoc]. *)

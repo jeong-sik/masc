@@ -186,8 +186,8 @@ let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools
       | Some _ | None -> false
     in
     let visible_tools =
-      json_string_list "requested_tools" receipt
-      @ json_string_list "canonical_tools" receipt
+      Json_util.get_string_list receipt "requested_tools"
+      @ Json_util.get_string_list receipt "canonical_tools"
       @ tools_used
     in
     let visible_set = build_allowed_set visible_tools in

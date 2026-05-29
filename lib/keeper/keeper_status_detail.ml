@@ -187,7 +187,7 @@ let hash_status_args _config resolved_name args =
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
 let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
-let json_string_opt_member = Keeper_status_detail_observability.json_string_opt_member
+let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 

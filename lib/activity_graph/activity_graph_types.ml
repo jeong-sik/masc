@@ -147,10 +147,7 @@ let assoc_replace_int_opt name value fields =
   | Some value when value >= 1 -> assoc_replace name (`Int value) fields
   | _ -> fields
 
-let first_some left right =
-  match left with
-  | Some _ -> left
-  | None -> right
+let first_some = Dashboard_utils.first_some
 
 let tag_context_pair raw =
   match String.index_opt raw ':' with

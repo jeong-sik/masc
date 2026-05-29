@@ -127,10 +127,7 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
-let json_string_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `String value -> Some value
-  | _ -> None
+let json_string_member_opt = Json_util.get_string
 
 let json_string_list_member name json =
   match Yojson.Safe.Util.member name json with

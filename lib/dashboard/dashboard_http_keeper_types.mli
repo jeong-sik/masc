@@ -58,8 +58,6 @@ val last_latency_ms_json : int -> Yojson.Safe.t
 
     Used by dashboard renderers and execution-trust health computations. *)
 
-val json_string_list_member : string -> Yojson.Safe.t -> string list
-val json_string_member_opt : string -> Yojson.Safe.t -> string option
 val terminal_reason_code_of_decision_json :
   Yojson.Safe.t -> string option
 

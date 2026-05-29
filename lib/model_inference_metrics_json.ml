@@ -80,7 +80,7 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
     ; "fallback_count", `Int s.fallback_count
     ; "success_count", `Int s.success_count
     ; "error_count", `Int s.error_count
-    ; "total_cost_usd", opt_float s.total_cost_usd
+    ; "total_cost_usd", Json_util.float_opt_to_json s.total_cost_usd
     ; "avg_tool_calls_per_turn", `Float s.avg_tool_calls_per_turn
     ; "total_tool_calls", `Int s.total_tool_calls
     ; ( "top_tools"

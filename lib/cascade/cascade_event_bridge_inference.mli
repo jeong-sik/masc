@@ -1,9 +1,3 @@
-val json_string_opt : string option -> Yojson.Safe.t
-
-val payload_string_opt : string -> Yojson.Safe.t -> string option
-
-val payload_int_opt : string -> Yojson.Safe.t -> int option
-
 val inference_model_bucket : provider:string -> model:string -> string
 
 val inference_provider_bucket : provider:string -> model:string -> string

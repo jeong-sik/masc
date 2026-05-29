@@ -127,10 +127,10 @@ let provider_entry_to_json
        can show "which error keeps recurring" alongside the existing
        success-rate snapshot. *)
        "top_fingerprints", top_fingerprints_json
-     ; "last_failure_at", opt_float info.last_failure_at
+     ; "last_failure_at", Json_util.float_opt_to_json info.last_failure_at
      ; "declared", `Bool declared
      ; "status", `String (provider_status info)
-     ; "avg_confidence", opt_float info.avg_confidence
+     ; "avg_confidence", Json_util.float_opt_to_json info.avg_confidence
      ; "confidence_samples", `Int info.confidence_samples
      ]
      @ perf_fields)

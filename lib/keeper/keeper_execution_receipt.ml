@@ -60,22 +60,7 @@ let receipt_duration_ms receipt =
   | _ -> 0.0
 ;;
 
-let string_contains_ci haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if needle_len = 0
-    then true
-    else if i + needle_len > haystack_len
-    then false
-    else if String.sub haystack i needle_len = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
+let string_contains_ci = String_util.contains_substring_ci
 
 let bump_count name counts =
   let rec loop prefix = function

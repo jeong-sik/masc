@@ -22,18 +22,7 @@ let invalidation_memory_ttl_s = Masc_time_constants.hour
 let invalidation_memory : (string, float) Hashtbl.t = Hashtbl.create 64
 let invalidation_memory_lock = Mutex.create ()
 
-let string_contains s needle =
-  let len_s = String.length s in
-  let len_needle = String.length needle in
-  if len_needle = 0 then true
-  else if len_needle > len_s then false
-  else
-    let rec loop i =
-      if i > len_s - len_needle then false
-      else if String.sub s i len_needle = needle then true
-      else loop (i + 1)
-    in
-    loop 0
+let string_contains = String_util.contains_substring
 ;;
 
 let string_starts_with = String.starts_with

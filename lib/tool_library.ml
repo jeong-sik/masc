@@ -68,18 +68,7 @@ let source_of_string_opt = function
   | "observation" -> Some Observation
   | _ -> None
 
-(* String helper - check if sub is contained in s *)
-let string_contains ~sub s =
-  let sub_len = String.length sub in
-  let s_len = String.length s in
-  if sub_len > s_len then false
-  else
-    let rec check i =
-      if i > s_len - sub_len then false
-      else if String.equal (Stdlib.String.sub s i sub_len) sub then true
-      else check (i + 1)
-    in
-    check 0
+let string_contains = String_util.string_contains_substring
 
 type context = {
   agent_name: string;
@@ -239,7 +228,7 @@ let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
       let content = In_channel.with_open_text path In_channel.input_all in
       match parse_frontmatter content with
       | Some fm ->
-          let is_candidate = string_contains ~sub:"/candidates/" path in
+          let is_candidate = string_contains ~needle:"/candidates/" path in
           Some (sprintf "- **%s** [%.2f] %s%s\n  tags: %s"
             fm.title fm.confidence
             fm.source
@@ -264,7 +253,7 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
     let files = list_documents ~include_candidates:true () in
     let matching = List.filter (fun f ->
       let base = Filename.basename f in
-      string_contains ~sub:topic (String.lowercase_ascii base)
+      string_contains ~needle:topic (String.lowercase_ascii base)
     ) files in
     match matching with
     | [] ->
@@ -367,8 +356,8 @@ let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
   else begin
     let topic_lower = String.lowercase_ascii topic in
     let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
-      string_contains ~sub:"/candidates/" f &&
-      string_contains ~sub:topic_lower (String.lowercase_ascii (Filename.basename f))
+      string_contains ~needle:"/candidates/" f &&
+      string_contains ~needle:topic_lower (String.lowercase_ascii (Filename.basename f))
     ) in
     match candidates with
     | [] ->
@@ -413,7 +402,7 @@ let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
       try
         let content = In_channel.with_open_text path In_channel.input_all in
         let content_lower = String.lowercase_ascii content in
-        if string_contains ~sub:query_lower content_lower then
+        if string_contains ~needle:query_lower content_lower then
           match parse_frontmatter content with
           | Some fm -> Some (sprintf "- **%s** [%.2f] %s" fm.title fm.confidence (Filename.basename path))
           | None -> Some (sprintf "- %s" (Filename.basename path))

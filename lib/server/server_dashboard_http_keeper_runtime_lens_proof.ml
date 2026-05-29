@@ -35,18 +35,7 @@ let runtime_lens_proof_acc () =
   ; network_modes = Hashtbl.create 4
   }
 
-let string_contains ~needle value =
-  let value = String.lowercase_ascii value in
-  let needle = String.lowercase_ascii needle in
-  let value_len = String.length value in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= value_len
-      && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
-    in
-    loop 0
+let string_contains = String_util.string_contains_substring_ci
 
 let runtime_lens_set_add table value =
   let value = String.trim value in

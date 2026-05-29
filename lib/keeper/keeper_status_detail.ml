@@ -190,7 +190,6 @@ let hash_status_args _config resolved_name args =
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
 let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
-let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
@@ -699,10 +698,10 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            attention_fields_with_runtime_trust attention_fields runtime_trust
          in
          let disposition =
-           json_string_opt_member runtime_trust "disposition"
+           Json_util.get_string_nonempty runtime_trust "disposition"
          in
          let disposition_reason =
-           json_string_opt_member runtime_trust "disposition_reason"
+           Json_util.get_string_nonempty runtime_trust "disposition_reason"
          in
          let model_observability =
            match model_observability with

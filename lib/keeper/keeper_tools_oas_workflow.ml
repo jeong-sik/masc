@@ -37,15 +37,13 @@ type workflow_rejection_block =
   ; blocked_at : float
   }
 
-let json_assoc_field_opt = Json_util.assoc_member_opt
-let json_assoc_string_opt = Json_util.assoc_string_opt
 let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
 let json_or_detail_string_opt = Keeper_tools_oas_json.json_or_detail_string_opt
 let json_or_detail_bool_opt = Keeper_tools_oas_json.json_or_detail_bool_opt
 let diagnosis_json_opt = Keeper_tools_oas_json.diagnosis_json_opt
 
 let json_nonempty_string_opt key json =
-  match json_assoc_field_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`String value) ->
     let value = String.trim value in
     if String.equal value "" then None else Some value
@@ -57,18 +55,18 @@ let workflow_rejection_info_of_json json =
   let task_id = json_nonempty_string_opt "task_id" json in
   let rule_id =
     match diagnosis with
-    | Some diagnosis -> json_assoc_string_opt "rule_id" diagnosis
+    | Some diagnosis -> Json_util.assoc_string_opt "rule_id" diagnosis
     | None -> None
   in
   let tool_suggestion =
     match diagnosis with
-    | Some diagnosis -> json_assoc_string_opt "tool_suggestion" diagnosis
+    | Some diagnosis -> Json_util.assoc_string_opt "tool_suggestion" diagnosis
     | None -> None
   in
   let scope_policy =
     match
       Option.bind diagnosis (fun diagnosis ->
-        json_assoc_string_opt "scope_policy" diagnosis)
+        Json_util.assoc_string_opt "scope_policy" diagnosis)
     with
     | Some value ->
       Option.value
@@ -149,7 +147,7 @@ let workflow_rejection_payload_of_json json =
   match payload_from_json json with
   | Some _ as payload -> payload
   | None ->
-    (match json_assoc_string_opt "error" json with
+    (match Json_util.assoc_string_opt "error" json with
      | Some raw ->
        (try
           match Yojson.Safe.from_string raw with
@@ -309,7 +307,7 @@ let json_has_nonempty_evidence_refs json =
     | `String value -> not (String.equal (String.trim value) "")
     | _ -> false
   in
-  match json_assoc_field_opt "handoff_context" json with
+  match Json_util.assoc_member_opt "handoff_context" json with
   | Some (`Assoc fields) ->
     (match List.assoc_opt "evidence_refs" fields with
      | Some (`List refs) -> List.exists nonempty_string refs

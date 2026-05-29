@@ -393,7 +393,6 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
   ]
 ;;
 
-let json_string_opt_member = Json_util.get_string_nonempty
 ;;
 
 let assoc_upsert fields key value =
@@ -422,18 +421,18 @@ let attention_fields_with_runtime_trust attention_fields runtime_trust =
       match List.assoc_opt "attention_reason" attention_fields with
       | Some (`String value) when String.trim value <> "" -> Some value
       | _ ->
-        (match json_string_opt_member runtime_trust "attention_reason" with
+        (match Json_util.get_string_nonempty runtime_trust "attention_reason" with
          | Some _ as value -> value
-         | None -> json_string_opt_member runtime_trust "disposition_reason")
+         | None -> Json_util.get_string_nonempty runtime_trust "disposition_reason")
     in
     let next_human_action =
       match List.assoc_opt "next_human_action" attention_fields with
       | Some (`String value) when String.trim value <> "" -> Some value
       | _ ->
-        (match json_string_opt_member runtime_trust "next_human_action" with
+        (match Json_util.get_string_nonempty runtime_trust "next_human_action" with
          | Some _ as value -> value
          | None ->
-           (match json_string_opt_member runtime_trust "latest_next_action" with
+           (match Json_util.get_string_nonempty runtime_trust "latest_next_action" with
             | Some _ as value -> value
             | None -> Some "inspect_runtime_trust"))
     in

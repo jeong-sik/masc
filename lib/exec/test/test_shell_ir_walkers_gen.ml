@@ -81,7 +81,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Patch { file = Some "foo.c"; patchfile = Some "fix.patch"; strip = 1; reverse = false })
   ; W (Npm { subcommand = "install"; save_dev = true; global = false; force = false; rest = [] })
   ; W (Cargo { subcommand = "build"; release = true; verbose = false; features = None; rest = [] })
-  ; W (Go { subcommand = "build"; verbose = false; race = false; rest = [ "-o"; "bin" ] })
+  ; W (Go { subcommand = "build"; verbose = false; race = false; rest = [ "./..." ] })
   ; W (Gh { subcommand = "pr"; action = Some "list"; draft = false; squash = false; delete_branch = false; body = None; title = None; rest = [] })
   ; W (Chmod { mode = "755"; path = "/tmp/x"; recursive = false })
   ; W (Chown { owner = "root"; path = "/tmp/x"; recursive = false })
@@ -1467,6 +1467,104 @@ let test_git_log_value_consuming_flags () =
    | w -> Alcotest.failf "git log --oneline -n5 --format=medium: expected oneline max_count=5, got %a" pp w)
 ;;
 
+(* Batch 12: value-consuming flags for Docker, Go, Cargo, Npm, Mvn, Gradle *)
+let test_batch12_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Docker: --name myapp → name parsed, --env FOO=bar → env parsed *)
+  let d1 =
+    of_simple { (base "docker") with args = [ lit "run"; lit "--name"; lit "myapp"; lit "img" ] }
+  in
+  (match d1 with
+   | W (Docker { subcommand = "run"; rest; _ }) ->
+     if List.exists ((=) "myapp") rest then
+       Alcotest.failf "Docker --name myapp: 'myapp' should be consumed, not in rest (%a)" pp d1
+   | w -> Alcotest.failf "Docker run --name myapp: expected Docker, got %a" pp w);
+  (* Docker: --flag=VALUE form *)
+  let d2 =
+    of_simple { (base "docker") with args = [ lit "run"; lit "--name=myapp"; lit "img" ] }
+  in
+  (match d2 with
+   | W (Docker { subcommand = "run"; rest; _ }) ->
+     if List.exists ((=) "myapp") rest then
+       Alcotest.failf "Docker --name=myapp: 'myapp' should be consumed (%a)" pp d2
+   | w -> Alcotest.failf "Docker --name=myapp: expected Docker, got %a" pp w);
+  (* Go: -o bin → consumed, rest empty *)
+  let g1 =
+    of_simple { (base "go") with args = [ lit "build"; lit "-o"; lit "bin"; lit "./..." ] }
+  in
+  (match g1 with
+   | W (Go { subcommand = "build"; rest; _ }) ->
+     if List.exists ((=) "bin") rest then
+       Alcotest.failf "Go build -o bin: 'bin' should be consumed (%a)" pp g1;
+     if not (List.exists ((=) "./...") rest) then
+       Alcotest.failf "Go build -o bin ./...: './...' should be in rest (%a)" pp g1
+   | w -> Alcotest.failf "Go build -o bin: expected Go, got %a" pp w);
+  (* Cargo: --target x86_64 → consumed *)
+  let c1 =
+    of_simple { (base "cargo") with args = [ lit "build"; lit "--target"; lit "x86_64"; lit "--release" ] }
+  in
+  (match c1 with
+   | W (Cargo { subcommand = "build"; release = true; rest; _ }) ->
+     if List.exists ((=) "x86_64") rest then
+       Alcotest.failf "Cargo --target x86_64: 'x86_64' should be consumed (%a)" pp c1
+   | w -> Alcotest.failf "Cargo --target: expected Cargo, got %a" pp w);
+  (* Npm: --registry https://x → consumed *)
+  let n1 =
+    of_simple { (base "npm") with args = [ lit "install"; lit "--registry"; lit "https://x"; lit "pkg" ] }
+  in
+  (match n1 with
+   | W (Npm { subcommand = "install"; rest; _ }) ->
+     if List.exists ((=) "https://x") rest then
+       Alcotest.failf "Npm --registry: url should be consumed (%a)" pp n1;
+     if not (List.exists ((=) "pkg") rest) then
+       Alcotest.failf "Npm --registry ... pkg: 'pkg' should be in rest (%a)" pp n1
+   | w -> Alcotest.failf "Npm --registry: expected Npm, got %a" pp w);
+  (* Mvn: -D key=val → two-token form consumed *)
+  let m1 =
+    of_simple { (base "mvn") with args = [ lit "install"; lit "-D"; lit "skipTests=true" ] }
+  in
+  (match m1 with
+   | W (Mvn { subcommand = "install"; args; _ }) ->
+     if List.exists ((=) "skipTests=true") args then
+       Alcotest.failf "Mvn -D skipTests=true: value should be consumed (%a)" pp m1
+   | w -> Alcotest.failf "Mvn -D: expected Mvn, got %a" pp w);
+  (* Mvn: --batch-mode --quiet boolean flags preserved *)
+  let m2 =
+    of_simple { (base "mvn") with args = [ lit "test"; lit "--batch-mode"; lit "--quiet" ] }
+  in
+  (match m2 with
+   | W (Mvn { subcommand = "test"; batch_mode = true; quiet = true; _ }) -> ()
+   | w -> Alcotest.failf "Mvn --batch-mode --quiet: expected flags, got %a" pp w);
+  (* Gradle: --build-file custom.gradle → consumed *)
+  let gr1 =
+    of_simple { (base "gradle") with args = [ lit "build"; lit "--build-file"; lit "custom.gradle" ] }
+  in
+  (match gr1 with
+   | W (Gradle { subcommand = "build"; rest; _ }) ->
+     if List.exists ((=) "custom.gradle") rest then
+       Alcotest.failf "Gradle --build-file: 'custom.gradle' should be consumed (%a)" pp gr1
+   | w -> Alcotest.failf "Gradle --build-file: expected Gradle, got %a" pp w);
+  (* Gradle: --gradle-user-home=/opt/gradle → =VALUE form *)
+  let gr2 =
+    of_simple { (base "gradle") with args = [ lit "build"; lit "--gradle-user-home=/opt/gradle" ] }
+  in
+  (match gr2 with
+   | W (Gradle { subcommand = "build"; rest; _ }) ->
+     if List.exists ((=) "/opt/gradle") rest then
+       Alcotest.failf "Gradle --gradle-user-home=VALUE: should be consumed (%a)" pp gr2
+   | w -> Alcotest.failf "Gradle --gradle-user-home=: expected Gradle, got %a" pp w)
+;;
+
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -1585,6 +1683,7 @@ let () =
         ; Alcotest.test_case "Git_push value-consuming flags" `Quick test_git_push_value_consuming_flags
         ; Alcotest.test_case "Git_pull value-consuming flags" `Quick test_git_pull_value_consuming_flags
         ; Alcotest.test_case "Git_log value-consuming flags" `Quick test_git_log_value_consuming_flags
+        ; Alcotest.test_case "Batch 12: Docker/Go/Cargo/Npm/Mvn/Gradle value flags" `Quick test_batch12_value_consuming_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

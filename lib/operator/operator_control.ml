@@ -55,14 +55,10 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
              ~now_ts)
 
 let keeper_diagnostic_health_state json =
-  match U.member "health_state" json with
-  | `String value -> Some (String.lowercase_ascii value)
-  | _ -> None
+  Json_util.get_string json "health_state" |> Option.map String.lowercase_ascii
 
 let keeper_diagnostic_recoverable json =
-  match U.member "recoverable" json with
-  | `Bool value -> value
-  | _ -> false
+  Json_util.get_bool json "recoverable" |> Option.value ~default:false
 
 let keeper_recovery_outcome after_diagnostic =
   match keeper_diagnostic_health_state after_diagnostic with
@@ -185,9 +181,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       in
       let* before_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
       let recoverable =
-        match U.member "recoverable" before_diagnostic with
-        | `Bool value -> value
-        | _ -> false
+        Json_util.get_bool before_diagnostic "recoverable" |> Option.value ~default:false
       in
       if not recoverable then
         Ok
@@ -239,22 +233,19 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | None -> Error "payload.message is required"
       in
       let* () =
-        match request.payload |> U.member "models" with
-        | `Null -> Ok ()
-        | _ ->
+        match Json_util.get_object request.payload "models" with
+        | None -> Ok ()
+        | Some _ ->
             Error
               "legacy keeper model args removed for masc_keeper_msg: models. Use cascade_name; concrete provider/model identity is OAS-owned."
       in
       let direct_reply =
-        match request.payload |> U.member "direct_reply" with
-        | `Bool value -> value
-        | _ -> false
+        Json_util.get_bool request.payload "direct_reply" |> Option.value ~default:false
       in
       let timeout_sec =
-        match request.payload |> U.member "timeout_sec" with
-        | `Int value when value > 0 -> Some value
-        | `Float value when value > 0.0 -> Some (int_of_float (Float.ceil value))
-        | _ -> None
+        Json_util.get_float request.payload "timeout_sec"
+        |> Option.map (fun f -> int_of_float (Float.ceil f))
+        |> Option.filter (fun n -> n > 0)
       in
       let args =
         `Assoc

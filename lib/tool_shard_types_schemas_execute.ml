@@ -94,12 +94,27 @@ let tool_execute_cwd_field =
 ;;
 
 let tool_execute_timeout_sec_field =
+  (* Issue #18472: the LLM emits the field as a JSON string (["30"])
+     about 60x/day, which the Anthropic SDK schema validator then rejects
+     under a strict ["type": "number"], routing the call through
+     [correction_pipeline] for a silent string-to-number coerce
+     ([oas:agent_tools] events ["fixed 1 field(s) fields=timeout_sec
+     stages=coercion"] on the [Execute] tool, 60/141 = 43% of the
+     5/29 correction load). The downstream handler
+     ([Agent_tool_execute_timeout.clamp_shell_timeout]) reads the field
+     via [Safe_ops.json_float] which already coerces both shapes, so the
+     coercion is a wire-format quirk, not a semantic one. Widening the
+     advertised JSON Schema to accept either shape lets the LLM's typical
+     string representation pass validation directly. *)
   ( "timeout_sec"
   , `Assoc
-      [ "type", `String "number"
+      [ ( "type"
+        , `List [ `String "number"; `String "string" ] )
       ; ( "description"
         , `String
-            "Timeout seconds for foreground typed execution (default: 30, max: 180)." )
+            "Timeout seconds for foreground typed execution (default: 30, max: \
+             180). Numeric strings (e.g. \"30\") are accepted and coerced; \
+             prefer the bare number form." )
       ] )
 ;;
 

@@ -92,15 +92,13 @@ let dashboard_message_json (message : Masc_domain.message) =
 let dashboard_tasks_safe config = Coord.get_tasks_safe config
 let dashboard_agents_safe config = Coord.get_active_agents config
 
-let json_assoc_string_opt = Json_util.assoc_string_opt
-
 let active_agent_summary_json json =
-  match json_assoc_string_opt "status" json with
+  match Json_util.assoc_string_opt "status" json with
   | Some status ->
     (match String.lowercase_ascii (String.trim status) with
      | "active" | "busy" | "listening" ->
        let agent_type =
-         json_assoc_string_opt "agent_type" json
+         Json_util.assoc_string_opt "agent_type" json
          |> Option.value ~default:"unknown"
          |> String.trim
          |> String.lowercase_ascii

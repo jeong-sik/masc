@@ -460,13 +460,11 @@ let relay_stage_to_string = function
   | Broadcast -> "broadcast"
 ;;
 
-let json_field_string_opt = Json_util.assoc_string_opt
-
 let relay_event_type json =
-  match json_field_string_opt "event_type" json with
+  match Json_util.assoc_string_opt "event_type" json with
   | Some value -> value
   | None ->
-    (match json_field_string_opt "type" json with
+    (match Json_util.assoc_string_opt "type" json with
      | Some value -> value
      | None -> "unknown")
 ;;
@@ -506,8 +504,8 @@ let emit_relay_retry_log
     (relay_stage_to_string stage)
     attempt
     relay_max_attempts
-    (Option.value ~default:"<none>" (json_field_string_opt "correlation_id" pending.json))
-    (Option.value ~default:"<none>" (json_field_string_opt "run_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "correlation_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "run_id" pending.json))
     (Printexc.to_string exn)
 ;;
 
@@ -522,8 +520,8 @@ let emit_relay_drop_log
     (relay_event_type pending.json)
     stage_label
     attempts
-    (Option.value ~default:"<none>" (json_field_string_opt "correlation_id" pending.json))
-    (Option.value ~default:"<none>" (json_field_string_opt "run_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "correlation_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "run_id" pending.json))
 ;;
 
 let broadcast_drop_marker
@@ -537,15 +535,15 @@ let broadcast_drop_marker
       ; "event_type", `String "relay_dropped"
       ; "ts_unix", `Float (Time_compat.now ())
       ; ( "correlation_id"
-        , match json_field_string_opt "correlation_id" pending.json with
+        , match Json_util.assoc_string_opt "correlation_id" pending.json with
           | Some value -> `String value
           | None -> `Null )
       ; ( "run_id"
-        , match json_field_string_opt "run_id" pending.json with
+        , match Json_util.assoc_string_opt "run_id" pending.json with
           | Some value -> `String value
           | None -> `Null )
       ; ( "agent_name"
-        , match json_field_string_opt "agent_name" pending.json with
+        , match Json_util.assoc_string_opt "agent_name" pending.json with
           | Some value -> `String value
           | None -> `Null )
       ; "failed_stage", `String stage_label

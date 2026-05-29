@@ -104,7 +104,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                 let existing_refs =
                   match List.assoc_opt "evidence_refs" hc_fields with
                   | Some (`List xs) -> xs
-                  | _ -> []
+                  | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _) -> []
                 in
                 let new_refs = existing_refs @ [ `String pr_url ] in
                 let hc_fields =

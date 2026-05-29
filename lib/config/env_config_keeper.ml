@@ -743,37 +743,6 @@ module CascadeSaturationSignal = struct
     get_bool ~default:false "MASC_CASCADE_SATURATION_SIGNAL_ENABLED"
 end
 
-(** {1 Cascade Tier Admission (RFC-0153 Phase B.2)}
-
-    Runtime kill switch for per-tier inflight admission in the main keeper
-    cascade path. Default on: RFC-0153 Phase B.2 is intended to prevent
-    keeper stampedes before provider dispatch. Operators can set the flag
-    false as an emergency rollback without also disabling the additive Phase
-    A.2 saturation-signal metric. *)
-module CascadeTierAdmission = struct
-  let enabled () =
-    Feature_flag_registry.get_bool "MASC_CASCADE_TIER_ADMISSION_ENABLED"
-end
-
-module CascadeTierWait = struct
-  let enabled () =
-    Feature_flag_registry.get_bool "MASC_CASCADE_TIER_WAIT_ENABLED"
-
-  let timeout_s () =
-    get_float_nonneg ~default:30.0 "MASC_CASCADE_TIER_WAIT_TIMEOUT_S"
-
-  let max_retries () =
-    let v = get_string ~default:"" "MASC_CASCADE_TIER_WAIT_MAX_RETRIES" in
-    match v with
-    | "" | "none" | "unlimited" -> None
-    | s ->
-      (* RFC-0145 — narrow from a wildcard catch-all to the only
-         exception [int_of_string] raises on malformed numeric input.
-         Other runtime exceptions (e.g. [Out_of_memory]) propagate. *)
-      (try Some (int_of_string s) with
-       | Failure _ -> None)
-end
-
 (** {1 Cascade Runtime Overrides}
 
     Runtime-only narrowing of the MASC cascade provider set. The underlying

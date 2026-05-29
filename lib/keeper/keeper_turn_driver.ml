@@ -21,21 +21,6 @@ include Keeper_turn_driver_helpers
 include Keeper_turn_driver_provider_attempt
 include Keeper_turn_driver_backpressure
 
-let keeper_cascade_admission =
-  Keeper_turn_driver_admission.keeper_cascade_admission
-
-let cascade_admission_policy_of_priority =
-  Keeper_turn_driver_admission.cascade_admission_policy_of_priority
-
-let with_keeper_cascade_admission =
-  Keeper_turn_driver_admission.with_keeper_cascade_admission
-
-let cascade_admission_blocked_decision =
-  Keeper_turn_driver_admission.cascade_admission_blocked_decision
-
-let emit_cascade_admission_signal_metric =
-  Keeper_turn_driver_admission.emit_cascade_admission_signal_metric
-
 let release_client_capacity_quietly =
   Keeper_turn_driver_admission.release_client_capacity_quietly
 
@@ -603,9 +588,6 @@ let run_named
   let queue_priority =
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
   in
-  let admission_policy =
-    cascade_admission_policy_of_priority queue_priority
-  in
   (* MASC-driven cascade FSM: try each provider, decide on failure.
      Extracted to [Keeper_turn_driver_try_provider.run_try_provider] via
      explicit [try_provider_ctx] record (RFC-0051 PR-3a). *)
@@ -745,7 +727,6 @@ let run_named
     health_cooldown_fail_open;
     base_path;
     session_id;
-    admission_policy;
     accept;
     error_cascade_name_for_backpressure = error_cascade_name;
     record_provider_health_result;
@@ -901,10 +882,4 @@ module For_testing = struct
   let missing_required_tool_names_after_lane_by_name =
     missing_required_tool_names_after_lane_by_name
   let success_selected_model_raw = success_selected_model_raw
-  let cascade_admission_policy_of_priority =
-    cascade_admission_policy_of_priority
-  let with_cascade_admission_for_testing
-      ~admission ~enabled ~admission_key ~admission_policy f =
-    with_keeper_cascade_admission ~admission ~enabled ~admission_key
-      ~admission_policy f
 end

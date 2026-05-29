@@ -54,7 +54,6 @@ type try_cascade_ctx =
     health_cooldown_fail_open : bool
   ; base_path : string option
   ; session_id : string option
-  ; admission_policy : Cascade_tier_admission.admission_policy
   ; (* Cascade accept predicate *)
     accept : Agent_sdk_response.api_response -> bool
   ; (* Error cascade name for backpressure *)
@@ -68,10 +67,9 @@ type try_cascade_ctx =
   ; (* Provider health error recording *)
     record_provider_health_error :
       Cascade_runtime_candidate.t -> Provider_error.t -> unit
-  ; (* RFC-0192: keeper-level total budget for cascade-tier wait. Threaded
+  ; (* RFC-0192: keeper-level total budget for cascade attempts. Threaded
        from [Keeper_agent_run.admission_wait_timeout_sec] through
-       [run_named] to drive per-attempt deadline composition in
-       {!Cascade_tier_wait_scheduler.try_admission_or_wait}. [None] =
+       [run_named] for per-attempt deadline composition. [None] =
        no deadline; legacy env amplifier behaviour. *)
     wait_timeout_sec : float option
   }
@@ -136,12 +134,6 @@ let emit_capacity_blocked_manifest ctx ~capacity_key =
   ctx.emit_runtime_manifest
     ~status:"blocked"
     ~decision:(client_capacity_full_decision ~capacity_key)
-    Keeper_runtime_manifest.Pre_dispatch_blocked
-
-let emit_admission_blocked_manifest ctx signal =
-  ctx.emit_runtime_manifest
-    ~status:"blocked"
-    ~decision:(Keeper_turn_driver_admission.cascade_admission_blocked_decision signal)
     Keeper_runtime_manifest.Pre_dispatch_blocked
 
 let capacity_backpressure_of_http_error ctx ?source last_err =
@@ -402,7 +394,6 @@ let rec run
         ~pre_dispatch_required_tool_rejections_rev
         ?last_capacity_source ?last_capacity_backpressure ctx rest last_err)
     else
-    let admission_key = Cascade_runtime_candidate.admission_key candidate in
     let health_cooldown =
       Cascade_runtime_candidate.first_health_cooldown candidate
     in
@@ -584,13 +575,8 @@ let rec run
       Cascade_observation.record_attempt_terminal ctx.capture
         ~model_id:runtime_candidate_label ~latency_ms ~error
     in
-    let attempt_with_admission =
-      Keeper_turn_driver_admission.with_keeper_cascade_admission
-        ~admission_key
-        ~admission_policy:ctx.admission_policy
-        ?wait_timeout_sec:ctx.wait_timeout_sec
-        (fun () ->
-           Eio.Switch.run (fun provider_attempt_sw ->
+    let result, checkpoint_after, liveness_success_sample, attempt_latency_ms =
+      Eio.Switch.run (fun provider_attempt_sw ->
         Option.iter
           (fun release -> Eio.Switch.on_release provider_attempt_sw release)
           capacity_release;
@@ -754,41 +740,8 @@ let rec run
             ~exception_kind:status
             attempt_latency_ms;
           record_attempt_terminal ~error:(Some error) attempt_latency_ms;
-          Printexc.raise_with_backtrace exn bt))
+          Printexc.raise_with_backtrace exn bt)
     in
-    match attempt_with_admission with
-    | Error signal ->
-      Keeper_turn_driver_admission.release_client_capacity_quietly capacity_release;
-      let skip_reason =
-        Cascade_candidate_skip_reason.Capacity_full
-          { capacity_key = admission_key
-          ; capacity_kind = `Admission
-          ; retry_after_sec = Some Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec
-          }
-      in
-      emit_admission_blocked_manifest ctx signal;
-      Keeper_turn_driver_admission.emit_cascade_admission_signal_metric
-        ~cascade_name:ctx.cascade_name signal;
-      record_cascade_attempt ctx candidate ~outcome:(`Failure "admission_full") ();
-      Cascade_observation.record_fallback_event ctx.capture
-        ~from_model:runtime_candidate_label
-        ~to_model:runtime_candidate_label
-        ~reason:(Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
-      Log.Misc.info
-        "[cascade-fallback] cascade %s: %s skipped because admission \
-         %s is full, trying next"
-        ctx.cascade_name
-        runtime_candidate_label
-        admission_key;
-      let capacity_detail =
-        Printf.sprintf "admission %s is full" admission_key
-      in
-      run ~on_success ?resume_checkpoint ?per_provider_timeout_s
-        ~pre_dispatch_required_tool_rejections_rev
-        ~last_capacity_backpressure:
-          (Admission_capacity, capacity_detail, Some Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec)
-        ctx rest last_err
-    | Ok (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) ->
     let record_accepted_liveness_sample () =
       match liveness_success_sample with
       | None -> ()

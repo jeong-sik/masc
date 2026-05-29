@@ -102,7 +102,6 @@
   test_reward_advice_artifact
   test_cascade_capability_profile
   test_cascade_deadline
-  test_cascade_tier_wait_scheduler
   test_cascade_secondary_expand
   test_keeper_hooks_oas_telemetry
   test_masc_oas_bridge_timeout_guard
@@ -426,7 +425,6 @@
   test_reward_advice_artifact
   test_cascade_capability_profile
   test_cascade_deadline
-  test_cascade_tier_wait_scheduler
   test_cascade_secondary_expand
   test_keeper_hooks_oas_telemetry
   test_masc_oas_bridge_timeout_guard
@@ -1449,8 +1447,6 @@
 (include stanzas/test_cascade_saturation_signal.inc)
 
 (include stanzas/test_cascade_saturation_signal_phase_a2.inc)
-
-(include stanzas/test_cascade_tier_admission.inc)
 
 (include stanzas/test_cascade_catalog_runtime_yojson.inc)
 

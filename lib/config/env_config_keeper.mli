@@ -276,32 +276,6 @@ module CascadeSaturationSignal : sig
       string label, or control-flow path. *)
 end
 
-(** {1 Cascade Tier Admission (RFC-0153 Phase B.2)} *)
-
-module CascadeTierAdmission : sig
-  val enabled : unit -> bool
-  (** [MASC_CASCADE_TIER_ADMISSION_ENABLED] flag. Default true.
-
-      When true, the main keeper cascade path enforces per-tier inflight
-      admission before provider dispatch. Set false only as an emergency
-      rollback; it is intentionally independent from Phase A.2 metric
-      emission. *)
-end
-
-module CascadeTierWait : sig
-  val enabled : unit -> bool
-  (** [MASC_CASCADE_TIER_WAIT_ENABLED] flag. Default false.
-
-      When true, tier admission failures enter a bounded wait loop
-      with backoff instead of immediately returning [Capacity_full].
-      Requires [MASC_CASCADE_TIER_ADMISSION_ENABLED] to be true. *)
-
-  val timeout_s : unit -> float
-  (** [MASC_CASCADE_TIER_WAIT_TIMEOUT_S]. Default 30.0. *)
-
-  val max_retries : unit -> int option
-  (** [MASC_CASCADE_TIER_WAIT_MAX_RETRIES]. Default [None] (unlimited). *)
-end
 
 (** {1 Cascade runtime overrides} *)
 

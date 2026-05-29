@@ -159,7 +159,7 @@ val run_named :
 (** Run a single [Agent.run] call with MASC-driven cascade model fallback.
     MASC drives the cascade FSM directly: resolves cascade providers,
     tries each with OAS, and uses [Cascade_fsm.decide] on failure.
-    The cascade loop runs inside an admission queue permit. *)
+    The cascade loop runs inside a capacity-managed queue permit. *)
 
 module For_testing : sig
   val checkpoint_after_attempt :
@@ -173,16 +173,4 @@ module For_testing : sig
     string list
 
   val success_selected_model_raw : Cascade_runtime_candidate.t -> string option
-
-  val cascade_admission_policy_of_priority :
-    Llm_provider.Request_priority.t ->
-    Cascade_tier_admission.admission_policy
-
-  val with_cascade_admission_for_testing :
-    admission:Cascade_tier_admission.t ->
-    enabled:bool ->
-    admission_key:string ->
-    admission_policy:Cascade_tier_admission.admission_policy ->
-    (unit -> 'a) ->
-    ('a, Cascade_saturation_signal.t) result
 end

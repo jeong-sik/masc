@@ -119,6 +119,23 @@ let rec parse flags path = function
   | "-l" :: rest | "--long" :: rest -> parse (`Long :: flags) path rest
   | "-a" :: rest | "--all" :: rest -> parse (`All :: flags) path rest
   | "-h" :: rest | "--human-readable" :: rest -> parse (`Human :: flags) path rest
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ls { path = Some p; flags = List.rev flags }))
+     | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ls { path; flags = List.rev flags })))
+  (* Combined short flags: -lah, -al, -lh, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'l' || c = 'a' || c = 'h')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let flags' = flags
+      @ (if String.contains arg 'l' then [ `Long ] else [])
+      @ (if String.contains arg 'a' then [ `All ] else [])
+      @ (if String.contains arg 'h' then [ `Human ] else [])
+    in parse flags' path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse flags path rest
@@ -148,6 +165,10 @@ parse [] None args|}
         Some
           {|match args with
 | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cat { path }))
+| "--" :: rest ->
+  (match List.find_opt (fun a -> String.length a > 0) rest with
+   | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cat { path = p }))
+   | None -> None)
 | _ -> None|}
     }
   ; { name = "Rg"
@@ -1328,6 +1349,19 @@ let rec parse delete squeeze set1 set2 = function
      | None -> None)
   | "-d" :: rest -> parse true squeeze set1 set2 rest
   | "-s" :: rest -> parse delete true set1 set2 rest
+  (* POSIX end-of-options: remaining are set1/set2 *)
+  | "--" :: rest ->
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ s1 ] ->
+       (match set1 with
+        | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tr { set1 = s1; set2; delete; squeeze }))
+        | Some _ -> None)
+     | [ s1; s2 ] ->
+       (match set1 with
+        | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tr { set1 = s1; set2 = Some s2; delete; squeeze }))
+        | Some _ -> None)
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse delete squeeze set1 set2 rest
@@ -1822,6 +1856,12 @@ let rec parse mime brief = function
     Some
       (Shell_ir_typed_types.W
          (Shell_ir_typed_types.File { path; mime; brief }))
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.File { path = p; mime; brief }))
+     | None -> None)
   | "-b" :: rest -> parse mime true rest
   | "-i" :: rest -> parse true brief rest
   | arg :: rest ->
@@ -2378,6 +2418,13 @@ let rec parse unified brief files = function
   | "--unified" :: rest -> parse true brief files rest
   | "-q" :: rest -> parse unified true files rest
   | "--brief" :: rest -> parse unified true files rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are file1, file2 *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ f1; f2 ] ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified; brief }))
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse unified brief files rest
@@ -2991,6 +3038,16 @@ let rec parse recursive mode path = function
      | _ -> None)
   | "-R" :: rest -> parse true mode path rest
   | "--recursive" :: rest -> parse true mode path rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are mode, path *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ m; p ] ->
+       (match mode, path with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chmod { mode = m; path = p; recursive }))
+        | _ -> None)
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive mode path rest
@@ -3034,6 +3091,16 @@ let rec parse recursive owner path = function
      | _ -> None)
   | "-R" :: rest -> parse true owner path rest
   | "--recursive" :: rest -> parse true owner path rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are owner, path *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ o; p ] ->
+       (match owner, path with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chown { owner = o; path = p; recursive }))
+        | _ -> None)
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive owner path rest

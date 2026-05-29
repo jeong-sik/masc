@@ -206,7 +206,7 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
 ;;
 
 let assoc_member_if_object key json =
-  Json_util.get_object key json
+  Json_util.get_object json key
 ;;
 
 let existing_keeper_trust_json keeper_json =
@@ -292,7 +292,7 @@ let keeper_runtime_trust_json keeper =
 ;;
 
 let lowercase_json_string key json =
-  Json_util.get_string key json |> Option.map String.lowercase_ascii
+  Json_util.get_string json key |> Option.map String.lowercase_ascii
 ;;
 
 let terminal_reason_json trust = member_assoc "latest_terminal_reason" trust

@@ -21,7 +21,7 @@ module Float = Stdlib.Float
     done, release, task_history, tasks, transition, update_priority, archive_view
 *)
 
-open Yojson.Safe.Util
+(* Yojson.Safe.Util removed — use Json_util SSOT helpers instead *)
 
 type context = {
   config: Coord.config;
@@ -331,8 +331,8 @@ let handle_add_task ~tool_name ~start_time ctx args =
             ~priority ~description)
 
 let handle_batch_add_tasks ~tool_name ~start_time ctx args =
-  let tasks_json = match args |> member "tasks" with
-    | `List l -> l
+  let tasks_json = match Json_util.assoc_member_opt "tasks" args with
+    | Some (`List l) -> l
     | _ -> []
   in
   if Stdlib.List.length tasks_json = 0 then
@@ -342,25 +342,25 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
       "tasks array is empty or missing"
   else
   let validated = List.mapi (fun idx t ->
-    let title = String.trim (t |> member "title" |> to_string) in
-    let priority = t |> member "priority" |> to_int_option |> Option.value ~default:3 in
-    let description = t |> member "description" |> to_string_option |> Option.value ~default:"" in
+    let title = String.trim (Json_util.get_string "title" t |> Option.value ~default:"") in
+    let priority = Json_util.get_int "priority" t |> Option.value ~default:3 in
+    let description = Json_util.get_string "description" t |> Option.value ~default:"" in
     let goal_id =
-      match t |> member "goal_id" |> to_string_option with
+      match Json_util.get_string "goal_id" t with
       | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
       | _ -> None
     in
     let contract =
-      match t |> member "contract" with
-      | `Null -> Ok None
-      | (`Assoc _ as json) -> (
+      match Json_util.assoc_member_opt "contract" t with
+      | None | Some `Null -> Ok None
+      | Some (`Assoc _ as json) -> (
           match Masc_domain.task_contract_of_yojson json with
           | Ok contract -> Ok (Some contract)
           | Error error ->
               Error
                 (Printf.sprintf "item[%d]: invalid contract payload: %s" idx
                    error))
-      | _ -> Error (Printf.sprintf "item[%d]: contract must be an object" idx)
+      | Some _ -> Error (Printf.sprintf "item[%d]: contract must be an object" idx)
     in
     if String.equal title "" then
       Error (Printf.sprintf "item[%d]: title cannot be empty" idx)
@@ -370,9 +370,9 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
       match contract with
       | Ok contract ->
           let has_removed_field name =
-            match t |> member name with
-            | `Null -> false
-            | _ -> true
+            match Json_util.assoc_member_opt name t with
+            | None | Some `Null -> false
+            | Some _ -> true
           in
           if has_removed_field "required_preset" then
             Error (Printf.sprintf "item[%d]: required_preset is no longer supported" idx)
@@ -405,7 +405,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
      ~/.masc/agents/ empty while keepers run normally; only
      masc_claim/masc_claim_next failed).  Coord.claim_task_r works on
      agent_name alone; gate added no real authorization. *)
-  if not ((=) (args |> member "agent_role") `Null) then
+  if Option.is_some (Json_util.assoc_member_opt "agent_role" args) then
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time

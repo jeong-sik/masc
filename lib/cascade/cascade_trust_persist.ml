@@ -96,20 +96,21 @@ let int_opt = function
   | _ -> None
 
 let restore_provider_of_json json =
-  let open Yojson.Safe.Util in
-  match json |> member "provider_key" with
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
+  match m "provider_key" with
   | `String provider_key when String.trim provider_key <> "" ->
     let restore_consecutive_failures =
-      json |> member "consecutive_failures" |> int_opt |> Option.value ~default:0
+      m "consecutive_failures" |> int_opt |> Option.value ~default:0
     in
-    let restore_cooldown_until = json |> member "cooldown_expires_at" |> float_opt in
-    let restore_last_failure_at = json |> member "last_failure_at" |> float_opt in
+    let restore_cooldown_until = m "cooldown_expires_at" |> float_opt in
+    let restore_last_failure_at = m "last_failure_at" |> float_opt in
     let restore_top_fingerprints =
-      match json |> member "top_fingerprints" with
+      match m "top_fingerprints" with
       | `List rows ->
         List.filter_map
           (fun row ->
-            match row |> member "fingerprint", row |> member "count" |> int_opt with
+            let rm key = Option.value ~default:`Null (Json_util.assoc_member_opt key row) in
+            match rm "fingerprint", rm "count" |> int_opt with
             | `String fp, Some count when String.trim fp <> "" && count > 0 ->
               Some (fp, count)
             | _ -> None)
@@ -123,9 +124,9 @@ let restore_provider_of_json json =
         ; restore_cooldown_until
         ; restore_last_failure_at
         ; restore_top_fingerprints
-        ; restore_latency_ms = json |> member "p50_latency_ms" |> float_opt
-        ; restore_confidence = json |> member "avg_confidence" |> float_opt
-        ; restore_cost_usd = json |> member "avg_cost_usd" |> float_opt
+        ; restore_latency_ms = m "p50_latency_ms" |> float_opt
+        ; restore_confidence = m "avg_confidence" |> float_opt
+        ; restore_cost_usd = m "avg_cost_usd" |> float_opt
         }
   | _ -> None
 
@@ -149,8 +150,8 @@ let hydrate_latest ~base_path =
     match Dated_jsonl.read_recent store 1 with
     | [] -> 0
     | latest :: _ ->
-      (match Yojson.Safe.Util.member "providers" latest with
-       | `List providers ->
+      (match Json_util.assoc_member_opt "providers" latest with
+       | Some (`List providers) ->
          let restored =
            List.filter_map restore_provider_of_json providers
            |> H.restore_providers H.global

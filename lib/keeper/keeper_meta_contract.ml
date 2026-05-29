@@ -681,7 +681,9 @@ let () =
     ]
 ;;
 
-(* -- Updater helpers for nested record updates -- *)
+(* -- Updater helpers -- *)
+
+let now_iso () = Masc_domain.now_iso ()
 
 let map_runtime (f : agent_runtime_state -> agent_runtime_state) (m : keeper_meta)
   : keeper_meta

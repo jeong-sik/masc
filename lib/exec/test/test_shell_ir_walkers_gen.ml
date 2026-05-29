@@ -710,6 +710,27 @@ let test_posix_end_of_options () =
   (match tar with
    | W (Tar { action = `Create; compression = `Gzip; archive = "archive.tar.gz"; paths = [ "file1.txt"; "file2.txt" ]; _ }) -> ()
    | w -> Alcotest.failf "Tar --: expected Create Gzip archive.tar.gz paths=[file1.txt;file2.txt], got %a" pp w);
+  (* Tar: -x --file=archive.tar (equal-sign form) *)
+  let tar_file_eq =
+    of_simple { (base "tar") with args = [ lit "-x"; lit "--file=archive.tar" ] }
+  in
+  (match tar_file_eq with
+   | W (Tar { action = `Extract; archive = "archive.tar"; compression = `None; _ }) -> ()
+   | w -> Alcotest.failf "Tar --file=: expected Extract archive.tar, got %a" pp w);
+  (* Tar: -cfarchive.tar.gz --gzip src (combined -cf + --gzip long form) *)
+  let tar_gzip_long =
+    of_simple { (base "tar") with args = [ lit "-cfarchive.tar.gz"; lit "--gzip"; lit "src" ] }
+  in
+  (match tar_gzip_long with
+   | W (Tar { action = `Create; compression = `Gzip; archive = "archive.tar.gz"; paths = [ "src" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --gzip: expected Create Gzip archive.tar.gz, got %a" pp w);
+  (* Tar: -x --file archive.tar (two-token --file form) *)
+  let tar_file_two =
+    of_simple { (base "tar") with args = [ lit "-x"; lit "--file"; lit "archive.tar" ] }
+  in
+  (match tar_file_two with
+   | W (Tar { action = `Extract; archive = "archive.tar"; _ }) -> ()
+   | w -> Alcotest.failf "Tar --file: expected Extract archive.tar, got %a" pp w);
   (* Make: -- install *)
   let make =
     of_simple { (base "make") with args = [ lit "--"; lit "install" ] }

@@ -2538,6 +2538,10 @@ let rec parse action compression archive paths = function
   | "-J" :: rest -> parse action `Xz archive paths rest
   | "--zstd" :: rest -> parse action `Zstd archive paths rest
   | "-f" :: f :: rest -> parse action compression (Some f) paths rest
+  | "--file" :: f :: rest -> parse action compression (Some f) paths rest
+  | "--gzip" :: rest -> parse action `Gzip archive paths rest
+  | "--bzip2" :: rest -> parse action `Bzip2 archive paths rest
+  | "--xz" :: rest -> parse action `Xz archive paths rest
   (* POSIX end-of-options: all remaining args are paths *)
   | "--" :: rest ->
     let paths' = List.rev_append (List.filter (fun a -> String.length a > 0) rest) paths in
@@ -2545,6 +2549,11 @@ let rec parse action compression archive paths = function
      | Some a, Some f ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tar { action = a; archive = f; paths = List.rev paths'; compression }))
      | _ -> None)
+  (* --file=ARCHIVE equal-sign form *)
+  | arg :: rest
+    when String.length arg > 7 && String.sub arg 0 7 = "--file=" ->
+    let f = String.sub arg 7 (String.length arg - 7) in
+    parse action compression (Some f) paths rest
   | arg :: rest ->
     if String.length arg >= 3 && arg.[0] = '-'
     then (

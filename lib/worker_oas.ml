@@ -28,7 +28,6 @@ let oas_model_of_effective_model (model_id : string) : string = model_id
 (* worker_container_meta -> OAS Masc_domain.agent_config                   *)
 (* ================================================================ *)
 
-let proof_result_status_to_string = Cascade_runner.proof_result_status_to_string
 let worker_max_turns_cap = 20
 
 (** Derive max_turns from worker meta timeout budget.
@@ -522,7 +521,6 @@ let rec run_worker_via_oas
           ~(tools : Agent_sdk.Tool.t list)
           ~(raw_trace : Agent_sdk.Raw_trace.t)
           ?(gate_config : Eval_gate.gate_config option)
-          ?contract
           ?worker_run_id
           ()
   : (Worker_container_types.run_result, string) result
@@ -579,7 +577,6 @@ let rec run_worker_via_oas
            ~workspace_path
            ~raw_trace
            ?worker_run_id
-           ?contract
            ~tool_names_ref
            agent)
 
@@ -593,7 +590,6 @@ and resume_worker_via_oas
       ~(prompt : string)
       ~(tools : Agent_sdk.Tool.t list)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
-      ?contract
       ?worker_run_id
       ?(approval : Agent_sdk.Hooks.approval_callback =
         Approval_callbacks.reject_by_default)
@@ -686,7 +682,6 @@ and resume_worker_via_oas
            ~workspace_path
            ~raw_trace
            ?worker_run_id
-           ?contract
            ~tool_names_ref
            agent)
 
@@ -698,7 +693,6 @@ and run_existing_worker_agent
       ~(workspace_path : string)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
       ?worker_run_id
-      ?contract
       ~(tool_names_ref : string list ref)
       (agent : Agent_sdk.Agent.t)
   : (Worker_container_types.run_result, string) result
@@ -715,15 +709,7 @@ and run_existing_worker_agent
           worker_name
           (Printexc.to_string exn))
     (fun () ->
-       let result, proof =
-         match contract with
-         | Some c ->
-           let cr =
-             Masc_mcp_cdal_runtime.Contract_runner.run ~sw ~contract:c agent prompt
-           in
-           cr.response, Some cr.proof
-         | None -> Agent_sdk.Agent.run ~sw agent prompt, None
-       in
+       let result = Agent_sdk.Agent.run ~sw agent prompt in
        let raw_trace_run = Agent_sdk.Agent.last_raw_trace_run agent in
        let evidence_session_id =
          Worker_container.evidence_session_id_of_worker_run
@@ -778,14 +764,6 @@ and run_existing_worker_agent
              ~output
              ?raw_trace_run
              ?evidence_session_id
-             ?proof_run_id:
-               (Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
-             ?proof_result_status:
-               (Option.map
-                  (fun p ->
-                     proof_result_status_to_string
-                       p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
-                  proof)
              ()
          in
          Ok
@@ -802,20 +780,10 @@ and run_existing_worker_agent
            ; session_id
            ; raw_trace_run
            ; api_response = Some response
-           ; proof
            }
        | Error err ->
          let detail = Agent_sdk.Error.to_string err in
-         (match proof with
-          | Some p ->
-            Log.LocalWorker.warn
-              "worker %s errored with CDAL proof: run_id=%s status=%s error=%s"
-              worker_name
-              p.run_id
-              (proof_result_status_to_string p.result_status)
-              detail
-          | None ->
-            Log.LocalWorker.warn "worker %s errored (no proof): %s" worker_name detail);
+         Log.LocalWorker.warn "worker %s errored: %s" worker_name detail;
          let* () =
            Worker_container.append_worker_completion_log
              ~base_path
@@ -827,14 +795,6 @@ and run_existing_worker_agent
              ~error:detail
              ?raw_trace_run
              ?evidence_session_id
-             ?proof_run_id:
-               (Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
-             ?proof_result_status:
-               (Option.map
-                  (fun p ->
-                     proof_result_status_to_string
-                       p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
-                  proof)
              ()
          in
          Error detail)

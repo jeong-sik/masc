@@ -111,16 +111,6 @@ let api_response_of_yojson = function
       | Some response -> Ok (Some response)
       | None -> Error "invalid api_response in worker helper payload")
 
-let proof_to_yojson =
-  Json_util.option_to_yojson Masc_mcp_cdal_runtime.Cdal_proof.to_json
-
-let proof_of_yojson = function
-  | `Null -> Ok None
-  | json -> (
-      match Masc_mcp_cdal_runtime.Cdal_proof.of_json json with
-      | Ok proof -> Ok (Some proof)
-      | Error msg -> Error ("invalid proof in worker helper payload: " ^ msg))
-
 let run_result_to_yojson (run_result : Worker_container_types.run_result) =
   `Assoc
     [
@@ -135,7 +125,6 @@ let run_result_to_yojson (run_result : Worker_container_types.run_result) =
       ( "raw_trace_run",
         Json_util.option_to_yojson Agent_sdk.Raw_trace.run_ref_to_yojson run_result.raw_trace_run );
       ("api_response", api_response_to_yojson run_result.api_response);
-      ("proof", proof_to_yojson run_result.proof);
     ]
 
 let run_result_of_yojson (json : Yojson.Safe.t) :
@@ -161,7 +150,6 @@ let run_result_of_yojson (json : Yojson.Safe.t) :
               Error ("invalid raw_trace_run in worker helper payload: " ^ msg))
     in
     let* api_response = api_response_of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "api_response" json)) in
-    let* proof = proof_of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "proof" json)) in
     let run_result : Worker_container_types.run_result = {
       output;
       model_used;
@@ -173,7 +161,6 @@ let run_result_of_yojson (json : Yojson.Safe.t) :
       session_id;
       raw_trace_run;
       api_response;
-      proof;
     } in
     Ok run_result
   with

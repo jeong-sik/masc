@@ -314,28 +314,6 @@ let test_phase_a_contract_rejected_roundtrip () =
       reason
   | _ -> Alcotest.fail "expected Internal_contract_rejected"
 
-(** The cdal_runtime substrate emits the same prefixed payload as the
-    masc_mcp classifier expects.  This pins the wire-format
-    compatibility so a drift between the two prefix strings is caught
-    at test time. *)
-let test_phase_a_cdal_substrate_wire_compat () =
-  let cdal_sdk_err =
-    Masc_mcp_cdal_runtime.Internal_error_substrate.sdk_error_of
-      (Masc_mcp_cdal_runtime.Internal_error_substrate.Contract_rejected
-         { reason = "guardrail tripped" })
-  in
-  let decoded = Classify.classify_masc_internal_error cdal_sdk_err in
-  match decoded with
-  | Some (Classify.Internal_contract_rejected { reason }) ->
-    Alcotest.(check string)
-      "cdal-emitted reason parsed by masc_mcp classifier"
-      "guardrail tripped"
-      reason
-  | _ ->
-    Alcotest.fail
-      "cdal_runtime substrate payload not recognized by masc_mcp \
-       classifier — prefix or kind drift"
-
 let () =
   Alcotest.run "cascade_error_classify_decoder"
     [ ( "round-trip"
@@ -374,9 +352,5 @@ let () =
         ; Alcotest.test_case
             "Internal_contract_rejected round-trip" `Quick
             test_phase_a_contract_rejected_roundtrip
-        ; Alcotest.test_case
-            "cdal_runtime substrate ↔ masc_mcp classifier wire-compat"
-            `Quick
-            test_phase_a_cdal_substrate_wire_compat
         ] )
     ]

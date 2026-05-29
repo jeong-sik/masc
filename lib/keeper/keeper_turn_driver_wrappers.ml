@@ -35,7 +35,6 @@ let run_model_by_label
     ?tool_retry_policy
     ?enable_thinking
     ?compact_ratio
-    ?contract
     ?on_event
     ?transport
     ?sw
@@ -74,7 +73,7 @@ let run_model_by_label
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
-                match Cascade_runner.run ~sw ~net ~config ?on_event ?contract goal with
+                match Cascade_runner.run ~sw ~net ~config ?on_event  goal with
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
                     Error
@@ -127,8 +126,6 @@ let run_named_with_masc_tools
     ?on_event
     ?on_yield
     ?on_resume
-    ?proof_ref
-    ?contract
     ?transport
     ?(yield_on_tool = false)
     ?compact_ratio
@@ -152,8 +149,7 @@ let run_named_with_masc_tools
     ~accept
     ?compact_ratio
     ?approval
-    ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
-    ?contract
+    ?raw_trace ?on_event ?on_yield ?on_resume 
     ?transport ~yield_on_tool ?sw ?net ()
 
 let run_model_with_masc_tools
@@ -175,7 +171,6 @@ let run_model_with_masc_tools
     ?tool_retry_policy
     ?enable_thinking
     ?compact_ratio
-    ?contract
     ?raw_trace
     ?on_event
     ?transport
@@ -213,7 +208,7 @@ let run_model_with_masc_tools
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->
-                Cascade_runner.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
+                Cascade_runner.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch  ?on_event
                   goal))
       with
       | Ok result -> result

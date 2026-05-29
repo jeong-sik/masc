@@ -63,8 +63,6 @@ let run_named
     ?on_yield
     ?on_resume
     ?agent_ref
-    ?proof_ref
-    ?contract
     ?transport
     ?cli_transport_overrides
     ?(allowed_paths = [])
@@ -638,14 +636,12 @@ let run_named
     exit_condition_result;
     summarizer;
     oas_checkpoint;
-    contract;
     sw;
     net;
     on_event;
     on_yield;
     on_resume;
     agent_ref;
-    proof_ref;
     event_bus;
     cascade_engine;
     runtime_manifest_context;

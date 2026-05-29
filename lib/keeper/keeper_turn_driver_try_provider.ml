@@ -65,7 +65,6 @@ type try_provider_ctx =
   ; exit_condition_result : (int -> Cascade_runner.stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
-  ; contract : Masc_mcp_cdal_runtime.Risk_contract.t option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -74,7 +73,6 @@ type try_provider_ctx =
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
-  ; proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
   ; cascade_engine : Keeper_cascade_engine.t
@@ -333,7 +331,6 @@ let run_try_provider
           ; cache_system_prompt = ctx.cache_system_prompt
           ; compact_ratio = ctx.compact_ratio
           ; oas_auto_context_overflow_retry = ctx.oas_auto_context_overflow_retry
-          ; contract = ctx.contract
           ; checkpoint_dir = ctx.checkpoint_dir
           ; context_injector = ctx.context_injector
           ; context = ctx.context
@@ -502,8 +499,6 @@ let run_try_provider
                     ?on_yield:ctx.on_yield
                     ?on_resume:ctx.on_resume
                     ~agent_ref:local_agent_ref
-                    ?proof_ref:ctx.proof_ref
-                    ?contract:ctx.contract
                     ctx.goal
                 in
                 let outer_wall_for_provider =

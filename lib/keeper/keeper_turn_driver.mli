@@ -127,8 +127,6 @@ val run_named :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
-  ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?cli_transport_overrides:Cascade_runner.cli_transport_overrides ->
   ?allowed_paths:string list ->

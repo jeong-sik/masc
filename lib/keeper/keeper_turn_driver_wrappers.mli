@@ -30,7 +30,6 @@ val run_model_by_label :
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
@@ -66,8 +65,6 @@ val run_named_with_masc_tools :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
@@ -98,7 +95,6 @@ val run_model_with_masc_tools :
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->

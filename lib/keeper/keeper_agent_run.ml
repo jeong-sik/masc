@@ -30,9 +30,6 @@ let tool_contract_result_for_observed_tools =
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
-  let select_cdal_proof = Turn_helpers.select_cdal_proof
-  let cdal_task_id_for_verdict = Contract_helpers.cdal_task_id_for_verdict
-  let cdal_verdict_persist_decision = Contract_helpers.cdal_verdict_persist_decision
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
   let no_progress_success_tool_names_for_contract =
@@ -403,7 +400,6 @@ let run_turn
           ])
       Keeper_runtime_manifest.Tool_surface_selected;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-    let proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref = ref None in
     let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
     let initial_tool_surface_blocker_ref =
       s.Keeper_run_tools.initial_tool_surface_blocker
@@ -432,11 +428,6 @@ let run_turn
      gating must judge claim-context tools against ownership at turn entry. *)
     let had_owned_active_task_at_turn_start = keeper_has_owned_active_task () in
     (* 8. Run Agent *)
-    let contract =
-      if Env_config.Cdal.enabled ()
-      then Keeper_cdal_contract.of_keeper_meta meta
-      else None
-    in
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
         ~config
@@ -673,8 +664,6 @@ let run_turn
                     ?on_yield
                     ?on_resume
                     ~agent_ref
-                    ~proof_ref
-                    ?contract
                     ?cli_transport_overrides
                     ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
@@ -947,7 +936,7 @@ let run_turn
                           ~trace_id ~session ~append_manifest ~model
                           ~acc ~memory
                           ~actual_keeper_tool_names ~actual_keeper_tool_names_ref
-                          ~result ~checkpoint_persistence_error ~proof_ref
+                          ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ?provider_filter ~cascade_name_string
                           ~prompt_metrics ~ctx_composition ~usage
                           ~receipt_response_text_present_ref ~history_assistant_source

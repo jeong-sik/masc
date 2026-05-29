@@ -5,15 +5,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-let cdal_mode_violations_ref_suffix = "evidence/mode_violations.json"
-
-let cdal_raw_evidence_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
-  List.length proof.raw_evidence_refs
-
-let cdal_violation_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
-  proof.raw_evidence_refs
-  |> List.filter (String.ends_with ~suffix:cdal_mode_violations_ref_suffix)
-  |> List.length
 
 let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : string =
   let digest =

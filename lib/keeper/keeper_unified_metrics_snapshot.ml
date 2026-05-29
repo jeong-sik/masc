@@ -193,24 +193,6 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | Some validation ->
               Agent_sdk.Raw_trace.run_validation_to_yojson validation
           | None -> `Null );
-        ("cdal_proof",
-         match result.proof with
-         | Some p ->
-           `Assoc [
-             ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
-             ("effective_mode",
-              Masc_mcp_cdal_runtime.Execution_mode.to_yojson p.effective_execution_mode);
-             ("result_status",
-              Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status);
-             ("violation_count",
-              `Int (cdal_violation_ref_count p));
-             ("raw_evidence_ref_count",
-              `Int (cdal_raw_evidence_ref_count p));
-             ("tool_trace_count",
-              `Int (List.length p.tool_trace_refs));
-             ("mode_source", `String p.mode_decision_source);
-           ]
-         | None -> `Null);
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->

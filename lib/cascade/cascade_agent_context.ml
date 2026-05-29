@@ -59,7 +59,6 @@ type config =
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
   ; required_tool_satisfaction : Agent_sdk.Completion_contract.required_tool_satisfaction
-  ; contract : Masc_mcp_cdal_runtime.Risk_contract.t option
   ; enable_thinking : bool option
   ; transport : Masc_grpc_transport.t
   ; allowed_paths : string list
@@ -122,7 +121,6 @@ let default_config
   ; raw_trace = None
   ; tool_retry_policy = None
   ; required_tool_satisfaction = Agent_sdk.Completion_contract.any_tool_call_satisfies
-  ; contract = None
   ; enable_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
   ; allowed_paths = []

@@ -60,7 +60,6 @@ type config =
   tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   required_tool_satisfaction :
     Agent_sdk.Completion_contract.required_tool_satisfaction;
-  contract : Masc_mcp_cdal_runtime.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -92,7 +91,6 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
   cascade_observation : Cascade_observation.cascade_observation option;
   stop_reason : stop_reason;
 }
@@ -111,16 +109,6 @@ let worker_lifecycle_classification_of_result = function
     { event = "failed"; status = "agent_execution_timeout"; error = None }
   | Error e ->
     { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
-
-(* Delegate to the canonical [Cdal_proof.result_status_to_string]
-   (exposed in #14712 / T5).  Previously this re-implemented the same
-   wire conversion via [show_result_status] + [String.rindex '.']
-   substring split — a fragile [@@deriving show] strip that breaks
-   silently when the type is moved or the module renamed.  Both this
-   call site and [keeper_turn_telemetry.log_keeper_proof] (fixed in
-   #14712) had grown independent copies of the same workaround. *)
-let proof_result_status_to_string =
-  Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_string
 
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)
@@ -502,8 +490,6 @@ let run
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
     ?(agent_ref : Agent_sdk.Agent.t option ref option)
-    ?(proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref option)
-    ?(contract : Masc_mcp_cdal_runtime.Risk_contract.t option)
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   let session_id = match config.session_id with
@@ -549,34 +535,24 @@ let run
     Error e
   | Ok agent ->
   (match agent_ref with Some r -> r := Some agent | None -> ());
-  let effective_contract = match contract with Some c -> Some c | None -> config.contract in
   let run_started_at = Unix.gettimeofday () in
   (try
-    let result, proof = match effective_contract with
-      | Some c ->
-        let cr = Masc_mcp_cdal_runtime.Contract_runner.run ~sw ~contract:c agent goal in
-        (cr.response, Some cr.proof)
-      | None ->
-        (* Pass the process-level Eio clock when available so agent_sdk's
-           [with_optional_timeout] can fire on hang when the caller has
-           also set [config.max_execution_time_s]. Both inputs must be
-           [Some] for the timeout to engage; absent either, behaviour is
-           historical (block until provider closes). *)
-        let clock =
-          match Process_eio.get_clock () with
-          | Ok c -> Some c
-          | Error _ -> None
-        in
-        let r = match on_event with
-          | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
-          | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal
-        in
-        (r, None)
+    let result =
+      (* Pass the process-level Eio clock when available so agent_sdk's
+         [with_optional_timeout] can fire on hang when the caller has
+         also set [config.max_execution_time_s]. Both inputs must be
+         [Some] for the timeout to engage; absent either, behaviour is
+         historical (block until provider closes). *)
+      let clock =
+        match Process_eio.get_clock () with
+        | Ok c -> Some c
+        | Error _ -> None
+      in
+      match on_event with
+      | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
+      | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
-    (match proof_ref, proof with
-     | Some ref_, Some _ -> ref_ := proof
-     | _ -> ());
     let checkpoint =
       let ckpt =
         build_checkpoint ~session_id
@@ -631,7 +607,6 @@ let run
           turns;
           trace_ref;
           run_validation;
-          proof;
           cascade_observation = None;
           stop_reason = Completed;
         }
@@ -654,7 +629,6 @@ let run
           turns;
           trace_ref;
           run_validation;
-          proof;
           cascade_observation = None;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
         }
@@ -685,7 +659,6 @@ let run
             turns;
             trace_ref;
             run_validation;
-            proof;
             cascade_observation = None;
             stop_reason;
           }
@@ -730,14 +703,7 @@ let run
          next provider.  Emitting WARN/ERROR here creates noise on
          recovered cascades.  The cascade layer logs [cascade-fallback] at
          INFO when it retries and emits ERROR only on full exhaustion. *)
-      (match proof with
-       | Some p ->
-         Log.Misc.debug "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"
-           p.run_id
-           (proof_result_status_to_string p.result_status)
-           detail
-       | None ->
-         Log.Misc.debug "oas_worker: agent errored (no proof): %s" detail);
+      Log.Misc.debug "oas_worker: agent errored: %s" detail;
       close_agent_for_cleanup ~propagate_cancel:false ~config agent;
       Error err)
   with
@@ -782,7 +748,6 @@ let run_with_masc_tools
     ~(config : config)
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ?contract
     ?on_event
     ?on_yield
     ?on_resume
@@ -796,9 +761,9 @@ let run_with_masc_tools
     when Provider_tool_support.provider_supports_runtime_mcp_policy
            config.provider_cfg runtime_mcp_policy ->
       let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when masc_tools = [] ->
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
       let oas_tools =
         List.map
@@ -811,7 +776,7 @@ let run_with_masc_tools
           masc_tools
       in
       let config = { config with tools = oas_tools @ config.tools } in
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ ->
       Error
         (invalid_runtime_config "tool_support"

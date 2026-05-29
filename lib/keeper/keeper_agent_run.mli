@@ -32,17 +32,6 @@ module For_testing : sig
     -> (Agent_sdk.Types.sse_event -> unit) option
     -> Agent_sdk.Types.sse_event
     -> unit
-  val select_cdal_proof
-    :  result_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option
-    -> captured_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option
-    -> Masc_mcp_cdal_runtime.Cdal_proof.t option
-  val cdal_task_id_for_verdict
-    :  current_task_id:string option
-    -> tool_calls:tool_call_detail list
-    -> string option
-  val cdal_verdict_persist_decision
-    :  string option
-    -> [> `Persist_task_scoped of string | `Skip_missing_task_scope ]
   val progress_keeper_tool_names_for_contract
     :  allowed_tool_names:string list
     -> actual_keeper_tool_names:string list

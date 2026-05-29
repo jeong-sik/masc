@@ -263,8 +263,6 @@
   test_tool_input_validation
   test_failure_learnings_10325
   test_agent_stress_emit_10341
-  test_cdal_conformance
-  test_cdal_criteria
   test_cdal_evidence_gate
   test_task_stage
   test_ocaml_north_star_task_lifecycle
@@ -583,8 +581,6 @@
   test_agent_stress_emit_10341
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
-  test_cdal_conformance
-  test_cdal_criteria
   test_cdal_evidence_gate
   test_task_stage
   test_ocaml_north_star_task_lifecycle
@@ -913,12 +909,7 @@
   test_prompt_registry_defaults
   test_keeper_prompt_external
   test_keeper_recurring
-  test_cdal_proof
-  test_cdal_risk_contract
-  test_keeper_cdal_contract
   test_evidence_claim_schema
-  test_cdal_mode_enforcer
-  test_cdal_mode_resolver
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration
@@ -1129,12 +1120,7 @@
   test_prompt_registry_defaults
   test_keeper_prompt_external
   test_keeper_recurring
-  test_cdal_proof
-  test_cdal_risk_contract
-  test_keeper_cdal_contract
   test_evidence_claim_schema
-  test_cdal_mode_enforcer
-  test_cdal_mode_resolver
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration
@@ -1859,11 +1845,6 @@
 (test
  (name test_dashboard_o5_feeds)
  (modules test_dashboard_o5_feeds)
- (libraries masc_test_deps))
-
-(test
- (name test_masc_contract_catalog)
- (modules test_masc_contract_catalog)
  (libraries masc_test_deps))
 
 (test

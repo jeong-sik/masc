@@ -76,10 +76,6 @@ let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter record_turn_progress (sse_event_progress_kind event);
   Option.iter (fun cb -> cb event) downstream
 
-let select_cdal_proof ~result_proof ~captured_proof =
-  match result_proof with
-  | Some _ -> result_proof
-  | None -> captured_proof
 
 let should_require_provider_tool_choice_support
     ~initial_tool_requirement

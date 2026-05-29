@@ -239,17 +239,6 @@ let append_decision_record
           | Some { run_validation = Some validation; _ } ->
               Agent_sdk.Raw_trace.run_validation_to_yojson validation
           | _ -> `Null );
-        ( "cdal_proof",
-          match result with
-          | Some { proof = Some p; _ } ->
-              `Assoc
-                [
-                  ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
-                  ( "result_status",
-                    Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status );
-                  ("tool_trace_count", `Int (List.length p.tool_trace_refs));
-                ]
-          | _ -> `Null );
         ( "telemetry",
           match result with
           | Some r ->

@@ -1,9 +1,9 @@
-(** Dashboard_mission_assembly — keeper briefs, operation
+(** Dashboard_briefing_assembly — keeper briefs, operation
     contexts, session assembly, internal signals, and
     timeline rendering for the mission dashboard.
 
     {b Cascade chain}: includes
-    {!Dashboard_mission_agents} (which itself cascades
+    {!Dashboard_briefing_agents} (which itself cascades
     {!Dashboard_utils}), so callers reach the agent-brief
     + per-entity context records ({!attention_context},
     {!session_context}, {!agent_context},
@@ -14,10 +14,10 @@
     [include module type of struct include M end].
 
     External surface beyond the cascade (8 own-module
-    entries) — all consumed by {!Dashboard_mission} when
+    entries) — all consumed by {!Dashboard_briefing} when
     rendering the mission HTTP envelope, plus
     [build_keeper_briefs] reached directly by
-    [test/test_dashboard_mission.ml].
+    [test/test_dashboard_briefing.ml].
 
     Internal helpers stay private at this boundary
     ([lane_pressure_ctx_ratio] tuning constant,
@@ -33,7 +33,7 @@
     [take]). *)
 
 include module type of struct
-  include Dashboard_mission_agents
+  include Dashboard_briefing_agents
 end
 
 (** {1 Brief / context builders} *)
@@ -45,7 +45,7 @@ val build_keeper_briefs :
     {!Keeper_registry}, falling back to in-band fields
     ([allowed_tool_names], [latest_tool_names]) when the
     registry has no record.  Pinned because
-    [test/test_dashboard_mission.ml] exercises this path
+    [test/test_dashboard_briefing.ml] exercises this path
     directly. *)
 
 val build_internal_signals :

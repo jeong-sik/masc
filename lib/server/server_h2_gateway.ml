@@ -799,9 +799,9 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/mission" ->
+      | `GET, "/api/v1/dashboard/briefing" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
+            let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/session" ->
@@ -809,10 +809,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/mission/briefing" ->
+      | `GET, "/api/v1/dashboard/briefing/sections" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
-              dashboard_mission_briefing_http_json ~state ~sw ~clock
+              dashboard_briefing_sections_http_json ~state ~sw ~clock
                 httpun_request
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)

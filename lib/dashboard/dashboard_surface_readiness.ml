@@ -153,7 +153,7 @@ let all_entries =
       ~meets_main_gate:true
       ~rationale:"Front-door briefing surface for shell, mission, and project snapshots."
       ~route_hash:"#overview"
-      ~fixture_harness:"./scripts/harness_dashboard_mission_smoke.sh"
+      ~fixture_harness:"./scripts/harness_dashboard_briefing_smoke.sh"
       ~live_spotcheck:"/api/v1/dashboard/shell"
       ~tool_name:"masc_operator_snapshot"
       ()
@@ -254,7 +254,7 @@ let all_entries =
       ~meets_main_gate:false
       ~rationale:"Hidden diagnostic execution-flow drill-down."
       ~route_hash:"#monitoring?section=journey"
-      ~fixture_harness:"./scripts/harness_dashboard_mission_smoke.sh"
+      ~fixture_harness:"./scripts/harness_dashboard_briefing_smoke.sh"
       ~live_spotcheck:"/api/v1/dashboard/namespace-truth"
       ~tool_name:"masc_operator_snapshot"
       ()

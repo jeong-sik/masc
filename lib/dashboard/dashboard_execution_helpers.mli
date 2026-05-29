@@ -44,7 +44,7 @@ type tone = Dashboard_utils.tone =
   | Tone_bad
 (** Severity tone re-export from {!Dashboard_utils.tone}.
     Type-equality preserves so every cascade consumer
-    (Dashboard_mission_assembly, etc.) can use the same
+    (Dashboard_briefing_assembly, etc.) can use the same
     constructors regardless of which alias they reach
     them through. *)
 

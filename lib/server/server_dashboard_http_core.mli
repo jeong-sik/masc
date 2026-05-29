@@ -120,7 +120,7 @@ val start_mission_refresh_loop :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit
 
-val dashboard_mission_http_json :
+val dashboard_briefing_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -134,7 +134,7 @@ val dashboard_session_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 
-val dashboard_mission_briefing_http_json :
+val dashboard_briefing_sections_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

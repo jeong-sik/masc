@@ -1,11 +1,11 @@
-(** Dashboard_mission_agents — agent briefs + per-entity context
+(** Dashboard_briefing_agents — agent briefs + per-entity context
     records for the mission dashboard.
 
     {b Cascade chain}: starts with [include Dashboard_utils], so
-    {!Dashboard_mission_assembly} (which does [include
-    Dashboard_mission_agents]) re-exports the full
+    {!Dashboard_briefing_assembly} (which does [include
+    Dashboard_briefing_agents]) re-exports the full
     Dashboard_utils + this module surface to
-    {!Dashboard_mission}.
+    {!Dashboard_briefing}.
 
     Internal: 9 helpers (\[build_task_lookup\],
     \[latest_message_from\], \[latest_message_to\],
@@ -24,7 +24,7 @@ end
 
 val dedup_strings : string list -> string list
 (** [dedup_strings items] is [List.sort_uniq String.compare items].
-    Used by Dashboard_mission_assembly during agent / keeper list
+    Used by Dashboard_briefing_assembly during agent / keeper list
     aggregation. *)
 
 val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
@@ -45,8 +45,8 @@ val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
     Each context record bundles (a) sort / rank fields used by
     cross-section ordering and (b) the rendered JSON payload.
     Concrete records because cascade consumers
-    ({!Dashboard_mission_assembly},
-    {!Dashboard_mission}) construct them field-by-field. *)
+    ({!Dashboard_briefing_assembly},
+    {!Dashboard_briefing}) construct them field-by-field. *)
 
 type session_context = {
   session_id : string;

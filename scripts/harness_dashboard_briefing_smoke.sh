@@ -135,7 +135,7 @@ fi
 log "seeding mission fixture"
 if ! run_with_timeout "$FIXTURE_TIMEOUT_SEC" "fixture setup" \
   env BASE_PATH="$BASE_PATH" MCP_URL="$MCP_URL" SESSION_ID="$SESSION_ID" \
-  "$SCRIPT_DIR/setup_dashboard_mission_fixture.sh"; then
+  "$SCRIPT_DIR/setup_dashboard_briefing_fixture.sh"; then
   echo "Mission fixture setup failed. See $SERVER_LOG" >&2
   exit 1
 fi

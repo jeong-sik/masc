@@ -30,7 +30,7 @@ module S = Masc_mcp.Briefing_sections
 
 let s_str s = `String s
 
-let mission ?(room_health = "ok") ?(incidents = 0)
+let briefing_summary ?(room_health = "ok") ?(incidents = 0)
     ?(recommended = 0) ?(top_attention = "") () : Yojson.Safe.t =
   `Assoc
     [
@@ -114,7 +114,7 @@ let by_id sections id =
 let test_output_shape_three_sections () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ()) ~sessions:[] ~agents:[]
+      ~briefing_summary_json:(briefing_summary ()) ~sessions:[] ~agents:[]
       ~recent_messages:[] ~metadata_gaps:[]
   in
   assert (List.length sections = 3);
@@ -124,7 +124,7 @@ let test_output_shape_three_sections () =
 let test_output_shape_section_attribute_keys () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ()) ~sessions:[] ~agents:[]
+      ~briefing_summary_json:(briefing_summary ()) ~sessions:[] ~agents:[]
       ~recent_messages:[] ~metadata_gaps:[]
   in
   let expected_keys =
@@ -142,7 +142,7 @@ let test_output_shape_section_attribute_keys () =
 let test_provenance_and_authoritative_pinned () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ()) ~sessions:[] ~agents:[]
+      ~briefing_summary_json:(briefing_summary ()) ~sessions:[] ~agents:[]
       ~recent_messages:[] ~metadata_gaps:[]
   in
   List.iter
@@ -160,7 +160,7 @@ let test_provenance_and_authoritative_pinned () =
 let test_watch_summary_matches_watch_section () =
   let ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ()) ~sessions:[] ~agents:[]
+      ~briefing_summary_json:(briefing_summary ()) ~sessions:[] ~agents:[]
       ~recent_messages:[] ~metadata_gaps:[]
   in
   let watch = by_id sections "watch" in
@@ -171,7 +171,7 @@ let test_watch_summary_matches_watch_section () =
 let test_watch_risky_room () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ~room_health:"critical" ())
+      ~briefing_summary_json:(briefing_summary ~room_health:"critical" ())
       ~sessions:[] ~agents:[] ~recent_messages:[]
       ~metadata_gaps:[]
   in
@@ -181,7 +181,7 @@ let test_watch_risky_room () =
 let test_watch_incidents_only () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ~incidents:2 ()) ~sessions:[]
+      ~briefing_summary_json:(briefing_summary ~incidents:2 ()) ~sessions:[]
       ~agents:[] ~recent_messages:[] ~metadata_gaps:[]
   in
   let w = by_id sections "watch" in
@@ -190,7 +190,7 @@ let test_watch_incidents_only () =
 let test_watch_recommended_actions_only () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ~recommended:3 ())
+      ~briefing_summary_json:(briefing_summary ~recommended:3 ())
       ~sessions:[] ~agents:[] ~recent_messages:[]
       ~metadata_gaps:[]
   in
@@ -200,7 +200,7 @@ let test_watch_recommended_actions_only () =
 let test_watch_clean_state_ok () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ()) ~sessions:[] ~agents:[]
+      ~briefing_summary_json:(briefing_summary ()) ~sessions:[] ~agents:[]
       ~recent_messages:[] ~metadata_gaps:[]
   in
   let w = by_id sections "watch" in
@@ -213,7 +213,7 @@ let test_communication_positive_signal_no_gaps_healthy () =
      allow-list → "healthy". *)
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~mode:"async" () ]
       ~agents:[] ~recent_messages:[ recent_msg () ]
       ~metadata_gaps:[]
@@ -225,7 +225,7 @@ let test_communication_positive_signal_with_gaps_watch () =
   (* recent_messages > 0 AND a Communication gap → "watch". *)
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session () ]
       ~agents:[]
       ~recent_messages:[ recent_msg () ]
@@ -237,7 +237,7 @@ let test_communication_positive_signal_with_gaps_watch () =
 let test_communication_no_sessions_unclear () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ()) ~sessions:[] ~agents:[]
+      ~briefing_summary_json:(briefing_summary ()) ~sessions:[] ~agents:[]
       ~recent_messages:[] ~metadata_gaps:[]
   in
   let c = by_id sections "communication" in
@@ -247,7 +247,7 @@ let test_communication_unknown_mode_unclear () =
   (* Live session present, but mode is "unknown" → "unclear". *)
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~mode:"unknown" () ]
       ~agents:[] ~recent_messages:[] ~metadata_gaps:[]
   in
@@ -257,7 +257,7 @@ let test_communication_unknown_mode_unclear () =
 let test_communication_metadata_gap_unclear () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~mode:"async" () ]
       ~agents:[]
       ~recent_messages:[]
@@ -272,7 +272,7 @@ let test_communication_metadata_gap_unclear () =
 let test_alignment_no_active_agents_unclear () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~goal:"ship" () ]
       ~agents:[ agent ~status:"inactive" () ]
       ~recent_messages:[] ~metadata_gaps:[]
@@ -283,7 +283,7 @@ let test_alignment_no_active_agents_unclear () =
 let test_alignment_metadata_gap_unclear () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~goal:"ship" () ]
       ~agents:[ agent ~status:"active" ~assignment:"assigned" () ]
       ~recent_messages:[]
@@ -297,7 +297,7 @@ let test_alignment_no_bound_goal_unclear () =
      bound_goal_count=0 → "unclear". *)
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~goal:"unassigned" () ]
       ~agents:[ agent ~status:"active" ~assignment:"assigned" () ]
       ~recent_messages:[] ~metadata_gaps:[]
@@ -308,7 +308,7 @@ let test_alignment_no_bound_goal_unclear () =
 let test_alignment_all_assigned_aligned () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~goal:"ship feature" () ]
       ~agents:
         [
@@ -323,7 +323,7 @@ let test_alignment_all_assigned_aligned () =
 let test_alignment_some_unassigned_watch () =
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ session ~goal:"ship feature" () ]
       ~agents:
         [
@@ -348,7 +348,7 @@ let test_evidence_capped_at_two () =
   in
   let _ws, sections =
     S.build_briefing_sections
-      ~mission_summary_json:(mission ())
+      ~briefing_summary_json:(briefing_summary ())
       ~sessions:[ s_with_signals ]
       ~agents:[ agent ~status:"active" ~assignment:"assigned" () ]
       ~recent_messages:many_messages ~metadata_gaps:[]

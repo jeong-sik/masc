@@ -119,7 +119,7 @@ let severity_rank_of_health_level = function
     The variant makes the different terminal sets visible:
     - [is_session_terminal]: Completed | Cancelled | Failed | Stopped
     - [is_session_blocked]: Failed | Cancelled | Interrupted
-    - dashboard_mission terminal: Completed | Interrupted | Cancelled | Expired *)
+    - dashboard_briefing terminal: Completed | Interrupted | Cancelled | Expired *)
 type session_lifecycle =
   | SL_active
   | SL_running

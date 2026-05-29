@@ -1,4 +1,4 @@
-(** Section builders for mission briefing (communication, alignment, watch). *)
+(** Section builders for briefing (communication, alignment, watch). *)
 
 open Briefing_json_helpers
 open Briefing_gaps
@@ -208,15 +208,15 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
   else
     ("ok", "No immediate operator action is flagged by the namespace summary.", evidence)
 
-let build_briefing_sections ~mission_summary_json ~sessions ~agents ~recent_messages
+let build_briefing_sections ~briefing_summary_json ~sessions ~agents ~recent_messages
     ~metadata_gaps =
-  let room_health = mission_summary_json |> string_field "room_health" in
-  let incident_count = mission_summary_json |> int_field "incident_count" in
+  let room_health = briefing_summary_json |> string_field "room_health" in
+  let incident_count = briefing_summary_json |> int_field "incident_count" in
   let recommended_action_count =
-    mission_summary_json |> int_field "recommended_action_count"
+    briefing_summary_json |> int_field "recommended_action_count"
   in
   let top_attention_summary =
-    mission_summary_json |> string_field "top_attention_summary"
+    briefing_summary_json |> string_field "top_attention_summary"
   in
   let communication_status, communication_summary, communication_evidence =
     build_communication_section ~sessions ~recent_messages ~metadata_gaps

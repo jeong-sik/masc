@@ -609,10 +609,8 @@ type keeper_meta =
   ; meta_version : int
   }
 
-let cascade_name_of_meta (m : keeper_meta) : string =
-  match m.cascade_ref with
-  | Some ref_ -> Cascade_name.to_string ref_.Cascade_ref.group
-  | _ -> (Keeper_config.default_cascade_name ())
+let cascade_name_of_meta (_m : keeper_meta) : string =
+  Runtime.get_default_runtime_id ()
 ;;
 
 let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =

@@ -17,3 +17,13 @@ type t =
 val id_of_binding : cascade_binding -> string
 val of_binding : cascade_config -> cascade_binding -> t option
 val load_list : config_path:string -> (t list * t, string) result
+
+(** {1 Lazy default runtime singleton}
+
+    Initialized once at startup via {!init_default}.  All consumer
+    code that previously resolved a cascade name now calls
+    {!get_default_runtime_id} instead. *)
+
+val init_default : config_path:string -> (unit, string) result
+val get_default_runtime : unit -> t option
+val get_default_runtime_id : unit -> string

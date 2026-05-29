@@ -2243,24 +2243,26 @@ parse None false false None args|}
     ; parse_body =
         Some
           {|
-let rec parse port id_file host user command = function
+let rec parse port id_file host user command dd = function
   | [] ->
     (match host with
      | Some h ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host = h; user; command; port; identity_file = id_file }))
      | None -> None)
-  | "-p" :: p_str :: rest ->
+  | "-p" :: p_str :: rest when not dd ->
     (match int_of_string_opt p_str with
-     | Some p -> parse (Some p) id_file host user command rest
-     | None -> parse port id_file host user command rest)
-  | "-i" :: f :: rest -> parse port (Some f) host user command rest
-  | "-o" :: _ :: rest -> parse port id_file host user command rest
-  | "-L" :: _ :: rest -> parse port id_file host user command rest
-  | "-R" :: _ :: rest -> parse port id_file host user command rest
-  | "-D" :: _ :: rest -> parse port id_file host user command rest
+     | Some p -> parse (Some p) id_file host user command dd rest
+     | None -> parse port id_file host user command dd rest)
+  | "-i" :: f :: rest when not dd -> parse port (Some f) host user command dd rest
+  | "-o" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-L" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-R" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-D" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  (* POSIX end-of-options: remaining are host + command *)
+  | "--" :: rest -> parse port id_file host user command true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse port id_file host user command rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse port id_file host user command dd rest
     else (
       match host with
       | None ->
@@ -2270,14 +2272,14 @@ let rec parse port id_file host user command = function
           | [ u; h ] -> (Some u, h)
           | _ -> (None, arg)
         in
-        parse port id_file (Some h) u command rest
+        parse port id_file (Some h) u command dd rest
       | Some _ ->
         (* Remaining positional tokens are the remote command *)
         let cmd = String.concat " " (arg :: rest) in
         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh
           { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port; identity_file = id_file })))
 in
-parse None None None None None args|}
+parse None None None None None false args|}
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"
@@ -2331,6 +2333,16 @@ let rec parse recursive port src dest = function
       | _ -> ()
     done;
     parse !r' port src dest rest
+  (* POSIX end-of-options: remaining are source, dest *)
+  | "--" :: rest ->
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ s; d ] ->
+       (match src, dest with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive; port }))
+        | _ -> None)
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive port src dest rest
@@ -2604,34 +2616,36 @@ parse false false [] args|}
     ; parse_body =
         Some
           {|
-let rec parse in_place ext_re suppress expr file = function
+let rec parse in_place ext_re suppress expr file dd = function
   | [] ->
     (match expr, file with
      | Some e, Some f ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place; extended_regex = ext_re; suppress_output = suppress }))
      | _ -> None)
-  | "-i" :: rest ->
+  | "-i" :: rest when not dd ->
     (* macOS sed -i '' takes an empty suffix; GNU sed -i has no suffix.
        Only skip the next token if it's an explicit empty string (macOS style).
        Non-empty non-flag tokens are the expression, not a suffix. *)
     (match rest with
-     | "" :: rest' -> parse true ext_re suppress expr file rest'   (* -i '' — macOS empty suffix *)
-     | _ -> parse true ext_re suppress expr file rest)              (* -i at end or GNU style *)
-  | "-e" :: e :: rest -> parse in_place ext_re suppress (Some e) file rest  (* explicit expression *)
-  | "-E" :: rest | "--regexp-extended" :: rest -> parse in_place true suppress expr file rest
-  | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest -> parse in_place ext_re true expr file rest
+     | "" :: rest' -> parse true ext_re suppress expr file dd rest'   (* -i '' — macOS empty suffix *)
+     | _ -> parse true ext_re suppress expr file dd rest)              (* -i at end or GNU style *)
+  | "-e" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
+  | "-E" :: rest | "--regexp-extended" :: rest when not dd -> parse in_place true suppress expr file dd rest
+  | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest when not dd -> parse in_place ext_re true expr file dd rest
+  (* POSIX end-of-options: remaining are expression, file *)
+  | "--" :: rest -> parse in_place ext_re suppress expr file true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse in_place ext_re suppress expr file rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse in_place ext_re suppress expr file dd rest
     else (
       match expr with
-      | None -> parse in_place ext_re suppress (Some arg) file rest
+      | None -> parse in_place ext_re suppress (Some arg) file dd rest
       | Some _ ->
         match file with
-        | None -> parse in_place ext_re suppress expr (Some arg) rest
+        | None -> parse in_place ext_re suppress expr (Some arg) dd rest
         | Some _ -> None)
 in
-parse false false false None None args|}
+parse false false false None None false args|}
     }
   ; { name = "Rsync"
     ; anon_pattern = "Rsync _"

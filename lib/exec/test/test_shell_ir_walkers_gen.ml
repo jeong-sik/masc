@@ -710,7 +710,28 @@ let test_posix_end_of_options () =
   in
   (match wget with
    | W (Wget { url = "https://example.com/file"; _ }) -> ()
-   | w -> Alcotest.failf "Wget --: expected url=https://example.com/file, got %a" pp w)
+   | w -> Alcotest.failf "Wget --: expected url=https://example.com/file, got %a" pp w);
+  (* Scp: -- -src/file -dest/file *)
+  let scp =
+    of_simple { (base "scp") with args = [ lit "-r"; lit "--"; lit "-src/file"; lit "-dest/file" ] }
+  in
+  (match scp with
+   | W (Scp { source = "-src/file"; dest = "-dest/file"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Scp --: expected source=-src/file dest=-dest/file recursive=true, got %a" pp w);
+  (* Ssh: -- -host echo hello *)
+  let ssh =
+    of_simple { (base "ssh") with args = [ lit "--"; lit "-host"; lit "echo"; lit "hello" ] }
+  in
+  (match ssh with
+   | W (Ssh { host = "-host"; command = Some "echo hello"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh --: expected host=-host command=echo hello, got %a" pp w);
+  (* Sed: -- s/a/b/ -file.txt *)
+  let sed =
+    of_simple { (base "sed") with args = [ lit "-n"; lit "--"; lit "s/a/b/"; lit "-file.txt" ] }
+  in
+  (match sed with
+   | W (Sed { expression = "s/a/b/"; file = "-file.txt"; suppress_output = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed --: expected expr=s/a/b/ file=-file.txt suppress=true, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)

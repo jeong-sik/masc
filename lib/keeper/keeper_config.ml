@@ -520,6 +520,8 @@ let keeper_tool_search_top_k () : int =
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
+  (* fire-and-forget: warm param cache, value not needed *)
+  (* fire-and-forget: warm param cache, value not needed *)
   ignore (Runtime_params.get keeper_unified_temperature_rp)
 
 let keeper_slot_pool_size_rp =

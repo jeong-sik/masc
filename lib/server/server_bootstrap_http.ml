@@ -253,6 +253,8 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
           try
             match Http_protocol_detect.detect flow with
             | Ok Http_protocol_detect.Http2 ->
+              (* fire-and-forget: atomic counter increment, return value unused *)
+              (* fire-and-forget: atomic counter increment, return value unused *)
               ignore (Atomic.fetch_and_add h2_count 1);
               H2_eio.Server.create_connection_handler
                 ~sw:conn_sw
@@ -260,7 +262,10 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
                 ~error_handler:h2_error_handler
                 client_addr
                 flow
+              (* fire-and-forget: atomic counter increment, return value unused *)
+              (* fire-and-forget: atomic counter increment, return value unused *)
             | Ok Http_protocol_detect.Http1 ->
+              (* fire-and-forget: atomic counter increment, return value unused *)
               ignore (Atomic.fetch_and_add h1_count 1);
               let conn_handler =
                 Httpun_eio.Server.create_connection_handler

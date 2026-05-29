@@ -787,6 +787,7 @@ let snapshot_json
     in
     let config = ctx.config in
     let initialized = Coord.is_initialized config in
+    (* TODO: suppress unused-tuple-binding warning *)
     ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
     let trace_id = trace_id "ops" in
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -857,6 +858,7 @@ let snapshot_json
             Eio.Fiber.all
               [ (fun () ->
                   (* Team sessions removed — always empty *)
+                  (* TODO: suppress unused-tuple-binding warning *)
                   ignore (lightweight_summary, status_cache);
                   sessions_ref := empty_section)
               ; (fun () ->

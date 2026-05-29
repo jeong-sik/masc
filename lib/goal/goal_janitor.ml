@@ -186,6 +186,8 @@ let run ?(config = default_config) (room_config : Coord.config) : sweep_result =
   (* Write updated goal state — use update_state so the file lock protects
      the read-modify-write cycle. Prevents truncation races (#17229). *)
   if partial.purged > 0 || partial.stagnated > 0 then
+    (* fire-and-forget: state update, best-effort *)
+    (* fire-and-forget: state update, best-effort *)
     ignore (Goal_store.update_state room_config (fun _state ->
       { goals = goals'; version = st.version + 1; updated_at = Masc_domain.now_iso () }));
   (* Prune active_goal_ids from all keeper metas *)

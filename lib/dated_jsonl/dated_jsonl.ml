@@ -311,6 +311,8 @@ let append_inner t json =
               (Atomic.get t.last_prune_day)
               (Some today))
        then begin
+         (* fire-and-forget: best-effort prune *)
+         (* fire-and-forget: best-effort prune *)
          ignore (prune_unlocked t ~days : int);
          Atomic.set t.last_prune_day (Some today)
        end);

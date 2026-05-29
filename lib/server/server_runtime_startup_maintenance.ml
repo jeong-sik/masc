@@ -38,7 +38,7 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
       ~prefer_room_flatten_conflicts =
     if not (Sys.file_exists old_dir) then ()
     else begin
-      (* ensure_dir returns the created path; fire-and-forget *)
+      (* fire-and-forget: ensure_dir return value unused *)
       ignore (Keeper_fs.ensure_dir new_dir);
       Array.iter (fun name ->
         let old_path = Filename.concat old_dir name in

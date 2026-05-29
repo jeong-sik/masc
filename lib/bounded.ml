@@ -100,6 +100,8 @@ module Usage_history = struct
         in
         Queue.add tokens_out q;
         while Queue.length q > max_samples_per_agent do
+          (* fire-and-forget: pop for side-effect, element discarded *)
+          (* fire-and-forget: pop for side-effect, element discarded *)
           ignore (Queue.pop q)
         done)
 

@@ -560,6 +560,8 @@ let normalize_profile ~handle profile =
 
 let ensure_personas_root root =
   try
+    (* fire-and-forget: best-effort directory creation *)
+    (* fire-and-forget: best-effort directory creation *)
     ignore (Keeper_fs.ensure_dir root);
     Ok ()
   with

@@ -329,6 +329,8 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               if Unix.gettimeofday () >= deadline then begin
                 timed_out := true;
                 kill_and_wait status_ref;
+                (* fire-and-forget: non-blocking read attempt *)
+                (* fire-and-forget: non-blocking read attempt *)
                 ignore (read_available () : [ `Eof | `Would_block ])
               end else begin
                 let remaining = max 0.0 (deadline -. Unix.gettimeofday ()) in

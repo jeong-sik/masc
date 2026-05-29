@@ -346,6 +346,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               | Ok trace_id_t ->
                   let base_dir = session_base_dir ctx.config in
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
+                  (* fire-and-forget: best-effort directory creation *)
+                  (* fire-and-forget: best-effort directory creation *)
                   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
                   let bundle_paths =
                     try

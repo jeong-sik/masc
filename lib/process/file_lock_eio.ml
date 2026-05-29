@@ -129,6 +129,8 @@ let get_entry path =
   entry
 
 let release_entry entry =
+  (* fire-and-forget: atomic counter increment, return value unused *)
+  (* fire-and-forget: atomic counter increment, return value unused *)
   ignore (Atomic.fetch_and_add entry.active (-1))
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f

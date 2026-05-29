@@ -79,6 +79,8 @@ let clear_dir_cache () : unit =
 let save_atomic (path : string) (content : string) : (unit, string) result =
   try
     let dir = Filename.dirname path in
+    (* fire-and-forget: best-effort directory creation *)
+    (* fire-and-forget: best-effort directory creation *)
     ignore (ensure_dir dir);
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()

@@ -158,6 +158,8 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
     | Error msg -> Error msg
   in
   try
+    (* fire-and-forget: best-effort directory creation *)
+    (* fire-and-forget: best-effort directory creation *)
     ignore (Keeper_fs.ensure_dir session_dir);
     match Fs_compat.get_fs_opt () with
     | Some fs when Eio_guard.is_ready () ->

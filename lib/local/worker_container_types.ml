@@ -298,6 +298,7 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
 let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
     (Masc_domain.tool_schema list, string) result =
+  (* TODO: suppress unused-tuple-binding warning *)
   ignore (_sw, auth_token, session_id);
   Agent_tool_surfaces.local_worker_tool_schemas ?names ()
 

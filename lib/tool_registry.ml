@@ -136,6 +136,8 @@ let record_call
    | Inline_dispatch -> Atomic.incr stats.inline_dispatch_count);
   if success then Atomic.incr stats.success_count else Atomic.incr stats.failure_count;
   Atomic.set stats.last_called_at (Time_compat.now ());
+  (* fire-and-forget: atomic counter increment, return value unused *)
+  (* fire-and-forget: atomic counter increment, return value unused *)
   ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms);
   match assignment_id with
   | Some _ as aid -> Atomic.set stats.last_assignment_id aid

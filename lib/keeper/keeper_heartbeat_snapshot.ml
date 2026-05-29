@@ -93,6 +93,8 @@ let write_heartbeat_snapshot
     resolution.effective_budget
   in
   let base_dir = session_base_dir ctx.config in
+  (* fire-and-forget: best-effort directory creation *)
+  (* fire-and-forget: best-effort directory creation *)
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)));
   let _session, ctx_opt =
     load_context_from_checkpoint

@@ -800,6 +800,8 @@ let refresh_once ~sw ~net
      Previously every branch was silent in steady state — a hung daemon was
      indistinguishable from a healthy one producing zero events (#8319). *)
   Log.Governance.routine "refresh_once: cycle start";
+  (* fire-and-forget: snapshot load, best-effort *)
+  (* fire-and-forget: snapshot load, best-effort *)
   ignore (latest_judgments base_path);
   let served_from_cache =
     let now_ts = Unix.gettimeofday () in
@@ -852,7 +854,10 @@ let refresh_once ~sw ~net
       Some
         (Env_config_oas_bridge.timeout_sec
            ~caller:Env_config_oas_bridge.Governance_judge ())
+    (* fire-and-forget: timing marker *)
+    (* fire-and-forget: timing marker *)
     in
+    (* fire-and-forget: timing marker *)
     ignore (mark_compute_start st);
     let compute_result =
       try compute_judgments ~masc_tools ~dispatch ~build_facts with

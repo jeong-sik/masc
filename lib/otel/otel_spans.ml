@@ -29,6 +29,8 @@ let init () =
     OT.Globals.service_name := Otel_config.service_name;
     (* ambient-context-eio storage is set automatically when the library is linked.
        Eio fiber-local context propagation works via Ambient_context_eio.storage. *)
+    (* fire-and-forget: return value intentionally discarded *)
+    (* fire-and-forget: return value intentionally discarded *)
     ignore (Ambient_context_eio.storage : Ambient_context.Storage.t)
   end
 

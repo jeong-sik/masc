@@ -513,6 +513,7 @@ let session_json ?actor ~session_id ~config ~sw
       projection.sessions
   in
   let worker_runs_json =
+    (* TODO: suppress unused-tuple-binding warning *)
     ignore (config, session_id);
     `Null
   in

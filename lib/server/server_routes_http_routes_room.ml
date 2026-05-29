@@ -58,6 +58,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
            in
            let projection_fields =
              (* Task_contract_gate removed *)
+             (* TODO: suppress unused-tuple-binding warning *)
              ignore (config, t);
              []
            in

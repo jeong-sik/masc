@@ -228,6 +228,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         deps.verify_operator_mcp_auth ~base_path request
   in
   let open Result.Syntax in
+  (* fire-and-forget: return value intentionally discarded *)
+  (* fire-and-forget: return value intentionally discarded *)
   ignore (
     let* () =
       match validate_mcp_session_profile ~profile session_id with
@@ -270,7 +272,10 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             ~protocol_version msg;
           Error ()
     in
+      (* fire-and-forget: return value intentionally discarded *)
+      (* fire-and-forget: return value intentionally discarded *)
     Ok (Http.Request.read_body_async reqd (fun body_str ->
+      (* fire-and-forget: return value intentionally discarded *)
       ignore (
       let* post_context =
         match

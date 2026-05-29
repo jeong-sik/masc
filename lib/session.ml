@@ -155,6 +155,8 @@ let process_msg config state msg =
           if should_send then begin
             let rec try_add st ev =
             if Eio.Stream.length st >= max_notification_queue then begin
+              (* fire-and-forget: best-effort drain, None is acceptable *)
+              (* fire-and-forget: best-effort drain, None is acceptable *)
               ignore (Eio.Stream.take_nonblocking st);
               try_add st ev
             end else
@@ -174,7 +176,10 @@ let process_msg config state msg =
       let count = ref 0 in
       AgentMap.iter (fun _name session ->
         let rec try_add st ev =
+            (* fire-and-forget: best-effort drain, None is acceptable *)
+            (* fire-and-forget: best-effort drain, None is acceptable *)
           if Eio.Stream.length st >= max_notification_queue then begin
+            (* fire-and-forget: best-effort drain, None is acceptable *)
             ignore (Eio.Stream.take_nonblocking st);
             try_add st ev
           end else

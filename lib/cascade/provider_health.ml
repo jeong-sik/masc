@@ -169,6 +169,8 @@ let transition_with_state provider ~success =
 ;;
 
 let transition provider ~success =
+  (* fire-and-forget: return value intentionally discarded *)
+  (* fire-and-forget: return value intentionally discarded *)
   ignore (transition_with_state provider ~success : health_state * health_state)
 ;;
 

@@ -34,6 +34,8 @@ let report_persistence_read_drop ~reason ~path ~detail =
     ~detail
 
 let ensure_dir_once ~base_dir =
+  (* fire-and-forget: best-effort directory creation *)
+  (* fire-and-forget: best-effort directory creation *)
   ignore (Keeper_fs.ensure_dir (chat_dir base_dir))
 
 let encode_line ~role ~content ~ts : string =

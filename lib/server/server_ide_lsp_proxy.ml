@@ -643,6 +643,8 @@ let add_routes ~sw ~clock router =
                       })
                   in
                   ignore ws_conn;
+                  (* fire-and-forget: await completion, result unused *)
+                  (* fire-and-forget: await completion, result unused *)
                   ignore (Eio.Promise.await done_promise)))
               |> function
               | Ok () -> ()

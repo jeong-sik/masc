@@ -66,6 +66,8 @@ let keeper_memory_bank_path config name =
 
 let keeper_progress_path config name =
   let d = Filename.concat (keeper_dir_ config) name in
+  (* fire-and-forget: best-effort directory creation *)
+  (* fire-and-forget: best-effort directory creation *)
   ignore (ensure_dir_ d);
   Filename.concat d "progress.md"
 

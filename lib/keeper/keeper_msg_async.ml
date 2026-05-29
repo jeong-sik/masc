@@ -354,6 +354,8 @@ type worker_result =
 let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
     ~keeper_name () : string =
   gc_stale ();
+  (* fire-and-forget: best-effort GC *)
+  (* fire-and-forget: best-effort GC *)
   ignore (gc_stale_disk ~base_path);
   let request_id = generate_request_id ~keeper_name in
   let entry =
@@ -407,7 +409,10 @@ let poll ?base_path request_id : entry option =
   | None ->
     (match base_path with
      | None -> None
+       (* fire-and-forget: best-effort GC *)
+       (* fire-and-forget: best-effort GC *)
      | Some base_path ->
+       (* fire-and-forget: best-effort GC *)
        ignore (gc_stale_disk ~base_path);
        (match load_record ~base_path ~request_id with
         | None -> None

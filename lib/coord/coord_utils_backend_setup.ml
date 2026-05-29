@@ -319,6 +319,8 @@ let create_backend cfg =
   in
   let fs_usable fs =
     try
+      (* fire-and-forget: filesystem probe, error acceptable *)
+      (* fire-and-forget: filesystem probe, error acceptable *)
       ignore (Eio.Path.kind ~follow:true fs);
       true
     with

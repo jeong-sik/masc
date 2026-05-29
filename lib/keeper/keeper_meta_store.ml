@@ -303,6 +303,8 @@ let write_meta ?(force = false) config (m : Keeper_meta_contract.keeper_meta) : 
 
 let is_version_conflict_error msg =
   try
+    (* fire-and-forget: regex match check only *)
+    (* fire-and-forget: regex match check only *)
     ignore (Re.exec version_conflict_re msg);
     true
   with

@@ -116,6 +116,8 @@ let bootstrap ~(config : Coord.config) : t =
   in
   (* Publish only if the slot is still empty — never overwrite a
      refresh-fiber publish with a bootstrap value. *)
+  (* fire-and-forget: CAS result unused, retry not needed *)
+  (* fire-and-forget: CAS result unused, retry not needed *)
   ignore (Atomic.compare_and_set slot None (Some t));
   t
 ;;

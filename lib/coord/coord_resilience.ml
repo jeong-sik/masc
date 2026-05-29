@@ -117,6 +117,8 @@ module ZeroZombie = struct
          if is_cancelled exn then raise exn;
          Log.Misc.error "sleep error: %s" (Printexc.to_string exn));
       (try
+         (* fire-and-forget: best-effort cleanup *)
+         (* fire-and-forget: best-effort cleanup *)
          ignore (cleanup ~cleanup_fn)
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          if is_cancelled exn then raise exn;

@@ -43,6 +43,8 @@ let auto_release_claimed_for_agent config ~agent_name ~exclude_task_id (backlog 
 (* fire-and-forget: broadcast auto-release for operator visibility *)
 let broadcast_auto_releases config ~agent_name ~claimed_task_id auto_released_ids =
   List.iter (fun released_id ->
+      (* fire-and-forget: broadcast, delivery not guaranteed *)
+      (* fire-and-forget: broadcast, delivery not guaranteed *)
       ignore (broadcast config ~from_agent:agent_name
         ~content:(Printf.sprintf "Auto-released %s (claimed, not started) to claim %s"
            released_id claimed_task_id));

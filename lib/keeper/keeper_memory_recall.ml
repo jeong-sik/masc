@@ -50,6 +50,8 @@ let read_file_tail_lines_result path ~max_bytes ~max_lines :
                  Int64.to_int (Int64.min (Int64.of_int chunk_size) available)
                in
                let start = Int64.sub !pos (Int64.of_int read_len) in
+               (* fire-and-forget: seek for positioning, error handled by caller *)
+               (* fire-and-forget: seek for positioning, error handled by caller *)
                ignore (Unix.LargeFile.lseek fd start Unix.SEEK_SET);
                let buf = Bytes.create read_len in
                let rec read_exact offset remaining =

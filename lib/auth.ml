@@ -247,6 +247,8 @@ let bare_alias_audit ~base_path ~canonical_names =
 let ensure_keeper_credential config ~agent_name
   : (string * agent_credential, masc_error) result
   =
+  (* fire-and-forget: token warm-up, not required for this path *)
+  (* fire-and-forget: token warm-up, not required for this path *)
   ignore (ensure_internal_keeper_token config);
   let existing = load_credential config agent_name in
   let create_fresh_keeper_token () =

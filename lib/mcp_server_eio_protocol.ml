@@ -512,6 +512,8 @@ let handle_dashboard_ack_eio id ?mcp_session_id params =
 ;;
 
 let handle_dashboard_ack_notification ?mcp_session_id params =
+  (* fire-and-forget: ack processing, failure logged upstream *)
+  (* fire-and-forget: ack processing, failure logged upstream *)
   ignore (handle_dashboard_ack_eio `Null ?mcp_session_id params);
   `Null
 ;;

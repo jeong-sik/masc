@@ -99,6 +99,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
           ~content:message
           ~mention
         in
+        (* TODO: suppress unused-tuple-binding warning *)
         ignore (config, agent_name);
         Audit_log.log_broadcast config ~agent_id:agent_name
           ~message_preview:message ();

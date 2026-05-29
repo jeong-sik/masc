@@ -400,6 +400,8 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let thread_id = "keeper:" ^ payload.name in
   let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
   let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+  (* fire-and-forget: best-effort send, client may disconnect *)
+  (* fire-and-forget: best-effort send, client may disconnect *)
   ignore (keeper_stream_send_raw writer mutex closed "retry: 1500\n\n");
   Eio.Fiber.fork ~sw (fun () ->
       ignore

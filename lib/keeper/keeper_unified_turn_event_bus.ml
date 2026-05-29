@@ -117,6 +117,8 @@ let unsubscribe t =
           t.keeper_name
           msg)
    | None -> ());
+  (* fire-and-forget: best-effort drain *)
+  (* fire-and-forget: best-effort drain *)
   ignore (drain ~site:"unsubscribe_final" t);
   match t.event_bus_sub, Keeper_event_bus.get () with
   | Some sub, Some bus -> Agent_sdk_metrics_bridge.unsubscribe bus sub

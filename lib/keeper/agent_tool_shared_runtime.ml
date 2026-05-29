@@ -120,6 +120,7 @@ let missing_file_error_json
       ~(fallback_dir : string)
       ~(error : string)
   =
+  (* TODO: suppress unused-tuple-binding warning *)
   ignore (config, fallback_dir);
   (* #10349: do NOT echo directory entries back to the LLM.  When keeper
      identity drifts, the resolved parent may belong to a sibling sandbox,
@@ -171,7 +172,10 @@ let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
   Keeper_alerting_path.effective_write_allowed_paths ~meta
 ;;
 
+  (* fire-and-forget: best-effort sandbox prep *)
+  (* fire-and-forget: best-effort sandbox prep *)
 let keeper_playground_root ~(config : Coord.config) ~(meta : keeper_meta) =
+  (* fire-and-forget: best-effort sandbox prep *)
   ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
   Keeper_sandbox.host_root_abs_of_meta ~config meta
 ;;

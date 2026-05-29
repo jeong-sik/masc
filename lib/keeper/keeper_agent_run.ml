@@ -445,6 +445,8 @@ let run_turn
       then Some (Keeper_runtime_resolved.admission_wait_timeout_sec ())
       else None
     in
+    (* fire-and-forget: best-effort sandbox prep *)
+    (* fire-and-forget: best-effort sandbox prep *)
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =

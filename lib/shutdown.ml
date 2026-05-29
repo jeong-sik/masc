@@ -194,6 +194,8 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
        Runs outside the Eio domain so it can terminate the process even when
        Eio is deadlocked or stuck.  Cancelled via done_flag on normal exit. *)
     let done_flag = Atomic.make false in
+    (* fire-and-forget: detached background thread *)
+    (* fire-and-forget: detached background thread *)
     ignore (Thread.create (fun () ->
       Unix.sleepf state.config.force_timeout_s;
       if not (Atomic.get done_flag) then begin

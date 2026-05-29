@@ -286,6 +286,8 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
   | Some result when Tool_result.is_success result -> (
       let body = Tool_result.message result in
       try
+        (* fire-and-forget: validation parse only, result discarded *)
+        (* fire-and-forget: validation parse only, result discarded *)
         ignore (Yojson.Safe.from_string body);
         respond_json_with_cors ~status:`OK request reqd body
       with

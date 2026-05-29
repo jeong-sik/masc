@@ -316,6 +316,8 @@ let handle_stream ~deps ~state request reqd =
               (try Eio.Time.sleep clock keepalive_interval_s
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> if is_cancelled exn then raise exn);
               if not !(info.stop) then
+                (* fire-and-forget: best-effort send, client may disconnect *)
+                (* fire-and-forget: best-effort send, client may disconnect *)
                 ignore (send_raw info ": keepalive\n\n");
               loop ()
             end

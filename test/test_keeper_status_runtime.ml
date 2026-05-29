@@ -596,7 +596,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
     runtime |> member "runtime_blocker_summary" |> to_string
   in
   check string "runtime blocker class"
-    "no_tool_capable_provider"
+    "cascade_exhausted_no_tool_capable"
     (runtime |> member "runtime_blocker_class" |> to_string);
   check bool "summary names required execution tool" true
     (has_substring surfaced_summary "tool_execute");
@@ -746,13 +746,13 @@ let test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload () =
       (KT.Cascade_exhausted KT.No_providers_available)
   in
   let no_tool_surface =
-    KSB.runtime_blocker_surface_of_typed_class ~summary KT.No_tool_capable_provider
+    KSB.runtime_blocker_surface_of_typed_class ~summary (KT.Cascade_exhausted KT.No_tool_capable)
   in
   check string "cascade summary stays opaque" summary cascade_surface.summary;
   check string "no-tool summary stays opaque" summary no_tool_surface.summary;
   check string "cascade class stays typed" "cascade_exhausted"
     cascade_surface.blocker_class;
-  check string "no-tool class stays typed" "no_tool_capable_provider"
+  check string "no-tool class stays typed" "cascade_exhausted_no_tool_capable"
     no_tool_surface.blocker_class
 ;;
 

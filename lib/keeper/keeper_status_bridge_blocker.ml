@@ -18,7 +18,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
     Some (Cascade_exhausted reason)
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
-  | Some (Keeper_turn_driver.No_tool_capable_provider _) -> Some No_tool_capable_provider
+  | Some (Keeper_turn_driver.No_tool_capable_provider _) -> Some (Cascade_exhausted No_tool_capable)
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
     Some Admission_queue_wait_timeout
@@ -94,8 +94,8 @@ let is_cascade_exhausted_blocker_class blocker_class =
     (blocker_class_to_string (Cascade_exhausted (Other_detail "")))
 ;;
 
-let is_no_tool_capable_provider_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string No_tool_capable_provider)
+let is_no_tool_capable_blocker_class blocker_class =
+  String.equal blocker_class "cascade_exhausted_no_tool_capable"
 ;;
 
 let is_completion_contract_blocker_class blocker_class =
@@ -146,10 +146,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       if summary = ""
       then
         "OAS Agent.run or the enclosing cascade-attempt watchdog hit its execution timeout; this is not a provider HTTP timeout."
-      else summary
-    | No_tool_capable_provider ->
-      if summary = ""
-      then "No configured provider can satisfy the required tool set before dispatch."
       else summary
     | Completion_contract_violation ->
       (* TEL-OK: string literal in blocker classification summary, not an action handler *)
@@ -276,7 +272,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            (Printf.sprintf
               "No tool-capable provider available (registry path): %s"
               detail)
-         No_tool_capable_provider)
+         (Cascade_exhausted No_tool_capable))
   | Keeper_registry.Provider_runtime_error { code; detail } ->
     Some
       { blocker_class = "provider_runtime_error"

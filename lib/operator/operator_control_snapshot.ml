@@ -1,4 +1,3 @@
-module U = Yojson.Safe.Util
 include Operator_pending_confirm
 include Operator_digest
 
@@ -17,9 +16,7 @@ let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity
 include Operator_control_snapshot_action_log
 
 let get_payload args =
-  match U.member "payload" args with
-  | `Assoc _ as payload -> payload
-  | _ -> `Assoc []
+  Json_util.get_object args "payload" |> Option.value ~default:(`Assoc [])
 ;;
 
 let merge_json_objects left right =

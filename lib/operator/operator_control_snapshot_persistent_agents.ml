@@ -18,7 +18,6 @@
     Both paths emit the same wire shape — `runtime_class="keeper"`
     plus the standard operator-dashboard keeper fields. *)
 
-module U = Yojson.Safe.Util
 include Operator_control_context_snapshot
 
 let persistent_agents_json ?keeper_names ?keeper_rows config =
@@ -101,9 +100,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
              let agent_status =
                match agent_json with
                | `Assoc _ ->
-                 (match agent_json |> U.member "status" with
-                  | `String status -> status
-                  | _ -> "unknown")
+                 Json_util.get_string agent_json "status" |> Option.value ~default:"unknown"
                | _ -> "unknown"
              in
              let context_snapshot = keeper_context_snapshot_of_meta config meta in

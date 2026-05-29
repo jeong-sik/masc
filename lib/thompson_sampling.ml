@@ -245,20 +245,19 @@ let stats_to_json (s : agent_stats) : Yojson.Safe.t =
   ]
 
 let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
-  let open Yojson.Safe.Util in
   try
-    let name = json |> member "name" |> to_string in
-    let alpha = json |> member "alpha" |> to_float in
-    let beta = json |> member "beta" |> to_float in
-    let selections = json |> member "selections" |> to_int in
-    let last_selected_at = json |> member "last_selected_at" |> to_float in
-    let total_votes_up = json |> member "total_votes_up" |> to_int in
-    let total_votes_down = json |> member "total_votes_down" |> to_int in
-    let posts_created = json |> member "posts_created" |> to_int_option |> Option.value ~default:0 in
-    let comments_created = json |> member "comments_created" |> to_int_option |> Option.value ~default:0 in
-    let skips = json |> member "skips" |> to_int_option |> Option.value ~default:0 in
-    let guard_penalties_total = json |> member "guard_penalties_total" |> to_int_option |> Option.value ~default:0 in
-    let updated_at = json |> member "updated_at" |> to_float in
+    let name = Json_util.get_string json "name" |> Option.value ~default:"" in
+    let alpha = Json_util.get_float json "alpha" |> Option.value ~default:0.0 in
+    let beta = Json_util.get_float json "beta" |> Option.value ~default:0.0 in
+    let selections = Json_util.get_int json "selections" |> Option.value ~default:0 in
+    let last_selected_at = Json_util.get_float json "last_selected_at" |> Option.value ~default:0.0 in
+    let total_votes_up = Json_util.get_int json "total_votes_up" |> Option.value ~default:0 in
+    let total_votes_down = Json_util.get_int json "total_votes_down" |> Option.value ~default:0 in
+    let posts_created = Json_util.get_int json "posts_created" |> Option.value ~default:0 in
+    let comments_created = Json_util.get_int json "comments_created" |> Option.value ~default:0 in
+    let skips = Json_util.get_int json "skips" |> Option.value ~default:0 in
+    let guard_penalties_total = Json_util.get_int json "guard_penalties_total" |> Option.value ~default:0 in
+    let updated_at = Json_util.get_float json "updated_at" |> Option.value ~default:0.0 in
     Some {
       name;
       alpha = Float.max min_prior alpha;

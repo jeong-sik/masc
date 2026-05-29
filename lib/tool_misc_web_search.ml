@@ -195,15 +195,17 @@ let parse_ddg_html payload =
   |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
 
 let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
-  let open Yojson.Safe.Util in
   let str_of item key =
     Safe_ops.protect ~default:None (fun () ->
-      Option.bind (member key item |> to_string_option) String_util.trim_nonempty)
+      Option.bind (Json_util.get_string item key) String_util.trim_nonempty)
   in
   Safe_ops.protect ~default:[] (fun () ->
     let root = Yojson.Safe.from_string payload in
     let items =
-      Safe_ops.protect ~default:[] (fun () -> results_path root |> to_list)
+      Safe_ops.protect ~default:[] (fun () ->
+        match results_path root with
+        | `List xs -> xs
+        | _ -> [])
     in
     items
     |> List.filter_map (fun item ->
@@ -215,27 +217,31 @@ let parse_json_search_results ~results_path ~title_field ~snippet_field payload 
 
 let parse_searxng_json payload =
   parse_json_search_results
-    ~results_path:Yojson.Safe.Util.(member "results")
+    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_brave_json payload =
   parse_json_search_results
-    ~results_path:(fun j -> Yojson.Safe.Util.(member "web" j |> member "results"))
+    ~results_path:(fun j ->
+      let web = Json_util.assoc_member_opt "web" j |> Option.value ~default:`Null in
+      Json_util.assoc_member_opt "results" web |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"description" payload
 
 let parse_tavily_json payload =
   parse_json_search_results
-    ~results_path:Yojson.Safe.Util.(member "results")
+    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_exa_json payload =
   parse_json_search_results
-    ~results_path:Yojson.Safe.Util.(member "results")
+    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"text" payload
 
 let parse_bing_search_json payload =
   parse_json_search_results
-    ~results_path:(fun j -> Yojson.Safe.Util.(member "webPages" j |> member "value"))
+    ~results_path:(fun j ->
+      let web = Json_util.assoc_member_opt "webPages" j |> Option.value ~default:`Null in
+      Json_util.assoc_member_opt "value" web |> Option.value ~default:`Null)
     ~title_field:"name" ~snippet_field:"snippet" payload
 
 let looks_like_rss_payload payload =

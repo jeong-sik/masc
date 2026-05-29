@@ -521,9 +521,8 @@ let tool_timeout_sec_opt = Mcp_server_eio_tool_timeout.tool_timeout_sec_opt
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
-  let module U = Yojson.Safe.Util in
-  let requested_name = params |> U.member "name" |> U.to_string in
-  let arguments = params |> U.member "arguments" in
+  let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
+  let arguments = Yojson.Safe.Util.member "arguments" params in
   let identity =
     Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
@@ -535,7 +534,6 @@ let resolve_managed_agent_call ?mcp_session_id params =
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
     ?auth_token ?(internal_keeper_runtime = false) state id params =
-  let module U = Yojson.Safe.Util in
   let make_response = Mcp_transport_protocol.make_response in
   let (name, arguments) =
     match profile with
@@ -547,7 +545,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
     | Full | Operator_remote ->
-        (params |> U.member "name" |> U.to_string, params |> U.member "arguments")
+        (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
   in
   let is_read_only =
     Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
@@ -885,10 +883,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("summary", `String message);
       ("status", `String status);
       ("tool", `String name);
-      ("required_follow_up",
-       (match required_follow_up with
-        | None -> `Null
-        | Some value -> `String value));
+      ("required_follow_up", Json_util.string_opt_to_json required_follow_up);
       ("trace_id", `String trace_id);
       ("quality", quality);
     ]

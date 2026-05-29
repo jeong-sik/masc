@@ -698,12 +698,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ; "effective_agent", Json_util.string_opt_to_json effective_agent
     ; "effective_role", Json_util.string_opt_to_json effective_role
     ; ( "auth_error_code"
-      , match auth_error with
-        | Some err ->
-          (match dashboard_auth_error_code err with
-           | Some code -> `String code
-           | None -> `Null)
-        | None -> `Null )
+      , Json_util.string_opt_to_json (Option.bind auth_error dashboard_auth_error_code) )
     ; ( "auth_error_detail"
       , match auth_error with
         | Some err -> `String (Masc_domain.masc_error_to_string err)

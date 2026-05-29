@@ -231,10 +231,7 @@ let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
   `Assoc
     [ "kind", `String m.kind
     ; "horizon", `String m.horizon
-    ; ( "source"
-      , match m.source with
-        | Some source -> `String source
-        | None -> `Null )
+    ; ( "source", Json_util.string_opt_to_json m.source )
     ; "text", `String m.text
     ; "priority", `Int m.priority
     ; "generation", `Int m.generation
@@ -554,9 +551,7 @@ let keeper_context_status_json
            ; "recovery_source", `String recovery_source
            ; "memory_tier_summary", `Assoc memory_tier_summary
            ; ( "memory_tier_error_class"
-             , match memory_tier_error_class with
-               | Some label -> `String label
-               | None -> `Null )
+             , Json_util.string_opt_to_json memory_tier_error_class )
            ]))
 ;;
 

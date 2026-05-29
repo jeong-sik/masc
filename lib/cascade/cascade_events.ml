@@ -134,11 +134,7 @@ let publish_keeper_lifecycle
     the structured fields directly. Topic: [masc.keeper.dead]. *)
 let publish_keeper_dead
     ~keeper_name ~reason ~restart_count ~last_failure_reason () =
-  let last_failure_json =
-    match last_failure_reason with
-    | Some s -> `String s
-    | None -> `Null
-  in
+  let last_failure_json = Json_util.string_opt_to_json last_failure_reason in
   let payload = `Assoc [
     ("keeper_name", `String keeper_name);
     ("reason", `String reason);
@@ -161,10 +157,7 @@ let publish_keeper_dead
     summary, severity, payload}]. *)
 let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
     ?payload () =
-  let target_json = match target with
-    | Some t -> `String t
-    | None -> `Null
-  in
+  let target_json = Json_util.string_opt_to_json target in
   let payload_json = match payload with
     | Some p -> p
     | None -> `Null

@@ -423,10 +423,12 @@ let post_keeper_alert_slack_dm
              | Error e -> Alert_failed (Some ("dm_open_failed: " ^ e))
              | Ok () ->
                  let channel_id =
-                   let open Yojson.Safe.Util in
-                   match open_json |> member "channel" |> member "id" with
-                   | `String s when String.trim s <> "" -> Some s
-                   | _ -> None
+                   match Json_util.assoc_member_opt "channel" open_json with
+                   | Some channel_json -> (
+                       match Json_util.assoc_member_opt "id" channel_json with
+                       | Some (`String s) when String.trim s <> "" -> Some s
+                       | _ -> None)
+                   | None -> None
                  in
                  (match channel_id with
                   | None -> Alert_failed (Some "dm_open_failed: missing_channel_id")

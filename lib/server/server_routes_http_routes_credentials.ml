@@ -38,10 +38,7 @@ let credential_json (c : Repo_manager_types.credential) : Yojson.Safe.t =
       ("ssh_key_path", Json_util.string_opt_to_json c.ssh_key_path);
       ("gpg_key_id", Json_util.string_opt_to_json c.gpg_key_id);
       ("state", credential_state_json c.state);
-      ( "token_sha256_prefix",
-        match c.token_sha256_prefix with
-        | Some s -> `String s
-        | None -> `Null );
+      ( "token_sha256_prefix", Json_util.string_opt_to_json c.token_sha256_prefix );
     ]
 
 let credential_of_json (json : Yojson.Safe.t) :

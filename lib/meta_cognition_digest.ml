@@ -57,14 +57,8 @@ let latest_digest_json ?summary () =
           ("post_id", `String digest.post_id);
           ("title", `String digest.title);
           ("created_at", `String digest.created_at);
-          ( "updated_at",
-            match digest.updated_at with
-            | Some value -> `String value
-            | None -> `Null );
-          ( "hearth",
-            match digest.hearth with
-            | Some value -> `String value
-            | None -> `Null );
+          ( "updated_at", Json_util.string_opt_to_json digest.updated_at );
+          ( "hearth", Json_util.string_opt_to_json digest.hearth );
           ("digest_key", `String digest.digest_key);
           ("matches_summary", `Bool digest.matches_summary);
           ("provenance", `String "board");

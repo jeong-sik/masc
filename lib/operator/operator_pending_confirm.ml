@@ -1,5 +1,3 @@
-module U = Yojson.Safe.Util
-
 type 'a context = {
   config : Coord.config;
   agent_name : string;
@@ -112,24 +110,24 @@ let pending_confirm_to_yojson (entry : pending_confirm) =
 
 let pending_confirm_of_yojson json =
   try
-    let token = json |> U.member "token" |> U.to_string in
+    let token = Json_util.get_string json "token" |> Option.value ~default:"" in
     let trace_id =
-      match json |> U.member "trace_id" |> U.to_string_option with
+      match Json_util.get_string json "trace_id" with
       | Some value -> value
       | None -> trace_id "opc"
     in
-    let actor = json |> U.member "actor" |> U.to_string in
-    let action_type = json |> U.member "action_type" |> U.to_string in
-    let target_type = json |> U.member "target_type" |> U.to_string in
-    let target_id = json |> U.member "target_id" |> U.to_string_option in
+    let actor = Json_util.get_string json "actor" |> Option.value ~default:"" in
+    let action_type = Json_util.get_string json "action_type" |> Option.value ~default:"" in
+    let target_type = Json_util.get_string json "target_type" |> Option.value ~default:"" in
+    let target_id = Json_util.get_string json "target_id" in
     let payload =
-      match json |> U.member "payload" with
-      | `Assoc _ as payload -> payload
-      | _ -> `Assoc []
+      match Json_util.get_object json "payload" with
+      | Some payload -> payload
+      | None -> `Assoc []
     in
-    let delegated_tool = json |> U.member "delegated_tool" |> U.to_string in
-    let created_at = json |> U.member "created_at" |> U.to_string in
-    let expires_at = json |> U.member "expires_at" |> U.to_string_option in
+    let delegated_tool = Json_util.get_string json "delegated_tool" |> Option.value ~default:"" in
+    let created_at = Json_util.get_string json "created_at" |> Option.value ~default:"" in
+    let expires_at = Json_util.get_string json "expires_at" in
     Ok
       {
         token;
@@ -143,7 +141,7 @@ let pending_confirm_of_yojson json =
         created_at;
         expires_at;
       }
-  with U.Type_error (msg, _) | Failure msg -> Error msg
+  with Failure msg -> Error msg
 
 let raw_pending_confirms config : pending_confirm list =
   match Coord_utils.read_json_opt config (pending_confirms_path config) with

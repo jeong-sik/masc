@@ -13,8 +13,8 @@
 
 open Dashboard_goals_types_accessor
 
-let to_string_option = function | `String s -> Some s | _ -> None
-let to_int_option = function | `Int n -> Some n | `Intlit s -> (try Some (int_of_string s) with _ -> None) | _ -> None
+let json_to_string_opt = function | `String s -> Some s | _ -> None
+let json_to_int_opt = function | `Int n -> Some n | `Intlit s -> (try Some (int_of_string s) with _ -> None) | _ -> None
 
 let goal_status_color = function
   | Goal_store.Active -> "#4ade80"
@@ -59,15 +59,7 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
       ("status", `String status);
       ("status_color", `String (task_status_color status));
       ("priority", `Int task.priority);
-      ("goal_id", Json_util.string_opt_to_json task.goal_id);
-      ("assignee",
-       match task_assignee task with
-       | Some assignee -> `String assignee
-       | None -> `Null);
-      ("goal_id",
-       match task.goal_id with
-       | Some goal_id -> `String goal_id
-       | None -> `Null);
+      ("assignee", Json_util.string_opt_to_json (task_assignee task));
       ("linkage_source", `String linkage_source);
       ("is_terminal", `Bool (task_is_terminal task));
       ("created_at", `String task.created_at);
@@ -181,30 +173,13 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
       ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
       ("cascade_name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
       ( "approval_profile",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_approval_profile receipt with
-             | Some profile -> `String profile
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_approval_profile) );
       ( "cascade_outcome",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_cascade_outcome receipt with
-             | Some outcome -> `String outcome
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_cascade_outcome) );
       ( "latest_execution_outcome",
-        match latest_execution_outcome with
-        | Some outcome -> `String outcome
-        | None -> `Null );
+        Json_util.string_opt_to_json latest_execution_outcome );
       ( "latest_execution_at",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_ended_at receipt with
-             | Some ended_at -> `String ended_at
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_ended_at) );
       ( "latest_receipt",
         match latest_receipt with
         | Some receipt -> receipt
@@ -251,11 +226,11 @@ let goal_event_timeline_json event =
            any producer, so a non-zero appearance is an unambiguous
            producer-side fix signal. *)
         let phase =
-          payload_field "phase" |> to_string_option
+          payload_field "phase" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.phase>"
         in
         let actor =
-          payload_field "actor" |> json_member_or_null "id" |> to_string_option
+          payload_field "actor" |> json_member_or_null "id" |> json_to_string_opt
         in
         ( "Goal Phase",
           (match actor with
@@ -268,12 +243,12 @@ let goal_event_timeline_json event =
     | "goal_verification_opened" ->
         let request = payload_field "request" in
         let request_id =
-          request |> json_member_or_null "id" |> to_string_option
+          request |> json_member_or_null "id" |> json_to_string_opt
           |> Option.value ~default:"request"
         in
         let required =
           request |> json_member_or_null "policy_snapshot"
-          |> json_member_or_null "required_verdicts" |> to_int_option
+          |> json_member_or_null "required_verdicts" |> json_to_int_opt
         in
         ( "Goal Verification Opened",
           (match required with
@@ -283,12 +258,12 @@ let goal_event_timeline_json event =
     | "goal_vote" ->
         let vote = payload_field "vote" in
         let decision =
-          vote |> json_member_or_null "decision" |> to_string_option
+          vote |> json_member_or_null "decision" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.vote.decision>"
         in
         let principal =
           vote |> json_member_or_null "principal" |> json_member_or_null "id"
-          |> to_string_option
+          |> json_to_string_opt
           |> Option.value ~default:"principal"
         in
         ( "Goal Vote",
@@ -296,7 +271,7 @@ let goal_event_timeline_json event =
           if String.equal decision "reject" then "bad" else "ok" )
     | "goal_verification_resolved" ->
         let status =
-          payload_field "status" |> to_string_option
+          payload_field "status" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.status>"
         in
         ( "Goal Verification Resolved",
@@ -306,7 +281,7 @@ let goal_event_timeline_json event =
           | "rejected" -> "bad"
           | _ -> "warn") )
     | "goal_approval_opened" ->
-        let request_id = payload_field "request_id" |> to_string_option in
+        let request_id = payload_field "request_id" |> json_to_string_opt in
         ( "Goal Approval Opened",
           (match request_id with
           | Some id -> Printf.sprintf "request %s is awaiting operator approval" id
@@ -314,7 +289,7 @@ let goal_event_timeline_json event =
           "warn" )
     | "goal_approval_resolved" ->
         let decision =
-          payload_field "decision" |> to_string_option
+          payload_field "decision" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.decision>"
         in
         ( "Goal Approval Resolved",

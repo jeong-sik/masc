@@ -25,8 +25,6 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-module U = Yojson.Safe.Util
-
 type tool_result = Tool_result.result
 
 (* RFC-0189: typed [Tool_result.result] helpers, scoped to this module.
@@ -81,31 +79,6 @@ type context = {
   config: Coord.config;
   agent_name: string;
 }
-
-(* ================================================================ *)
-(* Local helpers (duplicated from tool_misc to avoid circular deps) *)
-(* ================================================================ *)
-
-let bool_arg_opt args key =
-  match U.member key args with
-  | `Bool value -> Some value
-  | _ -> None
-
-let int_arg_opt args key =
-  match U.member key args with
-  | `Int value -> Some value
-  (* [`Intlit raw] only appears for integers too large for the native
-     [int] domain (63-bit on 64-bit platforms).  The previous
-     implementation collapsed parse failure to [Some 0], which silently
-     corrupted overflow into a defined "zero" value — a Workaround
-     Rejection Bar §2 violation (unknown → permissive default).  By
-     composing [int_of_string_opt] into [Option.t] directly, an
-     overflow surfaces as [None], the same shape callers already
-     handle for "field missing" — no silent zero.  Small [`Intlit]
-     payloads (rare; values just above [max_int] depending on
-     platform) round-trip cleanly. *)
-  | `Intlit raw -> Stdlib.int_of_string_opt raw
-  | _ -> None
 
 (* ================================================================ *)
 (* JSON builders                                                    *)
@@ -244,17 +217,17 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args : tool_result =
   match section with
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
-      if not ((=) (U.member "default_role" args) `Null) then
+      if Option.is_some (Json_util.get_string args "default_role") then
         error_workflow ~tool_name ~start_time "default_role is no longer supported"
       else
       let require_token =
-        match bool_arg_opt args "require_token" with
+        match Json_util.get_bool args "require_token" with
         | Some value -> value
         | None -> current.require_token
       in
-      let enabled_opt = bool_arg_opt args "enabled" in
+      let enabled_opt = Json_util.get_bool args "enabled" in
       let expiry_hours =
-        match int_arg_opt args "token_expiry_hours" with
+        match Json_util.get_int args "token_expiry_hours" with
         | Some value when value > 0 -> Ok value
         | Some _ -> Error "token_expiry_hours must be > 0"
         | None -> Ok current.token_expiry_hours

@@ -693,7 +693,7 @@ let handle_get_metrics state p =
   let json = `List
     (List.sort
        (fun a b ->
-         let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
+         let get_calls j = Json_util.get_int j "calls" |> Option.value ~default:0 in
          Int.compare (get_calls b) (get_calls a))
        entries)
   in

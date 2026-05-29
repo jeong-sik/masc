@@ -51,7 +51,11 @@ let compact_runtime_trust_cache_key
 ;;
 
 let project_compact_runtime_trust runtime_trust =
-  let member key = Yojson.Safe.Util.member key runtime_trust in
+  let member key =
+    match Json_util.assoc_member_opt key runtime_trust with
+    | Some v -> v
+    | None -> `Null
+  in
   `Assoc
     [ "disposition", member "disposition"
     ; "disposition_reason", member "disposition_reason"

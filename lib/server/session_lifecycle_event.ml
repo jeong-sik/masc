@@ -90,21 +90,25 @@ let close_reason_to_yojson = function
 
 let close_reason_of_yojson (j : Yojson.Safe.t) :
     (close_reason, string) result =
-  let open Yojson.Safe.Util in
   try
-    match j |> member "kind" |> to_string with
+    let get_string_exn key json =
+      match Json_util.get_string json key with
+      | Some s -> s
+      | None -> raise (Yojson.Safe.Util.Type_error (Printf.sprintf "missing or non-string field: %s" key, json))
+    in
+    match get_string_exn "kind" j with
     | "client_disconnected" -> Ok Client_disconnected
     | "server_shutdown" -> Ok Server_shutdown
     | "server_error" ->
-        let detail = j |> member "detail" |> to_string in
+        let detail = get_string_exn "detail" j in
         Ok (Server_error detail)
     | "evicted" -> (
-        let r = j |> member "evict_reason" |> to_string in
+        let r = get_string_exn "evict_reason" j in
         match evict_reason_of_string r with
         | Some er -> Ok (Evicted er)
         | None -> Error (Printf.sprintf "unknown evict_reason: %s" r))
     | other -> Error (Printf.sprintf "unknown close_reason kind: %s" other)
-  with Type_error (msg, _) -> Error msg
+  with Yojson.Safe.Util.Type_error (msg, _) -> Error msg
 
 let to_yojson = function
   | Open { transport ; session_id ; origin } ->
@@ -129,10 +133,7 @@ let to_yojson = function
           ("kind", `String "resume") ;
           ("transport", `String (transport_to_string transport)) ;
           ("session_id", `String session_id) ;
-          ( "last_event_id",
-            match last_event_id with
-            | Some id -> `String id
-            | None -> `Null ) ;
+          ( "last_event_id", Json_util.string_opt_to_json last_event_id ) ;
           ("replayed", `Int replayed) ;
         ]
   | Evict { transport ; session_id ; reason } ->
@@ -153,20 +154,19 @@ let to_yojson = function
         ]
 
 let of_yojson (j : Yojson.Safe.t) : (t, string) result =
-  let open Yojson.Safe.Util in
   try
-    let kind = j |> member "kind" |> to_string in
+    let kind = (match Json_util.assoc_member_opt "kind" j with Some (`String s) -> s | _ -> "") in
     let transport_field name =
-      let s = j |> member name |> to_string in
+      let s = (match Json_util.assoc_member_opt name j with Some (`String s) -> s | _ -> "") in
       match transport_of_string s with
       | Some t -> Ok t
       | None -> Error (Printf.sprintf "unknown transport: %s" s)
     in
-    let session_id () = j |> member "session_id" |> to_string in
+    let session_id () = (match Json_util.assoc_member_opt "session_id" j with Some (`String s) -> s | _ -> "") in
     match kind with
     | "open" ->
         Result.bind (transport_field "transport") (fun transport ->
-            let origin = j |> member "origin" |> to_string in
+            let origin = (match Json_util.assoc_member_opt "origin" j with Some (`String s) -> s | _ -> "") in
             Ok (Open { transport ; session_id = session_id () ; origin }))
     | "upgrade" ->
         Result.bind (transport_field "transport_from") (fun transport_from ->
@@ -177,18 +177,18 @@ let of_yojson (j : Yojson.Safe.t) : (t, string) result =
     | "resume" ->
         Result.bind (transport_field "transport") (fun transport ->
             let last_event_id =
-              match j |> member "last_event_id" with
-              | `Null -> None
-              | `String s -> Some s
-              | _ -> None
+              match Json_util.assoc_member_opt "last_event_id" j with
+              | None | Some `Null -> None
+              | Some (`String s) -> Some s
+              | Some _ -> None
             in
-            let replayed = j |> member "replayed" |> to_int in
+            let replayed = (match Json_util.assoc_member_opt "replayed" j with Some (`Int n) -> n | _ -> 0) in
             Ok
               (Resume
                  { transport ; session_id = session_id () ; last_event_id ; replayed }))
     | "evict" ->
         Result.bind (transport_field "transport") (fun transport ->
-            let reason_str = j |> member "reason" |> to_string in
+            let reason_str = (match Json_util.assoc_member_opt "reason" j with Some (`String s) -> s | _ -> "") in
             match evict_reason_of_string reason_str with
             | Some reason ->
                 Ok (Evict { transport ; session_id = session_id () ; reason })
@@ -197,11 +197,11 @@ let of_yojson (j : Yojson.Safe.t) : (t, string) result =
     | "close" ->
         Result.bind (transport_field "transport") (fun transport ->
             Result.bind
-              (close_reason_of_yojson (j |> member "reason"))
+              (close_reason_of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "reason" j)))
               (fun reason ->
                 Ok (Close { transport ; session_id = session_id () ; reason })))
     | other -> Error (Printf.sprintf "unknown event kind: %s" other)
-  with Type_error (msg, _) -> Error msg
+  with Yojson.Safe.Util.Type_error (msg, _) -> Error msg
 
 let pp fmt t = Format.pp_print_string fmt (Yojson.Safe.to_string (to_yojson t))
 

@@ -63,7 +63,10 @@ type log_entry = {
 
 let ( let* ) = Result.bind
 
-let member key json = Yojson.Safe.Util.member key json
+let member key json =
+  match Json_util.assoc_member_opt key json with
+  | Some v -> v
+  | None -> `Null
 
 let optional_string json key =
   match member key json with

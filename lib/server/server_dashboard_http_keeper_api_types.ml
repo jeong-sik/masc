@@ -233,13 +233,13 @@ let rec runtime_trace_public_json = function
       value
 
 let tool_call_output_text_opt json =
-  match Yojson.Safe.Util.member "output" json with
-  | `String value -> Some value
-  | `Assoc _ as output -> (
+  match Json_util.assoc_member_opt "output" json with
+  | Some (`String value) -> Some value
+  | Some (`Assoc _ as output) -> (
     match Json_util.assoc_member_opt "_blob" output with
     | Some blob -> Json_util.get_string blob "preview"
     | None -> None)
-  | _ -> None
+  | None | Some _ -> None
 
 let parse_tool_output_json_opt json =
   match tool_call_output_text_opt json with

@@ -130,18 +130,9 @@ let flush_trace st entry =
       ; "batch_index", `Int entry.batch_index
       ; "batch_size", `Int entry.batch_size
       ; "concurrency_class", `String entry.concurrency_class
-      ; ( "output"
-        , match entry.output with
-          | Some s -> `String s
-          | None -> `Null )
-      ; ( "error"
-        , match entry.error with
-          | Some s -> `String s
-          | None -> `Null )
-      ; ( "duration_ms"
-        , match entry.duration_ms with
-          | Some d -> `Int d
-          | None -> `Null )
+      ; ( "output", Json_util.string_opt_to_json entry.output )
+      ; ( "error", Json_util.string_opt_to_json entry.error )
+      ; ( "duration_ms", Json_util.int_opt_to_json entry.duration_ms )
       ]
   in
   Proof_store.append_tool_trace st.store ~run_id:st.run_id ~trace_id json
@@ -305,10 +296,7 @@ let collect_evidence_refs st =
                   [ "turn", `Int s.turn
                   ; "input_tokens", `Int s.input_tokens
                   ; "output_tokens", `Int s.output_tokens
-                  ; ( "cost_usd"
-                    , match s.cost_usd with
-                      | Some c -> `Float c
-                      | None -> `Null )
+                  ; ( "cost_usd", Json_util.float_opt_to_json s.cost_usd )
                   ])
              snapshots)
       in

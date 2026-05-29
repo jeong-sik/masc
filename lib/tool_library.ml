@@ -218,8 +218,8 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 
 let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
   let include_candidates =
-    match Yojson.Safe.Util.member "include_candidates" args with
-    | `Bool b -> b
+    match Json_util.assoc_member_opt "include_candidates" args with
+    | Some (`Bool b) -> b
     | _ -> false
   in
   let docs = list_documents ~include_candidates () in
@@ -245,7 +245,7 @@ let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
 
 (* Read document *)
 let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
-  let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
+  let topic = Json_util.get_string args "topic"
     |> Option.value ~default:"" in
   if String.equal topic "" then topic_required ~tool_name ~start_time
   else begin
@@ -274,13 +274,11 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
 
 (* Add document *)
 let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
-  let module U = Yojson.Safe.Util in
-  let title = U.member "title" args |> U.to_string_option |> Option.value ~default:"" in
-  let source = U.member "source" args |> U.to_string_option |> Option.value ~default:"direct_experience" in
-  let confidence = U.member "confidence" args |> U.to_float_option |> Option.value ~default:0.7 in
-  let tags = try U.member "tags" args |> U.to_list |> List.filter_map U.to_string_option
-    with Yojson.Safe.Util.Type_error (_, _) -> [] in
-  let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
+  let title = Json_util.get_string args "title" |> Option.value ~default:"" in
+  let source = Json_util.get_string args "source" |> Option.value ~default:"direct_experience" in
+  let confidence = Json_util.get_float args "confidence" |> Option.value ~default:0.7 in
+  let tags = Json_util.get_string_list args "tags" in
+  let content = Json_util.get_string args "content" |> Option.value ~default:"" in
 
   if String.equal title "" then missing_required ~tool_name ~start_time "title"
   else if String.equal content "" then missing_required ~tool_name ~start_time "content"
@@ -344,9 +342,9 @@ verified_by: []
 
 (* Promote candidate to library *)
 let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
-  let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
+  let topic = Json_util.get_string args "topic"
     |> Option.value ~default:"" in
-  let new_confidence = Yojson.Safe.Util.(member "confidence" args |> to_float_option)
+  let new_confidence = Json_util.get_float args "confidence"
     |> Option.value ~default:0.7 in
 
   if String.equal topic "" then topic_required ~tool_name ~start_time
@@ -392,7 +390,7 @@ let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
 
 (* Search documents *)
 let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
-  let query = Yojson.Safe.Util.(member "query" args |> to_string_option)
+  let query = Json_util.get_string args "query"
     |> Option.value ~default:"" in
   if String.equal query "" then query_required ~tool_name ~start_time
   else begin

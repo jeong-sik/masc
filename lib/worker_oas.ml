@@ -275,16 +275,13 @@ let string_of_screening_value (value : Yojson.Safe.t) : string =
     Reads "command", "cmd", "content", "action"/"args", or "path" keys.
     Shared pattern with keeper_hooks_oas.ml extract_command_from_input. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
-  let open Yojson.Safe.Util in
   let string_member key =
-    match input |> member key with
-    | `String s -> s
-    | _ -> ""
+    Json_util.get_string input key |> Option.value ~default:""
   in
   let member_to_string key =
-    match input |> member key with
-    | `Null -> ""
-    | value -> string_of_screening_value value
+    match Json_util.assoc_member_opt key input with
+    | None | Some `Null -> ""
+    | Some value -> string_of_screening_value value
   in
   try
     let command = string_member "command" in

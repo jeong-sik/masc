@@ -38,18 +38,13 @@ let load_governance (config : Coord.config) : governance_config =
   let path = governance_path config in
   if Coord_utils.path_exists config path then
     let json = Coord_utils.read_json config path in
-    let module U = Yojson.Safe.Util in
     let level = Json_util.get_string json "level" |> Option.value ~default:"development" in
     let defaults = governance_defaults level in
     let audit_enabled =
-      match json |> U.member "audit_enabled" with
-      | `Bool b -> b
-      | _ -> defaults.audit_enabled
+      Json_util.get_bool json "audit_enabled" |> Option.value ~default:defaults.audit_enabled
     in
     let anomaly_detection =
-      match json |> U.member "anomaly_detection" with
-      | `Bool b -> b
-      | _ -> defaults.anomaly_detection
+      Json_util.get_bool json "anomaly_detection" |> Option.value ~default:defaults.anomaly_detection
     in
     { level = String.lowercase_ascii level; audit_enabled; anomaly_detection }
   else

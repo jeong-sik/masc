@@ -97,21 +97,21 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
 ;;
 
 let string_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `String value -> Some value
+  match Json_util.assoc_member_opt name json with
+  | Some (`String value) -> Some value
   | _ -> None
 ;;
 
 let float_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
+  match Json_util.assoc_member_opt name json with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
   | _ -> None
 ;;
 
 let bool_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `Bool value -> Some value
+  match Json_util.assoc_member_opt name json with
+  | Some (`Bool value) -> Some value
   | _ -> None
 ;;
 

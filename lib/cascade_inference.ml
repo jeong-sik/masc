@@ -34,12 +34,12 @@ let of_oas (p : Cascade_config.inference_params) : t =
 let for_json ~(name : string) (json : Yojson.Safe.t) : t =
   let name = Keeper_cascade_profile.canonicalize name in
   let read_float key =
-    match Yojson.Safe.Util.member key json with
-    | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None
+    match Json_util.assoc_member_opt key json with
+    | Some (`Float f) -> Some f | Some (`Int i) -> Some (float_of_int i) | _ -> None
   in
   let read_int key =
-    match Yojson.Safe.Util.member key json with
-    | `Int i -> Some i | `Float f -> Some (int_of_float f) | _ -> None
+    match Json_util.assoc_member_opt key json with
+    | Some (`Int i) -> Some i | Some (`Float f) -> Some (int_of_float f) | _ -> None
   in
   let temperature =
     match read_float (Keeper_cascade_profile.temperature_key name) with

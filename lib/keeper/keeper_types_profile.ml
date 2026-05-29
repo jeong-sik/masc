@@ -166,7 +166,11 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
               ~label:"load_keeper_profile_defaults" ~path json
           then empty_keeper_profile_defaults
           else
-          let keeper_json = Yojson.Safe.Util.member "keeper" json in
+          let keeper_json =
+            match Json_util.assoc_member_opt "keeper" json with
+            | Some v -> v
+            | None -> `Null
+          in
           let per_provider_timeout_state, per_provider_timeout =
             per_provider_timeout_of_json_field
               ~source:(Printf.sprintf "persona profile %s" path)

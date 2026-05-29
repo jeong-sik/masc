@@ -587,16 +587,15 @@ let first_sentence desc =
 (** Extract enum values from a tool's input_schema.
     Returns a compact string like "op=pwd|ls|cat|rg|git_status" or "" if no enums found. *)
 let enum_hints_of_schema (schema : Yojson.Safe.t) : string =
-  let module U = Yojson.Safe.Util in
-  let properties = match U.member "properties" schema with
-  | `Assoc props -> props
+  let properties = match Json_util.get_object schema "properties" with
+  | Some (`Assoc props) -> props
   | _ -> []
   in
   let enums =
     properties
     |> List.filter_map (fun (name, field_schema) ->
-      match U.member "enum" field_schema with
-      | `List values ->
+      match Json_util.get_array field_schema "enum" with
+      | Some (`List values) ->
         let vals = List.filter_map (function
           | `String v -> Some v
           | _ -> None
@@ -610,9 +609,8 @@ let enum_hints_of_schema (schema : Yojson.Safe.t) : string =
 (** Extract required fields from a tool's input_schema.
     Returns a compact string like "required: path, content" or "" if no required fields. *)
 let required_hints_of_schema (schema : Yojson.Safe.t) : string =
-  let module U = Yojson.Safe.Util in
-  match U.member "required" schema with
-  | `List reqs ->
+  match Json_util.get_array schema "required" with
+  | Some (`List reqs) ->
     let names = List.filter_map (function
       | `String v -> Some v
       | _ -> None

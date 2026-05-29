@@ -311,10 +311,10 @@ let compute_directives
   then (
     try
       let json = Yojson.Safe.from_string (read_file_safe agent_file) in
-      match Yojson.Safe.Util.member "paused" json with
-      | `Bool true -> directives := "pause" :: !directives
-      | `Bool false
-      | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> ()
+      match Json_util.assoc_member_opt "paused" json with
+      | Some (`Bool true) -> directives := "pause" :: !directives
+      | Some (`Bool false)
+      | Some `Null | Some (`Int _) | Some (`Intlit _) | Some (`Float _) | Some (`String _) | Some (`Assoc _) | Some (`List _) | None -> ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

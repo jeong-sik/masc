@@ -61,8 +61,8 @@ let validate_schemas (schemas : Masc_domain.tool_schema list) =
           else errors
         in
         let errors =
-          match Yojson.Safe.Util.member "type" schema.input_schema with
-          | `String "object" -> errors
+          match Json_util.assoc_member_opt "type" schema.input_schema with
+          | Some (`String "object") -> errors
           | _ ->
               Printf.sprintf "Tool %s: input_schema.type is not 'object'"
                 schema.name

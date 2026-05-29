@@ -296,14 +296,8 @@ let dashboard_session_result session =
       ("protocol", `String "dashboard-ws.v1");
       ("session_id", `String session.id);
       ("authenticated", `Bool (dashboard_auth_is_authenticated auth));
-      ( "agent",
-        match dashboard_auth_agent auth with
-        | Some agent -> `String agent
-        | None -> `Null );
-      ( "route",
-        match session.dashboard_route with
-        | Some route -> `String route
-        | None -> `Null );
+      ( "agent", Json_util.string_opt_to_json (dashboard_auth_agent auth) );
+      ( "route", Json_util.string_opt_to_json session.dashboard_route );
       ("slices", `List slices);
       ("seq", `Int session.dashboard_seq);
     ]
@@ -389,10 +383,7 @@ let dashboard_snapshot session =
     [
       ("protocol", `String "dashboard-ws.v1");
       ("seq", `Int (next_dashboard_seq session));
-      ( "route",
-        match session.dashboard_route with
-        | Some route -> `String route
-        | None -> `Null );
+      ( "route", Json_util.string_opt_to_json session.dashboard_route );
       ("slices", `Assoc slices);
     ]
 

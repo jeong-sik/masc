@@ -1,4 +1,7 @@
-let json_member = Yojson.Safe.Util.member
+let json_member key json =
+  match Json_util.assoc_member_opt key json with
+  | Some v -> v
+  | None -> `Null
 let json_int_opt_member key json = Json_util.get_int json key
 let json_float_opt_member key json = Json_util.get_float json key
 let json_string_opt_member key json = Json_util.get_string_nonempty json key

@@ -394,17 +394,13 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                     match entry.last_failure_reason with
                     | Some r -> `String (Keeper_registry.failure_reason_to_string r)
                     | None -> `Null);
-                  ("dead_since",
-                    match entry.dead_since_ts with
-                    | Some ts -> `Float ts
-                    | None -> `Null);
+                  ("dead_since", Json_util.float_opt_to_json entry.dead_since_ts);
                   ("sp_events", `List shared_sp_events);
                   ("health_score", `Int health_score);
                   ("dead_eta_sec",
-                    match estimate_dead_eta_sec
-                      ~restart_count:entry.restart_count ~max_restarts with
-                    | Some eta -> `Float eta
-                    | None -> `Null);
+                    Json_util.float_opt_to_json
+                      (estimate_dead_eta_sec
+                        ~restart_count:entry.restart_count ~max_restarts));
                 ], List.length combined_log)
             | None ->
                 (`Assoc [
@@ -582,10 +578,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                    Keeper_status_runtime.pipeline_stage_of_phase entry.phase
                  | None -> "offline"));
               ("runtime_class", `String "keeper");
-              ("phase",
-                match phase with
-                | Some p -> `String p
-                | None -> `Null);
+              ("phase", Json_util.string_opt_to_json phase);
               ("conditions", conditions_json);
               ("outcomes", outcomes_json);
             ] @ runtime_blocker_fields @ attention_fields @ [
@@ -738,16 +731,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             ]
             @ Keeper_status_bridge.social_runtime_fields_json m
             @ [
-	              ("skill_primary",
-	                match last_skill_primary with
-	                | Some s -> `String s
-	                | None -> `Null);
+	              ("skill_primary", Json_util.string_opt_to_json last_skill_primary);
 	              ("skill_secondary",
 	                `List (List.map (fun s -> `String s) last_skill_secondary));
-	              ("skill_reason",
-	                match last_skill_reason with
-	                | Some s -> `String s
-	                | None -> `Null);
+	              ("skill_reason", Json_util.string_opt_to_json last_skill_reason);
               ("metrics_window", metrics_window_summary);
               ("metrics_24h_summary", metrics_24h_summary);
               ("memory_note_count",
@@ -766,18 +753,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                       | Some (`String _ as s) -> s
                       | _ -> `Null)
                  | _ -> `Null));
-              ("memory_recent_note",
-                match memory_recent_note with
-                | Some text -> `String text
-                | None -> `Null);
-              ("recent_input_preview",
-                match recent_preview_for_role "user" with
-                | Some text -> `String text
-                | None -> `Null);
-              ("recent_output_preview",
-                match recent_preview_for_role "assistant" with
-                | Some text -> `String text
-                | None -> `Null);
+              ("memory_recent_note", Json_util.string_opt_to_json memory_recent_note);
+              ("recent_input_preview", Json_util.string_opt_to_json (recent_preview_for_role "user"));
+              ("recent_output_preview", Json_util.string_opt_to_json (recent_preview_for_role "assistant"));
               ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));
               ("conversation_tail_count", `Int conversation_tail_count);
               ("conversation_raw_count", `Int conversation_raw_count);

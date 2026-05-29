@@ -52,8 +52,8 @@ let extract_board_post_id (message : string) =
           Yojson.Safe.from_string
             (String.sub message idx (String.length message - idx))
         in
-        match Yojson.Safe.Util.member "id" json with
-        | `String id when not (String.equal (String.trim id) "") -> Some id
+        match Json_util.assoc_member_opt "id" json with
+        | Some (`String id) when not (String.equal (String.trim id) "") -> Some id
         | _ -> None
       with
       | Invalid_argument _
@@ -270,10 +270,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             (`Assoc
               [
                 ("content", `String content);
-                ( "post_id",
-                  match post_id with
-                  | Some id -> `String id
-                  | None -> `Null );
+                ( "post_id", Json_util.string_opt_to_json post_id );
               ])
           ();
         (* Mention processing — mirror masc_broadcast pattern *)

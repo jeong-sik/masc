@@ -27,8 +27,8 @@ type edge_acc = {
 let entity_node_id (value : entity_ref) = value.kind ^ ":" ^ value.id
 
 let payload_string field json =
-  match Yojson.Safe.Util.member field json with
-  | `String value when String.trim value <> "" -> Some value
+  match Json_util.assoc_member_opt field json with
+  | Some (`String value) when String.trim value <> "" -> Some value
   | _ -> None
 
 let is_generic_status = function

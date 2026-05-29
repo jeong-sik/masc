@@ -140,12 +140,14 @@ let http_post_json_with_status ~timeout_sec ~url ~body_json =
         Error (Printf.sprintf "invalid json from %s: %s" url msg))
 
 let int_member json key =
-  let open Yojson.Safe.Util in
-  match member key json with
-  | `Int value -> Some value
-  | `Intlit value -> parse_int_opt value
-  | _ -> None
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> None
+  | Some (`Int value) -> Some value
+  | Some (`Intlit value) -> parse_int_opt value
+  | Some _ -> None
 
 let string_member json key =
-  let open Yojson.Safe.Util in
-  Option.bind (member key json |> to_string_option) String_util.trim_to_option
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> None
+  | Some (`String value) -> String_util.trim_to_option value
+  | Some _ -> None

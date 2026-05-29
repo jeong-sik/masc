@@ -157,7 +157,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `Null);
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-alpha");
+                ("koreanName", `String "local-alpha");
                 ("model", `String "runtime");
                 ("recent_output_preview", `String "manager synthesized runtime visibility and handed next checks to beta");
                 ("recent_event", `String "manager handoff");
@@ -179,7 +179,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-beta");
+                ("koreanName", `String "local-beta");
                 ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-a"));
                 ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
                 ("recent_event", `String "secondary runtime probe");
@@ -201,7 +201,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-002");
                 ("related_operation_id", `String "op-runtime-003");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-gamma");
+                ("koreanName", `String "local-gamma");
                 ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "idle");
@@ -263,7 +263,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `Null);
                 ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-a"));
                 ("emoji", `String "🤖");
-                ("korean_name", `String "dm-keeper");
+                ("koreanName", `String "dm-keeper");
                 ("recent_input_preview", `String "Player asked to continue the next scene without breaking continuity");
                 ("recent_output_preview", `String "Prepared the next scene transition and handoff summary");
                 ("recent_tool_names", `List [ `String "masc_keeper_status"; `String "masc_board_post" ]);
@@ -298,7 +298,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-delta");
+                ("koreanName", `String "local-delta");
                 ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "missing heartbeat");

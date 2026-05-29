@@ -389,8 +389,8 @@ let cached_playground_repo_entries playground_abs =
   try
     match Yojson.Safe.from_file cache_path with
     | `Assoc _ as json -> (
-        match Yojson.Safe.Util.member "repos" json with
-        | `List repos -> repos
+        match Json_util.assoc_member_opt "repos" json with
+        | Some (`List repos) -> repos
         | _ -> [])
     | _ -> []
   with

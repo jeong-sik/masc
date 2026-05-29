@@ -635,7 +635,6 @@ module FileSystem = struct
       None
     else
     try
-      let module U = Yojson.Safe.Util in
       let j = Yojson.Safe.from_string trimmed in
       let parse_float = function
         | `Float f -> Some f
@@ -644,14 +643,10 @@ module FileSystem = struct
         | `String s -> float_of_string_opt s
         | _ -> None
       in
-      let parse_string = function
-        | `String s -> Some s
-        | _ -> None
-      in
       match
-        (parse_string (U.member "owner" j),
-         parse_float (U.member "acquired_at" j),
-         parse_float (U.member "expires_at" j))
+        (Json_util.get_string j "owner",
+         parse_float (Yojson.Safe.Util.member "acquired_at" j),
+         parse_float (Yojson.Safe.Util.member "expires_at" j))
       with
       | Some owner, Some acquired_at, Some expires_at ->
           Some { owner; acquired_at; expires_at }

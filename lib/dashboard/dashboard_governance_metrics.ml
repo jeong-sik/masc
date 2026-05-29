@@ -212,9 +212,9 @@ let tool_rejections_json ?(top_n = 20)
 let approval_queue_json (summary : approval_summary) : Yojson.Safe.t =
   `Assoc [
     ("depth", `Int summary.depth);
-    ("p50_wait_sec", json_of_float_opt summary.p50_wait_sec);
-    ("p95_wait_sec", json_of_float_opt summary.p95_wait_sec);
-    ("oldest_pending_sec", json_of_float_opt summary.oldest_pending_sec);
+    ("p50_wait_sec", Json_util.float_opt_to_json summary.p50_wait_sec);
+    ("p95_wait_sec", Json_util.float_opt_to_json summary.p95_wait_sec);
+    ("oldest_pending_sec", Json_util.float_opt_to_json summary.oldest_pending_sec);
   ]
 
 (** Top-level endpoint payload. *)

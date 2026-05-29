@@ -53,14 +53,14 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
   maybe_sweep store;
   let scan_limit = max 0 (min limit 5200) in
   let json_string name json =
-    match Yojson.Safe.Util.member name json with
-    | `String value when not (String.equal (String.trim value) "") -> Some value
+    match Json_util.assoc_member_opt name json with
+    | Some (`String value) when not (String.equal (String.trim value) "") -> Some value
     | _ -> None
   in
   let json_float name json =
-    match Yojson.Safe.Util.member name json with
-    | `Float value -> Some value
-    | `Int value -> Some (Stdlib.Float.of_int value)
+    match Json_util.assoc_member_opt name json with
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (Stdlib.Float.of_int value)
     | _ -> None
   in
   let persisted_candidates =
@@ -85,8 +85,8 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
                in
                let hearth = json_string "hearth" json in
                let meta_json =
-                 match Yojson.Safe.Util.member "meta" json with
-                 | `Assoc _ as meta -> Some meta
+                 match Json_util.assoc_member_opt "meta" json with
+                 | Some (`Assoc _ as meta) -> Some meta
                  | _ -> None
                in
                let created_at =

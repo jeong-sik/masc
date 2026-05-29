@@ -580,7 +580,7 @@ let find_pending_id_in_map
 let sort_entries_by_requested_at entries =
   List.sort
     (fun left right ->
-       let ts_of_json json = Yojson.Safe.Util.(member "requested_at" json |> to_float) in
+       let ts_of_json json = (match Json_util.assoc_member_opt "requested_at" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0) in
        Float.compare (ts_of_json left) (ts_of_json right))
     entries
 ;;

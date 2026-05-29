@@ -317,15 +317,13 @@ let fetch_context_eio
 let metadata_string_opt (metadata : Yojson.Safe.t) key =
   match metadata with
   | `Assoc _ ->
-      metadata |> Yojson.Safe.Util.member key
-      |> Yojson.Safe.Util.to_string_option
+      Json_util.get_string metadata key
   | _ -> None
 
 let metadata_int_opt (metadata : Yojson.Safe.t) key =
   match metadata with
   | `Assoc _ ->
-      metadata |> Yojson.Safe.Util.member key
-      |> Yojson.Safe.Util.to_int_option
+      Json_util.get_int metadata key
   | _ -> None
 
 let grep_like_line_of_item (item : recall_item) =

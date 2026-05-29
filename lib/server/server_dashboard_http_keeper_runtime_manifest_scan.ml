@@ -121,22 +121,22 @@ let update_runtime_manifest_scan scan row =
   increment_event_count scan row.Keeper_runtime_manifest.event;
   (match
      let decision = row.Keeper_runtime_manifest.decision in
-     let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
+     let clock_refs = Json_util.assoc_member_opt "clock_refs" decision in
      match clock_refs with
-     | `Assoc _ ->
-       let event_id = Json_util.get_string clock_refs "event_id" in
-       let parent_event_id = Json_util.get_string clock_refs "parent_event_id" in
+     | Some (`Assoc _ as refs) ->
+       let event_id = Json_util.get_string refs "event_id" in
+       let parent_event_id = Json_util.get_string refs "parent_event_id" in
        (match event_id, parent_event_id with
         | Some eid, Some peid -> Some (peid, eid)
         | _ -> None)
-     | _ -> None
+     | None | Some _ -> None
    with
    | Some edge -> scan.dag_edges <- edge :: scan.dag_edges
    | None -> ());
   (match
-     Yojson.Safe.Util.member "payload_role" row.Keeper_runtime_manifest.decision
+     Json_util.assoc_member_opt "payload_role" row.Keeper_runtime_manifest.decision
    with
-   | `String role ->
+   | Some (`String role) ->
      let current =
        match Hashtbl.find_opt scan.payload_role_counts role with
        | Some value -> value
@@ -151,11 +151,11 @@ let update_runtime_manifest_scan scan row =
       |> Keeper_runtime_manifest.source_clock_to_string
     in
     let clock_refs =
-      Yojson.Safe.Util.member "clock_refs" row.Keeper_runtime_manifest.decision
+      Json_util.assoc_member_opt "clock_refs" row.Keeper_runtime_manifest.decision
     in
     match clock_refs with
-    | `Assoc _ ->
-      (match Json_util.get_string clock_refs "source_clock" with
+    | Some (`Assoc _ as refs) ->
+      (match Json_util.get_string refs "source_clock" with
        | Some clock -> (
          match Keeper_runtime_manifest.source_clock_of_string clock with
          | Some valid -> Keeper_runtime_manifest.source_clock_to_string valid
@@ -221,8 +221,8 @@ let update_runtime_manifest_scan scan row =
        scan.context_compacted_count
        + Option.value (Json_util.get_int decision "context_compacted_count")
            ~default:0;
-     (match Yojson.Safe.Util.member "last_compaction" decision with
-      | `Assoc _ as obj -> scan.last_compaction <- Some obj
+     (match Json_util.assoc_member_opt "last_compaction" decision with
+      | Some (`Assoc _ as obj) -> scan.last_compaction <- Some obj
       | _ -> ())
    | Keeper_runtime_manifest.Memory_injected ->
      scan.memory_injected_count <- scan.memory_injected_count + 1;

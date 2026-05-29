@@ -11,9 +11,6 @@
     - Non-blocking: work runs in an Eio fiber forked from the server switch
     - Rate-limited to prevent runaway mention loops
 *)
-
-open Yojson.Safe.Util
-
 type mode = Disabled | Model
 
 let get_mode () =
@@ -172,8 +169,16 @@ let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result
       (* Extract MCP tool text: result.content[0].text *)
       try
         let json = Yojson.Safe.from_string body_str in
-        match json |> member "result" |> member "content" |> to_list with
-        | item :: _ -> Ok (item |> member "text" |> to_string)
+        let content_list =
+          match Json_util.assoc_member_opt "result" json with
+          | Some result -> (
+              match Json_util.assoc_member_opt "content" result with
+              | Some (`List items) -> items
+              | _ -> [])
+          | None -> []
+        in
+        match content_list with
+        | item :: _ -> Ok ((match Json_util.assoc_member_opt "text" item with Some (`String s) -> s | _ -> ""))
         | [] -> Error "empty content list"
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

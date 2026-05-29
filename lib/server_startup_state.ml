@@ -341,14 +341,8 @@ let to_yojson () =
       ( "pending_lazy_tasks",
         `List (List.map (fun task -> `String task) current.pending_lazy_tasks)
       );
-      ( "last_error",
-        match current.last_error with
-        | Some error -> `String error
-        | None -> `Null );
-      ( "fallback_reason",
-        match current.fallback_reason with
-        | Some reason -> `String reason
-        | None -> `Null );
+      ( "last_error", Json_util.string_opt_to_json current.last_error );
+      ( "fallback_reason", Json_util.string_opt_to_json current.fallback_reason );
       ( "path_diagnostics",
         match current.path_diagnostics with
         | Some value -> value

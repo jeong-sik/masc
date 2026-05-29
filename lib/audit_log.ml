@@ -166,28 +166,33 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     Returns Error with reason on parse failure (never silently drops). *)
 let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
   try
-    let module U = Yojson.Safe.Util in
-    let timestamp = json |> U.member "timestamp" |> U.to_float in
-    let agent_id = json |> U.member "agent_id" |> U.to_string in
-    let action = json |> U.member "action" |> U.to_string |> string_to_action in
-    let room_id = json |> U.member "room_id" |> U.to_string_option in
+    let timestamp = Json_util.get_float json "timestamp" in
+    let agent_id = Json_util.get_string json "agent_id" in
+    let action_raw = Json_util.get_string json "action" in
+    let room_id = Json_util.get_string json "room_id" in
     let details =
       match Safe_ops.json_member_opt "details" json with
       | Some v -> v
       | None -> `Null
     in
     let outcome =
-      let o = json |> U.member "outcome" in
-      let status = o |> U.member "status" |> U.to_string in
-      if status = "success" then Success
-      else
-        let reason = Safe_ops.json_string ~default:"unknown" "reason" o in
-        Failure reason
+      match Json_util.get_object json "outcome" with
+      | Some o ->
+        let status = Json_util.get_string o "status" |> Option.value ~default:"" in
+        if status = "success" then Success
+        else
+          let reason = Safe_ops.json_string ~default:"unknown" "reason" o in
+          Failure reason
+      | None -> Failure "missing outcome"
     in
     let cost_estimate = Safe_ops.json_float_opt "cost_estimate" json in
     let token_count = Safe_ops.json_int_opt "token_count" json in
     let trace_id = Safe_ops.json_string_opt "trace_id" json in
-    Ok { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
+    match timestamp, agent_id, action_raw with
+    | Some timestamp, Some agent_id, Some action_raw ->
+      let action = string_to_action action_raw in
+      Ok { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
+    | _ -> Error "missing required fields (timestamp, agent_id, action)"
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (* Redact details field to prevent sensitive content leaking into logs *)
     let redacted = match json with

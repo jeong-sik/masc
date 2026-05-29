@@ -641,8 +641,8 @@ let runtime_diagnostics_json () =
   let count kind =
     List.fold_left
       (fun acc json ->
-         match Yojson.Safe.Util.member "kind" json with
-         | `String value when String.equal value kind -> acc + 1
+         match Json_util.assoc_member_opt "kind" json with
+         | Some (`String value) when String.equal value kind -> acc + 1
          | _ -> acc)
       0
       diagnostics

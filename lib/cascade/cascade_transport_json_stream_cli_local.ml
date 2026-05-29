@@ -133,18 +133,17 @@ let blocks_of_message_content json =
 ;;
 
 let tool_use_of_json json =
-  let open Yojson.Safe.Util in
   try
-    let fn = json |> member "function" in
+    let fn = json |> Json_util.assoc_member_opt "function" |> Option.value ~default:`Null in
     let id = Llm_provider.Cli_common_json.member_str "id" json in
     let name = Llm_provider.Cli_common_json.member_str "name" fn in
-    match fn |> member "arguments" |> to_string_option |> json_of_argument_string with
+    match Json_util.get_string fn "arguments" |> json_of_argument_string with
     | Ok args -> Ok (Some (Agent_sdk.Types.ToolUse { id; name; input = args }))
     | Error msg ->
       Error
         (Printf.sprintf "invalid CLI tool arguments JSON for tool %S: %s" name msg)
   with
-  | Type_error _ -> Ok None
+  | Yojson.Safe.Util.Type_error _ -> Ok None
 ;;
 
 let tool_uses_of_json calls =
@@ -160,15 +159,14 @@ let tool_uses_of_json calls =
 ;;
 
 let tool_result_of_json json =
-  let open Yojson.Safe.Util in
-  match json |> member "tool_call_id" |> to_string_option with
+  match Json_util.get_string json "tool_call_id" with
   | Some tool_use_id ->
-    let content_json = json |> member "content" in
+    let content_json = json |> Json_util.assoc_member_opt "content" in
     let content, parsed_json =
       match content_json with
-      | `String text -> text, Agent_sdk.Types.try_parse_json text
-      | `Null -> "", None
-      | other -> Yojson.Safe.to_string other, Some other
+      | Some (`String text) -> text, Agent_sdk.Types.try_parse_json text
+      | Some `Null | None -> "", None
+      | Some other -> Yojson.Safe.to_string other, Some other
     in
     Some
       (Agent_sdk.Types.ToolResult
@@ -181,15 +179,14 @@ let parse_json_line line =
 ;;
 
 let blocks_of_output_line line =
-  let open Yojson.Safe.Util in
   try
     let json = parse_json_line line in
-    match json |> member "role" |> to_string_option with
+    match Json_util.get_string json "role" with
     | Some "assistant" ->
-      let content = blocks_of_message_content (json |> member "content") in
+      let content = blocks_of_message_content (Json_util.assoc_member_opt "content" json |> Option.value ~default:`Null) in
       let tool_uses_result =
-        match json |> member "tool_calls" with
-        | `List calls -> tool_uses_of_json calls
+        match Json_util.assoc_member_opt "tool_calls" json with
+        | Some (`List calls) -> tool_uses_of_json calls
         | _ -> Ok []
       in
       Result.map (fun tool_uses -> content @ tool_uses) tool_uses_result
@@ -199,36 +196,34 @@ let blocks_of_output_line line =
        | None -> Ok [])
     | _ -> Ok []
   with
-  | Yojson.Json_error _ | Type_error _ -> Ok []
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Ok []
 ;;
 
 let response_id_of_lines lines =
-  let open Yojson.Safe.Util in
   let find_id line =
     try
       let json = parse_json_line line in
-      match json |> member "id" |> to_string_option with
+      match Json_util.get_string json "id" with
       | Some id when String.trim id <> "" -> Some id
       | _ ->
-        (match json |> member "session_id" |> to_string_option with
+        (match Json_util.get_string json "session_id" with
          | Some id when String.trim id <> "" -> Some id
          | _ -> None)
     with
-    | Yojson.Json_error _ | Type_error _ -> None
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
   in
   List.find_map find_id lines |> Option.value ~default:"cli-json-stream"
 ;;
 
 let response_model_of_lines ~model_id lines =
-  let open Yojson.Safe.Util in
   let find_model line =
     try
       let json = parse_json_line line in
-      match json |> member "model" |> to_string_option with
+      match Json_util.get_string json "model" with
       | Some model when String.trim model <> "" -> Some model
       | _ -> None
     with
-    | Yojson.Json_error _ | Type_error _ -> None
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
   in
   List.find_map find_model lines |> Option.value ~default:model_id
 ;;

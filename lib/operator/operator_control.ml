@@ -223,10 +223,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                 `Assoc
                   [
                     ("recovered", `Bool recovered);
-                    ( "skipped_reason",
-                      match skipped_reason with
-                      | Some reason -> `String reason
-                      | None -> `Null );
+                    ( "skipped_reason", Json_util.string_opt_to_json skipped_reason );
                     ("before", before_diagnostic);
                     ("after", after_diagnostic);
                     ("down", down_result);

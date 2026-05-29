@@ -129,10 +129,7 @@ let to_json reason =
     ; "source", `String reason.source
     ; "severity", `String (severity_to_string reason.severity)
     ; "summary", `String reason.summary
-    ; ( "next_action"
-      , match reason.next_action with
-        | Some action -> `String action
-        | None -> `Null )
+    ; ( "next_action", Json_util.string_opt_to_json reason.next_action )
     ]
 ;;
 

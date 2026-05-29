@@ -375,11 +375,10 @@ let post_eval
   let has_error =
     try
       let json = Yojson.Safe.from_string result in
-      let open Yojson.Safe.Util in
-      (match json |> member "error" with
-       | `Null -> false
-       | `String "" -> false
-       | `String _ -> true
+      (match Json_util.assoc_member_opt "error" json with
+       | Some `Null -> false
+       | Some (`String "") -> false
+       | Some (`String _) -> true
        | _ -> false)
     with Yojson.Json_error _ -> false
   in

@@ -106,8 +106,8 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
   let st = inspect_state ctx in
   let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
   let assertions =
-    match Yojson.Safe.Util.member "assertions" args with
-    | `List items ->
+    match Json_util.assoc_member_opt "assertions" args with
+    | Some (`List items) ->
       let parsed =
         List.filter_map
           (function
@@ -124,8 +124,8 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
   let all_passed =
     List.for_all
       (fun r ->
-         match Yojson.Safe.Util.member "passed" r with
-         | `Bool b -> b
+         match Json_util.assoc_member_opt "passed" r with
+         | Some (`Bool b) -> b
          | _ -> false)
       results
   in
@@ -136,13 +136,16 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
       let first_fail =
         List.find_opt
           (fun r ->
-             match Yojson.Safe.Util.member "passed" r with
-             | `Bool false -> true
+             match Json_util.assoc_member_opt "passed" r with
+             | Some (`Bool false) -> true
              | _ -> false)
           results
       in
       match first_fail with
-      | Some r -> Yojson.Safe.Util.member "fix_hint" r
+      | Some r ->
+        (match Json_util.assoc_member_opt "fix_hint" r with
+         | Some v -> v
+         | None -> `Null)
       | None -> `Null)
   in
   let result =

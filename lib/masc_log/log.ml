@@ -384,9 +384,8 @@ module Ring = struct
      bad line at the file-fold boundary; the decoder itself never silently
      drops. *)
   let entry_of_json json =
-    let open Yojson.Safe.Util in
     let require_string field =
-      match member field json with
+      match Yojson.Safe.Util.member field json with
       | `String s -> s
       | `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
@@ -397,7 +396,7 @@ module Ring = struct
                   (Yojson.Safe.to_string other)))
     in
     let require_int field =
-      match member field json with
+      match Yojson.Safe.Util.member field json with
       | `Int i -> i
       | `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
@@ -423,7 +422,7 @@ module Ring = struct
         let module_name = require_string "module" in
         let message = require_string "message" in
         let keeper_name =
-          match member "keeper_name" json with
+          match Yojson.Safe.Util.member "keeper_name" json with
           | `String s -> Some s
           | `Null -> None
           | other ->
@@ -433,7 +432,7 @@ module Ring = struct
                       (Yojson.Safe.to_string other)))
         in
         let turn_id =
-          match member "turn_id" json with
+          match Yojson.Safe.Util.member "turn_id" json with
           | `Int i -> Some i
           | `Null -> None
           | other ->
@@ -445,7 +444,7 @@ module Ring = struct
         {
           seq; ts; level; source; module_name;
           keeper_name; turn_id; message;
-          details = member "details" json;
+          details = Yojson.Safe.Util.member "details" json;
         }
     | _ ->
         raise

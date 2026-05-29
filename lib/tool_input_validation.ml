@@ -38,8 +38,8 @@ let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
 ;;
 
 let required_names schema =
-  match Yojson.Safe.Util.member "required" schema with
-  | `List items ->
+  match Json_util.assoc_member_opt "required" schema with
+  | Some (`List items) ->
     List.filter_map
       (function
         | `String name -> Some name
@@ -49,15 +49,15 @@ let required_names schema =
 ;;
 
 let has_enum schema =
-  match Yojson.Safe.Util.member "enum" schema with
-  | `List (_ :: _) -> true
+  match Json_util.assoc_member_opt "enum" schema with
+  | Some (`List (_ :: _)) -> true
   | _ -> false
 ;;
 
 let optional_enum_fields schema =
   let required = required_names schema in
-  match Yojson.Safe.Util.member "properties" schema with
-  | `Assoc props ->
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc props) ->
     List.filter_map
       (fun (name, prop_schema) ->
          if (not (List.mem name required)) && has_enum prop_schema
@@ -102,14 +102,14 @@ let schema_has_properties = function
 ;;
 
 let property_names schema =
-  match Yojson.Safe.Util.member "properties" schema with
-  | `Assoc props -> List.map fst props
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc props) -> List.map fst props
   | _ -> []
 ;;
 
 let forbids_additional_properties schema =
-  match Yojson.Safe.Util.member "additionalProperties" schema with
-  | `Bool false -> true
+  match Json_util.assoc_member_opt "additionalProperties" schema with
+  | Some (`Bool false) -> true
   | _ -> false
 ;;
 
@@ -148,8 +148,8 @@ type one_of_branch = {
 }
 
 let one_of_branch_constraints schema =
-  match Yojson.Safe.Util.member "oneOf" schema with
-  | `List branches ->
+  match Json_util.assoc_member_opt "oneOf" schema with
+  | Some (`List branches) ->
     let constraints =
       List.filter_map
         (fun branch ->
@@ -158,8 +158,8 @@ let one_of_branch_constraints schema =
            then None
            else
              let consts =
-               match Yojson.Safe.Util.member "properties" branch with
-               | `Assoc props ->
+               match Json_util.assoc_member_opt "properties" branch with
+               | Some (`Assoc props) ->
                  List.filter_map
                    (fun (name, prop_schema) ->
                       match prop_schema with
@@ -172,8 +172,8 @@ let one_of_branch_constraints schema =
                | _ -> []
              in
              let forbidden_required =
-               match Yojson.Safe.Util.member "not" branch with
-               | `Assoc _ as not_schema -> required_names not_schema
+               match Json_util.assoc_member_opt "not" branch with
+               | Some (`Assoc _ as not_schema) -> required_names not_schema
                | _ -> []
              in
              Some { required; consts; forbidden_required })

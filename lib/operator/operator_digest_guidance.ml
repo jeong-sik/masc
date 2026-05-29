@@ -52,15 +52,18 @@ let active_guidance_fields ~config ~actor ~target_type ~target_id
   in
   match fresh_operator_judgment config ~target_type ~target_id with
   | Some judgment_json ->
+      let recommended_action_opt =
+        Json_util.get_object judgment_json "recommended_action"
+      in
       let judgment_actions =
-        match judgment_json |> U.member "recommended_action" with
-        | `Assoc _ as value -> `List [ value ]
-        | _ -> fallback_recommendation_json
+        match recommended_action_opt with
+        | Some value -> `List [ value ]
+        | None -> fallback_recommendation_json
       in
       let recommendation_source =
-        match judgment_json |> U.member "recommended_action" with
-        | `Assoc _ -> "judgment"
-        | _ -> "fallback"
+        match recommended_action_opt with
+        | Some _ -> "judgment"
+        | None -> "fallback"
       in
       [
         ("judgment_owner", `String "operator_keeper");

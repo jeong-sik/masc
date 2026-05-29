@@ -183,8 +183,8 @@ let persona_summary_of_profile_json name profile_path json =
     let role = Safe_ops.json_string_opt "role" json in
     let trait = Safe_ops.json_string_opt "trait" json in
     let has_keeper_defaults =
-      match Yojson.Safe.Util.member "keeper" json with
-      | `Assoc _ -> true
+      match Json_util.assoc_member_opt "keeper" json with
+      | Some (`Assoc _) -> true
       | _ -> false
     in
     Some { persona_name = name; display_name; role; trait; profile_path; has_keeper_defaults })

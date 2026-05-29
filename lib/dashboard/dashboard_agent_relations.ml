@@ -55,8 +55,8 @@ let json ~agent_name () : Yojson.Safe.t =
     match Graphql_client.query ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~query:collaborators_query ~variables () with
     | Ok data ->
       (match Json_util.assoc_member_opt "agentCollaborationNetworkByName" data with
-       | Some items -> Yojson.Safe.Util.to_list items
-       | None -> [])
+       | Some (`List items) -> items
+       | _ -> [])
       |> List.map (fun edge ->
         let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key edge) in
         `Assoc [
@@ -79,8 +79,8 @@ let json ~agent_name () : Yojson.Safe.t =
     | Some agent ->
       Safe_ops.protect ~default:[] (fun () ->
         match Json_util.assoc_member_opt "interests" agent with
-        | Some items -> Yojson.Safe.Util.to_list items
-        | None -> [])
+        | Some (`List items) -> items
+        | _ -> [])
     | None -> []
   in
   let relations = match agent_data with
@@ -88,8 +88,8 @@ let json ~agent_name () : Yojson.Safe.t =
       Safe_ops.protect ~default:[] (fun () ->
         let edges = match Json_util.assoc_member_opt "relations" agent with
           | Some rel -> (match Json_util.assoc_member_opt "edges" rel with
-            | Some e -> Yojson.Safe.Util.to_list e
-            | None -> [])
+            | Some (`List e) -> e
+            | _ -> [])
           | None -> []
         in
         edges |> List.map (fun edge ->
@@ -101,8 +101,8 @@ let json ~agent_name () : Yojson.Safe.t =
           let participants =
             let p_edges = match Json_util.assoc_member_opt "participants" node with
               | Some part -> (match Json_util.assoc_member_opt "edges" part with
-                | Some e -> Yojson.Safe.Util.to_list e
-                | None -> [])
+                | Some (`List e) -> e
+                | _ -> [])
               | None -> []
             in
             p_edges |> List.map (fun p ->

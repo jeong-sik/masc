@@ -163,7 +163,6 @@ let handle_keeper_list ctx args : tool_result =
               ]
           in
           let skill_route_json =
-            let open Yojson.Safe.Util in
             let fallback_selection_mode_string = "agent" in
             let fallback_selection_provenance = "fallback" in
             match last_skill_metrics with
@@ -171,12 +170,12 @@ let handle_keeper_list ctx args : tool_result =
             | Some metrics ->
                 let primary = Safe_ops.json_string_opt "skill_primary" metrics in
                 let secondary =
-                  match metrics |> member "skill_secondary" with
-                  | `List xs ->
+                  match Json_util.assoc_member_opt "skill_secondary" metrics with
+                  | Some (`List xs) ->
                       xs
                       |> List.filter_map (fun v ->
                            match v with `String s when String.trim s <> "" -> Some s | _ -> None)
-                  | _ -> []
+                  | None | Some _ -> []
                 in
                 let reason = Safe_ops.json_string_opt "skill_reason" metrics in
                 `Assoc [

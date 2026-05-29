@@ -7,8 +7,6 @@
     two concerns have separate lifecycles, so they live in separate
     files. *)
 
-module U = Yojson.Safe.Util
-
 type name_map = {
   guild_names : (string * string) list;
   channel_names : (string * string) list;
@@ -48,13 +46,11 @@ let read_json_file_opt path =
   | Sys_error _ | Yojson.Json_error _ -> None
 
 let string_member json key =
-  match json |> U.member key with
-  | `String s -> s
-  | _ -> ""
+  Json_util.get_string json key |> Option.value ~default:""
 
 let string_assoc_of_member key json =
-  match json |> U.member key with
-  | `Assoc items ->
+  match Json_util.get_object json key with
+  | Some (`Assoc items) ->
       List.filter_map (fun (k, v) ->
         match v with
         | `String s -> Some (k, s)

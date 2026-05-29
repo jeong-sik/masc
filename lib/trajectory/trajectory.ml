@@ -258,8 +258,7 @@ let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string
             |> List.fold_left (fun acc line ->
                 try
                   let json = Yojson.Safe.from_string line in
-                  let open Yojson.Safe.Util in
-                  let entry_turn = json |> member "turn" |> to_int in
+                  let entry_turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0) in
                   if entry_turn = turn then acc + 1 else acc
                 with _ -> acc
               ) 0
@@ -625,35 +624,34 @@ let gate_decision_of_json = function
 let tool_call_entry_of_json (json : Yojson.Safe.t) :
     (tool_call_entry * bool) option =
   try
-    let open Yojson.Safe.Util in
-    match member "type" json with
-    | `String "trajectory_summary" -> None
-    | `String "thinking" -> None
+    match Json_util.assoc_member_opt "type" json with
+    | Some (`String "trajectory_summary") -> None
+    | Some (`String "thinking") -> None
     | _ ->
         let gate_decision, parsed_gate =
-          gate_decision_of_json (member "gate" json)
+          gate_decision_of_json (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
         in
         Some
           ( {
-              ts = json |> member "ts" |> to_float;
-              ts_iso = json |> member "ts_iso" |> to_string;
-              turn = json |> member "turn" |> to_int;
-              round = json |> member "round" |> to_int;
-              tool_name = json |> member "tool_name" |> to_string;
-              args_json = json |> member "args" |> Yojson.Safe.to_string;
+              ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+              ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
+              turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
+              round = (match Json_util.assoc_member_opt "round" json with Some (`Int n) -> n | _ -> 0);
+              tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "");
+              args_json = Option.value ~default:`Null (Json_util.assoc_member_opt "args" json) |> Yojson.Safe.to_string;
               gate_decision;
               result =
-                (match json |> member "result" with
-                 | `Null -> None
-                 | `String s -> Some s
-                 | _ -> None);
-              duration_ms = json |> member "duration_ms" |> to_int;
+                (match Json_util.assoc_member_opt "result" json with
+                 | None | Some `Null -> None
+                 | Some (`String s) -> Some s
+                 | Some _ -> None);
+              duration_ms = (match Json_util.assoc_member_opt "duration_ms" json with Some (`Int n) -> n | _ -> 0);
               error =
-                (match json |> member "error" with
-                 | `Null -> None
-                 | `String s -> Some s
-                 | _ -> None);
-              cost_usd = json |> member "cost_usd" |> to_float;
+                (match Json_util.assoc_member_opt "error" json with
+                 | None | Some `Null -> None
+                 | Some (`String s) -> Some s
+                 | Some _ -> None);
+              cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
             },
             parsed_gate )
   with
@@ -739,17 +737,16 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     |> List.filter_map (fun line ->
         try
           let json = Yojson.Safe.from_string line in
-          let open Yojson.Safe.Util in
-          match json |> member "type" with
-          | `String "trajectory_summary" -> None
-          | `String "thinking" ->
+          match Json_util.assoc_member_opt "type" json with
+          | Some (`String "trajectory_summary") -> None
+          | Some (`String "thinking") ->
               Some (Thinking {
-                ts = json |> member "ts" |> to_float;
-                ts_iso = json |> member "ts_iso" |> to_string;
-                turn = json |> member "turn" |> to_int;
-                content = json |> member "content" |> to_string;
-                content_length = json |> member "content_length" |> to_int;
-                redacted = (match json |> member "redacted" with `Bool b -> b | _ -> false);
+                ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+                ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
+                turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
+                content = (match Json_util.assoc_member_opt "content" json with Some (`String s) -> s | _ -> "");
+                content_length = (match Json_util.assoc_member_opt "content_length" json with Some (`Int n) -> n | _ -> 0);
+                redacted = (match Json_util.assoc_member_opt "redacted" json with Some (`Bool b) -> b | _ -> false);
               })
           | _ ->
               (match tool_call_entry_of_json json with

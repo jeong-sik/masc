@@ -76,12 +76,12 @@ let handle_keeper_tools_post state req reqd =
                      Safe_ops.json_string_list "deny" args |> dedupe_tool_names
                    in
                    let tool_access_result =
-                     match Yojson.Safe.Util.member "tool_access" args with
-                     | `Assoc _ as access_json ->
+                     match Json_util.assoc_member_opt "tool_access" args with
+                     | Some (`Assoc _ as access_json) ->
                          Keeper_meta_contract.tool_access_of_meta_json
                            (`Assoc [ ("tool_access", access_json) ])
-                     | `Null -> Error "tool_access required"
-                     | _ -> Error "tool_access must be an object"
+                     | Some `Null -> Error "tool_access required"
+                     | None | Some _ -> Error "tool_access must be an object"
                    in
                    Result.map
                      (fun tool_access ->
@@ -239,10 +239,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
               ("keeper", `String name);
               ( "trace_id",
                 `String trace_id );
-              ( "turn_id",
-                match turn_id with
-                | Some value -> `Int value
-                | None -> `Null );
+              ( "turn_id", Json_util.int_opt_to_json turn_id );
               ("manifest_path", `String manifest_scan.path);
               ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
               ("manifest_total_rows", `Int manifest_scan.total_rows);
@@ -257,10 +254,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
                   manifest_scan );
               ("health", `String health);
-              ( "stale_reason",
-                match stale_reason with
-                | Some value -> `String value
-                | None -> `Null );
+              ( "stale_reason", Json_util.string_opt_to_json stale_reason );
               ( "linked_artifacts",
                 `Assoc
                   [
@@ -584,15 +578,15 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
     try
       let json = Yojson.Safe.from_string body_str in
       let names_list =
-        match Yojson.Safe.Util.member "names" json with
-        | `List items ->
+        match Json_util.assoc_member_opt "names" json with
+        | Some (`List items) ->
             List.filter_map
               (function
                 | `String s when is_valid_keeper_name s -> Some s
                 | _ -> None)
               items
             |> List.sort_uniq String.compare
-        | _ -> []
+        | None | Some _ -> []
       in
       let action_result =
         match Safe_ops.json_string_opt "action" json with
@@ -696,8 +690,8 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
       let ok_count =
         List.fold_left
           (fun acc r ->
-            match Yojson.Safe.Util.member "ok" r with
-            | `Bool true -> acc + 1
+            match Json_util.assoc_member_opt "ok" r with
+            | Some (`Bool true) -> acc + 1
             | _ -> acc)
           0 results
       in

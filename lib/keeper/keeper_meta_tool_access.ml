@@ -154,8 +154,8 @@ let json_member_present key (json : Yojson.Safe.t) =
 
 let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
   let label = Option.value ~default:field_name label in
-  match Yojson.Safe.Util.member field_name json with
-  | `List items ->
+  match Json_util.assoc_member_opt field_name json with
+  | Some (`List items) ->
     let rec collect acc index = function
       | [] -> Ok (List.rev acc)
       | `String value :: rest -> collect (value :: acc) (index + 1) rest
@@ -165,16 +165,16 @@ let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
              index (Json_util.kind_name bad))
     in
     collect [] 0 items
-  | `Null -> Error (Printf.sprintf "keeper %s must be an array of strings" label)
-  | other ->
+  | Some `Null | None -> Error (Printf.sprintf "keeper %s must be an array of strings" label)
+  | Some other ->
     Error
       (Printf.sprintf "keeper %s must be an array of strings (received %s)"
          label (Json_util.kind_name other))
 ;;
 
 let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
-  match Yojson.Safe.Util.member field_name json with
-  | `Null -> Ok []
+  match Json_util.assoc_member_opt field_name json with
+  | Some `Null -> Ok []
   | _ -> string_list_field_result ?label ~field_name json
 ;;
 
@@ -188,16 +188,16 @@ let default_tool_access_of_meta_json () =
 ;;
 
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
-  match Yojson.Safe.Util.member "tool_access" json with
-  | `Null -> Ok (default_tool_access_of_meta_json ())
-  | `Assoc _ as access_json ->
+  match Json_util.assoc_member_opt "tool_access" json with
+  | Some `Null -> Ok (default_tool_access_of_meta_json ())
+  | Some (`Assoc _ as access_json) ->
     let kind =
-      Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
+      Json_util.get_string access_json "kind"
     in
     (match kind with
      | Some "preset" ->
        let preset_raw =
-         Yojson.Safe.Util.member "preset" access_json |> Yojson.Safe.Util.to_string_option
+         Json_util.get_string access_json "preset"
        in
        (match preset_raw with
         | None -> Error "keeper tool_access.preset required"

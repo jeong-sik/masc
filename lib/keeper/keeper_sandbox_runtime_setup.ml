@@ -100,7 +100,7 @@ let docker_info_security_options_with_class ~timeout_sec =
       match Yojson.Safe.from_string (String.trim out) with
       | `List items ->
         Ok
-          (List.filter_map Yojson.Safe.Util.to_string_option items
+          (List.filter_map (function `String s -> Some s | _ -> None) items
            |> List.map String.lowercase_ascii)
       | `Null -> Ok []
       | _ ->

@@ -137,9 +137,9 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_social_model
       ; pk_cascade_name
       ; pk_cascade_ref =
-        (match json |> Yojson.Safe.Util.member "cascade_ref" with
-         | `Null | `Assoc [] -> None
-         | ref_json ->
+        (match Json_util.assoc_member_opt "cascade_ref" json with
+         | Some `Null | Some (`Assoc []) | None -> None
+         | Some ref_json ->
              (match Cascade_ref.cascade_ref_of_json ref_json with
               | Some ref -> Some ref
               | None -> Cascade_ref.cascade_ref_of_string pk_cascade_name))
@@ -206,7 +206,9 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       |> dedupe_keep_order
     in
     let pp_last_seen_seq_by_room =
-      Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
+      (match Json_util.assoc_member_opt "last_seen_seq_by_room" json with
+       | Some json -> room_seq_map_of_json json
+       | None -> room_seq_map_of_json `Null)
     in
     let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
@@ -465,10 +467,10 @@ let parse_keeper_state
   (* Canonical format: last_blocker is a structured object
      (blocker_info_to_json output) or `Null. *)
   let last_blocker =
-    let raw_field = Yojson.Safe.Util.member "last_blocker" json in
+    let raw_field = Json_util.assoc_member_opt "last_blocker" json in
     match raw_field with
-    | `Null -> None
-    | `Assoc _ -> blocker_info_of_json raw_field
+    | Some `Null -> None
+    | Some (`Assoc _ as json) -> blocker_info_of_json json
     | _ -> None
 	  in
 	  let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
@@ -666,8 +668,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
                    ; runtime = state.ps_runtime
                    ; oas_env =
-                       (match Yojson.Safe.Util.member "oas_env" json with
-                        | `Assoc fields ->
+                       (match Json_util.assoc_member_opt "oas_env" json with
+                        | Some (`Assoc fields) ->
                           List.filter_map
                             (function
                               | k, `String v -> Some (k, v)

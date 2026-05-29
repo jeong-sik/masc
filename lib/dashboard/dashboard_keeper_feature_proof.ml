@@ -423,9 +423,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         ( "meta_last_proactive_ts",
           if meta_last_ts > 0.0 then `Float meta_last_ts else `Null );
         ( "meta_last_proactive_outcome",
-          match meta_outcome with
-          | Some outcome -> `String outcome
-          | None -> `Null );
+          Json_util.string_opt_to_json meta_outcome );
         ("meta_evidence_within_window", `Bool meta_recent);
         ("decision_log", Decision.scheduled_evidence_json stat);
       ])

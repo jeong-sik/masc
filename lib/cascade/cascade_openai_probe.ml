@@ -61,13 +61,12 @@ let store_capacity ~url ~capacity ~now =
 (* ── JSON parser ────────────────────────────────────────────── *)
 
 let parse_response json =
-  let open Yojson.Safe.Util in
   match json with
   | `Assoc _ ->
-    (match member "object" json with
-     | `String "list" ->
-       (match member "data" json with
-        | `List items when List.length items > 0 ->
+    (match Json_util.assoc_member_opt "object" json with
+     | Some (`String "list") ->
+       (match Json_util.assoc_member_opt "data" json with
+        | Some (`List items) when List.length items > 0 ->
           Some
             { Cascade_throttle.total = 1
             ; process_active = 0

@@ -60,7 +60,6 @@ let execute_tool_eio
   =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for in-process identity continuity. *)
-  let module U = Yojson.Safe.Util in
   (* Defensive: refresh Eio global context for downstream helpers that still
      consult the ambient switch/clock during a request. Tests may leave a
      finished switch in the global slot between runs, so keep it aligned with

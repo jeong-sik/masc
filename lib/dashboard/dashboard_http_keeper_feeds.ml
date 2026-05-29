@@ -267,9 +267,7 @@ let keeper_decisions_json
           | value -> value
         in
         let terminal_reason_code =
-          match terminal_reason_code_of_decision_json json with
-          | Some value -> `String value
-          | None -> `Null
+          Json_util.string_opt_to_json (terminal_reason_code_of_decision_json json)
         in
         `Assoc
           [ "ts_unix", float_or_null "ts_unix"
@@ -418,13 +416,9 @@ let keeper_decisions_log_json
                       ; "decision_type", `String decision_type
                       ; "summary", `String summary
                       ; ( "terminal_reason_code"
-                        , match terminal_reason_code with
-                          | Some code -> `String code
-                          | None -> `Null )
+                        , Json_util.string_opt_to_json terminal_reason_code )
                       ; ( "duration_ms"
-                        , match duration_ms with
-                          | Some value -> `Float value
-                          | None -> `Null )
+                        , Json_util.float_opt_to_json duration_ms )
                       ; "evidence_refs", `List evidence_refs
                       ] )
               with

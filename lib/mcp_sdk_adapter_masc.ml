@@ -64,7 +64,7 @@ let make_context ?mcp_session_id () : Handler.context =
 
 let response_result = function
   | `Assoc fields -> List.assoc_opt "result" fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let response_error_message = function
   | `Assoc fields -> (
@@ -72,9 +72,9 @@ let response_error_message = function
       | Some (`Assoc err_fields) -> (
           match List.assoc_opt "message" err_fields with
           | Some (`String message) -> Some message
-          | _ -> None)
-      | _ -> None)
-  | _ -> None
+          | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let parse_list parser field_name = function
   | `Assoc fields -> (
@@ -93,11 +93,11 @@ let parse_list parser field_name = function
                "Field %S has wrong type: expected JSON array, got %s"
                field_name (Json_util.kind_name other))
       | None -> Error ("Missing " ^ field_name))
-  | other ->
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error
         (Printf.sprintf
            "Invalid response payload: expected JSON object, got %s"
-           (Json_util.kind_name other))
+           "non-object")
 
 let tool_result_of_response response =
   match response_result response with

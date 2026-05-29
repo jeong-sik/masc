@@ -10,7 +10,7 @@ let assoc_replace key value fields =
 let keeper_board_meta ~source meta =
   match meta with
   | `Assoc fields -> assoc_replace "source" (`String source) fields |> fun f -> `Assoc f
-  | _ -> `Assoc [ "source", `String source ]
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Assoc [ "source", `String source ]
 ;;
 
 let assoc_value_opt key = function
@@ -66,7 +66,7 @@ let ensure_keeper_board_post_args ~author ~source = function
        ; "meta", keeper_board_meta ~source raw_meta
        ]
        @ fields)
-  | other -> other
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as other -> other
 ;;
 
 let dispatchable_keeper_board_tool_name name =

@@ -51,7 +51,7 @@ let slice_default_events_to_limit json ~limit =
     let events_list =
       match List.assoc_opt "events" fields with
       | Some (`List xs) -> xs
-      | _ -> []
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
     in
     let len = List.length events_list in
     let sliced =
@@ -69,7 +69,7 @@ let slice_default_events_to_limit json ~limit =
       | (`Assoc last_fields) :: _ ->
         (match List.assoc_opt "seq" last_fields with
          | Some (`Int n) -> `Int n
-         | _ -> List.assoc_opt "next_after_seq" fields |> Option.value ~default:(`Int 0))
+         | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> List.assoc_opt "next_after_seq" fields |> Option.value ~default:(`Int 0))
       | _ ->
         List.assoc_opt "after_seq" fields |> Option.value ~default:(`Int 0)
     in
@@ -83,7 +83,7 @@ let slice_default_events_to_limit json ~limit =
         | _ -> (k, v)) fields
     in
     `Assoc replaced
-  | other -> other
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as other -> other
 
 let events_http_json ~deps ~state request =
 

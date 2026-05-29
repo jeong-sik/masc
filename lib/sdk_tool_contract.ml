@@ -139,28 +139,28 @@ let find_property properties key =
 
 let assoc_members = function
   | `Assoc pairs -> Some pairs
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let string_member name json =
   match Option.bind (assoc_members json) (fun pairs -> find_property pairs name) with
   | Some (`String value) -> Some value
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
 
 let int_member name json =
   match Option.bind (assoc_members json) (fun pairs -> find_property pairs name) with
   | Some (`Int value) -> Some value
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
 
 let required_names schema =
   match Option.bind (assoc_members schema) (fun pairs -> find_property pairs "required") with
   | Some (`List items) ->
-      List.filter_map (function `String value -> Some value | _ -> None) items
-  | _ -> []
+      List.filter_map (function `String value -> Some value | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None) items
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
 
 let property_map schema =
   match Option.bind (assoc_members schema) (fun pairs -> find_property pairs "properties") with
   | Some (`Assoc props) -> props
-  | _ -> []
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> []
 
 let schema_type schema =
   match string_member "type" schema with
@@ -200,7 +200,7 @@ let rec validate_json_value ?label schema value =
                         | Error _ as error -> error))
               in
               validate_props properties)
-      | other ->
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as other ->
           Error
             (Printf.sprintf "%s must be a JSON object (received %s)" label
                (Json_util.kind_name other)))
@@ -222,35 +222,35 @@ let rec validate_json_value ?label schema value =
                       | Error _ as error -> error)
                 in
                 validate_items items)
-      | other ->
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ as other ->
           Error
             (Printf.sprintf "%s must be a JSON array (received %s)" label
                (Json_util.kind_name other)))
   | "string" -> (
       match value with
       | `String _ -> Ok ()
-      | other ->
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ as other ->
           Error
             (Printf.sprintf "%s must be a string (received %s)" label
                (Json_util.kind_name other)))
   | "integer" -> (
       match value with
       | `Int _ -> Ok ()
-      | other ->
+      | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ as other ->
           Error
             (Printf.sprintf "%s must be an integer (received %s)" label
                (Json_util.kind_name other)))
   | "number" -> (
       match value with
       | `Int _ | `Float _ -> Ok ()
-      | other ->
+      | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ as other ->
           Error
             (Printf.sprintf "%s must be a number (received %s)" label
                (Json_util.kind_name other)))
   | "boolean" -> (
       match value with
       | `Bool _ -> Ok ()
-      | other ->
+      | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ as other ->
           Error
             (Printf.sprintf "%s must be a boolean (received %s)" label
                (Json_util.kind_name other)))
@@ -317,7 +317,7 @@ let build_operation_arguments ~agent_name binding json =
                     | None -> build acc rest))
           in
           build [] binding.arg_bindings
-      | other ->
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as other ->
           Error
             (Printf.sprintf "input must be a JSON object (received %s)"
                (Json_util.kind_name other)))

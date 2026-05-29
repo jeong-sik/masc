@@ -187,7 +187,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
 	                             |> List.filter_map (fun v ->
 	                                    match v with
 	                                    | `String s when String.trim s <> "" -> Some s
-	                                    | _ -> None)
+	                                    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None)
 	                         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 	                       in
 	                       let reason = Safe_ops.json_string_opt "skill_reason" j in
@@ -533,7 +533,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                       | `Assoc fields ->
                         (match List.assoc_opt "agent_name" fields with
                          | Some (`String n) -> n = m.name || n = m.agent_name
-                         | _ -> false)
+                         | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> false)
                       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
                     ) all_events in
                     `List (List.filteri (fun i _ -> i < 10) keeper_events)
@@ -847,7 +847,7 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
                      ("active_goal_ids", Option.value ~default:`Null (Json_util.assoc_member_opt "active_goal_ids" row));
                      ("trust", Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row));
                    ])
-        | _ -> [])
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> [])
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
   in
   let now = Unix.gettimeofday () in

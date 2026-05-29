@@ -177,7 +177,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               | `Assoc fields -> (
                   match List.assoc_opt "wait_sec" fields with
                   | Some (`Float v) -> v
-                  | _ -> 0.0)
+                  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> 0.0)
               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0.0
             in
             Some
@@ -201,7 +201,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               match List.assoc_opt "elapsed_sec" fields with
               | Some (`Float v) ->
                 Some (Turn_timeout { elapsed_sec = v })
-              | _ -> None)
+              | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None)
           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
       | Some (`String "provider_timeout") -> (
           match json with
@@ -261,7 +261,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               | `Assoc fields -> (
                   match List.assoc_opt "is_timeout" fields with
                   | Some (`Bool b) -> b
-                  | _ -> false)
+                  | None | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false)
               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
             in
             let tools =
@@ -273,7 +273,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     |> List.filter_map (function
                          | `String value -> Some value
                          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None)
-                  | _ -> [])
+                  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> [])
               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
             in
             Some (Ambiguous_post_commit { is_timeout; tools; original_error })
@@ -296,7 +296,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           match string_opt_of_assoc "reason" json with
           | Some reason -> Some (Internal_contract_rejected { reason })
           | None -> None)
-      | _ -> None)
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let classify_masc_internal_error_of_string (raw : string) :

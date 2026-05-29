@@ -300,7 +300,7 @@ let event_to_yojson (value : event) =
   in
   match context with
   | `Assoc [] -> `Assoc fields
-  | _ -> `Assoc (fields @ [ ("context", context) ])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> `Assoc (fields @ [ ("context", context) ])
 
 let event_of_yojson (json : Yojson.Safe.t) : event option =
   match Safe_ops.json_int_opt "seq" json,

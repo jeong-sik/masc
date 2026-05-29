@@ -56,7 +56,7 @@ let payload_json payload =
 let payload_field name payload =
   match payload_json payload with
   | Ok (`Assoc fields) -> List.assoc_opt name fields
-  | Ok _ | Error _ -> None
+  | Ok (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | Error _ -> None
 ;;
 
 let payload_parse_error payload =
@@ -69,7 +69,7 @@ let payload_float_field name payload =
   match payload_field name payload with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 ;;
 
 let payload_preview payload =
@@ -343,7 +343,7 @@ let float_field name json =
   match assoc_field name json with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 ;;
 
 let int_field name json =

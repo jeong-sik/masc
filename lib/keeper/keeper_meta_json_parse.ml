@@ -483,10 +483,10 @@ let parse_keeper_state
 	           (function
 	            | `Assoc [ ("tool_name", `String n); ("outcome", `String o) ] ->
 	              Some { Keeper_meta_contract.tool_name = n; outcome = o }
-	            | _ -> None)
+	            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None)
 	           items
-	       | _ -> [])
-	    | _ -> []
+	       | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> [])
+	    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 	  in
 	  let last_cascade_attempt =
 	    match json with
@@ -673,9 +673,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                           List.filter_map
                             (function
                               | k, `String v -> Some (k, v)
-                              | _ -> None)
+                              | _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
                             fields
-                        | _ -> [])
+                        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> [])
                    ; keeper_id =
                        (match Safe_ops.json_string_opt "keeper_id" json with
                         | Some s ->

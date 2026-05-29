@@ -332,7 +332,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
       | `Assoc fields ->
         (match List.assoc_opt "result_bytes" fields with
          | Some (`Int i) -> i
-         | _ ->
+         | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) ->
            (* Fallback for old entries that pre-date [result_bytes].
               Output may be either an inline string (legacy) or a
               normalized blob object {"_blob":{...,"bytes":N,...}}

@@ -80,10 +80,10 @@ let output_text record =
      | Some (`Assoc [("_blob", `Assoc blob)]) ->
        (match List.assoc_opt "preview" blob with
         | Some (`String preview) -> preview
-        | _ -> "")
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> "")
      | Some json -> Yojson.Safe.to_string json
      | None -> "")
-  | _ -> ""
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ""
 
 let compact_text ?(limit = 240) text =
   let trimmed =

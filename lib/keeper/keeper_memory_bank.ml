@@ -768,7 +768,7 @@ let strip_tool_result_reserved_keys (result : Yojson.Safe.t) : Yojson.Safe.t =
         ]
       in
       `Assoc (List.filter (fun (key, _) -> not (List.mem key reserved)) kv)
-  | other -> other
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as other -> other
 
 let tool_result_metadata (result : Yojson.Safe.t) : Yojson.Safe.t =
   match result with
@@ -779,8 +779,8 @@ let tool_result_metadata (result : Yojson.Safe.t) : Yojson.Safe.t =
           kv
       with
       | Some (`Assoc _ as metadata) -> metadata
-      | _ -> `Assoc [])
-  | _ -> `Assoc []
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> `Assoc [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Assoc []
 
 let tool_result_payload_preview (result : Yojson.Safe.t) : string =
   result

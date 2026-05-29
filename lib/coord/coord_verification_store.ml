@@ -120,20 +120,20 @@ let request_header_of_yojson = function
       let get_string key =
         match List.assoc_opt key fields with
         | Some (`String s) -> Some s
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let get_float key =
         match List.assoc_opt key fields with
         | Some (`Float f) -> Some f
         | Some (`Int n) -> Some (Float.of_int n)
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
       in
       (match get_string "id", get_string "task_id", get_string "worker" with
        | Some id, Some task_id, Some worker ->
            let verifier =
              match List.assoc_opt "verifier" fields with
              | Some (`String s) -> Some s
-             | _ -> None
+             | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
            in
            let created_at =
              match get_float "created_at" with

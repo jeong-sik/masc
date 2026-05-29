@@ -238,7 +238,7 @@ let oas_outcome_of_institution (episode : Institution_eio.episode) =
 let metadata_string key metadata =
   match List.assoc_opt key metadata with
   | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
 
 let metadata_string_list key metadata =
   match List.assoc_opt key metadata with
@@ -247,7 +247,7 @@ let metadata_string_list key metadata =
       |> List.filter_map (function
            | `String value when String.trim value <> "" -> Some value
            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> None)
-  | _ -> []
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
 
 let metadata_context key metadata =
   match List.assoc_opt key metadata with
@@ -256,14 +256,14 @@ let metadata_context key metadata =
       |> List.filter_map (function
            | k, `String value -> Some (k, value)
            | _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) -> None)
-  | _ -> []
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> []
 
 let metadata_float key metadata =
   match List.assoc_opt key metadata with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
   | Some (`Intlit value) -> float_of_string_opt value
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `String _ | `Assoc _ | `List _) -> None
 
 let institution_outcome_to_string = function
   | `Success -> "success"

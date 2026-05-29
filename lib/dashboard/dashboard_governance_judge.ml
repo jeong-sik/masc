@@ -297,7 +297,7 @@ let normalize_disk_recommended_action judgment =
         | Some (`String tool) ->
             let tool = tool |> String.trim |> String.lowercase_ascii in
             if tool = "" then None else Some tool
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let normalized_action =
         `Assoc
@@ -623,11 +623,11 @@ let parse_governance_response ~raw_text ~generated_at ~expires_at ~model_used =
                     | Ok (Some judgment) -> loop (judgment :: acc) rest)
               in
               loop [] rows
-          | _ ->
+          | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None ->
               Error
                 (Structural_error
                    "expected top-level items array in judge response"))
-      | _ ->
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
           Error
             (Structural_error
                "expected top-level JSON object in judge response"))

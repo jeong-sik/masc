@@ -34,7 +34,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
     match member_assoc "latest_tool_call_count" keeper with
     | `Int value -> Some value
     | `Intlit raw -> (int_of_string_opt (raw))
-    | _ -> None
+    | `Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
   in
   let fallback_source =
     match String_util.trim_to_option (string_field "tool_audit_source" keeper) with

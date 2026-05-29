@@ -246,7 +246,7 @@ let stats_to_json (s : agent_stats) : Yojson.Safe.t =
 
 let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
   try
-    let name = Json_util.get_string json "name" |> Option.value ~default:"" in
+    let name = Json_util.get_string_with_default json ~key:"name" ~default:"" in
     let alpha = Json_util.get_float json "alpha" |> Option.value ~default:0.0 in
     let beta = Json_util.get_float json "beta" |> Option.value ~default:0.0 in
     let selections = Json_util.get_int json "selections" |> Option.value ~default:0 in

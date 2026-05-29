@@ -424,7 +424,7 @@ let constraints_of_json json =
 
 (** Parse goal from JSON *)
 let goal_of_json json =
-  let path = Json_util.get_string json "path" |> Option.value ~default:"" in
+  let path = Json_util.get_string_with_default json ~key:"path" ~default:"" in
   let cond =
     match Json_util.assoc_member_opt "condition" json with
     | None | Some `Null -> `Null

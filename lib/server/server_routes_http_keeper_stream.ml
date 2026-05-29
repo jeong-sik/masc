@@ -101,18 +101,17 @@ let parse_keeper_chat_stream_request body_str =
     if not (match json with `Assoc _ -> true | _ -> false) then
       Error "request body must be a JSON object"
     else
-      let name = Json_util.get_string json "name" |> Option.value ~default:"" |> String.trim in
+      let name = Json_util.get_string_with_default json ~key:"name" ~default:"" |> String.trim in
       let message =
-        Json_util.get_string json "message" |> Option.value ~default:""
+        Json_util.get_string_with_default json ~key:"message" ~default:""
         |> String.trim
       in
       let channel =
-        Json_util.get_string json "channel" |> Option.value ~default:""
+        Json_util.get_string_with_default json ~key:"channel" ~default:""
         |> String.trim
       in
       let channel_user_id =
-        Json_util.get_string json "channel_user_id"
-        |> Option.value ~default:""
+        Json_util.get_string_with_default json ~key:"channel_user_id" ~default:""
         |> String.trim
       in
       let channel_user_name =

@@ -169,7 +169,7 @@ let tool_call_of_yojson json =
     tool_name =
       (match Json_util.get_string json "tool_name" with
        | Some value -> value
-       | None -> Json_util.get_string json "tool" |> Option.value ~default:"");
+       | None -> Json_util.get_string_with_default json ~key:"tool" ~default:"");
     success = Json_util.get_bool json "success" |> Option.value ~default:false;
     input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
     output = member_opt "output" json;

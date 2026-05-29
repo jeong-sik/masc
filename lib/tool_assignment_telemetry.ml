@@ -103,7 +103,7 @@ let event_to_json = function
 
 let event_of_json json : (tool_event, string) Result.t =
   try
-    match Json_util.get_string json "event_type" |> Option.value ~default:"" with
+    match Json_util.get_string_with_default json ~key:"event_type" ~default:"" with
     | "Assigned" ->
         let preset = Json_util.get_string json "preset" in
         let string_list field =
@@ -114,24 +114,24 @@ let event_of_json json : (tool_event, string) Result.t =
         in
         Ok
           (Assigned
-             { assignment_id = Json_util.get_string json "assignment_id" |> Option.value ~default:""
-             ; agent_id = Json_util.get_string json "agent_id" |> Option.value ~default:""
-             ; profile = Json_util.get_string json "profile" |> Option.value ~default:""
+             { assignment_id = Json_util.get_string_with_default json ~key:"assignment_id" ~default:""
+             ; agent_id = Json_util.get_string_with_default json ~key:"agent_id" ~default:""
+             ; profile = Json_util.get_string_with_default json ~key:"profile" ~default:""
              ; preset
              ; tool_list = string_list "tool_list"
              ; allow_set = string_list "allow_set"
              ; deny_set = string_list "deny_set"
-             ; config_hash = Json_util.get_string json "config_hash" |> Option.value ~default:""
-             ; reason = Json_util.get_string json "reason" |> Option.value ~default:""
+             ; config_hash = Json_util.get_string_with_default json ~key:"config_hash" ~default:""
+             ; reason = Json_util.get_string_with_default json ~key:"reason" ~default:""
              ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
              })
     | "Called" ->
-        let source = Json_util.get_string json "source" |> Option.value ~default:"" in
+        let source = Json_util.get_string_with_default json ~key:"source" ~default:"" in
         Ok
           (Called
-             { assignment_id = Json_util.get_string json "assignment_id" |> Option.value ~default:""
-             ; tool_name = Json_util.get_string json "tool_name" |> Option.value ~default:""
-             ; arguments_hash = Json_util.get_string json "arguments_hash" |> Option.value ~default:""
+             { assignment_id = Json_util.get_string_with_default json ~key:"assignment_id" ~default:""
+             ; tool_name = Json_util.get_string_with_default json ~key:"tool_name" ~default:""
+             ; arguments_hash = Json_util.get_string_with_default json ~key:"arguments_hash" ~default:""
              ; source
              ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
              })
@@ -142,8 +142,8 @@ let event_of_json json : (tool_event, string) Result.t =
         in
         Ok
           (Completed
-             { assignment_id = Json_util.get_string json "assignment_id" |> Option.value ~default:""
-             ; tool_name = Json_util.get_string json "tool_name" |> Option.value ~default:""
+             { assignment_id = Json_util.get_string_with_default json ~key:"assignment_id" ~default:""
+             ; tool_name = Json_util.get_string_with_default json ~key:"tool_name" ~default:""
              ; success = Json_util.get_bool json "success" |> Option.value ~default:false
              ; duration_ms = Json_util.get_float json "duration_ms" |> Option.value ~default:0.0
              ; error_kind

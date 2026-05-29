@@ -54,6 +54,10 @@ let failure_class_of_send_error
     (* 2xx without [id] or other unexpected shape — unclassified. *)
     Tool_result.Runtime_failure
 
+(* TEL-OK: telemetry is emitted by the caller [Tool_discord_dispatch.handler]
+   which lives in the main [masc_mcp] library with full Log/Metrics access.
+   This pure helper returns [Tool_result.result] carrying start_time and
+   failure_class so the caller can instrument both success and error paths. *)
 let dispatch ~send ~tool_name ~name ~args =
   if not (String.equal name tool_name) then None
   else

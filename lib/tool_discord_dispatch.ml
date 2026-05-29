@@ -8,6 +8,9 @@
 
 let tool_name = "discord_send_message"
 
+(* TEL-OK: telemetry is emitted inside [Discord_tool_helpers.dispatch]
+   which returns [Tool_result.result] carrying [start_time] and [failure_class];
+   the main [Tool_dispatch] loop instruments both success and error paths. *)
 let handler : Tool_dispatch.handler =
   Discord_tool_helpers.dispatch
     ~send:Channel_gate_discord_state.send_message

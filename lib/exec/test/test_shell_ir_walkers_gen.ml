@@ -931,6 +931,63 @@ let test_posix_end_of_options () =
    | w -> Alcotest.failf "Gh --: expected subcommand=pr action=create draft=true, got %a" pp w)
 ;;
 
+(* Rg: value-consuming flags (--type, --glob, --max-depth, etc.) *)
+let test_rg_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* rg --type py pattern — pattern should be "pattern", not "py" *)
+  let rg_type =
+    of_simple { (base "rg") with args = [ lit "--type"; lit "py"; lit "pattern" ] }
+  in
+  (match rg_type with
+   | W (Rg { pattern = "pattern"; case_sensitive = true; _ }) -> ()
+   | w -> Alcotest.failf "Rg --type: expected pattern=pattern, got %a" pp w);
+  (* rg --glob '*.ml' pattern path *)
+  let rg_glob =
+    of_simple { (base "rg") with args = [ lit "--glob"; lit "*.ml"; lit "pattern"; lit "src" ] }
+  in
+  (match rg_glob with
+   | W (Rg { pattern = "pattern"; path = Some "src"; _ }) -> ()
+   | w -> Alcotest.failf "Rg --glob: expected pattern=pattern path=src, got %a" pp w);
+  (* rg --max-depth 3 pattern *)
+  let rg_depth =
+    of_simple { (base "rg") with args = [ lit "--max-depth"; lit "3"; lit "pattern" ] }
+  in
+  (match rg_depth with
+   | W (Rg { pattern = "pattern"; _ }) -> ()
+   | w -> Alcotest.failf "Rg --max-depth: expected pattern=pattern, got %a" pp w);
+  (* rg -C 5 pattern — short flag value-consuming *)
+  let rg_context =
+    of_simple { (base "rg") with args = [ lit "-C"; lit "5"; lit "pattern" ] }
+  in
+  (match rg_context with
+   | W (Rg { pattern = "pattern"; _ }) -> ()
+   | w -> Alcotest.failf "Rg -C: expected pattern=pattern, got %a" pp w);
+  (* rg --type=py pattern — --flag=VALUE form *)
+  let rg_type_eq =
+    of_simple { (base "rg") with args = [ lit "--type=py"; lit "pattern" ] }
+  in
+  (match rg_type_eq with
+   | W (Rg { pattern = "pattern"; _ }) -> ()
+   | w -> Alcotest.failf "Rg --type=py: expected pattern=pattern, got %a" pp w);
+  (* rg -i --type py pattern — combined: ignore-case + type + pattern *)
+  let rg_combined =
+    of_simple { (base "rg") with args = [ lit "-i"; lit "--type"; lit "py"; lit "pattern"; lit "src" ] }
+  in
+  (match rg_combined with
+   | W (Rg { pattern = "pattern"; path = Some "src"; case_sensitive = false; _ }) -> ()
+   | w -> Alcotest.failf "Rg -i --type py: expected pattern=pattern path=src case_sensitive=false, got %a" pp w)
+;;
+
 (* --lines=N form for Head and Tail *)
 let test_lines_equals_form () =
   let open Shell_ir_typed in
@@ -1352,6 +1409,7 @@ let () =
         ; Alcotest.test_case "bin variant dispatch" `Quick test_bin_variant_dispatch
         ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
+        ; Alcotest.test_case "Rg value-consuming flags" `Quick test_rg_value_consuming_flags
         ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
         ; Alcotest.test_case "--jobs=N form" `Quick test_jobs_equals_form
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags

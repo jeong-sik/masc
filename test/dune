@@ -347,7 +347,8 @@
   test_intentional_projection
   test_chronicle_event
   test_chronicle_librarian
-  test_alignment_score)
+  test_alignment_score
+  test_blocker_class_exhaustiveness)
  (modules
   test_attribution
   test_attribution_tagged
@@ -676,7 +677,8 @@
   test_intentional_projection
   test_chronicle_event
   test_chronicle_librarian
-  test_alignment_score)
+  test_alignment_score
+  test_blocker_class_exhaustiveness)
  (libraries masc_test_deps multimodal))
 
 ; Group 2: Property-based tests (QCheck)

@@ -79,12 +79,12 @@ let test_runtime_pressure_classifier () =
           }));
   Alcotest.check
     pressure_label_t
-    "tier admission"
+    "cascade admission"
     (Some "tier_admission_full")
     (pressure_label_of_failure_reason
        (R.Provider_runtime_error
           { code = "capacity_backpressure"
-          ; detail = "inflight_capacity_full tier=strict_tool_candidates"
+          ; detail = "inflight_capacity_full admission_key=strict_tool_candidates"
           ; provider_id = None
           ; http_status = None
           ; cascade_name = None

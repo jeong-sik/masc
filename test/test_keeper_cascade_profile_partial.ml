@@ -47,7 +47,7 @@ tools-support = true
 
 [ollama.qwen3]
 
-[tier.local]
+[cascade.local]
 members = ["ollama.qwen3"]
 strategy = "failover"
 

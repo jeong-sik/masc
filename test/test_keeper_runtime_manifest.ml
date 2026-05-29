@@ -50,7 +50,7 @@ streaming = false
 [runtime_mock.%s]
 max-concurrent = 1
 
-[tier.%s_primary]
+[cascade.%s_primary]
 members = ["runtime_mock.%s"]
 
 [cascade.%s]

@@ -31,7 +31,7 @@ type provider_rejection = {
 (** {1 Capacity backpressure source}
 
     Names the system component that issued the backpressure signal.  Used by
-    operators and dashboards to attribute saturation to a specific tier. *)
+    operators and dashboards to attribute saturation to a specific cascade. *)
 
 type capacity_backpressure_source =
   | Provider_capacity

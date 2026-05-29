@@ -1,8 +1,8 @@
-(** Cascade_saturation_signal — Typed signal for tier saturation events.
+(** Cascade_saturation_signal — Typed signal for cascade saturation events.
 
     Phase A.1 of RFC-0153 (Cascade Backpressure & Tier Admission).
 
-    이 모듈은 cascade tier 가 "saturated" 상태일 때 caller 에게 전달되는
+    이 모듈은 cascade 가 "saturated" 상태일 때 caller 에게 전달되는
     typed signal 을 정의한다. 종전의 hard timer kill / "cascade exhausted"
     string 경로를 대체하는 *추가-only* 신호 채널.
 
@@ -12,7 +12,7 @@
     - caller (예: keeper_turn_driver) 가 남은 turn deadline + signal 종류
       를 보고 retry / wait / fail 을 결정.
     - Phase A.1 단독으로는 *동작 변경 없음*. Phase A.2 (caller dispatch),
-      Phase B (tier admission), Phase C (adaptive throttle) 가 본 signal
+      Phase B (cascade admission), Phase C (adaptive throttle) 가 본 signal
       을 입력으로 받음.
 
     외부 검증:

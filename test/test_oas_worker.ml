@@ -170,7 +170,7 @@ max-concurrent = 1
 %s
 %s
 %s
-[tier.%s]
+[cascade.%s]
 members = [%s]
 strategy = "failover"
 

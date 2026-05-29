@@ -189,7 +189,7 @@ let worker_state_of_agent
           ("related_session_id", Json_util.string_opt_to_json related_session_id);
           ("related_operation_id", Json_util.string_opt_to_json related_operation_id);
           ("emoji", `String profile.emoji);
-          ("korean_name", `String profile.korean_name);
+          ("koreanName", `String profile.korean_name);
           ("model", `Null);
           ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
           ("recent_event", Json_util.string_opt_to_json recent_output_preview);
@@ -374,7 +374,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
               | Some value -> `String value
               | None -> `Null );
             ("emoji", `String profile.emoji);
-            ("korean_name", `String profile.korean_name);
+            ("koreanName", `String profile.korean_name);
             ("skill_reason", Json_util.string_opt_to_json (String_util.trim_to_option (string_field "goal" keeper)));
           ]);
   }

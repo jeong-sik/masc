@@ -902,6 +902,35 @@ let test_lines_equals_form () =
    | w -> Alcotest.failf "Head --lines=0: expected lines=0, got %a" pp w)
 ;;
 
+(* --lines N (space-separated) form for Head and Tail *)
+let test_lines_space_form () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Head: --lines 25 file.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "--lines"; lit "25"; lit "file.txt" ] }
+  in
+  (match head with
+   | W (Head { path = "file.txt"; lines = 25; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines 25: expected lines=25, got %a" pp w);
+  (* Tail: --lines 20 /var/log/syslog *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "--lines"; lit "20"; lit "/var/log/syslog" ] }
+  in
+  (match tail with
+   | W (Tail { path = "/var/log/syslog"; lines = 20; _ }) -> ()
+   | w -> Alcotest.failf "Tail --lines 20: expected lines=20, got %a" pp w)
+;;
+
 (* --jobs=N and --jobs VALUE form for Make and Ninja *)
 let test_jobs_equals_form () =
   let open Shell_ir_typed in
@@ -1670,6 +1699,7 @@ let () =
         ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
         ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
+        ; Alcotest.test_case "--lines N form" `Quick test_lines_space_form
         ; Alcotest.test_case "--jobs=N form" `Quick test_jobs_equals_form
         ; Alcotest.test_case "--message= form" `Quick test_git_commit_message_equals
         ; Alcotest.test_case "--port=/--identity-file= form" `Quick test_ssh_long_forms

@@ -678,6 +678,11 @@ let rec parse lines path = function
               (String.sub arg 1 (String.length arg - 1)) ->
     let l = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse l path rest
+  (* --lines N form *)
+  | "--lines" :: n :: rest ->
+    (match int_of_string_opt n with
+     | Some l -> parse l path rest
+     | None -> None)
   (* --lines=N form *)
   | arg :: rest
     when String.length arg > 8
@@ -747,6 +752,11 @@ let rec parse lines path = function
               (String.sub arg 1 (String.length arg - 1)) ->
     let l = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse l path rest
+  (* --lines N form *)
+  | "--lines" :: n :: rest ->
+    (match int_of_string_opt n with
+     | Some l -> parse l path rest
+     | None -> None)
   (* --lines=N form *)
   | arg :: rest
     when String.length arg > 8

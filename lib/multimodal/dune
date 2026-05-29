@@ -5,5 +5,5 @@
  (public_name masc_mcp.multimodal)
  ; RFC-0071 Phase 5 ratchet (warning 4)
  (flags (:standard -w +4))
- (libraries shared_types unix yojson)
+ (libraries shared_types unix yojson masc_mcp.masc_core)
  (preprocess (pps ppx_tla)))

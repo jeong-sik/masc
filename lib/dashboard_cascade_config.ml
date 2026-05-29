@@ -250,7 +250,7 @@ let validation_summary_json ?config_path () =
     in
     [ "validation_status", `String status
     ; ( "validation_errors"
-      , Json_util.json_string_list (json_string_list (json_assoc_member "errors" rejection_json))
+      , Json_util.json_string_list (Json_util.get_string_list rejection_json "errors")
       )
     ; "invalid_profiles", `List (List.map invalid_profile_to_json invalid_profiles)
     ]

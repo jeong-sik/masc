@@ -16,4 +16,5 @@
  (wrapped false)
  (flags (:standard -w +4))
  (libraries
-  yojson))
+  yojson
+  masc_mcp.masc_core))

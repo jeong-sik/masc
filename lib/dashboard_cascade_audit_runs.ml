@@ -9,7 +9,7 @@
 open Dashboard_cascade_helpers
 
 let json_list_member key json =
-  match json_assoc_member key json with
+  match Yojson.Safe.Util.member key json with
   | `List values -> values
   | _ -> []
 ;;
@@ -100,7 +100,7 @@ let last_attempt_error attempts =
 ;;
 
 let audit_run_json_of_record json =
-  let observation = json_assoc_member "observation" json in
+  let observation = Yojson.Safe.Util.member "observation" json in
   let attempts = json_list_member "attempts" observation in
   let fallback_events = json_list_member "fallback_events" observation in
   let selected_attempt_index = Json_util.assoc_int_opt "selected_index" observation in

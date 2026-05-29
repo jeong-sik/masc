@@ -23,4 +23,5 @@
   ;; to route legacy records to their canonical-URL bucket. repo_manager
   ;; depends only on config/fs_compat/exec/log so the new edge introduces
   ;; no dependency cycle.
-  masc_mcp.repo_manager))
+  masc_mcp.repo_manager
+  masc_mcp.masc_core))

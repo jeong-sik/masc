@@ -1115,6 +1115,17 @@ let rec parse message amend = function
     (match message with
      | None -> parse (Some m) amend rest
      | Some _ -> None)
+  | "--message" :: m :: rest ->
+    (match message with
+     | None -> parse (Some m) amend rest
+     | Some _ -> None)
+  | arg :: rest
+    when String.length arg > 10
+         && String.sub arg 0 10 = "--message=" ->
+    let m = String.sub arg 10 (String.length arg - 10) in
+    (match message with
+     | None -> parse (Some m) amend rest
+     | Some _ -> None)
   | "-a" :: rest | "--all" :: rest -> parse message amend rest
   | "--no-edit" :: rest -> parse message amend rest
   (* Combined short flags: -am MESSAGE, -ma MESSAGE *)
@@ -2370,6 +2381,17 @@ let rec parse port id_file host user command dd = function
     (match int_of_string_opt p_str with
      | Some p -> parse (Some p) id_file host user command dd rest
      | None -> parse port id_file host user command dd rest)
+  | "--port" :: p_str :: rest when not dd ->
+    (match int_of_string_opt p_str with
+     | Some p -> parse (Some p) id_file host user command dd rest
+     | None -> parse port id_file host user command dd rest)
+  | arg :: rest
+    when not dd && String.length arg > 7
+         && String.sub arg 0 7 = "--port=" ->
+    let p_str = String.sub arg 7 (String.length arg - 7) in
+    (match int_of_string_opt p_str with
+     | Some p -> parse (Some p) id_file host user command dd rest
+     | None -> parse port id_file host user command dd rest)
   (* Combined form: -p22 *)
   | arg :: rest
     when not dd && String.length arg > 2
@@ -2379,6 +2401,12 @@ let rec parse port id_file host user command dd = function
     let p = int_of_string (String.sub arg 2 (String.length arg - 2)) in
     parse (Some p) id_file host user command dd rest
   | "-i" :: f :: rest when not dd -> parse port (Some f) host user command dd rest
+  | "--identity-file" :: f :: rest when not dd -> parse port (Some f) host user command dd rest
+  | arg :: rest
+    when not dd && String.length arg > 16
+         && String.sub arg 0 16 = "--identity-file=" ->
+    let f = String.sub arg 16 (String.length arg - 16) in
+    parse port (Some f) host user command dd rest
   | "-o" :: _ :: rest when not dd -> parse port id_file host user command dd rest
   | "-L" :: _ :: rest when not dd -> parse port id_file host user command dd rest
   | "-R" :: _ :: rest when not dd -> parse port id_file host user command dd rest

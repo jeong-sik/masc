@@ -945,6 +945,78 @@ let test_jobs_equals_form () =
    | w -> Alcotest.failf "Ninja --jobs 2: expected jobs=2, got %a" pp w)
 ;;
 
+(* --message=VALUE form for Git_commit *)
+let test_git_commit_message_equals () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* git commit --message="fix: bug" *)
+  let gc =
+    of_simple { (base "git") with args = [ lit "commit"; lit "--message=fix: bug" ] }
+  in
+  (match gc with
+   | W (Git_commit { message = "fix: bug"; _ }) -> ()
+   | w -> Alcotest.failf "Git_commit --message=: expected msg, got %a" pp w);
+  (* git commit --message "add feature" *)
+  let gc2 =
+    of_simple { (base "git") with args = [ lit "commit"; lit "--message"; lit "add feature" ] }
+  in
+  (match gc2 with
+   | W (Git_commit { message = "add feature"; _ }) -> ()
+   | w -> Alcotest.failf "Git_commit --message: expected msg, got %a" pp w)
+;;
+
+(* --port= and --identity-file= form for Ssh *)
+let test_ssh_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* ssh --port=2222 user@host *)
+  let ssh1 =
+    of_simple { (base "ssh") with args = [ lit "--port=2222"; lit "user@host" ] }
+  in
+  (match ssh1 with
+   | W (Ssh { host = "host"; user = Some "user"; port = Some 2222; _ }) -> ()
+   | w -> Alcotest.failf "Ssh --port=2222: expected port=2222, got %a" pp w);
+  (* ssh --port 8022 host *)
+  let ssh2 =
+    of_simple { (base "ssh") with args = [ lit "--port"; lit "8022"; lit "host" ] }
+  in
+  (match ssh2 with
+   | W (Ssh { host = "host"; port = Some 8022; _ }) -> ()
+   | w -> Alcotest.failf "Ssh --port 8022: expected port=8022, got %a" pp w);
+  (* ssh --identity-file=~/.ssh/id_ed25519 host *)
+  let ssh3 =
+    of_simple { (base "ssh") with args = [ lit "--identity-file=~/.ssh/id_ed25519"; lit "host" ] }
+  in
+  (match ssh3 with
+   | W (Ssh { host = "host"; identity_file = Some "~/.ssh/id_ed25519"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh --identity-file=: expected file, got %a" pp w);
+  (* ssh -i key.pem host *)
+  let ssh4 =
+    of_simple { (base "ssh") with args = [ lit "-i"; lit "key.pem"; lit "host" ] }
+  in
+  (match ssh4 with
+   | W (Ssh { host = "host"; identity_file = Some "key.pem"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh -i: expected file, got %a" pp w)
+;;
+
 (* Combined short-flag parsing: -rf → -r + -f *)
 let test_combined_short_flags () =
   let open Shell_ir_typed in
@@ -1289,6 +1361,8 @@ let () =
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
         ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
         ; Alcotest.test_case "--jobs=N form" `Quick test_jobs_equals_form
+        ; Alcotest.test_case "--message= form" `Quick test_git_commit_message_equals
+        ; Alcotest.test_case "--port=/--identity-file= form" `Quick test_ssh_long_forms
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"

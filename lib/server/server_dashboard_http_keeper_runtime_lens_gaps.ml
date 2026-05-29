@@ -29,7 +29,7 @@ let runtime_lens_tool_surface_parts scan =
     | None -> `Assoc []
   in
   let requested_tools =
-    json_string_list_member "requested_tool_names" lane_decision
+    Json_util.get_string_list lane_decision "requested_tool_names"
   in
   let required_tools =
     first_non_empty_string_list

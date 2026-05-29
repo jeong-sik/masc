@@ -210,7 +210,7 @@ let clock_edge_json ~idx ~provider_attempt_index row =
   let event_bus_payload_kinds =
     match event with
     | Keeper_runtime_manifest.Event_bus_correlated ->
-      Json_util.json_string_list_member "payload_kinds" decision
+      Json_util.get_string_list decision "payload_kinds"
     | _ -> []
   in
   `Assoc

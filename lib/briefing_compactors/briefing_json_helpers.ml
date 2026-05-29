@@ -49,7 +49,6 @@ let float_json ?(default = 0.0) json =
       | None -> `Float default)
   | _ -> `Float default
 
-let int_field = Dashboard_utils.int_field
 let take = List.take
 
 

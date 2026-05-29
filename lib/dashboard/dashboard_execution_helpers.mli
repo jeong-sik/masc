@@ -140,7 +140,6 @@ val get_agent_profile : string -> agent_profile
 
 val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
-val int_field : ?default:int -> string -> Yojson.Safe.t -> int
 val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 val string_list_of_field : string -> Yojson.Safe.t -> string list
 

@@ -123,9 +123,9 @@ let build_session_seed session_json _cards =
       String_util.trim_to_option (string_field "mode" communication)
       |> Option.value ~default:"mode n/a"
     in
-    let broadcast_count = int_field "broadcast_count" communication in
-    let portal_count = int_field "portal_count" communication in
-    let seen_count = int_field "seen_agents_count" summary in
+    let broadcast_count = Option.value ~default:0 (Json_util.assoc_int_opt "broadcast_count" communication) in
+    let portal_count = Option.value ~default:0 (Json_util.assoc_int_opt "portal_count" communication) in
+    let seen_count = Option.value ~default:0 (Json_util.assoc_int_opt "seen_agents_count" summary) in
     let member_names =
       dedup_strings
         (Dashboard_utils.string_list_of_json (member_assoc "agent_names" meta)
@@ -179,10 +179,10 @@ let build_session_seed session_json _cards =
         communication_summary =
           Printf.sprintf "%s · broadcast %d · portal %d" mode broadcast_count
             portal_count;
-        active_count = int_field "active_agents_count" team_health;
+        active_count = Option.value ~default:0 (Json_util.assoc_int_opt "active_agents_count" team_health);
         seen_count;
         planned_count;
-        required_count = int_field ~default:1 "required_agents" team_health;
+        required_count = Option.value ~default:1 (Json_util.assoc_int_opt "required_agents" team_health);
         counts_basis;
         runtime_blocker;
         worker_gap_summary;

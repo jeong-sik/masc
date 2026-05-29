@@ -8,18 +8,10 @@
 
 open Dashboard_cascade_helpers
 
-let json_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List values -> values
-  | _ -> []
-;;
-
 let first_nonempty values =
   List.find_map (fun v ->
     match v with
-    | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some trimmed
+    | Some raw -> String_util.trim_to_option raw
     | None -> None)
     values
 
@@ -101,8 +93,13 @@ let last_attempt_error attempts =
 
 let audit_run_json_of_record json =
   let observation = Yojson.Safe.Util.member "observation" json in
-  let attempts = json_list_member "attempts" observation in
-  let fallback_events = json_list_member "fallback_events" observation in
+  let list_member key json =
+    match Yojson.Safe.Util.member key json with
+    | `List values -> values
+    | _ -> []
+  in
+  let attempts = list_member "attempts" observation in
+  let fallback_events = list_member "fallback_events" observation in
   let selected_attempt_index = Json_util.assoc_int_opt "selected_index" observation in
   let cascade =
     first_nonempty

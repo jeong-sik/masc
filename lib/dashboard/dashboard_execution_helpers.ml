@@ -77,7 +77,6 @@ let option_or_else fallback = function
 let member_assoc = Dashboard_utils.member_assoc
 let string_field = Dashboard_utils.string_field
 let take = List.take
-let int_field = Dashboard_utils.int_field
 let list_field = Dashboard_utils.list_field
 let compact_text = String_util.compact_text
 let session_payload_json = Dashboard_utils.session_payload_json

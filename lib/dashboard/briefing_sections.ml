@@ -55,7 +55,8 @@ let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
       ("authoritative", `Bool false);
     ]
 
-let int_field_direct ?(default = 0) key json = int_field ~default key json
+let int_field_direct ?(default = 0) key json =
+  Option.value ~default (Json_util.assoc_int_opt key json)
 
 let sum_int_field key items =
   List.fold_left (fun acc json -> acc + int_field_direct key json) 0 items
@@ -211,9 +212,9 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
 let build_briefing_sections ~briefing_summary_json ~sessions ~agents ~recent_messages
     ~metadata_gaps =
   let room_health = briefing_summary_json |> string_field "room_health" in
-  let incident_count = briefing_summary_json |> int_field "incident_count" in
+  let incident_count = Option.value ~default:0 (Json_util.assoc_int_opt "incident_count" briefing_summary_json) in
   let recommended_action_count =
-    briefing_summary_json |> int_field "recommended_action_count"
+    Option.value ~default:0 (Json_util.assoc_int_opt "recommended_action_count" briefing_summary_json)
   in
   let top_attention_summary =
     briefing_summary_json |> string_field "top_attention_summary"

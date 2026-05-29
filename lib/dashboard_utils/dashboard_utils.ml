@@ -35,13 +35,6 @@ let member_assoc key json =
   | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
   | _ -> `Null
 
-let int_field ?(default = 0) key json =
-  match member_assoc key json with
-  | `Int v -> v
-  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
-  | `Float v -> int_of_float v
-  | _ -> default
-
 let string_field ?(default = "") key json =
   match member_assoc key json with
   | `String v -> v

@@ -73,9 +73,6 @@ val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Lookup [key] inside [`Assoc fields], returning [`Null] if missing or
     if the input is not an [`Assoc]. *)
 
-val int_field : ?default:int -> string -> Yojson.Safe.t -> int
-(** Read [key] as an integer ([`Int]/[`Intlit]/[`Float]). Default [0]. *)
-
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 (** Read [key] as a [`String]. Default [""]. *)
 

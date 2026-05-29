@@ -186,16 +186,16 @@ let read_recent_audit ~limit =
         else rows |> drop_left (total - limit) |> List.rev)
 
 let string_member json key =
-  json |> U.member key |> U.to_string_option |> Option.value ~default:""
+  Json_util.get_string json key |> Option.value ~default:""
 
 let int_member json key =
-  json |> U.member key |> U.to_int_option |> Option.value ~default:0
+  Json_util.get_int json key |> Option.value ~default:0
 
 let bool_member json key =
-  json |> U.member key |> U.to_bool_option |> Option.value ~default:false
+  Json_util.get_bool json key |> Option.value ~default:false
 
 let bool_option_member json key =
-  json |> U.member key |> U.to_bool_option
+  Json_util.get_bool json key
 
 let stale_of_updated_at updated_at =
   match Gate_time_util.parse_iso8601_opt updated_at with
@@ -352,7 +352,9 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
           `Int (int_member status "runtime_bindings_count") );
         ( "configured_bindings_count",
           `Int
-            (status |> U.member "configured_bindings" |> U.to_list |> List.length)
+            (Json_util.get_array status "configured_bindings"
+             |> Option.map (function `List l -> List.length l | _ -> 0)
+             |> Option.value ~default:0)
         );
       ]
   in

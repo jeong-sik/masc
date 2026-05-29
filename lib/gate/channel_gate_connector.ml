@@ -23,8 +23,6 @@ module type S = sig
     (Yojson.Safe.t, string) result
 end
 
-module U = Yojson.Safe.Util
-
 let registry : (string, (module S)) Hashtbl.t = Hashtbl.create 4
 
 let register (module C : S) =
@@ -46,7 +44,7 @@ let connectors_json ?gate_status_json ?(audit_limit = 10) () =
   let active_count =
     List.fold_left
       (fun acc json ->
-        if json |> U.member "available" |> U.to_bool_option
+        if Json_util.get_bool json "available"
            |> Option.value ~default:false
         then acc + 1
         else acc)

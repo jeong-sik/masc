@@ -16,18 +16,25 @@ type t =
   ; provider : cascade_provider
   ; model : cascade_model_spec
   ; binding : cascade_binding
+  ; provider_config : Llm_provider.Provider_config.t
+    (** load 시점에 materialize 된 hot-path provider config. 소비자는
+        routing 없이 이걸 곧장 LLM dispatch 로 넘긴다. *)
   }
 
 let id_of_binding (b : cascade_binding) : string =
   Printf.sprintf "%s.%s" b.provider_id b.model_id
 ;;
 
-(** binding 을 Runtime 으로 변환. provider/model 이 [cfg] 에서 resolve 안 되면
-    [None] (fail-closed — partial-boot 없음). *)
+(** binding 을 Runtime 으로 변환. provider/model resolve 또는 provider_config
+    materialize 가 실패하면 [None] (fail-closed — partial-boot 없음, 해당
+    binding 은 가용 Runtime 목록에서 제외). *)
 let of_binding (cfg : cascade_config) (b : cascade_binding) : t option =
   match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
   | Some provider, Some model ->
-    Some { id = id_of_binding b; provider; model; binding = b }
+    (match Cascade_declarative_adapter.binding_to_provider_config cfg b with
+     | Ok provider_config ->
+       Some { id = id_of_binding b; provider; model; binding = b; provider_config }
+     | Error _ -> None)
   | _ -> None
 ;;
 

@@ -64,6 +64,14 @@ type adapted_catalog = {
 
 (** {1 Entry point} *)
 
+val binding_to_provider_config :
+  Cascade_declarative_types.cascade_config ->
+  Cascade_declarative_types.cascade_binding ->
+  (Llm_provider.Provider_config.t, string) result
+(** cascade→Runtime 전환: 단일 binding 을 routing 없이 [Provider_config.t] 로
+    materialize. provider/model resolve 실패 시 [Error] (silent fallback 없음).
+    capabilities override 와 alias 레이어는 버린다 (v1). *)
+
 val adapt_config : Cascade_declarative_types.cascade_config -> adapted_catalog
 (** [adapt_config cfg] converts a validated declarative config into an
     adapted catalog. Resolution errors are accumulated in

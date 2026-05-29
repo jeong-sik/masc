@@ -312,6 +312,26 @@ let resolve_binding_config (cfg : cascade_config)
         :: !errors;
       None
 
+(** cascade→Runtime 전환: 단일 binding 을 [Provider_config.t] 로 materialize.
+
+    [resolve_binding_config] 을 감싸 override/error-ref 를 result 로 평탄화한다.
+    Runtime 모듈이 routing(profile/route/cascade_name) 없이 binding 하나를
+    곧장 소비하기 위한 진입점. capabilities override 는 v1 에서 버린다
+    (alias 레이어와 함께 제거 대상). NB: cascade/ 삭제(B4) 시 이 builder
+    [provider_config_from_declared_provider] 를 살아남는 lib 로 이전해야 한다. *)
+let binding_to_provider_config (cfg : cascade_config) (binding : cascade_binding)
+    : (Llm_provider.Provider_config.t, string) result =
+  let errors = ref [] in
+  match resolve_binding_config cfg binding errors with
+  | Some (config, _override) -> Ok config
+  | None ->
+    let rendered =
+      match !errors with
+      | [] -> Printf.sprintf "%s.%s: unresolved binding" binding.provider_id binding.model_id
+      | es -> String.concat "; " (List.map show_adapter_error es)
+    in
+    Error rendered
+
 (* --- Alias overrides --- *)
 
 let apply_alias_overrides (base : Llm_provider.Provider_config.t)

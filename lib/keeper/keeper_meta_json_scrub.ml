@@ -38,6 +38,10 @@ let drop_assoc_keys (keys : string list) (json : Yojson.Safe.t) : Yojson.Safe.t 
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ as j -> j
 ;;
 
+let present_json_keys keys = function
+  | `Assoc fields -> List.filter (fun k -> List.mem_assoc k fields) keys
+  | _ -> []
+
 let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
   let present = present_json_keys removed_keeper_meta_key_names json in
   match present with

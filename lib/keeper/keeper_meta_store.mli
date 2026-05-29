@@ -24,7 +24,7 @@ val version_conflict_re : Re.re
     the file does not exist; warns on unknown keys; scrubs deprecated
     persisted fields before parsing. *)
 val read_meta_file_path :
-  string -> (keeper_meta option, string) result
+  string -> (Keeper_meta_contract.keeper_meta option, string) result
 
 (** Sidecar stem suffixes (without the trailing [.json]). Files
     matching [<name><suffix>.json] are filtered out of the keeper
@@ -64,7 +64,7 @@ val persistent_agent_names : Coord.config -> string list
 val read_meta_resolved :
   Coord.config ->
   string ->
-  ((string * keeper_meta) option, string) result
+  ((string * Keeper_meta_contract.keeper_meta) option, string) result
 
 (** Like [read_meta_resolved] but discards the filename component. *)
 val read_meta :

@@ -6,6 +6,7 @@
 
 include Keeper_meta_tool_access
 
+
 (* -- Policy types (remain in keeper_meta top-level) -- *)
 
 type compaction_policy =
@@ -106,11 +107,6 @@ type cascade_exhaustion_reason =
         and triggering the harsher [Cascade_exhausted { retryable = false }]
         failure policy.  This variant enables the softer
         [Soft_fail_turn + Provider_cooldown] path. *)
-  | No_tool_capable
-    (** Cascade exhausted because no configured provider can satisfy the
-        required tool set.  Previously a standalone [blocker_class] variant;
-        reclassified here because the cascade rotation filtered all candidates
-        before dispatch — a semantic subset of cascade exhaustion. *)
   | Other_detail of string
 
 type blocker_class =
@@ -161,7 +157,7 @@ type blocker_class =
   | Sdk_input_required
 
 let blocker_class_to_string = function
-  | Cascade_exhausted No_tool_capable -> "cascade_exhausted_no_tool_capable"
+  | Cascade_exhausted No_providers_available -> "cascade_exhausted_no_providers_available"
   | Cascade_exhausted _ -> "cascade_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
@@ -190,7 +186,7 @@ let blocker_class_to_string = function
 ;;
 
 let blocker_class_of_serialized_string = function
-  | "cascade_exhausted_no_tool_capable" -> Some (Cascade_exhausted No_tool_capable)
+  | "cascade_exhausted_no_providers_available" -> Some (Cascade_exhausted No_providers_available)
   | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
@@ -235,8 +231,6 @@ let cascade_exhaustion_summary = function
     "Cascade exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
   | Capacity_exhausted ->
     "Cascade exhausted; all providers reported capacity backpressure."
-  | No_tool_capable ->
-    "Cascade exhausted; no configured provider can satisfy the required tool set."
   | Other_detail _ ->
     "Cascade exhausted; inspect cascade attempts for the dominant root cause."
 ;;
@@ -279,7 +273,6 @@ let cascade_exhaustion_reason_to_json = function
   | Structural_attempt_timeout { detail } ->
     `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
   | Capacity_exhausted -> `String "capacity_exhausted"
-  | No_tool_capable -> `String "no_tool_capable"
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 ;;
 
@@ -291,7 +284,6 @@ let cascade_exhaustion_reason_of_json = function
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
   | `String "max_turns_exceeded" -> Some Max_turns_exceeded
   | `String "capacity_exhausted" -> Some Capacity_exhausted
-  | `String "no_tool_capable" -> Some No_tool_capable
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
      | Some (`String "structural_attempt_timeout") ->
@@ -508,9 +500,9 @@ type keeper_meta =
   ; desires : string
   ; instructions : string
   ; (* -- Policy -- *)
-    sandbox_profile : sandbox_profile
+    sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_image : string option
-  ; network_mode : network_mode
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; allowed_paths : string list
   ; tool_access : tool_access
   ; tool_preset_source : string option

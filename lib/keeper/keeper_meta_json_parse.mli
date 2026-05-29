@@ -26,11 +26,11 @@ type parsed_keeper_identity =
 
 (** Parsed policy slice of a persisted keeper meta. *)
 type parsed_keeper_policy =
-  { pp_sandbox_profile : sandbox_profile
+  { pp_sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   ; pp_sandbox_image : string option
-  ; pp_network_mode : network_mode
+  ; pp_network_mode : Keeper_types_profile_sandbox.network_mode
   ; pp_allowed_paths : string list
-  ; pp_tool_access : tool_access
+  ; pp_tool_access : Keeper_meta_tool_access.tool_access
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
   ; pp_room_signal_prompt_enabled : bool

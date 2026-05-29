@@ -137,10 +137,10 @@ let wrap_event
     ; "ts_unix", `Float ts
     ; "correlation_id", `String correlation_id
     ; "run_id", `String run_id
-    ; "agent_name", json_string_opt agent_name
-    ; "task_id", json_string_opt task_id
+    ; "agent_name", Json_util.string_opt_to_json agent_name
+    ; "task_id", Json_util.string_opt_to_json task_id
     ; "turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn
-    ; "tool_name", json_string_opt tool_name
+    ; "tool_name", Json_util.string_opt_to_json tool_name
     ; "payload", payload
     ]
 ;;

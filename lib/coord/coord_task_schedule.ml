@@ -825,7 +825,25 @@ let release_stale_claims config ~ttl_seconds =
                  clear_assignee_current_task ~assignee ~task_id:task.id;
                  { task with task_status = Todo })
                else task
-             | AwaitingVerification _ -> task (* leave alone; awaiting verifier *)
+             | AwaitingVerification { assignee; submitted_at; _ } ->
+               let ts =
+                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) submitted_at
+               in
+               if now_f -. ts > ttl_seconds
+               then (
+                 stale_tasks := (task.id, assignee) :: !stale_tasks;
+                 log_event
+                   config
+                   (`Assoc
+                       [ "type", `String "stale_verification_released"
+                       ; "task_id", `String task.id
+                       ; "assignee", `String assignee
+                       ; "age_s", age_seconds_json ts
+                       ; "ts", `String now_str
+                       ]);
+                 clear_assignee_current_task ~assignee ~task_id:task.id;
+                 { task with task_status = Todo })
+               else task
              | Todo | Done _ | Cancelled _ -> task)
           backlog.tasks
       in

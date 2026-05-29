@@ -110,23 +110,23 @@ let pending_confirm_to_yojson (entry : pending_confirm) =
 
 let pending_confirm_of_yojson json =
   try
-    let token = Json_util.get_string json "token" |> Option.value ~default:"" in
+    let token = Json_util.get_string_with_default json ~key:"token" ~default:"" in
     let trace_id =
       match Json_util.get_string json "trace_id" with
       | Some value -> value
       | None -> trace_id "opc"
     in
-    let actor = Json_util.get_string json "actor" |> Option.value ~default:"" in
-    let action_type = Json_util.get_string json "action_type" |> Option.value ~default:"" in
-    let target_type = Json_util.get_string json "target_type" |> Option.value ~default:"" in
+    let actor = Json_util.get_string_with_default json ~key:"actor" ~default:"" in
+    let action_type = Json_util.get_string_with_default json ~key:"action_type" ~default:"" in
+    let target_type = Json_util.get_string_with_default json ~key:"target_type" ~default:"" in
     let target_id = Json_util.get_string json "target_id" in
     let payload =
       match Json_util.get_object json "payload" with
       | Some payload -> payload
       | None -> `Assoc []
     in
-    let delegated_tool = Json_util.get_string json "delegated_tool" |> Option.value ~default:"" in
-    let created_at = Json_util.get_string json "created_at" |> Option.value ~default:"" in
+    let delegated_tool = Json_util.get_string_with_default json ~key:"delegated_tool" ~default:"" in
+    let created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"" in
     let expires_at = Json_util.get_string json "expires_at" in
     Ok
       {

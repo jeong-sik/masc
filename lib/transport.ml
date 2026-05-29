@@ -92,12 +92,12 @@ module JsonRpc = struct
   (** Parse JSON-RPC request *)
   let parse_request (json : Yojson.Safe.t) : (request, string) result =
     try
-      let jsonrpc = Json_util.get_string json "jsonrpc" |> Option.value ~default:"" in
+      let jsonrpc = Json_util.get_string_with_default json ~key:"jsonrpc" ~default:"" in
       if jsonrpc <> version then
         Error (Printf.sprintf "Invalid JSON-RPC version: %s" jsonrpc)
       else
         let id = Json_util.get_string json "id" in
-        let method_name = Json_util.get_string json "method" |> Option.value ~default:"" in
+        let method_name = Json_util.get_string_with_default json ~key:"method" ~default:"" in
         let params = Yojson.Safe.Util.member "params" json in
         Ok { id; method_name; params; headers = [] }
     with

@@ -82,8 +82,8 @@ let agent_credential_to_yojson (c : agent_credential) =
 
 let agent_credential_of_yojson json =
   try
-    let agent_name = Json_util.get_string json "agent_name" |> Option.value ~default:"" in
-    let token = Json_util.get_string json "token" |> Option.value ~default:"" in
+    let agent_name = Json_util.get_string_with_default json ~key:"agent_name" ~default:"" in
+    let token = Json_util.get_string_with_default json ~key:"token" ~default:"" in
     let role =
       match Json_util.get_string json "role" with
       | Some s -> agent_role_of_string s
@@ -94,7 +94,7 @@ let agent_credential_of_yojson json =
     (match role with
      | Error e -> Error e
      | Ok role ->
-       let created_at = Json_util.get_string json "created_at" |> Option.value ~default:"" in
+       let created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"" in
        let expires_at = Json_util.get_string json "expires_at" in
        let id = Json_util.get_string json "id" |> Option.map Credential_id.of_string in
        let agent_id = Json_util.get_string json "agent_id" |> Option.map Agent_id.of_string in

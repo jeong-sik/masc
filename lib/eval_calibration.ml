@@ -241,8 +241,7 @@ let record_human_label
 (* ================================================================ *)
 
 let string_field json key =
-  try (match Json_util.assoc_member_opt key json with Some (`String s) -> s | other -> raise (Yojson.Safe.Util.Type_error ("expected string", Option.value ~default:`Null other)))
-  with Yojson.Safe.Util.Type_error _ | Not_found -> ""
+  Json_util.get_string_with_default json ~key ~default:""
 
 (* ================================================================ *)
 (* Divergence analysis                                               *)

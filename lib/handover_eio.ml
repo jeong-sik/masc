@@ -106,7 +106,7 @@ let handover_to_json (h : handover_record) : Yojson.Safe.t =
 
 (** JSON to handover *)
 let handover_of_json (json : Yojson.Safe.t) : handover_record option =
-  let str key = Json_util.get_string json key |> Option.value ~default:"" in
+  let str key = Json_util.get_string_with_default json ~key ~default:"" in
   let str_opt key = Json_util.get_string json key in
   let str_list key = Json_util.get_string_list json key in
   let int_val key = Json_util.get_int json key |> Option.value ~default:0 in

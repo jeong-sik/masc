@@ -155,8 +155,7 @@ let trust_needs_attention json =
 
 let trust_snapshot_unavailable json =
   String.equal
-    (Json_util.get_string json "disposition_reason"
-     |> Option.value ~default:"")
+    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
     "runtime_trust_snapshot_unavailable"
 
 let trust_turn_id json =
@@ -177,14 +176,12 @@ let trust_latest_event_ts_unix json =
 
 let trust_sandbox_risk json =
   String.equal
-    (Json_util.get_string json "disposition_reason"
-     |> Option.value ~default:"")
+    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
     "sandbox_violation"
 
 let trust_cascade_risk json =
   String.equal
-    (Json_util.get_string json "disposition_reason"
-     |> Option.value ~default:"")
+    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
     "cascade_exhausted"
 
 let receipt_has_error json =

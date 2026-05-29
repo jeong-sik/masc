@@ -80,9 +80,9 @@ let session_to_json session =
 
 let session_of_json json =
   {
-    session_id = Json_util.get_string json "session_id" |> Option.value ~default:"";
-    agent_id = Json_util.get_string json "agent_id" |> Option.value ~default:"";
-    voice = Json_util.get_string json "voice" |> Option.value ~default:"";
+    session_id = Json_util.get_string_with_default json ~key:"session_id" ~default:"";
+    agent_id = Json_util.get_string_with_default json ~key:"agent_id" ~default:"";
+    voice = Json_util.get_string_with_default json ~key:"voice" ~default:"";
     started_at = Json_util.get_float json "started_at" |> Option.value ~default:0.0;
     last_activity = Json_util.get_float json "last_activity" |> Option.value ~default:0.0;
     turn_count = Json_util.get_int json "turn_count" |> Option.value ~default:0;

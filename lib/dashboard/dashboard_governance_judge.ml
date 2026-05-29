@@ -283,8 +283,8 @@ let get_state base_path =
 let key_of kind id = kind ^ ":" ^ id
 
 let judgment_key json =
-  let kind = Json_util.get_string json "target_kind" |> Option.value ~default:"" in
-  let id = Json_util.get_string json "target_id" |> Option.value ~default:"" in
+  let kind = Json_util.get_string_with_default json ~key:"target_kind" ~default:"" in
+  let id = Json_util.get_string_with_default json ~key:"target_id" ~default:"" in
   key_of kind id
 
 let judgment_generated_at json =
@@ -500,8 +500,7 @@ let parse_recommended_action json =
             ( "reason",
               `String
                 (normalize_text
-                   (Json_util.get_string action_json "reason"
-                  |> Option.value ~default:"")) );
+                   (Json_util.get_string_with_default action_json ~key:"reason" ~default:"")) );
             ("payload_preview", m "payload_preview" action_json);
           ])
   | _ -> None
@@ -560,14 +559,14 @@ let parse_required_guardrail_state json =
 
 let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
   let target_kind =
-    Json_util.get_string json "kind" |> Option.value ~default:""
+    Json_util.get_string_with_default json ~key:"kind" ~default:""
     |> String.lowercase_ascii
   in
-  let target_id = Json_util.get_string json "id" |> Option.value ~default:"" in
+  let target_id = Json_util.get_string_with_default json ~key:"id" ~default:"" in
   if target_kind = "" || target_id = "" then Ok None
   else
     let summary =
-      normalize_text (Json_util.get_string json "summary" |> Option.value ~default:"")
+      normalize_text (Json_util.get_string_with_default json ~key:"summary" ~default:"")
     in
     if summary = "" then Ok None
     else

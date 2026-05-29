@@ -154,14 +154,6 @@ type strategy_config = {
       limited to one in-flight subprocess.
       @since 0.9.8 *)
 
-  tiers : string list list option;
-  (** ["{name}_tiers"]. Used by the [priority_tier] strategy.  Each
-      inner array is a tier of provider keys (matched against the
-      [model] field in [{name}_models]); outer order is tier order
-      (tier 0 = highest priority).  Example JSON:
-      [\[\["ollama:qwen3-coder:30b"\], \["cli_tool_b:provider_f-3-flash-preview"\]\]].
-      @since 0.9.7 *)
-
   sticky_ttl_ms : int option;
   (** ["{name}_sticky_ttl_ms"]. Retired legacy field.  Parsed only so
       diagnostics can reject stale runtime JSON explicitly. *)

@@ -48,14 +48,6 @@ let has_binding_failed (key : string) (errs : adapter_error list) =
     errs
 ;;
 
-let has_alias_failed (key : string) (errs : adapter_error list) =
-  has_error
-    (function
-      | Alias_resolution_failed s -> s = key
-      | _ -> false)
-    errs
-;;
-
 let has_duplicate_route (name : string) (errs : adapter_error list) =
   has_error
     (function
@@ -135,24 +127,17 @@ max-input = 4096
 
 [ollama.qwen3]
 
-[tier.rerank]
-members = ["cli_tool_d.haiku.for-scoring"]
-strategy = "failover"
+[profiles.rerank]
+provider_filter = "cli_tool_d"
 
-[tier.primary]
-members = ["cli_tool_d.sonnet", "cli_tool_d.haiku"]
-strategy = "failover"
+[profiles.primary]
+provider_filter = "cli_tool_d"
 
-[tier.local]
-members = ["ollama.qwen3"]
-strategy = "failover"
-
-[tier-group.primary]
-tiers = ["primary", "local"]
-strategy = "priority_tier"
+[profiles.local]
+provider_filter = "ollama"
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cli_tool_d.haiku"
 
 [system.governance]
 target = "cli_tool_d.haiku.for-scoring"
@@ -171,30 +156,20 @@ let test_valid_catalog_structure () =
 
 let test_valid_tier_profiles () =
   let catalog = adapt_toml valid_toml in
-  let tier_names = List.map (fun (p : adapted_profile) -> p.name) catalog.profiles in
-  check bool "has tier.rerank" true (List.mem "tier.rerank" tier_names);
-  check bool "has tier.primary" true (List.mem "tier.primary" tier_names);
-  check bool "has tier.local" true (List.mem "tier.local" tier_names);
-  check bool "has tier-group.primary" true (List.mem "tier-group.primary" tier_names)
+  let profile_names = List.map (fun (p : adapted_profile) -> p.name) catalog.profiles in
+  check bool "has rerank" true (List.mem "rerank" profile_names);
+  check bool "has primary" true (List.mem "primary" profile_names);
+  check bool "has local" true (List.mem "local" profile_names)
 ;;
 
 let test_valid_tier_members_resolved () =
   let catalog = adapt_toml valid_toml in
   let rerank =
-    List.find (fun (p : adapted_profile) -> p.name = "tier.rerank") catalog.profiles
+    List.find (fun (p : adapted_profile) -> p.name = "rerank") catalog.profiles
   in
-  check int "rerank has 1 provider_config" 1 (List.length rerank.provider_configs)
-;;
-
-let test_valid_tier_group_flattened () =
-  let catalog = adapt_toml valid_toml in
-  let primary =
-    List.find
-      (fun (p : adapted_profile) -> p.name = "tier-group.primary")
-      catalog.profiles
-  in
-  (* primary has 2 members + local has 1 member = 3 provider_configs *)
-  check int "primary has 3 provider_configs" 3 (List.length primary.provider_configs)
+  (* provider_filter = "cli_tool_d" selects all cli_tool_d bindings:
+     cli_tool_d.haiku + cli_tool_d.sonnet = 2 provider_configs. *)
+  check int "rerank has 2 provider_configs" 2 (List.length rerank.provider_configs)
 ;;
 
 let test_valid_routes () =
@@ -202,9 +177,9 @@ let test_valid_routes () =
   let route_targets = List.map snd catalog.routes in
   check
     bool
-    "routes to tier-group.primary"
+    "routes to cli_tool_d.haiku"
     true
-    (List.mem "tier-group.primary" route_targets)
+    (List.mem "cli_tool_d.haiku" route_targets)
 ;;
 
 let test_valid_system_targets () =
@@ -215,11 +190,6 @@ let test_valid_system_targets () =
     "system target is alias key"
     true
     (List.mem "cli_tool_d.haiku.for-scoring" targets)
-;;
-
-let test_valid_default_profile () =
-  let catalog = adapt_toml valid_toml in
-  check bool "has default profile" true (catalog.default_profile <> None)
 ;;
 
 let test_registered_http_provider_uses_toml_endpoint_without_api_key () =
@@ -241,15 +211,14 @@ tools-support = true
 [provider_k-coding.provider_k-5-turbo]
 max-concurrent = 2
 
-[tier.medium]
-members = ["provider_k-coding.provider_k-5-turbo"]
-strategy = "failover"
+[profiles.medium]
+provider_filter = "provider_k-coding"
 |}
   in
   let catalog = adapt_toml toml in
   no_errors catalog.errors;
   let medium =
-    List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+    List.find (fun (p : adapted_profile) -> p.name = "medium") catalog.profiles
   in
   match medium.provider_configs with
   | [ (cfg, _) ] ->
@@ -272,7 +241,7 @@ strategy = "failover"
 ;;
 
 let test_registered_http_provider_without_credentials_uses_registry_api_key_env () =
-  with_env "ZAI_API_KEY" "zai-review-test-key" (fun () ->
+  with_env "ZAI_CODING_API_KEY" "zai-review-test-key" (fun () ->
     let toml =
       {|
 [providers.provider_k-coding]
@@ -287,15 +256,14 @@ tools-support = true
 [provider_k-coding.provider_k-5-turbo]
 max-concurrent = 2
 
-[tier.medium]
-members = ["provider_k-coding.provider_k-5-turbo"]
-strategy = "failover"
+[profiles.medium]
+provider_filter = "provider_k-coding"
 |}
     in
     let catalog = adapt_toml toml in
     no_errors catalog.errors;
     let medium =
-      List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+      List.find (fun (p : adapted_profile) -> p.name = "medium") catalog.profiles
     in
     match medium.provider_configs with
     | [ (cfg, _) ] ->
@@ -338,16 +306,15 @@ tools-support = true
 [ollama_cloud.provider_k-5-1-cloud]
 max-concurrent = 1
 
-[tier.provider_k-coding-with-spark]
-members = ["ollama_cloud.provider_k-5-1-cloud"]
-strategy = "failover"
+[profiles.provider_k-coding-with-spark]
+provider_filter = "ollama_cloud"
 |}
     in
     let catalog = adapt_toml toml in
     no_errors catalog.errors;
     let coding_tier =
       List.find
-        (fun (p : adapted_profile) -> p.name = "tier.provider_k-coding-with-spark")
+        (fun (p : adapted_profile) -> p.name = "provider_k-coding-with-spark")
         catalog.profiles
     in
     match coding_tier.provider_configs with
@@ -401,16 +368,15 @@ supports-tool-choice = true
 [ollama_cloud.qwen3-5]
 max-concurrent = 1
 
-[tier.ollama_cloud_primary]
-members = ["ollama_cloud.qwen3-5"]
-strategy = "failover"
+[profiles.ollama_cloud_primary]
+provider_filter = "ollama_cloud"
 |}
     in
     let catalog = adapt_toml toml in
     no_errors catalog.errors;
     let primary =
       List.find
-        (fun (p : adapted_profile) -> p.name = "tier.ollama_cloud_primary")
+        (fun (p : adapted_profile) -> p.name = "ollama_cloud_primary")
         catalog.profiles
     in
     match primary.provider_configs with
@@ -453,16 +419,15 @@ supports-tool-choice = true
 [provider_k-coding.provider_k-5-1]
 max-concurrent = 1
 
-[tier.provider_k-coding-primary]
-members = ["provider_k-coding.provider_k-5-1"]
-strategy = "failover"
+[profiles.provider_k-coding-primary]
+provider_filter = "provider_k-coding"
 |}
   in
   let catalog = adapt_toml toml in
   no_errors catalog.errors;
   let tier =
     List.find
-      (fun (p : adapted_profile) -> p.name = "tier.provider_k-coding-primary")
+      (fun (p : adapted_profile) -> p.name = "provider_k-coding-primary")
       catalog.profiles
   in
   match tier.provider_configs with
@@ -502,15 +467,14 @@ tools-support = true
 
 [local-provider_d.remote]
 
-[tier.medium]
-members = ["local-provider_d.remote"]
-strategy = "failover"
+[profiles.medium]
+provider_filter = "local-provider_d"
 |}
   in
   let catalog = adapt_toml toml in
   no_errors catalog.errors;
   let medium =
-    List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+    List.find (fun (p : adapted_profile) -> p.name = "medium") catalog.profiles
   in
   match medium.provider_configs with
   | [ (cfg, _) ] ->
@@ -552,15 +516,14 @@ tools-support = true
 [cli_tool_d.haiku]
 max-concurrent = 1
 
-[tier.primary]
-members = ["cli_tool_d.haiku"]
-strategy = "failover"
+[profiles.primary]
+provider_filter = "cli_tool_d"
 |}
   in
   let catalog = adapt_toml toml in
   no_errors catalog.errors;
   let primary =
-    List.find (fun (p : adapted_profile) -> p.name = "tier.primary") catalog.profiles
+    List.find (fun (p : adapted_profile) -> p.name = "primary") catalog.profiles
   in
   match primary.provider_configs with
   | [ (cfg, _) ] ->
@@ -616,57 +579,12 @@ is-default = true
   has_model_not_found "nonexistent-model" catalog.errors
 ;;
 
-(* --- Error: alias resolution fails when parent missing --- *)
-
-let test_alias_parent_missing () =
-  let cfg =
-    { providers =
-        [ { id = "x"
-          ; display_name = "X"
-          ; protocol = "provider_a"
-          ; api_format = Messages_api
-          ; transport = Cli "x"
-          ; is_non_interactive = false
-          ; credentials = None
-          ; capabilities = None
-          ; log = None
-          ; healthcheck = None
-          ; headers = None
-          }
-        ]
-    ; models =
-        [ { id = "m"
-          ; api_name = "test-model"
-          ; max_context = 4096
-          ; tools_support = true
-          ; thinking_support = false
-          ; max_thinking_budget = None
-          ; streaming = true
-          ; capabilities = None
-          ; match_prefixes = []
-          }
-        ]
-    ; bindings = []
-    ; aliases =
-        [ { provider_id = "x"
-          ; model_id = "m"
-          ; name = "a"
-          ; max_input = None
-          ; max_output = None
-          ; temperature = None
-          ; thinking_enabled = None
-          ; thinking_budget = None
-          }
-        ]
-    (* #19327: tier/tier_groups fields removed from cascade_config. *)
-    ; routes = []
-    ; system_targets = []
-    ; profiles = []
-    }
-  in
-  let catalog = adapt_config cfg in
-  has_alias_failed "x.m.a" catalog.errors
-;;
+(* Note: the legacy [Alias_resolution_failed] error path was produced by
+   tier-member resolution ([resolve_member]), which the tier purge removed.
+   Aliases are no longer resolved into profile members, so the
+   "alias parent missing" error case is unreachable and its test was
+   dropped. Alias-parent validation, if reinstated, belongs to a separate
+   declarative-validation concern (tracked via issue). *)
 
 (* --- Strategy mapping --- *)
 
@@ -683,13 +601,11 @@ api-name = "model-a-haiku"
 
 [cli_tool_d.haiku]
 
-[tier.failover-t]
-members = ["cli_tool_d.haiku"]
-strategy = "failover"
+[profiles.failover-t]
+provider_filter = "cli_tool_d"
 
-[tier.priority-t]
-members = ["cli_tool_d.haiku"]
-strategy = "priority_tier"
+[profiles.priority-t]
+provider_filter = "cli_tool_d"
 |}
   in
   let catalog = adapt_toml toml in
@@ -710,70 +626,11 @@ strategy = "priority_tier"
       expected
       profile.strategy.Cascade_strategy.kind
   in
-  check_kind "tier.failover-t" Cascade_strategy.Failover;
-  check_kind "tier.priority-t" Cascade_strategy.Priority_tier
-;;
-
-let test_provider_d_http_tier_group_uses_endpoint_scoped_health_keys () =
-  let toml =
-    {|
-[providers.runpod]
-protocol = "provider_d-http"
-endpoint = "https://runpod.example.test/v1"
-
-[providers.glm]
-protocol = "provider_d-http"
-endpoint = "https://api.z.ai/api/coding/paas/v4"
-
-[models.runpod-qwen]
-max-context = 128000
-api-name = "runpod-qwen"
-tools-support = true
-
-[models.glm-5-turbo]
-max-context = 128000
-api-name = "glm-5-turbo"
-tools-support = true
-
-[runpod.runpod-qwen]
-[glm.glm-5-turbo]
-
-[tier.runpod]
-members = ["runpod.runpod-qwen"]
-strategy = "failover"
-
-[tier.glm]
-members = ["glm.glm-5-turbo"]
-strategy = "failover"
-
-[tier-group.custom-priority]
-tiers = ["runpod", "glm"]
-strategy = "priority_tier"
-|}
-  in
-  let catalog = adapt_toml toml in
-  no_errors catalog.errors;
-  let profile =
-    List.find
-      (fun (p : adapted_profile) -> p.name = "tier-group.custom-priority")
-      catalog.profiles
-  in
-  match profile.strategy.Cascade_strategy.tiers with
-  | [ [ first ]; [ second ] ] ->
-    check bool "tier health keys are endpoint-scoped"
-      true
-      (not (String.equal first second));
-    check bool "runpod tier key includes endpoint"
-      true
-      (String.contains first '@');
-    check bool "glm tier key includes endpoint"
-      true
-      (String.contains second '@')
-  | tiers ->
-    fail
-      (Printf.sprintf
-         "expected two single-entry tiers, got %d tiers"
-         (List.length tiers))
+  check_kind "failover-t" Cascade_strategy.Failover;
+  (* [priority_tier] is retired: declarative profiles no longer carry a
+     per-profile strategy, so every profile resolves to the sole surviving
+     [Failover] strategy. *)
+  check_kind "priority-t" Cascade_strategy.Failover
 ;;
 
 (* --- Multiple errors accumulated --- *)
@@ -857,41 +714,6 @@ let test_duplicate_routes () =
   has_duplicate_route "dup" catalog.errors
 ;;
 
-(* --- Empty tier-group produces empty provider_configs --- *)
-
-let test_empty_tier_group () =
-  let toml =
-    {|
-[providers.cli_tool_d]
-protocol = "provider_a-cli"
-command = "agent_llm_a"
-
-[models.haiku]
-max-context = 200000
-api-name = "model-a-haiku"
-
-[cli_tool_d.haiku]
-
-[tier.real]
-members = ["cli_tool_d.haiku"]
-strategy = "failover"
-
-[tier-group.empty]
-tiers = ["real"]
-strategy = "priority_tier"
-|}
-  in
-  let catalog = adapt_toml toml in
-  (* tier-group.empty has tier "real" with 1 member — not actually empty *)
-  check
-    bool
-    "has tier-group.empty profile"
-    true
-    (List.exists
-       (fun (p : adapted_profile) -> p.name = "tier-group.empty")
-       catalog.profiles)
-;;
-
 (* --- Test suite --- *)
 
 let () =
@@ -901,10 +723,8 @@ let () =
       , [ test_case "structure" `Quick test_valid_catalog_structure
         ; test_case "tier profiles" `Quick test_valid_tier_profiles
         ; test_case "tier members resolved" `Quick test_valid_tier_members_resolved
-        ; test_case "tier-group flattened" `Quick test_valid_tier_group_flattened
         ; test_case "routes" `Quick test_valid_routes
         ; test_case "system targets" `Quick test_valid_system_targets
-        ; test_case "default profile" `Quick test_valid_default_profile
         ; test_case
             "registered HTTP provider uses TOML endpoint"
             `Quick
@@ -937,17 +757,11 @@ let () =
     ; ( "errors"
       , [ test_case "unknown provider" `Quick test_unknown_provider
         ; test_case "unknown model" `Quick test_unknown_model
-        ; test_case "alias parent missing" `Quick test_alias_parent_missing
         ; test_case "multiple errors" `Quick test_multiple_errors
         ; test_case "duplicate routes" `Quick test_duplicate_routes
         ] )
     ; ( "strategy"
       , [ test_case "supported variants" `Quick test_strategy_mapping
-        ; test_case
-            "provider_d-http tier-group keys are endpoint-scoped"
-            `Quick
-            test_provider_d_http_tier_group_uses_endpoint_scoped_health_keys
         ] )
-    ; "edge_cases", [ test_case "empty tier-group" `Quick test_empty_tier_group ]
     ]
 ;;

@@ -95,11 +95,6 @@ let mk_ctx ?(health = H.create ())
   { health; capacity; now; rand_int = rand;
     keeper_name; cascade_name = Cascade_name.of_string_exn cascade_name }
 
-let mk_t ?(cycle = S.default_cycle_policy)
-         ?(tiers = [])
-         kind : S.t =
-  { kind; cycle; tiers }
-
 (* ── S1 Failover ─────────────────────────────────────────────── *)
 
 let test_failover_preserves_order () =
@@ -185,8 +180,7 @@ let test_parse_kind_known () =
       check string ("parse " ^ s) (S.kind_to_string expected) (S.kind_to_string k)
     | Error msg -> fail (Printf.sprintf "expected Ok, got Error %s" msg)
   in
-  check_ok "failover" S.Failover;
-  check_ok "priority_tier" S.Priority_tier
+  check_ok "failover" S.Failover
 
 let string_contains haystack needle =
   let nlen = String.length needle in
@@ -210,7 +204,7 @@ let test_parse_config_kind_supported () =
   check
     (list string)
     "config kind strings"
-    [ "failover"; "priority_tier" ]
+    [ "failover" ]
     S.config_kind_strings;
   let check_ok s expected =
     match S.parse_config_kind s with
@@ -218,12 +212,12 @@ let test_parse_config_kind_supported () =
       check string ("parse config " ^ s) (S.kind_to_string expected) (S.kind_to_string k)
     | Error msg -> fail (Printf.sprintf "expected Ok, got Error %s" msg)
   in
-  check_ok "failover" S.Failover;
-  check_ok "priority_tier" S.Priority_tier
+  check_ok "failover" S.Failover
 
 let test_parse_config_kind_retired_rejected () =
   let rejected =
-    [ "capacity_aware"
+    [ "priority_tier"  (* retired: tier routing removed *)
+    ; "capacity_aware"
     ; "weighted_random"
     ; "circuit_breaker_cycling"
     ; "sticky"
@@ -245,7 +239,7 @@ let test_parse_config_kind_retired_rejected () =
            bool
            ("config error mentions supported kinds for " ^ raw)
            true
-           (string_contains msg "failover" && string_contains msg "priority_tier"))
+           (string_contains msg "failover"))
     rejected
 
 (* ── Cascade_client_capacity ─────────────────────────────────── *)
@@ -438,75 +432,6 @@ let test_client_capacity_json_exposes_provenance () =
   check string "retention scope" "cascade_client_capacity"
     (json_string "scope" retention);
   check string "store kind" "process_registry" (json_string "store_kind" retention)
-
-(* ── Phase B: Priority_tier (S5) ───────────────────────────── *)
-
-let test_priority_tier_picks_first_tier () =
-  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
-  let strat = mk_t S.Priority_tier
-      ~tiers:[["a"]; ["b"; "c"]]
-  in
-  let ctx = mk_ctx () in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "cycle 0 → tier 0 (a only)" ["a"] (names ordered)
-
-let test_priority_tier_advances_with_cycle () =
-  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
-  let strat = mk_t S.Priority_tier
-      ~tiers:[["a"]; ["b"; "c"]]
-  in
-  let ctx = mk_ctx () in
-  let cycle1 = S.order_candidates strat ~adapter ~ctx ~cycle:1 cands in
-  check (list string) "cycle 1 → tier 1 (b, c)" ["b"; "c"] (names cycle1)
-
-let test_priority_tier_clamps_overflow () =
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let strat = mk_t S.Priority_tier ~tiers:[["a"]; ["b"]] in
-  let ctx = mk_ctx () in
-  let cycle99 = S.order_candidates strat ~adapter ~ctx ~cycle:99 cands in
-  check (list string) "cycle ≥ tiers count → last tier" ["b"] (names cycle99)
-
-let test_priority_tier_capacity_filter () =
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let table = [
-    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
-  ] in
-  let strat = mk_t S.Priority_tier ~tiers:[["a"; "b"]] in
-  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "tier 0 with 'a' busy → only 'b'" ["b"] (names ordered)
-
-let test_priority_tier_starvation_guard () =
-  (* All tier candidates report capacity=0.  Without the guard the
-     cascade would exit empty and surface as "all candidates filtered
-     after N cycle(s)"; with it, the tier list itself is returned so
-     at least one real call is attempted. *)
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let table = [
-    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
-    (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;
-  ] in
-  let strat = mk_t S.Priority_tier ~tiers:[["a"; "b"]] in
-  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "all-busy tier → fall through with tier list"
-    ["a"; "b"] (names ordered)
-
-let test_priority_tier_starvation_guard_dedupes_full_shared_capacity_key () =
-  let cands =
-    [
-      { name = "a"; url = "https://shared.example/v1" };
-      { name = "b"; url = "https://shared.example/v1" };
-    ]
-  in
-  let table =
-    [ "https://shared.example/v1", mk_capacity_info ~total:1 ~active:1 ]
-  in
-  let strat = mk_t S.Priority_tier ~tiers:[["a"; "b"]] in
-  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "all-busy shared key → one representative"
-    ["a"] (names ordered)
 
 (* ── Cascade_state auto-rotation primitive ───────────────────── *)
 
@@ -889,7 +814,7 @@ let test_trace_prometheus_counter_increments () =
   ST.record (mk_trace_event ~cascade_name:"tier.primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
   ST.record (mk_trace_event ~cascade_name:"tier.nick0cave"
-               ~strategy:"priority_tier"
+               ~strategy:"failover"
                ~kind:ST.Filtered_empty ~backoff_ms:500 ());
   let text = Masc_mcp.Prometheus.to_prometheus_text () in
   let ordered =
@@ -899,13 +824,13 @@ let test_trace_prometheus_counter_increments () =
   in
   let filtered =
     find_strategy_counter_value text
-      ~cascade:"tier.nick0cave" ~strategy:"priority_tier"
+      ~cascade:"tier.nick0cave" ~strategy:"failover"
       ~kind:"filtered_empty"
     |> Option.value ~default:0.0
   in
   check bool "primary/failover/ordered advanced by >= 2"
     true (ordered >= before +. 2.0);
-  check bool "nick0cave/priority_tier/filtered_empty >= 1"
+  check bool "nick0cave/failover/filtered_empty >= 1"
     true (filtered >= 1.0)
 
 let test_strategy_trace_json_exposes_provenance () =
@@ -1002,20 +927,6 @@ let () =
         test_snapshot_reflects_active_acquires;
       test_case "dashboard JSON exposes provenance" `Quick
         test_client_capacity_json_exposes_provenance;
-    ];
-    "priority_tier", [
-      test_case "cycle 0 picks first tier" `Quick
-        test_priority_tier_picks_first_tier;
-      test_case "cycle advances with tier index" `Quick
-        test_priority_tier_advances_with_cycle;
-      test_case "cycle overflow clamps to last tier" `Quick
-        test_priority_tier_clamps_overflow;
-      test_case "tier respects capacity filter" `Quick
-        test_priority_tier_capacity_filter;
-      test_case "all-busy tier falls through (starvation guard)" `Quick
-        test_priority_tier_starvation_guard;
-      test_case "all-busy shared key falls through once" `Quick
-        test_priority_tier_starvation_guard_dedupes_full_shared_capacity_key;
     ];
     "cascade_state", [
       test_case "round_robin bound<=0 returns 0" `Quick

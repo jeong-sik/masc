@@ -49,7 +49,7 @@ OutcomeSet == {"in_progress", "accepted", "exhausted"}
 \* test. The model below abstracts over candidate ordering, but the
 \* exported strategy kind set still must not drift from
 \* lib/cascade/cascade_strategy.ml.
-StrategyKindSet == {"failover", "priority_tier"}
+StrategyKindSet == {"failover"}
 NoneProvider == "_none_"
 ASSUME NoneProvider \notin Candidates
 

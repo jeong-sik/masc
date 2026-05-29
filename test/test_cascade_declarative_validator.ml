@@ -26,12 +26,6 @@ let has_rule_at (rule : string) (path : string) (errs : validation_error list) =
 let no_errors (errs : validation_error list) =
   check int "no errors" 0 (List.length errs)
 
-let has_parse_error_at (path : string) (errs : parse_error list) =
-  check bool
-    ("has parse error at " ^ path)
-    true
-    (List.exists (fun (e : parse_error) -> e.path = path) errs)
-
 let validate_toml (toml : string) : validation_error list =
   match parse_string toml with
   | Ok cfg -> validate cfg
@@ -78,24 +72,14 @@ max-input = 4096
 [ollama.qwen3-8b]
 max-concurrent = 1
 
-[tier.rerank]
-members = ["agent_llm_a-code.haiku.for-scoring"]
-strategy = "failover"
+[profiles.primary]
+provider_filter = "agent_llm_a-code"
 
-[tier.primary]
-members = ["agent_llm_a-code.sonnet", "agent_llm_a-code.haiku"]
-strategy = "failover"
-
-[tier.local]
-members = ["ollama.qwen3-8b"]
-strategy = "failover"
-
-[tier-group.primary]
-tiers = ["primary", "local"]
-strategy = "priority_tier"
+[profiles.local]
+provider_filter = "ollama"
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "agent_llm_a-code.haiku"
 
 [system.governance]
 target = "agent_llm_a-code.haiku.for-scoring"
@@ -207,75 +191,6 @@ max-input = 4096
   let errs = validate_toml toml in
   no_errors errs
 
-(* --- R5: Tier member does not resolve --- *)
-
-let test_r5_unknown_tier_member () =
-  let toml = {|
-[providers.agent_llm_a-code]
-protocol = "provider_a-cli"
-command = "agent_llm_a"
-
-[models.haiku]
-max-context = 200000
-
-[agent_llm_a-code.haiku]
-is-default = true
-
-[tier.bad-tier]
-members = ["agent_llm_a-code.haiku", "nonexistent.binding"]
-strategy = "failover"
-|} in
-  let errs = validate_toml toml in
-  has_rule "R5" errs
-
-let test_r5_alias_member_ok () =
-  let toml = {|
-[providers.agent_llm_a-code]
-protocol = "provider_a-cli"
-command = "agent_llm_a"
-
-[models.haiku]
-max-context = 200000
-
-[agent_llm_a-code.haiku]
-is-default = true
-max-concurrent = 1
-
-[agent_llm_a-code.haiku.alias-a]
-max-input = 4096
-
-[tier.t]
-members = ["agent_llm_a-code.haiku.alias-a"]
-strategy = "failover"
-|} in
-  let errs = validate_toml toml in
-  no_errors errs
-
-(* --- R6: Tier-group references unknown tier --- *)
-
-let test_r6_unknown_tier () =
-  let toml = {|
-[providers.agent_llm_a-code]
-protocol = "provider_a-cli"
-command = "agent_llm_a"
-
-[models.haiku]
-max-context = 200000
-
-[agent_llm_a-code.haiku]
-is-default = true
-
-[tier.real]
-members = ["agent_llm_a-code.haiku"]
-strategy = "failover"
-
-[tier-group.broken]
-tiers = ["real", "phantom"]
-strategy = "failover"
-|} in
-  let errs = validate_toml toml in
-  has_rule "R6" errs
-
 (* --- R7: Route target does not resolve --- *)
 
 let test_r7_unknown_route_target () =
@@ -311,29 +226,6 @@ max-concurrent = 1
 
 [routes.direct]
 target = "agent_llm_a-code.haiku"
-|} in
-  let errs = validate_toml toml in
-  no_errors errs
-
-let test_r7_route_to_tier () =
-  let toml = {|
-[providers.agent_llm_a-code]
-protocol = "provider_a-cli"
-command = "agent_llm_a"
-
-[models.haiku]
-max-context = 200000
-
-[agent_llm_a-code.haiku]
-is-default = true
-max-concurrent = 1
-
-[tier.primary]
-members = ["agent_llm_a-code.haiku"]
-strategy = "failover"
-
-[routes.via-tier]
-target = "tier.primary"
 |} in
   let errs = validate_toml toml in
   no_errors errs
@@ -451,191 +343,6 @@ target = "no.such.binding"
   has_rule "R8" errs;
   check bool "multiple errors" true (List.length errs >= 3)
 
-(* --- R10: Strategy-field consistency --- *)
-
-let test_r10_cycle_policy_on_wrong_strategy () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-max-cycles = 3
-backoff-base-ms = 500
-backoff-cap-ms = 10000
-|} in
-  let errs = validate_toml toml in
-  has_rule_at "R10" "tier.t.cycle-policy" errs
-
-let test_retired_cycle_policy_strategy_rejected_by_parser () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "circuit_breaker_cycling"
-max-cycles = 3
-backoff-base-ms = 500
-backoff-cap-ms = 10000
-|} in
-  match parse_string toml with
-  | Ok _ -> Alcotest.fail "expected retired strategy to be rejected"
-  | Error errs -> has_parse_error_at "tier.t.strategy" errs
-
-let test_r10_sticky_ttl_on_wrong_strategy () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-sticky-ttl-ms = 600000
-|} in
-  let errs = validate_toml toml in
-  has_rule_at "R10" "tier.t.sticky-ttl-ms" errs
-
-let test_retired_sticky_strategy_rejected_by_parser () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "sticky"
-sticky-ttl-ms = 600000
-|} in
-  match parse_string toml with
-  | Ok _ -> Alcotest.fail "expected retired strategy to be rejected"
-  | Error errs -> has_parse_error_at "tier.t.strategy" errs
-
-let test_r10_scoring_on_wrong_strategy () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-latency-baseline-ms = 200.0
-rate-limit-recency-window-s = 60.0
-rate-limit-decay-base = 0.5
-rate-limit-skip-after = 3
-server-error-recency-window-s = 120.0
-server-error-decay-base = 0.3
-server-error-skip-after = 5
-|} in
-  let errs = validate_toml toml in
-  has_rule_at "R10" "tier.t.scoring-params" errs
-
-let test_retired_scoring_strategy_rejected_by_parser () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "weighted_random"
-latency-baseline-ms = 200.0
-rate-limit-recency-window-s = 60.0
-rate-limit-decay-base = 0.5
-rate-limit-skip-after = 3
-server-error-recency-window-s = 120.0
-server-error-decay-base = 0.3
-server-error-skip-after = 5
-|} in
-  match parse_string toml with
-  | Ok _ -> Alcotest.fail "expected retired strategy to be rejected"
-  | Error errs -> has_parse_error_at "tier.t.strategy" errs
-
-let test_r10_no_strategy_fields_is_ok () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-|} in
-  let errs = validate_toml toml in
-  no_errors errs
-
-let test_r10_multiple_mismatches () =
-  let toml = {|
-[providers.p]
-protocol = "provider_a-cli"
-command = "c"
-
-[models.m]
-max-context = 4096
-
-[p.m]
-max-concurrent = 1
-
-[tier.t]
-members = ["p.m"]
-strategy = "failover"
-max-cycles = 3
-backoff-base-ms = 500
-backoff-cap-ms = 10000
-sticky-ttl-ms = 600000
-|} in
-  let errs = validate_toml toml in
-  has_rule "R10" errs;
-  check bool "multiple R10 errors" true
-    (List.length (List.filter (fun e -> e.rule = "R10") errs) >= 2)
-
 (* --- Test suite --- *)
 
 (* --- R12: Protocol ↔ transport consistency --- *)
@@ -721,17 +428,9 @@ let () =
         test_case "max-input exceeds max-context" `Quick test_r4_max_input_exceeds;
         test_case "max-input within max-context" `Quick test_r4_max_input_ok;
       ];
-      "R5_tier_members", [
-        test_case "unknown tier member" `Quick test_r5_unknown_tier_member;
-        test_case "alias as tier member" `Quick test_r5_alias_member_ok;
-      ];
-      "R6_tier_group_refs", [
-        test_case "unknown tier in group" `Quick test_r6_unknown_tier;
-      ];
       "R7_route_targets", [
         test_case "unknown route target" `Quick test_r7_unknown_route_target;
         test_case "route to binding" `Quick test_r7_route_to_binding;
-        test_case "route to tier" `Quick test_r7_route_to_tier;
       ];
       "R8_system_targets", [
         test_case "unknown system target" `Quick test_r8_unknown_system_target;
@@ -743,19 +442,6 @@ let () =
       ];
       "multi", [
         test_case "multiple errors at once" `Quick test_multiple_errors;
-      ];
-      "R10_strategy_fields", [
-        test_case "cycle_policy on wrong strategy" `Quick test_r10_cycle_policy_on_wrong_strategy;
-        test_case "retired cycle_policy strategy rejected" `Quick
-          test_retired_cycle_policy_strategy_rejected_by_parser;
-        test_case "sticky_ttl on wrong strategy" `Quick test_r10_sticky_ttl_on_wrong_strategy;
-        test_case "retired sticky strategy rejected" `Quick
-          test_retired_sticky_strategy_rejected_by_parser;
-        test_case "scoring on wrong strategy" `Quick test_r10_scoring_on_wrong_strategy;
-        test_case "retired scoring strategy rejected" `Quick
-          test_retired_scoring_strategy_rejected_by_parser;
-        test_case "no strategy fields is ok" `Quick test_r10_no_strategy_fields_is_ok;
-        test_case "multiple mismatches" `Quick test_r10_multiple_mismatches;
       ];
       "R12_protocol_transport", [
         test_case "cli protocol with cli transport ok" `Quick test_r12_cli_protocol_with_cli_transport;

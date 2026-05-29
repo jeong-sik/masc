@@ -845,12 +845,12 @@ let () =
           if not (List.mem actual C.valid_kind_strings) then
             Alcotest.failf "kind_to_string %S not in valid_kind_strings" actual)
           C.all_kinds;
-        Alcotest.(check int) "count" 2 (List.length C.all_kinds);
-        Alcotest.(check int) "strings count" 2
+        Alcotest.(check int) "count" 1 (List.length C.all_kinds);
+        Alcotest.(check int) "strings count" 1
           (List.length C.valid_kind_strings));
       Alcotest.test_case "valid_kind_strings pinned to wire format" `Quick (fun () ->
         Alcotest.(check (list string)) "wire-format names"
-          [ "failover"; "priority_tier" ]
+          [ "failover" ]
           Masc_mcp.Cascade_strategy.valid_kind_strings);
       Alcotest.test_case "parse_kind error mentions every valid kind" `Quick (fun () ->
         let module C = Masc_mcp.Cascade_strategy in

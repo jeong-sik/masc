@@ -295,7 +295,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String "internal_contract_rejected") -> (
           match string_opt_of_assoc "reason" json with
           | Some reason -> Some (Internal_contract_rejected { reason })
-          | _ -> None)
+          | None -> None)
       | _ -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 

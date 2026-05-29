@@ -489,7 +489,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           acc)
     empty_metrics_summary lines
 
-
 let action_source_opt_member json =
   match Safe_ops.json_string_opt "action_source" json with
   | Some _ as value -> value

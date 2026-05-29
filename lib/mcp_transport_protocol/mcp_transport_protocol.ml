@@ -46,7 +46,7 @@ let get_id req = match req.id with Some id -> id | None -> `Null
 
 let is_valid_request_id = function
   | `Null | `String _ | `Int _ | `Intlit _ | `Float _ -> true
-  | _ -> false
+  | `Bool _ | `Assoc _ | `List _ -> false
 
 let validate_initialize_params params =
   let ( let* ) = Result.bind in

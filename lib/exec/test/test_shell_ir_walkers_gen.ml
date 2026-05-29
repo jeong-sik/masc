@@ -863,7 +863,72 @@ let test_posix_end_of_options () =
   in
   (match curl with
    | W (Curl { url = "-url-path"; follow_redirects = true; _ }) -> ()
-   | w -> Alcotest.failf "Curl --: expected url=-url-path follow_redirects=true, got %a" pp w)
+   | w -> Alcotest.failf "Curl --: expected url=-url-path follow_redirects=true, got %a" pp w);
+  (* Git_commit: -m msg -- -file (after --, args are ignored) *)
+  let git_commit =
+    of_simple { (base "git") with args = [ lit "commit"; lit "-m"; lit "msg"; lit "--"; lit "-file" ] }
+  in
+  (match git_commit with
+   | W (Git_commit { message = "msg"; _ }) -> ()
+   | w -> Alcotest.failf "Git_commit --: expected message=msg, got %a" pp w);
+  (* Git_push: -f -- origin main *)
+  let git_push =
+    of_simple { (base "git") with args = [ lit "push"; lit "-f"; lit "--"; lit "origin"; lit "main" ] }
+  in
+  (match git_push with
+   | W (Git_push { force = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "Git_push --: expected force=true remote=origin branch=main, got %a" pp w);
+  (* Git_pull: --rebase -- origin main *)
+  let git_pull =
+    of_simple { (base "git") with args = [ lit "pull"; lit "--rebase"; lit "--"; lit "origin"; lit "main" ] }
+  in
+  (match git_pull with
+   | W (Git_pull { rebase = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "Git_pull --: expected rebase=true remote=origin branch=main, got %a" pp w);
+  (* Git_diff: --stat -- -file1 -file2 *)
+  let git_diff =
+    of_simple { (base "git") with args = [ lit "diff"; lit "--stat"; lit "--"; lit "-file1"; lit "-file2" ] }
+  in
+  (match git_diff with
+   | W (Git_diff { stat = true; paths = [ "-file1"; "-file2" ]; _ }) -> ()
+   | w -> Alcotest.failf "Git_diff --: expected stat=true paths=[-file1;-file2], got %a" pp w);
+  (* Date: -u -- +%Y-%m-%d *)
+  let date =
+    of_simple { (base "date") with args = [ lit "-u"; lit "--"; lit "+%Y-%m-%d" ] }
+  in
+  (match date with
+   | W (Date { format = Some "+%Y-%m-%d"; utc = true; _ }) -> ()
+   | w -> Alcotest.failf "Date --: expected format=+%%Y-%%m-%%d utc=true, got %a" pp w);
+  (* Hostname: -s -- *)
+  let hostname =
+    of_simple { (base "hostname") with args = [ lit "-s"; lit "--" ] }
+  in
+  (match hostname with
+   | W (Hostname { short = true; _ }) -> ()
+   | w -> Alcotest.failf "Hostname --: expected short=true, got %a" pp w);
+  (* Uname: -a -- *)
+  let uname =
+    of_simple { (base "uname") with args = [ lit "-a"; lit "--" ] }
+  in
+  (match uname with
+   | W (Uname { all = true; _ }) -> ()
+   | w -> Alcotest.failf "Uname --: expected all=true, got %a" pp w);
+  (* Ps: -ef -- *)
+  let ps =
+    of_simple { (base "ps") with args = [ lit "-ef"; lit "--" ] }
+  in
+  (match ps with
+   | W (Ps { all = true; full = true; _ }) -> ()
+   | w -> Alcotest.failf "Ps --: expected all=true full=true, got %a" pp w);
+  (* Gh: pr create --draft -- --extra-flag *)
+  let gh =
+    of_simple { (base "gh") with args = [ lit "pr"; lit "create"; lit "--draft"; lit "--"; lit "--extra-flag" ] }
+  in
+  (match gh with
+   | W (Gh { subcommand = "pr"; action = Some "create"; draft = true; rest; _ }) ->
+     if not (List.mem "--extra-flag" rest)
+     then Alcotest.failf "Gh --: expected --extra-flag in rest, got rest=[%s]" (String.concat "; " rest)
+   | w -> Alcotest.failf "Gh --: expected subcommand=pr action=create draft=true, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)

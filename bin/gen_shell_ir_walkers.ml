@@ -248,6 +248,7 @@ let rec parse short = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_status { short }))
   | "-s" :: rest | "--short" :: rest -> parse true rest
   | "--porcelain" :: rest -> parse true rest
+  | "--" :: rest -> parse short rest
   | _ :: rest -> parse short rest
 in
 parse false args|}
@@ -1023,6 +1024,9 @@ let rec parse stat cached paths = function
   | "--stat" :: rest -> parse true cached paths rest
   | "--cached" :: rest | "--staged" :: rest -> parse stat true paths rest
   | "--name-only" :: rest | "--name-status" :: rest -> parse stat cached paths rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining args are all paths *)
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_diff { stat; cached; paths = List.rev paths @ rest }))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse stat cached paths rest
@@ -1085,6 +1089,7 @@ let rec parse oneline max_count = function
     let c = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse oneline (Some c) rest
   | "--graph" :: rest | "--all" :: rest | "--decorate" :: rest -> parse oneline max_count rest
+  | "--" :: rest -> parse oneline max_count rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse oneline max_count rest
@@ -1173,6 +1178,7 @@ let rec parse message amend = function
        (match rest with
         | m :: rest' -> parse (Some m) !has_a rest'
         | _ -> None))
+  | "--" :: rest -> parse message amend rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse message amend rest
@@ -1229,6 +1235,12 @@ let rec parse force force_with_lease set_upstream remote branch = function
       | _ -> ()
     done;
     parse !f' force_with_lease !u' remote branch rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining args are all positional *)
+    (match rest with
+     | [ r; b ] -> parse force force_with_lease set_upstream (Some r) (Some b) []
+     | [ r ] -> parse force force_with_lease set_upstream (Some r) branch []
+     | _ -> parse force force_with_lease set_upstream remote branch [])
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse force force_with_lease set_upstream remote branch rest
@@ -1271,6 +1283,11 @@ let rec parse rebase remote branch = function
   | "--rebase" :: rest -> parse true remote branch rest
   | "--ff-only" :: rest -> parse rebase remote branch rest
   | "--no-rebase" :: rest -> parse false remote branch rest
+  | "--" :: rest ->
+    (match rest with
+     | [ r; b ] -> parse rebase (Some r) (Some b) []
+     | [ r ] -> parse rebase (Some r) branch []
+     | _ -> parse rebase remote branch [])
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse rebase remote branch rest
@@ -1595,6 +1612,11 @@ parse false false None None args|}
 let rec parse utc format = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Date { format; utc }))
   | "-u" :: rest | "--utc" :: rest | "--universal" :: rest -> parse true format rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: next arg is format string *)
+    (match rest with
+     | fmt :: _ -> parse utc (Some fmt) []
+     | _ -> parse utc format [])
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse utc format rest
@@ -1887,6 +1909,7 @@ let rec parse short = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Hostname { short }))
   | "-s" :: rest -> parse true rest
   | "--short" :: rest -> parse true rest
+  | "--" :: rest -> parse short rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse short rest
@@ -2210,6 +2233,7 @@ let rec parse all kn rel mach = function
   | "-s" :: rest | "--kernel-name" :: rest -> parse all true rel mach rest
   | "-r" :: rest | "--release" :: rest -> parse all kn true mach rest
   | "-m" :: rest | "--machine" :: rest -> parse all kn rel true rest
+  | "--" :: rest -> parse all kn rel mach rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
@@ -2268,6 +2292,7 @@ let rec parse all full user = function
   | "-e" :: rest | "-A" :: rest | "--all" :: rest -> parse true full user rest
   | "-f" :: rest | "--full" :: rest -> parse all true user rest
   | "-u" :: u :: rest | "--user" :: u :: rest when not (String.length u > 0 && u.[0] = '-') -> parse all full (Some u) rest
+  | "--" :: rest -> parse all full user rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
@@ -3436,6 +3461,9 @@ let rec parse subcmd act draft squash del_branch body title rest = function
           (match args with
            | _ :: rest' -> parse subcmd act draft squash del_branch body title rest rest'
            | [] -> parse subcmd act draft squash del_branch body title rest args)
+        | "--" ->
+          (* POSIX end-of-options: remaining args go to rest *)
+          parse subcmd act draft squash del_branch body title (List.rev args @ rest) []
         | _ when String.length arg > 1 && arg.[0] = '-' && arg.[1] = '-' ->
           (match String.index_opt arg '=' with
            | Some _ -> parse subcmd act draft squash del_branch body title rest args

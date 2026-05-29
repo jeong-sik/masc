@@ -274,12 +274,22 @@ let to_yojson
 
 let ( let* ) = Result.bind
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+
 let expect_assoc ~where = function
   | `Assoc fields -> Ok fields
   | other ->
     Error
       (Printf.sprintf "%s: expected JSON object (received %s)" where
-         (Json_util.kind_name other))
+         (json_kind_name other))
 
 let find_field fields name = List.assoc_opt name fields
 
@@ -289,7 +299,7 @@ let require_string fields name =
   | Some other ->
     Error
       (Printf.sprintf "field '%s' must be a string (received %s)" name
-         (Json_util.kind_name other))
+         (json_kind_name other))
   | None -> Error (Printf.sprintf "missing required string field '%s'" name)
 
 let require_int fields name =
@@ -298,7 +308,7 @@ let require_int fields name =
   | Some other ->
     Error
       (Printf.sprintf "field '%s' must be an integer (received %s)" name
-         (Json_util.kind_name other))
+         (json_kind_name other))
   | None -> Error (Printf.sprintf "missing required int field '%s'" name)
 
 let optional_string fields name =
@@ -308,7 +318,7 @@ let optional_string fields name =
   | Some other ->
     Error
       (Printf.sprintf "field '%s' must be a string when present (received %s)"
-         name (Json_util.kind_name other))
+         name (json_kind_name other))
 
 let optional_int fields name =
   match find_field fields name with
@@ -317,7 +327,7 @@ let optional_int fields name =
   | Some other ->
     Error
       (Printf.sprintf "field '%s' must be an integer when present (received %s)"
-         name (Json_util.kind_name other))
+         name (json_kind_name other))
 
 let optional_bool fields name =
   match find_field fields name with
@@ -326,7 +336,7 @@ let optional_bool fields name =
   | Some other ->
     Error
       (Printf.sprintf "field '%s' must be a bool when present (received %s)"
-         name (Json_util.kind_name other))
+         name (json_kind_name other))
 
 let string_list fields name =
   match find_field fields name with
@@ -339,13 +349,13 @@ let string_list fields name =
         Error
           (Printf.sprintf
              "field '%s' must be a list of strings (received %s element)" name
-             (Json_util.kind_name bad))
+             (json_kind_name bad))
     in
     loop [] xs
   | Some other ->
     Error
       (Printf.sprintf "field '%s' must be a list (received %s)" name
-         (Json_util.kind_name other))
+         (json_kind_name other))
 
 let actor_of_yojson json =
   let* fields = expect_assoc ~where:"actor" json in
@@ -360,7 +370,7 @@ let range_of_yojson json =
   | `List [ `Int a; `Int b ] -> Ok (a, b)
   | `List xs ->
     let element_kinds =
-      String.concat ", " (List.map Json_util.kind_name xs)
+      String.concat ", " (List.map json_kind_name xs)
     in
     Error
       (Printf.sprintf
@@ -371,7 +381,7 @@ let range_of_yojson json =
     Error
       (Printf.sprintf
          "range must be a JSON array of two integers (received %s)"
-         (Json_util.kind_name other))
+         (json_kind_name other))
 
 let target_of_yojson json =
   let* fields = expect_assoc ~where:"target" json in
@@ -433,7 +443,7 @@ let intent_of_yojson json =
     | Some other ->
       Error
         (Printf.sprintf "intent.confidence must be a number (received %s)"
-           (Json_util.kind_name other))
+           (json_kind_name other))
     | None -> Error "intent.confidence is required"
   in
   Ok { stated_goal; inferred_intent; confidence }

@@ -689,7 +689,28 @@ let test_posix_end_of_options () =
   in
   (match uniq with
    | W (Uniq { count = true; file = Some "-duplicates.txt"; _ }) -> ()
-   | w -> Alcotest.failf "Uniq --: expected count=true file=-duplicates.txt, got %a" pp w)
+   | w -> Alcotest.failf "Uniq --: expected count=true file=-duplicates.txt, got %a" pp w);
+  (* Tar: -czf archive.tar.gz -- file1.txt file2.txt *)
+  let tar =
+    of_simple { (base "tar") with args = [ lit "-czf"; lit "archive.tar.gz"; lit "--"; lit "file1.txt"; lit "file2.txt" ] }
+  in
+  (match tar with
+   | W (Tar { action = `Create; compression = `Gzip; archive = "archive.tar.gz"; paths = [ "file1.txt"; "file2.txt" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --: expected Create Gzip archive.tar.gz paths=[file1.txt;file2.txt], got %a" pp w);
+  (* Make: -- install *)
+  let make =
+    of_simple { (base "make") with args = [ lit "--"; lit "install" ] }
+  in
+  (match make with
+   | W (Make { target = Some "install"; _ }) -> ()
+   | w -> Alcotest.failf "Make --: expected target=Some install, got %a" pp w);
+  (* Wget: -- https://example.com/file *)
+  let wget =
+    of_simple { (base "wget") with args = [ lit "--"; lit "https://example.com/file" ] }
+  in
+  (match wget with
+   | W (Wget { url = "https://example.com/file"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --: expected url=https://example.com/file, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)

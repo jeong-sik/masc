@@ -79,9 +79,7 @@ let is_keeper_checkpoints_get_path req_path =
 let is_keeper_runtime_trace_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_runtime_trace
 
-let trim_to_opt (value : string) =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+let trim_to_opt = String_util.trim_to_option
 
 let truncate_text ~max_chars text =
   let len = String.length text in
@@ -130,14 +128,7 @@ let extract_keeper_name_for_post req_path suffix =
 let json_string_member_opt = Json_util.get_string
 
 let json_string_list_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `List values ->
-    values
-    |> List.filter_map (function
-      | `String value when String.trim value <> "" -> Some value
-      | _ -> None)
-    |> Json_util.dedupe_keep_order
-  | _ -> []
+  Json_util.json_string_list_member name json |> Json_util.dedupe_keep_order
 
 let take_last limit values =
   let len = List.length values in

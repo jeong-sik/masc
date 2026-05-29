@@ -168,15 +168,11 @@ let generate_session_key () =
 
 (** Create identity from MCP request params *)
 let from_mcp_params params =
-  let module U = Yojson.Safe.Util in
-  (* #9788: normalize null/non-object payloads to empty assoc so U.member
-     below cannot raise Type_error and crash tools/call dispatch. *)
+  (* #9788: normalize null/non-object payloads to empty assoc so
+     Json_util.get_string below cannot raise Type_error and crash
+     tools/call dispatch. *)
   let params = match params with `Assoc _ -> params | _ -> `Assoc [] in
-  let get_opt key =
-    match U.member key params with
-    | `String s -> Some s
-    | _ -> None
-  in
+  let get_opt key = Json_util.get_string params key in
   let fallback_agent_name session_key =
     match classify_session_key_prefix session_key with
     | Empty_session_key -> "agent-anon"
@@ -199,11 +195,7 @@ let from_mcp_params params =
   in
   let user_id = get_opt "_user_id" in
   let room_id = get_opt "room" in
-  let capabilities =
-    match U.member "_capabilities" params with
-    | `List l -> List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l
-    | _ -> []
-  in
+  let capabilities = Json_util.get_string_list params "_capabilities" in
   let now = Time_compat.now () in
   {
     uuid = generate_uuid ~agent_name;

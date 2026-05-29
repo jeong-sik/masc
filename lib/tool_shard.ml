@@ -274,12 +274,7 @@ let active_shards_of_agent agent_name_opt =
 
 (** Execute tool_shard MCP tools. *)
 let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Safe.t =
-  let module U = Yojson.Safe.Util in
-  let read_required_string key =
-    match U.member key arguments with
-    | `String v when not (String.equal (String.trim v) "") -> Some v
-    | _ -> None
-  in
+  let read_required_string key = Json_util.get_string_nonempty arguments key in
   match tool_name with
   | "masc_tool_list" ->
     let agent_name = read_required_string "agent_name" in

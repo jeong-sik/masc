@@ -39,17 +39,17 @@ let criterion_of_yojson = function
        | Some (`String "contains") ->
            (match List.assoc_opt "value" fields with
             | Some (`String s) -> Ok (Contains s)
-            | _ -> Error "contains requires 'value' string field")
+            | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> Error "contains requires 'value' string field")
        | Some (`String "not_contains") ->
            (match List.assoc_opt "value" fields with
             | Some (`String s) -> Ok (Not_contains s)
-            | _ -> Error "not_contains requires 'value' string field")
+            | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> Error "not_contains requires 'value' string field")
        | Some (`String "custom") ->
            (match List.assoc_opt "description" fields with
             | Some (`String s) -> Ok (Custom s)
-            | _ -> Error "custom requires 'description' string field")
+            | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> Error "custom requires 'description' string field")
        | Some (`String t) -> Error (Printf.sprintf "unknown criterion type: %s" t)
-       | _ -> Error "criterion requires 'type' field")
+       | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> Error "criterion requires 'type' field")
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "criterion must be a JSON object"
 
 (** Verification verdict *)
@@ -76,18 +76,18 @@ let verdict_of_yojson = function
        | Some (`String "fail") ->
            let reason = match List.assoc_opt "reason" fields with
              | Some (`String s) -> s
-             | _ -> "no reason given"
+             | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> "no reason given"
            in
            Ok (Fail reason)
        | Some (`String "partial") ->
            let score = match List.assoc_opt "score" fields with
              | Some (`Float f) -> f
              | Some (`Int n) -> Float.of_int n
-             | _ -> 0.0
+             | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> 0.0
            in
            let reason = match List.assoc_opt "reason" fields with
              | Some (`String s) -> s
-             | _ -> "no reason given"
+             | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> "no reason given"
            in
            Ok (Partial (score, reason))
        | other ->
@@ -196,13 +196,13 @@ let request_of_yojson = function
       let get_string key =
         match List.assoc_opt key fields with
         | Some (`String s) -> Some s
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let get_float key =
         match List.assoc_opt key fields with
         | Some (`Float f) -> Some f
         | Some (`Int n) -> Some (Float.of_int n)
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
       in
       (match get_string "id", get_string "task_id", get_string "worker" with
        | Some id, Some task_id, Some worker ->
@@ -219,11 +219,11 @@ let request_of_yojson = function
                      Log.Misc.warn "[Verification] dropping invalid criterion: %s" msg;
                      None
                  ) l
-             | _ -> []
+             | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
            in
            let verifier = match List.assoc_opt "verifier" fields with
              | Some (`String s) -> Some s
-             | _ -> None
+             | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
            in
            let created_at = match get_float "created_at" with
              | Some f -> f
@@ -324,23 +324,23 @@ let evaluate_all output criteria =
   | [] -> Pass  (* No criteria = auto-pass *)
   | _ ->
       let results = List.map (evaluate_criterion output) criteria in
-      let fails = List.filter (function Fail _ -> true | _ -> false) results in
-      let partials = List.filter (function Partial _ -> true | _ -> false) results in
+      let fails = List.filter (function Fail _ -> true | Pass | Partial _ -> false) results in
+      let partials = List.filter (function Partial _ -> true | Pass | Fail _ -> false) results in
       if fails <> [] then
         let reasons = List.filter_map (function
           | Fail r -> Some r
-          | _ -> None
+          | Pass | Partial _ -> None
         ) fails in
         Fail (String.concat "; " reasons)
       else if partials <> [] then
         let scores = List.filter_map (function
           | Partial (s, _) -> Some s
-          | _ -> None
+          | Pass | Fail _ -> None
         ) partials in
         let avg = List.fold_left (+.) 0.0 scores /. Float.of_int (List.length scores) in
         let reasons = List.filter_map (function
           | Partial (_, r) -> Some r
-          | _ -> None
+          | Pass | Fail _ -> None
         ) partials in
         Partial (avg, String.concat "; " reasons)
       else

@@ -122,7 +122,7 @@ let extract_string_field key json =
   | `Assoc fields ->
     (match List.assoc_opt key fields with
     | Some (`String value) -> Some value
-    | _ -> None)
+    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let extract_int_field key json =
@@ -130,7 +130,7 @@ let extract_int_field key json =
   | `Assoc fields ->
     (match List.assoc_opt key fields with
     | Some (`Int value) -> Some value
-    | _ -> None)
+    | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let extract_clock_refs decision =
@@ -143,8 +143,8 @@ let source_clock_from_manifest manifest =
   | Some (`Assoc fields) ->
     (match List.assoc_opt "source_clock" fields with
     | Some (`String s) -> source_clock_of_string s
-    | _ -> None)
-  | _ -> None
+    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None
 
 let logical_ordering manifest =
   match extract_clock_refs manifest.decision with
@@ -152,20 +152,20 @@ let logical_ordering manifest =
     let parent_event_id =
       match List.assoc_opt "parent_event_id" fields with
       | Some (`String s) -> Some s
-      | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
     in
     let caused_by =
       match List.assoc_opt "caused_by" fields with
       | Some (`String s) -> Some s
-      | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
     in
     let logical_seq =
       match List.assoc_opt "logical_seq" fields with
       | Some (`Int i) -> Some i
-      | _ -> None
+      | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
     in
     { parent_event_id; caused_by; logical_seq }
-  | _ -> { parent_event_id = None; caused_by = None; logical_seq = None }
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> { parent_event_id = None; caused_by = None; logical_seq = None }
 
 let comparable_for_latency a b =
   match source_clock_from_manifest a, source_clock_from_manifest b with

@@ -15,6 +15,7 @@
 open Alcotest
 
 module R = Masc_mcp.Keeper_registry
+module Keeper_types_profile = Masc_mcp.Keeper_types_profile
 module Sup = Masc_mcp.Keeper_supervisor
 module KT = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
@@ -423,7 +424,7 @@ let test_fresh_presence_preserves_turn_failures () =
       cleanup_dir base_path)
     (fun () ->
       let config = Masc_mcp.Coord.default_config base_path in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "operator";
@@ -480,7 +481,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "tester";

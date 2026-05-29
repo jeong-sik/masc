@@ -42,7 +42,7 @@ let sample_board_event : WO.pending_board_event =
     latest_external_preview = None;
   }
 
-let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
+let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [
@@ -55,7 +55,7 @@ let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
-let minimal_meta : Masc_mcp.Keeper_types.keeper_meta = make_meta "test-keeper"
+let minimal_meta : Masc_mcp.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
 let test_task_verify_affordance_for_keeper () =
   let meta = { minimal_meta with mention_targets = [ "analyst" ] } in

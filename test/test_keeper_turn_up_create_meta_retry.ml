@@ -41,13 +41,13 @@ let make_meta ~name =
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
 let read_meta_exn config name =
-  match Keeper_types.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Ok (Some meta) -> meta
   | Ok None -> fail ("missing meta for " ^ name)
   | Error err -> fail ("read_meta failed: " ^ err)
 
 let write_meta_exn config meta =
-  match Keeper_types.write_meta config meta with
+  match Keeper_meta_store.write_meta config meta with
   | Ok () -> ()
   | Error err -> fail ("write_meta failed: " ^ err)
 

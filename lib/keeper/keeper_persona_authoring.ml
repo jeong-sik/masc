@@ -889,8 +889,8 @@ let handle_persona_generate ctx args =
                    ~temperature
                    ~max_tokens
                    ~approval:Approval_callbacks.auto_approve
-                   ~sw:ctx.sw
-                   ?net:ctx.net
+                   ~sw:ctx.Keeper_types_profile.sw
+                   ?net:ctx.Keeper_types_profile.net
                    ())
            with
            | Error err ->

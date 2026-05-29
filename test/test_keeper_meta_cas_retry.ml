@@ -1,6 +1,6 @@
 (** #9764/#9733/#9769: write_meta CAS retry semantics.
 
-    Verifies that [Keeper_types.write_meta_with_merge] with
+    Verifies that [Keeper_meta_store.write_meta_with_merge] with
     [Keeper_meta_merge.caller_wins]:
       - succeeds when no concurrent writer interferes
       - succeeds after N attempts when the disk version has advanced
@@ -59,23 +59,23 @@ let test_no_conflict_writes_first_attempt () =
     let m0 = make_meta ~name:"alpha" in
     (* Initial write — no existing file. *)
     (match
-       Keeper_types.write_meta_with_merge
+       Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.caller_wins config m0
      with
      | Ok () -> ()
      | Error e -> fail ("first write failed: " ^ e));
     (* Read what landed on disk and bump caller's version to match. *)
-    let disk = match Keeper_types.read_meta config "alpha" with
+    let disk = match Keeper_meta_store.read_meta config "alpha" with
       | Ok (Some m) -> m
       | _ -> fail "disk read failed"
     in
     let m1 = { disk with goal = "updated goal" } in
     match
-      Keeper_types.write_meta_with_merge
+      Keeper_meta_store.write_meta_with_merge
         ~merge:Keeper_meta_merge.caller_wins config m1
     with
     | Ok () ->
-      let after = match Keeper_types.read_meta config "alpha" with
+      let after = match Keeper_meta_store.read_meta config "alpha" with
         | Ok (Some m) -> m
         | _ -> fail "read after write failed"
       in
@@ -91,17 +91,17 @@ let test_retry_succeeds_after_concurrent_bump () =
     let config = Coord.default_config base_dir in
     ignore (Coord.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"beta" in
-    (match Keeper_types.write_meta ~force:true config m0 with
+    (match Keeper_meta_store.write_meta ~force:true config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
-    let caller_view = match Keeper_types.read_meta config "beta" with
+    let caller_view = match Keeper_meta_store.read_meta config "beta" with
       | Ok (Some m) -> m
       | _ -> fail "seed read failed"
     in
     (* Simulate a concurrent writer bumping the disk version while
        [caller_view] is held by the cycle-completion fiber. *)
     let racing = { caller_view with goal = "racing writer" } in
-    (match Keeper_types.write_meta config racing with
+    (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* Now the cycle attempts to write its own payload. CAS would fail
@@ -115,7 +115,7 @@ let test_retry_succeeds_after_concurrent_bump () =
         ()
     in
     (match
-       Keeper_types.write_meta_with_merge
+       Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.caller_wins config cycle_payload
      with
      | Ok () -> ()
@@ -126,7 +126,7 @@ let test_retry_succeeds_after_concurrent_bump () =
         ~labels:[("keeper_name", "beta")]
         ()
     in
-    let final = match Keeper_types.read_meta config "beta" with
+    let final = match Keeper_meta_store.read_meta config "beta" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
@@ -140,9 +140,9 @@ let test_is_version_conflict_error_classifies () =
   let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
   let other_msg = "failed to write meta /tmp/x: Permission denied" in
   check bool "classifies version conflict" true
-    (Keeper_types.is_version_conflict_error conflict_msg);
+    (Keeper_meta_store.is_version_conflict_error conflict_msg);
   check bool "rejects unrelated error" false
-    (Keeper_types.is_version_conflict_error other_msg)
+    (Keeper_meta_store.is_version_conflict_error other_msg)
 
 let () =
   run "Keeper_types CAS retry (#9764/#9733/#9769)"

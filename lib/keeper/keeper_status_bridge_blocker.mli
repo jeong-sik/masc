@@ -25,7 +25,7 @@ val runtime_blocker_surface_of_failure_reason :
   Keeper_registry.failure_reason -> runtime_blocker_surface option
 
 val is_cascade_exhausted_blocker_class : string -> bool
-val is_no_tool_capable_provider_blocker_class : string -> bool
+val is_no_tool_capable_blocker_class : string -> bool
 val is_completion_contract_blocker_class : string -> bool
 val is_provider_runtime_blocker_class : string -> bool
 val is_stale_watchdog_blocker_class : string -> bool

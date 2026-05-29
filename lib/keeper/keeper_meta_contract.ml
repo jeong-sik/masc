@@ -508,9 +508,9 @@ type keeper_meta =
   ; desires : string
   ; instructions : string
   ; (* -- Policy -- *)
-    sandbox_profile : sandbox_profile
+    sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
-  ; network_mode : network_mode
+  ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
   ; tool_access : tool_access
   ; tool_preset_source : string option

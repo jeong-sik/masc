@@ -112,7 +112,8 @@ let json ~agent_name () : Yojson.Safe.t =
             ("confidence", nm "confidence");
             ("note", nm "note");
             ("participants", `List participants);
-          ]))
+          ])
+        | _ -> [])
     | None -> []
   in
   `Assoc [

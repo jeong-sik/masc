@@ -131,7 +131,7 @@ let compute_metrics_window
           |> Option.map String.trim
           |> function Some s when s <> "" -> Some s | _ -> None
         in
-        let handoff_obj = Yojson.Safe.Util.member "handoff" j in
+        let handoff_obj = member "handoff" in
         let handoff_performed = Safe_ops.json_bool ~default:false "performed" handoff_obj in
         let handoff_prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff_obj in
         let handoff_new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff_obj in
@@ -140,7 +140,7 @@ let compute_metrics_window
           | Some value -> Some value
           | None -> Safe_ops.json_int_opt "to_generation" handoff_obj
         in
-        let usage_obj = Yojson.Safe.Util.member "usage" j in
+        let usage_obj = member "usage" in
         let input_tokens = Safe_ops.json_int_opt "input_tokens" usage_obj in
         let output_tokens = Safe_ops.json_int_opt "output_tokens" usage_obj in
         let total_tokens = Safe_ops.json_int_opt "total_tokens" usage_obj in
@@ -157,7 +157,7 @@ let compute_metrics_window
           Keeper_unified_metrics.work_kind_of_json j
           |> Option.value ~default:""
         in
-        let memory_check = Yojson.Safe.Util.member "memory_check" j in
+        let memory_check = member "memory_check" in
         let memory_performed = Safe_ops.json_bool ~default:false "performed" memory_check in
         let memory_query_kind = Safe_ops.json_string ~default:"none" "query_kind" memory_check in
         let memory_passed_now = Safe_ops.json_bool ~default:false "passed" memory_check in
@@ -166,21 +166,21 @@ let compute_metrics_window
         let memory_correction_applied_now = Safe_ops.json_bool ~default:false "correction_applied" memory_check in
         let memory_correction_success_now = Safe_ops.json_bool ~default:false "correction_success" memory_check in
         let memory_expected_topic = Safe_ops.json_string_opt "expected_topic" memory_check in
-        let proactive_obj = Yojson.Safe.Util.member "proactive" j in
+        let proactive_obj = member "proactive" in
         let proactive_fallback_applied_now = Safe_ops.json_bool ~default:false "fallback_applied" proactive_obj in
         let proactive_preview_now =
           Safe_ops.json_string_opt "preview" proactive_obj
           |> Option.map String.trim
           |> function Some s when s <> "" -> Some s | _ -> None
         in
-        let drift_obj = Yojson.Safe.Util.member "drift" j in
+        let drift_obj = member "drift" in
         let drift_applied_now = Safe_ops.json_bool ~default:false "applied" drift_obj in
         let drift_reason_now =
           Safe_ops.json_string_opt "reason" drift_obj
           |> Option.map String.trim
           |> function Some s when s <> "" -> Some s | _ -> None
         in
-        let auto_rules_obj = Yojson.Safe.Util.member "auto_rules" j in
+        let auto_rules_obj = member "auto_rules" in
         let auto_reflect_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "reflect" auto_rules_obj) "auto_reflect" j in
         let auto_plan_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "plan" auto_rules_obj) "auto_plan" j in
         let auto_compact_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "compact" auto_rules_obj) "auto_compact" j in
@@ -193,7 +193,7 @@ let compute_metrics_window
         let memory_notes_added_now = Safe_ops.json_int ~default:0 "memory_notes_added" j in
         let memory_top_kind_now = Safe_ops.json_string_opt "memory_top_kind" j in
         let memory_note_kinds =
-          match Yojson.Safe.Util.member "memory_note_kinds" j with
+          match member "memory_note_kinds" with
           | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some (String.trim s) | _ -> None) xs
           | _ -> []
         in
@@ -202,7 +202,7 @@ let compute_metrics_window
         let memory_compaction_dropped_notes_now = Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j in
         let memory_compaction_invalid_dropped_now = Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j in
         let tools_used =
-          match Yojson.Safe.Util.member "tools_used" j with
+          match member "tools_used" with
           | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some s | _ -> None) xs
           | _ -> []
         in
@@ -419,8 +419,8 @@ let compute_metrics_window
               ("latency_ms", `Int latency_ms);
               ("cost_usd", Json_util.float_opt_to_json cost_usd);
               ("model_used", `Null);
-              ("prompt_fingerprint", Yojson.Safe.Util.member "prompt_fingerprint" j);
-              ("prompt", Yojson.Safe.Util.member "prompt" j);
+              ("prompt_fingerprint", member "prompt_fingerprint");
+              ("prompt", member "prompt");
               ("compaction_before_tokens", `Int before_tokens);
               ("compaction_after_tokens", `Int after_tokens);
               ("compaction_saved_tokens", `Int saved_tokens);
@@ -442,7 +442,7 @@ let compute_metrics_window
               ("goal_alignment", Json_util.float_opt_to_json goal_alignment_opt);
               ("response_alignment", Json_util.float_opt_to_json response_alignment_opt);
               ("goal_drift", Json_util.float_opt_to_json goal_drift_opt);
-              ("reflection", Yojson.Safe.Util.member "reflection" j);
+              ("reflection", member "reflection");
               ("memory_performed", `Bool memory_performed);
               ("memory_query_kind", `String memory_query_kind);
               ("memory_passed", `Bool memory_passed_now);
@@ -459,9 +459,9 @@ let compute_metrics_window
 	              ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
 	              ("memory_expected_topic", Json_util.string_opt_to_json memory_expected_topic);
               ( "provider_timeout_plan",
-                Yojson.Safe.Util.member "provider_timeout_plan" j );
+                member "provider_timeout_plan" );
               ( "inference_telemetry",
-                Yojson.Safe.Util.member "inference_telemetry" j
+                member "inference_telemetry"
                 |> Keeper_hooks_oas.redact_inference_telemetry_json );
             ])
         in

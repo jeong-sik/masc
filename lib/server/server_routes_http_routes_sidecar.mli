@@ -194,12 +194,6 @@ val sidecar_attempt_path : base_path:string -> string -> string
 val read_desired_record : base_path:string -> string -> desired_record option
 val read_attempt_record : base_path:string -> string -> attempt_record option
 
-val isoish_now : unit -> string
-(** ISO-8601-ish timestamp used for [updated_at]. *)
-
-val isoish_at : float -> string
-(** ISO-8601-ish timestamp from a Unix epoch float. *)
-
 val ensure_parent_dir : string -> unit
 (** Create the parent directory of [path] if missing. *)
 

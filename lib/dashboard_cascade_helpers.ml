@@ -105,29 +105,16 @@ let invalid_assignments_for_public_profiles ~known_internal_profiles
     | None -> None)
 ;;
 
-let json_assoc_member key = function
-  | `Assoc fields -> Option.value (List.assoc_opt key fields) ~default:`Null
-  | _ -> `Null
-;;
-
-let json_string_list = function
-  | `List values ->
-    List.filter_map
-      (function
-        | `String value -> Some value
-        | _ -> None)
-      values
-  | _ -> []
-;;
+let member = Yojson.Safe.Util.member
 
 let invalid_profiles_of_rejection_json rejection_json =
-  match json_assoc_member "profiles" rejection_json with
+  match member "profiles" rejection_json with
   | `List profiles ->
     List.filter_map
       (fun profile_json ->
-         match json_assoc_member "name" profile_json with
+         match member "name" profile_json with
          | `String name ->
-           Some (name, json_string_list (json_assoc_member "errors" profile_json))
+           Some (name, Json_util.get_string_list profile_json "errors")
          | _ -> None)
       profiles
     |> invalid_profiles_with_internal_names

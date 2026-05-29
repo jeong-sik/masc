@@ -103,15 +103,15 @@ let make_type_field_error ~field ~constraint_violated ~expected ~received =
 ;;
 
 let parse_optional_horizon args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw when String.trim raw = "" -> Ok None
-  | `String raw ->
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) when String.trim raw = "" -> Ok None
+  | Some (`String raw) ->
     (match Goal_store.parse_horizon (Some raw) with
      | Some horizon -> Ok (Some horizon)
      | None ->
        Error (make_enum_field_error ~field ~allowed:goal_horizon_strings ~received:raw))
-  | json ->
+  | Some json ->
     Error
       (make_type_field_error
          ~field
@@ -121,15 +121,15 @@ let parse_optional_horizon args field =
 ;;
 
 let parse_optional_goal_status args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw when String.trim raw = "" -> Ok None
-  | `String raw ->
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) when String.trim raw = "" -> Ok None
+  | Some (`String raw) ->
     (match Goal_store.parse_goal_status (Some raw) with
      | Some status -> Ok (Some status)
      | None ->
        Error (make_enum_field_error ~field ~allowed:goal_status_strings ~received:raw))
-  | json ->
+  | Some json ->
     Error
       (make_type_field_error
          ~field
@@ -139,15 +139,15 @@ let parse_optional_goal_status args field =
 ;;
 
 let parse_optional_goal_phase args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw when String.trim raw = "" -> Ok None
-  | `String raw ->
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) when String.trim raw = "" -> Ok None
+  | Some (`String raw) ->
     (match Goal_store.parse_goal_phase (Some raw) with
      | Some phase -> Ok (Some phase)
      | None ->
        Error (make_enum_field_error ~field ~allowed:goal_phase_strings ~received:raw))
-  | json ->
+  | Some json ->
     Error
       (make_type_field_error
          ~field
@@ -184,9 +184,9 @@ let goal_upsert_lifecycle_error ~tool_name ~start_time field =
 ;;
 
 let parse_optional_priority args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `Int n ->
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`Int n) ->
     if n < 1 || n > 5
     then
       Error
@@ -197,7 +197,7 @@ let parse_optional_priority args field =
         ; received = Some (Int.to_string n)
         }
     else Ok (Some n)
-  | json ->
+  | Some json ->
     Error
       (make_type_field_error
          ~field
@@ -207,10 +207,10 @@ let parse_optional_priority args field =
 ;;
 
 let parse_optional_bool args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `Bool value -> Ok (Some value)
-  | json ->
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some json ->
     Error
       (make_type_field_error
          ~field
@@ -232,9 +232,9 @@ let is_noop_verifier_policy_json = function
 ;;
 
 let parse_optional_policy args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | json when is_noop_verifier_policy_json json -> Ok None
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some json when is_noop_verifier_policy_json json -> Ok None
   | json ->
     (match Goal_verification.goal_verifier_policy_of_yojson json with
      | Ok policy -> Ok (Some policy)
@@ -252,8 +252,8 @@ let parse_optional_policy args field =
 ;;
 
 let parse_optional_principal args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
   | json ->
     (match Goal_verification.goal_principal_of_yojson json with
      | Ok principal -> Ok (Some principal)
@@ -268,9 +268,9 @@ let parse_optional_principal args field =
 ;;
 
 let parse_optional_vote_decision args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw ->
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) ->
     (match
        String.trim raw
        |> String.lowercase_ascii
@@ -280,7 +280,7 @@ let parse_optional_vote_decision args field =
      | None ->
        Error
          (make_enum_field_error ~field ~allowed:goal_vote_decision_strings ~received:raw))
-  | json ->
+  | Some json ->
     Error
       (make_type_field_error
          ~field
@@ -290,9 +290,9 @@ let parse_optional_vote_decision args field =
 ;;
 
 let parse_optional_transition_action args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw ->
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) ->
     (match Goal_phase.parse_action raw with
      | Some action -> Ok (Some action)
      | None ->
@@ -301,7 +301,7 @@ let parse_optional_transition_action args field =
             ~field
             ~allowed:goal_transition_action_strings
             ~received:raw))
-  | json ->
+  | Some json ->
     Error
       (make_type_field_error
          ~field
@@ -356,8 +356,8 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
 ;;
 
 let parse_optional_string_list args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
   | `List values ->
     (try Ok (Some (List.map Yojson.Safe.Util.to_string values)) with
      | Eio.Cancel.Cancelled _ as e -> raise e
@@ -368,7 +368,7 @@ let parse_optional_string_list args field =
             ~constraint_violated:Type_string
             ~expected:"string[]"
             ~received:(Yojson.Safe.to_string (`List values))))
-  | json ->
+  | Some json ->
     Error
       (make_type_field_error
          ~field

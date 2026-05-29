@@ -1793,6 +1793,8 @@
 
 (include stanzas/test_shutdown_flag.inc)
 
+(include stanzas/test_log_file_sink_self_heal.inc)
+
 (include stanzas/test_executable_not_allowlisted_hint.inc)
 
 (include stanzas/test_claim_outcome_typed.inc)

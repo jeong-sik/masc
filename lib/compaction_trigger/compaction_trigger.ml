@@ -57,19 +57,19 @@ let of_detail_json (json : Yojson.Safe.t) : t option =
     let str key =
       match List.assoc_opt key fields with
       | Some (`String s) -> Some s
-      | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
     in
     let num_float key =
       match List.assoc_opt key fields with
       | Some (`Float f) -> Some f
       | Some (`Int i) -> Some (float_of_int i)
-      | _ -> None
+      | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
     in
     let num_int key =
       match List.assoc_opt key fields with
       | Some (`Int i) -> Some i
       | Some (`Intlit s) -> int_of_string_opt s
-      | _ -> None
+      | None | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
     in
     (match str "kind" with
      | Some "ratio" ->
@@ -90,5 +90,5 @@ let of_detail_json (json : Yojson.Safe.t) : t option =
         | _ -> None)
      | Some "manual" -> Some Manual
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;

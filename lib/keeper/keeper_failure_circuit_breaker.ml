@@ -408,17 +408,17 @@ let classify_snapshot_json (json : Yojson.Safe.t)
           let name =
             match List.assoc_opt "keeper" fields with
             | Some (`String s) -> Some s
-            | _ -> None
+            | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
           in
           let cc =
             match List.assoc_opt "consecutive_count" fields with
             | Some (`Int n) -> Some n
-            | _ -> None
+            | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
           in
           let tt =
             match List.assoc_opt "total_tripped" fields with
             | Some (`Int n) -> Some n
-            | _ -> None
+            | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
           in
           (match name, cc, tt with
            | Some n, Some c, Some t ->
@@ -437,7 +437,7 @@ let classify_snapshot_json (json : Yojson.Safe.t)
              in
              Some (n, state)
            | _ -> None)
-        | _ -> None
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
       ) entries
     in
     Ok acc

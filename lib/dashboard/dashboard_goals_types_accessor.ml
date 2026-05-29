@@ -94,73 +94,73 @@ let link_source_of_values values =
   | _ -> "mixed"
 let receipt_error_kind json =
   match Json_util.assoc_member_opt "error" json with
-  | Some (`Assoc _ as error) -> Json_util.get_string "kind" error
+  | Some (`Assoc _ as error) -> Json_util.get_string error "kind"
   | _ -> None
 
 let receipt_error_message json =
   match Json_util.assoc_member_opt "error" json with
-  | Some (`Assoc _ as error) -> Json_util.get_string "message" error
+  | Some (`Assoc _ as error) -> Json_util.get_string error "message"
   | _ -> None
 
 let receipt_sandbox_kind json =
   match Json_util.assoc_member_opt "sandbox" json with
-  | Some sandbox -> Json_util.get_string "kind" sandbox
+  | Some sandbox -> Json_util.get_string sandbox "kind"
   | None -> None
 
 let receipt_approval_profile json =
   match Json_util.assoc_member_opt "approval" json with
-  | Some approval -> Json_util.get_string "profile" approval
+  | Some approval -> Json_util.get_string approval "profile"
   | None -> None
 
 let receipt_cascade_name json =
   match Json_util.assoc_member_opt "cascade" json with
-  | Some cascade -> Json_util.get_string "name" cascade
+  | Some cascade -> Json_util.get_string cascade "name"
   | None -> None
 
 let receipt_cascade_outcome json =
   match Json_util.assoc_member_opt "cascade" json with
-  | Some cascade -> Json_util.get_string "outcome" cascade
+  | Some cascade -> Json_util.get_string cascade "outcome"
   | None -> None
 
 let receipt_cascade_fallback_applied json =
-  match Json_util.assoc_member_opt "cascade" json with
-  | Some cascade -> Json_util.get_bool "fallback_applied" cascade
-  | None -> None
+  (match Json_util.assoc_member_opt "cascade" json with
+  | Some cascade -> Json_util.get_bool cascade "fallback_applied"
+  | None -> None)
   |> Option.value ~default:false
 
 let receipt_outcome json =
-  Json_util.get_string "outcome" json
+  Json_util.get_string json "outcome"
 
 let receipt_started_at json =
-  Json_util.get_string "started_at" json
+  Json_util.get_string json "started_at"
 
 let receipt_ended_at json =
-  Json_util.get_string "ended_at" json
+  Json_util.get_string json "ended_at"
 
 let receipt_turn_count json =
-  Json_util.get_int "turn_count" json
+  Json_util.get_int json "turn_count"
 
 let trust_disposition json =
-  Json_util.get_string "disposition" json
+  Json_util.get_string json "disposition"
 
 let trust_disposition_reason json =
-  Json_util.get_string "disposition_reason" json
+  Json_util.get_string json "disposition_reason"
 
 let trust_attention_reason json =
-  Json_util.get_string "attention_reason" json
+  Json_util.get_string json "attention_reason"
 
 let trust_needs_attention json =
-  Json_util.get_bool "needs_attention" json
+  Json_util.get_bool json "needs_attention"
   |> Option.value ~default:false
 
 let trust_snapshot_unavailable json =
   String.equal
-    (Json_util.get_string "disposition_reason" json
+    (Json_util.get_string json "disposition_reason"
      |> Option.value ~default:"")
     "runtime_trust_snapshot_unavailable"
 
 let trust_turn_id json =
-  Json_util.get_int "turn_id" json
+  Json_util.get_int json "turn_id"
 
 let trust_latest_event json =
   match Json_util.assoc_member_opt "latest_causal_event" json with
@@ -169,21 +169,21 @@ let trust_latest_event json =
 
 let trust_latest_event_ts json =
   Option.bind (trust_latest_event json) (fun event ->
-      Json_util.get_string "ts" event )
+      Json_util.get_string event "ts" )
 
 let trust_latest_event_ts_unix json =
   Option.bind (trust_latest_event json) (fun event ->
-      Json_util.get_float "ts_unix" event )
+      Json_util.get_float event "ts_unix" )
 
 let trust_sandbox_risk json =
   String.equal
-    (Json_util.get_string "disposition_reason" json
+    (Json_util.get_string json "disposition_reason"
      |> Option.value ~default:"")
     "sandbox_violation"
 
 let trust_cascade_risk json =
   String.equal
-    (Json_util.get_string "disposition_reason" json
+    (Json_util.get_string json "disposition_reason"
      |> Option.value ~default:"")
     "cascade_exhausted"
 

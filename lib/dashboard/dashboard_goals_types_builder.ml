@@ -73,8 +73,8 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_meta_contract.keeper
   in
   let assoc_string_opt name =
     match List.assoc_opt name runtime_blocker_fields with
-    | Some json -> to_string_option json
-    | None -> None
+    | Some (`String s) -> Some s
+    | _ -> None
   in
   let blocker_class = assoc_string_opt "runtime_blocker_class" in
   let blocker_summary = assoc_string_opt "runtime_blocker_summary" in
@@ -272,7 +272,7 @@ let rec build_tree context goals goal =
   let approval_activity_values =
     direct_pending_approvals
     |> List.filter_map (fun json ->
-           Json_util.get_string "requested_at_iso" json)
+           Json_util.get_string json "requested_at_iso")
   in
   let receipt_activity_values =
     direct_receipts |> List.filter_map receipt_ended_at

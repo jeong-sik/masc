@@ -210,7 +210,7 @@ let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
   has_ratio (m "context_ratio")
   && has_int (m "context_tokens")
   && has_int (m "context_max")
-  && has_int (member "message_count" j)
+  && has_int (m "message_count")
 
 let keeper_metrics_24h_json
     ~(metrics_lines : string list)

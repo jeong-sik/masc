@@ -14,7 +14,7 @@ include Dashboard_goals_types
 let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
   let labels = [ ("goal_id", goal.id) ] in
   let measured, pct =
-    match Json_util.get_int "attainment_pct" attainment with
+    match Json_util.get_int attainment "attainment_pct" with
     | Some pct -> (1.0, float_of_int pct)
     | None -> (0.0, 0.0)
   in
@@ -138,7 +138,7 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
     requests;
   List.iter
     (fun json ->
-      match Json_util.get_string "goal_id" json with
+      match Json_util.get_string json "goal_id" with
       | Some goal_id ->
           let existing =
             Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]

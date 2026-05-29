@@ -102,61 +102,55 @@ let event_to_json = function
         ]
 
 let event_of_json json : (tool_event, string) Result.t =
-  let open Yojson.Safe.Util in
   try
-    match json |> member "event_type" |> to_string with
+    match Json_util.get_string json "event_type" |> Option.value ~default:"" with
     | "Assigned" ->
-        let preset =
-          match json |> member "preset" with
-          | `Null -> None
-          | `String s -> Some s
-          | _ -> None
-        in
+        let preset = Json_util.get_string json "preset" in
         let string_list field =
-          json |> member field |> to_list
+          (match Json_util.get_array json field with
+           | Some items -> items
+           | None -> [])
           |> List.filter_map (function `String s -> Some s | _ -> None)
         in
         Ok
           (Assigned
-             { assignment_id = json |> member "assignment_id" |> to_string
-             ; agent_id = json |> member "agent_id" |> to_string
-             ; profile = json |> member "profile" |> to_string
+             { assignment_id = Json_util.get_string json "assignment_id" |> Option.value ~default:""
+             ; agent_id = Json_util.get_string json "agent_id" |> Option.value ~default:""
+             ; profile = Json_util.get_string json "profile" |> Option.value ~default:""
              ; preset
              ; tool_list = string_list "tool_list"
              ; allow_set = string_list "allow_set"
              ; deny_set = string_list "deny_set"
-             ; config_hash = json |> member "config_hash" |> to_string
-             ; reason = json |> member "reason" |> to_string
-             ; timestamp = json |> member "timestamp" |> to_number
+             ; config_hash = Json_util.get_string json "config_hash" |> Option.value ~default:""
+             ; reason = Json_util.get_string json "reason" |> Option.value ~default:""
+             ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
              })
     | "Called" ->
-        let source = json |> member "source" |> to_string in
+        let source = Json_util.get_string json "source" |> Option.value ~default:"" in
         Ok
           (Called
-             { assignment_id = json |> member "assignment_id" |> to_string
-             ; tool_name = json |> member "tool_name" |> to_string
-             ; arguments_hash = json |> member "arguments_hash" |> to_string
+             { assignment_id = Json_util.get_string json "assignment_id" |> Option.value ~default:""
+             ; tool_name = Json_util.get_string json "tool_name" |> Option.value ~default:""
+             ; arguments_hash = Json_util.get_string json "arguments_hash" |> Option.value ~default:""
              ; source
-             ; timestamp = json |> member "timestamp" |> to_number
+             ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
              })
     | "Completed" ->
         let error_kind =
-          match json |> member "error_kind" with
-          | `Null -> None
-          | `String s -> Some (error_kind_of_string s)
-          | _ -> None
+          Json_util.get_string json "error_kind"
+          |> Option.map error_kind_of_string
         in
         Ok
           (Completed
-             { assignment_id = json |> member "assignment_id" |> to_string
-             ; tool_name = json |> member "tool_name" |> to_string
-             ; success = json |> member "success" |> to_bool
-             ; duration_ms = json |> member "duration_ms" |> to_number
+             { assignment_id = Json_util.get_string json "assignment_id" |> Option.value ~default:""
+             ; tool_name = Json_util.get_string json "tool_name" |> Option.value ~default:""
+             ; success = Json_util.get_bool json "success" |> Option.value ~default:false
+             ; duration_ms = Json_util.get_float json "duration_ms" |> Option.value ~default:0.0
              ; error_kind
-             ; timestamp = json |> member "timestamp" |> to_number
+             ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
              })
     | other -> Error (Printf.sprintf "unknown event_type: %s" other)
-  with Type_error (msg, _) -> Error msg
+  with Yojson.Safe.Util.Type_error (msg, _) -> Error msg
 
 (* ── In-memory state ──────────────────────────────────── *)
 

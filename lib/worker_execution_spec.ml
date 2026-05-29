@@ -82,48 +82,43 @@ let to_yojson (spec : t) =
     ]
 
 let of_yojson (json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
   match json with
   | `Assoc fields ->
       (try
          let* () = validate_fields fields in
          let* base_path =
-           required_trimmed_string "base_path" (json |> member "base_path")
+           required_trimmed_string "base_path" (Json_util.assoc_member_opt "base_path" json |> Option.value ~default:`Null)
          in
          let* worker_name =
-           required_trimmed_string "worker_name" (json |> member "worker_name")
+           required_trimmed_string "worker_name" (Json_util.assoc_member_opt "worker_name" json |> Option.value ~default:`Null)
          in
          let* model_label =
-           required_trimmed_string "model_label" (json |> member "model_label")
+           required_trimmed_string "model_label" (Json_util.assoc_member_opt "model_label" json |> Option.value ~default:`Null)
          in
          let* prompt =
-           required_trimmed_string "prompt" (json |> member "prompt")
+           required_trimmed_string "prompt" (Json_util.assoc_member_opt "prompt" json |> Option.value ~default:`Null)
          in
          let* runtime_backend =
-           Worker_execution_backend.of_yojson (json |> member "runtime_backend")
+           Worker_execution_backend.of_yojson (Json_util.assoc_member_opt "runtime_backend" json |> Option.value ~default:`Null)
          in
-         let timeout_sec = json |> member "timeout_sec" |> to_int in
+         let timeout_sec = Json_util.get_int json "timeout_sec" |> Option.value ~default:0 in
          Ok
            {
              base_path;
              worker_name;
              model_label;
-             working_dir = option_string (json |> member "working_dir");
+             working_dir = option_string (Json_util.assoc_member_opt "working_dir" json |> Option.value ~default:`Null);
              runtime_backend;
-             thinking_enabled =
-               (match json |> member "thinking_enabled" with
-               | `Bool value -> Some value
-               | `Null -> None
-               | _ -> None);
-             worker_run_id = option_string (json |> member "worker_run_id");
-             role = option_string (json |> member "role");
-             selection_note = option_string (json |> member "selection_note");
+             thinking_enabled = Json_util.get_bool json "thinking_enabled";
+             worker_run_id = option_string (Json_util.assoc_member_opt "worker_run_id" json |> Option.value ~default:`Null);
+             role = option_string (Json_util.assoc_member_opt "role" json |> Option.value ~default:`Null);
+             selection_note = option_string (Json_util.assoc_member_opt "selection_note" json |> Option.value ~default:`Null);
              prompt;
              timeout_sec;
            }
        with
        | Yojson.Json_error msg -> Error ("worker execution spec JSON error: " ^ msg)
-       | Type_error (msg, _) -> Error ("worker execution spec type error: " ^ msg)
+       | Yojson.Safe.Util.Type_error (msg, _) -> Error ("worker execution spec type error: " ^ msg)
        (* Context-label the bare Failure so the operator reading the log
           can tell a worker-spec parse failure apart from any other
           [failwith] / [int_of_string] failure that bubbles up from

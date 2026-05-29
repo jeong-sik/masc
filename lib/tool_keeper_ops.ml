@@ -230,7 +230,6 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
             ~site:"tool_keeper_ops_skill_route_metrics" metrics_path exn_class;
           []
   in
-  let open Yojson.Safe.Util in
   let rec find_latest = function
     | [] -> `Null
     | line :: tl -> (
@@ -239,8 +238,8 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
           match Safe_ops.json_string_opt "skill_primary" json with
           | Some primary when not (String.equal (String.trim primary) "") ->
               let secondary =
-                match json |> member "skill_secondary" with
-                | `List xs ->
+                match Json_util.get_array json "skill_secondary" with
+                | Some (`List xs) ->
                     xs
                     |> List.filter_map (function
                          | `String s when not (String.equal (String.trim s) "") -> Some (`String s)

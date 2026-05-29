@@ -189,13 +189,12 @@ let fetch_models_at base_url =
   | Unix.WEXITED 0 -> (
       try
         let json = Yojson.Safe.from_string body in
-        let open Yojson.Safe.Util in
         let models =
-          match member "data" json with
-          | `List items ->
+          match Json_util.get_array json "data" with
+          | Some (`List items) ->
               items
               |> List.filter_map (fun item ->
-                     item |> member "id" |> to_string_option)
+                     Json_util.get_string item "id")
           | _ -> []
         in
         Ok (url, models)

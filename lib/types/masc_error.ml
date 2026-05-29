@@ -24,23 +24,18 @@ let rate_limit_config_to_yojson c =
   ]
 
 let rate_limit_config_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let field name = json |> member name in
     let int_field name default =
-      match field name with
-      | `Null -> default
-      | value -> to_int value
+      Json_util.get_int json name |> Option.value ~default
     in
     let float_field name default =
-      match field name with
-      | `Null -> default
-      | value -> to_float value
+      Json_util.get_float json name |> Option.value ~default
     in
     let string_list_field name default =
-      match field name with
-      | `Null -> default
-      | value -> value |> to_list |> filter_string
+      match Json_util.get_array json name with
+      | Some (`List values) ->
+          List.filter_map (function `String s -> Some s | _ -> None) values
+      | _ -> default
     in
     let per_minute = int_field "per_minute" default_rate_limit.per_minute in
     let burst_allowed = int_field "burst_allowed" default_rate_limit.burst_allowed in

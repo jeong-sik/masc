@@ -1,3 +1,4 @@
+module U = Yojson.Safe.Util
 include Operator_pending_confirm
 include Operator_digest
 

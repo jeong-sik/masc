@@ -245,7 +245,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       let timeout_sec =
         Json_util.get_float request.payload "timeout_sec"
         |> Option.map (fun f -> int_of_float (Float.ceil f))
-        |> Option.filter (fun n -> n > 0)
+        |> (fun o -> match o with Some n when n > 0 -> Some n | _ -> None)
       in
       let args =
         `Assoc

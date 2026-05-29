@@ -456,14 +456,26 @@ let http_probe_urls candidates =
 let register_http_probe_capable ~max_concurrent candidate =
   match candidate.http_probe_url with
   | None -> ()
-  | Some url ->
-      if not (Cascade_client_capacity.is_registered url) then
-        Cascade_client_capacity.register ~url ~max_concurrent;
+  | Some probe_url ->
+      (* BUGFIX: register under capacity_key (base_url:model_id) instead of
+         probe_url (base_url only) so that try_acquire — which uses
+         capacity_key — actually finds the entry.  Without this, Path B
+         (HTTP-probe) registrations create a separate slot keyed by bare
+         base_url that the acquire path never checks, silently bypassing
+         the capacity limit.
+
+         Probe URL registration (server-side health) still uses the bare
+         base_url because the HTTP probe endpoint is URL-level, not
+         model-level. *)
+      let cap_key = String.trim candidate.capacity_key in
+      if not (String.equal cap_key "") then
+        if not (Cascade_client_capacity.is_registered cap_key) then
+          Cascade_client_capacity.register ~url:cap_key ~max_concurrent;
       (match candidate.provider_cfg.kind with
        | Llm_provider.Provider_config.Ollama ->
-           Cascade_http_probe.register_url ~url
+           Cascade_http_probe.register_url ~url:probe_url
        | _ ->
-           Cascade_openai_probe.register_url ~url)
+           Cascade_openai_probe.register_url ~url:probe_url)
 
 let strategy_adapter : t Cascade_strategy.adapter =
   { health_key; capacity_key }

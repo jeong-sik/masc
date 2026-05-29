@@ -43,9 +43,9 @@ let json_string_list_opt key fields =
       (List.filter_map
          (function
            | `String value -> Some value
-           | _ -> None)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None)
          values)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> None
 ;;
 
 let git_network_subcommand = function
@@ -102,10 +102,10 @@ let typed_execute_args_class args =
     let pipeline =
       match List.assoc_opt "pipeline" fields with
       | Some (`List stages) -> stages_class stages
-      | _ -> Shell
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> Shell
     in
     combine direct pipeline
-  | _ -> Shell
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Shell
 ;;
 
 type shell_op_classification =

@@ -107,7 +107,7 @@ let trim_nonempty_json = function
   | `String value ->
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
 
 let string_list_opt = function
   | `List items ->
@@ -120,25 +120,25 @@ let string_list_opt = function
       in
       loop [] items
   | `Null -> Some []
-  | _ -> None
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None
 
 let bool_or_default default = function
   | `Bool value -> value
-  | _ -> default
+  | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> default
 
 let int_opt = function
   | `Int value -> Some value
-  | _ -> None
+  | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 
 let float_opt = function
   | `Float value -> Some value
   | `Int value -> Some (float_of_int value)
-  | _ -> None
+  | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> None
 
 let float_or_default default = function
   | `Float value -> value
   | `Int value -> float_of_int value
-  | _ -> default
+  | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> default
 
 let require_string ~ctx ~field json =
   match Json_util.get_string_nonempty json field with

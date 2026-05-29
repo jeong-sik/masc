@@ -663,8 +663,8 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
         | `Assoc fields ->
           (match List.assoc_opt "source" fields with
            | Some (`String "keeper_metric") -> true  (* already filtered *)
-           | _ -> matches_keeper name json)
-        | _ -> true
+           | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> matches_keeper name json)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true
       ) all_entries
   in
   let filtered =

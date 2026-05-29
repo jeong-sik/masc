@@ -125,12 +125,7 @@ let test_keeper_meta_projects_capture_only_contract () =
   check_json_string "network_mode" "none" criteria;
   check_json_string "current_task_id_at_start" "task-cdal-001" criteria;
   check_json_list "allowed_paths" [ "/workspace/project" ] criteria;
-  check_json_list "active_goal_ids" [ "goal-cdal" ] criteria;
-  match member "tool_access" criteria with
-  | `Assoc _ as tool_access ->
-    check_json_string "kind" "custom" tool_access;
-    check_json_list "tools" [ "tool_execute" ] tool_access
-  | value -> failf "expected tool_access object, got %s" (Yojson.Safe.to_string value)
+  check_json_list "active_goal_ids" [ "goal-cdal" ] criteria
 ;;
 
 let test_contract_id_is_stable_for_same_meta () =

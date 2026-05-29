@@ -21,15 +21,11 @@
 
     Type fidelity note (cdal_runtime independence): this sub-library does
     not depend on [Keeper_types]. Fields whose source type lives in the
-    main [masc_mcp] library (e.g. [tool_access], [Task_id]) are carried as
+    main [masc_mcp] library (e.g. [Task_id]) are carried as
     their JSON projection (string or [Yojson.Safe.t]). Consumers that need
     structured semantics call back into [Keeper_types.*_of_meta_json].
 
     @since RFC-0109 Phase A *)
-
-(** Tool access JSON projection. Opaque to this module — kept as JSON to
-    avoid pulling [Keeper_meta_contract.tool_access] into [cdal_runtime]. *)
-type tool_access_json = Yojson.Safe.t
 
 (** Goal reference for verification-aware variants. [goal_title] is a
     witness for log lines and is NOT load-bearing for routing. *)
@@ -46,8 +42,6 @@ type t =
       ; sandbox_profile : string
       ; sandbox_image : string option
       ; network_mode : string
-      ; tool_access : tool_access_json
-      ; tool_denylist : string list
       ; allowed_paths : string list
       ; active_goal_ids : string list
       ; current_task_id : string option

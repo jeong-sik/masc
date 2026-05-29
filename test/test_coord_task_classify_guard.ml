@@ -64,8 +64,8 @@ let test_none_with_required_tools_rejects () =
 
 let test_none_with_empty_tools_accepts () =
   let task =
-    make_task ~id:"t2" ~title:"Write docs"
-      ~description:"Update the README"
+    make_task ~id:"t2" ~title:"Review status"
+      ~description:"Check current progress"
       ~required_tools:[]
       ()
   in

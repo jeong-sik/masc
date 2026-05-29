@@ -222,9 +222,13 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
   else caps
 ;;
 
-(** Resolve OAS-level capabilities for a provider config, then apply only
-    MASC's tool-delivery projection for CLI runtimes.  Provider/model/catalog
-    capability truth stays in OAS. *)
+(** Resolve OAS-level capabilities for a provider config, then merge
+    declarative cascade.toml capabilities.  For CLI runtimes, the merge
+    is unconditional (runtime MCP lane from tool policy).  For non-CLI
+    runtimes, the merge applies when the declarative tool policy declares
+    a runtime MCP lane — this ensures [classify_rejection] respects the
+    operator's [supports-runtime-mcp-tools] even when the OAS model-level
+    lookup returns a narrower capability set. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
   let is_cli = is_cli_agent_provider provider_cfg in
   let caps =
@@ -241,7 +245,25 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
       supports_runtime_mcp_tools = runtime_mcp_lane
     ; supports_runtime_tool_events = runtime_mcp_lane
     }
-  else caps
+  else (
+    (* Non-CLI providers: merge declarative cascade.toml capabilities
+       so that [classify_rejection] respects the operator's declared
+       [supports-runtime-mcp-tools] even when the OAS model-level
+       lookup returns a narrower capability set. *)
+    match tool_policy_for_config provider_cfg with
+    | exception _ -> caps
+    | tool_policy ->
+      let runtime_mcp_lane =
+        tool_policy.supports_runtime_mcp_http_headers
+        || tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
+      in
+      if runtime_mcp_lane
+      then
+        { caps with
+          supports_runtime_mcp_tools = true
+        ; supports_runtime_tool_events = true
+        }
+      else caps)
 ;;
 
 let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =

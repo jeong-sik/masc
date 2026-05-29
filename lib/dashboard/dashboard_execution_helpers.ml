@@ -80,6 +80,14 @@ let take = List.take
 let int_field = Dashboard_utils.int_field
 let list_field = Dashboard_utils.list_field
 let compact_text = String_util.compact_text
+let session_payload_json = Dashboard_utils.session_payload_json
+let session_meta_json = Dashboard_utils.session_meta_json
+let session_summary_json = Dashboard_utils.session_summary_json
+let session_team_health_json = Dashboard_utils.session_team_health_json
+let session_communication_json = Dashboard_utils.session_communication_json
+let session_status_string = Dashboard_utils.session_status_string
+let session_recent_events = Dashboard_utils.session_recent_events
+let event_detail_json = Dashboard_utils.event_detail_json
 
 
 let latest_iso_timestamp values =

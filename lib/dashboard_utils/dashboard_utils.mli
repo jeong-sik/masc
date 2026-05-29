@@ -34,6 +34,35 @@ val normalized_text_key : string -> string
 (** [compact_text ~max_len:512] then trim and lowercase — a stable
     key for fuzzy text grouping. *)
 
+(** {1 Session JSON accessors} *)
+
+val session_payload_json : Yojson.Safe.t -> Yojson.Safe.t
+(** Normalise a session JSON: if the ["status"] field is an [`Assoc],
+    return that sub-object; otherwise return the original JSON. *)
+
+val session_meta_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["session"] sub-key inside the payload. *)
+
+val session_summary_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["summary"] sub-key inside the payload. *)
+
+val session_team_health_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["team_health"] sub-key inside the payload. *)
+
+val session_communication_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["communication_metrics"] sub-key inside the payload. *)
+
+val session_status_string : Yojson.Safe.t -> string
+(** Resolve the status string by probing ["summary"] → ["meta"] →
+    top-level session JSON.  Returns a diagnostic placeholder when
+    no ["status"] field is found. *)
+
+val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
+(** ["recent_events"] list from the session JSON. *)
+
+val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["detail"] sub-key inside an event JSON. *)
+
 (** {1 JSON helpers} *)
 
 val string_list_of_json : Yojson.Safe.t -> string list

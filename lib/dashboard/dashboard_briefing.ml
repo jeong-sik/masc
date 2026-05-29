@@ -41,41 +41,10 @@ let top_item items =
   | item :: _ -> item
   | [] -> `Null
 
-let session_payload_json session_json =
-  match member_assoc "status" session_json with
-  | `Assoc _ as payload -> payload
-  | _ -> session_json
-
-let session_meta_json session_json =
-  session_payload_json session_json |> member_assoc "session"
-
-let session_summary_json session_json =
-  session_payload_json session_json |> member_assoc "summary"
-
-let session_team_health_json session_json =
-  session_payload_json session_json |> member_assoc "team_health"
-
-let session_communication_json session_json =
-  session_payload_json session_json |> member_assoc "communication_metrics"
-
-let session_status_string session_json =
-  let summary = session_summary_json session_json in
-  let meta = session_meta_json session_json in
-  match String_util.trim_to_option (string_field "status" summary) with
-  | Some value -> value
-  | None -> (
-      match String_util.trim_to_option (string_field "status" meta) with
-      | Some value -> value
-      | None ->
-          String_util.trim_to_option (string_field "status" session_json)
-          |> Option.value
-               ~default:"<missing status field in summary / meta / session>")
-
-let session_recent_events session_json =
-  list_field "recent_events" session_json
-
-let event_detail_json event_json =
-  member_assoc "detail" event_json
+(* session_payload_json, session_meta_json, session_summary_json,
+   session_team_health_json, session_communication_json,
+   session_status_string, session_recent_events, event_detail_json
+   are provided by Dashboard_utils (included above). *)
 
 let event_summary event_json =
   let detail = event_detail_json event_json in

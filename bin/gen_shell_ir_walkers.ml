@@ -420,6 +420,21 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
     | "--trace" | "--trace-ascii" | "-u" | "--user" )
     :: _val :: rest ->
     parse method_ headers body url output_file follow_redirects insecure rest
+  (* Combined short flags: -Lk, -kL, etc. (boolean flags only) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'L' || c = 'k')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let fr' = ref follow_redirects and ins' = ref insecure in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'L' -> fr' := true
+      | 'k' -> ins' := true
+      | _ -> ()
+    done;
+    parse method_ headers body url output_file !fr' !ins' rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse method_ headers body url output_file follow_redirects insecure rest
@@ -2630,6 +2645,23 @@ let rec parse flags archive delete dry_run compress src dst = function
           Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; archive; delete; dry_run; compress; flags = List.rev flags }))
         | _ -> None)
      | _ -> None)
+  (* Combined short flags: -az, -anz, -nza, etc. (typed flags only) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'a' || c = 'n' || c = 'z')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let archive' = ref archive and delete' = ref delete
+    and dry_run' = ref dry_run and compress' = ref compress in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'a' -> archive' := true
+      | 'n' -> dry_run' := true
+      | 'z' -> compress' := true
+      | _ -> ()
+    done;
+    parse flags !archive' !delete' !dry_run' !compress' src dst rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ flag; value ] when List.mem flag rsync_value_flags ->

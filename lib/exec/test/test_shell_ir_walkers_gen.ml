@@ -873,7 +873,35 @@ let test_combined_short_flags () =
   in
   (match uniq_duc with
    | W (Uniq { count = true; duplicates = true; unique = true; file = Some "file.txt"; _ }) -> ()
-   | w -> Alcotest.failf "uniq -duc: expected all three, got %a" pp w)
+   | w -> Alcotest.failf "uniq -duc: expected all three, got %a" pp w);
+  (* rsync -az src dst *)
+  let rsync_az =
+    of_simple { (base "rsync") with args = [ lit "-az"; lit "src/"; lit "dst/" ] }
+  in
+  (match rsync_az with
+   | W (Rsync { archive = true; compress = true; dry_run = false; _ }) -> ()
+   | w -> Alcotest.failf "rsync -az: expected archive+compress, got %a" pp w);
+  (* rsync -anz src dst *)
+  let rsync_anz =
+    of_simple { (base "rsync") with args = [ lit "-anz"; lit "src/"; lit "dst/" ] }
+  in
+  (match rsync_anz with
+   | W (Rsync { archive = true; dry_run = true; compress = true; _ }) -> ()
+   | w -> Alcotest.failf "rsync -anz: expected archive+dry_run+compress, got %a" pp w);
+  (* curl -Lk url *)
+  let curl_lk =
+    of_simple { (base "curl") with args = [ lit "-Lk"; lit "https://example.com" ] }
+  in
+  (match curl_lk with
+   | W (Curl { follow_redirects = true; insecure = true; _ }) -> ()
+   | w -> Alcotest.failf "curl -Lk: expected follow_redirects+insecure, got %a" pp w);
+  (* curl -kL url *)
+  let curl_kl =
+    of_simple { (base "curl") with args = [ lit "-kL"; lit "https://example.com" ] }
+  in
+  (match curl_kl with
+   | W (Curl { follow_redirects = true; insecure = true; _ }) -> ()
+   | w -> Alcotest.failf "curl -kL: expected follow_redirects+insecure, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

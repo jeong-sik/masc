@@ -95,10 +95,10 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Pytest { subcommand = ""; verbose = true; exitfirst = false; rest = [ "tests/" ] })
   ; W (Terminal_notifier { title = "Done"; message = "Build finished" })
   ; W (Ruff { subcommand = "check"; fix = true; show_source = false; rest = [] })
-  ; W (Pyright { subcommand = ""; strict = false; rest = [ "--project"; "." ] })
+  ; W (Pyright { subcommand = ""; strict = false; rest = [] })
   ; W (Tsc { subcommand = ""; no_emit = true; watch = false; rest = [] })
   ; W (Ocamlfind { subcommand = "list"; args = [ "-desc" ] })
-  ; W (Rustc { subcommand = ""; optimize = false; test = false; rest = [ "--edition"; "2021" ] })
+  ; W (Rustc { subcommand = ""; optimize = false; test = false; rest = [ "src/main.rs" ] })
   ; W (Gofmt { subcommand = ""; write = true; list_files = false; rest = [ "main.go" ] })
   ; W (Gradle { subcommand = "build"; no_daemon = true; parallel = false; rest = [] })
   ; W (Ninja { subcommand = ""; jobs = Some 4; rest = [] })
@@ -115,7 +115,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Open { subcommand = "file.txt"; args = [] })
   ; W (Su { subcommand = "root"; args = [] })
   ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=10" ] })
-  ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdb1" ] })
+  ; W (Mkfs { subcommand = "/dev/sdb1"; args = [] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -197,7 +197,7 @@ let test_to_simple_parallel_equivalence () =
 ;;
 
 let test_constructor_count () =
-  (* Baseline: 71 constructors as of 2026-05-28. If this fails, either
+  (* Baseline: 93 constructors as of 2026-05-29. If this fails, either
      a constructor was added to shell_ir_typed.ml without updating the
      spec in bin/gen_shell_ir_walkers.ml (regression) or the count is
      intentional and this test should bump along with the spec. *)
@@ -304,7 +304,7 @@ let test_of_simple_round_trip () =
     ; W (Rustc { subcommand = ""; optimize = true; test = false; rest = [ "src/main.rs" ] })
     ; W (Gofmt { subcommand = ""; write = false; list_files = true; rest = [ "." ] })
     ; W (Gradle { subcommand = "test"; no_daemon = false; parallel = false; rest = [ "--info" ] })
-    ; W (Ninja { subcommand = ""; jobs = None; rest = [ "-C"; "build" ] })
+    ; W (Ninja { subcommand = "build"; jobs = None; rest = [] })
     ; W (Java { subcommand = "app.Main"; args = [ "--port"; "8080" ] })
     ; W (Javac { subcommand = "src/App.java"; args = [ "-d"; "build/" ] })
     ; W (Mvn { subcommand = "test"; offline = true; batch_mode = false; quiet = true; args = [ "-DskipTests=false" ] })
@@ -316,9 +316,9 @@ let test_of_simple_round_trip () =
     ; W (Ffplay { subcommand = "clip.mp4"; args = [ "-nodisp"; "-autoexit" ] })
     ; W (Mpg123 { subcommand = "podcast.mp3"; args = [ "-q"; "--list"; "playlist.m3u" ] })
     ; W (Open { subcommand = "https://example.com"; args = [ "-a"; "Safari" ] })
-    ; W (Su { subcommand = "root"; args = [ "-c"; "whoami" ] })
+    ; W (Su { subcommand = "root"; args = [ "whoami" ] })
     ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=1" ] })
-    ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdc1" ] })
+    ; W (Mkfs { subcommand = "/dev/sdc1"; args = [] })
     ]
   in
   List.iter
@@ -476,22 +476,22 @@ let test_flag_equals_parsing () =
    | W (Cargo { subcommand = "build"; features = Some "serde"; _ }) -> ()
    | w ->
      Alcotest.failf "Cargo --flag=value: expected features=serde, got %a" pp w);
-  (* Ninja: -j8 with -C build — -C becomes subcommand (first non-flag arg) *)
+  (* Ninja: -j8 with -C build — -C is value-consuming flag, "build" passes through to become subcommand *)
   let ninja =
     of_simple { (base "ninja") with args = [ lit "-j8"; lit "-C"; lit "build" ] }
   in
   (match ninja with
-   | W (Ninja { subcommand = "-C"; jobs = Some 8; rest = [ "build" ]; _ }) -> ()
+   | W (Ninja { subcommand = "build"; jobs = Some 8; rest = []; _ }) -> ()
    | w ->
-     Alcotest.failf "Ninja -j8: expected sub=-C jobs=8, got %a" pp w);
-  (* Ninja: no flags, just subcommand + rest *)
+     Alcotest.failf "Ninja -j8 -C build: expected sub=build jobs=8, got %a" pp w);
+  (* Ninja: subcommand + -C build — -C build is discarded, rest=[] *)
   let ninja2 =
     of_simple { (base "ninja") with args = [ lit "all"; lit "-C"; lit "build" ] }
   in
   (match ninja2 with
-   | W (Ninja { subcommand = "all"; jobs = None; rest = [ "-C"; "build" ]; _ }) -> ()
+   | W (Ninja { subcommand = "all"; jobs = None; rest = [ "build" ]; _ }) -> ()
    | w ->
-     Alcotest.failf "Ninja plain: expected sub=all, got %a" pp w);
+     Alcotest.failf "Ninja all -C build: expected sub=all rest=[build], got %a" pp w);
   (* Cut: --delimiter=: --fields=1,3 *)
   let cut =
     of_simple { (base "cut") with args = [ lit "--delimiter=:"; lit "--fields=1,3"; lit "file.txt" ] }
@@ -1653,7 +1653,140 @@ let test_batch13_value_consuming_flags () =
    | w -> Alcotest.failf "Tsc --target: expected rest=[src/], got %a" pp w)
 ;;
 
->>>>>>> 14ef88a38 (feat(shell-ir): value-consuming flags for Node/Python/Python3/Pip/Ruff/Tsc)
+let test_batch14_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Opam: --switch VALUE is consumed, package remains *)
+  let w_opam =
+    of_simple
+      { (base "opam") with args = [ lit "install"; lit "--switch"; lit "5.1.0"; lit "dune" ] }
+  in
+  (match w_opam with
+   | W (Opam { subcommand = "install"; yes = false; rest = [ "dune" ] }) -> ()
+   | w -> Alcotest.failf "Opam --switch: expected rest=[dune], got %a" pp w);
+  (* Opam: --switch=VALUE (eq form) *)
+  let w_opam_eq =
+    of_simple
+      { (base "opam") with args = [ lit "install"; lit "--switch=5.1.0"; lit "dune" ] }
+  in
+  (match w_opam_eq with
+   | W (Opam { subcommand = "install"; rest = [ "dune" ] }) -> ()
+   | w -> Alcotest.failf "Opam --switch=VALUE: expected rest=[dune], got %a" pp w);
+  (* Npx: --package VALUE is consumed, command remains *)
+  let w_npx =
+    of_simple
+      { (base "npx") with args = [ lit "--package"; lit "typescript"; lit "tsc"; lit "--noEmit" ] }
+  in
+  (match w_npx with
+   | W (Npx { subcommand = "tsc"; rest = [ "--noEmit" ] }) -> ()
+   | w -> Alcotest.failf "Npx --package: expected subcommand=tsc, got %a" pp w);
+  (* Yarn: --cwd VALUE is consumed, subcommand remains *)
+  let w_yarn =
+    of_simple
+      { (base "yarn") with args = [ lit "--cwd"; lit "/app"; lit "install" ] }
+  in
+  (match w_yarn with
+   | W (Yarn { subcommand = "install"; rest = [] }) -> ()
+   | w -> Alcotest.failf "Yarn --cwd: expected subcommand=install, got %a" pp w);
+  (* Yarn: --network-timeout=VALUE (eq form) *)
+  let w_yarn_eq =
+    of_simple
+      { (base "yarn") with args = [ lit "install"; lit "--network-timeout=60000" ] }
+  in
+  (match w_yarn_eq with
+   | W (Yarn { subcommand = "install"; rest = [] }) -> ()
+   | w -> Alcotest.failf "Yarn --network-timeout=VALUE: expected rest=[], got %a" pp w);
+  (* Pnpm: --filter VALUE is consumed, subcommand remains *)
+  let w_pnpm =
+    of_simple
+      { (base "pnpm") with args = [ lit "run"; lit "--filter"; lit "@scope/pkg"; lit "build" ] }
+  in
+  (match w_pnpm with
+   | W (Pnpm { subcommand = "run"; rest = [ "build" ] }) -> ()
+   | w -> Alcotest.failf "Pnpm --filter: expected rest=[build], got %a" pp w);
+  (* Pnpm: --store-dir=VALUE (eq form) *)
+  let w_pnpm_eq =
+    of_simple
+      { (base "pnpm") with args = [ lit "install"; lit "--store-dir=/tmp/store" ] }
+  in
+  (match w_pnpm_eq with
+   | W (Pnpm { subcommand = "install"; rest = [] }) -> ()
+   | w -> Alcotest.failf "Pnpm --store-dir=VALUE: expected rest=[], got %a" pp w);
+  (* Uv: --python VALUE is consumed, package remains *)
+  let w_uv =
+    of_simple
+      { (base "uv") with args = [ lit "pip"; lit "--python"; lit "3.11"; lit "install"; lit "flask" ] }
+  in
+  (match w_uv with
+   | W (Uv { subcommand = "pip"; rest = [ "install"; "flask" ] }) -> ()
+   | w -> Alcotest.failf "Uv --python: expected rest=[install;flask], got %a" pp w);
+  (* Uv: --cache-dir=VALUE (eq form, before positional args) *)
+  let w_uv_eq =
+    of_simple
+      { (base "uv") with args = [ lit "pip"; lit "--cache-dir=/tmp/uv-cache"; lit "install"; lit "requests" ] }
+  in
+  (match w_uv_eq with
+   | W (Uv { subcommand = "pip"; rest = [ "install"; "requests" ] }) -> ()
+   | w -> Alcotest.failf "Uv --cache-dir=VALUE: expected rest=[install;requests], got %a" pp w);
+  (* Glab: --repo VALUE is consumed, subcommand args remain *)
+  let w_glab =
+    of_simple
+      { (base "glab") with args = [ lit "mr"; lit "--repo"; lit "owner/repo"; lit "list" ] }
+  in
+  (match w_glab with
+   | W (Glab { subcommand = "mr"; rest = [ "list" ] }) -> ()
+   | w -> Alcotest.failf "Glab --repo: expected rest=[list], got %a" pp w);
+  (* Glab: --hostname=VALUE (eq form, before positional args) *)
+  let w_glab_eq =
+    of_simple
+      { (base "glab") with args = [ lit "mr"; lit "--hostname=gitlab.example.com"; lit "list" ] }
+  in
+  (match w_glab_eq with
+   | W (Glab { subcommand = "mr"; rest = [ "list" ] }) -> ()
+   | w -> Alcotest.failf "Glab --hostname=VALUE: expected rest=[list], got %a" pp w);
+  (* Pytest: -k VALUE is consumed, test path is subcommand *)
+  let w_pytest =
+    of_simple
+      { (base "pytest") with args = [ lit "tests/"; lit "-k"; lit "test_login" ] }
+  in
+  (match w_pytest with
+   | W (Pytest { subcommand = "tests/"; rest = [] }) -> ()
+   | w -> Alcotest.failf "Pytest -k: expected sub=tests/ rest=[], got %a" pp w);
+  (* Pytest: --tb=VALUE (eq form, path is subcommand) *)
+  let w_pytest_eq =
+    of_simple
+      { (base "pytest") with args = [ lit "tests/"; lit "--tb=short" ] }
+  in
+  (match w_pytest_eq with
+   | W (Pytest { subcommand = "tests/"; rest = [] }) -> ()
+   | w -> Alcotest.failf "Pytest --tb=VALUE: expected sub=tests/ rest=[], got %a" pp w);
+  (* Pyright: --pythonversion VALUE is consumed, path becomes subcommand *)
+  let w_pyright =
+    of_simple
+      { (base "pyright") with args = [ lit "src/"; lit "--pythonversion"; lit "3.11" ] }
+  in
+  (match w_pyright with
+   | W (Pyright { subcommand = "src/"; rest = [] }) -> ()
+   | w -> Alcotest.failf "Pyright --pythonversion: expected sub=src/ rest=[], got %a" pp w);
+  (* Pyright: --project=VALUE (eq form, path is subcommand) *)
+  let w_pyright_eq =
+    of_simple
+      { (base "pyright") with args = [ lit "src/"; lit "--project=." ] }
+  in
+  (match w_pyright_eq with
+   | W (Pyright { subcommand = "src/"; rest = [] }) -> ()
+   | w -> Alcotest.failf "Pyright --project=VALUE: expected sub=src/ rest=[], got %a" pp w)
+;;
+
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -1777,6 +1910,10 @@ let () =
             "Batch13 Node/Python/Pip/Ruff/Tsc value flags"
             `Quick
             test_batch13_value_consuming_flags
+        ; Alcotest.test_case
+            "Batch14 Opam/Npx/Yarn/Pnpm/Uv/Glab/Pytest/Pyright value flags"
+            `Quick
+            test_batch14_value_consuming_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

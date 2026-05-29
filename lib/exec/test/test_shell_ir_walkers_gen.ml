@@ -1257,6 +1257,76 @@ let test_node_long_forms () =
    | w -> Alcotest.failf "node -e: got %a" pp w)
 ;;
 
+let test_uniq_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* uniq --count --repeated file.txt *)
+  let u1 =
+    of_simple { (base "uniq") with args = [ lit "--count"; lit "--repeated"; lit "file.txt" ] }
+  in
+  (match u1 with
+   | W (Uniq { count = true; duplicates = true; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq --count --repeated: got %a" pp w);
+  (* uniq --unique --skip-fields=2 --skip-chars=5 data.txt *)
+  let u2 =
+    of_simple { (base "uniq") with args = [ lit "--unique"; lit "--skip-fields"; lit "2"; lit "--skip-chars"; lit "5"; lit "data.txt" ] }
+  in
+  (match u2 with
+   | W (Uniq { unique = true; skip_fields = Some 2; skip_chars = Some 5; file = Some "data.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq --unique --skip-fields/--skip-chars: got %a" pp w)
+;;
+
+let test_du_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* du --human-readable --summarize /tmp *)
+  let d1 =
+    of_simple { (base "du") with args = [ lit "--human-readable"; lit "--summarize"; lit "/tmp" ] }
+  in
+  (match d1 with
+   | W (Du { human_readable = true; summary = true; path = Some "/tmp"; _ }) -> ()
+   | w -> Alcotest.failf "du --human-readable --summarize: got %a" pp w)
+;;
+
+let test_hostname_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* hostname --short *)
+  let h1 =
+    of_simple { (base "hostname") with args = [ lit "--short" ] }
+  in
+  (match h1 with
+   | W (Hostname { short = true }) -> ()
+   | w -> Alcotest.failf "hostname --short: got %a" pp w)
+;;
+
 (* Combined short-flag parsing: -rf → -r + -f *)
 let test_combined_short_flags () =
   let open Shell_ir_typed in
@@ -1611,6 +1681,9 @@ let () =
         ; Alcotest.test_case "pytest --verbose/--exitfirst form" `Quick test_pytest_long_forms
         ; Alcotest.test_case "tar --create/--extract/--list form" `Quick test_tar_long_forms
         ; Alcotest.test_case "node --eval form" `Quick test_node_long_forms
+        ; Alcotest.test_case "uniq --count/--repeated/--unique form" `Quick test_uniq_long_forms
+        ; Alcotest.test_case "du --human-readable/--summarize form" `Quick test_du_long_forms
+        ; Alcotest.test_case "hostname --short form" `Quick test_hostname_long_forms
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"

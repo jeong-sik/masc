@@ -1670,13 +1670,24 @@ match args with
 let rec parse count duplicates unique skip_fields skip_chars file = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file }))
   | "-c" :: rest -> parse true duplicates unique skip_fields skip_chars file rest
+  | "--count" :: rest -> parse true duplicates unique skip_fields skip_chars file rest
   | "-d" :: rest -> parse count true unique skip_fields skip_chars file rest
+  | "--repeated" :: rest -> parse count true unique skip_fields skip_chars file rest
   | "-u" :: rest -> parse count duplicates true skip_fields skip_chars file rest
+  | "--unique" :: rest -> parse count duplicates true skip_fields skip_chars file rest
   | "-f" :: n_str :: rest ->
     (match int_of_string_opt n_str with
      | Some n -> parse count duplicates unique (Some n) skip_chars file rest
      | None -> parse count duplicates unique skip_fields skip_chars file rest)
+  | "--skip-fields" :: n_str :: rest ->
+    (match int_of_string_opt n_str with
+     | Some n -> parse count duplicates unique (Some n) skip_chars file rest
+     | None -> parse count duplicates unique skip_fields skip_chars file rest)
   | "-s" :: n_str :: rest ->
+    (match int_of_string_opt n_str with
+     | Some n -> parse count duplicates unique skip_fields (Some n) file rest
+     | None -> parse count duplicates unique skip_fields skip_chars file rest)
+  | "--skip-chars" :: n_str :: rest ->
     (match int_of_string_opt n_str with
      | Some n -> parse count duplicates unique skip_fields (Some n) file rest
      | None -> parse count duplicates unique skip_fields skip_chars file rest)
@@ -1865,6 +1876,7 @@ parse None args|}
 let rec parse short = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Hostname { short }))
   | "-s" :: rest -> parse true rest
+  | "--short" :: rest -> parse true rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse short rest
@@ -1936,7 +1948,9 @@ let rec parse human_readable summary max_depth = function
          (Shell_ir_typed_types.Du
             { path = None; human_readable; summary; max_depth }))
   | "-h" :: rest -> parse true summary max_depth rest
+  | "--human-readable" :: rest -> parse true summary max_depth rest
   | "-s" :: rest -> parse human_readable true max_depth rest
+  | "--summarize" :: rest -> parse human_readable true max_depth rest
   | "--max-depth" :: n :: rest ->
     (match int_of_string_opt n with
      | Some d -> parse human_readable summary (Some d) rest

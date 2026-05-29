@@ -500,8 +500,7 @@ let parse_recommended_action json =
             ( "reason",
               `String
                 (normalize_text
-                   (Json_util.get_string action_json "reason"
-                  |> Option.value ~default:"")) );
+                   (Json_util.get_string_with_default action_json ~key:"reason" ~default:"")) );
             ("payload_preview", m "payload_preview" action_json);
           ])
   | _ -> None

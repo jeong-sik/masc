@@ -131,12 +131,11 @@ let build_recommended_action ~actor ~target_type ~target_id json =
       (match action_type with
       | Some action_type when action_type <> "" && allowed_action_type action_type ->
           let severity =
-            Json_util.get_string json member_severity
-            |> Option.value ~default:severity_warn
+            Json_util.get_string_with_default json ~key:member_severity ~default:severity_warn
           in
           let reason =
             normalize_text
-              (Json_util.get_string json member_reason |> Option.value ~default:"")
+              (Json_util.get_string_with_default json ~key:member_reason ~default:"")
           in
           let suggested_payload =
             match Json_util.assoc_member_opt member_suggested_payload json with
@@ -183,7 +182,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
   | `Assoc _ ->
       let summary =
         normalize_text
-          (Json_util.get_string json member_summary |> Option.value ~default:"")
+          (Json_util.get_string_with_default json ~key:member_summary ~default:"")
       in
       if summary = "" then None
       else

@@ -245,34 +245,32 @@ let stats_to_json (s : agent_stats) : Yojson.Safe.t =
   ]
 
 let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
-  try
-    let name = Json_util.get_string_with_default json ~key:"name" ~default:"" in
-    let alpha = Json_util.get_float json "alpha" |> Option.value ~default:0.0 in
-    let beta = Json_util.get_float json "beta" |> Option.value ~default:0.0 in
-    let selections = Json_util.get_int json "selections" |> Option.value ~default:0 in
-    let last_selected_at = Json_util.get_float json "last_selected_at" |> Option.value ~default:0.0 in
-    let total_votes_up = Json_util.get_int json "total_votes_up" |> Option.value ~default:0 in
-    let total_votes_down = Json_util.get_int json "total_votes_down" |> Option.value ~default:0 in
-    let posts_created = Json_util.get_int json "posts_created" |> Option.value ~default:0 in
-    let comments_created = Json_util.get_int json "comments_created" |> Option.value ~default:0 in
-    let skips = Json_util.get_int json "skips" |> Option.value ~default:0 in
-    let guard_penalties_total = Json_util.get_int json "guard_penalties_total" |> Option.value ~default:0 in
-    let updated_at = Json_util.get_float json "updated_at" |> Option.value ~default:0.0 in
-    Some {
-      name;
-      alpha = Float.max min_prior alpha;
-      beta = Float.max min_prior beta;
-      selections;
-      last_selected_at;
-      total_votes_up;
-      total_votes_down;
-      posts_created;
-      comments_created;
-      skips;
-      guard_penalties_total;
-      updated_at;
-    }
-  with Yojson.Safe.Util.Type_error _ -> None
+  let name = Json_util.get_string_with_default json ~key:"name" ~default:"" in
+  let alpha = Json_util.get_float json "alpha" |> Option.value ~default:0.0 in
+  let beta = Json_util.get_float json "beta" |> Option.value ~default:0.0 in
+  let selections = Json_util.get_int json "selections" |> Option.value ~default:0 in
+  let last_selected_at = Json_util.get_float json "last_selected_at" |> Option.value ~default:0.0 in
+  let total_votes_up = Json_util.get_int json "total_votes_up" |> Option.value ~default:0 in
+  let total_votes_down = Json_util.get_int json "total_votes_down" |> Option.value ~default:0 in
+  let posts_created = Json_util.get_int json "posts_created" |> Option.value ~default:0 in
+  let comments_created = Json_util.get_int json "comments_created" |> Option.value ~default:0 in
+  let skips = Json_util.get_int json "skips" |> Option.value ~default:0 in
+  let guard_penalties_total = Json_util.get_int json "guard_penalties_total" |> Option.value ~default:0 in
+  let updated_at = Json_util.get_float json "updated_at" |> Option.value ~default:0.0 in
+  Some {
+    name;
+    alpha = Float.max min_prior alpha;
+    beta = Float.max min_prior beta;
+    selections;
+    last_selected_at;
+    total_votes_up;
+    total_votes_down;
+    posts_created;
+    comments_created;
+    skips;
+    guard_penalties_total;
+    updated_at;
+  }
 
 (** {1 Persistence} *)
 

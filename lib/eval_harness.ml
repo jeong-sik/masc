@@ -318,7 +318,7 @@ let scenario_to_json (s : scenario) : Yojson.Safe.t =
 (** Parse a scenario from JSON (loaded from YAML→JSON or direct JSON). *)
 let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
   try
-    let str key = Json_util.get_string json key |> Option.value ~default:"" in
+    let str key = Json_util.get_string_with_default json ~key ~default:"" in
     let str_opt key default =
       match Json_util.assoc_member_opt key json with
       | Some (`String s) -> s

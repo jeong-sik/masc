@@ -51,7 +51,7 @@ let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_meta_cont
     then Keeper_fd_pressure.degraded_trust_json ()
     else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
   in
-  let member key = Yojson.Safe.Util.member key runtime_trust in
+  let member key = Option.value ~default:`Null (Json_util.assoc_member_opt key runtime_trust) in
   `Assoc
     [ "disposition", member "disposition"
     ; "disposition_reason", member "disposition_reason"
@@ -73,23 +73,23 @@ let reconcile_keeper_attention_fields_with_trust fields trust =
   | `Assoc _ ->
     let upsert key value fields = assoc_upsert fields key value in
     fields
-    |> upsert "disposition" (Yojson.Safe.Util.member "disposition" trust)
+    |> upsert "disposition" (Option.value ~default:`Null (Json_util.assoc_member_opt "disposition" trust))
     |> upsert
          "disposition_reason"
-         (Yojson.Safe.Util.member "disposition_reason" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "disposition_reason" trust))
     |> upsert
          "operator_disposition"
-         (Yojson.Safe.Util.member "operator_disposition" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition" trust))
     |> upsert
          "operator_disposition_reason"
-         (Yojson.Safe.Util.member "operator_disposition_reason" trust)
-    |> upsert "needs_attention" (Yojson.Safe.Util.member "needs_attention" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition_reason" trust))
+    |> upsert "needs_attention" (Option.value ~default:`Null (Json_util.assoc_member_opt "needs_attention" trust))
     |> upsert
          "attention_reason"
-         (Yojson.Safe.Util.member "attention_reason" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "attention_reason" trust))
     |> upsert
          "next_human_action"
-         (Yojson.Safe.Util.member "next_human_action" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "next_human_action" trust))
   | _ -> fields
 ;;
 
@@ -206,9 +206,7 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
 ;;
 
 let assoc_member_if_object key json =
-  match Yojson.Safe.Util.member key json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
+  Json_util.get_object json key
 ;;
 
 let existing_keeper_trust_json keeper_json =
@@ -224,7 +222,6 @@ let upsert_keeper_trust_fields fields trust =
 ;;
 
 let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
   match keeper_json with
   | `Assoc fields ->
     (* The upstream operator snapshot already carries these for most keeper rows.
@@ -234,12 +231,12 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
     (match existing_diagnostic, existing_trust with
      | Some _, Some trust -> `Assoc (upsert_keeper_trust_fields fields trust)
      | _ ->
-       (match member "name" keeper_json with
+       (match Option.value ~default:`Null (Json_util.assoc_member_opt "name" keeper_json) with
         | `String name ->
           (match Keeper_meta_store.read_meta_resolved config name with
            | Ok (Some (_resolved_name, meta)) ->
              let keepalive_running =
-               match member "keepalive_running" keeper_json with
+               match Option.value ~default:`Null (Json_util.assoc_member_opt "keepalive_running" keeper_json) with
                | `Bool value -> value
                | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
              in
@@ -250,7 +247,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
                | None ->
                  Keeper_status_runtime.keeper_diagnostic_json
                    ~meta
-                   ~agent_status:(member "agent" keeper_json)
+                   ~agent_status:(Option.value ~default:`Null (Json_util.assoc_member_opt "agent" keeper_json))
                    ~keepalive_running
                    ~history_items:[]
                    ~now_ts
@@ -476,12 +473,15 @@ let merge_execution_queue left right =
 
 let model_map_of_keeper_rows keepers =
   let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
-  let open Yojson.Safe.Util in
   List.iter
     (function
       | `Assoc _ as keeper_json ->
-        (match member "name" keeper_json, member "active_model" keeper_json with
-         | `String _, `String _ | `String _, _ | _, `String _ | _, _ -> ())
+        (match Json_util.assoc_member_opt "name" keeper_json,
+               Json_util.assoc_member_opt "active_model" keeper_json with
+         | Some (`String _), Some (`String _)
+         | Some (`String _), _
+         | _, Some (`String _)
+         | _, _ -> ())
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ())
     keepers;
   model_map

@@ -1,14 +1,14 @@
-(** Cdal_judge -- Phase 1A contract judge with 6 active checks.
+(** Cdal_judge -- Phase 1A contract judge with 7 active checks.
 
     Evaluates a loaded proof bundle against its contract constraints:
     execution mode propagation and escalation, risk class match,
     contract snapshot integrity, required artifact presence,
-    review-requirement bridgeability, and runtime terminal status
-    (completion precondition).
+    review-requirement bridgeability, runtime terminal status
+    (completion precondition), and contract tool-denylist containment.
 
     @since CDAL Phase 1A *)
 
-(** Evaluate all 6 checks and derive run-level verdict. *)
+(** Evaluate all 7 checks and derive run-level verdict. *)
 val judge : Cdal_loader.loaded_bundle -> Cdal_types.contract_verdict
 
 (** {2 Individual checks (exposed for testing)} *)
@@ -35,6 +35,15 @@ val check_review_requirement : Cdal_loader.loaded_bundle -> Cdal_types.check_res
     [Context_overflow] are [Inconclusive] with a blocking gap (completion
     cannot be verified from an unfinished run). *)
 val check_result_status : Cdal_loader.loaded_bundle -> Cdal_types.check_result
+
+(** Check contract tool-denylist containment. First consumer of
+    [contract.eval_criteria]: when the criteria is [Keeper_turn_capture_v1],
+    a tool in its [tool_denylist] that also appears in the proof's captured
+    [capability_snapshot.tools] yields [Violated]; otherwise [Satisfied].
+    Other criteria kinds declare no tool denylist and are [Satisfied]. *)
+val check_eval_criteria_tool_denylist
+  :  Cdal_loader.loaded_bundle
+  -> Cdal_types.check_result
 
 (** {2 Exec-outcome verifiable markers}
 

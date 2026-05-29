@@ -219,6 +219,58 @@ let check_result_status (b : Cdal_loader.loaded_bundle) : Cdal_types.check_resul
 ;;
 
 (* ================================================================ *)
+(* Check 7: Contract tool-denylist containment (eval_criteria)      *)
+(* ================================================================ *)
+
+(* First consumer of [contract.eval_criteria] in the judge. [risk_contract.mli]
+   documents eval_criteria as "carried to the proof bundle and consumed", but
+   judge ignored it entirely — only [Keeper_turn_capture_v1] (the producer for
+   keeper turns, via [Keeper_cdal_contract.of_keeper_meta]) declares a
+   [tool_denylist], so this audits the declared denylist against the captured
+   capability set: a tool the contract DENIED must not appear in the run's
+   captured [capability_snapshot.tools].
+
+   Deterministic and conservative — exact string membership, so a vocabulary
+   mismatch only ever under-detects (no false [Violated]). The other criteria
+   kinds declare no tool denylist ([Verification_request] has no producer yet,
+   [Persona_probe] is deferred, [Contract_catalog_invariants] carries prose
+   invariants, [Free] is the migration escape), so there is nothing to enforce
+   for them here. Exhaustive match — a new criteria variant must be classified. *)
+let check_eval_criteria_tool_denylist (b : Cdal_loader.loaded_bundle)
+  : Cdal_types.check_result
+  =
+  let check_id = "runtime.tool_denylist" in
+  let module C = Masc_mcp_cdal_runtime.Criteria in
+  match b.contract.eval_criteria with
+  | C.Keeper_turn_capture_v1 { tool_denylist; _ } ->
+    let captured = b.proof.capability_snapshot.tools in
+    let present = List.filter (fun denied -> List.mem denied captured) tool_denylist in
+    (match present with
+     | [] -> { check_id; status = Satisfied; findings = []; completeness_gaps = [] }
+     | _ ->
+       { check_id
+       ; status = Violated
+       ; findings =
+           List.map
+             (fun denied : Cdal_types.contract_finding ->
+                { check_id
+                ; event_id = Some "denied_tool_captured"
+                ; observed = `String denied
+                ; expected = `String "absent (contract tool_denylist)"
+                ; trace_ref = None
+                })
+             present
+       ; completeness_gaps = []
+       })
+  | C.Contract_catalog_invariants _
+  | C.Verification_request _
+  | C.Persona_probe _
+  | C.Free _ ->
+    (* No tool denylist declared by these criteria kinds — nothing to enforce. *)
+    { check_id; status = Satisfied; findings = []; completeness_gaps = [] }
+;;
+
+(* ================================================================ *)
 (* Verdict derivation                                               *)
 (* ================================================================ *)
 
@@ -262,6 +314,7 @@ let judge (b : Cdal_loader.loaded_bundle) : Cdal_types.contract_verdict =
     ; check_required_artifact b
     ; check_review_requirement b
     ; check_result_status b
+    ; check_eval_criteria_tool_denylist b
     ]
   in
   let status = derive_status checks in

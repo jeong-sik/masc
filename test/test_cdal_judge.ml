@@ -19,6 +19,7 @@ let make_proof
       ?(effective = Masc_mcp_cdal_runtime.Execution_mode.Execute)
       ?(risk_class = Masc_mcp_cdal_runtime.Risk_class.Low)
       ?(result_status = Masc_mcp_cdal_runtime.Cdal_proof.Completed)
+      ?(capability_tools = [ "read"; "write" ])
       ()
   : Masc_mcp_cdal_runtime.Cdal_proof.t
   =
@@ -32,7 +33,7 @@ let make_proof
   ; provider_snapshot =
       { provider_name = "test"; model_id = "test-model"; api_version = None }
   ; capability_snapshot =
-      { tools = [ "read"; "write" ]
+      { tools = capability_tools
       ; mcp_servers = []
       ; max_turns = 10
       ; max_tokens = Some 4096
@@ -48,10 +49,16 @@ let make_proof
   }
 ;;
 
+let default_eval_criteria =
+  Masc_mcp_cdal_runtime.Criteria.Free
+    (`Assoc [ "success_criteria", `List [ `String "tests pass" ] ])
+;;
+
 let make_contract
       ?(requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
       ?(risk_class = Masc_mcp_cdal_runtime.Risk_class.Low)
       ?review_requirement
+      ?(eval_criteria = default_eval_criteria)
       ()
   : Masc_mcp_cdal_runtime.Risk_contract.t
   =
@@ -61,9 +68,7 @@ let make_contract
       ; allowed_mutations = [ "tool_edit_file" ]
       ; review_requirement
       }
-  ; eval_criteria =
-      Masc_mcp_cdal_runtime.Criteria.Free
-        (`Assoc [ "success_criteria", `List [ `String "tests pass" ] ])
+  ; eval_criteria
   }
 ;;
 
@@ -77,6 +82,8 @@ let make_bundle
       ?contract_review_requirement
       ?(proof_raw_evidence_refs = [])
       ?(proof_result_status = Masc_mcp_cdal_runtime.Cdal_proof.Completed)
+      ?(proof_capability_tools = [ "read"; "write" ])
+      ?(eval_criteria = default_eval_criteria)
       ?(contract_id_match = true)
       ()
   : CL.loaded_bundle
@@ -86,6 +93,7 @@ let make_bundle
       ~requested:contract_requested
       ~risk_class:contract_risk
       ?review_requirement:contract_review_requirement
+      ~eval_criteria
       ()
   in
   let recomputed_contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
@@ -100,6 +108,7 @@ let make_bundle
       ~effective:proof_effective
       ~risk_class:proof_risk
       ~result_status:proof_result_status
+      ~capability_tools:proof_capability_tools
       ()
   in
   let proof = { proof with raw_evidence_refs = proof_raw_evidence_refs } in
@@ -123,7 +132,7 @@ let test_all_satisfied () =
     "satisfied"
     (CT.contract_status_to_string verdict.status);
   Alcotest.(check int) "no findings" 0 (List.length verdict.findings);
-  Alcotest.(check int) "6 check results" 6 (List.length verdict.check_results);
+  Alcotest.(check int) "7 check results" 7 (List.length verdict.check_results);
   List.iter
     (fun (cr : CT.check_result) ->
        Alcotest.(check string)
@@ -446,6 +455,73 @@ let test_verdict_errored_run_violated () =
 ;;
 
 (* ================================================================ *)
+(* eval_criteria tool-denylist containment (check 7)                 *)
+(* ================================================================ *)
+
+let keeper_capture_criteria ?(tool_denylist = []) () : Masc_mcp_cdal_runtime.Criteria.t =
+  Masc_mcp_cdal_runtime.Criteria.Keeper_turn_capture_v1
+    { keeper_name = "k1"
+    ; agent_name = "a1"
+    ; sandbox_profile = "default"
+    ; sandbox_image = None
+    ; network_mode = "none"
+    ; tool_access = `Null
+    ; tool_denylist
+    ; allowed_paths = []
+    ; active_goal_ids = []
+    ; current_task_id = None
+    }
+;;
+
+let test_tool_denylist_violation () =
+  (* Contract denies "danger_tool" but the run captured it as available. *)
+  let bundle =
+    make_bundle
+      ~eval_criteria:(keeper_capture_criteria ~tool_denylist:[ "danger_tool" ] ())
+      ~proof_capability_tools:[ "read"; "danger_tool" ]
+      ()
+  in
+  let cr = CJ.check_eval_criteria_tool_denylist bundle in
+  Alcotest.(check string) "status" "violated" (CT.contract_status_to_string cr.status);
+  Alcotest.(check int) "1 finding" 1 (List.length cr.findings);
+  let f = List.hd cr.findings in
+  Alcotest.(check string) "finding check_id" "runtime.tool_denylist" f.check_id
+;;
+
+let test_tool_denylist_no_intersection_satisfied () =
+  let bundle =
+    make_bundle
+      ~eval_criteria:(keeper_capture_criteria ~tool_denylist:[ "danger_tool" ] ())
+      ~proof_capability_tools:[ "read"; "write" ]
+      ()
+  in
+  let cr = CJ.check_eval_criteria_tool_denylist bundle in
+  Alcotest.(check string) "status" "satisfied" (CT.contract_status_to_string cr.status);
+  Alcotest.(check int) "no findings" 0 (List.length cr.findings)
+;;
+
+let test_tool_denylist_non_keeper_criteria_satisfied () =
+  (* Free criteria (default) declares no denylist -> nothing to enforce. *)
+  let bundle = make_bundle () in
+  let cr = CJ.check_eval_criteria_tool_denylist bundle in
+  Alcotest.(check string) "status" "satisfied" (CT.contract_status_to_string cr.status)
+;;
+
+let test_verdict_tool_denylist_violation_wins () =
+  let bundle =
+    make_bundle
+      ~eval_criteria:(keeper_capture_criteria ~tool_denylist:[ "danger_tool" ] ())
+      ~proof_capability_tools:[ "danger_tool" ]
+      ()
+  in
+  let verdict = CJ.judge bundle in
+  Alcotest.(check string)
+    "status"
+    "violated"
+    (CT.contract_status_to_string verdict.status)
+;;
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -491,6 +567,18 @@ let () =
             "result_status cancelled inconclusive"
             `Quick
             test_result_status_cancelled_inconclusive
+        ; Alcotest.test_case
+            "tool denylist violation"
+            `Quick
+            test_tool_denylist_violation
+        ; Alcotest.test_case
+            "tool denylist no intersection satisfied"
+            `Quick
+            test_tool_denylist_no_intersection_satisfied
+        ; Alcotest.test_case
+            "tool denylist non-keeper criteria satisfied"
+            `Quick
+            test_tool_denylist_non_keeper_criteria_satisfied
         ] )
     ; ( "verdict"
       , [ Alcotest.test_case "violated wins" `Quick test_verdict_priority_violated_wins
@@ -507,6 +595,10 @@ let () =
             "errored run violated"
             `Quick
             test_verdict_errored_run_violated
+        ; Alcotest.test_case
+            "tool denylist violation wins"
+            `Quick
+            test_verdict_tool_denylist_violation_wins
         ] )
     ]
 ;;

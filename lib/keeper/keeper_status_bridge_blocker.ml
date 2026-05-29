@@ -96,7 +96,7 @@ let is_cascade_exhausted_blocker_class blocker_class =
     (blocker_class_to_string (Cascade_exhausted (Other_detail "")))
 ;;
 
-let is_no_tool_capable_blocker_class blocker_class =
+let is_no_tool_capable_provider_blocker_class blocker_class =
   String.equal blocker_class "cascade_exhausted_no_tool_capable"
 ;;
 
@@ -154,6 +154,12 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       if summary = ""
       then
         "Provider response violated the required completion/tool contract after dispatch."
+      else summary
+    | No_tool_capable_provider ->
+      (* TEL-OK: string literal in blocker classification summary, not an action handler *)
+      if summary = ""
+      then
+        "No provider candidate advertised the required tool capability for this keeper turn."
       else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)

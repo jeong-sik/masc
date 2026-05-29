@@ -1332,9 +1332,9 @@ let test_keeper_zombie_field_contracts () =
           missing_required_tools = [];
           materialized_tools = [];
         };
-      sandbox_kind = Masc_mcp.Keeper_types.Local;
+      sandbox_kind = Masc_mcp.Keeper_types_profile_sandbox.Local;
       sandbox_root = None;
-      network_mode = Masc_mcp.Keeper_types.Network_none;
+      network_mode = Masc_mcp.Keeper_types_profile_sandbox.Network_none;
       approval_profile = None;
       approval_profile_derived = false;
       cascade_name = Cascade_name.of_string_exn "default";

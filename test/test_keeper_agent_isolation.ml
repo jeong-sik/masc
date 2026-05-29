@@ -28,7 +28,7 @@ let make_meta
     ?(policy_voice_enabled = false)
     
     ()
-  : Keeper_types.keeper_meta =
+  : Masc_mcp.Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [
       ("name", `String name);

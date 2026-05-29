@@ -70,7 +70,7 @@ let test_cascade_exhausted_kind () =
          {
            cascade_name = typed_cascade_name cascade_name;
            reason =
-             Masc_mcp.Keeper_types.Other_detail "all providers tried";
+             Masc_mcp.Keeper_meta_contract.Other_detail "all providers tried";
          })
   in
   Alcotest.(check (float 0.0001))

@@ -78,7 +78,8 @@ let mark_loop_detected ~(config : Coord.config) meta ~streak ~threshold =
     meta
 ;;
 
-let clear_if_recovered ~(config : Coord.config) meta ~previous_streak ~was_latched =
+let clear_if_recovered ~(config : Coord.config) (meta : Keeper_meta_contract.keeper_meta)
+    ~previous_streak ~was_latched =
   if was_latched then begin
     match Keeper_registry.get ~base_path:config.base_path meta.name with
     | Some { Keeper_registry.last_failure_reason =

@@ -98,7 +98,7 @@ let make_meta ~name ~sandbox =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "docker read test");
         ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
+          `String (Masc_mcp.Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -108,14 +108,14 @@ let make_meta ~name ~sandbox =
 (* ── should_route_read profile policy ────────────────────────────── *)
 
 let test_legacy_keeper_never_routes () =
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Local in
+  let meta = make_meta ~name:"alice" ~sandbox:Masc_mcp.Keeper_types_profile_sandbox.Local in
   Alcotest.(check bool) "legacy keeper never routes through docker"
     false
     (Keeper_sandbox_read_backend.should_route_read ~meta)
 
 let test_docker_keeper_routes () =
   let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker
+    make_meta ~name:"minjae" ~sandbox:Masc_mcp.Keeper_types_profile_sandbox.Docker
   in
   Alcotest.(check bool) "docker keeper routes through docker"
     true
@@ -123,7 +123,7 @@ let test_docker_keeper_routes () =
 
 let test_docker_git_creds_routes () =
   let meta =
-    make_meta ~name:"poe" ~sandbox:Keeper_types.Docker
+    make_meta ~name:"poe" ~sandbox:Masc_mcp.Keeper_types_profile_sandbox.Docker
   in
   Alcotest.(check bool) "docker git-creds also routes" true
     (Keeper_sandbox_read_backend.should_route_read ~meta)
@@ -135,7 +135,7 @@ let setup_config name =
   Unix.mkdir (Filename.concat base Common.masc_dirname) 0o755;
   let config = Coord.default_config base in
   let meta =
-    make_meta ~name ~sandbox:Keeper_types.Docker
+    make_meta ~name ~sandbox:Masc_mcp.Keeper_types_profile_sandbox.Docker
   in
   base, config, meta
 
@@ -623,13 +623,13 @@ let test_sandbox_container_label_args_include_managed_ttl () =
 
 let test_docker_network_args_follow_masc_policy () =
   let args_none, label_none =
-    Keeper_sandbox_runtime.docker_network_args Keeper_types.Network_none
+    Keeper_sandbox_runtime.docker_network_args Masc_mcp.Keeper_types_profile_sandbox.Network_none
   in
   Alcotest.(check (list string)) "network none passes docker flag"
     [ "--network"; "none" ] args_none;
   Alcotest.(check string) "network none label" "none" label_none;
   let args_inherit, label_inherit =
-    Keeper_sandbox_runtime.docker_network_args Keeper_types.Network_inherit
+    Keeper_sandbox_runtime.docker_network_args Masc_mcp.Keeper_types_profile_sandbox.Network_inherit
   in
   Alcotest.(check (list string)) "network inherit uses host network (#10431)"
     [ "--network"; "host" ] args_inherit;
@@ -987,7 +987,7 @@ let test_startup_preflight_skips_required_command_inventory () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   match
     Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-      ~timeout_sec:5.0 ~sandbox_profile:Keeper_types.Docker
+      ~timeout_sec:5.0 ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
   with
   | Error err -> Alcotest.failf "expected startup preflight to pass: %s" err
   | Ok () ->

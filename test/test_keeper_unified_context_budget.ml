@@ -4,7 +4,7 @@ module KEC = Masc_mcp.Keeper_context_runtime
 module OMR = Masc_mcp.Cascade_runtime
 module UT = Masc_mcp.Keeper_unified_turn
 
-let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
+let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [
@@ -17,7 +17,7 @@ let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
-let minimal_meta : Masc_mcp.Keeper_types.keeper_meta = make_meta "test-keeper"
+let minimal_meta : Masc_mcp.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
 let test_pure_local_labels_detection () =
   check

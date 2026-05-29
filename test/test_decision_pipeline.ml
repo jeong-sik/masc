@@ -242,7 +242,7 @@ let make_obs_meta name =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  match KTypes.meta_of_json json with
+  match Masc_mcp.Keeper_meta_json_parse.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
 

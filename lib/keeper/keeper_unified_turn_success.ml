@@ -54,7 +54,7 @@ let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_block
   lifecycle
 ;;
 
-let apply_loop_detectors ~config updated_meta result =
+let apply_loop_detectors ~config (updated_meta : Keeper_meta_contract.keeper_meta) result =
   let updated_meta =
     match
       Keeper_stay_silent_loop_detector.record_turn
@@ -111,7 +111,7 @@ let apply_loop_detectors ~config updated_meta result =
 
 let append_metrics_snapshot
       ~config
-      ~meta
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~updated_meta
       ~observation
       ~result
@@ -183,7 +183,7 @@ let append_metrics_snapshot
 
 let emit_activity_graph
       ~config
-      ~updated_meta
+      ~(updated_meta : Keeper_meta_contract.keeper_meta)
       ~result
       ~latency_ms
       ~turn_cost
@@ -265,7 +265,8 @@ let emit_activity_graph
       (Printexc.to_string exn)
 ;;
 
-let record_accountability ~config ~updated_meta ~social_state ~result claim =
+let record_accountability ~config ~(updated_meta : Keeper_meta_contract.keeper_meta)
+    ~social_state ~result claim =
   let trace_id = Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id in
   let validated_evidence = KUM.visible_run_validation result in
   let strong_evidence =
@@ -293,7 +294,7 @@ let record_accountability ~config ~updated_meta ~social_state ~result claim =
 ;;
 
 let emit_usage_metrics_and_log
-      ~updated_meta
+      ~(updated_meta : Keeper_meta_contract.keeper_meta)
       ~result
       ~latency_ms
       ~usage_trust
@@ -394,7 +395,8 @@ let emit_usage_metrics_and_log
     outcome_str
 ;;
 
-let persist_success_meta ~config ~original_meta ~updated_meta =
+let persist_success_meta ~config ~(original_meta : Keeper_meta_contract.keeper_meta)
+    ~(updated_meta : Keeper_meta_contract.keeper_meta) =
   let updated_meta =
     if updated_meta.auto_resume_after_sec <> None
     then { updated_meta with auto_resume_after_sec = None }
@@ -431,7 +433,8 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
   updated_meta
 ;;
 
-let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
+let reset_turn_failures_for_stop_reason ~config
+    ~(updated_meta : Keeper_meta_contract.keeper_meta) result =
   match result.Keeper_agent_run.stop_reason with
   | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
     Log.Keeper.info

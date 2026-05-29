@@ -45,7 +45,7 @@ let with_store f =
 
 let make_meta ?(name = "alpha") () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
           ("name", `String name);
@@ -105,8 +105,8 @@ let persist_keeper_with_proactive
                  | Some outcome -> outcome
                  | None ->
                    if proactive_count_total > 0
-                   then KT.Proactive_tool_use
-                   else KT.Proactive_never_started);
+                   then Masc_mcp.Keeper_meta_contract.Proactive_tool_use
+                   else Masc_mcp.Keeper_meta_contract.Proactive_never_started);
             };
           autonomous_action_count;
           autonomous_turn_count = autonomous_action_count;
@@ -115,7 +115,7 @@ let persist_keeper_with_proactive
         };
     }
   in
-  match KT.write_meta ~force:true config meta with
+  match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
   | Ok () -> meta
   | Error err -> fail ("write_meta failed: " ^ err)
 
@@ -561,7 +561,7 @@ let test_scheduled_proactive_meta_error_does_not_prove_success () =
   ignore
     (persist_keeper_with_proactive
        ~proactive_last_ts:(now -. 60.0)
-       ~proactive_last_outcome:KT.Proactive_error
+       ~proactive_last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_error
        config ~proactive_enabled:true
        ~name:"alpha" ~total_turns:3 ~autonomous_action_count:2
        ~autonomous_tool_turn_count:2 ~board_reactive_turn_count:1

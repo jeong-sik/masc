@@ -27,46 +27,46 @@ let decision_testable =
 let overflow_class_is_recognized () =
   check bool "Sdk_token_budget_exceeded → overflow"
     true
-    (KR.blocker_class_indicates_overflow KT.Sdk_token_budget_exceeded)
+    (KR.blocker_class_indicates_overflow Masc_mcp.Keeper_meta_contract.Sdk_token_budget_exceeded)
 
 let non_overflow_classes_are_not_matched () =
   (* Exhaustive: every variant other than [Sdk_token_budget_exceeded] is
      not an overflow signal.  Adding a new [blocker_class] variant forces
      a compile error in [Keeper_rollover.blocker_class_indicates_overflow]
      — the catch-all is intentionally omitted. *)
-  let cases : KT.blocker_class list = [
-    KT.Cascade_exhausted KT.No_providers_available;
-    KT.Cascade_exhausted KT.All_providers_failed;
-    KT.Cascade_exhausted KT.Max_turns_exceeded;
-    KT.Capacity_backpressure;
-    KT.Ambiguous_post_commit_timeout;
-    KT.Ambiguous_post_commit_failure;
-    KT.Oas_agent_execution_timeout;
-    KT.Autonomous_slot_wait_timeout;
-    KT.Admission_queue_wait_timeout;
-    KT.Turn_timeout_after_queue_wait;
-    KT.Turn_timeout;
-    KT.Turn_timeout;
-    KT.Turn_livelock_blocked;
-    KT.Completion_contract_violation;
-    KT.No_tool_capable_provider;
-    KT.Fiber_unresolved;
-    KT.Stale_turn_timeout;
-    KT.Stale_fleet_batch;
-    KT.Sdk_max_turns_exceeded;
-    KT.Sdk_cost_budget_exceeded;
-    KT.Sdk_unrecognized_stop_reason;
-    KT.Sdk_idle_detected;
-    KT.Sdk_tool_retry_exhausted;
-    KT.Sdk_guardrail_violation;
-    KT.Sdk_tripwire_violation;
-    KT.Sdk_exit_condition_met;
+  let cases : Masc_mcp.Keeper_meta_contract.blocker_class list = [
+    Masc_mcp.Keeper_meta_contract.Cascade_exhausted Masc_mcp.Keeper_meta_contract.No_providers_available;
+    Masc_mcp.Keeper_meta_contract.Cascade_exhausted Masc_mcp.Keeper_meta_contract.All_providers_failed;
+    Masc_mcp.Keeper_meta_contract.Cascade_exhausted Masc_mcp.Keeper_meta_contract.Max_turns_exceeded;
+    Masc_mcp.Keeper_meta_contract.Capacity_backpressure;
+    Masc_mcp.Keeper_meta_contract.Ambiguous_post_commit_timeout;
+    Masc_mcp.Keeper_meta_contract.Ambiguous_post_commit_failure;
+    Masc_mcp.Keeper_meta_contract.Oas_agent_execution_timeout;
+    Masc_mcp.Keeper_meta_contract.Autonomous_slot_wait_timeout;
+    Masc_mcp.Keeper_meta_contract.Admission_queue_wait_timeout;
+    Masc_mcp.Keeper_meta_contract.Turn_timeout_after_queue_wait;
+    Masc_mcp.Keeper_meta_contract.Turn_timeout;
+    Masc_mcp.Keeper_meta_contract.Turn_timeout;
+    Masc_mcp.Keeper_meta_contract.Turn_livelock_blocked;
+    Masc_mcp.Keeper_meta_contract.Completion_contract_violation;
+    Masc_mcp.Keeper_meta_contract.No_tool_capable_provider;
+    Masc_mcp.Keeper_meta_contract.Fiber_unresolved;
+    Masc_mcp.Keeper_meta_contract.Stale_turn_timeout;
+    Masc_mcp.Keeper_meta_contract.Stale_fleet_batch;
+    Masc_mcp.Keeper_meta_contract.Sdk_max_turns_exceeded;
+    Masc_mcp.Keeper_meta_contract.Sdk_cost_budget_exceeded;
+    Masc_mcp.Keeper_meta_contract.Sdk_unrecognized_stop_reason;
+    Masc_mcp.Keeper_meta_contract.Sdk_idle_detected;
+    Masc_mcp.Keeper_meta_contract.Sdk_tool_retry_exhausted;
+    Masc_mcp.Keeper_meta_contract.Sdk_guardrail_violation;
+    Masc_mcp.Keeper_meta_contract.Sdk_tripwire_violation;
+    Masc_mcp.Keeper_meta_contract.Sdk_exit_condition_met;
   ] in
   List.iter
     (fun klass ->
       check bool
         (Printf.sprintf "non-overflow class: %s"
-           (KT.blocker_class_to_string klass))
+           (Masc_mcp.Keeper_meta_contract.blocker_class_to_string klass))
         false
         (KR.blocker_class_indicates_overflow klass))
     cases
@@ -74,11 +74,11 @@ let non_overflow_classes_are_not_matched () =
 (* Test fixtures for the typed blocker_info inputs.  Detail strings are
    intentionally redacted to placeholder text — the gate semantics depend
    only on [klass]. *)
-let overflow_info : KT.blocker_info =
-  { klass = KT.Sdk_token_budget_exceeded; detail = "<opaque-detail>" }
+let overflow_info : Masc_mcp.Keeper_meta_contract.blocker_info =
+  { klass = Masc_mcp.Keeper_meta_contract.Sdk_token_budget_exceeded; detail = "<opaque-detail>" }
 
-let non_overflow_info : KT.blocker_info =
-  { klass = KT.Sdk_max_turns_exceeded; detail = "<opaque-detail>" }
+let non_overflow_info : Masc_mcp.Keeper_meta_contract.blocker_info =
+  { klass = Masc_mcp.Keeper_meta_contract.Sdk_max_turns_exceeded; detail = "<opaque-detail>" }
 
 let gate_skips_when_auto_handoff_disabled () =
   let decision =
@@ -87,7 +87,7 @@ let gate_skips_when_auto_handoff_disabled () =
       ~cooldown_elapsed:true
       ~ratio:0.99
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_error
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_error
       ~last_blocker_info:(Some overflow_info)
       ()
   in
@@ -101,7 +101,7 @@ let gate_skips_when_cooldown_active () =
       ~cooldown_elapsed:false
       ~ratio:0.99
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_error
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_error
       ~last_blocker_info:(Some overflow_info)
       ()
   in
@@ -114,7 +114,7 @@ let gate_fires_on_ratio () =
       ~cooldown_elapsed:true
       ~ratio:0.90
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_silent
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_silent
       ~last_blocker_info:None
       ()
   in
@@ -131,7 +131,7 @@ let gate_fires_on_persistent_overflow_despite_low_ratio () =
       ~cooldown_elapsed:true
       ~ratio:0.045  (* masc-improver snapshot 2026-04-14 *)
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_error
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_error
       ~last_blocker_info:(Some overflow_info)
       ()
   in
@@ -145,7 +145,7 @@ let gate_reports_both_when_both_conditions_true () =
       ~cooldown_elapsed:true
       ~ratio:0.90
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_error
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_error
       ~last_blocker_info:(Some overflow_info)
       ()
   in
@@ -161,7 +161,7 @@ let gate_requires_error_outcome_for_signal_trigger () =
       ~cooldown_elapsed:true
       ~ratio:0.2
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_text_response
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_text_response
       ~last_blocker_info:(Some overflow_info)
       ()
   in
@@ -175,7 +175,7 @@ let gate_skips_below_all_thresholds () =
       ~cooldown_elapsed:true
       ~ratio:0.10
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_silent
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_silent
       ~last_blocker_info:None
       ()
   in
@@ -189,7 +189,7 @@ let gate_fires_on_current_turn_overflow_signal () =
       ~cooldown_elapsed:true
       ~ratio:0.10
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_text_response
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_text_response
       ~last_blocker_info:None
       ~current_turn_blocker_info:(Some overflow_info)
       ()
@@ -208,7 +208,7 @@ let gate_ignores_non_overflow_class_signal () =
       ~cooldown_elapsed:true
       ~ratio:0.10
       ~handoff_threshold:0.85
-      ~last_outcome:KT.Proactive_error
+      ~last_outcome:Masc_mcp.Keeper_meta_contract.Proactive_error
       ~last_blocker_info:(Some non_overflow_info)
       ~current_turn_blocker_info:(Some non_overflow_info)
       ()

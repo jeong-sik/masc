@@ -2400,7 +2400,7 @@ let test_classify_masc_internal_error_roundtrip () =
       (Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
              internal_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
-         ; reason = Keeper_types.All_providers_failed
+         ; reason = Keeper_meta_contract.All_providers_failed
          })
   in
   (match Keeper_turn_driver.classify_masc_internal_error cascade_err with
@@ -2411,8 +2411,8 @@ let test_classify_masc_internal_error_roundtrip () =
        (internal_cascade_name_to_string cascade_name);
      Alcotest.(check string)
        "cascade reason"
-       (Keeper_types.cascade_exhaustion_summary Keeper_types.All_providers_failed)
-       (Keeper_types.cascade_exhaustion_summary reason)
+       (Keeper_meta_contract.cascade_exhaustion_summary Keeper_meta_contract.All_providers_failed)
+       (Keeper_meta_contract.cascade_exhaustion_summary reason)
    | _ -> Alcotest.fail "expected structured cascade exhaustion");
   let accept_err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error

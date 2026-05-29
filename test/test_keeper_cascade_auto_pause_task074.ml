@@ -38,7 +38,7 @@ let cascade_name raw = Cascade_name.of_string_exn raw
 let mk_cascade_exhausted () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Cascade_exhausted
-       { cascade_name = cascade_name "test"; reason = KT.All_providers_failed })
+       { cascade_name = cascade_name "test"; reason = Masc_mcp.Keeper_meta_contract.All_providers_failed })
 
 let mk_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error

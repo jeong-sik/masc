@@ -127,7 +127,7 @@ let has_tool_use_id ~tool_use_id msgs =
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
           ("name", `String name);
@@ -160,7 +160,7 @@ let build_dense_context ~turns ~max_tokens ~state_reply =
   KEC.append ctx (Agent_sdk.Types.assistant_msg state_reply)
   |> KEC.sync_oas_context
 
-let save_checkpoint ~base_dir ~(meta : KT.keeper_meta) ~ctx =
+let save_checkpoint ~base_dir ~(meta : Masc_mcp.Keeper_meta_contract.keeper_meta) ~ctx =
   let session =
     KEC.create_session ~session_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
   in
@@ -210,7 +210,7 @@ let test_post_turn_lifecycle_without_checkpoint_records_skip () =
       check string "skip decision" "skipped:no_checkpoint"
         (KEC.compaction_decision_to_string lifecycle.compaction.decision);
       check string "runtime decision persisted" "skipped:no_checkpoint"
-        (KT.compaction_runtime_decision_to_string
+        (Masc_mcp.Keeper_meta_contract.compaction_runtime_decision_to_string
            lifecycle.updated_meta.runtime.compaction_rt.last_decision);
       check bool "last check ts recorded" true
         (lifecycle.updated_meta.runtime.compaction_rt.last_check_ts > 0.0);
@@ -1031,7 +1031,7 @@ let test_post_turn_resilience_runtime_executor_pauses_handoff () =
             };
         }
       in
-      (match KT.write_meta config meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail ("write_meta failed: " ^ err));
       ignore (KR.register ~base_path:config.base_path meta.name meta);

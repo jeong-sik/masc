@@ -61,7 +61,7 @@ let test_removed_keeper_cascade_alias_rejected () =
   | Ok meta ->
       fail
         ("expected removed alias rejection, got "
-         ^ Keeper_types.cascade_name_of_meta meta)
+         ^ Keeper_meta_contract.cascade_name_of_meta meta)
 
 let test_unknown_bare_cascade_name_rejected () =
   (* Bare cascade names are no longer accepted. Operators must use
@@ -91,7 +91,7 @@ let test_unknown_bare_cascade_name_rejected () =
   | Ok meta ->
       fail
         ("expected bare cascade rejection, got "
-         ^ Keeper_types.cascade_name_of_meta meta)
+         ^ Keeper_meta_contract.cascade_name_of_meta meta)
 
 let test_missing_trace_id () =
   let json =

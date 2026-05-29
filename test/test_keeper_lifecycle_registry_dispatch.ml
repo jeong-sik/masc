@@ -53,7 +53,7 @@ let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
           ("name", `String name);
@@ -68,7 +68,7 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-let base_lifecycle ~(meta : KT.keeper_meta) : KEC.post_turn_lifecycle =
+let base_lifecycle ~(meta : Masc_mcp.Keeper_meta_contract.keeper_meta) : KEC.post_turn_lifecycle =
   {
     updated_meta = meta;
     checkpoint = None;
@@ -237,7 +237,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
       let config = Masc_mcp.Coord.default_config base_dir in
-      let ctx : _ KT.context =
+      let ctx : _ Masc_mcp.Keeper_types_profile.context =
         {
           config;
           agent_name = "test-operator";
@@ -308,7 +308,7 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       let before_invalid =
         persistence_read_drop_total ~surface ~reason:invalid_reason
       in
-      let ctx : _ KT.context =
+      let ctx : _ Masc_mcp.Keeper_types_profile.context =
         {
           config;
           agent_name = "test-operator";

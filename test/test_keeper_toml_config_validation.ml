@@ -107,7 +107,7 @@ let test_committed_keepers_are_pr_work_capable () =
              match defaults.tool_preset with
              | None -> fail (Printf.sprintf "%s: tool_access.preset is required" file)
              | Some raw ->
-                 (match KT.tool_preset_of_string raw with
+                 (match Masc_mcp.Keeper_meta_tool_access.tool_preset_of_string raw with
                   | Some preset -> preset
                   | None -> fail (Printf.sprintf "%s: unknown preset %S" file raw))
            in
@@ -121,7 +121,7 @@ let test_committed_keepers_are_pr_work_capable () =
                     ( "tool_access",
                       `Assoc [
                         ("kind", `String "preset");
-                        ("preset", `String (KT.tool_preset_to_string preset));
+                        ("preset", `String (Masc_mcp.Keeper_meta_tool_access.tool_preset_to_string preset));
                         ("also_allow", `List []);
                       ] );
                     ("tool_denylist", `List []);
@@ -190,7 +190,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
       let preset =
         match defaults.tool_preset with
         | Some raw -> (
-            match KT.tool_preset_of_string raw with
+            match Masc_mcp.Keeper_meta_tool_access.tool_preset_of_string raw with
             | Some preset -> preset
             | None -> fail (Printf.sprintf "unknown verifier preset %S" raw))
         | None -> fail "verifier tool_access.preset is required"
@@ -209,7 +209,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
                    `Assoc
                      [
                        ("kind", `String "preset");
-                       ("preset", `String (KT.tool_preset_to_string preset));
+                       ("preset", `String (Masc_mcp.Keeper_meta_tool_access.tool_preset_to_string preset));
                        ( "also_allow",
                          `List (List.map (fun value -> `String value) also_allow) );
                      ] );

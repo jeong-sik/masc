@@ -239,7 +239,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -261,7 +261,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
             };
         }
       in
-      (match Keeper_types.write_meta config updated_meta with
+      (match Keeper_meta_store.write_meta config updated_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let metrics_store = Keeper_types_support.keeper_metrics_store config keeper_name in
@@ -379,14 +379,14 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 meta.runtime with
                 last_blocker =
                   Some
-                    (Keeper_types.blocker_info_of_class
+                    (Keeper_meta_contract.blocker_info_of_class
                        ~detail:"Completion contract [require_tool_use] violated: actionable keeper signal was present, but the model called no keeper tools"
-                       Keeper_types.Completion_contract_violation);
+                       Keeper_meta_contract.Completion_contract_violation);
               };
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
-      (match Keeper_types.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       Dated_jsonl.append
@@ -522,7 +522,7 @@ let test_digest_room_includes_keeper_runtime_attention () =
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -536,13 +536,13 @@ let test_digest_room_includes_keeper_runtime_attention () =
               meta.runtime with
               last_blocker =
                 Some
-                  (Keeper_types.blocker_info_of_class
+                  (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"Completion contract requires a keeper tool call"
-                     Keeper_types.Completion_contract_violation);
+                     Keeper_meta_contract.Completion_contract_violation);
             };
         }
       in
-      (match Keeper_types.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let digest =
@@ -627,7 +627,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -928,7 +928,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("tools_used", `List []);
           ]);
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -1038,7 +1038,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             ])
       done;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err

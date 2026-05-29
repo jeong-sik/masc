@@ -40,7 +40,7 @@ let rec ensure_dir path =
     if p <> path then ensure_dir p;
     Unix.mkdir path 0o755)
 
-let make_meta ?(sandbox = Keeper_types.Local) name =
+let make_meta ?(sandbox = Masc_mcp.Keeper_types_profile_sandbox.Local) name =
   let json =
     `Assoc
       [
@@ -50,7 +50,7 @@ let make_meta ?(sandbox = Keeper_types.Local) name =
         ("goal", `String "patch test");
         ("allowed_paths", `List [ `String "*" ]);
         ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
+          `String (Masc_mcp.Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -66,7 +66,7 @@ let with_eio_fs f =
     ~clock:(Eio.Stdenv.clock env);
   f ()
 
-let setup ?(sandbox = Keeper_types.Local) f =
+let setup ?(sandbox = Masc_mcp.Keeper_types_profile_sandbox.Local) f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
@@ -94,7 +94,7 @@ let parse_error raw =
 let parse_int raw field =
   parse raw |> Json.member field |> Json.to_int_option
 
-let public_fs_edit_call ~public ~config ~(meta : Keeper_types.keeper_meta) args =
+let public_fs_edit_call ~public ~config ~(meta : Masc_mcp.Keeper_meta_contract.keeper_meta) args =
   let args = Keeper_tool_alias.translate_input ~public args in
   Agent_tool_filesystem_runtime.handle_file_write
     ~turn_sandbox_factory:None
@@ -102,7 +102,7 @@ let public_fs_edit_call ~public ~config ~(meta : Keeper_types.keeper_meta) args 
     ~keeper_name:meta.name
     ~args
 
-let seed_single_playground_repo ~config ~(meta : Keeper_types.keeper_meta) playground =
+let seed_single_playground_repo ~config ~(meta : Masc_mcp.Keeper_meta_contract.keeper_meta) playground =
   let repo = Filename.concat playground "repos/masc-mcp" in
   ensure_dir (Filename.concat repo ".git");
   let mapping : Repo_manager_types.keeper_repo_mapping =

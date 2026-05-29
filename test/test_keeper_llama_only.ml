@@ -60,7 +60,7 @@ let labels_for_turn meta =
 let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
   let base =
     match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
           ("name", `String "keeper-llama-only-test");
@@ -111,7 +111,7 @@ let test_legacy_explicit_models_do_not_override_cascade_resolution () =
 
 let test_meta_of_json_rejects_legacy_models () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
           ("name", `String "keeper-llama-only-test");

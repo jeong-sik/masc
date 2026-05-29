@@ -80,17 +80,17 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       Safe_ops.json_string_list "trace_history" json |> List.filter Keeper_config.validate_name
     in
     let pk_goal =
-      Safe_ops.json_string ~default:"" "goal" json |> normalize_goal_horizon_text
+      Safe_ops.json_string ~default:"" "goal" json |> Keeper_config_text.normalize_goal_horizon_text
     in
     let pk_short_goal, pk_mid_goal, pk_long_goal =
-      resolve_goal_horizons
+      Keeper_config_text.resolve_goal_horizons
         ~goal:pk_goal
         ~short_goal_opt:
-          (normalize_goal_horizon_opt (Safe_ops.json_string_opt "short_goal" json))
+          (Keeper_config_text.normalize_goal_horizon_opt (Safe_ops.json_string_opt "short_goal" json))
         ~mid_goal_opt:
-          (normalize_goal_horizon_opt (Safe_ops.json_string_opt "mid_goal" json))
+          (Keeper_config_text.normalize_goal_horizon_opt (Safe_ops.json_string_opt "mid_goal" json))
         ~long_goal_opt:
-          (normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
+          (Keeper_config_text.normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
     in
     let pk_social_model =
       Safe_ops.json_string
@@ -193,62 +193,62 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let pp_mention_targets =
-      Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
+      Safe_ops.json_string_list "mention_targets" json |> Json_util.dedupe_keep_order
     in
     let pp_room_signal_prompt_enabled =
       Safe_ops.json_bool
-        ~default:default_room_signal_prompt_enabled
+        ~default:Keeper_config_text.default_room_signal_prompt_enabled
         "room_signal_prompt_enabled"
         json
     in
     let pp_joined_room_ids =
       Safe_ops.json_string_list "joined_room_ids" json
-      |> List.filter validate_name
-      |> dedupe_keep_order
+      |> List.filter Keeper_config.validate_name
+      |> Json_util.dedupe_keep_order
     in
     let pp_last_seen_seq_by_room =
-      Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
+      Yojson.Safe.Util.member "last_seen_seq_by_room" json |> Keeper_types_profile.room_seq_map_of_json
     in
     let proactive_enabled =
-      Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
+      Safe_ops.json_bool ~default:Keeper_config_text.default_proactive_enabled "proactive_enabled" json
     in
     let proactive_idle_sec =
-      Safe_ops.json_int ~default:default_proactive_idle_sec "proactive_idle_sec" json
-      |> normalize_proactive_idle_sec
+      Safe_ops.json_int ~default:Keeper_config_text.default_proactive_idle_sec "proactive_idle_sec" json
+      |> Keeper_config.normalize_proactive_idle_sec
     in
     let proactive_cooldown_sec =
       Safe_ops.json_int
-        ~default:default_proactive_cooldown_sec
+        ~default:Keeper_config_text.default_proactive_cooldown_sec
         "proactive_cooldown_sec"
         json
-      |> normalize_proactive_cooldown_sec
+      |> Keeper_config.normalize_proactive_cooldown_sec
     in
     let env_ratio_gate, env_message_gate, env_token_gate =
-      keeper_compaction_policy_from_env ()
+      Keeper_config.keeper_compaction_policy_from_env ()
     in
     let compaction_profile =
-      Safe_ops.json_string ~default:default_compaction_profile "compaction_profile" json
-      |> canonical_compaction_profile
-      |> Option.value ~default:default_compaction_profile
+      Safe_ops.json_string ~default:Keeper_config.default_compaction_profile "compaction_profile" json
+      |> Keeper_config.canonical_compaction_profile
+      |> Option.value ~default:Keeper_config.default_compaction_profile
     in
     let compaction_ratio_gate =
       Safe_ops.json_float ~default:env_ratio_gate "compaction_ratio_gate" json
-      |> normalize_compaction_ratio_gate
+      |> Keeper_config.normalize_compaction_ratio_gate
     in
     let compaction_message_gate =
       Safe_ops.json_int ~default:env_message_gate "compaction_message_gate" json
-      |> normalize_compaction_message_gate
+      |> Keeper_config.normalize_compaction_message_gate
     in
     let compaction_token_gate =
       Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
-      |> normalize_compaction_token_gate
+      |> Keeper_config.normalize_compaction_token_gate
     in
     let continuity_compaction_cooldown_sec =
       Safe_ops.json_int
-        ~default:(keeper_continuity_compaction_cooldown_sec ())
+        ~default:(Keeper_config.keeper_continuity_compaction_cooldown_sec ())
         "continuity_compaction_cooldown_sec"
         json
-      |> normalize_continuity_compaction_cooldown_sec
+      |> Keeper_config.normalize_continuity_compaction_cooldown_sec
     in
     let pp_auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
     let pp_handoff_threshold =
@@ -258,7 +258,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
     in
     let pp_per_provider_timeout_s =
-      normalize_per_provider_timeout_json_field
+      Keeper_types_profile.normalize_per_provider_timeout_json_field
         ~source:(Printf.sprintf "keeper meta %s" keeper_name)
         ~field:"per_provider_timeout_s"
         json
@@ -580,10 +580,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ~trace_id:identity.pk_trace_id
                    ~trace_history:identity.pk_trace_history
                in
-               if not (validate_name identity.pk_name)
+               if not (Keeper_config.validate_name identity.pk_name)
                then Error "invalid keeper meta (bad name)"
                else if
-                 not (validate_name (Keeper_id.Trace_id.to_string identity.pk_trace_id))
+                 not (Keeper_config.validate_name (Keeper_id.Trace_id.to_string identity.pk_trace_id))
                then Error "invalid keeper meta (bad trace_id)"
                else
                  let cascade_ref_result =

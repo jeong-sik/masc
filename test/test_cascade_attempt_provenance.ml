@@ -49,10 +49,10 @@ let test_record_cascade_attempt_round_trips_from_meta () =
       let config = Masc_mcp.Coord.default_config base_path in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "cascade-attempt-test"));
       let keeper_name = "provenance-keeper" in
-      (match KT.write_meta ~force:true config (make_meta keeper_name) with
+      (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config (make_meta keeper_name) with
        | Ok () -> ()
        | Error err -> fail ("initial write_meta failed: " ^ err));
-      let expected : KT.cascade_attempt_record =
+      let expected : Masc_mcp.Keeper_meta_contract.cascade_attempt_record =
         { provider_id = "runpod_mtp"
         ; http_status = Some 502
         ; outcome = `Failure "GGML_ASSERT(logits!=nullptr)"
@@ -63,7 +63,7 @@ let test_record_cascade_attempt_round_trips_from_meta () =
         ~base_path:config.base_path
         ~keeper_name
         expected;
-      match KT.read_meta config keeper_name with
+      match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
       | Error err -> fail ("read_meta failed: " ^ err)
       | Ok None -> fail "keeper meta missing after cascade attempt write"
       | Ok (Some meta) ->

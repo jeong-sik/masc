@@ -2,6 +2,12 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
+(* RFC-0205 #19399 facade cleanup removed the [Keeper_types] open that
+   previously brought [string_field_opt] into scope. Re-point at its real
+   home in [Json_util]; signature ([name -> json -> string option]) is
+   identical. *)
+let string_field_opt = Json_util.assoc_string_opt
+
 let room_status_json (config : Coord.config) : Yojson.Safe.t =
   let room_state_opt =
     if Coord.is_initialized config then Some (Coord.read_state config) else None

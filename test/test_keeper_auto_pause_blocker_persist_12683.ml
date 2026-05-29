@@ -15,16 +15,16 @@ module KT = Masc_mcp.Keeper_types
 module MC = Masc_mcp.Keeper_meta_contract
 
 let test_turn_timeout_blocker_class_roundtrip () =
-  let cls = KT.Turn_timeout in
-  let label = KT.blocker_class_to_string cls in
+  let cls = Masc_mcp.Keeper_meta_contract.Turn_timeout in
+  let label = Masc_mcp.Keeper_meta_contract.blocker_class_to_string cls in
   check bool "label non-empty" true (String.length label > 0);
   match MC.blocker_class_of_serialized_string label with
   | Some _ -> ()
   | None -> fail "Turn_timeout label did not parse back"
 
 let test_stale_fleet_batch_blocker_class_roundtrip () =
-  let cls = KT.Stale_fleet_batch in
-  let label = KT.blocker_class_to_string cls in
+  let cls = Masc_mcp.Keeper_meta_contract.Stale_fleet_batch in
+  let label = Masc_mcp.Keeper_meta_contract.blocker_class_to_string cls in
   check string "label" "stale_fleet_batch" label;
   match MC.blocker_class_of_serialized_string label with
   | Some MC.Stale_fleet_batch -> ()
@@ -32,8 +32,8 @@ let test_stale_fleet_batch_blocker_class_roundtrip () =
   | None -> fail "Stale_fleet_batch label did not parse back"
 
 let test_capacity_backpressure_blocker_class_roundtrip () =
-  let cls = KT.Capacity_backpressure in
-  let label = KT.blocker_class_to_string cls in
+  let cls = Masc_mcp.Keeper_meta_contract.Capacity_backpressure in
+  let label = Masc_mcp.Keeper_meta_contract.blocker_class_to_string cls in
   check string "label" "capacity_backpressure" label;
   match MC.blocker_class_of_serialized_string label with
   | Some MC.Capacity_backpressure -> ()
@@ -49,7 +49,7 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  let meta = match KT.meta_of_json base_json with
+  let meta = match Masc_mcp.Keeper_meta_json_parse.meta_of_json base_json with
     | Ok m -> m
     | Error err -> fail ("parse base: " ^ err)
   in
@@ -59,12 +59,12 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
     auto_resume_after_sec = Some 3600.0;
     runtime = { meta.runtime with
       last_blocker =
-        Some (KT.blocker_info_of_class
-                ~detail:blocker_text KT.Turn_timeout);
+        Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+                ~detail:blocker_text Masc_mcp.Keeper_meta_contract.Turn_timeout);
     };
   } in
-  let json = KT.meta_to_json paused_meta in
-  let reparsed = match KT.meta_of_json json with
+  let json = Masc_mcp.Keeper_meta_json.meta_to_json paused_meta in
+  let reparsed = match Masc_mcp.Keeper_meta_json_parse.meta_of_json json with
     | Ok m -> m
     | Error err -> fail ("roundtrip: " ^ err)
   in
@@ -75,7 +75,7 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
    | Some info ->
      check string "last_blocker.detail preserved" blocker_text info.detail;
      (match info.klass with
-      | KT.Turn_timeout -> ()
+      | Masc_mcp.Keeper_meta_contract.Turn_timeout -> ()
       | _ -> fail "legacy timeout-budget blocker did not collapse to Turn_timeout")
    | None -> fail "last_blocker should be Some after roundtrip")
 
@@ -88,22 +88,22 @@ let test_meta_json_roundtrip_with_stale_storm_blocker () =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  let meta = match KT.meta_of_json base_json with
+  let meta = match Masc_mcp.Keeper_meta_json_parse.meta_of_json base_json with
     | Ok m -> m
     | Error err -> fail ("parse base: " ^ err)
   in
-  let blocker_text = KT.blocker_class_to_string KT.Turn_timeout in
+  let blocker_text = Masc_mcp.Keeper_meta_contract.blocker_class_to_string Masc_mcp.Keeper_meta_contract.Turn_timeout in
   let paused_meta = { meta with
     paused = true;
     auto_resume_after_sec = Some 7200.0;
     runtime = { meta.runtime with
       last_blocker =
-        Some (KT.blocker_info_of_class
-                ~detail:blocker_text KT.Turn_timeout);
+        Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+                ~detail:blocker_text Masc_mcp.Keeper_meta_contract.Turn_timeout);
     };
   } in
-  let json = KT.meta_to_json paused_meta in
-  let reparsed = match KT.meta_of_json json with
+  let json = Masc_mcp.Keeper_meta_json.meta_to_json paused_meta in
+  let reparsed = match Masc_mcp.Keeper_meta_json_parse.meta_of_json json with
     | Ok m -> m
     | Error err -> fail ("roundtrip: " ^ err)
   in
@@ -111,7 +111,7 @@ let test_meta_json_roundtrip_with_stale_storm_blocker () =
    | Some info ->
      check string "last_blocker.detail" blocker_text info.detail;
      (match info.klass with
-      | KT.Turn_timeout -> ()
+      | Masc_mcp.Keeper_meta_contract.Turn_timeout -> ()
       | _ -> fail "blocker klass not Turn_timeout after roundtrip")
    | None -> fail "last_blocker should be Some after roundtrip")
 
@@ -138,7 +138,7 @@ let test_legacy_last_blocker_pair_rejected () =
          ])
     | json -> json
   in
-  match KT.meta_of_json legacy_json with
+  match Masc_mcp.Keeper_meta_json_parse.meta_of_json legacy_json with
   | Ok _ -> fail "legacy blocker pair should be rejected"
   | Error msg ->
     check string
@@ -154,7 +154,7 @@ let test_legacy_last_blocker_string_rejected () =
         (fields @ [ "last_blocker", `String "turn wall-clock timeout exceeded" ])
     | json -> json
   in
-  match KT.meta_of_json legacy_json with
+  match Masc_mcp.Keeper_meta_json_parse.meta_of_json legacy_json with
   | Ok _ -> fail "legacy string last_blocker should be rejected"
   | Error msg ->
     check string
@@ -170,7 +170,7 @@ let test_repo_cli_identity_runtime_meta_rejected () =
       `Assoc (fields @ [ "repo_cli_identity", `String "anyang-keepers" ])
     | json -> json
   in
-  match KT.meta_of_json legacy_json with
+  match Masc_mcp.Keeper_meta_json_parse.meta_of_json legacy_json with
   | Ok _ -> fail "runtime meta repo_cli_identity field should be rejected"
   | Error msg ->
     check string
@@ -206,12 +206,12 @@ let test_persisted_retired_runtime_meta_fields_scrubbed () =
     ~finally:(fun () -> try Sys.remove path with _ -> ())
     (fun () ->
        Yojson.Safe.to_file path legacy_json;
-       let scrubbed, changed = KT.scrub_persisted_keeper_meta_json ~path legacy_json in
+       let scrubbed, changed = Masc_mcp.Keeper_meta_json_scrub.scrub_persisted_keeper_meta_json ~path legacy_json in
        check bool "scrubbed" true changed;
        List.iter
          (fun (key, _) -> check bool (key ^ " removed") false (has_key key scrubbed))
          retired_fields;
-       (match KT.meta_of_json scrubbed with
+       (match Masc_mcp.Keeper_meta_json_parse.meta_of_json scrubbed with
         | Ok _ -> ()
         | Error err -> fail ("scrubbed meta should parse: " ^ err));
        let persisted = Yojson.Safe.from_file path in

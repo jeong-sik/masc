@@ -56,7 +56,7 @@ let make_meta ?(name = "analyst") ?(models = []) () =
         ("models", `List (List.map (fun value -> `String value) models))
         :: base_fields
   in
-  match KT.meta_of_json (`Assoc fields) with
+  match Masc_mcp.Keeper_meta_json_parse.meta_of_json (`Assoc fields) with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 

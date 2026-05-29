@@ -25,8 +25,8 @@ let read_meta_file_path path : (keeper_meta option, string) result =
     | Error e -> Error e
     | Ok json ->
       let json, _scrubbed = Keeper_meta_json_scrub.scrub_persisted_keeper_meta_json ~path json in
-      warn_unknown_keeper_meta_keys ~path json;
-      (match meta_of_json json with
+      Keeper_meta_json.warn_unknown_keeper_meta_keys ~path json;
+      (match Keeper_meta_json_parse.meta_of_json json with
        | Ok meta -> Ok (Some meta)
        | Error e ->
          Prometheus.inc_counter
@@ -59,7 +59,7 @@ let is_keeper_meta_file f =
 ;;
 
 let persisted_keeper_names config =
-  let dir = keeper_dir config in
+  let dir = Keeper_types_profile.keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error e ->
     Prometheus.inc_counter
@@ -72,7 +72,7 @@ let persisted_keeper_names config =
     files
     |> List.filter is_keeper_meta_file
     |> List.map Filename.remove_extension
-    |> List.filter validate_name
+    |> List.filter Keeper_config.validate_name
     |> List.sort String.compare
 ;;
 
@@ -80,7 +80,7 @@ let configured_keeper_names _config =
   Config_dir_resolver.log_warnings ~context:"KeeperTypes" ();
   Keeper_types_profile.discover_keepers_toml (Config_dir_resolver.keepers_dir ())
   |> List.map fst
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 ;;
 
 let keeper_names config =
@@ -93,13 +93,13 @@ let keeper_names config =
 ;;
 
 let declarative_autoboot_enabled_by_default name =
-  match (load_keeper_profile_defaults name).autoboot_enabled with
+  match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
   | Some false -> false
   | Some true | None -> true
 ;;
 
 let effective_autoboot_enabled name meta =
-  match (load_keeper_profile_defaults name).autoboot_enabled with
+  match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
   | Some value -> value
   | None -> meta.autoboot_enabled
 ;;
@@ -107,7 +107,7 @@ let effective_autoboot_enabled name meta =
 let keepalive_keeper_names config =
   configured_keeper_names config
   |> List.filter_map (fun name ->
-    match read_meta_file_path (keeper_meta_path config name) with
+    match read_meta_file_path (Keeper_types_profile.keeper_meta_path config name) with
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled name meta ->
         Some meta.name
@@ -140,7 +140,7 @@ let keepalive_keeper_names config =
 let persistent_agent_names config =
   configured_keeper_names config
   |> List.filter_map (fun name ->
-    match read_meta_file_path (keeper_meta_path config name) with
+    match read_meta_file_path (Keeper_types_profile.keeper_meta_path config name) with
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled name meta ->
         Some meta.name
@@ -167,14 +167,14 @@ let read_meta_resolved config name : ((string * keeper_meta) option, string) res
   if requested_name = ""
   then Ok None
   else
-    read_meta_file_path (keeper_meta_path config requested_name)
+    read_meta_file_path (Keeper_types_profile.keeper_meta_path config requested_name)
     |> Result.map (Option.map (fun meta -> requested_name, meta))
 ;;
 
 let read_meta config name : (keeper_meta option, string) result =
   let requested_name = String.trim name in
-  let path = keeper_meta_path config requested_name in
-  if keeper_debug
+  let path = Keeper_types_profile.keeper_meta_path config requested_name in
+  if Keeper_types_profile.keeper_debug
   then
     Log.Keeper.debug
       "read_meta name=%s path=%s exists=%b"
@@ -194,7 +194,7 @@ let read_meta config name : (keeper_meta option, string) result =
 let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * float) option =
   let requested_name = String.trim name in
   let read_candidate candidate =
-    let path = keeper_meta_path config candidate in
+    let path = Keeper_types_profile.keeper_meta_path config candidate in
     if not (Fs_compat.file_exists path)
     then None
     else (
@@ -273,7 +273,7 @@ let refresh_progress_updated_line config name =
 ;;
 
 let persist_meta config path persisted =
-  let json = meta_to_json persisted in
+  let json = Keeper_meta_json.meta_to_json persisted in
   match Keeper_fs.save_json_atomic path json with
   | Ok () ->
     !runtime_meta_write_sync_hook config persisted;
@@ -283,7 +283,7 @@ let persist_meta config path persisted =
 ;;
 
 let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
-  let path = keeper_meta_path config m.name in
+  let path = Keeper_types_profile.keeper_meta_path config m.name in
   if force
   then (
     let persisted = { m with meta_version = m.meta_version + 1 } in
@@ -330,7 +330,7 @@ let write_meta_with_merge
       (m : keeper_meta)
   : (unit, string) result
   =
-  let path = keeper_meta_path config m.name in
+  let path = Keeper_types_profile.keeper_meta_path config m.name in
   let rec attempt n (caller : keeper_meta) =
     match write_meta config caller with
     | Ok () -> Ok ()

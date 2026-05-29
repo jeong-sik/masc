@@ -16,7 +16,7 @@ let meta_to_json (m : Keeper_meta_contract.keeper_meta) : Yojson.Safe.t =
     ; "agent_name", `String m.agent_name
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
-    ; "last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room
+    ; "last_seen_seq_by_room", Keeper_types_profile.room_seq_map_to_json m.last_seen_seq_by_room
     ; "generation", `Int rt.generation
     ; "last_handoff_ts", `Float rt.last_handoff_ts
     ; "created_at", `String m.created_at
@@ -41,13 +41,13 @@ let meta_to_json (m : Keeper_meta_contract.keeper_meta) : Yojson.Safe.t =
     ; "proactive_visible_count_total", `Int rt.proactive_rt.visible_count_total
     ; "last_visible_proactive_ts", `Float rt.proactive_rt.last_visible_ts
     ; ( "last_proactive_outcome"
-      , `String (proactive_cycle_outcome_to_string rt.proactive_rt.last_outcome) )
+      , `String (Keeper_meta_contract.proactive_cycle_outcome_to_string rt.proactive_rt.last_outcome) )
     ; "last_proactive_reason", `String rt.proactive_rt.last_reason
     ; "last_proactive_preview", `String rt.proactive_rt.last_preview
     ; "consecutive_noop_count", `Int rt.proactive_rt.consecutive_noop_count
     ; "last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts
     ; ( "last_compaction_decision"
-      , `String (compaction_runtime_decision_to_string rt.compaction_rt.last_decision)
+      , `String (Keeper_meta_contract.compaction_runtime_decision_to_string rt.compaction_rt.last_decision)
       )
     ; "last_continuity_update_ts", `Float rt.last_continuity_update_ts
     ; "continuity_summary", `String m.continuity_summary
@@ -66,11 +66,11 @@ let meta_to_json (m : Keeper_meta_contract.keeper_meta) : Yojson.Safe.t =
     ; "last_current_intention", `String rt.last_current_intention
     ; ( "last_blocker"
       , match rt.last_blocker with
-        | Some info -> blocker_info_to_json info
+        | Some info -> Keeper_meta_contract.blocker_info_to_json info
         | None -> `Null )
     ; ( "last_cascade_attempt"
       , match rt.last_cascade_attempt with
-        | Some record -> cascade_attempt_record_to_json record
+        | Some record -> Keeper_meta_contract.cascade_attempt_record_to_json record
         | None -> `Null )
     ; "last_need", `String rt.last_need
     ; ( "last_turn_tool_calls"
@@ -180,7 +180,7 @@ let canonical_keeper_meta_key_names =
   match meta_of_json seed_json with
   | Ok meta ->
     (match meta_to_json meta with
-     | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
+     | `Assoc fields -> fields |> List.map fst |> Json_util.dedupe_keep_order
      | _ -> fallback_canonical_keeper_meta_key_names)
   | Error msg ->
     Prometheus.inc_counter
@@ -202,7 +202,7 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
         if List.mem key canonical_keeper_meta_key_names
         then None
         else Some key)
-      |> dedupe_keep_order
+      |> Json_util.dedupe_keep_order
     in
     (match unknown with
      | [] -> ()

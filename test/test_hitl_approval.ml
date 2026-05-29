@@ -24,7 +24,7 @@ let temp_dir () =
   dir
 
 let meta_from_json json =
-  match KT.meta_of_json json with
+  match Masc_mcp.Keeper_meta_json_parse.meta_of_json json with
   | Ok m -> m
   | Error e -> Alcotest.fail ("meta parse failed: " ^ e)
 

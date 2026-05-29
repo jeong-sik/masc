@@ -828,6 +828,17 @@ let rec parse parents path = function
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkdir { path = p; parents }))
      | None -> None)
   | "-p" :: rest | "--parents" :: rest -> parse true path rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: next non-empty arg is the path *)
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p ->
+       (match path with
+        | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkdir { path = p; parents }))
+        | Some _ -> None)
+     | None ->
+       (match path with
+        | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkdir { path = p; parents }))
+        | None -> None))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse parents path rest
@@ -1490,6 +1501,11 @@ let rec parse count duplicates unique skip_fields skip_chars file = function
     (match int_of_string_opt n_str with
      | Some n -> parse count duplicates unique skip_fields (Some n) file rest
      | None -> parse count duplicates unique skip_fields skip_chars file rest)
+  | "--" :: rest ->
+    (* POSIX end-of-options: next non-empty arg is the file *)
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some f -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file = Some f }))
+     | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file })))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse count duplicates unique skip_fields skip_chars file rest
@@ -1522,6 +1538,12 @@ parse false false false None None None args|}
 match args with
 | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = None }))
 | [ path; suffix ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = Some suffix }))
+| "--" :: rest ->
+  let remaining = List.filter (fun a -> String.length a > 0) rest in
+  (match remaining with
+   | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = None }))
+   | [ path; suffix ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = Some suffix }))
+   | _ -> None)
 | _ -> None|}
     }
   ; { name = "Dirname"
@@ -1544,6 +1566,10 @@ match args with
           {|
 match args with
 | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dirname { path }))
+| "--" :: rest ->
+  (match List.find_opt (fun a -> String.length a > 0) rest with
+   | Some path -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dirname { path }))
+   | None -> None)
 | _ -> None|}
     }
   ; { name = "Test"
@@ -2542,6 +2568,16 @@ let rec parse flags archive delete dry_run compress src dst = function
     when String.length arg > 0 && arg.[0] = '-'
          && List.mem arg rsync_value_flags ->
     parse (val_ :: arg :: flags) archive delete dry_run compress src dst rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are source, dest *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ s; d ] ->
+       (match src, dst with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; archive; delete; dry_run; compress; flags = List.rev flags }))
+        | _ -> None)
+     | _ -> None)
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ flag; value ] when List.mem flag rsync_value_flags ->
@@ -2748,6 +2784,13 @@ let rec parse file patchfile strip reverse = function
     Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file; patchfile; strip; reverse }))
   | "-R" :: rest -> parse file patchfile strip true rest
   | "-i" :: p :: rest -> parse file (Some p) strip reverse rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining non-empty args are file *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file; patchfile; strip; reverse }))
+     | [ f ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file = Some f; patchfile; strip; reverse }))
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then (

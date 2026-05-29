@@ -33,11 +33,9 @@ type planning_context = {
 
 (* ===== Utility Functions ===== *)
 
-let now_iso = Masc_domain.now_iso
-
 (** Create empty planning context *)
 let create_context ~task_id =
-  let now = now_iso () in
+  let now = Masc_domain.now_iso () in
   {
     task_id;
     task_plan = "";
@@ -171,7 +169,7 @@ let update_plan (config : Coord.config) ~task_id ~content : (planning_context, s
           | Some { deliverable = Some value; _ } -> value
           | _ -> ctx.deliverable
         in
-        let updated = { ctx with task_plan; deliverable; updated_at = now_iso () } in
+        let updated = { ctx with task_plan; deliverable; updated_at = Masc_domain.now_iso () } in
         write_file_content (Filename.concat dir "task_plan.md") task_plan;
         (match parsed with
          | Some { deliverable = Some value; _ } ->
@@ -191,11 +189,11 @@ let add_note (config : Coord.config) ~task_id ~note : (planning_context, string)
     match load config ~task_id with
     | Error e -> Error e
     | Ok ctx ->
-        let timestamp = now_iso () in
+        let timestamp = Masc_domain.now_iso () in
         let formatted_note = Printf.sprintf "## [%s]\n%s\n" timestamp note in
         let updated = { ctx with
           notes = ctx.notes @ [note];
-          updated_at = now_iso ()
+          updated_at = Masc_domain.now_iso ()
         } in
         (* Append to notes.md *)
         let notes_path = Filename.concat dir "notes.md" in
@@ -221,7 +219,7 @@ let add_error (config : Coord.config) ~task_id ~error_type ~message ?context () 
     match ctx with
     | Error e -> Error e
     | Ok ctx ->
-        let timestamp = now_iso () in
+        let timestamp = Masc_domain.now_iso () in
         let error_entry = { timestamp; error_type; message; context; resolved = false } in
         let formatted_error = Printf.sprintf "## [%s] %s\n**Type**: %s\n%s\n%s\n---\n"
           timestamp
@@ -232,7 +230,7 @@ let add_error (config : Coord.config) ~task_id ~error_type ~message ?context () 
         in
         let updated = { ctx with
           errors = ctx.errors @ [error_entry];
-          updated_at = now_iso ()
+          updated_at = Masc_domain.now_iso ()
         } in
         (* Append to errors.md *)
         let errors_path = Filename.concat dir "errors.md" in
@@ -257,7 +255,7 @@ let resolve_error (config : Coord.config) ~task_id ~index : (planning_context, s
           let errors = List.mapi (fun i e ->
             if i = index then { e with resolved = true } else e
           ) ctx.errors in
-          let updated = { ctx with errors; updated_at = now_iso () } in
+          let updated = { ctx with errors; updated_at = Masc_domain.now_iso () } in
           let dir = planning_dir config task_id in
           write_file_content (Filename.concat dir "context.json")
             (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
@@ -280,7 +278,7 @@ let set_deliverable (config : Coord.config) ~task_id ~content : (planning_contex
     match ctx with
     | Error e -> Error e
     | Ok ctx ->
-        let updated = { ctx with deliverable = content; updated_at = now_iso () } in
+        let updated = { ctx with deliverable = content; updated_at = Masc_domain.now_iso () } in
         write_file_content (Filename.concat dir "deliverable.md") content;
         write_file_content (Filename.concat dir "context.json")
           (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));

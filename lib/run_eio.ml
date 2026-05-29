@@ -88,8 +88,6 @@ let ensure_run_dir config task_id =
   let dir = run_dir config task_id in
   if not (Sys.file_exists dir) then mkdir_p dir
 
-let now_iso () = Masc_domain.now_iso ()
-
 let read_text_file path =
   if Sys.file_exists path then
     Fs_compat.load_file path
@@ -129,7 +127,7 @@ let init config ~task_id ~agent_name : (run_record, string) result =
   try
     ensure_initialized config;
     ensure_run_dir config task_id;
-    let created_at = now_iso () in
+    let created_at = Masc_domain.now_iso () in
     let run = {
       task_id;
       agent_name;
@@ -175,7 +173,7 @@ let update_plan config ~task_id ~content : (run_record, string) result =
       match read_run config task_id with
       | Error e -> Error e
       | Ok run ->
-          let updated = { run with plan = content; updated_at = now_iso () } in
+          let updated = { run with plan = content; updated_at = Masc_domain.now_iso () } in
           let path = plan_path config task_id in
           write_text_file path content;
           write_run config updated;
@@ -189,7 +187,7 @@ let append_log config ~task_id ~note : (log_entry, string) result =
   try
     ensure_initialized config;
     ensure_run_dir config task_id;
-    let entry = { timestamp = now_iso (); note } in
+    let entry = { timestamp = Masc_domain.now_iso (); note } in
     let file = log_path config task_id in
     with_file_lock config file (fun () ->
       Fs_compat.append_jsonl file (log_entry_to_json entry)
@@ -211,7 +209,7 @@ let set_deliverable config ~task_id ~content : (run_record, string) result =
       match read_run config task_id with
       | Error e -> Error e
       | Ok run ->
-          let updated = { run with deliverable = content; updated_at = now_iso () } in
+          let updated = { run with deliverable = content; updated_at = Masc_domain.now_iso () } in
           let path = deliverable_path config task_id in
           write_text_file path content;
           write_run config updated;

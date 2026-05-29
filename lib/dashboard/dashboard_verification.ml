@@ -188,7 +188,6 @@ let sort_desc (requests : V.verification_request list)
 
 let take = List.take
 
-let now_iso () = Masc_domain.now_iso ()
 let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 
 (* Compute the request-listing projection from an already-loaded list.
@@ -199,7 +198,7 @@ let requests_json_of_requests ?task_id ~limit all : Yojson.Safe.t =
   let sorted = sort_desc filtered in
   let trimmed = take limit sorted in
   `Assoc
-    ([ ("updated_at", `String (now_iso ()))
+    ([ ("updated_at", `String (Masc_domain.now_iso ()))
      ; ("total", `Int (List.length filtered))
      ; ("requests", `List (List.map request_to_json trimmed))
      ]
@@ -269,7 +268,7 @@ let summary_json_of_requests ~recent all : Yojson.Safe.t =
     |> List.map rejection_row_json
   in
   `Assoc
-    ([ ("updated_at", `String (now_iso ()))
+    ([ ("updated_at", `String (Masc_domain.now_iso ()))
      ; ("total", `Int total)
      ; ( "by_status"
        , `Assoc

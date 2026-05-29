@@ -70,17 +70,7 @@ let float_field_opt record field =
      | _ -> None)
   | _ -> None
 
-let string_list_field record field =
-  match record with
-  | `Assoc fields ->
-    (match List.assoc_opt field fields with
-     | Some (`List values) ->
-       values
-       |> List.filter_map (function
-         | `String value when String.trim value <> "" -> Some value
-         | _ -> None)
-     | _ -> [])
-  | _ -> []
+let string_list_field = Json_util.get_string_list
 
 let output_text record =
   match record with

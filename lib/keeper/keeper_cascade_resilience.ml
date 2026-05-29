@@ -33,7 +33,7 @@ let cascade_resilience_of_name raw_name =
   let pure_local =
     match model_labels with
     | [] -> false
-    | models -> Cascade_runtime.labels_are_pure_local models
+    | _models -> false
   in
   let blocker =
     match error with

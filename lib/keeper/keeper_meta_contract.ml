@@ -724,7 +724,6 @@ let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_me
   { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
 ;;
 
-let now_iso () = Masc_domain.now_iso ()
 let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
 
 let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =

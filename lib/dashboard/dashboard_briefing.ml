@@ -36,10 +36,6 @@ type attention_context = Dashboard_briefing_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-let dedup_strings items =
-  List.sort_uniq String.compare
-    (List.filter_map String_util.trim_to_option items)
-
 let top_item items =
   match items with
   | item :: _ -> item

@@ -38,13 +38,8 @@ let cache_store ~ttl key preview =
       Hashtbl.replace preview_cache key
         { preview; expires_at = Time_compat.now () +. ttl })
 
-let json_string_opt_field fields key =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> String_util.trim_to_option value
-  | _ -> None
-
 let error_reason_of_json = function
-  | `Assoc fields -> json_string_opt_field fields "error"
+  | `Assoc _ as json -> Json_util.assoc_string_opt "error" json
   | _ -> None
 
 let assoc_upsert fields key value =

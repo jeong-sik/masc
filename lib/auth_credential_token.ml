@@ -59,16 +59,7 @@ let expires_at_for_auth_config auth_cfg =
       Time_compat.now ()
       +. (float_of_int auth_cfg.token_expiry_hours *. Masc_time_constants.hour)
     in
-    let tm = Unix.gmtime expiry in
-    Some
-      (Printf.sprintf
-         "%04d-%02d-%02dT%02d:%02d:%02dZ"
-         (tm.Unix.tm_year + 1900)
-         (tm.Unix.tm_mon + 1)
-         tm.Unix.tm_mday
-         tm.Unix.tm_hour
-         tm.Unix.tm_min
-         tm.Unix.tm_sec))
+    Some (Masc_domain.iso8601_of_unix_seconds expiry))
   else None
 ;;
 

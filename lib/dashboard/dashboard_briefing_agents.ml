@@ -5,10 +5,6 @@
 
 include Dashboard_utils
 
-let dedup_strings items =
-  List.sort_uniq String.compare
-    (List.filter_map String_util.trim_to_option items)
-
 let event_detail_json event_json =
   member_assoc "detail" event_json
 

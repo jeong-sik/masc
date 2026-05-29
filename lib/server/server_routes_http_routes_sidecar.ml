@@ -223,29 +223,9 @@ let read_attempt_record ~base_path id =
       None)
 ;;
 
-let isoish_now () =
-  let tm = Unix.gmtime (Unix.time ()) in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900)
-    (tm.tm_mon + 1)
-    tm.tm_mday
-    tm.tm_hour
-    tm.tm_min
-    tm.tm_sec
-;;
+let isoish_now () = Masc_domain.now_iso ()
 
-let isoish_at ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900)
-    (tm.tm_mon + 1)
-    tm.tm_mday
-    tm.tm_hour
-    tm.tm_min
-    tm.tm_sec
-;;
+let isoish_at ts = Masc_domain.iso8601_of_unix_seconds ts
 
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
     tries to rename into it. *)

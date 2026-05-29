@@ -294,6 +294,9 @@ type cascade_config =
   ; routes : cascade_route list
   ; system_targets : cascade_route list
   ; profiles : cascade_profile list
+  ; default_runtime_id : string option
+    (** cascade→Runtime 전환. [\[runtime\] default = "provider.model"] TOML
+        에서 파싱. None 이면 Runtime.load_list 가 startup 에서 fail-fast. *)
   }
 [@@deriving show, eq]
 

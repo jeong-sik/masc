@@ -8,6 +8,12 @@
 # api_format (Messages_api / Chat_completions_api / Ollama_api) and
 # reads everything else from this file. See RFC-0058 §2.4.
 
+# ── Runtime: global default ─────────────────────────────────────
+# cascade→Runtime 전환. routes/cascade_name 간접을 대체하는 글로벌 default
+# Runtime (binding key "provider.model"). 없으면 startup fail (silent fallback 금지).
+[runtime]
+default = "runpod_mtp.qwen-runpod"
+
 # ── Layer 1: Providers ──────────────────────────────────────────
 
 

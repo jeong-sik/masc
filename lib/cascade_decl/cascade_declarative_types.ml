@@ -352,6 +352,11 @@ type cascade_config =
   ; routes : cascade_route list
   ; system_targets : cascade_route list
   ; profiles : cascade_profile list
+  ; default_runtime_id : string option
+    (** RFC: cascade→Runtime 전환. [\[runtime\] default = "provider.model"]
+        TOML 테이블에서 파싱. routes/cascade_name 간접을 대체하는 글로벌
+        default Runtime 식별자. None 이면 Runtime.load_list 가 startup 에서
+        fail-fast (silent fallback 금지). *)
   }
 [@@deriving show, eq]
 

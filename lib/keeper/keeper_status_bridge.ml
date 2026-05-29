@@ -391,12 +391,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
   ]
 ;;
 
-let json_string_opt_member json key =
-  match Yojson.Safe.Util.member key json with
-  | `String value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
-  | _ -> None
+let json_string_opt_member = Json_util.get_string_nonempty
 ;;
 
 let assoc_upsert fields key value =

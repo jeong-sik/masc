@@ -116,12 +116,7 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
                       agent.last_seen));
               ]))
 
-let json_string_opt key json =
-  match Safe_ops.json_string_opt key json with
-  | Some s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
+let json_string_opt key json = Json_util.get_string_nonempty json key
 
 let json_bool key json default =
   Safe_ops.json_bool ~default key json

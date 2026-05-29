@@ -62,9 +62,7 @@ let status_to_string = function
   | Warn -> "warn"
   | Error -> "error"
 
-let string_has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
+let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
 
 let string_has_suffix ~suffix value =
   let suffix_len = String.length suffix in

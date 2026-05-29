@@ -157,9 +157,9 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ; "repo_head_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit
     ; "repo_head_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit_source
     ; "keeper_fibers", `Int keeper_fibers
-    ; "fd_open", fd_accountant |> Yojson.Safe.Util.member "fd_open"
-    ; "fd_limit", fd_accountant |> Yojson.Safe.Util.member "fd_limit"
-    ; "fd_pressure_active", fd_accountant |> Yojson.Safe.Util.member "pressure_active"
+    ; "fd_open", (match Json_util.assoc_member_opt "fd_open" fd_accountant with Some v -> v | None -> `Null)
+    ; "fd_limit", (match Json_util.assoc_member_opt "fd_limit" fd_accountant with Some v -> v | None -> `Null)
+    ; "fd_pressure_active", (match Json_util.assoc_member_opt "pressure_active" fd_accountant with Some v -> v | None -> `Null)
     ]
 ;;
 

@@ -41,21 +41,22 @@ let goal_principal_to_yojson (principal : goal_principal) =
 
 let goal_principal_of_yojson = function
   | `Assoc fields as json -> (
-      match principal_kind_of_yojson (Json_util.assoc_member_opt "kind" json) with
+      match principal_kind_of_yojson (Json_util.assoc_member_opt "kind" json |> Option.value ~default:`Null) with
       | Error msg -> Error msg
       | Ok kind -> (
           match Json_util.assoc_member_opt "id" json with
-          | `String id when String.trim id <> "" ->
+          | Some (`String id) when String.trim id <> "" ->
               Ok
                 {
                   kind;
                   id;
                   display_name = Json_util.assoc_member_opt "display_name" json ;
                 }
-          | `String _ -> Error "goal_principal_of_yojson: id must be non-empty"
+          | Some (`String _) -> Error "goal_principal_of_yojson: id must be non-empty"
           | other ->
               Error
-                ("goal_principal_of_yojson: invalid id " ^ Yojson.Safe.to_string other)))
+                ("goal_principal_of_yojson: invalid id " ^
+                 (match other with Some v -> Yojson.Safe.to_string v | None -> "null"))))
   | json ->
       Error ("goal_principal_of_yojson: " ^ Yojson.Safe.to_string json)
 

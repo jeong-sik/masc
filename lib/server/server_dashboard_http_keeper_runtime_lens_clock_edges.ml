@@ -6,8 +6,8 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 
 let clock_refs decision =
-  match Yojson.Safe.Util.member "clock_refs" decision with
-  | `Assoc _ as obj -> Some obj
+  match Json_util.assoc_member_opt "clock_refs" decision with
+  | Some (`Assoc _ as obj) -> Some obj
   | _ -> None
 
 let clock_string row key =

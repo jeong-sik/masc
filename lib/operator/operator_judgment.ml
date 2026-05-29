@@ -112,8 +112,8 @@ let of_yojson json =
         fresh_until = (match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "");
         fresh_until_unix =
           (match json |> Json_util.assoc_member_opt "fresh_until_unix" with
-          | `Float value -> value
-          | `Int value -> float_of_int value
+          | Some (`Float value) -> value
+          | Some (`Int value) -> float_of_int value
           | _ -> Masc_domain.parse_iso8601 ((match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "")));
         keeper_name =
           Json_util.get_string json "keeper_name"
@@ -122,15 +122,15 @@ let of_yojson json =
         runtime_name = Json_util.get_string json "runtime_name";
         evidence_refs =
           (match json |> Json_util.assoc_member_opt "evidence_refs" with
-          | `List items -> List.filter_map to_string_option items
+          | Some (`List items) -> List.filter_map to_string_option items
           | _ -> []);
         recommended_action =
           (match json |> Json_util.assoc_member_opt "recommended_action" with
-          | `Assoc _ as value -> Some value
+          | Some (`Assoc _ as value) -> Some value
           | _ -> None);
         supersedes =
           (match json |> Json_util.assoc_member_opt "supersedes" with
-          | `List items -> List.filter_map to_string_option items
+          | Some (`List items) -> List.filter_map to_string_option items
           | _ -> []);
         fallback_used =
           Json_util.get_bool json "fallback_used"

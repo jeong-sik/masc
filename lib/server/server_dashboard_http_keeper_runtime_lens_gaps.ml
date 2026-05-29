@@ -431,13 +431,13 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          match scan.latest_tool_lineage_decision with
          | Some decision ->
            let has_emitted =
-             match Yojson.Safe.Util.member "emitted" decision with
-             | `Assoc _ -> true
+             match Json_util.assoc_member_opt "emitted" decision with
+             | Some (`Assoc _) -> true
              | _ -> false
            in
            let has_executed =
-             match Yojson.Safe.Util.member "executed" decision with
-             | `Assoc _ -> true
+             match Json_util.assoc_member_opt "executed" decision with
+             | Some (`Assoc _) -> true
              | _ -> false
            in
            if has_emitted && not has_executed
@@ -454,13 +454,13 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          match scan.latest_tool_lineage_decision with
          | Some decision ->
            let has_executed =
-             match Yojson.Safe.Util.member "executed" decision with
-             | `Assoc _ -> true
+             match Json_util.assoc_member_opt "executed" decision with
+             | Some (`Assoc _) -> true
              | _ -> false
            in
            let has_verified =
-             match Yojson.Safe.Util.member "verified" decision with
-             | `Assoc _ -> true
+             match Json_util.assoc_member_opt "verified" decision with
+             | Some (`Assoc _) -> true
              | _ -> false
            in
            if has_executed && not has_verified
@@ -477,8 +477,8 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          match scan.latest_context_compacted_row with
          | Some row ->
            let decision = row.Keeper_runtime_manifest.decision in
-           let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
-           (match Json_util.get_string clock_refs "compaction_source" with
+           let clock_refs = Json_util.assoc_member_opt "clock_refs" decision in
+           (match Option.bind clock_refs (fun cr -> Json_util.get_string cr "compaction_source") with
             | Some _ -> gaps
             | None ->
               { code = "compaction_source_missing"

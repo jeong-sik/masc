@@ -88,7 +88,7 @@ let parse_response ?(total = 1) json =
   match json with
   | `Assoc _ ->
     (match Json_util.assoc_member_opt "models" json with
-     | `List items ->
+     | Some (`List items) ->
        let process_active = List.length items in
        let process_available = max 0 (total - process_active) in
        Some

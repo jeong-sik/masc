@@ -73,8 +73,8 @@ type chat_message = {
 let parse_line ~file_path (line : string) : chat_message option =
   try
     let json = Yojson.Safe.from_string line in
-    let role = Json_util.assoc_member_opt "role" json  |> Option.value ~default:"" in
-    let content = Json_util.assoc_member_opt "content" json  |> Option.value ~default:"" in
+    let role = Json_util.get_string json "role" |> Option.value ~default:"" in
+    let content = Json_util.get_string json "content" |> Option.value ~default:"" in
     let ts =
       (try Some ((match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | _ -> 0.0))
        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None) in

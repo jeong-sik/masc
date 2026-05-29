@@ -67,8 +67,8 @@ let strip_mcp_prefix name =
 
 let has_agent_name_field (schema : Masc_domain.tool_schema) =
   match (match Json_util.assoc_member_opt "properties" schema.input_schema with Some x -> Json_util.assoc_member_opt "agent_name" x | None -> None) with
-  | `Null -> false
-  | _ -> true
+  | Some `Null | None -> false
+  | Some _ -> true
 
 let inject_default_agent_name ~(worker_name : string)
     ~(schema : Masc_domain.tool_schema option) (args : Yojson.Safe.t) =
@@ -101,12 +101,12 @@ let mcp_endpoint_url ~(auth_token : string option) =
 
 let request_id_matches request_id json =
   match Json_util.assoc_member_opt "id" json with
-  | `Int value -> value = request_id
-  | `Intlit value -> (
+  | Some (`Int value) -> value = request_id
+  | Some (`Intlit value) -> (
       match int_of_string_opt value with
       | Some v -> v = request_id
       | None -> false)
-  | `String value -> String.equal value (string_of_int request_id)
+  | Some (`String value) -> String.equal value (string_of_int request_id)
   | _ -> false
 
 let normalize_mcp_body ~request_id body =

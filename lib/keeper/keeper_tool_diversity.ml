@@ -39,7 +39,7 @@ type diversity_summary = {
     format) into a list of tool_stat. *)
 let parse_tool_usage_json (json : Yojson.Safe.t) : tool_stat list =
   match Json_util.assoc_member_opt "tools" json with
-  | `List items ->
+  | Some (`List items) ->
     List.filter_map (fun item ->
       match Json_util.assoc_member_opt "tool" item  with
       | Some name ->

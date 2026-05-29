@@ -90,10 +90,10 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       in
       List.filter_map
         (fun stage ->
-           match Yojson.Safe.Util.member stage decision with
-           | `Assoc _ as obj -> (
-             match Yojson.Safe.Util.member "count" obj with
-             | `Int count when count > 0 -> Some (stage, count)
+           match Json_util.assoc_member_opt stage decision with
+           | Some (`Assoc _ as obj) -> (
+             match Json_util.assoc_member_opt "count" obj with
+             | Some (`Int count) when count > 0 -> Some (stage, count)
              | _ -> None)
            | _ -> None)
         stages

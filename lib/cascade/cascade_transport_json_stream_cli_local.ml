@@ -134,7 +134,7 @@ let blocks_of_message_content json =
 
 let tool_use_of_json json =
   try
-    let fn = json |> Json_util.assoc_member_opt "function" in
+    let fn = json |> Json_util.assoc_member_opt "function" |> Option.value ~default:`Null in
     let id = Llm_provider.Cli_common_json.member_str "id" json in
     let name = Llm_provider.Cli_common_json.member_str "name" fn in
     match Json_util.get_string fn "arguments" |> json_of_argument_string with
@@ -143,7 +143,7 @@ let tool_use_of_json json =
       Error
         (Printf.sprintf "invalid CLI tool arguments JSON for tool %S: %s" name msg)
   with
-  | Type_error _ -> Ok None
+  | Yojson.Safe.Util.Type_error _ -> Ok None
 ;;
 
 let tool_uses_of_json calls =
@@ -185,8 +185,8 @@ let blocks_of_output_line line =
     | Some "assistant" ->
       let content = blocks_of_message_content (Json_util.assoc_member_opt "content" json) in
       let tool_uses_result =
-        match json |> Json_util.assoc_member_opt "tool_calls" with
-        | `List calls -> tool_uses_of_json calls
+        match Json_util.assoc_member_opt "tool_calls" json with
+        | Some (`List calls) -> tool_uses_of_json calls
         | _ -> Ok []
       in
       Result.map (fun tool_uses -> content @ tool_uses) tool_uses_result

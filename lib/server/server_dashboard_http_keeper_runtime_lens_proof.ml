@@ -47,9 +47,9 @@ let runtime_lens_sorted_set table =
 
 let runtime_lens_update_latest_ts acc json =
   let ts_opt =
-    match Yojson.Safe.Util.member "ts" json with
-    | `Float value -> Some value
-    | `Int value -> Some (Float.of_int value)
+    match Json_util.assoc_member_opt "ts" json with
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (Float.of_int value)
     | _ -> None
   in
   match ts_opt with
@@ -96,7 +96,7 @@ let runtime_lens_has_true_field json field =
   runtime_lens_json_bool_values field json |> List.exists Fun.id
 
 let runtime_lens_tool_text json =
-  let input = Yojson.Safe.Util.member "input" json |> Yojson.Safe.to_string in
+  let input = (match Json_util.assoc_member_opt "input" json with Some v -> v | None -> `Null) |> Yojson.Safe.to_string in
   let output = Option.value (tool_call_output_text_opt json) ~default:"" in
   input ^ "\n" ^ output
 

@@ -282,8 +282,8 @@ let populate_neo4j_identity_cache_locked () =
         let json = Yojson.Safe.from_string output in
         let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
         let edges =
-          json |> m "data" |> m "agents" |> m "edges"
-          |> Yojson.Safe.Util.to_list
+          (match json |> m "data" |> m "agents" |> m "edges" with
+           | `List l -> l | _ -> [])
         in
         List.iter
           (fun edge ->
@@ -301,11 +301,11 @@ let populate_neo4j_identity_cache_locked () =
               let model = Safe_ops.json_string_opt "model" node in
               let traits =
                 Safe_ops.protect ~default:[] (fun () ->
-                  node |> m "traits" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string)
+                  (match node |> m "traits" with `List l -> List.filter_map (function `String s -> Some s | _ -> None) l | _ -> []))
               in
               let interests =
                 Safe_ops.protect ~default:[] (fun () ->
-                  node |> m "interests" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string)
+                  (match node |> m "interests" with `List l -> List.filter_map (function `String s -> Some s | _ -> None) l | _ -> []))
               in
               let activity_level = Safe_ops.json_float_opt "activityLevel" node in
               let primary_value = Safe_ops.json_string_opt "primaryValue" node in

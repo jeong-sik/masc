@@ -151,7 +151,7 @@ let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
     |> List.find_map
          (fun json ->
            match Json_util.assoc_member_opt "tool_output_preview" json with
-           | `String s ->
+           | Some (`String s) ->
                let trimmed = String.trim s in
                if trimmed <> "" then Some trimmed else None
            | _ -> None)

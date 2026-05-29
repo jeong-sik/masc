@@ -96,12 +96,12 @@ let parse_state_line line =
        in
        let ts_str =
          match json |> Json_util.assoc_member_opt "ts" with
-         | `String s -> s
+         | Some (`String s) -> s
          | _ -> ""
        in
        let kinds =
          match json |> Json_util.assoc_member_opt "kinds" with
-         | `String s -> s
+         | Some (`String s) -> s
          | _ -> "?"
        in
        let summary =

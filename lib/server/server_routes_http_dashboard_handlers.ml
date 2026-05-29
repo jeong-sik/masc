@@ -27,13 +27,13 @@ let handle_broadcast state agent_name reqd body_str =
   in
   try
     let json = Yojson.Safe.from_string body_str in
-    match Yojson.Safe.Util.member "message" json with
-    | `String message ->
+    match Json_util.assoc_member_opt "message" json with
+    | Some (`String message) ->
         let config = state.Mcp_server.room_config in
         let _ = Coord.broadcast config ~from_agent:agent_name ~content:message in
         reply true None
-    | `Null -> reply false (Some "missing required field: message")
-    | _ -> reply false (Some "field 'message' must be a string")
+    | Some `Null -> reply false (Some "missing required field: message")
+    | None | Some _ -> reply false (Some "field 'message' must be a string")
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error msg -> reply false (Some ("invalid JSON: " ^ msg))

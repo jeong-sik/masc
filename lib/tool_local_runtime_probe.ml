@@ -255,11 +255,12 @@ let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms jso
     done_reason = string_member json "done_reason";
     thinking_present =
       (match Json_util.assoc_member_opt "thinking" json with
-      | `Null -> false
-      | `String value -> not (String.equal (String.trim value) "")
-      | `List [] -> false
-      | `Assoc [] -> false
-      | _ -> true);
+      | Some `Null -> false
+      | Some (`String value) -> not (String.equal (String.trim value) "")
+      | Some (`List []) -> false
+      | Some (`Assoc []) -> false
+      | Some _ -> true
+      | None -> false);
     response_preview = response;
     response_chars;
     error = None;
@@ -294,8 +295,8 @@ let kv_cache_assessment_json run_jsons =
            | Some duration_ms ->
                let run_index =
                  match Json_util.assoc_member_opt "run_index" json with
-                 | `Int value -> Some value
-                 | `Intlit value -> parse_int_opt value
+                 | Some (`Int value) -> Some value
+                 | Some (`Intlit value) -> parse_int_opt value
                  | _ -> None
                in
                Some (run_index, duration_ms)
@@ -614,13 +615,13 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
          | _ -> items)
     |> (fun items ->
          match Json_util.assoc_member_opt "signal" kv_cache_assessment with
-         | `String "likely_reused" ->
+         | Some (`String "likely_reused") ->
              "Repeated prompt_eval_duration_ms dropped enough to suggest repeated-prefix reuse."
              :: items
-         | `String "possible_reuse" ->
+         | Some (`String "possible_reuse") ->
              "Repeated prompt_eval_duration_ms improved, but the signal is moderate rather than decisive."
              :: items
-         | `String "no_visible_reuse" ->
+         | Some (`String "no_visible_reuse") ->
              "Repeated prompt_eval_duration_ms did not show a strong reuse improvement."
              :: items
          | _ -> items)

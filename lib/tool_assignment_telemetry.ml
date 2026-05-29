@@ -108,8 +108,8 @@ let event_of_json json : (tool_event, string) Result.t =
         let preset = Json_util.get_string json "preset" in
         let string_list field =
           (match Json_util.get_array json field with
-           | Some items -> items
-           | None -> [])
+           | Some (`List items) -> items
+           | _ -> [])
           |> List.filter_map (function `String s -> Some s | _ -> None)
         in
         Ok

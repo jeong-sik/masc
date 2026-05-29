@@ -207,8 +207,8 @@ let normalize_runtime_json json =
       let model = Json_util.get_string json "model" |> trim_opt in
       let max_concurrency =
         match json |> Json_util.assoc_member_opt "max_concurrency" with
-        | `Int value -> max 1 value
-        | `Intlit raw -> (
+        | Some (`Int value) -> max 1 value
+        | Some (`Intlit raw) -> (
             match parse_int_opt raw with
             | Some value -> max 1 value
             | None -> default_parallel_hint)

@@ -68,12 +68,12 @@ let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
       ]
 
 let find_override_field_source field sources =
-  match Yojson.Safe.Util.member "override_field_sources" sources with
-  | `List values ->
+  match Json_util.assoc_member_opt "override_field_sources" sources with
+  | Some (`List values) ->
     List.find_opt
       (fun value -> Json_util.get_string value "field" = Some field)
       values
-  | _ -> None
+  | None | Some _ -> None
 
 let config_drift_summary_json ~config ~keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
@@ -110,8 +110,8 @@ let config_drift_summary_json ~config ~keeper_name =
     let default_cascade_name, live_cascade_name =
       match cascade_detail with
       | Some detail ->
-        ( Yojson.Safe.Util.member "default_value" detail |> Yojson.Safe.Util.to_string_option,
-          Yojson.Safe.Util.member "live_value" detail |> Yojson.Safe.Util.to_string_option )
+        ( Json_util.get_string detail "default_value",
+          Json_util.get_string detail "live_value" )
       | None -> (None, None)
     in
     let cascade_override = Option.is_some cascade_detail in

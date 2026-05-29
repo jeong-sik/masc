@@ -385,22 +385,22 @@ module Ring = struct
      drops. *)
   let entry_of_json json =
     let require_string field =
-      match Json_util.assoc_member_opt field json with
-      | Some (`String s) -> s
-      | None | Some `Null ->
+      match Yojson.Safe.Util.member field json with
+      | `String s -> s
+      | `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
-      | Some other ->
+      | other ->
           raise
             (Entry_decode_error
                (Printf.sprintf "field %s: expected string, got %s" field
                   (Yojson.Safe.to_string other)))
     in
     let require_int field =
-      match Json_util.assoc_member_opt field json with
-      | Some (`Int i) -> i
-      | None | Some `Null ->
+      match Yojson.Safe.Util.member field json with
+      | `Int i -> i
+      | `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
-      | Some other ->
+      | other ->
           raise
             (Entry_decode_error
                (Printf.sprintf "field %s: expected int, got %s" field
@@ -422,20 +422,20 @@ module Ring = struct
         let module_name = require_string "module" in
         let message = require_string "message" in
         let keeper_name =
-          match Json_util.assoc_member_opt "keeper_name" json with
-          | Some (`String s) -> Some s
-          | None | Some `Null -> None
-          | Some other ->
+          match Yojson.Safe.Util.member "keeper_name" json with
+          | `String s -> Some s
+          | `Null -> None
+          | other ->
               raise
                 (Entry_decode_error
                    (Printf.sprintf "field keeper_name: expected string or null, got %s"
                       (Yojson.Safe.to_string other)))
         in
         let turn_id =
-          match Json_util.assoc_member_opt "turn_id" json with
-          | Some (`Int i) -> Some i
-          | None | Some `Null -> None
-          | Some other ->
+          match Yojson.Safe.Util.member "turn_id" json with
+          | `Int i -> Some i
+          | `Null -> None
+          | other ->
               raise
                 (Entry_decode_error
                    (Printf.sprintf "field turn_id: expected int or null, got %s"
@@ -444,7 +444,7 @@ module Ring = struct
         {
           seq; ts; level; source; module_name;
           keeper_name; turn_id; message;
-          details = Json_util.assoc_member_opt "details" json;
+          details = Yojson.Safe.Util.member "details" json;
         }
     | _ ->
         raise

@@ -708,47 +708,6 @@ let semantic_payload_to_yojson (key, value) =
   key, v
 ;;
 
-(* Tick 16 introduced the flag opt-in; Tick 21 flips it to
-   default-on.  The verifier cascade (#7598) and any agent that
-   consumes [Test_pass {count}] / [Build_ok] / [Lint_clean] /
-   [Git_clean] now get them without an explicit operator switch.
-   Field is additive only (empty list is omitted), so callers
-   that ignore the [verifiable_markers] key remain byte-compatible.
-   Explicit opt-out: [MASC_BASH_VERIFIABLE_MARKERS=0] (or
-   ["false" / "FALSE" / "no" / "off"]).  The flag itself survives
-   one more minor bump before removal. *)
-let markers_enabled () =
-  match Sys.getenv_opt "MASC_BASH_VERIFIABLE_MARKERS" with
-  | Some ("0" | "false" | "FALSE" | "no" | "off") -> false
-  | _ -> true
-;;
-
-let verifiable_marker_to_json (m : Cdal_judge.verifiable_marker) : Yojson.Safe.t =
-  let tag (kind : string) ?(count = None) (confidence : string) : Yojson.Safe.t =
-    let base = [ "kind", `String kind; "confidence", `String confidence ] in
-    match count with
-    | None -> `Assoc base
-    | Some n -> `Assoc (base @ [ "count", `Int n ])
-  in
-  let conf_str = function
-    | `Exact -> "exact"
-    | `Heuristic -> "heuristic"
-  in
-  match m with
-  | Test_pass { count; confidence } ->
-    tag "test_pass" ~count:(Some count) (conf_str confidence)
-  | Test_fail { count; confidence } ->
-    tag "test_fail" ~count:(Some count) (conf_str confidence)
-  | Build_ok { confidence } -> tag "build_ok" (conf_str confidence)
-  | Build_fail { confidence } -> tag "build_fail" (conf_str confidence)
-  | Lint_clean { confidence } -> tag "lint_clean" (conf_str confidence)
-  | Lint_dirty { count; confidence } ->
-    tag "lint_dirty" ~count:(Some count) (conf_str confidence)
-  | Git_clean { confidence } -> tag "git_clean" (conf_str confidence)
-  | Git_dirty { confidence } -> tag "git_dirty" (conf_str confidence)
-  | Git_not_a_repo -> tag "git_not_a_repo" "exact"
-;;
-
 let semantic_fields_of_executed (result : executed_result) : (string * Yojson.Safe.t) list
   =
   if not (Masc_exec.Exec_semantic.enabled ())
@@ -782,22 +741,7 @@ let semantic_fields_of_executed (result : executed_result) : (string * Yojson.Sa
       | None -> []
       | Some h -> [ "return_code_interpretation", `String h ]
     in
-    let marker_field =
-      if not (markers_enabled ())
-      then []
-      else (
-        (* Foreground exec merges stdout+stderr via "2>&1" at the
-           keeper layer, so feed the merged stream as stdout and an
-           empty stderr. *)
-        let markers =
-          Cdal_judge.of_exec_outcome ~semantic:sem ~stdout:result.output ~stderr:""
-        in
-        match markers with
-        | [] -> []
-        | _ ->
-          [ "verifiable_markers", `List (List.map verifiable_marker_to_json markers) ])
-    in
-    ("semantic_exit", semantic_obj) :: (rci_field @ marker_field))
+    ("semantic_exit", semantic_obj) :: rci_field)
 ;;
 
 (* Tick 9: head+tail output cap — opt-in via MASC_BASH_OUTPUT_CAP.

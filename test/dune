@@ -85,7 +85,6 @@
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
-  test_cdal_tool_id
   test_tool_assignment_telemetry
   test_dashboard_link_preview
   test_gate_keeper_backend
@@ -408,7 +407,6 @@
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
-  test_cdal_tool_id
   test_tool_assignment_telemetry
   test_dashboard_link_preview
   test_gate_keeper_backend
@@ -922,7 +920,6 @@
   test_cdal_proof
   test_cdal_risk_contract
   test_cdal_judge
-  test_cdal_verifiable_markers
   test_cdal_eval_v1
   test_keeper_cdal_contract
   test_evidence_claim_schema
@@ -1145,7 +1142,6 @@
   test_cdal_proof
   test_cdal_risk_contract
   test_cdal_judge
-  test_cdal_verifiable_markers
   test_cdal_eval_v1
   test_keeper_cdal_contract
   test_evidence_claim_schema

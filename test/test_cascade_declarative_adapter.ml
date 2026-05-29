@@ -708,6 +708,7 @@ let test_duplicate_routes () =
         ]
     ; system_targets = []
     ; profiles = []
+    ; default_runtime_id = None
     }
   in
   let catalog = adapt_config cfg in

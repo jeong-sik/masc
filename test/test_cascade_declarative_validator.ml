@@ -148,6 +148,7 @@ let test_r3_unknown_binding () =
     routes = [];
     system_targets = [];
     profiles = [];
+    default_runtime_id = None;
   } in
   let errs = Cascade_declarative_validator.validate cfg in
   has_rule "R3" errs

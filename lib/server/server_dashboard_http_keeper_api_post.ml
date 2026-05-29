@@ -157,7 +157,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
   else
     let trace_id_query =
       match trace_id with
-      | Some value when String.trim value <> "" -> Some (String.trim value)
+      | Some value -> String_util.trim_to_option value
       | _ -> None
     in
     let missing_trace_id_json =

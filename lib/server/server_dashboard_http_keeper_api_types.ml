@@ -138,7 +138,7 @@ let unique_present_paths paths =
   paths
   |> List.filter_map (fun value ->
        match value with
-       | Some path when String.trim path <> "" -> Some path
+       | Some path -> String_util.trim_to_option path
        | _ -> None)
   |> Json_util.dedupe_keep_order
 
@@ -302,10 +302,10 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
     else
       let ts_iso =
         match Safe_ops.json_string_opt "ts_iso" json with
-        | Some value when String.trim value <> "" -> value
+        | Some value when Option.is_some (String_util.trim_to_option value) -> value
         | _ ->
             match Safe_ops.json_string_opt "ts" json with
-            | Some value when String.trim value <> "" -> value
+            | Some value when Option.is_some (String_util.trim_to_option value) -> value
             | _ -> Masc_domain.iso8601_of_unix_seconds ts
       in
       Some

@@ -28,7 +28,7 @@ let assoc_field key = function
 
 let string_field key json =
   match assoc_field key json with
-  | Some (`String value) when String.trim value <> "" -> Some value
+  | Some (`String value) -> String_util.trim_to_option value
   | _ -> None
 ;;
 

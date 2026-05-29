@@ -266,7 +266,7 @@ let purge_keeper_artifacts config requested_name
   let keeper_runtime_dir = Filename.concat keeper_dir keeper_name in
   let cleanup_names =
     [ requested_name; keeper_name; agent_name ]
-    |> List.filter (fun value -> String.trim value <> "")
+    |> List.filter_map String_util.trim_to_option
     |> Json_util.dedupe_keep_order
   in
   cleanup_names
@@ -555,7 +555,7 @@ let add_delete_action_routes router =
                        let note = Safe_ops.json_string_opt "note" json in
                        let actor =
                          match Safe_ops.json_string_opt "actor" json with
-                         | Some a when String.trim a <> "" -> a
+                         | Some a -> (match String_util.trim_to_option a with Some trimmed -> trimmed | None -> agent_name)
                          | _ -> agent_name
                        in
                        (match Board_moderation.record_action ~target_kind ~target_id

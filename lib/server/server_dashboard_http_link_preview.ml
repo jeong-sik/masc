@@ -340,7 +340,7 @@ let rec fetch_response_following_redirects ~net ~url ~remaining_redirects =
   | Ok response when is_redirect_status response.status && remaining_redirects > 0
     ->
       (match list_header_ci response.headers "location" with
-       | Some location when String.trim location <> "" ->
+       | Some location when Option.is_some (String_util.trim_to_option location) ->
            let next_url = resolve_relative_url ~base_url:url location in
            fetch_response_following_redirects ~net ~url:next_url
              ~remaining_redirects:(remaining_redirects - 1)

@@ -204,9 +204,19 @@ let refresh_loop
   in
   let rec loop () =
     (match
-       (* If the whole compute path fails (e.g. exception escapes a
+       (* Offload the snapshot compute to a worker domain (RFC-0204 sections 8-9
+          Phase 2).  The projection build (shell board scan + 3 activity
+          graphs) is CPU-heavy and previously ran inline on the main Eio
+          domain, contending with WS dispatch and keeper fibers under host
+          load.  [submit_cpu_or_inline] reserves a full worker slot
+          (weight 1.0, matching the per-surface refresh loops'
+          [run_dashboard_compute ~mode:Offloaded_readonly]) and falls back to
+          inline before the pool is installed at boot.  Every shared cell
+          [compute] touches is an [Atomic] ([slot], [generation_counter]), so
+          it is cross-domain safe; the publish ([Atomic.set slot]) stays on
+          this fiber.  If the whole compute path fails (an exception escapes a
           [safe] wrapper), keep the previous snapshot live. *)
-       try Some (compute ()) with
+       try Some (Domain_pool_ref.submit_cpu_or_inline compute) with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          log_failure "compute" exn;

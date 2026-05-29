@@ -119,6 +119,23 @@ let rec parse flags path = function
   | "-l" :: rest | "--long" :: rest -> parse (`Long :: flags) path rest
   | "-a" :: rest | "--all" :: rest -> parse (`All :: flags) path rest
   | "-h" :: rest | "--human-readable" :: rest -> parse (`Human :: flags) path rest
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ls { path = Some p; flags = List.rev flags }))
+     | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ls { path; flags = List.rev flags })))
+  (* Combined short flags: -lah, -al, -lh, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'l' || c = 'a' || c = 'h')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let flags' = flags
+      @ (if String.contains arg 'l' then [ `Long ] else [])
+      @ (if String.contains arg 'a' then [ `All ] else [])
+      @ (if String.contains arg 'h' then [ `Human ] else [])
+    in parse flags' path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse flags path rest
@@ -148,6 +165,10 @@ parse [] None args|}
         Some
           {|match args with
 | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cat { path }))
+| "--" :: rest ->
+  (match List.find_opt (fun a -> String.length a > 0) rest with
+   | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cat { path = p }))
+   | None -> None)
 | _ -> None|}
     }
   ; { name = "Rg"
@@ -399,6 +420,21 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
     | "--trace" | "--trace-ascii" | "-u" | "--user" )
     :: _val :: rest ->
     parse method_ headers body url output_file follow_redirects insecure rest
+  (* Combined short flags: -Lk, -kL, etc. (boolean flags only) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'L' || c = 'k')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let fr' = ref follow_redirects and ins' = ref insecure in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'L' -> fr' := true
+      | 'k' -> ins' := true
+      | _ -> ()
+    done;
+    parse method_ headers body url output_file !fr' !ins' rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse method_ headers body url output_file follow_redirects insecure rest
@@ -438,6 +474,16 @@ let rec parse recursive force paths = function
      | _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rm { paths = List.rev paths; recursive; force })))
   | "-r" :: rest | "-R" :: rest | "--recursive" :: rest -> parse true force paths rest
   | "-f" :: rest | "--force" :: rest -> parse recursive true paths rest
+  (* Combined short flags: -rf, -fr, -rfr, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'r' || c = 'R' || c = 'f')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let has_r = String.contains arg 'r' || String.contains arg 'R' in
+    let has_f = String.contains arg 'f' in
+    parse (recursive || has_r) (force || has_f) paths rest
   (* POSIX end-of-options: all remaining are paths *)
   | "--" :: rest ->
     let remaining = List.filter (fun a -> String.length a > 0) rest in
@@ -524,6 +570,11 @@ let rec parse name type_ maxdepth path = function
   | "-type" :: "d" :: rest -> parse name (Some `Dir) maxdepth path rest
   | "-maxdepth" :: d :: rest ->
     (match int_of_string_opt d with
+     | Some n -> parse name type_ (Some n) path rest
+     | None -> parse name type_ maxdepth path rest)
+  | arg :: rest
+    when String.length arg > 10 && String.sub arg 0 10 = "-maxdepth=" ->
+    (match int_of_string_opt (String.sub arg 10 (String.length arg - 10)) with
      | Some n -> parse name type_ (Some n) path rest
      | None -> parse name type_ maxdepth path rest)
   | "-exec" :: rest | "-ok" :: rest
@@ -797,6 +848,17 @@ let rec parse parents path = function
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkdir { path = p; parents }))
      | None -> None)
   | "-p" :: rest | "--parents" :: rest -> parse true path rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: next non-empty arg is the path *)
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p ->
+       (match path with
+        | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkdir { path = p; parents }))
+        | Some _ -> None)
+     | None ->
+       (match path with
+        | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mkdir { path = p; parents }))
+        | None -> None))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse parents path rest
@@ -845,6 +907,22 @@ let rec parse mode path = function
     (match List.find_opt (fun a -> String.length a > 0) rest with
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wc { path = p; mode }))
      | None -> None)
+  (* Combined short flags: -lw, -wc, -lc, etc. (last wins for mutually exclusive mode) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'l' || c = 'w' || c = 'c')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let mode' = ref mode in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'l' -> mode' := Some `Lines
+      | 'w' -> mode' := Some `Words
+      | 'c' -> mode' := Some `Chars
+      | _ -> ()
+    done;
+    parse !mode' path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse mode path rest
@@ -1024,6 +1102,21 @@ let rec parse force force_with_lease set_upstream remote branch = function
   | "--force-with-lease" :: rest -> parse force true set_upstream remote branch rest
   | "-u" :: rest | "--set-upstream" :: rest -> parse force force_with_lease true remote branch rest
   | "--delete" :: rest -> parse force force_with_lease set_upstream remote branch rest
+  (* Combined short flags: -fu, -uf (force + set_upstream) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'f' || c = 'u')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let f' = ref force and u' = ref set_upstream in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'f' -> f' := true
+      | 'u' -> u' := true
+      | _ -> ()
+    done;
+    parse !f' force_with_lease !u' remote branch rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse force force_with_lease set_upstream remote branch rest
@@ -1211,6 +1304,17 @@ let rec parse reverse numeric unique key file = function
         let n_num = numeric || String.contains flags 'n' in
         parse r n_num unique (Some n) file rest)
       else parse reverse numeric unique key file rest)
+    (* Combined short flags: -rn, -ru, -nu, -rnu, etc. *)
+    else if String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'r' || c = 'n' || c = 'u')
+              (String.sub arg 1 (String.length arg - 1))
+    then (
+      let r' = reverse || String.contains arg 'r' in
+      let n' = numeric || String.contains arg 'n' in
+      let u' = unique || String.contains arg 'u' in
+      parse r' n' u' key file rest)
     else if String.length arg > 0 && arg.[0] = '-'
     then parse reverse numeric unique key file rest
     else (
@@ -1307,6 +1411,34 @@ let rec parse delete squeeze set1 set2 = function
      | None -> None)
   | "-d" :: rest -> parse true squeeze set1 set2 rest
   | "-s" :: rest -> parse delete true set1 set2 rest
+  (* POSIX end-of-options: remaining are set1/set2 *)
+  | "--" :: rest ->
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ s1 ] ->
+       (match set1 with
+        | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tr { set1 = s1; set2; delete; squeeze }))
+        | Some _ -> None)
+     | [ s1; s2 ] ->
+       (match set1 with
+        | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tr { set1 = s1; set2 = Some s2; delete; squeeze }))
+        | Some _ -> None)
+     | _ -> None)
+  (* Combined short flags: -ds, -sd, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'd' || c = 's')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let delete' = ref delete and squeeze' = ref squeeze in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'd' -> delete' := true
+      | 's' -> squeeze' := true
+      | _ -> ()
+    done;
+    parse !delete' !squeeze' set1 set2 rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse delete squeeze set1 set2 rest
@@ -1435,6 +1567,27 @@ let rec parse count duplicates unique skip_fields skip_chars file = function
     (match int_of_string_opt n_str with
      | Some n -> parse count duplicates unique skip_fields (Some n) file rest
      | None -> parse count duplicates unique skip_fields skip_chars file rest)
+  | "--" :: rest ->
+    (* POSIX end-of-options: next non-empty arg is the file *)
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some f -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file = Some f }))
+     | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file })))
+  (* Combined short flags: -cd, -cu, -dc, -du, -uc, -ud, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'c' || c = 'd' || c = 'u')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let count' = ref count and duplicates' = ref duplicates and unique' = ref unique in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'c' -> count' := true
+      | 'd' -> duplicates' := true
+      | 'u' -> unique' := true
+      | _ -> ()
+    done;
+    parse !count' !duplicates' !unique' skip_fields skip_chars file rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse count duplicates unique skip_fields skip_chars file rest
@@ -1467,6 +1620,12 @@ parse false false false None None None args|}
 match args with
 | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = None }))
 | [ path; suffix ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = Some suffix }))
+| "--" :: rest ->
+  let remaining = List.filter (fun a -> String.length a > 0) rest in
+  (match remaining with
+   | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = None }))
+   | [ path; suffix ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = Some suffix }))
+   | _ -> None)
 | _ -> None|}
     }
   ; { name = "Dirname"
@@ -1489,6 +1648,10 @@ match args with
           {|
 match args with
 | [ path ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dirname { path }))
+| "--" :: rest ->
+  (match List.find_opt (fun a -> String.length a > 0) rest with
+   | Some path -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dirname { path }))
+   | None -> None)
 | _ -> None|}
     }
   ; { name = "Test"
@@ -1679,7 +1842,17 @@ let rec parse human_readable summary max_depth = function
         | Some d -> parse human_readable summary (Some d) rest
         | None -> None)
      | _ ->
-       if String.length arg > 0 && arg.[0] = '-'
+       (* Combined short flags: -hs, -sh *)
+       if String.length arg > 2
+            && arg.[0] = '-'
+            && arg.[1] <> '-'
+            && String.for_all (fun c -> c = 'h' || c = 's')
+                 (String.sub arg 1 (String.length arg - 1))
+       then (
+         let h' = human_readable || String.contains arg 'h' in
+         let s' = summary || String.contains arg 's' in
+         parse h' s' max_depth rest)
+       else if String.length arg > 0 && arg.[0] = '-'
        then parse human_readable summary max_depth rest
        else
          Some
@@ -1791,6 +1964,12 @@ let rec parse mime brief = function
     Some
       (Shell_ir_typed_types.W
          (Shell_ir_typed_types.File { path; mime; brief }))
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.File { path = p; mime; brief }))
+     | None -> None)
   | "-b" :: rest -> parse mime true rest
   | "-i" :: rest -> parse true brief rest
   | arg :: rest ->
@@ -2007,29 +2186,31 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse output continue_ ncc url = function
+let rec parse output continue_ ncc url dd = function
   | [] ->
     (match url with
      | Some u ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wget { url = u; output; continue_; no_check_certificate = ncc }))
      | None -> None)
-  | "-O" :: o :: rest -> parse (Some o) continue_ ncc url rest
-  | "--output-document" :: o :: rest -> parse (Some o) continue_ ncc url rest
-  | "-c" :: rest -> parse output true ncc url rest
-  | "--continue" :: rest -> parse output true ncc url rest
-  | "--no-check-certificate" :: rest -> parse output continue_ true url rest
+  | "-O" :: o :: rest when not dd -> parse (Some o) continue_ ncc url dd rest
+  | "--output-document" :: o :: rest when not dd -> parse (Some o) continue_ ncc url dd rest
+  | "-c" :: rest when not dd -> parse output true ncc url dd rest
+  | "--continue" :: rest when not dd -> parse output true ncc url dd rest
+  | "--no-check-certificate" :: rest when not dd -> parse output continue_ true url dd rest
+  (* POSIX end-of-options: skip --, remaining args are positional *)
+  | "--" :: rest -> parse output continue_ ncc url true rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
-     | [ "--output-document"; o ] -> parse (Some o) continue_ ncc url rest
+     | [ "--output-document"; o ] when not dd -> parse (Some o) continue_ ncc url dd rest
      | _ ->
-       if String.length arg > 0 && arg.[0] = '-'
-       then parse output continue_ ncc url rest
+       if not dd && String.length arg > 0 && arg.[0] = '-'
+       then parse output continue_ ncc url dd rest
        else (
          match url with
-         | None -> parse output continue_ ncc (Some arg) rest
+         | None -> parse output continue_ ncc (Some arg) dd rest
          | Some _ -> None))
 in
-parse None false false None args|}
+parse None false false None false args|}
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
@@ -2062,24 +2243,26 @@ parse None false false None args|}
     ; parse_body =
         Some
           {|
-let rec parse port id_file host user command = function
+let rec parse port id_file host user command dd = function
   | [] ->
     (match host with
      | Some h ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host = h; user; command; port; identity_file = id_file }))
      | None -> None)
-  | "-p" :: p_str :: rest ->
+  | "-p" :: p_str :: rest when not dd ->
     (match int_of_string_opt p_str with
-     | Some p -> parse (Some p) id_file host user command rest
-     | None -> parse port id_file host user command rest)
-  | "-i" :: f :: rest -> parse port (Some f) host user command rest
-  | "-o" :: _ :: rest -> parse port id_file host user command rest
-  | "-L" :: _ :: rest -> parse port id_file host user command rest
-  | "-R" :: _ :: rest -> parse port id_file host user command rest
-  | "-D" :: _ :: rest -> parse port id_file host user command rest
+     | Some p -> parse (Some p) id_file host user command dd rest
+     | None -> parse port id_file host user command dd rest)
+  | "-i" :: f :: rest when not dd -> parse port (Some f) host user command dd rest
+  | "-o" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-L" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-R" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-D" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  (* POSIX end-of-options: remaining are host + command *)
+  | "--" :: rest -> parse port id_file host user command true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse port id_file host user command rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse port id_file host user command dd rest
     else (
       match host with
       | None ->
@@ -2089,14 +2272,14 @@ let rec parse port id_file host user command = function
           | [ u; h ] -> (Some u, h)
           | _ -> (None, arg)
         in
-        parse port id_file (Some h) u command rest
+        parse port id_file (Some h) u command dd rest
       | Some _ ->
         (* Remaining positional tokens are the remote command *)
         let cmd = String.concat " " (arg :: rest) in
         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh
           { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port; identity_file = id_file })))
 in
-parse None None None None None args|}
+parse None None None None None false args|}
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"
@@ -2136,6 +2319,30 @@ let rec parse recursive port src dest = function
   | "-C" :: rest -> parse recursive port src dest rest
   | "-v" :: rest -> parse recursive port src dest rest
   | "-q" :: rest -> parse recursive port src dest rest
+  (* Combined short flags: -rCv, -Cvr, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'r' || c = 'p' || c = 'C' || c = 'v' || c = 'q')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let r' = ref recursive in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'r' -> r' := true
+      | _ -> ()
+    done;
+    parse !r' port src dest rest
+  (* POSIX end-of-options: remaining are source, dest *)
+  | "--" :: rest ->
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ s; d ] ->
+       (match src, dest with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive; port }))
+        | _ -> None)
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive port src dest rest
@@ -2231,6 +2438,13 @@ let rec parse action compression archive paths = function
   | "-J" :: rest -> parse action `Xz archive paths rest
   | "--zstd" :: rest -> parse action `Zstd archive paths rest
   | "-f" :: f :: rest -> parse action compression (Some f) paths rest
+  (* POSIX end-of-options: all remaining args are paths *)
+  | "--" :: rest ->
+    let paths' = List.rev_append (List.filter (fun a -> String.length a > 0) rest) paths in
+    (match action, archive with
+     | Some a, Some f ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tar { action = a; archive = f; paths = List.rev paths'; compression }))
+     | _ -> None)
   | arg :: rest ->
     if String.length arg >= 3 && arg.[0] = '-'
     then (
@@ -2287,32 +2501,35 @@ parse None `None None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse jobs target = function
+let rec parse jobs target dd = function
   | [] ->
     Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Make { target; jobs }))
-  | "-j" :: n :: rest ->
+  | "-j" :: n :: rest when not dd ->
     (match int_of_string_opt n with
-     | Some j -> parse (Some j) target rest
+     | Some j -> parse (Some j) target dd rest
      | None -> None)
   (* Combined form: -j4 → jobs = Some 4 *)
   | arg :: rest
-    when String.length arg > 2
+    when not dd
+         && String.length arg > 2
          && String.length arg <= 5
          && arg.[0] = '-'
          && arg.[1] = 'j'
          && String.for_all (fun c -> c >= '0' && c <= '9')
               (String.sub arg 2 (String.length arg - 2)) ->
     let j = int_of_string (String.sub arg 2 (String.length arg - 2)) in
-    parse (Some j) target rest
+    parse (Some j) target dd rest
+  (* POSIX end-of-options: skip --, remaining args are positional *)
+  | "--" :: rest -> parse jobs target true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse jobs target rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse jobs target dd rest
     else (
       match target with
-      | None -> parse jobs (Some arg) rest
+      | None -> parse jobs (Some arg) dd rest
       | Some _ -> None)
 in
-parse None None args|}
+parse None None false args|}
     }
   ; { name = "Diff"
     ; anon_pattern = "Diff _"
@@ -2347,6 +2564,28 @@ let rec parse unified brief files = function
   | "--unified" :: rest -> parse true brief files rest
   | "-q" :: rest -> parse unified true files rest
   | "--brief" :: rest -> parse unified true files rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are file1, file2 *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ f1; f2 ] ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified; brief }))
+     | _ -> None)
+  (* Combined short flags: -uq, -qu, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'u' || c = 'q')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let u' = ref unified and q' = ref brief in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'u' -> u' := true
+      | 'q' -> q' := true
+      | _ -> ()
+    done;
+    parse !u' !q' files rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse unified brief files rest
@@ -2378,34 +2617,36 @@ parse false false [] args|}
     ; parse_body =
         Some
           {|
-let rec parse in_place ext_re suppress expr file = function
+let rec parse in_place ext_re suppress expr file dd = function
   | [] ->
     (match expr, file with
      | Some e, Some f ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place; extended_regex = ext_re; suppress_output = suppress }))
      | _ -> None)
-  | "-i" :: rest ->
+  | "-i" :: rest when not dd ->
     (* macOS sed -i '' takes an empty suffix; GNU sed -i has no suffix.
        Only skip the next token if it's an explicit empty string (macOS style).
        Non-empty non-flag tokens are the expression, not a suffix. *)
     (match rest with
-     | "" :: rest' -> parse true ext_re suppress expr file rest'   (* -i '' — macOS empty suffix *)
-     | _ -> parse true ext_re suppress expr file rest)              (* -i at end or GNU style *)
-  | "-e" :: e :: rest -> parse in_place ext_re suppress (Some e) file rest  (* explicit expression *)
-  | "-E" :: rest | "--regexp-extended" :: rest -> parse in_place true suppress expr file rest
-  | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest -> parse in_place ext_re true expr file rest
+     | "" :: rest' -> parse true ext_re suppress expr file dd rest'   (* -i '' — macOS empty suffix *)
+     | _ -> parse true ext_re suppress expr file dd rest)              (* -i at end or GNU style *)
+  | "-e" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
+  | "-E" :: rest | "--regexp-extended" :: rest when not dd -> parse in_place true suppress expr file dd rest
+  | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest when not dd -> parse in_place ext_re true expr file dd rest
+  (* POSIX end-of-options: remaining are expression, file *)
+  | "--" :: rest -> parse in_place ext_re suppress expr file true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse in_place ext_re suppress expr file rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse in_place ext_re suppress expr file dd rest
     else (
       match expr with
-      | None -> parse in_place ext_re suppress (Some arg) file rest
+      | None -> parse in_place ext_re suppress (Some arg) file dd rest
       | Some _ ->
         match file with
-        | None -> parse in_place ext_re suppress expr (Some arg) rest
+        | None -> parse in_place ext_re suppress expr (Some arg) dd rest
         | Some _ -> None)
 in
-parse false false false None None args|}
+parse false false false None None false args|}
     }
   ; { name = "Rsync"
     ; anon_pattern = "Rsync _"
@@ -2464,6 +2705,33 @@ let rec parse flags archive delete dry_run compress src dst = function
     when String.length arg > 0 && arg.[0] = '-'
          && List.mem arg rsync_value_flags ->
     parse (val_ :: arg :: flags) archive delete dry_run compress src dst rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are source, dest *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ s; d ] ->
+       (match src, dst with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rsync { source = s; dest = d; archive; delete; dry_run; compress; flags = List.rev flags }))
+        | _ -> None)
+     | _ -> None)
+  (* Combined short flags: -az, -anz, -nza, etc. (typed flags only) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'a' || c = 'n' || c = 'z')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let archive' = ref archive and delete' = ref delete
+    and dry_run' = ref dry_run and compress' = ref compress in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'a' -> archive' := true
+      | 'n' -> dry_run' := true
+      | 'z' -> compress' := true
+      | _ -> ()
+    done;
+    parse flags !archive' !delete' !dry_run' !compress' src dst rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ flag; value ] when List.mem flag rsync_value_flags ->
@@ -2670,6 +2938,13 @@ let rec parse file patchfile strip reverse = function
     Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file; patchfile; strip; reverse }))
   | "-R" :: rest -> parse file patchfile strip true rest
   | "-i" :: p :: rest -> parse file (Some p) strip reverse rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining non-empty args are file *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file; patchfile; strip; reverse }))
+     | [ f ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file = Some f; patchfile; strip; reverse }))
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then (
@@ -2960,6 +3235,16 @@ let rec parse recursive mode path = function
      | _ -> None)
   | "-R" :: rest -> parse true mode path rest
   | "--recursive" :: rest -> parse true mode path rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are mode, path *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ m; p ] ->
+       (match mode, path with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chmod { mode = m; path = p; recursive }))
+        | _ -> None)
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive mode path rest
@@ -3003,6 +3288,16 @@ let rec parse recursive owner path = function
      | _ -> None)
   | "-R" :: rest -> parse true owner path rest
   | "--recursive" :: rest -> parse true owner path rest
+  | "--" :: rest ->
+    (* POSIX end-of-options: remaining are owner, path *)
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | [ o; p ] ->
+       (match owner, path with
+        | None, None ->
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Chown { owner = o; path = p; recursive }))
+        | _ -> None)
+     | _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive owner path rest

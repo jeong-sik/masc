@@ -78,14 +78,32 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           | Some cascade_name, Some source, Some detail ->
             (match capacity_backpressure_source_of_string source with
              | Some source ->
+               (* Reconstruct provenance from the wire: a [retry_after_synthetic]
+                  flag distinguishes a fabricated default from a real backoff, so
+                  a synthetic value is never read back as explicit.  Legacy
+                  payloads (no flag) default to [Explicit]. *)
+               let retry_after_synthetic =
+                 match json with
+                 | `Assoc fields -> (
+                     match List.assoc_opt "retry_after_synthetic" fields with
+                     | Some (`Bool b) -> b
+                     | _ -> false)
+                 | _ -> false
+               in
+               let retry_after =
+                 match float_opt_of_assoc "retry_after_sec" json with
+                 | None -> Cascade_internal_error.No_retry_hint
+                 | Some s when retry_after_synthetic ->
+                   Cascade_internal_error.Synthetic_default s
+                 | Some s -> Cascade_internal_error.Explicit s
+               in
                Some
                  (Capacity_backpressure
                     {
                       cascade_name = Cascade_name.of_string_exn cascade_name;
                       source;
                       detail;
-                      retry_after_sec =
-                        float_opt_of_assoc "retry_after_sec" json;
+                      retry_after;
                     })
              | None -> None)
           | _ -> None)

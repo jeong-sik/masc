@@ -131,9 +131,14 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
           (match sdk_error_capacity_backpressure_retry_hint sdk_err with
            | Some (Cbr_explicit s) -> Some (Some s)
            | Some (Cbr_synthetic_default s) ->
-             Log.Misc.warn
-               "cascade_capacity_backpressure: provider=%s retry_after_sec=null \
-                injecting synthetic backoff=%.1fs (error_kind=%s)"
+             (* No provider Retry-After; applying a synthetic backoff.  This is
+                expected for capacity exhaustion without an upstream hint, so it
+                is logged at INFO.  Provenance is preserved in the typed carrier
+                ([Synthetic_default]); it is not laundered into an explicit
+                hint. *)
+             Log.Misc.info
+               "cascade_capacity_backpressure: provider=%s no provider \
+                retry_after; using synthetic backoff=%.1fs (error_kind=%s)"
                provider_key s
                (Cascade_health_tracker.error_kind_to_string error_kind);
              Some (Some s)

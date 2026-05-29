@@ -74,6 +74,25 @@ let retry_admission_denial_to_yojson = function
         ("remaining_turn_budget_s", `Float remaining_turn_budget_s);
       ]
 
+(** Provenance-preserving retry-after hint for capacity backpressure.
+
+    [Explicit] carries a concrete backoff to trust: an upstream-supplied
+    Retry-After (seconds, > 0) or a real locally-computed wait (e.g. a client
+    capacity cooldown).  [Synthetic_default] carries a fabricated fixed-default
+    backoff applied when no real signal was available.  [No_retry_hint] means
+    neither was available.
+
+    Keeping [Synthetic_default] distinct from [Explicit] at the type level
+    makes it impossible to launder a fabricated default into the explicit
+    path: the classifier and telemetry can always tell a real backoff from a
+    blind guess.  Replaces a [float option] carrier whose [None]->[Some
+    synthetic] injection (PR #19329) relabelled a synthetic backoff as an
+    explicit hint (audit 2026-05-29). *)
+type capacity_retry_after =
+  | Explicit of float
+  | Synthetic_default of float
+  | No_retry_hint
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : Cascade_name.t;
@@ -83,7 +102,7 @@ type masc_internal_error =
       cascade_name : Cascade_name.t;
       source : capacity_backpressure_source;
       detail : string;
-      retry_after_sec : float option;
+      retry_after : capacity_retry_after;
     }
   | Resumable_cli_session of {
       cascade_name : Cascade_name.t;
@@ -221,16 +240,28 @@ let masc_internal_error_to_json = function
         ("cascade_name", `String cascade_name);
         ("reason", Keeper_meta_contract.cascade_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { cascade_name; source; detail; retry_after_sec } ->
+  | Capacity_backpressure { cascade_name; source; detail; retry_after } ->
     let cascade_name = cascade_name_to_string cascade_name in
+    (* Carry the backoff seconds for both real and synthetic hints (never
+       null when a backoff applies, satisfying telemetry consumers) plus an
+       explicit [retry_after_synthetic] flag so a synthetic default is never
+       read back as a provider hint on the JSON round-trip. *)
+    let retry_after_fields =
+      match retry_after with
+      | Explicit s ->
+        [ ("retry_after_sec", `Float s); ("retry_after_synthetic", `Bool false) ]
+      | Synthetic_default s ->
+        [ ("retry_after_sec", `Float s); ("retry_after_synthetic", `Bool true) ]
+      | No_retry_hint -> [ ("retry_after_sec", `Null) ]
+    in
     `Assoc
-      [
-        ("kind", `String "capacity_backpressure");
-        ("cascade_name", `String cascade_name);
-        ("source", `String (capacity_backpressure_source_to_string source));
-        ("detail", `String detail);
-        ("retry_after_sec", Json_util.float_opt_to_json retry_after_sec);
-      ]
+      ([
+         ("kind", `String "capacity_backpressure");
+         ("cascade_name", `String cascade_name);
+         ("source", `String (capacity_backpressure_source_to_string source));
+         ("detail", `String detail);
+       ]
+      @ retry_after_fields)
   | Resumable_cli_session { cascade_name; detail; exit_code } ->
     let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
@@ -369,11 +400,13 @@ let summarize_provider_rejections rejections =
   | reasons -> String.concat "; " reasons
 
 let summary_of_masc_internal_error = function
-  | Capacity_backpressure { cascade_name; source; detail; retry_after_sec } ->
-      let retry_after =
-        match retry_after_sec with
-        | Some value -> Printf.sprintf "; retry_after=%.1fs" value
-        | None -> ""
+  | Capacity_backpressure { cascade_name; source; detail; retry_after } ->
+      let retry_after_suffix =
+        match retry_after with
+        | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
+        | Synthetic_default value ->
+          Printf.sprintf "; retry_after=%.1fs (synthetic)" value
+        | No_retry_hint -> ""
       in
       Some
         (Printf.sprintf
@@ -381,7 +414,7 @@ let summary_of_masc_internal_error = function
            (cascade_name_to_string cascade_name)
            (capacity_backpressure_source_to_string source)
            detail
-           retry_after)
+           retry_after_suffix)
   | No_tool_capable_provider
       {
         cascade_name;

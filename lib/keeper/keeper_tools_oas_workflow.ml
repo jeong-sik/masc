@@ -49,7 +49,7 @@ let json_nonempty_string_opt key json =
   | Some (`String value) ->
     let value = String.trim value in
     if String.equal value "" then None else Some value
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
 ;;
 
 let workflow_rejection_info_of_json json =
@@ -307,14 +307,14 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
 let json_has_nonempty_evidence_refs json =
   let nonempty_string = function
     | `String value -> not (String.equal (String.trim value) "")
-    | _ -> false
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false
   in
   match json_assoc_field_opt "handoff_context" json with
   | Some (`Assoc fields) ->
     (match List.assoc_opt "evidence_refs" fields with
      | Some (`List refs) -> List.exists nonempty_string refs
-     | _ -> false)
-  | _ -> false
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> false)
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> false
 ;;
 
 let workflow_submit_evidence_marker json =

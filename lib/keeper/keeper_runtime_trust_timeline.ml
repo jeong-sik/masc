@@ -28,7 +28,7 @@ let assoc_bool_default key ~default fields =
 let assoc_string_opt key fields =
   match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
 
 let assoc_json_opt key fields =
   match List.assoc_opt key fields with

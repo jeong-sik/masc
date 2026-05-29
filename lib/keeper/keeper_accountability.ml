@@ -783,8 +783,8 @@ let accountability_risk_is_high config ~keeper_name ~agent_name =
   | `Assoc fields ->
     (match List.assoc_opt "risk_band" fields with
      | Some (`String "high") -> true
-     | _ -> false)
-  | _ -> false
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
 (* --- Attribution envelope conversion (Layer 1) ---

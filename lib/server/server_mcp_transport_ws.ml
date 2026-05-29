@@ -591,7 +591,8 @@ let parse_sse_dashboard_event sse_event =
               ~error_kind:Transport_metrics.Other_ws_frame_json_parse_error;
             None
         | `Assoc fields as event_json -> (
-            match List.assoc_opt "type" fields with
+            let type_val = (List.assoc_opt "type" fields : Yojson.Safe.t option) in
+            match type_val with
             | Some (`String event_type) ->
                 let payload =
                   match List.assoc_opt "payload" fields with
@@ -601,8 +602,8 @@ let parse_sse_dashboard_event sse_event =
                 let slice = dashboard_slice_for_sse_type event_type in
                 let broadcast_ts = Time_compat.now () in
                 Some { event_type; slice; payload; broadcast_ts }
-            | _ -> None)
-        | _ -> None
+            | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     in
     Atomic.set parse_cache (sse_event, result);
     result

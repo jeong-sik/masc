@@ -267,7 +267,7 @@ let rec collect_string_list_values ~keys json =
           direct @ collect_string_list_values ~keys value)
         kvs
   | `List values -> List.concat_map (collect_string_list_values ~keys) values
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> []
 
 (** Lazily-built set of canonical destructive substring patterns from
     {!Eval_gate.destructive_patterns}. Used to discriminate "real" destructive

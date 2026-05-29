@@ -123,19 +123,19 @@ let clamp01 value =
 let string_field name fields =
   match List.assoc_opt name fields with
   | Some (`String s) -> Some s
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
 
 let int_field name fields =
   match List.assoc_opt name fields with
   | Some (`Int n) -> Some n
   | Some (`Float f) -> Some (int_of_float f)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 
 let float_field name fields =
   match List.assoc_opt name fields with
   | Some (`Float f) -> Some f
   | Some (`Int n) -> Some (float_of_int n)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 
 let pressure_of_kind_fields fields =
   match string_field "type" fields with
@@ -209,7 +209,7 @@ let merge_event table (json : Yojson.Safe.t) =
                (match acc.blocked_on, blocker_of_kind_fields kind_fields with
                 | None, Some blocker -> acc.blocked_on <- Some blocker
                 | _ -> ())
-           | _ -> ()))
+           | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> ()))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ()
 
 let board_row_to_json acc =

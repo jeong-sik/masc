@@ -19,16 +19,16 @@ type jsonrpc_request = {
 
 let has_field key = function
   | `Assoc fields -> List.exists (fun (k, _) -> k = key) fields
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 let get_field key = function
   | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let is_jsonrpc_v2 json =
   match get_field "jsonrpc" json with
   | Some (`String "2.0") -> true
-  | _ -> false
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false
 
 let is_jsonrpc_response json =
   match json with
@@ -183,8 +183,8 @@ let protocol_version_from_params = function
   | Some (`Assoc fields) -> (
       match List.assoc_opt "protocolVersion" fields with
       | Some (`String version) -> version
-      | _ -> default_protocol_version)
-  | _ -> default_protocol_version
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> default_protocol_version)
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> default_protocol_version
 
 let protocol_version_from_initialize_request_json = function
   | `Assoc fields -> (
@@ -196,7 +196,7 @@ let protocol_version_from_initialize_request_json = function
           Some
             (protocol_version_from_params params |> normalize_protocol_version)
       | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let protocol_version_from_body body_str =
   try

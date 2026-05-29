@@ -40,7 +40,7 @@ let cache_store ~ttl key preview =
 
 let error_reason_of_json = function
   | `Assoc _ as json -> Json_util.assoc_string_opt "error" json
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let assoc_upsert fields key value =
   (key, value) :: List.remove_assoc key fields
@@ -48,7 +48,7 @@ let assoc_upsert fields key value =
 let with_cache_state preview cache_state =
   match preview with
   | `Assoc fields -> `Assoc (assoc_upsert fields "cache_state" (`String cache_state))
-  | _ -> preview
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> preview
 
 (* Static replacement table — both the entity needles and the
    compiled regexes are fixed.  Old form rebuilt 7 [Re.t] DFAs per
@@ -454,12 +454,12 @@ let urls_of_request args =
              | `String value ->
                  let trimmed = String.trim value in
                  if trimmed = "" then None else Some trimmed
-             | _ -> None)
+             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None)
         |> List.sort_uniq String.compare
       in
       if urls = [] then Error "urls must contain at least one non-empty string"
       else Ok (List.take max_preview_urls urls)
-  | _ -> Error "urls must be an array of strings"
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> Error "urls must be an array of strings"
 
 let dashboard_link_previews_http_json ~state ~(args : Yojson.Safe.t) :
     (Yojson.Safe.t, string) result =

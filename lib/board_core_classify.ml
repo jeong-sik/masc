@@ -148,19 +148,19 @@ let meta_source = function
       | Some (`String source) ->
           let source = String.lowercase_ascii (String.trim source) in
           if String.equal source "" then None else Some source
-      | _ -> None)
-  | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None
 
 let meta_field meta_json key =
   match meta_json with
   | Some (`Assoc fields) -> List.assoc_opt key fields
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None
 
 let nonempty_json_string = function
   | `String value ->
       let value = String.trim value in
       if String.equal value "" then None else Some value
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
 
 let judgment_reason = function
   | `String _ as value -> nonempty_json_string value
@@ -174,7 +174,7 @@ let judgment_reason = function
           keys
       in
       find [ "summary"; "reason"; "classification_reason" ]
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ -> None
 
 let meta_explicit_classification_reason meta_json =
   match

@@ -121,12 +121,12 @@ let tool_error_metadata_from_json_message msg =
         let recoverable =
           match List.assoc_opt "recoverable" fields with
           | Some (`Bool true) -> true
-          | _ -> false
+          | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false
         in
         let error_class =
           match List.assoc_opt "error_class" fields with
           | Some (`String s) -> tool_error_class_of_string s
-          | _ -> None
+          | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
         in
         (recoverable, error_class)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> (false, None)

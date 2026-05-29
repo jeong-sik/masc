@@ -405,7 +405,7 @@ let pending_first_json pending_approvals =
           ("task_id", Json_util.string_opt_to_json task_id);
           ("blocker_class", Json_util.string_opt_to_json blocker_class);
         ]
-  | _ -> `Null
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> `Null
 
 let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_call
     ~latest_approval_audit ~latest_receipt =
@@ -712,7 +712,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     match Keeper_transition_audit.recent_transitions_json
             ~keeper_name:meta.name ~limit:6 with
     | `List items -> items |> List.filter_map transition_timeline_event
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   let decision_events =
     (match latest_decision with

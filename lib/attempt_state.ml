@@ -63,22 +63,22 @@ let to_json t =
 
 let int_of_json = function
   | `Int n -> Some n
-  | _ -> None
+  | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 
 let string_of_json = function
   | `String s -> Some s
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
 
 let float_of_json = function
   | `Float f -> Some f
   | `Int n -> Some (float_of_int n)
-  | _ -> None
+  | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> None
 
 let optional_float_of_json = function
   | `Null -> Some None
   | `Float f -> Some (Some f)
   | `Int n -> Some (Some (float_of_int n))
-  | _ -> None
+  | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> None
 
 let of_json = function
   | `Assoc fields ->
@@ -100,7 +100,7 @@ let of_json = function
             let reason =
               match List.assoc_opt "failure_reason" fields with
               | Some (`String s) -> s
-              | _ -> ""
+              | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> ""
             in
             Failed { reason }
         | Start_dispatched | Timed_out -> last_result_base
@@ -122,4 +122,4 @@ let of_json = function
           next_retry_unix;
           updated_unix;
         }
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None

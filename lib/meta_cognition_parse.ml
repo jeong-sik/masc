@@ -138,7 +138,7 @@ let parse_optional_summary parse value =
         (fun parsed ->
           match other with
           | `Assoc _ -> Some parsed
-          | _ -> None)
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
         (parse other)
 
 let parse_summary json =

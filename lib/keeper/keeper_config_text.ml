@@ -119,7 +119,7 @@ let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list 
   | `Assoc fields ->
       keys
       |> List.filter (fun key -> List.mem_assoc key fields)
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 
 let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
   let non_public = present_json_keys non_public_keeper_input_key_names args in

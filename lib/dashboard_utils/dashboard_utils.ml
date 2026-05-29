@@ -52,7 +52,7 @@ let string_field ?(default = "") key json =
 let list_field key json =
   match member_assoc key json with
   | `List items -> items
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 
 let severity_rank s =
   match String.lowercase_ascii s with

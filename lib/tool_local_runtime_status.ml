@@ -74,7 +74,7 @@ let runtime_status_json ?(include_models = true) () =
                  List.filter_map
                    (function `String s -> Some s | _ -> None)
                    items
-             | _ -> [])
+             | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> [])
       |> Json_util.dedupe_keep_order
   in
   let configured_capacity = Local_runtime_pool.configured_capacity () in

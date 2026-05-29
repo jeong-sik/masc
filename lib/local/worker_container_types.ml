@@ -144,7 +144,7 @@ let extract_tool_text json =
       | Some (`String s) -> s
       | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) ->
         Yojson.Safe.to_string json)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None ->
     Yojson.Safe.to_string json
 
 let extract_jsonrpc_error json =

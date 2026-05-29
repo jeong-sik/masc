@@ -108,7 +108,7 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
                t
            with
            | `Assoc fields -> fields
-           | _ -> []
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ -> []
          in
          `Assoc (base_fields @ projection_fields))
       (List.filter

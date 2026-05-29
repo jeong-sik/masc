@@ -158,7 +158,7 @@ let type_string_of_schema_property prop =
           | `String value when not (String.equal value "null") -> Some value
           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> None)
         values
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ -> None
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _) | None -> None
 
 let params_of_json_schema schema =
   let __t0 = Mtime_clock.now () in
@@ -182,7 +182,7 @@ let params_of_json_schema schema =
             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> ())
           items;
         tbl
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Hashtbl.create 0
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> Hashtbl.create 0
   in
   let result =
     match Json_util.get_object schema "properties" with
@@ -202,7 +202,7 @@ let params_of_json_schema schema =
             let required = Hashtbl.mem required_set name in
             { Agent_sdk.Types.name = name; description; param_type; required })
           pairs
-    | _ -> []
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> []
   in
   Prometheus_hotpath.observe
     ~metric:Prometheus_hotpath.metric_oas_params_of_schema_sec

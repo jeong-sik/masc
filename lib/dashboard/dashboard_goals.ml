@@ -68,7 +68,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
   let pending_approvals =
     match Keeper_approval_queue.list_pending_dashboard_json () with
     | `List items -> items
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   let latest_receipts =
     keeper_metas
@@ -326,7 +326,7 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
         match Keeper_approval_queue.list_pending_dashboard_json () with
         | `List items ->
             items |> List.filter (approval_matches_goal goal_id)
-        | _ -> []
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
       in
       let latest_receipts =
         keeper_details
@@ -399,7 +399,7 @@ let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
   let pending_approval_total =
     match Keeper_approval_queue.list_pending_dashboard_json () with
     | `List items -> List.length items
-    | _ -> 0
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> 0
   in
   `Assoc
     [

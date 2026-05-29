@@ -356,7 +356,7 @@ let merge_envelope_into_payload ?correlation_id ?run_id payload =
   else (
     match payload with
     | `Assoc fields -> `Assoc (fields @ extras)
-    | _ ->
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Log.Misc.warn "emit_task_activity: non-Assoc payload, envelope fields skipped";
       payload)
 ;;

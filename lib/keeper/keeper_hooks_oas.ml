@@ -510,7 +510,7 @@ let make_hooks
         in
         let input_keys = match input with
           | `Assoc pairs -> String.concat "," (List.map fst pairs)
-          | _ -> "-"
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> "-"
         in
         let outcome, out_len = match output with
           | Ok { Agent_sdk.Types.content; _ } -> Tool_result.Ok, String.length content

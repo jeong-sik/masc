@@ -65,7 +65,7 @@ let compact_receipt_tool_surface_json receipt =
   let surface =
     match json_member "tool_surface" receipt with
     | `Assoc _ as surface -> surface
-    | _ -> json_member "tool_contract" receipt
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> json_member "tool_contract" receipt
   in
   match surface with
   | `Assoc _ as surface ->

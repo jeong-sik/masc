@@ -268,7 +268,7 @@ let build_internal_signals incidents actions =
     |> List.filter_map (fun row ->
            match member_assoc "action" row.json with
            | `Assoc _ as action -> Some (action_identity action)
-           | _ -> None)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
   in
   let internal_actions =
     actions

@@ -500,7 +500,7 @@ let merge_addendum_into_record
   =
   match record_json with
   | `Assoc base -> `Assoc (base @ addendum)
-  | _ ->
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     invalid_arg
       "Sse_event.merge_addendum_into_record: atdgen record JSON must be `Assoc"
 ;;

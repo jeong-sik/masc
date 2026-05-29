@@ -103,7 +103,7 @@ let docker_info_security_options_with_class ~timeout_sec =
           (List.filter_map (function `String s -> Some s | _ -> None) items
            |> List.map String.lowercase_ascii)
       | `Null -> Ok []
-      | _ ->
+      | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
         Error
           { message =
               "docker info returned unexpected SecurityOptions payload while validating \

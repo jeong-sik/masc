@@ -299,7 +299,7 @@ let role_counts_of_json json : (string * int) list =
     match value with
     | `Int n -> Some (role, n)
     | `Intlit s -> Option.map (fun n -> role, n) (int_of_string_opt s)
-    | _ -> None)
+    | `Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _ -> None)
 ;;
 
 let public_runtime_model_id = "runtime"

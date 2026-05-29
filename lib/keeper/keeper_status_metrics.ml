@@ -252,7 +252,7 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let j =
           match Yojson.Safe.from_string line with
           | `Assoc _ as json -> json
-          | _ ->
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
               report_metrics_summary_read_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                 ~detail:"keeper metrics row is not a JSON object";
@@ -497,7 +497,7 @@ let action_source_opt_member json =
       match Json_util.assoc_member_opt "deliberation_execution" json with
       | Some (`Assoc _ as nested) ->
           Safe_ops.json_string_opt "action_source" nested
-      | _ -> None)
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> None)
 
 let has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source =
   tools <> []
@@ -589,7 +589,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
         let json =
           match Yojson.Safe.from_string line with
           | `Assoc _ as json -> json
-          | _ ->
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
               report_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                 ~detail:"decision log row is not a JSON object";
@@ -653,7 +653,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
       let json =
         match Yojson.Safe.from_string line with
         | `Assoc _ as json -> json
-        | _ ->
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
             report_drop
               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
               ~detail:"keeper metrics row is not a JSON object";

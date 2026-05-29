@@ -141,7 +141,7 @@ let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
         | Some (`String s) ->
             let trimmed = String.trim s in
             if trimmed <> "" then Some trimmed else None
-        | _ -> None)
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | None -> None)
       traces
   in
   let tool_input_preview = first_non_null "tool_input_preview" in
@@ -154,6 +154,6 @@ let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
            | Some (`String s) ->
                let trimmed = String.trim s in
                if trimmed <> "" then Some trimmed else None
-           | _ -> None)
+           | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | None -> None)
   in
   (tool_input_preview, tool_args_preview, tool_output_preview)

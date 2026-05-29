@@ -652,7 +652,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | `Int i -> string_of_int i
     | `Intlit s -> s
     | `Float f -> Printf.sprintf "%0.0f" f
-    | _ -> "unknown"
+    | `Null | `Bool _ | `Assoc _ | `List _ -> "unknown"
   in
   let mcp_session_detail = Json_util.string_opt_to_json mcp_session_id in
 

@@ -106,7 +106,7 @@ let parse_response (json : Yojson.Safe.t) : (int * (Yojson.Safe.t, string) resul
     let obj =
       match json with
       | `Assoc m -> m
-      | _ -> raise Exit
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> raise Exit
     in
     let id =
       match List.assoc_opt "id" obj with
@@ -139,7 +139,7 @@ let parse_notification (json : Yojson.Safe.t) : (string * Yojson.Safe.t) option 
     let obj =
       match json with
       | `Assoc m -> m
-      | _ -> raise Exit
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> raise Exit
     in
     match List.assoc_opt "id" obj with
     | Some _ -> None (* has an ID, not a notification *)

@@ -624,7 +624,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
          | Some (`String "no_visible_reuse") ->
              "Repeated prompt_eval_duration_ms did not show a strong reuse improvement."
              :: items
-         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> items)
+         | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) | None -> items)
     |> List.rev
   in
   let errors =

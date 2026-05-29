@@ -14,7 +14,7 @@ let session_recent_enough ~now_ts session_json =
   let recent_events =
     match member_assoc "recent_events" session_json with
     | `List items -> items
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   recent_events
   |> List.filter_map event_timestamp
@@ -62,7 +62,7 @@ let compact_session_json session_json =
   let recent_events =
     match member_assoc "recent_events" session_json with
     | `List items -> items
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   let last_event =
     match List.rev recent_events with
@@ -104,17 +104,17 @@ let compact_session_json session_json =
   let communication_mode_text =
     match communication_mode with
     | `String value -> value
-    | _ -> "unknown"
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> "unknown"
   in
   let broadcast_count_value =
     match broadcast_count with
     | `Int value -> value
-    | _ -> 0
+    | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> 0
   in
   let portal_count_value =
     match portal_count with
     | `Int value -> value
-    | _ -> 0
+    | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> 0
   in
   `Assoc
     [

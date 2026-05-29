@@ -31,7 +31,7 @@ let unknown_args ~valid_keys args =
       |> List.filter (fun (key, _) ->
              (not (is_internal_marker key)) && not (List.mem key valid_keys))
       |> List.map fst
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 
 (* Synthesize a summary from sibling [notes] / [reason] transition args
    when [handoff_context.summary] is empty. Keeper LLMs frequently send

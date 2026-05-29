@@ -138,7 +138,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     let scope_json =
       match snapshot_json |> member_assoc "root" with
       | `Assoc _ as value -> value
-      | _ -> snapshot_json |> member_assoc "room"
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> snapshot_json |> member_assoc "room"
     in
     let current_namespace =
       match String_util.option_trim (Some (scope_json |> string_field "project")) with
@@ -152,7 +152,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     let keepers =
       match briefing_json |> member_assoc "keeper_briefs" with
       | `List items -> items
-      | _ -> []
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
     in
     let compact_sessions = take 3 (List.map Briefing_compactors.compact_session_json sessions) in
     (* PR #15777 (V14) follow-up: emit Prometheus counter for the typed

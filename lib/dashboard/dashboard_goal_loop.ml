@@ -91,7 +91,7 @@ let status_json_compute ~base_path () =
         | `Assoc _ ->
             add_dashboard_source json
               (dashboard_source_json "runtime_status_json" [ ("path", `String path) ])
-        | _ -> invalid_status_json ~path ~error:"expected JSON object"
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> invalid_status_json ~path ~error:"expected JSON object"
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> invalid_status_json ~path ~error:(Printexc.to_string exn))

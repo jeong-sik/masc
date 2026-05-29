@@ -45,7 +45,7 @@ let dashboard_task_json config (task : Masc_domain.task) =
         task
     with
     | `Assoc fields -> fields
-    | _ -> []
+    | `Null | `Bool _ | `Intlit _ | `Float _ | `List _ -> []
   in
   `Assoc (base_fields @ projection_fields)
 ;;

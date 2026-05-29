@@ -320,7 +320,7 @@ let normalize_disk_recommended_action judgment =
                     (key, value))
                 fields)
        | other -> other)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> judgment
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> judgment
 
 let load_judgments_into_table jsons =
   let table = Hashtbl.create 32 in
@@ -458,7 +458,7 @@ let parse_string_list json key =
                  let trimmed = String.trim value in
                  if trimmed = "" then None else Some trimmed
              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
 
 let normalize_text = Dashboard_http_helpers.normalize_text
 
@@ -501,7 +501,7 @@ let parse_recommended_action json =
                    (Json_util.get_string_with_default action_json ~key:"reason" ~default:"")) );
             ("payload_preview", m "payload_preview" action_json);
           ])
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> None
 
 type governance_response_parse_failure =
   | Lenient_fallback of string

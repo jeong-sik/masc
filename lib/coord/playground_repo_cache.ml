@@ -85,7 +85,7 @@ let update
           let json = Yojson.Safe.from_file cache_path in
           match Option.value ~default:(`Null) (Json_util.assoc_member_opt "repos" json) with
           | `List repos -> repos
-          | _ -> []
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | (Sys_error _ | Yojson.Json_error _) as exn ->
@@ -101,7 +101,7 @@ let update
              (fun repo ->
                match Option.value ~default:(`Null) (Json_util.assoc_member_opt "name" repo) with
                | `String name -> not (String.equal name repo_name)
-               | _ -> true)
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> true)
              existing
       in
       let json =

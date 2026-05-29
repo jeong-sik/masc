@@ -179,7 +179,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 match parsed with
                 | `Assoc fields ->
                     Ok (`Assoc (("name", `String name) :: List.remove_assoc "name" fields))
-                | _ ->
+                | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
                     Error "request body must be a JSON object"
               with
               | Yojson.Json_error err ->

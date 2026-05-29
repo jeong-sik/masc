@@ -115,7 +115,7 @@ let execute_tool_eio
       |> List.map fst
       |> List.sort_uniq String.compare
       |> List.map (fun key -> `String key)
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
   in
   let runtime_error_result ?(tool_name = name) msg =
     Tool_result.make_err

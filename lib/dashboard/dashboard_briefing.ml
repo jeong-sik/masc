@@ -228,7 +228,7 @@ let rec evidence_preview_strings json =
       items |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
   | `Assoc fields ->
       fields |> List.map snd |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> []
 
 (* Issue #8395: root-level attention uses [target_type="root"].  This
    predicate previously compared only to the literal "room", so the
@@ -394,7 +394,7 @@ let build_projection ?actor ~config ~sw ~clock
   let namespace_json =
     match member_assoc "root" snapshot_json with
     | `Assoc _ as value -> value
-    | _ -> member_assoc "room" snapshot_json
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> member_assoc "room" snapshot_json
   in
   let incidents =
     list_field "attention_items" digest_json
@@ -409,7 +409,7 @@ let build_projection ?actor ~config ~sw ~clock
   let keeper_items =
     match member_assoc "keepers" snapshot_json |> member_assoc "items" with
     | `List items -> items
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   let agent_briefs =
     Dashboard_briefing_assembly.build_agent_briefs config sessions attention_queue namespace_json keeper_items

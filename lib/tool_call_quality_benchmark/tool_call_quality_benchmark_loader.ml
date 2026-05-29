@@ -209,7 +209,7 @@ let load_cases_from_file path =
     match json with
     | `List items -> Ok items
     | `Assoc _ -> list_field json "cases"
-    | _ -> errorf "invalid benchmark case set at %s" path
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> errorf "invalid benchmark case set at %s" path
   in
   map_m benchmark_case_of_yojson cases
 
@@ -219,6 +219,6 @@ let load_runs_from_file path =
     match json with
     | `List items -> Ok items
     | `Assoc _ -> list_field json "runs"
-    | _ -> errorf "invalid benchmark evidence set at %s" path
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> errorf "invalid benchmark evidence set at %s" path
   in
   map_m evidence_run_of_yojson runs

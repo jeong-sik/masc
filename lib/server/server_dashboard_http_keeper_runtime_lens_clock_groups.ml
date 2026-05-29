@@ -170,7 +170,7 @@ let runtime_lens_clock_groups_json scan =
 let clock_group_jsons scan =
   match runtime_lens_clock_groups_json scan with
   | `List groups -> groups
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 
 let take_n = List.take
 

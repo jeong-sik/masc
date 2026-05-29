@@ -48,7 +48,7 @@ let ensure_keeper_board_post_args ~author ~source = function
            &&
            match v with
            | `String s -> String.trim s <> ""
-           | _ -> false)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false)
         fields
     in
     let fields =

@@ -6,7 +6,7 @@ open Keeper_runtime_trust_timeline
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
-  | _ ->
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Option.map
         (fun code ->
           Keeper_turn_terminal.of_code ~source:"decision_log" code)
@@ -353,7 +353,7 @@ let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
                  ~detail;
                None
            | (`Assoc _ as json) -> Some json
-           | _ ->
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
                report_decision_log_read_drop
                  ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                  ~path
@@ -413,7 +413,7 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
     Option.bind latest_approval_audit (fun json ->
         match json_member "rule_match" json with
         | `Assoc _ as rule_match -> Some rule_match
-        | _ -> None)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
   in
   let latest_event_kind =
     Option.bind latest_approval_audit (json_string_opt_member "event")
@@ -775,7 +775,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   let live_pending_events =
     match pending_approval_json ~keeper_name:meta.name with
     | `List entries -> List.filter_map live_pending_approval_timeline_event entries
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
   in
   tool_events @ approval_events @ transition_events @ terminal_reason_events
   @ decision_events @ receipt_events @ blocker_events @ live_pending_events
@@ -804,7 +804,7 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let pending_approval_count =
     match pending_approvals with
     | `List entries -> List.length entries
-    | _ -> 0
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> 0
   in
   let runtime_blocker_fields =
     Keeper_status_bridge.runtime_blocker_fields_json config meta

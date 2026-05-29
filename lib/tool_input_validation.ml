@@ -45,7 +45,7 @@ let required_names schema =
         | `String name -> Some name
         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> None)
       items
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
 ;;
 
 let has_enum schema =
@@ -64,7 +64,7 @@ let optional_enum_fields schema =
          then Some name
          else None)
       props
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> []
 ;;
 
 let normalize_blank_optional_enum_args ?schema args =
@@ -169,7 +169,7 @@ let one_of_branch_constraints schema =
                          | None -> None)
                       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
                    props
-               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
+               | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> []
              in
              let forbidden_required =
                match Json_util.assoc_member_opt "not" branch with
@@ -180,7 +180,7 @@ let one_of_branch_constraints schema =
         branches
     in
     if List.length constraints = List.length branches then constraints else []
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
 ;;
 
 let branch_label b =

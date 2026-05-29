@@ -300,7 +300,7 @@ let board_post_dashboard_json ?(include_moderation = false)
   let base_fields =
     match Board_dispatch.post_to_yojson_with_karma p ~author_karma with
     | `Assoc fields -> fields
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
   in
   let fields =
     base_fields

@@ -130,7 +130,7 @@ let write_heartbeat_snapshot
                let json =
                  match Yojson.Safe.from_string line with
                  | `Assoc _ as json -> json
-                 | _ ->
+                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
                    report_heartbeat_history_drop
                      ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                      ~path

@@ -376,7 +376,7 @@ let handle_get_prompt_eio state id params =
         with
         | Ok json -> make_response ~id json
         | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg)
-     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
   | Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
@@ -388,7 +388,7 @@ let handle_resources_subscribe_eio id ?mcp_session_id params =
      | Some (`String uri) ->
        subscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
-     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
@@ -401,7 +401,7 @@ let handle_resources_unsubscribe_eio id ?mcp_session_id params =
      | Some (`String uri) ->
        unsubscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
-     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;

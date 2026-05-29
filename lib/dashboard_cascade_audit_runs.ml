@@ -11,7 +11,7 @@ open Dashboard_cascade_helpers
 let json_list_member key json =
   match Yojson.Safe.Util.member key json with
   | `List values -> values
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 ;;
 
 let first_nonempty values =

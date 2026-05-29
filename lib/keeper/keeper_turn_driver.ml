@@ -704,7 +704,7 @@ let run_named
   let turn_deadline =
     match Eio_context.get_clock_opt () with
     | Some clock ->
-        let turn_budget = (Keeper_runtime_resolved.turn_timeout_sec ()).value in
+        let turn_budget = Keeper_runtime_resolved.turn_timeout_sec () in
         Some (Cascade_deadline.of_seconds_from_now ~clock turn_budget)
     | None -> None
   in

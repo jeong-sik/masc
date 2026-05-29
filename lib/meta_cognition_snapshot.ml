@@ -12,6 +12,11 @@ open Meta_cognition_types
 
 let rule_id_tension_tool_blockage = "tension:masc_tool_blockage"
 
+let clamp ~min_v ~max_v value =
+  if value < min_v then min_v
+  else if value > max_v then max_v
+  else value
+
 (* ================================================================ *)
 (* Data loading                                                     *)
 (* ================================================================ *)

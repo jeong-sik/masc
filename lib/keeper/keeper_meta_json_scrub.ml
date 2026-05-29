@@ -14,7 +14,7 @@
    Keeper_meta_json -> Keeper_meta_json_scrub -> Keeper_meta_json. *)
 let config_field_names =
   [ "goal"; "short_goal"; "mid_goal"; "long_goal"
-  ; "social_model"; "cascade_name"; "cascade_ref"
+  ; "social_model"; "cascade_name"
   ; "will"; "needs"; "desires"; "instructions"
   ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
   ; "tool_access"; "tool_preset_source"; "tool_denylist"

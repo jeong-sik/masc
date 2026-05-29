@@ -25,21 +25,15 @@ let keeper_trust_json ?(include_receipt = false)
     | None -> `Assoc [ ("profile", `Null); ("derived", `Bool false) ]
   in
   let cascade_json =
-    let cascade_ref_json =
-      match meta.cascade_ref with
-      | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
-      | None -> `Null
-    in
     match latest_receipt with
     | Some receipt -> (
         match Json_util.assoc_member_opt "cascade" receipt with
-        | Some (`Assoc fields) -> `Assoc (("cascade_ref", cascade_ref_json) :: fields)
-        | other -> Option.value ~default:`Null other)
+        | Some json -> json
+        | None -> `Null)
     | None ->
         `Assoc
           [
             ("name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
-            ("cascade_ref", cascade_ref_json);
             ("selected_model", `Null);
             ("attempt_count", `Int 0);
             ("fallback_applied", `Bool false);

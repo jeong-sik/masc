@@ -10,9 +10,7 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
   match Keeper_meta_store.read_meta config name with
   | Error msg -> Error ("read_meta failed after TOML update: " ^ msg)
   | Ok (Some meta) ->
-      let updated =
-        { (Keeper_meta_contract.set_cascade_name cascade_name meta) with updated_at }
-      in
+      let updated = { meta with updated_at } in
       (match Keeper_meta_store.write_meta ~force:true config updated with
        | Ok () ->
            let registered =
@@ -27,7 +25,7 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
        | None -> Ok false
        | Some entry ->
            let updated =
-             { (Keeper_meta_contract.set_cascade_name cascade_name entry.meta) with updated_at }
+             { entry.meta with updated_at }
            in
            (match Keeper_meta_store.write_meta ~force:true config updated with
             | Ok () ->

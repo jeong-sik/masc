@@ -1322,11 +1322,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 ;;
 
 let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown () =
-  let default_meta =
-    Masc_mcp.Keeper_meta_contract.set_cascade_name
-      (Masc_mcp.Keeper_config.default_cascade_name ())
-      minimal_meta
-  in
+  let default_meta = minimal_meta in
   let blocked =
     WO.provider_capacity_blocked_task_count
       ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
@@ -1344,7 +1340,7 @@ let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown
   in
   check int "healthy provider leaves backlog unblocked" 0 healthy;
   let fail_open_meta =
-    Masc_mcp.Keeper_meta_contract.set_cascade_name "scoring" minimal_meta
+    minimal_meta
   in
   let fail_open_blocked =
     WO.provider_capacity_blocked_task_count
@@ -1358,7 +1354,7 @@ let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown
 
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
-    { (Masc_mcp.Keeper_meta_contract.set_cascade_name "scoring" minimal_meta) with
+    { minimal_meta with
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -1876,10 +1872,7 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
 
 let test_provider_cooldown_blocks_bootstrap_turn () =
   let meta =
-    { (Masc_mcp.Keeper_meta_contract.set_cascade_name
-         Masc_mcp.(Keeper_config.default_cascade_name ())
-         minimal_meta)
-      with
+    { minimal_meta with
       proactive = { enabled = true; idle_sec = 300; cooldown_sec = 1800 }
     ; runtime =
         { minimal_meta.runtime with
@@ -2070,10 +2063,7 @@ let test_min_interval_never_fires_for_bootstrap () =
 let test_provider_cooldown_blocks_min_interval_turn () =
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
     let meta =
-      { (Masc_mcp.Keeper_meta_contract.set_cascade_name
-           Masc_mcp.(Keeper_config.default_cascade_name ())
-           minimal_meta)
-        with
+      { minimal_meta with
         proactive = { enabled = true; idle_sec = 0; cooldown_sec = 600 }
       ; runtime =
           { minimal_meta.runtime with

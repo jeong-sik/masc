@@ -3022,7 +3022,7 @@ proactive_enabled = true
             Alcotest.fail ("keeper meta reload failed before stale write: " ^ err)
       in
       let stale_meta =
-        { (Keeper_meta_contract.set_cascade_name "vendor_mix_balanced" stale_base) with
+        { stale_base with
           updated_at = Masc_domain.now_iso ();
         }
       in

@@ -553,7 +553,6 @@ type keeper_meta =
   ; long_goal : string
   ; social_model : string
   ; models : string list
-  ; cascade_ref : Cascade_ref.cascade_ref option
   ; will : string
   ; needs : string
   ; desires : string
@@ -613,14 +612,6 @@ let cascade_name_of_meta (_m : keeper_meta) : string =
   Runtime.get_default_runtime_id ()
 ;;
 
-let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
-  match Cascade_name.of_string name with
-  | Ok group ->
-    { m with cascade_ref = Some Cascade_ref.{ group; item = None } }
-  | Error (`Invalid_prefix | `Empty) ->
-    (* Non-canonical cascade name — keep existing cascade_ref unchanged *)
-    m
-;;
 
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"

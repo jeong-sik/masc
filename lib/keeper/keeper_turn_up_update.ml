@@ -271,23 +271,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     short_goal;
     mid_goal;
     long_goal;
-    cascade_ref =
-      (* RFC-0041 (post-step-4): cascade_ref is the SSOT.
-         An explicit tool arg is an operator reconfiguration request.
-         Otherwise TOML cascade_name takes precedence over runtime when
-         present; otherwise preserve the existing keeper's cascade_ref so
-         dashboard drift remains visible.  See #6747. *)
-      (let group =
-         (* WORKAROUND (#19327 follow-up): cascade_name→model field rename. *)
-         match p.cascade_name_opt, p.profile_defaults.model with
-         | Some name, _ -> name
-         | None, Some name -> name
-         | None, None ->
-           let prev = cascade_name_of_meta old in
-           if String.trim prev <> "" then prev
-           else (Keeper_config.default_cascade_name ())
-       in
-       Some Cascade_ref.{ group = Cascade_name.of_string_exn group; item = None });
     will = new_will;
     needs = new_needs;
     desires = new_desires;

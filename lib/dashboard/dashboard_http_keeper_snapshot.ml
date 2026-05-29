@@ -260,10 +260,6 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("selected_cascade_name", `String cascade_name);
           ( "selected_cascade_canonical",
             selected_cascade_canonical_json );
-          ( "cascade_ref",
-            (match m.cascade_ref with
-             | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
-             | None -> `Null) );
           ("models", `List []);
           ("active_model", `Null);
           ("active_model_label", `Null);

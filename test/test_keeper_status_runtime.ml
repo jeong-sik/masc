@@ -979,7 +979,6 @@ let test_runtime_surface_exposes_cascade_attempt_facts () =
   in
   let base =
     make_meta ~name:"runtime-cascade-attempt-facts-test" ()
-    |> Keeper_meta_contract.set_cascade_name "cascade.strict_tool_candidates"
   in
   let meta =
     { base with

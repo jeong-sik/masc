@@ -1000,7 +1000,7 @@ let test_library_search_returns_results () =
            true
            (let low = String.lowercase_ascii (Tool_result.message search_result) in
             String.length low > 0
-            && not (Tool_library.string_contains ~sub:"no documents" low));
+            && not (Tool_library.string_contains ~needle:"no documents" low));
          (* Read *)
          let read_result =
            Tool_library.handle_read
@@ -1016,7 +1016,7 @@ let test_library_search_returns_results () =
            "read contains MLFQ content"
            true
            (Tool_library.string_contains
-              ~sub:"Multi-Level Feedback Queue"
+              ~needle:"Multi-Level Feedback Queue"
               (Tool_result.message read_result))))
 ;;
 

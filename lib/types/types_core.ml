@@ -442,35 +442,30 @@ let task_status_to_yojson = function
       ]
 
 let task_status_of_yojson json =
-  let open Yojson.Safe.Util in
+  let req key = Json_util.get_string json key |> Option.value ~default:"" in
+  let opt key = Json_util.get_string json key in
   try
-    let status = json |> member "status" |> to_string in
-    match status with
+    match req "status" with
     | "todo" -> Ok Todo
     | "claimed" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let claimed_at = json |> member "claimed_at" |> to_string in
-        Ok (Claimed { assignee; claimed_at })
+        Ok (Claimed { assignee = req "assignee"; claimed_at = req "claimed_at" })
     | "in_progress" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let started_at = json |> member "started_at" |> to_string in
-        Ok (InProgress { assignee; started_at })
+        Ok (InProgress { assignee = req "assignee"; started_at = req "started_at" })
     | "done" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let completed_at = json |> member "completed_at" |> to_string in
-        let notes = json |> member "notes" |> to_string_option in
-        Ok (Done { assignee; completed_at; notes })
+        Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let submitted_at = json |> member "submitted_at" |> to_string in
-        let verification_id = json |> member "verification_id" |> to_string in
-        let deadline = json |> member "deadline" |> to_string_option in
-        Ok (AwaitingVerification { assignee; submitted_at; verification_id; deadline })
+        Ok (AwaitingVerification
+              { assignee = req "assignee"
+              ; submitted_at = req "submitted_at"
+              ; verification_id = req "verification_id"
+              ; deadline = opt "deadline"
+              })
     | "cancelled" ->
-        let cancelled_by = json |> member "cancelled_by" |> to_string in
-        let cancelled_at = json |> member "cancelled_at" |> to_string in
-        let reason = json |> member "reason" |> to_string_option in
-        Ok (Cancelled { cancelled_by; cancelled_at; reason })
+        Ok (Cancelled
+              { cancelled_by = req "cancelled_by"
+              ; cancelled_at = req "cancelled_at"
+              ; reason = opt "reason"
+              })
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)
 
@@ -683,49 +678,46 @@ let task_to_yojson t =
   | _ -> `Assoc with_do_not_reclaim
 
 let task_of_yojson json =
-  let open Yojson.Safe.Util in
+  let req key = Json_util.get_string json key |> Option.value ~default:"" in
+  let opt key = Json_util.get_string json key in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
-    let id = json |> member "id" |> to_string in
-    let title = json |> member "title" |> to_string in
-    let description = json |> member "description" |> to_string_option |> Option.value ~default:"" in
-    let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
-    let files = json |> member "files" |> to_list |> List.map to_string in
-    let created_at = json |> member "created_at" |> to_string in
-    let created_by = json |> member "created_by" |> to_string_option in
-    let goal_id = json |> member "goal_id" |> to_string_option in
-    (* Parse optional stage field *)
-    let stage = match json |> member "stage" |> to_string_option with
+    let id = req "id" in
+    let title = req "title" in
+    let description = opt "description" |> Option.value ~default:"" in
+    let priority = Json_util.get_int json "priority" |> Option.value ~default:3 in
+    let files = Json_util.get_string_list json "files" in
+    let created_at = req "created_at" in
+    let created_by = opt "created_by" in
+    let goal_id = opt "goal_id" in
+    let stage = match opt "stage" with
       | Some s -> (match Task_stage.of_string s with Ok st -> Some st | Error _ -> None)
       | None -> None
     in
-    let contract = match json |> member "contract" with
+    let contract = match m "contract" with
       | `Null -> None
       | contract_json ->
           (match task_contract_of_yojson contract_json with
            | Ok contract -> Some contract
            | Error _ -> None)
     in
-    let handoff_context = match json |> member "handoff_context" with
+    let handoff_context = match m "handoff_context" with
       | `Null -> None
       | handoff_json ->
           (match task_handoff_context_of_yojson handoff_json with
            | Ok handoff_context -> Some handoff_context
            | Error _ -> None)
     in
-    let cycle_count =
-      json |> member "cycle_count" |> to_int_option |> Option.value ~default:0
-    in
+    let cycle_count = Json_util.get_int json "cycle_count" |> Option.value ~default:0 in
     let reclaim_policy =
-      match json |> member "reclaim_policy" with
+      match m "reclaim_policy" with
       | `Null -> None
       | reclaim_policy_json ->
           (match task_reclaim_policy_of_yojson reclaim_policy_json with
            | Ok policy -> Some policy
            | Error _ -> None)
     in
-    let do_not_reclaim_reason =
-      json |> member "do_not_reclaim_reason" |> to_string_option
-    in
+    let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
     match task_status_of_yojson json with
     | Ok task_status ->
         Ok
@@ -842,13 +834,12 @@ let tempo_config_to_yojson c =
   ]
 
 let tempo_config_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let mode_str = json |> member "mode" |> to_string in
-    let delay_ms = json |> member "delay_ms" |> to_int_option |> Option.value ~default:0 in
-    let reason = json |> member "reason" |> to_string_option in
-    let set_by = json |> member "set_by" |> to_string_option in
-    let set_at = json |> member "set_at" |> to_string_option in
+    let mode_str = Json_util.get_string json "mode" |> Option.value ~default:"" in
+    let delay_ms = Json_util.get_int json "delay_ms" |> Option.value ~default:0 in
+    let reason = Json_util.get_string json "reason" in
+    let set_by = Json_util.get_string json "set_by" in
+    let set_at = Json_util.get_string json "set_at" in
     match tempo_mode_of_string mode_str with
     | Ok mode -> Ok { mode; delay_ms; reason; set_by; set_at }
     | Error e -> Error e
@@ -869,9 +860,9 @@ let backlog_to_yojson b =
   ]
 
 let backlog_of_yojson json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
-    let tasks_json = json |> member "tasks" |> to_list in
+    let tasks_json = match m "tasks" with `List l -> l | _ -> [] in
     let tasks = List.filter_map (fun j ->
       match task_of_yojson j with Ok t -> Some t | Error _ -> None
     ) tasks_json in
@@ -885,12 +876,10 @@ let backlog_of_yojson json =
        failed] entries/day driven [stale-claims] GC to skip mutation,
        so claims never transitioned).  Tolerate missing/null fields. *)
     let last_updated =
-      json |> member "last_updated" |> to_string_option
-      |> Option.value ~default:""
+      Json_util.get_string json "last_updated" |> Option.value ~default:""
     in
     let version =
-      json |> member "version" |> to_int_option
-      |> Option.value ~default:1
+      Json_util.get_int json "version" |> Option.value ~default:1
     in
     Ok { tasks; last_updated; version }
   with e -> Error (Printexc.to_string e)
@@ -978,16 +967,16 @@ let a2a_task_to_yojson t =
   ]
 
 let a2a_task_of_yojson json =
-  let open Yojson.Safe.Util in
+  let req key = Json_util.get_string json key |> Option.value ~default:"" in
   try
-    let a2a_id = json |> member "id" |> to_string in
-    let from_agent = json |> member "from" |> to_string in
-    let to_agent = json |> member "to" |> to_string in
-    let a2a_message = json |> member "message" |> to_string in
-    let status_str = json |> member "status" |> to_string in
-    let a2a_result = json |> member "result" |> to_string_option in
-    let created_at = json |> member "createdAt" |> to_string in
-    let updated_at = json |> member "updatedAt" |> to_string in
+    let a2a_id = req "id" in
+    let from_agent = req "from" in
+    let to_agent = req "to" in
+    let a2a_message = req "message" in
+    let status_str = req "status" in
+    let a2a_result = Json_util.get_string json "result" in
+    let created_at = req "createdAt" in
+    let updated_at = req "updatedAt" in
     match a2a_task_status_of_string status_str with
     | Ok a2a_status -> Ok { a2a_id; from_agent; to_agent; a2a_message; a2a_status; a2a_result; created_at; updated_at }
     | Error e -> Error e
@@ -1013,13 +1002,13 @@ let portal_to_yojson p =
   ]
 
 let portal_of_yojson json =
-  let open Yojson.Safe.Util in
+  let req key = Json_util.get_string json key |> Option.value ~default:"" in
   try
-    let portal_from = json |> member "from" |> to_string in
-    let portal_target = json |> member "target" |> to_string in
-    let portal_opened_at = json |> member "openedAt" |> to_string in
-    let status_str = json |> member "status" |> to_string in
-    let task_count = json |> member "taskCount" |> to_int in
+    let portal_from = req "from" in
+    let portal_target = req "target" in
+    let portal_opened_at = req "openedAt" in
+    let status_str = req "status" in
+    let task_count = Json_util.get_int json "taskCount" |> Option.value ~default:0 in
     match portal_state_of_string status_str with
     | Ok portal_status -> Ok { portal_from; portal_target; portal_opened_at; portal_status; task_count }
     | Error e -> Error e

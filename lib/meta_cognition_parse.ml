@@ -45,22 +45,19 @@ let json_string_list_opt = function
 
 let parse_belief_summary = function
   | `Assoc _ as json ->
+      let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
       Ok
         {
-          id = Yojson.Safe.Util.member "id" json |> json_string_opt;
-          claim = Yojson.Safe.Util.member "claim" json |> json_string_opt;
-          status = Yojson.Safe.Util.member "status" json |> json_string_opt;
-          confidence = Yojson.Safe.Util.member "confidence" json |> json_float_opt;
-          support_agent_count =
-            Yojson.Safe.Util.member "support_agent_count" json |> json_int_opt;
-          challenge_agent_count =
-            Yojson.Safe.Util.member "challenge_agent_count" json |> json_int_opt;
+          id = Json_util.get_string json "id";
+          claim = Json_util.get_string json "claim";
+          status = Json_util.get_string json "status";
+          confidence = Json_util.get_float json "confidence";
+          support_agent_count = Json_util.get_int json "support_agent_count";
+          challenge_agent_count = Json_util.get_int json "challenge_agent_count";
           evidence_refs =
-            Yojson.Safe.Util.member "evidence_refs" json
-            |> json_string_list_opt |> Option.value ~default:[];
+            m "evidence_refs" |> json_string_list_opt |> Option.value ~default:[];
           challenge_refs =
-            Yojson.Safe.Util.member "challenge_refs" json
-            |> json_string_list_opt |> Option.value ~default:[];
+            m "challenge_refs" |> json_string_list_opt |> Option.value ~default:[];
         }
   | `Null -> Ok { id = None; claim = None; status = None; confidence = None;
                   support_agent_count = None; challenge_agent_count = None;
@@ -72,20 +69,17 @@ let parse_belief_summary = function
 
 let parse_tension_summary = function
   | `Assoc _ as json ->
+      let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
       Ok
         {
-          id = Yojson.Safe.Util.member "id" json |> json_string_opt;
-          topic = Yojson.Safe.Util.member "topic" json |> json_string_opt;
-          kind = Yojson.Safe.Util.member "kind" json |> json_string_opt;
-          severity = Yojson.Safe.Util.member "severity" json |> json_string_opt;
-          recurrence_count =
-            Yojson.Safe.Util.member "recurrence_count" json |> json_int_opt;
-          needs_operator =
-            Yojson.Safe.Util.member "needs_operator" json |> json_bool_opt
-            |> Option.value ~default:false;
+          id = Json_util.get_string json "id";
+          topic = Json_util.get_string json "topic";
+          kind = Json_util.get_string json "kind";
+          severity = Json_util.get_string json "severity";
+          recurrence_count = Json_util.get_int json "recurrence_count";
+          needs_operator = Json_util.get_bool json "needs_operator" |> Option.value ~default:false;
           evidence_refs =
-            Yojson.Safe.Util.member "evidence_refs" json
-            |> json_string_list_opt |> Option.value ~default:[];
+            m "evidence_refs" |> json_string_list_opt |> Option.value ~default:[];
         }
   | `Null ->
       Ok
@@ -105,16 +99,16 @@ let parse_tension_summary = function
 
 let parse_desire_summary = function
   | `Assoc _ as json ->
+      let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
       Ok
         {
-          id = Yojson.Safe.Util.member "id" json |> json_string_opt;
-          desired_state = Yojson.Safe.Util.member "desired_state" json |> json_string_opt;
-          desire_type = Yojson.Safe.Util.member "type" json |> json_string_opt;
-          actionability = Yojson.Safe.Util.member "actionability" json |> json_string_opt;
-          strength = Yojson.Safe.Util.member "strength" json |> json_float_opt;
+          id = Json_util.get_string json "id";
+          desired_state = Json_util.get_string json "desired_state";
+          desire_type = Json_util.get_string json "type";
+          actionability = Json_util.get_string json "actionability";
+          strength = Json_util.get_float json "strength";
           evidence_refs =
-            Yojson.Safe.Util.member "evidence_refs" json
-            |> json_string_list_opt |> Option.value ~default:[];
+            m "evidence_refs" |> json_string_list_opt |> Option.value ~default:[];
         }
   | `Null ->
       Ok
@@ -143,16 +137,16 @@ let parse_optional_summary parse value =
         (parse other)
 
 let parse_summary json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   let stagnation_score =
-    Option.value ~default:0.0 (json_float_opt (member "stagnation_score" json))
+    Json_util.get_float json "stagnation_score" |> Option.value ~default:0.0
   in
   (
-      match json_int_opt (member "belief_count" json),
-            json_int_opt (member "contested_belief_count" json),
-            parse_optional_summary parse_belief_summary (member "dominant_belief" json),
-            parse_optional_summary parse_tension_summary (member "top_tension" json),
-            parse_optional_summary parse_desire_summary (member "top_desire" json)
+      match Json_util.get_int json "belief_count",
+            Json_util.get_int json "contested_belief_count",
+            parse_optional_summary parse_belief_summary (m "dominant_belief"),
+            parse_optional_summary parse_tension_summary (m "top_tension"),
+            parse_optional_summary parse_desire_summary (m "top_desire")
       with
       | Some belief_count, Some contested_belief_count,
         Ok dominant_belief, Ok top_tension, Ok top_desire ->

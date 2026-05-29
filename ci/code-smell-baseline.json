@@ -3,7 +3,7 @@
   "_policy": "Current metric values must be <= baseline. Decreases should be committed as baseline updates.",
   "metrics": {
     "godfile_loc_1000plus": {
-      "baseline": 9,
+      "baseline": 10,
       "scope": "lib/**/*.ml excluding *_intf.ml, *_test.ml, _build; LoC >= 1000",
       "files": [
         {
@@ -11,8 +11,12 @@
           "value": 1284
         },
         {
+          "file": "lib/exec/test/test_shell_ir_walkers_gen.ml",
+          "value": 1302
+        },
+        {
           "file": "lib/keeper/agent_tool_descriptor.ml",
-          "value": 1290
+          "value": 1281
         },
         {
           "file": "lib/keeper/keeper_approval_queue.ml",
@@ -20,15 +24,15 @@
         },
         {
           "file": "lib/keeper/keeper_execution_receipt.ml",
-          "value": 1079
+          "value": 1064
         },
         {
           "file": "lib/keeper/keeper_status_detail.ml",
-          "value": 1017
+          "value": 1020
         },
         {
           "file": "lib/keeper/keeper_turn_driver_try_cascade.ml",
-          "value": 1050
+          "value": 1009
         },
         {
           "file": "lib/server/server_dashboard_http_runtime_info.ml",
@@ -36,7 +40,7 @@
         },
         {
           "file": "lib/server/server_routes_http_routes_dashboard.ml",
-          "value": 1078
+          "value": 1087
         },
         {
           "file": "lib/types/types_core.ml",
@@ -45,7 +49,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3096,
+      "baseline": 3023,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -166,7 +170,7 @@
         },
         {
           "file": "lib/board_core_status_rollup.ml",
-          "value": 4
+          "value": 2
         },
         {
           "file": "lib/board_core.ml",
@@ -206,7 +210,7 @@
         },
         {
           "file": "lib/briefing_compactors/briefing_json_helpers.ml",
-          "value": 8
+          "value": 5
         },
         {
           "file": "lib/build_identity.ml",
@@ -218,7 +222,7 @@
         },
         {
           "file": "lib/cascade_catalog_validator.ml",
-          "value": 10
+          "value": 6
         },
         {
           "file": "lib/cascade_decl/cascade_declarative_parser.ml",
@@ -254,7 +258,7 @@
         },
         {
           "file": "lib/cascade/cascade_catalog_runtime_named_providers.ml",
-          "value": 3
+          "value": 2
         },
         {
           "file": "lib/cascade/cascade_catalog_runtime_resolve.ml",
@@ -266,7 +270,7 @@
         },
         {
           "file": "lib/cascade/cascade_config_loader.ml",
-          "value": 12
+          "value": 9
         },
         {
           "file": "lib/cascade/cascade_config_parser.ml",
@@ -282,7 +286,7 @@
         },
         {
           "file": "lib/cascade/cascade_config_resolve.ml",
-          "value": 7
+          "value": 5
         },
         {
           "file": "lib/cascade/cascade_config_selection.ml",
@@ -302,15 +306,15 @@
         },
         {
           "file": "lib/cascade/cascade_error_from_sdk.ml",
-          "value": 28
+          "value": 30
         },
         {
           "file": "lib/cascade/cascade_event_bridge_inference.ml",
-          "value": 9
+          "value": 4
         },
         {
           "file": "lib/cascade/cascade_event_bridge.ml",
-          "value": 3
+          "value": 1
         },
         {
           "file": "lib/cascade/cascade_fsm.ml",
@@ -341,6 +345,10 @@
           "value": 5
         },
         {
+          "file": "lib/cascade/cascade_openai_probe.ml",
+          "value": 4
+        },
+        {
           "file": "lib/cascade/cascade_pool.ml",
           "value": 1
         },
@@ -367,10 +375,6 @@
         {
           "file": "lib/cascade/cascade_server_flavor.ml",
           "value": 2
-        },
-        {
-          "file": "lib/cascade/cascade_strategy.ml",
-          "value": 1
         },
         {
           "file": "lib/cascade/cascade_toml_materializer.ml",
@@ -545,10 +549,6 @@
           "value": 2
         },
         {
-          "file": "lib/coord/coord_broadcast.ml",
-          "value": 3
-        },
-        {
           "file": "lib/coord/coord_eio.ml",
           "value": 2
         },
@@ -602,7 +602,7 @@
         },
         {
           "file": "lib/core/json_util.ml",
-          "value": 9
+          "value": 16
         },
         {
           "file": "lib/core/safe_ops.ml",
@@ -614,7 +614,7 @@
         },
         {
           "file": "lib/dashboard_cascade_audit_runs.ml",
-          "value": 5
+          "value": 2
         },
         {
           "file": "lib/dashboard_cascade_helpers.ml",
@@ -658,7 +658,7 @@
         },
         {
           "file": "lib/dashboard/dashboard_execution_helpers.ml",
-          "value": 7
+          "value": 2
         },
         {
           "file": "lib/dashboard/dashboard_execution_sessions.ml",
@@ -666,7 +666,7 @@
         },
         {
           "file": "lib/dashboard/dashboard_execution.ml",
-          "value": 13
+          "value": 12
         },
         {
           "file": "lib/dashboard/dashboard_goal_loop.ml",
@@ -678,11 +678,11 @@
         },
         {
           "file": "lib/dashboard/dashboard_goals_types_attainment.ml",
-          "value": 8
+          "value": 6
         },
         {
           "file": "lib/dashboard/dashboard_goals_types_builder.ml",
-          "value": 5
+          "value": 6
         },
         {
           "file": "lib/dashboard/dashboard_goals_types_timeline.ml",
@@ -694,7 +694,7 @@
         },
         {
           "file": "lib/dashboard/dashboard_governance_judge.ml",
-          "value": 15
+          "value": 14
         },
         {
           "file": "lib/dashboard/dashboard_governance_metrics.ml",
@@ -730,7 +730,7 @@
         },
         {
           "file": "lib/dashboard/dashboard_http_keeper_types.ml",
-          "value": 6
+          "value": 3
         },
         {
           "file": "lib/dashboard/dashboard_http_keeper.ml",
@@ -786,11 +786,11 @@
         },
         {
           "file": "lib/dashboard/dashboard_operator_judge.ml",
-          "value": 7
+          "value": 6
         },
         {
           "file": "lib/dashboard/dashboard_operator_nudges.ml",
-          "value": 11
+          "value": 10
         },
         {
           "file": "lib/dashboard/dashboard_rooms.ml",
@@ -918,7 +918,7 @@
         },
         {
           "file": "lib/gate/channel_gate_discord_state.ml",
-          "value": 6
+          "value": 7
         },
         {
           "file": "lib/gate/channel_gate_imessage_state.ml",
@@ -930,7 +930,11 @@
         },
         {
           "file": "lib/gate/discord_gateway_state.ml",
-          "value": 8
+          "value": 7
+        },
+        {
+          "file": "lib/gate/discord_rest_client.ml",
+          "value": 4
         },
         {
           "file": "lib/gate/gate_protocol.ml",
@@ -1062,7 +1066,7 @@
         },
         {
           "file": "lib/keeper_tool_call_log_route_evidence.ml",
-          "value": 6
+          "value": 3
         },
         {
           "file": "lib/keeper_tool_call_log.ml",
@@ -1142,7 +1146,7 @@
         },
         {
           "file": "lib/keeper/keeper_accountability_types_codec.ml",
-          "value": 7
+          "value": 4
         },
         {
           "file": "lib/keeper/keeper_accountability.ml",
@@ -1202,7 +1206,7 @@
         },
         {
           "file": "lib/keeper/keeper_cascade_profile.ml",
-          "value": 6
+          "value": 2
         },
         {
           "file": "lib/keeper/keeper_cascade_selector.ml",
@@ -1550,7 +1554,7 @@
         },
         {
           "file": "lib/keeper/keeper_runtime_trust_timeline.ml",
-          "value": 22
+          "value": 17
         },
         {
           "file": "lib/keeper/keeper_sandbox_control.ml",
@@ -1606,11 +1610,11 @@
         },
         {
           "file": "lib/keeper/keeper_status_bridge.ml",
-          "value": 4
+          "value": 3
         },
         {
           "file": "lib/keeper/keeper_status_detail_observability.ml",
-          "value": 13
+          "value": 8
         },
         {
           "file": "lib/keeper/keeper_status_detail.ml",
@@ -1618,7 +1622,7 @@
         },
         {
           "file": "lib/keeper/keeper_status_metrics.ml",
-          "value": 6
+          "value": 4
         },
         {
           "file": "lib/keeper/keeper_status_runtime.ml",
@@ -1674,7 +1678,7 @@
         },
         {
           "file": "lib/keeper/keeper_tool_deterministic_error.ml",
-          "value": 6
+          "value": 2
         },
         {
           "file": "lib/keeper/keeper_tool_diversity.ml",
@@ -1722,7 +1726,7 @@
         },
         {
           "file": "lib/keeper/keeper_tools_oas_json.ml",
-          "value": 5
+          "value": 2
         },
         {
           "file": "lib/keeper/keeper_tools_oas_markers.ml",
@@ -1755,10 +1759,6 @@
         {
           "file": "lib/keeper/keeper_turn_cascade_budget.ml",
           "value": 3
-        },
-        {
-          "file": "lib/keeper/keeper_turn_driver_admission.ml",
-          "value": 2
         },
         {
           "file": "lib/keeper/keeper_turn_driver_cascade_health.ml",
@@ -1798,7 +1798,7 @@
         },
         {
           "file": "lib/keeper/keeper_turn_up_args.ml",
-          "value": 5
+          "value": 4
         },
         {
           "file": "lib/keeper/keeper_turn_up_update.ml",
@@ -2066,7 +2066,7 @@
         },
         {
           "file": "lib/meta_cognition_snapshot.ml",
-          "value": 4
+          "value": 3
         },
         {
           "file": "lib/metrics_store_eio.ml",
@@ -2330,7 +2330,7 @@
         },
         {
           "file": "lib/server/server_auth.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/server/server_bootstrap_http.ml",
@@ -2350,7 +2350,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_cache.ml",
-          "value": 3
+          "value": 1
         },
         {
           "file": "lib/server/server_dashboard_http_composite_claims.ml",
@@ -2366,11 +2366,11 @@
         },
         {
           "file": "lib/server/server_dashboard_http_core_entities.ml",
-          "value": 4
+          "value": 2
         },
         {
           "file": "lib/server/server_dashboard_http_core_json.ml",
-          "value": 5
+          "value": 3
         },
         {
           "file": "lib/server/server_dashboard_http_core_operator_digest_http.ml",
@@ -2414,7 +2414,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_keeper_api_types.ml",
-          "value": 12
+          "value": 5
         },
         {
           "file": "lib/server/server_dashboard_http_keeper_api.ml",
@@ -2422,7 +2422,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_keeper_runtime_lens_clock_edges.ml",
-          "value": 13
+          "value": 11
         },
         {
           "file": "lib/server/server_dashboard_http_keeper_runtime_lens_clock_groups.ml",
@@ -2566,6 +2566,10 @@
         },
         {
           "file": "lib/server/server_routes_http_routes_dashboard_setup.ml",
+          "value": 1
+        },
+        {
+          "file": "lib/server/server_routes_http_routes_frontend.ml",
           "value": 1
         },
         {
@@ -2870,7 +2874,7 @@
         },
         {
           "file": "lib/tool_misc_admin.ml",
-          "value": 4
+          "value": 3
         },
         {
           "file": "lib/tool_misc_web_fetch.ml",

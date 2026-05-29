@@ -1895,7 +1895,31 @@ let test_batch15_value_consuming_flags () =
   in
   (match w_mkfs_label with
    | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4"; "MYDISK" ]; _ }) -> ()
-   | w -> Alcotest.failf "Mkfs -L: expected sub=/dev/sdb1 args=[ext4;MYDISK], got %a" pp w)
+   | w -> Alcotest.failf "Mkfs -L: expected sub=/dev/sdb1 args=[ext4;MYDISK], got %a" pp w);
+  (* Su: --shell=VALUE (eq form) — value extracted from = *)
+  let w_su_shell_eq =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "--shell=/bin/bash" ] }
+  in
+  (match w_su_shell_eq with
+   | W (Su { subcommand = "root"; args = [ "/bin/bash" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su --shell=VALUE: expected args=[/bin/bash], got %a" pp w);
+  (* Rsync: --exclude VALUE (space form) — flag and value preserved in flags *)
+  let w_rsync_exclude =
+    of_simple
+      { (base "rsync") with args = [ lit "-a"; lit "--exclude"; lit "*.o"; lit "src/"; lit "dest/" ] }
+  in
+  (match w_rsync_exclude with
+   | W (Rsync { source = "src/"; dest = "dest/"; archive = true; flags = [ "--exclude"; "*.o" ]; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --exclude: expected flags=[--exclude;*.o], got %a" pp w);
+  (* Rsync: --exclude=VALUE (eq form) — value extracted from = *)
+  let w_rsync_exclude_eq =
+    of_simple
+      { (base "rsync") with args = [ lit "-a"; lit "--exclude=*.o"; lit "src/"; lit "dest/" ] }
+  in
+  (match w_rsync_exclude_eq with
+   | W (Rsync { source = "src/"; dest = "dest/"; archive = true; flags = [ "--exclude"; "*.o" ]; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --exclude=VALUE: expected flags=[--exclude;*.o], got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

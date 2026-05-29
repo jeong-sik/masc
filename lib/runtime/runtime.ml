@@ -71,3 +71,44 @@ let load_list ~(config_path : string) : (t list * t, string) result =
                did
                (List.length runtimes))))
 ;;
+
+(* ---- B3: process-cached default Runtime accessor ----
+   [load_list] 는 순수 함수(매 호출 TOML parse). 소비자(cascade_name_for_use
+   등)가 hot path 에서 default Runtime 을 요구하므로 resolved config_path 별로
+   memoize 한다. cascade catalog 캐시(cascade_catalog_runtime_cache.ml)와 동일한
+   Mutex + Fun.protect 패턴. *)
+let cache : (string, t list * t) Hashtbl.t = Hashtbl.create 4
+let cache_mu = Mutex.create ()
+
+let with_cache_lock f =
+  Mutex.lock cache_mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock cache_mu) f
+;;
+
+let resolve_config_path ?config_path () =
+  match config_path with
+  | Some _ as p -> p
+  | None -> Config_dir_resolver.cascade_path_opt ()
+;;
+
+(** memoized default Runtime.
+
+    [config_path] 미해결 또는 load 실패 시 [Error] (silent fallback 없음 —
+    소비자가 fail-fast 하도록). 성공 결과만 resolved path 별로 캐시한다. *)
+let default ?config_path () : (t, string) result =
+  match resolve_config_path ?config_path () with
+  | None -> Error "Runtime.default: no cascade config path resolved"
+  | Some path ->
+    (match with_cache_lock (fun () -> Hashtbl.find_opt cache path) with
+     | Some (_, dflt) -> Ok dflt
+     | None ->
+       (match load_list ~config_path:path with
+        | Error msg -> Error msg
+        | Ok (rts, dflt) ->
+          with_cache_lock (fun () -> Hashtbl.replace cache path (rts, dflt));
+          Ok dflt))
+;;
+
+let reset_cache_for_tests () =
+  with_cache_lock (fun () -> Hashtbl.reset cache)
+;;

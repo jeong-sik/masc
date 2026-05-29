@@ -25,7 +25,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
          | Some (entry : Keeper_registry.registry_entry) ->
            Agent_tool_dispatch_runtime.keeper_allowed_tool_names entry.meta
          | None -> [])
-    | _ -> Dashboard_utils.string_list_of_json raw_allowed
+    | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> Dashboard_utils.string_list_of_json raw_allowed
   in
   let fallback_latest =
     Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)

@@ -63,7 +63,9 @@ val prune_old_trace_files : base_dir:string -> days:int -> int
 val maybe_prune_retention : base_dir:string -> unit
 val mandatory_clock_refs_for_event : event_kind -> string list
 val clock_refs_has_keys :
-  String.t list -> [> `Assoc of (String.t * 'a) list ] -> bool
+  String.t list ->
+  [< `Null | `Bool of 'a | `Int of 'b | `Intlit of 'c | `Float of 'd | `String of 'e | `Assoc of (String.t * 'f) list | `List of 'g ] ->
+  bool
 val validate_manifest_completeness : t -> (unit, string) result
 val is_finished_turn : t list -> bool
 val is_complete_turn : t list -> bool

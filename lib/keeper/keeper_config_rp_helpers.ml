@@ -43,18 +43,18 @@ let _rp_deser_int json =
     let i = Float.to_int f in
     if Float.equal (Float.of_int i) f then Ok i
     else Error (Printf.sprintf "expected integer, got %g" f)
-  | _ -> Error "expected integer"
+  | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> Error "expected integer"
 
 let _rp_deser_float json =
   match json with
   | `Float f -> Ok f
   | `Int i -> Ok (float_of_int i)
-  | _ -> Error "expected number"
+  | `Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _ -> Error "expected number"
 
 let _rp_deser_bool json =
   match json with
   | `Bool b -> Ok b
-  | _ -> Error "expected boolean"
+  | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> Error "expected boolean"
 
 let _rp_int ~key ~default ~min_v ~max_v ~description () =
   Runtime_params.register ~key

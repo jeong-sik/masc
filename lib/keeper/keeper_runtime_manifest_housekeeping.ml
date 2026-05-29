@@ -107,7 +107,7 @@ let clock_refs_has_keys keys clock_refs_json =
     List.for_all
       (fun key -> List.exists (fun (k, _) -> String.equal k key) fields)
       keys
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 let validate_manifest_completeness manifest =
   let required_keys = mandatory_clock_refs_for_event manifest.event in

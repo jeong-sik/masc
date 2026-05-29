@@ -8,10 +8,14 @@ val _rp_validate_int :
 val _rp_validate_float :
   min:float -> max:float -> string -> float -> (unit, string) result
 val _rp_deser_int :
-  [> `Float of Float.t | `Int of int ] -> (int, string) result
+  [< `Null | `Bool of 'a | `Int of int | `Intlit of 'b | `Float of Float.t | `String of 'c | `Assoc of 'd | `List of 'e ] ->
+  (int, string) result
 val _rp_deser_float :
-  [> `Float of float | `Int of int ] -> (float, string) result
-val _rp_deser_bool : [> `Bool of 'a ] -> ('a, string) result
+  [< `Null | `Bool of 'a | `Int of int | `Intlit of 'b | `Float of float | `String of 'c | `Assoc of 'd | `List of 'e ] ->
+  (float, string) result
+val _rp_deser_bool :
+  [< `Null | `Bool of 'a | `Int of 'b | `Intlit of 'c | `Float of 'd | `String of 'e | `Assoc of 'f | `List of 'g ] ->
+  ('a, string) result
 val _rp_int :
   key:string ->
   default:(unit -> int) ->

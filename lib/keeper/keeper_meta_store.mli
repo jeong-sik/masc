@@ -79,9 +79,6 @@ val read_meta_if_changed :
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
 
-(** Current UTC timestamp as ISO-8601 (Z-suffixed). *)
-val current_utc_timestamp : unit -> string
-
 (** Refresh the [Updated:] line in the keeper progress markdown.
     Best-effort: a missing progress file is a no-op; other failures
     increment [metric_keeper_progress_updated_line_failures] and log a

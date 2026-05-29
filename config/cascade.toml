@@ -734,63 +734,73 @@ temperature = 0.3
 max-output = 8192
 temperature = 0.3
 
-# ── Routes (simplified: direct model reference) ────────────────
+# ── Routes (profile name targets) ──────────────────────────────
 # Tier and tier-group concepts were removed in PR #19381.
-# All routes now use the provider:model string format.
+# Route targets MUST reference [profiles.*] names, NOT binding keys
+# (provider.model).  The cascade resolver (cascade_routes_resolve.ml)
+# matches targets against known_profile_names(); binding keys are in
+# a different namespace and cause silent fallback to the
+# alphabetically-first profile (see cascade_routes_resolve.ml:34).
+#
+# Profile → required_capabilities → matching providers:
+#   tool_strict  → runtime_mcp_tools, runtime_tool_events, runtime_mcp_http_headers → runpod_mtp
+#   lite         → runtime_mcp_tools, runtime_tool_events → runpod_mtp
+#   local        → (none) → any provider
+#   inline_tools → inline_tools, inline_tool_choice → cli_tool_a, cli_tool_b
 
 [routes.keeper_turn]
-target = "runpod_mtp.qwen-runpod"
+target = "tool_strict"
 
 [routes.phase_recovery]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.phase_buffer]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.tool_required]
-target = "runpod_mtp.qwen-runpod"
+target = "tool_strict"
 
 [routes.governance_judge]
-target = "runpod_mtp.qwen-runpod"
+target = "tool_strict"
 
 [routes.operator_judge]
-target = "runpod_mtp.qwen-runpod"
+target = "tool_strict"
 
 [routes.cross_verifier]
-target = "runpod_mtp.qwen-runpod"
+target = "tool_strict"
 
 [routes.verifier]
-target = "runpod_mtp.qwen-runpod"
+target = "tool_strict"
 
 [routes.adversarial_reviewer]
-target = "runpod_mtp.qwen-runpod"
+target = "tool_strict"
 
 [routes.auto_responder]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.routing]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.openai_compat]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.persona_generation]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.provider_benchmark]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.llm_rerank]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.simple_task]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.moderate_task]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 [routes.complex_task]
-target = "runpod_mtp.qwen-runpod"
+target = "lite"
 
 # ── Profiles (capability requirements per route class) ─────────
 

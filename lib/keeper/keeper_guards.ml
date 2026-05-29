@@ -155,18 +155,16 @@ let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
 
 (** Extract command/content string from tool input JSON for screening. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
-  let open Yojson.Safe.Util in
-  try
-    match input |> member "command" with
-    | `String s -> s
-    | `Null | _ ->
-      (match input |> member "cmd" with
-       | `String s -> s
-       | `Null | _ ->
-         (match input |> member "content" with
-          | `String s -> s
-          | _ -> ""))
-  with Yojson.Safe.Util.Type_error _ -> ""
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key input) in
+  match m "command" with
+  | `String s -> s
+  | _ ->
+    (match m "cmd" with
+     | `String s -> s
+     | _ ->
+       (match m "content" with
+        | `String s -> s
+        | _ -> ""))
 
 (* -------------------------------------------------------------- *)
 (* Telemetry                                                       *)

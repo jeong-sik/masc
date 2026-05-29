@@ -1060,6 +1060,18 @@ parse false false [] args|}
     ; parse_body =
         Some
           {|
+(* git log flags that consume the next argument as a value (--flag VALUE form) *)
+let git_log_value_flags_no_eq =
+  [ "--format"; "--pretty"; "--date"; "--since"; "--until"; "--before"; "--after"
+  ; "--author"; "--committer"; "--grep"; "--grep-reflog"; "--merges"
+  ; "--diff-filter"; "--encoding"; "--output"; "--break-rewrites"
+  ; "--pickaxe-all"; "--pickaxe-regex"
+  ; "--diff-merges"; "--remerge-diff"
+  ; "-M"; "-C"; "-D"   (* diff-merges short forms *)
+  ]
+in
+(* git log flags that use --flag=VALUE form *)
+let git_log_value_flags_eq : string list = [] in
 let rec parse oneline max_count = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_log { oneline; max_count }))
   | "--oneline" :: rest -> parse true max_count rest
@@ -1091,7 +1103,29 @@ let rec parse oneline max_count = function
               (String.sub arg 1 (String.length arg - 1)) ->
     let c = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse oneline (Some c) rest
-  | "--graph" :: rest | "--all" :: rest | "--decorate" :: rest -> parse oneline max_count rest
+  | "--graph" :: rest | "--all" :: rest | "--decorate" :: rest
+  | "--stat" :: rest | "--name-only" :: rest | "--name-status" :: rest
+  | "--summary" :: rest | "--shortstat" :: rest
+  | "--no-merges" :: rest | "--first-parent" :: rest
+  | "--full-history" :: rest | "--simplify-merges" :: rest
+  | "--topo-order" :: rest | "--date-order" :: rest | "--reverse" :: rest
+  | "--follow" :: rest | "--full-diff" :: rest
+  | "--ignore-submodules" :: rest
+  | "--no-walk" :: rest | "--no-decorate" :: rest
+  | "--no-patch" :: rest | "-s" :: rest | "--sparse" :: rest
+  | "--show-signature" :: rest ->
+    parse oneline max_count rest
+  (* --flag VALUE form: flag in list (exact match) — MUST precede generic arg arm *)
+  | flag :: _ :: rest when List.mem flag git_log_value_flags_no_eq ->
+    parse oneline max_count rest
+  (* --flag=VALUE form: arg starts with a flag prefix that ends with = *)
+  | arg :: rest
+    when List.exists
+           (fun vf ->
+             String.length arg > String.length vf
+             && String.sub arg 0 (String.length vf) = vf)
+           git_log_value_flags_eq ->
+    parse oneline max_count rest
   | "--" :: rest -> parse oneline max_count rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
@@ -1206,12 +1240,46 @@ parse None false args|}
     ; parse_body =
         Some
           {|
+(* git push flags that consume the next argument as a value (--flag VALUE form) *)
+let git_push_value_flags_no_eq =
+  [ "--repo"; "--receive-pack"; "--upload-pack"; "--exec"
+  ; "--signed"
+  ; "--set-upstream-to"
+  ; "-o"   (* push option *)
+  ]
+in
+(* git push flags that use --flag=VALUE form *)
+let git_push_value_flags_eq : string list = [] in
 let rec parse force force_with_lease set_upstream remote branch = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_push { force; force_with_lease; set_upstream; remote; branch }))
   | "--force" :: rest | "-f" :: rest -> parse true force_with_lease set_upstream remote branch rest
   | "--force-with-lease" :: rest -> parse force true set_upstream remote branch rest
+  (* --force-with-lease=VALUE form: sets force_with_lease AND skips value *)
+  | arg :: rest
+    when String.length arg > 19
+         && String.sub arg 0 19 = "--force-with-lease=" ->
+    parse force true set_upstream remote branch rest
   | "-u" :: rest | "--set-upstream" :: rest -> parse force force_with_lease true remote branch rest
   | "--delete" :: rest -> parse force force_with_lease set_upstream remote branch rest
+  (* --flag VALUE form: flag in list (exact match) — MUST precede generic arg arm *)
+  | flag :: _ :: rest when List.mem flag git_push_value_flags_no_eq ->
+    parse force force_with_lease set_upstream remote branch rest
+  (* --flag=VALUE form: arg starts with a flag prefix that ends with = *)
+  | arg :: rest
+    when List.exists
+           (fun vf ->
+             String.length arg > String.length vf
+             && String.sub arg 0 (String.length vf) = vf)
+           git_push_value_flags_eq ->
+    parse force force_with_lease set_upstream remote branch rest
+  | "--tags" :: rest | "--mirror" :: rest | "--prune" :: rest
+  | "--follow-tags" :: rest | "--atomic" :: rest | "--quiet" :: rest
+  | "-q" :: rest | "--verbose" :: rest | "-v" :: rest
+  | "--dry-run" :: rest | "-n" :: rest | "--porcelain" :: rest
+  | "--no-verify" :: rest | "--reset-author" :: rest
+  | "--all" :: rest | "--thin" :: rest | "--no-thin" :: rest
+  | "--no-force-with-lease" :: rest ->
+    parse force force_with_lease set_upstream remote branch rest
   (* Combined short flags: -fu, -uf (force + set_upstream) *)
   | arg :: rest
     when String.length arg > 2
@@ -1270,11 +1338,49 @@ parse false false false None None args|}
     ; parse_body =
         Some
           {|
+(* git pull flags that consume the next argument as a value (--flag VALUE form) *)
+let git_pull_value_flags_no_eq =
+  [ "--repo"; "--upload-pack"; "--receive-pack"; "--depth"
+  ; "--recurse-submodules"; "--jobs"
+  ; "-o"   (* transport option *)
+  ]
+in
+(* git pull flags that use --flag=VALUE form *)
+let git_pull_value_flags_eq : string list = [] in
+(* git pull boolean flags that do NOT consume a value *)
+let git_pull_bool_flags =
+  [ "--tags"; "--no-tags"; "--rebase"; "--no-rebase"
+  ; "--ff-only"; "--no-ff"
+  ; "--stat"; "--no-stat"; "--squash"; "--no-squash"
+  ; "--autostash"; "--no-autostash"
+  ; "--quiet"; "-q"; "--verbose"; "-v"
+  ; "--dry-run"; "-n"; "--force"; "-f"
+  ; "--all"; "--append"; "--prune"; "--no-prune"
+  ; "--verify"; "--no-verify"
+  ; "--allow-unrelated-histories"
+  ; "--no-recurse-submodules"
+  ]
+in
 let rec parse rebase remote branch = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_pull { rebase; remote; branch }))
+  (* --flag VALUE form: flag in list (exact match) — MUST precede generic arg arm *)
+  | flag :: _ :: rest when List.mem flag git_pull_value_flags_no_eq ->
+    parse rebase remote branch rest
+  (* --flag=VALUE form: arg starts with a flag prefix that ends with = *)
+  | arg :: rest
+    when List.exists
+           (fun vf ->
+             String.length arg > String.length vf
+             && String.sub arg 0 (String.length vf) = vf)
+           git_pull_value_flags_eq ->
+    parse rebase remote branch rest
+  (* boolean flags: specific exact-match arms *)
   | "--rebase" :: rest -> parse true remote branch rest
-  | "--ff-only" :: rest -> parse rebase remote branch rest
   | "--no-rebase" :: rest -> parse false remote branch rest
+  | "--ff-only" :: rest -> parse rebase remote branch rest
+  (* boolean flags: catch-all from list *)
+  | flag :: rest when List.mem flag git_pull_bool_flags ->
+    parse rebase remote branch rest
   | "--" :: rest ->
     (match rest with
      | [ r; b ] -> parse rebase (Some r) (Some b) []
@@ -2341,6 +2447,30 @@ match args with
     ; parse_body =
         Some
           {|
+(* wget flags that consume the next argument as a value *)
+let wget_value_flags =
+  [ "--header"; "--execute"; "-e"
+  ; "--post-data"; "--post-file"
+  ; "--timeout"; "--connect-timeout"; "--dns-timeout"; "--read-timeout"
+  ; "--tries"; "--wait"; "--waitretry"; "--random-wait"
+  ; "--domains"; "--exclude-domains"; "--reject"; "--accept"
+  ; "--reject-regex"; "--accept-regex"
+  ; "--user"; "--password"
+  ; "--level"; "--directory-prefix"; "--cut-dirs"
+  ; "--bind-address"; "--limit-rate"
+  ; "--user-agent"; "--referer"
+  ; "--certificate"; "--private-key"; "--ca-certificate"
+  ; "--quota"; "--max-redirect"; "--max-filename-length"
+  ; "--mirror"; "--page-requisites"
+  ; "--span-hosts"; "--domains"
+  ; "-i"   (* input file *)
+  ; "-B"   (* base URL *)
+  ; "-P"   (* directory prefix *)
+  ; "-A"   (* accept pattern *)
+  ; "-R"   (* reject pattern *)
+  ; "-D"   (* domains *)
+  ]
+in
 let rec parse output continue_ ncc url dd = function
   | [] ->
     (match url with
@@ -2354,6 +2484,9 @@ let rec parse output continue_ ncc url dd = function
   | "--no-check-certificate" :: rest when not dd -> parse output continue_ true url dd rest
   (* POSIX end-of-options: skip --, remaining args are positional *)
   | "--" :: rest -> parse output continue_ ncc url true rest
+  (* value-consuming flags: skip flag + its value *)
+  | flag :: _ :: rest when not dd && List.mem flag wget_value_flags ->
+    parse output continue_ ncc url dd rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ "--output-document"; o ] when not dd -> parse (Some o) continue_ ncc url dd rest

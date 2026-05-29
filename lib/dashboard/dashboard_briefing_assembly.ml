@@ -12,8 +12,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let keeper_name =
     match member_assoc "name" keeper with
     | `String n ->
-        let trimmed = String.trim n in
-        if trimmed <> "" then trimmed else agent_name
+        (match String_util.trim_to_option n with Some v -> v | None -> agent_name)
     | _ -> agent_name
   in
   let fallback_allowed =
@@ -30,12 +29,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let fallback_latest =
     Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)
   in
-  let fallback_count =
-    match member_assoc "latest_tool_call_count" keeper with
-    | `Int value -> Some value
-    | `Intlit raw -> (int_of_string_opt (raw))
-    | _ -> None
-  in
+  let fallback_count = Json_util.assoc_int_opt "latest_tool_call_count" keeper in
   let fallback_source =
     match String_util.trim_to_option (string_field "tool_audit_source" keeper) with
     | Some _ as value -> value

@@ -90,9 +90,23 @@ let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
     Some (active_ownership_conflict_message ~agent_name ~requested_task_id task_ids)
 ;;
 
+(** RFC-0088 §1 child step (issue #18839): typed surface for the
+    implicit auto-release that [task_claim_next] performs when the
+    agent already holds another task. Previously the only signal was
+    a substring in the [Ok msg] string ["… (auto-released X, Y)"];
+    MCP handlers and tests had to re-parse it. Lifting it into a
+    typed field lets callers — including the MCP envelope that feeds
+    the LLM keeper — react without string parsing, which is the
+    enabling step before behaviour change (reject + explicit release)
+    can be staged. *)
+type claim_outcome = {
+  message : string;
+  auto_released_task_ids : string list;
+}
+
 (** Result-returning version of claim_task for type-safe error handling. *)
 let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
-  : string Masc_domain.masc_result
+  : claim_outcome Masc_domain.masc_result
   =
   let open Result.Syntax in
   let* () = if not (is_initialized config) then Error (Masc_domain.System Masc_domain.System_error.NotInitialized) else Ok () in
@@ -196,7 +210,10 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
          | `Not_found -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Already_mine ->
-           Ok (Printf.sprintf "Task %s is already claimed by you" task_id)
+           Ok
+             { message = Printf.sprintf "Task %s is already claimed by you" task_id
+             ; auto_released_task_ids = []
+             }
          | `Claimed_ok ->
            let new_backlog =
              { tasks = new_tasks
@@ -248,7 +265,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                Printf.sprintf "%s claimed %s (auto-released %s)"
                  agent_name task_id (String.concat ", " ids)
            in
-           Ok claim_msg
+           Ok { message = claim_msg; auto_released_task_ids = auto_released_ids }
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
@@ -257,7 +274,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
 (** Legacy string-returning claim_task. Delegates to [claim_task_r]. *)
 let claim_task config ~agent_name ~task_id =
   match claim_task_r config ~agent_name ~task_id () with
-  | Ok msg -> msg
+  | Ok outcome -> outcome.message
   | Error e -> Masc_domain.to_string e
 ;;
 

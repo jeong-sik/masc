@@ -1679,7 +1679,7 @@ let test_claim_task_r_success () =
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let result = Coord.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" () in
     match result with
-    | Ok msg -> Alcotest.(check bool) "claim success" true (str_contains msg "claimed")
+    | Ok outcome -> Alcotest.(check bool) "claim success" true (str_contains outcome.message "claimed")
     | Error _ -> Alcotest.fail "Expected Ok")
 ;;
 

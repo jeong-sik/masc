@@ -28,12 +28,34 @@ val active_ownership_conflict_for_claim :
 
 (** {1 Task claiming} *)
 
+(** Typed outcome of a successful claim.
+
+    [auto_released_task_ids] is the list of *other* tasks previously
+    held by the same agent that the claim implicitly auto-released
+    (see #10421 / #18839: hot-potato pattern where a keeper churns
+    through [task_claim_next] without finishing). Empty when the agent
+    held no prior claims; non-empty when [task_claim_next] preempted
+    them. Previously this list was only visible as a substring of the
+    [message] field (["… (auto-released X, Y)"]); MCP handlers had to
+    re-parse it. Surfaced as a typed field so callers — including the
+    MCP envelope that feeds the LLM keeper response — can react
+    without string parsing.
+
+    RFC-0088 §1 (counter-as-fix) note: this PR only widens the typed
+    surface so a caller *can* observe the auto-release. Behaviour is
+    unchanged. The follow-up RFC step (reject + explicit release) is
+    out of scope for this PR. *)
+type claim_outcome = {
+  message : string;
+  auto_released_task_ids : string list;
+}
+
 val claim_task :
   config -> agent_name:string -> task_id:string -> string
 
 val claim_task_r :
   config -> agent_name:string -> task_id:string ->
-  ?agent_tool_names:string list -> unit -> string Masc_domain.masc_result
+  ?agent_tool_names:string list -> unit -> claim_outcome Masc_domain.masc_result
 
 (** {1 Release/reclaim helpers} *)
 

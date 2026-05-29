@@ -653,7 +653,35 @@ let test_posix_end_of_options () =
   in
   (match chown with
    | W (Chown { owner = "user"; path = "-myfile"; recursive = true; _ }) -> ()
-   | w -> Alcotest.failf "Chown --: expected owner=user path=-myfile recursive=true, got %a" pp w)
+   | w -> Alcotest.failf "Chown --: expected owner=user path=-myfile recursive=true, got %a" pp w);
+  (* Mkdir: -- -newdir *)
+  let mkdir =
+    of_simple { (base "mkdir") with args = [ lit "-p"; lit "--"; lit "-newdir" ] }
+  in
+  (match mkdir with
+   | W (Mkdir { path = "-newdir"; parents = true; _ }) -> ()
+   | w -> Alcotest.failf "Mkdir --: expected path=-newdir parents=true, got %a" pp w);
+  (* Basename: -- -file.txt .txt *)
+  let basename =
+    of_simple { (base "basename") with args = [ lit "--"; lit "-file.txt"; lit ".txt" ] }
+  in
+  (match basename with
+   | W (Basename { path = "-file.txt"; suffix = Some ".txt"; _ }) -> ()
+   | w -> Alcotest.failf "Basename --: expected path=-file.txt suffix=.txt, got %a" pp w);
+  (* Dirname: -- -path/to/file *)
+  let dirname =
+    of_simple { (base "dirname") with args = [ lit "--"; lit "-path/to/file" ] }
+  in
+  (match dirname with
+   | W (Dirname { path = "-path/to/file"; _ }) -> ()
+   | w -> Alcotest.failf "Dirname --: expected path=-path/to/file, got %a" pp w);
+  (* Uniq: -c -- -duplicates.txt *)
+  let uniq =
+    of_simple { (base "uniq") with args = [ lit "-c"; lit "--"; lit "-duplicates.txt" ] }
+  in
+  (match uniq with
+   | W (Uniq { count = true; file = Some "-duplicates.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Uniq --: expected count=true file=-duplicates.txt, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)

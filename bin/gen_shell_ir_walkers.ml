@@ -3441,15 +3441,10 @@ let rec parse subcmd sd glb frc dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) sd glb frc dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npm {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npm {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          save_dev = sd; global = glb; force = frc;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false false args|}
@@ -3523,15 +3518,10 @@ let rec parse subcmd rel verb feat dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) rel verb feat dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          release = rel; verbose = verb; features = feat;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false None false args|}
@@ -3607,15 +3597,10 @@ let rec parse subcmd v race dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) v race dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Go {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Go {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          verbose = v; race;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -3915,15 +3900,10 @@ let rec parse subcmd rm priv det dd = function
     (match subcmd with
      | None when not dd -> parse (Some arg) rm priv det dd rest
      | _ ->
-       (* accumulate remaining args in rest *)
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker {
+       (* accumulate remaining args in rest *)       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          rm; privileged = priv; detach = det;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false false args|}
@@ -3974,15 +3954,10 @@ let opam_value_flags = [ "--repo"; "--root"; "--switch"; "--dir"; "--solver"; "-
     | arg :: rest ->
       (match subcmd with
        | None when not dd -> parse (Some arg) y dd rest
-       | _ ->
-         let rec collect acc = function
-           | [] -> List.rev acc
-           | x :: xs -> collect (x :: acc) xs
-         in
-         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Opam {
+       | _ ->         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Opam {
            subcommand = (match subcmd with Some s -> s | None -> arg);
            yes = y;
-           rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+           rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
          })))
   in
   parse None false false args|}
@@ -4033,15 +4008,10 @@ let npx_value_flags = [ "--package"; "--cache"; "--userconfig"; "--call"; "--she
     | arg :: rest ->
       (match subcmd with
        | None when not dd -> parse (Some arg) y dd rest
-       | _ ->
-         let rec collect acc = function
-           | [] -> List.rev acc
-           | x :: xs -> collect (x :: acc) xs
-         in
-         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npx {
+       | _ ->         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npx {
            subcommand = (match subcmd with Some s -> s | None -> arg);
            yes = y;
-           rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+           rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
          })))
   in
   parse None false false args|}
@@ -4101,15 +4071,10 @@ let rec parse subcmd dev glb prod fl dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) dev glb prod fl dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Yarn {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Yarn {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          dev; global = glb; production = prod; frozen_lockfile = fl;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false false false args|}
@@ -4168,15 +4133,10 @@ let rec parse subcmd sd glb frc prod dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) sd glb frc prod dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pnpm {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pnpm {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          save_dev = sd; global = glb; force = frc; production = prod;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false false false args|}
@@ -4229,15 +4189,10 @@ let rec parse subcmd nc sys dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) nc sys dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uv {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uv {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          no_cache = nc; system = sys;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4290,15 +4245,10 @@ let rec parse subcmd y f dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) y f dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Glab {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Glab {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          yes = y; force = f;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4349,15 +4299,10 @@ let rec parse subcmd v x dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) v x dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          verbose = v; exitfirst = x;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4444,15 +4389,10 @@ let rec parse subcmd f s dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) f s dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ruff {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ruff {
          subcommand = (match subcmd with Some sc -> sc | None -> arg);
          fix = f; show_source = s;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4501,15 +4441,10 @@ let rec parse subcmd st dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) st dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          strict = st;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false args|}
@@ -4560,15 +4495,10 @@ let rec parse subcmd nw w dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) nw w dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          no_emit = nw; watch = w;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4620,15 +4550,10 @@ let rec parse subcmd opt tst dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) opt tst dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          optimize = opt; test = tst;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4678,15 +4603,10 @@ let rec parse subcmd w lf dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) w lf dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          write = w; list_files = lf;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4739,15 +4659,10 @@ let rec parse subcmd nd p dd = function
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) nd p dd rest
-     | _ ->
-       let rec collect acc = function
-         | [] -> List.rev acc
-         | x :: xs -> collect (x :: acc) xs
-       in
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gradle {
+     | _ ->       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gradle {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          no_daemon = nd; parallel = p;
-         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
 parse None false false false args|}
@@ -4790,27 +4705,17 @@ parse None false false false args|}
     | "--jobs" :: n :: rest when not dd ->
       (match int_of_string_opt n with
        | Some j' -> parse subcmd (Some j') dd rest
-       | None ->
-         let rec collect acc = function
-           | [] -> List.rev acc
-           | x :: xs -> collect (x :: acc) xs
-         in
-         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+       | None ->         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
            subcommand = (match subcmd with Some s -> s | None -> n); jobs = j;
-           rest = collect (match subcmd with Some _ -> [ n ] | None -> []) rest
+           rest = (match subcmd with Some _ -> List.rev_append rest [ n ] | None -> List.rev rest)
          })))
     | arg :: rest when not dd && String.length arg > 7 && String.sub arg 0 7 = "--jobs=" ->
       let n = String.sub arg 7 (String.length arg - 7) in
       (match int_of_string_opt n with
        | Some j' -> parse subcmd (Some j') dd rest
-       | None ->
-         let rec collect acc = function
-           | [] -> List.rev acc
-           | x :: xs -> collect (x :: acc) xs
-         in
-         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+       | None ->         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
            subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
-           rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+           rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
          })))
     | arg :: _val :: rest
       when not dd && List.mem arg [ "-C"; "-f"; "-k"; "-l"; "-d" ] ->
@@ -4827,26 +4732,16 @@ parse None false false false args|}
          with Failure _ ->
            match subcmd with
            | None when not dd -> parse (Some arg) j dd rest
-           | _ ->
-             let rec collect acc = function
-               | [] -> List.rev acc
-               | x :: xs -> collect (x :: acc) xs
-             in
-             Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+           | _ ->             Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
                subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
-               rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+               rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
              })))
       else
         match subcmd with
         | None when not dd -> parse (Some arg) j dd rest
-        | _ ->
-          let rec collect acc = function
-            | [] -> List.rev acc
-            | x :: xs -> collect (x :: acc) xs
-          in
-          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+        | _ ->          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
             subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
-            rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+            rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
           }))
   in
   parse None None false args|}
@@ -4923,15 +4818,10 @@ parse None false false false args|}
     | arg :: rest ->
       (match subcmd with
        | None when not dd -> parse (Some arg) off bat q dd rest
-       | _ ->
-         let rec collect acc = function
-           | [] -> List.rev acc
-           | x :: xs -> collect (x :: acc) xs
-         in
-         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mvn {
+       | _ ->         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mvn {
            subcommand = (match subcmd with Some s -> s | None -> arg);
            offline = off; batch_mode = bat; quiet = q;
-           args = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest })))
+           args = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest) })))
   in
   parse None false false false false args|}
     ; no_expand_combined = false

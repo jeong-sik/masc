@@ -51,7 +51,7 @@ let dashboard_fleet_composite_json ~(config : Coord.config) () : Yojson.Safe.t =
   let entries = Keeper_registry.all ~base_path:config.base_path () in
   let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
   `Assoc
-    [ "generated_at", `Float (Unix.gettimeofday ())
+    [ "generated_at", `String (Masc_domain.now_iso ())
     ; "count", `Int (List.length snapshots)
     ; "snapshots", `List snapshots
     ]

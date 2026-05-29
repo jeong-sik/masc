@@ -2,12 +2,12 @@
 
 open Dashboard_http_helpers
 
-let take = List.take
+(* SSOT: Server_dashboard_http_runtime_info_json.take is the canonical implementation. *)
+let take = Server_dashboard_http_runtime_info_json.take
 
 let list_hd_opt = function
   | [] -> None
   | x :: _ -> Some x
-;;
 
 ;;
 

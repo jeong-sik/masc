@@ -47,7 +47,10 @@ let capacity_backpressure_of_http_error ?source ~cascade_name last_err =
            source =
              Option.value source ~default:Provider_capacity;
            detail = message;
-           retry_after_sec = retry_after;
+           retry_after_sec =
+             (match retry_after with
+              | Some _ -> retry_after
+              | None -> Some synthetic_retry_after_sec);
          })
   | Some
       (Llm_provider.Http_client.NetworkError
@@ -101,7 +104,10 @@ let capacity_backpressure_of_sdk_error
               cascade_name;
               source = Provider_capacity;
               detail;
-              retry_after_sec = retry_after;
+              retry_after_sec =
+                (match retry_after with
+                 | Some _ -> retry_after
+                 | None -> Some synthetic_retry_after_sec);
             }))
   | Agent_sdk.Error.Internal msg
     when message_looks_like_capacity_backpressure msg ->

@@ -2,6 +2,7 @@
 
 open Tool_args
 include Keeper_config_rp_helpers
+open Keeper_cascade_profile
 
 (** Upper bound for keeper time configs expressed in seconds.  Repeated
     seven times as the bare literal [172800] across this file before
@@ -15,11 +16,20 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
     naming the "1 day" intent at the call site. *)
 let one_day_seconds_int = Masc_time_constants.day_int
 
-let default_cascade_name () = "runpod:glm-coding-with-spark"
-let phase_recovery_cascade_name = "runpod:glm-coding-with-spark"
-let phase_buffer_cascade_name = "runpod:glm-coding-with-spark"
-let phase_routing_cascade_names = [ "runpod:glm-coding-with-spark" ]
-let tool_required_cascade_name = "runpod:glm-coding-with-spark"
+let default_cascade_name () =
+  try cascade_name_for_use Keeper_turn with _ -> "tool_strict"
+
+let phase_recovery_cascade_name =
+  try cascade_name_for_use Phase_recovery with _ -> "tool_strict"
+
+let phase_buffer_cascade_name =
+  try cascade_name_for_use Phase_buffer with _ -> "tool_strict"
+
+let phase_routing_cascade_names =
+  [ try cascade_name_for_use Routing with _ -> "tool_strict" ]
+
+let tool_required_cascade_name =
+  try cascade_name_for_use Tool_required with _ -> "tool_strict"
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward

@@ -220,7 +220,29 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
   |> Http.Router.get "/mcp" (fun request reqd ->
-       with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
+       (* Observer/presence SSE streams authenticate via the `token` query
+          param — an EventSource cannot set an Authorization header. Parse
+          sse_kind and let handle_get_mcp route it: Observer/Presence go to
+          verify_mcp_observer_stream_auth (accepts header OR `token` query),
+          the default (Coordinator) still requires a bearer header via
+          verify_mcp_auth. Do NOT wrap in with_read_auth — that gate is
+          header-only and 401s ("Token required") the query-token SSE
+          handshake before the sse_kind-aware auth runs, which is why the
+          dashboard observer stream failed and the client fell back/looped.
+          Mirrors POST /mcp, which already self-auths via handle_post_mcp. *)
+       let sse_kind =
+         match Server_utils.query_param request "sse_kind" with
+         | Some raw
+           when String.equal "observer"
+                  (String.lowercase_ascii (String.trim raw)) ->
+             Some Sse.Observer
+         | Some raw
+           when String.equal "presence"
+                  (String.lowercase_ascii (String.trim raw)) ->
+             Some Sse.Presence
+         | _ -> None
+       in
+       handle_get_mcp ?sse_kind request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"

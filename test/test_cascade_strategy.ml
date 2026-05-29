@@ -302,7 +302,8 @@ let test_declared_client_capacity_registers_generic_endpoint () =
     (Some 2)
     (Masc_mcp.Cascade_runtime_candidate.declared_client_capacity candidate);
   Masc_mcp.Cascade_runtime_candidate.register_declared_client_capacity candidate;
-  match C.capacity "https://runpod.example/v1" with
+  (* capacity_key = base_url:model_id, not bare base_url *)
+  match C.capacity "https://runpod.example/v1:runpod-provider_h" with
   | None -> fail "declared endpoint capacity was not registered"
   | Some info ->
     check int "generic endpoint total" 2 info.total;

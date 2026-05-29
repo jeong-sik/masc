@@ -90,6 +90,16 @@ let key_is_full ctx key =
   | None -> false
 
 let dedupe_full_capacity_keys adapter ctx cands =
+  (* When multiple candidates share the same capacity_key (same physical
+     provider), keep at most one per key when the key is at capacity.
+     This prevents N candidates for the same provider from all attempting
+     acquire on a full semaphore.
+
+     NOTE: Fairness across routes sharing the same provider is not yet
+     implemented.  The first candidate in list order wins; route priority
+     is therefore determined by cascade.toml ordering.  Route-level
+     fairness (weighted fair queuing or per-route reservation) requires
+     strategy-layer changes and is tracked separately. *)
   let seen_full = Hashtbl.create (List.length cands) in
   cands
   |> List.filter (fun c ->

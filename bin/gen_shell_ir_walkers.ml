@@ -2603,6 +2603,17 @@ let rec parse port id_file host user command dd = function
   | "-L" :: _ :: rest when not dd -> parse port id_file host user command dd rest
   | "-R" :: _ :: rest when not dd -> parse port id_file host user command dd rest
   | "-D" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-J" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-F" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-l" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-c" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-m" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-W" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-E" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-b" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-Q" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-O" :: _ :: rest when not dd -> parse port id_file host user command dd rest
+  | "-S" :: _ :: rest when not dd -> parse port id_file host user command dd rest
   (* POSIX end-of-options: remaining are host + command *)
   | "--" :: rest -> parse port id_file host user command true rest
   | arg :: rest ->
@@ -2673,6 +2684,12 @@ let rec parse recursive port src dest = function
   | "-C" :: rest -> parse recursive port src dest rest
   | "-v" :: rest -> parse recursive port src dest rest
   | "-q" :: rest -> parse recursive port src dest rest
+  | "-i" :: _ :: rest -> parse recursive port src dest rest
+  | "-l" :: _ :: rest -> parse recursive port src dest rest
+  | "-o" :: _ :: rest -> parse recursive port src dest rest
+  | "-F" :: _ :: rest -> parse recursive port src dest rest
+  | "-S" :: _ :: rest -> parse recursive port src dest rest
+  | "-J" :: _ :: rest -> parse recursive port src dest rest
   (* Combined short flags: -rCv, -Cvr, etc. *)
   | arg :: rest
     when String.length arg > 2
@@ -2797,6 +2814,8 @@ let rec parse action compression archive paths = function
   | "--gzip" :: rest -> parse action `Gzip archive paths rest
   | "--bzip2" :: rest -> parse action `Bzip2 archive paths rest
   | "--xz" :: rest -> parse action `Xz archive paths rest
+  | "--exclude" :: _ :: rest -> parse action compression archive paths rest
+  | "--strip-components" :: _ :: rest -> parse action compression archive paths rest
   (* POSIX end-of-options: all remaining args are paths *)
   | "--" :: rest ->
     let paths' = List.rev_append (List.filter (fun a -> String.length a > 0) rest) paths in
@@ -2809,6 +2828,14 @@ let rec parse action compression archive paths = function
     when String.length arg > 7 && String.sub arg 0 7 = "--file=" ->
     let f = String.sub arg 7 (String.length arg - 7) in
     parse action compression (Some f) paths rest
+  (* --exclude=PATTERN equal-sign form *)
+  | arg :: rest
+    when String.length arg > 10 && String.sub arg 0 10 = "--exclude=" ->
+    parse action compression archive paths rest
+  (* --strip-components=N equal-sign form *)
+  | arg :: rest
+    when String.length arg > 19 && String.sub arg 0 19 = "--strip-components=" ->
+    parse action compression archive paths rest
   | arg :: rest ->
     if String.length arg >= 3 && arg.[0] = '-'
     then (
@@ -3010,6 +3037,7 @@ let rec parse in_place ext_re suppress expr file dd = function
      | "" :: rest' -> parse true ext_re suppress expr file dd rest'   (* -i '' — macOS empty suffix *)
      | _ -> parse true ext_re suppress expr file dd rest)              (* -i at end or GNU style *)
   | "-e" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
+  | "-f" :: f :: rest when not dd -> parse in_place ext_re suppress (Some f) file dd rest  (* script file → expression *)
   | "-E" :: rest | "--regexp-extended" :: rest when not dd -> parse in_place true suppress expr file dd rest
   | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest when not dd -> parse in_place ext_re true expr file dd rest
   (* POSIX end-of-options: remaining are expression, file *)

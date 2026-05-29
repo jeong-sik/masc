@@ -864,6 +864,55 @@ let test_posix_end_of_options () =
   (match sed with
    | W (Sed { expression = "s/a/b/"; file = "-file.txt"; suppress_output = true; _ }) -> ()
    | w -> Alcotest.failf "Sed --: expected expr=s/a/b/ file=-file.txt suppress=true, got %a" pp w);
+  (* Ssh: -J jump-host user@host — jump proxy should be consumed, not treated as host *)
+  let ssh_jump =
+    of_simple { (base "ssh") with args = [ lit "-J"; lit "jump-host"; lit "user@server"; lit "uptime" ] }
+  in
+  (match ssh_jump with
+   | W (Ssh { host = "server"; user = Some "user"; command = Some "uptime"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh -J: expected host=server, got %a" pp w);
+  (* Ssh: -F /custom/config -l admin host *)
+  let ssh_f_l =
+    of_simple { (base "ssh") with args = [ lit "-F"; lit "/custom/config"; lit "-l"; lit "admin"; lit "host" ] }
+  in
+  (match ssh_f_l with
+   | W (Ssh { host = "host"; user = None; command = None; _ }) -> ()
+   | w -> Alcotest.failf "Ssh -F -l: expected host=host, got %a" pp w);
+  (* Scp: -i key.pem src dst — identity file should be consumed *)
+  let scp_i =
+    of_simple { (base "scp") with args = [ lit "-i"; lit "key.pem"; lit "src"; lit "dst" ] }
+  in
+  (match scp_i with
+   | W (Scp { source = "src"; dest = "dst"; _ }) -> ()
+   | w -> Alcotest.failf "Scp -i: expected source=src dest=dst, got %a" pp w);
+  (* Scp: -J jump src dst — jump proxy should be consumed *)
+  let scp_j =
+    of_simple { (base "scp") with args = [ lit "-J"; lit "jump"; lit "src"; lit "dst" ] }
+  in
+  (match scp_j with
+   | W (Scp { source = "src"; dest = "dst"; _ }) -> ()
+   | w -> Alcotest.failf "Scp -J: expected source=src dest=dst, got %a" pp w);
+  (* Sed: -f script.sed input.txt — -f sets expression, positional is input file *)
+  let sed_f =
+    of_simple { (base "sed") with args = [ lit "-f"; lit "script.sed"; lit "input.txt" ] }
+  in
+  (match sed_f with
+   | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed -f: expected expr=script.sed file=input.txt, got %a" pp w);
+  (* Tar: --exclude=*.o -cf archive.tar src/ — exclude pattern consumed *)
+  let tar_exclude_eq =
+    of_simple { (base "tar") with args = [ lit "--exclude=*.o"; lit "-cf"; lit "archive.tar"; lit "src/" ] }
+  in
+  (match tar_exclude_eq with
+   | W (Tar { action = `Create; archive = "archive.tar"; paths = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --exclude=: expected Create archive.tar paths=[src/], got %a" pp w);
+  (* Tar: --exclude *.o -cf archive.tar src/ — space-separated exclude *)
+  let tar_exclude_sp =
+    of_simple { (base "tar") with args = [ lit "--exclude"; lit "*.o"; lit "-cf"; lit "archive.tar"; lit "src/" ] }
+  in
+  (match tar_exclude_sp with
+   | W (Tar { action = `Create; archive = "archive.tar"; paths = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --exclude: expected Create archive.tar paths=[src/], got %a" pp w);
   (* Rg: -i -- pattern -file.txt *)
   let rg =
     of_simple { (base "rg") with args = [ lit "-i"; lit "--"; lit "pattern"; lit "-file.txt" ] }

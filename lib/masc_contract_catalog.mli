@@ -10,7 +10,6 @@ type contract_spec =
   ; invariants : string list
   ; requested_execution_mode : Masc_mcp_cdal_runtime.Execution_mode.t
   ; risk_class : Masc_mcp_cdal_runtime.Risk_class.t
-  ; allowed_mutations : string list
   ; review_requirement : string option
   }
 

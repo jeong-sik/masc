@@ -90,11 +90,6 @@ let test_risk_contract_projection_is_deterministic () =
     (Masc_mcp_cdal_runtime.Risk_contract.contract_id first)
     (Masc_mcp_cdal_runtime.Risk_contract.contract_id second);
   check
-    (list string)
-    "allowed mutations"
-    [ "keeper_lifecycle_update"; "supervisor_restart"; "telemetry_emit" ]
-    first.runtime_constraints.allowed_mutations;
-  check
     (option string)
     "review requirement"
     None

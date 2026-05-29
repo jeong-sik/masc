@@ -10,7 +10,6 @@
 type violation_kind = Masc_mcp_cdal_runtime.Mode_enforcer.violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
-  | Scope_violation
 
 (** Re-export OAS canonical violation record. *)
 type t = Masc_mcp_cdal_runtime.Mode_enforcer.violation =
@@ -25,7 +24,6 @@ let violation_kind_of_string s =
   match String.lowercase_ascii s with
   | "mutating_in_diagnose" -> Ok Masc_mcp_cdal_runtime.Mode_enforcer.Mutating_in_diagnose
   | "external_in_draft" -> Ok Masc_mcp_cdal_runtime.Mode_enforcer.External_in_draft
-  | "scope_violation" -> Ok Masc_mcp_cdal_runtime.Mode_enforcer.Scope_violation
   | other -> Error (Printf.sprintf "unknown violation_kind: %s" other)
 ;;
 
@@ -76,5 +74,4 @@ let minimum_required_mode (v : t) : Masc_mcp_cdal_runtime.Execution_mode.t =
   match v.violation_kind with
   | Mutating_in_diagnose -> Masc_mcp_cdal_runtime.Execution_mode.Draft
   | External_in_draft -> Masc_mcp_cdal_runtime.Execution_mode.Execute
-  | Scope_violation -> Masc_mcp_cdal_runtime.Execution_mode.Execute
 ;;

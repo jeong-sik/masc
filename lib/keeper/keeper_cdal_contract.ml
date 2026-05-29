@@ -8,7 +8,6 @@ let of_keeper_meta (meta : Keeper_meta_contract.keeper_meta) : RC.t option =
   let runtime_constraints : RC.runtime_constraints =
     { requested_execution_mode = EM.Execute
     ; risk_class = RK.Low
-    ; allowed_mutations = []
     ; review_requirement = None
     }
   in
@@ -19,10 +18,7 @@ let of_keeper_meta (meta : Keeper_meta_contract.keeper_meta) : RC.t option =
     Crit.Keeper_turn_capture_v1
       { keeper_name = meta.name
       ; agent_name = meta.agent_name
-      ; sandbox_profile = Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile
-      ; sandbox_image = meta.sandbox_image
       ; network_mode = Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode
-      ; allowed_paths = meta.allowed_paths
       ; active_goal_ids = meta.active_goal_ids
       ; current_task_id
       }

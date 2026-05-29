@@ -39,10 +39,7 @@ type t =
   | Keeper_turn_capture_v1 of
       { keeper_name : string
       ; agent_name : string
-      ; sandbox_profile : string
-      ; sandbox_image : string option
       ; network_mode : string
-      ; allowed_paths : string list
       ; active_goal_ids : string list
       ; current_task_id : string option
       }

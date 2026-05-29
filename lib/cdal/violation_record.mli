@@ -10,7 +10,6 @@
 type violation_kind = Masc_mcp_cdal_runtime.Mode_enforcer.violation_kind =
   | Mutating_in_diagnose (** workspace mutation attempted in Diagnose mode *)
   | External_in_draft (** external effect attempted in Draft mode *)
-  | Scope_violation (** violated allowed_mutations constraint *)
 
 (** A single violation record — re-exported from [Masc_mcp_cdal_runtime.Mode_enforcer.violation]. *)
 type t = Masc_mcp_cdal_runtime.Mode_enforcer.violation =
@@ -38,8 +37,7 @@ val of_json_list : Yojson.Safe.t -> (t list, string) result
 
 (** The minimum execution mode that would have prevented this violation.
     - [Mutating_in_diagnose] -> [Draft]
-    - [External_in_draft] -> [Execute]
-    - [Scope_violation] -> [Execute] *)
+    - [External_in_draft] -> [Execute] *)
 val minimum_required_mode : t -> Masc_mcp_cdal_runtime.Execution_mode.t
 
 (** Violation kind to/from string. Delegates to OAS canonical functions. *)

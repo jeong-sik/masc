@@ -2422,6 +2422,14 @@ let rec parse recursive port src dest = function
     (match int_of_string_opt p_str with
      | Some p -> parse recursive (Some p) src dest rest
      | None -> parse recursive port src dest rest)
+  (* Combined form: -P22 *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = 'P'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let p = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse recursive (Some p) src dest rest
   | "-p" :: rest -> parse recursive port src dest rest
   | "-C" :: rest -> parse recursive port src dest rest
   | "-v" :: rest -> parse recursive port src dest rest

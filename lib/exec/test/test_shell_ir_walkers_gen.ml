@@ -766,6 +766,13 @@ let test_posix_end_of_options () =
   (match scp with
    | W (Scp { source = "-src/file"; dest = "-dest/file"; recursive = true; _ }) -> ()
    | w -> Alcotest.failf "Scp --: expected source=-src/file dest=-dest/file recursive=true, got %a" pp w);
+  (* Scp: -P2222 src dst (combined port form) *)
+  let scp_p =
+    of_simple { (base "scp") with args = [ lit "-P2222"; lit "src"; lit "dst" ] }
+  in
+  (match scp_p with
+   | W (Scp { source = "src"; dest = "dst"; port = Some 2222; _ }) -> ()
+   | w -> Alcotest.failf "Scp -P2222: expected port=2222, got %a" pp w);
   (* Ssh: -- -host echo hello *)
   let ssh =
     of_simple { (base "ssh") with args = [ lit "--"; lit "-host"; lit "echo"; lit "hello" ] }

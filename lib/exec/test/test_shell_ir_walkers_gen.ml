@@ -2088,8 +2088,8 @@ let test_subcommand_args_eq_form_flags () =
       { (base "cargo") with args = [ lit "build"; lit "--target=x86_64-unknown-linux-gnu"; lit "src/main.rs" ] }
   in
   (match w_cargo_target_eq with
-   | W (Cargo { subcommand = "build"; rest = [ "src/main.rs" ]; _ }) -> ()
-   | w -> Alcotest.failf "Cargo --target=triple: expected rest=[src/main.rs], got %a" pp w);
+   | W (Cargo { subcommand = "build"; rest = [ "x86_64-unknown-linux-gnu"; "src/main.rs" ]; _ }) -> ()
+   | w -> Alcotest.failf "Cargo --target=triple: expected rest=[x86_64-unknown-linux-gnu;src/main.rs], got %a" pp w);
   (* Npm: --registry=URL *)
   let w_npm_eq =
     of_simple

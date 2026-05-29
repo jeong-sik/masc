@@ -3522,7 +3522,9 @@ let rec parse subcmd rel verb feat dd = function
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg ("--features" :: cargo_value_flags) ->
     (match Shell_ir_typed_types.eq_form_flag_value arg [ "--features" ] with
      | Some f -> parse subcmd rel verb (Some f) dd rest
-     | None -> parse subcmd rel verb feat dd rest)
+     | None ->
+       let ev = Shell_ir_typed_types.eq_form_flag_value arg cargo_value_flags in
+       parse subcmd rel verb feat dd (match ev with Some evv -> evv :: rest | None -> rest))
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd rel verb feat true rest
   | arg :: rest ->

@@ -93,15 +93,7 @@ let compare_recommendation left right =
       | cmp -> cmp)
   | cmp -> cmp
 
-let generated_at_utc () =
-  let tm = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
+let generated_at_utc () = Masc_domain.now_iso ()
 
 let build_manifest ?source_summary_path
     (summary : Tool_call_quality_benchmark.benchmark_summary) : manifest =

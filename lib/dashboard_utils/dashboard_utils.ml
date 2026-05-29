@@ -1,8 +1,4 @@
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+let iso_of_unix unix_ts = Masc_domain.iso8601_of_unix_seconds unix_ts
 
 let parse_iso_opt = function
   | Some raw when String.trim raw <> "" -> (

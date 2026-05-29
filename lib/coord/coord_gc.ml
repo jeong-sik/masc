@@ -259,12 +259,7 @@ let gc config ?(days=7) () =
     let now = Time_compat.now () in
     now -. (float_of_int days *. 24. *. 60. *. 60.)
   in
-  let cutoff_iso =
-    let tm = Unix.gmtime cutoff_time in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-  in
+  let cutoff_iso = Masc_domain.iso8601_of_unix_seconds cutoff_time in
 
   let backlog = read_backlog config in
   let stale_count = ref 0 in

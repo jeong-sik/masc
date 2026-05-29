@@ -46,7 +46,7 @@ let read_json_file_opt path =
   | Sys_error _ | Yojson.Json_error _ -> None
 
 let string_member json key =
-  Json_util.get_string json key |> Option.value ~default:""
+  Json_util.get_string_with_default json ~key ~default:""
 
 let string_assoc_of_member key json =
   match Json_util.get_object json key with

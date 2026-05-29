@@ -361,12 +361,7 @@ let serve_bonsai_index _request reqd =
     This endpoint must stay scoped to the live server [base_path]; returning
     static fixture rows here makes Bonsai look like an SSOT while showing a
     different keeper universe than the operator dashboard. *)
-let iso8601_utc_now () =
-  let open Unix in
-  let t = gmtime (gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-    t.tm_hour t.tm_min t.tm_sec
+let iso8601_utc_now () = Masc_domain.now_iso ()
 
 let bonsai_keeper_status_of_phase phase =
   let module K = Masc_dashboard_api_types.Keepers in

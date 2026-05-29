@@ -41,7 +41,7 @@ let case_contains ~(haystack : string) ~(needle : string) : bool =
       loop 0
 
 let json_string_field (json : Yojson.Safe.t) (field : string) : string =
-  Json_util.get_string json field |> Option.value ~default:""
+  Json_util.get_string_with_default json ~key:field ~default:""
 
 let json_created_by (json : Yojson.Safe.t) : string =
   match Json_util.assoc_member_opt "provenance" json with

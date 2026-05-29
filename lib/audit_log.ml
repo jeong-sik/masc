@@ -296,13 +296,7 @@ let audit_entry_id ~timestamp ~agent_id ~action =
                                            ^ Printf.sprintf "%.6f" timestamp)) in
   Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
 
-(** Format a Unix timestamp as ISO 8601 UTC string. *)
-let format_iso8601 ts =
-  let t = Int64.to_int (Int64.of_float ts) in
-  let tm = Unix.gmtime (float_of_int t) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+let format_iso8601 ts = Masc_domain.iso8601_of_unix_seconds ts
 
 (** Map outcome + action to O2 severity string. *)
 let audit_severity ~action ~outcome =

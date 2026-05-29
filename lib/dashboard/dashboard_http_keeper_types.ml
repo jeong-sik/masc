@@ -215,11 +215,7 @@ let keeper_decisions_retention_json ~per_keeper_limit ~keeper_count =
 
 let k2_iso8601_of_unix ts_unix =
   if ts_unix <= 0.0 then ""
-  else
-    let t = Unix.gmtime ts_unix in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
-      t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+  else Masc_domain.iso8601_of_unix_seconds ts_unix
 
 let k2_stable_id ~prefix ~keeper_name ~ts_unix ~raw =
   let ms = Int64.of_float (ts_unix *. 1000.0) in

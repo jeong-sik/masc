@@ -1016,7 +1016,7 @@ let test_library_search_returns_results () =
            "read contains MLFQ content"
            true
            (Tool_library.string_contains
-              ~sub:"Multi-Level Feedback Queue"
+              ~needle:"Multi-Level Feedback Queue"
               (Tool_result.message read_result))))
 ;;
 

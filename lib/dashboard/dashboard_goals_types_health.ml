@@ -89,8 +89,8 @@ let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalle
 
 let approval_matches_goal goal_id approval_json =
   let goal_ids =
-    match m approval_json "goal_ids" with
-    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+    match Json_util.assoc_member_opt "goal_ids" approval_json with
+    | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
     | _ -> []
   in
   List.mem goal_id goal_ids
@@ -173,11 +173,11 @@ let display_disposition_of_receipt_json receipt =
      regression in alerting), but the reason label now distinguishes
      them so the operator can chase the right producer fix. *)
   let operator_disposition =
-    receipt |> member "operator_disposition" |> to_string_option
+    Json_util.get_string receipt "operator_disposition"
     |> Option.value ~default:"<missing operator_disposition field>"
   in
   let operator_disposition_reason =
-    receipt |> member "operator_disposition_reason" |> to_string_option
+    Json_util.get_string receipt "operator_disposition_reason"
     |> Option.value ~default:""
   in
   let reason fallback =

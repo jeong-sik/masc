@@ -154,8 +154,8 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
   let meta = detail.meta in
   let latest_receipt = detail.latest_receipt in
   let latest_causal_event =
-    match m detail.runtime_trust "latest_causal_event" with
-    | `Assoc _ as event -> event
+    match Json_util.assoc_member_opt "latest_causal_event" detail.runtime_trust with
+    | Some (`Assoc _ as event) -> event
     | _ -> `Null
   in
   let latest_execution_outcome =
@@ -222,7 +222,7 @@ let timeline_event_json ~ts ~kind ~lane ~title ~summary ~severity =
     ]
 
 let json_member_or_null field = function
-  | `Assoc _ as json -> m json field
+  | `Assoc _ as json -> Option.value ~default:`Null (Json_util.assoc_member_opt field json)
   | _ -> `Null
 
 let goal_event_timeline_json event =
@@ -230,7 +230,7 @@ let goal_event_timeline_json event =
     Json_util.get_string event "event_type"
     |> Option.value ~default:"goal_event"
   in
-  let payload = m event "payload" in
+  let payload = Json_util.assoc_member_opt "payload" event |> Option.value ~default:`Null in
   let payload_field field = json_member_or_null field payload in
   let ts = Json_util.get_string event "ts" |> Option.value ~default:"" in
   let title, summary, severity =
@@ -248,11 +248,11 @@ let goal_event_timeline_json event =
            any producer, so a non-zero appearance is an unambiguous
            producer-side fix signal. *)
         let phase =
-          Json_util.get_string (payload_field "phase")
+          Yojson.Safe.Util.to_string_option (payload_field "phase")
           |> Option.value ~default:"<missing payload.phase>"
         in
         let actor =
-          Json_util.get_string (payload_field "actor" |> json_member_or_null "id")
+          Yojson.Safe.Util.to_string_option (payload_field "actor" |> json_member_or_null "id")
         in
         ( "Goal Phase",
           (match actor with
@@ -265,11 +265,11 @@ let goal_event_timeline_json event =
     | "goal_verification_opened" ->
         let request = payload_field "request" in
         let request_id =
-          Json_util.get_string (request |> json_member_or_null "id")
+          Yojson.Safe.Util.to_string_option (request |> json_member_or_null "id")
           |> Option.value ~default:"request"
         in
         let required =
-          Json_util.get_int
+          Yojson.Safe.Util.to_int_option
             (request |> json_member_or_null "policy_snapshot"
              |> json_member_or_null "required_verdicts")
         in
@@ -281,11 +281,11 @@ let goal_event_timeline_json event =
     | "goal_vote" ->
         let vote = payload_field "vote" in
         let decision =
-          Json_util.get_string (vote |> json_member_or_null "decision")
+          Yojson.Safe.Util.to_string_option (vote |> json_member_or_null "decision")
           |> Option.value ~default:"<missing payload.vote.decision>"
         in
         let principal =
-          Json_util.get_string
+          Yojson.Safe.Util.to_string_option
             (vote |> json_member_or_null "principal" |> json_member_or_null "id")
           |> Option.value ~default:"principal"
         in
@@ -294,7 +294,7 @@ let goal_event_timeline_json event =
           if String.equal decision "reject" then "bad" else "ok" )
     | "goal_verification_resolved" ->
         let status =
-          Json_util.get_string (payload_field "status")
+          Yojson.Safe.Util.to_string_option (payload_field "status")
           |> Option.value ~default:"<missing payload.status>"
         in
         ( "Goal Verification Resolved",
@@ -304,7 +304,7 @@ let goal_event_timeline_json event =
           | "rejected" -> "bad"
           | _ -> "warn") )
     | "goal_approval_opened" ->
-        let request_id = Json_util.get_string (payload_field "request_id") in
+        let request_id = Yojson.Safe.Util.to_string_option (payload_field "request_id") in
         ( "Goal Approval Opened",
           (match request_id with
           | Some id -> Printf.sprintf "request %s is awaiting operator approval" id
@@ -312,7 +312,7 @@ let goal_event_timeline_json event =
           "warn" )
     | "goal_approval_resolved" ->
         let decision =
-          Json_util.get_string (payload_field "decision")
+          Yojson.Safe.Util.to_string_option (payload_field "decision")
           |> Option.value ~default:"<missing payload.decision>"
         in
         ( "Goal Approval Resolved",

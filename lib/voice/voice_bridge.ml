@@ -294,7 +294,7 @@ let single_voice_mcp_call ~net:_ ~uri ~headers_list ~body_str =
 let extract_mcp_result json =
   try
     let result = json |> Json_util.assoc_member_opt "result" in
-    if result = `Null
+    if result = None
     then (
       let error = (match Json_util.assoc_member_opt "error" json with
         | Some err -> (match Json_util.assoc_member_opt "message" err with

@@ -19,7 +19,7 @@
     Verbatim extract from [Keeper_sandbox_docker]; all 3 functions
     are exposed by the parent .mli at lines 37, 40, 45. *)
 
-let keeper_sandbox_container_name (meta : Keeper_types.keeper_meta) =
+let keeper_sandbox_container_name (meta : Keeper_meta_contract.keeper_meta) =
   Printf.sprintf
     "masc-keeper-%s-%d-%d"
     (Coord_utils.safe_filename meta.name)
@@ -27,13 +27,13 @@ let keeper_sandbox_container_name (meta : Keeper_types.keeper_meta) =
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 ;;
 
-let keeper_private_container_root (meta : Keeper_types.keeper_meta) =
+let keeper_private_container_root (meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.container_root meta.name
 ;;
 
 let docker_private_workspace_cwd
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       host_cwd
   =
   let normalize_path_for_containment path =

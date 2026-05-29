@@ -10,7 +10,7 @@ type tool_stat = { name : string; calls : int; success_pct : float }
 
 type keeper_snapshot = {
   keeper_name : string;
-  meta : Keeper_types.keeper_meta option;
+  meta : Keeper_meta_contract.keeper_meta option;
   read_error : string option;
 }
 
@@ -45,7 +45,7 @@ let route_evidence path =
   evidence_ref ~kind:"route" ~id:path ~value:path
 
 let keeper_meta_evidence =
-  evidence_ref ~kind:"store" ~id:"keeper_meta" ~value:"Keeper_types.read_meta"
+  evidence_ref ~kind:"store" ~id:"keeper_meta" ~value:"Keeper_meta_store.read_meta"
 
 let tool_stat_json ?failure_classes stat =
   let fields = [
@@ -84,10 +84,10 @@ let uniq_sorted names =
   |> List.sort_uniq String.compare
 
 let load_keeper_snapshots config =
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
   |> uniq_sorted
   |> List.map (fun keeper_name ->
-    match Keeper_types.read_meta config keeper_name with
+    match Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> { keeper_name; meta = Some meta; read_error = None }
     | Ok None ->
       {
@@ -207,7 +207,7 @@ let runtime_liveness_feature snapshots =
     ~id:"runtime_liveness"
     ~label:"Persisted keeper runtime turns"
     ~eligible:(fun _snapshot -> true)
-    ~predicate:(fun meta -> meta.Keeper_types.runtime.usage.total_turns > 0)
+    ~predicate:(fun meta -> meta.runtime.usage.total_turns > 0)
     ~summary_label:"keepers have persisted runtime turns"
     ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/execution"]
     ~next_action:
@@ -297,8 +297,8 @@ let autonomous_tool_feature snapshots =
     ~label:"Autonomous tool turns"
     ~eligible:(fun _snapshot -> true)
     ~predicate:(fun meta ->
-       meta.Keeper_types.runtime.autonomous_action_count > 0
-       && meta.Keeper_types.runtime.autonomous_tool_turn_count > 0)
+       meta.runtime.autonomous_action_count > 0
+       && meta.runtime.autonomous_tool_turn_count > 0)
     ~summary_label:"keepers have autonomous action and tool-turn counters"
     ~evidence_refs:[keeper_meta_evidence]
     ~next_action:
@@ -309,7 +309,7 @@ let board_reactive_feature snapshots =
     ~id:"board_reactive_autonomy"
     ~label:"Board-reactive turns"
     ~eligible:(fun _snapshot -> true)
-    ~predicate:(fun meta -> meta.Keeper_types.runtime.board_reactive_turn_count > 0)
+    ~predicate:(fun meta -> meta.runtime.board_reactive_turn_count > 0)
     ~summary_label:"keepers have board-reactive turn counters"
     ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/board"]
     ~next_action:
@@ -348,17 +348,17 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
     snapshots
     |> List.filter (fun snapshot ->
       match snapshot.meta with
-      | Some meta -> meta.Keeper_types.proactive.enabled
+      | Some meta -> meta.proactive.enabled
       | None -> false)
   in
   let total = keeper_count enabled in
   let has_recent_meta_evidence meta =
-    meta.Keeper_types.runtime.proactive_rt.count_total > 0
+    meta.runtime.proactive_rt.count_total > 0
     && timestamp_within_window ?window_hours ~now
-         meta.Keeper_types.runtime.proactive_rt.last_ts
+         meta.runtime.proactive_rt.last_ts
     && not
-         (meta.Keeper_types.runtime.proactive_rt.last_outcome
-          = Keeper_types.Proactive_error)
+         (meta.runtime.proactive_rt.last_outcome
+          = Keeper_meta_contract.Proactive_error)
   in
   let has_recent_decision_evidence snapshot =
     match (decision_stat_for snapshot.keeper_name).latest_ts_unix with
@@ -396,12 +396,12 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       let stat = decision_stat_for snapshot.keeper_name in
       let meta_count =
         match snapshot.meta with
-        | Some meta -> meta.Keeper_types.runtime.proactive_rt.count_total
+        | Some meta -> meta.runtime.proactive_rt.count_total
         | None -> 0
       in
       let meta_last_ts =
         match snapshot.meta with
-        | Some meta -> meta.Keeper_types.runtime.proactive_rt.last_ts
+        | Some meta -> meta.runtime.proactive_rt.last_ts
         | None -> 0.0
       in
       let meta_recent =
@@ -413,8 +413,8 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         match snapshot.meta with
         | Some meta ->
           Some
-            (Keeper_types.proactive_cycle_outcome_to_string
-               meta.Keeper_types.runtime.proactive_rt.last_outcome)
+            (Keeper_meta_contract.proactive_cycle_outcome_to_string
+               meta.runtime.proactive_rt.last_outcome)
         | None -> None
       in
       `Assoc [

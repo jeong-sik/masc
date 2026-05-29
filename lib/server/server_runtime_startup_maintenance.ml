@@ -8,14 +8,14 @@
     Moves contents via recursive merge. Conflicting files go to _quarantine/,
     except keeper meta files where a fresher valid legacy record may replace a
     stale or invalid current record. *)
-let keeper_meta_updated_ts (meta : Keeper_types.keeper_meta) =
+let keeper_meta_updated_ts (meta : Keeper_meta_contract.keeper_meta) =
   Coord_resilience.Time.parse_iso8601_opt meta.updated_at
   |> Option.value ~default:0.0
 
 let should_promote_legacy_keeper_meta ~legacy_path ~current_path =
   match
-    Keeper_types.read_meta_file_path legacy_path,
-    Keeper_types.read_meta_file_path current_path
+    Keeper_meta_store.read_meta_file_path legacy_path,
+    Keeper_meta_store.read_meta_file_path current_path
   with
   | Ok (Some _legacy), Ok (Some _current) ->
       keeper_meta_updated_ts _legacy > keeper_meta_updated_ts _current

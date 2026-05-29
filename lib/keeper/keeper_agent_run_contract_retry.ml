@@ -26,7 +26,7 @@ let satisfying_tools_for_violation ~acc ~has_current_task ~turn_affordances
       Keeper_tool_progress.satisfying_tools_from_contract_violation_reason
         violation_reason
   in
-  Keeper_types.dedupe_keep_order (oas_tools @ local_tools)
+  Keeper_types_profile_toml_normalizers.dedupe_keep_order (oas_tools @ local_tools)
 ;;
 
 let retry_action = function

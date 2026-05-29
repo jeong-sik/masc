@@ -6,6 +6,8 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type parsed_args = {
   name : string;

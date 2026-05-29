@@ -375,11 +375,11 @@ let playground_mind_path = Playground_paths.mind_path
 let playground_repos_path = Playground_paths.repos_path
 let playground_bundle_paths = Playground_paths.bundle_paths
 
-let sandbox_path_of_meta ~(meta : Keeper_types.keeper_meta) =
+let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.allowed_root_rel_of_meta ~meta
 ;;
 
-let sandbox_bundle_paths_of_meta ~(meta : Keeper_types.keeper_meta) =
+let sandbox_bundle_paths_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   let root = sandbox_path_of_meta ~meta |> strip_trailing_slashes in
   [ root ^ "/"; root ^ "/mind/"; root ^ "/repos/" ]
 ;;
@@ -391,7 +391,7 @@ let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string 
   |> List.map Keeper_fs.ensure_dir
 ;;
 
-let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
+let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta)
   : string list
   =
   let root = project_root_of_config config in
@@ -403,7 +403,7 @@ let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_types.keeper_
 let ensure_sandbox_bundle_for_profile
       ~(config : Coord.config)
       ~(name : string)
-      ~(sandbox_profile : Keeper_types.sandbox_profile)
+      ~(sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile)
   : string list
   =
   let root = project_root_of_config config in
@@ -419,7 +419,7 @@ let ensure_sandbox_bundle_for_profile
     Returns the single sandbox root plus any explicit [allowed_paths]
     entries. Every additional path must be listed explicitly in
     [allowed_paths]. *)
-let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
+let effective_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
   sandbox_paths @ meta.allowed_paths
 ;;
@@ -428,7 +428,7 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
     Returns the single sandbox root plus any explicit [allowed_paths]
     entries. Every additional path must be listed explicitly in
     [allowed_paths]. *)
-let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
+let effective_write_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
   sandbox_paths @ meta.allowed_paths
 ;;

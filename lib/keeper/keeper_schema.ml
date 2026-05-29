@@ -4,7 +4,7 @@ open Masc_domain
 module Persona_contract = Keeper_persona_authoring_contract
 
 (** Issue #8430: canonical [tool_preset] strings. Mirrors
-    [Keeper_types.valid_tool_preset_strings]. Direct dependency would
+    [Keeper_meta_contract.valid_tool_preset_strings]. Direct dependency would
     create a cycle (Keeper_schema -> Keeper_types -> Keeper_types_profile
     -> Keeper_schema), so the test in [test_types.ml :: tool_preset_ssot]
     asserts these two lists stay in sync. *)

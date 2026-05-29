@@ -1,6 +1,8 @@
 (** Sandbox backend exec failure formatting + recording. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val status_label : Unix.process_status -> string
 

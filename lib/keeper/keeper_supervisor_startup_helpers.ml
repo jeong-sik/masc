@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_supervisor_types
 
 let backoff_delay attempt =

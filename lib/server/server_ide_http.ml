@@ -20,7 +20,7 @@ let resolve_workspace_base ~state ~uri =
     | Error _ -> None
   in
   let lookup_playground name =
-    match Keeper_types.read_meta config name with
+    match Keeper_meta_store.read_meta config name with
     | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
     | _ -> None
   in

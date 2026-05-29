@@ -16,7 +16,7 @@ let format_mentions (mentions : (string * string) list) : string =
     (List.map
        (fun (from_agent, content) ->
          Printf.sprintf "- @%s: %s" from_agent
-           (Keeper_types.short_preview ~max_len:200 content))
+           (Keeper_types_profile.short_preview ~max_len:200 content))
        mentions)
 
 let scope_message_prompt_limit = 12
@@ -60,7 +60,7 @@ let format_scope_messages
          (fun (from_agent, content) ->
            Printf.sprintf "- %s: %s"
              from_agent
-             (Keeper_types.short_preview ~max_len:scope_message_preview_len content))
+             (Keeper_types_profile.short_preview ~max_len:scope_message_preview_len content))
          shown_messages)
 
 let format_board_events
@@ -101,7 +101,7 @@ let format_board_events
          Printf.sprintf "- [%s] post_id=%s title=%S author=%s%s%s%s preview: %s"
            kind
            event.post_id
-           (Keeper_types.short_preview ~max_len:80 event.title)
+           (Keeper_types_profile.short_preview ~max_len:80 event.title)
            event.author
            hearth_note
            mention_note
@@ -435,7 +435,7 @@ let autonomous_trigger_lines
       List.filter_map Fun.id lines
   | _ -> []
 
-let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
+let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string

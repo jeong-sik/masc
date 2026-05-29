@@ -100,7 +100,7 @@ let approval_matches_goal goal_id approval_json =
   | None -> false
 
 let keeper_name_matches_meta metas name =
-  List.exists (fun (meta : Keeper_types.keeper_meta) -> String.equal meta.name name) metas
+  List.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> String.equal meta.name name) metas
 
 let keeper_name_of_assignee metas assignee =
   match Keeper_identity.canonical_keeper_name_from_agent_name assignee with

@@ -11,7 +11,7 @@ open Dashboard_http_keeper_types
     /api/v1/models/metrics) and per-agent spend (required by preview). *)
 let keeper_cost_aggregates_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ~(window_minutes : int)
   : Yojson.Safe.t =
   let now_ts = Unix.gettimeofday () in
@@ -19,7 +19,7 @@ let keeper_cost_aggregates_json
   let start_ts = now_ts -. window_sec in
   let keeper_items =
     List.map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
         let all_metrics_lines =
           let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
@@ -135,7 +135,7 @@ let keeper_cost_aggregates_json
     original schema variants. *)
 let keeper_decisions_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
@@ -143,7 +143,7 @@ let keeper_decisions_json
   let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
@@ -313,7 +313,7 @@ let keeper_decisions_json
 
 let keeper_decisions_log_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
@@ -321,7 +321,7 @@ let keeper_decisions_log_json
   let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
@@ -450,7 +450,7 @@ let keeper_decisions_log_json
 
 let keeper_memory_log_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
@@ -458,7 +458,7 @@ let keeper_memory_log_json
   let per_keeper_limit = limit * 2 in
   let all_entries =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_memory_bank_path config m.name in
         if not (Fs_compat.file_exists path)
         then []

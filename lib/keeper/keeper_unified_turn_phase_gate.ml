@@ -6,6 +6,8 @@
    Cascade_routing on the proceed path. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
 type phase_gate_outcome =

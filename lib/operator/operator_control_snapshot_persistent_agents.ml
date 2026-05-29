@@ -9,7 +9,7 @@
       operator snapshot schema (lossless filter — values are forwarded
       through `field_or_null`, no field synthesis).
     - When [keeper_rows] is absent, walks
-      [Keeper_types.persistent_agent_names config] (or the explicit
+      [Keeper_meta_store.persistent_agent_names config] (or the explicit
       [?keeper_names]), reads each keeper meta, asks
       [Dashboard_cache.get_or_compute] for a 2s-cached
       [Keeper_status_runtime.parse_agent_status] view, and assembles the
@@ -78,19 +78,19 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
       let names =
         match keeper_names with
         | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
+        | None -> Keeper_meta_store.persistent_agent_names config
       in
       rows_from_keeper_rows names rows
     | None ->
       let names =
         match keeper_names with
         | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
+        | None -> Keeper_meta_store.persistent_agent_names config
       in
       let agent_status_cache_ttl_s = 2.0 in
       List.filter_map
         (fun name ->
-           match Keeper_types.read_meta config name with
+           match Keeper_meta_store.read_meta config name with
            | Error _ | Ok None -> None
            | Ok (Some meta) ->
              let agent_json =

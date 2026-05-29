@@ -4,6 +4,8 @@
    Extracted from keeper_agent_run.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =

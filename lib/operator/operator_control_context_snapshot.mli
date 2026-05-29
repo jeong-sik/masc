@@ -1,6 +1,6 @@
 (** Keeper context snapshot helpers for operator control snapshots. *)
 
-val compute_context_ratio : Keeper_types.keeper_meta -> float option
+val compute_context_ratio : Keeper_meta_contract.keeper_meta -> float option
 
 type keeper_context_snapshot =
   { context_ratio : float option
@@ -18,10 +18,10 @@ val latest_keeper_context_snapshot_from_files :
   Coord.config -> string -> keeper_context_snapshot option
 
 val fallback_keeper_context_snapshot :
-  Keeper_types.keeper_meta -> keeper_context_snapshot
+  Keeper_meta_contract.keeper_meta -> keeper_context_snapshot
 
 val keeper_context_snapshot_of_meta :
-  Coord.config -> Keeper_types.keeper_meta -> keeper_context_snapshot
+  Coord.config -> Keeper_meta_contract.keeper_meta -> keeper_context_snapshot
 
 val keeper_context_snapshot_fields :
   keeper_context_snapshot -> (string * Yojson.Safe.t) list

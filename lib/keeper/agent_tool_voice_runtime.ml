@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 (** Runtime adapter for client-intercepted voice agent tools.

@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_alerting
 module StringMap = Set_util.StringMap
 
@@ -129,7 +131,7 @@ let missing_file_error_json
 ;;
 
 let find_registry_meta ~(keeper_name : string) ~(source_layer : string)
-  : Keeper_types.keeper_meta option
+  : Keeper_meta_contract.keeper_meta option
   =
   match Keeper_registry_lookup.find_by_name keeper_name with
   | None ->
@@ -290,7 +292,7 @@ let host_path_of_own_container_path
       ~(meta : keeper_meta)
       (raw : string)
   =
-  if Filename.is_relative raw || meta.sandbox_profile <> Keeper_types.Docker
+  if Filename.is_relative raw || meta.sandbox_profile <> Keeper_types_profile_sandbox.Docker
   then None
   else (
     let strip = Keeper_alerting_path.strip_trailing_slashes in

@@ -13,12 +13,12 @@ val goal_policy_nodes :
 
 val runtime_blocker_event_from_meta :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t option
 
 val runtime_trust_from_receipt_fallback :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t ->
   Yojson.Safe.t
 
@@ -26,7 +26,7 @@ type build_context = {
   now_ts : float;
   all_tasks : Masc_domain.task list;
   pending_approvals : Yojson.Safe.t list;
-  keeper_metas : Keeper_types.keeper_meta list;
+  keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
 }

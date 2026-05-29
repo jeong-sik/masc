@@ -8,6 +8,9 @@
     used by [Keeper_supervisor_self_preservation.apply]). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 
 let cleanup_dead_tombstone

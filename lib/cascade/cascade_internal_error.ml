@@ -77,7 +77,7 @@ let retry_admission_denial_to_yojson = function
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : Cascade_name.t;
-      reason : Keeper_types.cascade_exhaustion_reason;
+      reason : Keeper_meta_contract.cascade_exhaustion_reason;
     }
   | Capacity_backpressure of {
       cascade_name : Cascade_name.t;
@@ -219,7 +219,7 @@ let masc_internal_error_to_json = function
       [
         ("kind", `String "cascade_exhausted");
         ("cascade_name", `String cascade_name);
-        ("reason", Keeper_types.cascade_exhaustion_reason_to_json reason);
+        ("reason", Keeper_meta_contract.cascade_exhaustion_reason_to_json reason);
       ]
   | Capacity_backpressure { cascade_name; source; detail; retry_after_sec } ->
     let cascade_name = cascade_name_to_string cascade_name in

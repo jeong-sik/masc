@@ -4,6 +4,8 @@
     [Keeper_registry_setup] (godfile decomp). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_registry_setup
 

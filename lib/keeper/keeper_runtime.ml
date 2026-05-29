@@ -2,6 +2,9 @@
     Runtime-only mutable state stays behind keeper runtime/execution modules. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 (** #10061: compare personality text fields ignoring leading/trailing
     whitespace.  The TOML heredoc parser drops the newline before the

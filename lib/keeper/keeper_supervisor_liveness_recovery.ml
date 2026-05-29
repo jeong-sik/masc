@@ -1,6 +1,9 @@
 (** Dead-keeper liveness recovery scan. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 open Keeper_supervisor_types
 

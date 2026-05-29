@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_runtime_trust_timeline
 
 let terminal_reason_from_decision json =
@@ -470,14 +472,14 @@ let execution_summary_json ~meta ~latest_receipt =
     | Some receipt ->
         receipt |> json_member "sandbox"
         |> json_string_opt_member "kind"
-    | None -> Some (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
+    | None -> Some (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
   in
   let network_mode =
     match latest_receipt with
     | Some receipt ->
         receipt |> json_member "sandbox"
         |> json_string_opt_member "network_mode"
-    | None -> Some (Keeper_types.network_mode_to_string meta.network_mode)
+    | None -> Some (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
   in
   let sandbox_root =
     match latest_receipt with

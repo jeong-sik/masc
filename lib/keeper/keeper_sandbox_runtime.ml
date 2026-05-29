@@ -853,8 +853,8 @@ let preflight_cache_lookup ~now =
 
 let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
   match sandbox_profile with
-  | Keeper_types.Local -> Ok ()
-  | Keeper_types.Docker ->
+  | Keeper_types_profile_sandbox.Local -> Ok ()
+  | Keeper_types_profile_sandbox.Docker ->
     if not (Env_config_sandbox.Preflight.enabled ())
     then Ok ()
     else (

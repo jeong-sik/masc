@@ -30,7 +30,7 @@ type compaction_event =
 (** Combined post-turn outcome — compaction + rollover + continuity
     summary update + per-turn context metrics. *)
 type post_turn_lifecycle =
-  { updated_meta : Keeper_types.keeper_meta
+  { updated_meta : Keeper_meta_contract.keeper_meta
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
@@ -72,10 +72,10 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   on_compaction_started:(unit -> unit) ->
   on_handoff_started:(unit -> unit) ->
   base_dir:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_blocker_info:Keeper_types.blocker_info option ->
+  current_turn_blocker_info:Keeper_meta_contract.blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 (** Apply the keeper post-turn lifecycle with explicit resilience handles.
@@ -107,10 +107,10 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     retry: zero compaction gates so the next compaction always
     fires. *)
 val forced_overflow_retry_meta :
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   turn_generation:int ->
   now_ts:float ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta
 
 (** Reload the canonical OAS checkpoint and apply forced
     compaction so the turn can retry from a smaller context.
@@ -119,7 +119,7 @@ val forced_overflow_retry_meta :
     failed. *)
 val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
   overflow_retry_recovery option

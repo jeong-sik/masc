@@ -6,6 +6,9 @@
    Extracted from keeper_keepalive.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 open Keeper_keepalive_signal
@@ -249,7 +252,7 @@ let run_keepalive_unified_turn
               | Some info ->
                 let trimmed = String.trim info.detail in
                 if String.equal trimmed ""
-                then Keeper_types.blocker_class_to_string info.klass
+                then Keeper_meta_contract.blocker_class_to_string info.klass
                 else trimmed
               | None -> "unknown"
             in

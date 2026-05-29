@@ -124,5 +124,5 @@ let filter_model_visible_suggestions names =
     | Some public -> Some public
     | None when String.starts_with ~prefix:"keeper_" name -> None
     | None -> Some name)
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;

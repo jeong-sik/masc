@@ -74,7 +74,7 @@ let extract_user_message (messages : Yojson.Safe.t) : string option =
 (** Route to a keeper via Keeper_turn.handle_keeper_msg.
     Constructs the args JSON and context, then extracts the reply. *)
 let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) result =
-  let ctx : _ Keeper_types.context = {
+  let ctx : _ Keeper_types_profile.context = {
     config;
     agent_name = "provider_d-compat";
     sw;

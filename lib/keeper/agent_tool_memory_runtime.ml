@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 open Keeper_context_runtime
 module StringSet = Set_util.StringSet

@@ -5,6 +5,8 @@
     structured data instead of 60+ local bindings. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Parsed [keeper_up] tool arguments. Every optional field is
     [None] when the JSON arg was absent or [`Null]; non-optional

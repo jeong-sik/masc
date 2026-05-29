@@ -6,6 +6,8 @@
     agent_tool_command_runtime.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 (* Inlined from keeper_sandbox_docker_semantic (P1: 1 consumer via include). *)

@@ -11,8 +11,8 @@ let non_empty_trimmed_string_opt value =
   if trimmed = "" then None else Some trimmed
 ;;
 
-let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
-  let cascade_name = Keeper_types.cascade_name_of_meta meta in
+let keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
+  let cascade_name = Keeper_meta_contract.cascade_name_of_meta meta in
   let cascade_name_json =
     Json_util.string_opt_to_json (non_empty_trimmed_string_opt cascade_name)
   in
@@ -36,8 +36,8 @@ let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   ]
 ;;
 
-let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
-  let cascade_name = non_empty_trimmed_string_opt (Keeper_types.cascade_name_of_meta meta) in
+let degraded_keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
+  let cascade_name = non_empty_trimmed_string_opt (Keeper_meta_contract.cascade_name_of_meta meta) in
   let cascade_json = Json_util.string_opt_to_json cascade_name in
   [ "cascade_name", cascade_json
   ; "cascade_canonical", cascade_json

@@ -1,6 +1,8 @@
 (** Keeper status bridge helpers. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 
 let drift_surface_json ~unknown_toml_keys =

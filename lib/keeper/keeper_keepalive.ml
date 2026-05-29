@@ -27,6 +27,9 @@
     keeper lifecycle start/stop. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 include Keeper_turn_slot

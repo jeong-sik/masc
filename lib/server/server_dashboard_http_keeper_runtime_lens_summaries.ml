@@ -76,7 +76,7 @@ let find_override_field_source field sources =
   | _ -> None
 
 let config_drift_summary_json ~config ~keeper_name =
-  match Keeper_types.read_meta config keeper_name with
+  match Keeper_meta_store.read_meta config keeper_name with
   | Error message ->
     `Assoc
       [ ("present", `Bool false)

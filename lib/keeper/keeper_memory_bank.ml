@@ -47,6 +47,8 @@
 include Keeper_memory_bank_selection
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type keeper_memory_row_raw = {
   json: Yojson.Safe.t;

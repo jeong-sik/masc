@@ -62,10 +62,10 @@ let resolve_owner_keeper_identity config owner_name =
   let rec loop = function
     | [] -> None
     | candidate :: rest -> (
-        match Keeper_types.read_meta_resolved config candidate with
+        match Keeper_meta_store.read_meta_resolved config candidate with
         | Ok (Some (resolved_name, meta)) ->
             Some
-              (resolved_name, Option.map Keeper_id.Uid.to_string meta.Keeper_types.keeper_id)
+              (resolved_name, Option.map Keeper_id.Uid.to_string meta.keeper_id)
         | Ok None -> loop rest
         | Error _ -> loop rest)
   in

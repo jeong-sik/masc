@@ -1,6 +1,8 @@
 (** History JSONL migration and persistence helpers for keeper context. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module StringSet = Set_util.StringSet
 

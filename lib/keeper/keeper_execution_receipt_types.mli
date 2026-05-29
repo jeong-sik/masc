@@ -113,9 +113,9 @@ type t = {
   tools_used : string list;
   tool_contract_result : tool_contract_result;
   tool_surface : tool_surface;
-  sandbox_kind : Keeper_types.sandbox_profile;
+  sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile;
   sandbox_root : string option;
-  network_mode : Keeper_types.network_mode;
+  network_mode : Keeper_types_profile_sandbox.network_mode;
   approval_profile : string option;
   approval_profile_derived : bool;
   cascade_name : Cascade_name.t;
@@ -145,6 +145,6 @@ type t = {
 val stop_reason_to_string : Cascade_runner.stop_reason -> string
 val enrich_contract_violation_reason : t -> string
 val sandbox_kind_of_meta :
-  Keeper_types.keeper_meta -> Keeper_types.sandbox_profile
+  Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val list_json : 'a list -> [> `List of [> `String of 'a ] list ]
 val string_opt_json : 'a option -> [> `Null | `String of 'a ]

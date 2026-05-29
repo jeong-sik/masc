@@ -145,7 +145,7 @@ val max_turns_override_source : int option -> string
 (** {1 Context ratio} *)
 
 val compute_context_ratio :
-  Keeper_types.keeper_meta -> float option
+  Keeper_meta_contract.keeper_meta -> float option
 (** Returns [used_tokens / context_budget] when the
     keeper meta has a resolved context budget, [None]
     otherwise.  Pinned because
@@ -245,7 +245,7 @@ val recent_actions_json : Coord.config -> Yojson.Safe.t
 val cached_tool_audit_json :
   lightweight:bool ->
   Coord.config ->
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t
 (** Returns the cached tool-audit JSON for a keeper.
     [lightweight=true] uses the 120-second stale-fallback

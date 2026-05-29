@@ -407,7 +407,7 @@ let keeper_history_summary_json
     |> List.sort (fun (ka, va) (kb, vb) ->
          let c = compare vb va in
          if c <> 0 then c else String.compare ka kb)
-    |> Keeper_types.take 5
+    |> Keeper_types_profile.take 5
     |> List.map (fun (k, v) ->
          `Assoc [("keeper", `String k); ("count", `Int v)])
     |> fun xs -> `List xs
@@ -424,7 +424,7 @@ let top_counts_json
   |> List.sort (fun (ka, va) (kb, vb) ->
        let c = compare vb va in
        if c <> 0 then c else String.compare ka kb)
-  |> Keeper_types.take limit
+  |> Keeper_types_profile.take limit
   |> List.map (fun (k, v) ->
        `Assoc [ (name_key, `String k); ("count", `Int v) ])
 

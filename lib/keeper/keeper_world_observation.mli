@@ -175,24 +175,24 @@ type board_signal_match = {
 val collect_board_events :
   base_path:string ->
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
 val collect_board_events_without_advancing_cursor :
   base_path:string ->
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
 val board_signal_match :
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   signal:Board_dispatch.keeper_board_signal ->
   board_signal_match
 
 val board_signal_wake_reason :
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   signal:Board_dispatch.keeper_board_signal ->
   string option
 
@@ -200,7 +200,7 @@ val board_signal_wake_reason :
     for the next keeper prompt. Returns [None] for non-board stimuli. *)
 val pending_board_event_of_stimulus :
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
   pending_board_event option
 
@@ -208,7 +208,7 @@ val pending_board_event_of_stimulus :
     Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
 val read_continuity_summary :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string
 
 (** Build a world observation from room state and keeper metadata.
@@ -225,7 +225,7 @@ val observe :
   allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   world_observation
 
 (** Build the observation used by direct [masc_keeper_msg] turns.
@@ -239,7 +239,7 @@ val observe :
 val observe_direct_keeper_msg :
   allowed_tool_names:string list option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   world_observation
 
 (** Non-mutating probe for the smart-heartbeat gate.
@@ -252,16 +252,16 @@ val durable_signal_present :
   allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   bool
 
 (** Structured work signal present in the observation itself. *)
 val actionable_signal_present : world_observation -> bool
 
 val apply_message_cursor_updates :
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   (string * int) list ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta
 
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
@@ -276,7 +276,7 @@ val provider_cooldown_remaining_sec_for_cascade :
 val provider_capacity_blocked_task_count :
   ?provider_cooldown_remaining_sec:
     (cascade_name:Cascade_name.t -> int option) ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   claimable_task_count:int ->
   unit ->
   int
@@ -295,12 +295,12 @@ val should_inject_entropic_oscillation :
 val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:
     (cascade_name:Cascade_name.t -> int option) ->
-  meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val unified_turn_decision :
   ?provider_cooldown_remaining_sec:
     (cascade_name:Cascade_name.t -> int option) ->
-  meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val should_run_keeper_cycle :
-  meta:Keeper_types.keeper_meta -> world_observation -> bool
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

@@ -129,11 +129,11 @@ val playground_repos_path : string -> string
 val playground_bundle_paths : string -> string list
 
 (** Sandbox host root path for [meta]. *)
-val sandbox_path_of_meta : meta:Keeper_types.keeper_meta -> string
+val sandbox_path_of_meta : meta:Keeper_meta_contract.keeper_meta -> string
 
 (** Sandbox bundle paths (root, mind/, repos/) for [meta]. *)
 val sandbox_bundle_paths_of_meta :
-  meta:Keeper_types.keeper_meta -> string list
+  meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Ensure the playground bundle dirs exist; returns the absolute
     paths created. *)
@@ -142,24 +142,24 @@ val ensure_playground_bundle :
 
 val ensure_sandbox_bundle :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string list
 
 val ensure_sandbox_bundle_for_profile :
   config:Coord.config ->
   name:string ->
-  sandbox_profile:Keeper_types.sandbox_profile ->
+  sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
   string list
 
 (** Effective READ allowed_paths from keeper meta — sandbox root +
     explicit [allowed_paths]. *)
 val effective_allowed_paths :
-  meta:Keeper_types.keeper_meta -> string list
+  meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Effective WRITE allowed_paths from keeper meta — currently the
     same shape as [effective_allowed_paths]. *)
 val effective_write_allowed_paths :
-  meta:Keeper_types.keeper_meta -> string list
+  meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Resolve a path for read-only access within the keeper's
     effective allowlist; walks roots for missing relative paths. *)

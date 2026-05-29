@@ -35,7 +35,7 @@ type tree_node = {
 }
 
 type goal_detail_keeper = {
-  meta : Keeper_types.keeper_meta;
+  meta : Keeper_meta_contract.keeper_meta;
   latest_receipt : Yojson.Safe.t option;
   runtime_trust : Yojson.Safe.t;
 }

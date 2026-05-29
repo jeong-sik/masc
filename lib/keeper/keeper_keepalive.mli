@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
 val set_bus : Agent_sdk.Event_bus.t -> unit

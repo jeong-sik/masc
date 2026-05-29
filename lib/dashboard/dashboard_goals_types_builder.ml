@@ -68,7 +68,7 @@ let goal_policy_nodes goals =
       })
     goals
 
-let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
+let runtime_blocker_event_from_meta ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   let runtime_blocker_fields =
     Keeper_status_bridge.runtime_blocker_fields_json config meta
   in
@@ -117,7 +117,7 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
             ("next_human_action", `String "inspect_runtime_blocker");
           ])
 
-let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_meta)
+let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_meta_contract.keeper_meta)
     receipt =
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
@@ -197,7 +197,7 @@ type build_context = {
   now_ts : float;
   all_tasks : Masc_domain.task list;
   pending_approvals : Yojson.Safe.t list;
-  keeper_metas : Keeper_types.keeper_meta list;
+  keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
 }
@@ -233,9 +233,9 @@ let rec build_tree context goals goal =
   in
   let direct_goal_keeper_names =
     context.keeper_metas
-    |> List.filter (fun (meta : Keeper_types.keeper_meta) ->
+    |> List.filter (fun (meta : Keeper_meta_contract.keeper_meta) ->
            List.mem goal.Goal_store.id meta.active_goal_ids)
-    |> List.map (fun (meta : Keeper_types.keeper_meta) -> meta.name)
+    |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
   in
   let direct_linked_keeper_names =
     dedupe_sort (direct_task_keeper_names @ direct_goal_keeper_names)

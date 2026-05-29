@@ -13,22 +13,22 @@ type audit_status =
 type result = {
   agent_name : string;
   keeper_name : string;
-  sandbox_profile : Keeper_types.sandbox_profile;
+  sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile;
   status : audit_status;
 }
 
 val audit_one :
-  config:Coord.config -> meta:Keeper_types.keeper_meta -> result
+  config:Coord.config -> meta:Keeper_meta_contract.keeper_meta -> result
 (** Audit a single keeper's egress policy file location. *)
 
 val audit_all :
   config:Coord.config ->
-  metas:Keeper_types.keeper_meta list ->
+  metas:Keeper_meta_contract.keeper_meta list ->
   result list
 (** Audit every keeper meta supplied; pure mapping over [audit_one]. *)
 
 val host_direct_egress_path :
-  config:Coord.config -> meta:Keeper_types.keeper_meta -> string
+  config:Coord.config -> meta:Keeper_meta_contract.keeper_meta -> string
 (** Pre-Leak-11 host-direct location: [playground/<name>/egress.json].
     Exposed so boot hooks and tests can construct the same path the
     audit uses for [Stale_orphan] detection. *)
@@ -41,7 +41,7 @@ val format_missing_summary_line : result list -> string option
 (** Single WARN-line summary for active missing policies. Keeps boot logs
     bounded while per-keeper metrics still preserve cardinality. *)
 
-val inactive_missing_reason : Keeper_types.keeper_meta -> string option
+val inactive_missing_reason : Keeper_meta_contract.keeper_meta -> string option
 (** [Some reason] when a missing egress policy should not page operators
     because the keeper is intentionally inactive. *)
 

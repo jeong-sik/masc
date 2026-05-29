@@ -6,6 +6,8 @@
     @since God file decomposition *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type runtime_blocker_surface = {
   blocker_class : string;

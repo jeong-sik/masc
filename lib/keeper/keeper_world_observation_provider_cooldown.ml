@@ -6,6 +6,8 @@
     @since God file decomposition *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let fallback_cascade_for_provider_cooldown
       ~(base_cascade : string)

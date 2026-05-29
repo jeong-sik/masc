@@ -230,7 +230,7 @@ val checkpoint_text_cap_marker : string
 (** Pick the keeper's preferred model for checkpointing —
     canonical cascade name first, then a fallback list of
     provider-default labels. *)
-val checkpoint_model_of_meta : Keeper_types.keeper_meta -> string
+val checkpoint_model_of_meta : Keeper_meta_contract.keeper_meta -> string
 
 (** Project an OAS checkpoint to a working_context. Optionally
     repair orphan tool results and cap the message tail. *)

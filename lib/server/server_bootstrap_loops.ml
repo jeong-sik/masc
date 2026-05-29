@@ -691,7 +691,7 @@ let start_keeper_loops
       let config = state.room_config in
       let masc_root = Coord.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
-      let all_names = Keeper_types.keeper_names config in
+      let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
@@ -743,7 +743,7 @@ let start_keeper_loops
             (Printexc.to_string exn));
       let names = Keeper_runtime.bootable_keeper_names config in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
-      let keeper_boot_ctx : _ Keeper_types.context =
+      let keeper_boot_ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = "keeper-autoboot"
         ; sw
@@ -800,7 +800,7 @@ let start_keeper_loops
                 "autoboot: calling start_keepalive for %s (warmup=%ds)"
                 name
                 warmup;
-              let ctx : _ Keeper_types.context =
+              let ctx : _ Keeper_types_profile.context =
                 { config
                 ; agent_name = m.agent_name
                 ; sw

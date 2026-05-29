@@ -78,7 +78,7 @@ let deterministic_prefilter_names
       then None
       else Some name)
     in
-    Keeper_types.dedupe_keep_order (preferred_source_tools @ retrieved)
+    Keeper_types_profile_toml_normalizers.dedupe_keep_order (preferred_source_tools @ retrieved)
     |> List.filteri (fun i _ -> i < selection_limit)
   )
 ;;
@@ -98,9 +98,9 @@ let merge_tool_selection_boundary
      Core tools that also appear in deterministic_prefilter are deduped
      (first occurrence wins), so they naturally keep their BM25 rank. *)
   let deterministic_floor =
-    Keeper_types.dedupe_keep_order (deterministic_prefilter @ sorted_discovered @ core)
+    Keeper_types_profile_toml_normalizers.dedupe_keep_order (deterministic_prefilter @ sorted_discovered @ core)
   in
-  Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
+  Keeper_types_profile_toml_normalizers.dedupe_keep_order (deterministic_floor @ llm_selected)
 ;;
 
 let contract_enforcement_filter

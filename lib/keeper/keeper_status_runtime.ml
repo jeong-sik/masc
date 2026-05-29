@@ -3,6 +3,8 @@
     Metrics summary aggregation is in Keeper_status_metrics. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (* Agent staleness threshold — 2 minutes. An agent that hasn't sent a
    signal within this window is considered non-live. Used for live-signal

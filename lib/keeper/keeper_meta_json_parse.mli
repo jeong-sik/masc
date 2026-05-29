@@ -4,8 +4,6 @@
     stays in [Keeper_meta_json] so canonical-key derivation can
     use the public facade without creating a cycle. *)
 
-open Keeper_types_profile
-open Keeper_meta_contract
 
 (** Parsed identity slice of a persisted keeper meta. *)
 type parsed_keeper_identity =

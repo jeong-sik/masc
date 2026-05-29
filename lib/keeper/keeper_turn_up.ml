@@ -6,8 +6,11 @@
     - {!Keeper_turn_up_update}: existing keeper reconfiguration *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 let handle_keeper_up ctx args : tool_result =
   match Keeper_turn_up_args.parse ctx args with

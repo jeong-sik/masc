@@ -5,6 +5,9 @@
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_context_runtime
 module EC = Keeper_error_classify
 
@@ -160,21 +163,21 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
   Float.max 0.0 time_spent_in_turn_s < degraded_retry_slot_phase_budget_sec
 
 let cascade_reason_is_structural_attempt_timeout
-    (reason : Keeper_types.cascade_exhaustion_reason) : bool =
+    (reason : Keeper_meta_contract.cascade_exhaustion_reason) : bool =
   (* Typed match only. Producers must construct [Structural_attempt_timeout]
      explicitly; free-form OAS-ceiling-looking text remains [Other_detail].
      Enumerate every constructor so a new reason variant fails to compile here
      rather than silently falling through to [false]. *)
   match reason with
-  | Keeper_types.Structural_attempt_timeout _ -> true
-  | Keeper_types.Connection_refused
-  | Keeper_types.Dns_failure
-  | Keeper_types.No_providers_available
-  | Keeper_types.All_providers_failed
-  | Keeper_types.Candidates_filtered_after_cycles
-  | Keeper_types.Max_turns_exceeded
-  | Keeper_types.Capacity_exhausted
-  | Keeper_types.Other_detail _ -> false
+  | Keeper_meta_contract.Structural_attempt_timeout _ -> true
+  | Keeper_meta_contract.Connection_refused
+  | Keeper_meta_contract.Dns_failure
+  | Keeper_meta_contract.No_providers_available
+  | Keeper_meta_contract.All_providers_failed
+  | Keeper_meta_contract.Candidates_filtered_after_cycles
+  | Keeper_meta_contract.Max_turns_exceeded
+  | Keeper_meta_contract.Capacity_exhausted
+  | Keeper_meta_contract.Other_detail _ -> false
 
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =

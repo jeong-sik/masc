@@ -34,53 +34,53 @@ let mark_loop_detected ~(config : Coord.config) meta ~streak ~threshold =
   in
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path
-    meta.Keeper_types.name
+    meta.name
     (Some failure_reason);
   let stimulus =
     recovery_stimulus
       ~now:(Time_compat.now ())
-      ~keeper_name:meta.Keeper_types.name
+      ~keeper_name:meta.name
       ~streak
       ~threshold
   in
   Keeper_registry_event_queue.enqueue
     ~base_path:config.base_path
-    meta.Keeper_types.name
+    meta.name
     stimulus;
-  Keeper_registry.wakeup ~base_path:config.base_path meta.Keeper_types.name;
+  Keeper_registry.wakeup ~base_path:config.base_path meta.name;
   (try
      Keeper_reaction_ledger.record_event_queue_stimulus
        ~base_path:config.base_path
-       ~keeper_name:meta.Keeper_types.name
+       ~keeper_name:meta.name
        stimulus
    with
    | Eio.Cancel.Cancelled _ as exn -> raise exn
    | exn ->
      Log.Keeper.warn
        "%s: failed to persist stay-silent recovery stimulus in reaction ledger: %s"
-       meta.Keeper_types.name
+       meta.name
        (Printexc.to_string exn));
   Log.Keeper.warn
     "%s: stay_silent loop escalated to blocker and recovery stimulus \
      (streak=%d threshold=%d)"
-    meta.Keeper_types.name
+    meta.name
     streak
     threshold;
-  Keeper_types.map_runtime
+  Keeper_meta_contract.map_runtime
     (fun rt ->
        { rt with
          last_blocker =
            Some
              (Keeper_meta_contract.blocker_info_of_class
                 ~detail
-                Keeper_types.Stay_silent_loop)
+                Keeper_meta_contract.Stay_silent_loop)
        })
     meta
 ;;
 
 let clear_if_recovered ~(config : Coord.config) meta ~previous_streak ~was_latched =
   if was_latched then begin
-    match Keeper_registry.get ~base_path:config.base_path meta.Keeper_types.name with
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
     | Some { Keeper_registry.last_failure_reason =
                Some (Keeper_registry.Tool_required_unsatisfied { code; _ })
            ; _
@@ -88,17 +88,17 @@ let clear_if_recovered ~(config : Coord.config) meta ~previous_streak ~was_latch
       when String.equal code "stay_silent_loop" ->
       Keeper_registry.set_failure_reason
         ~base_path:config.base_path
-        meta.Keeper_types.name
+        meta.name
         None;
       Log.Keeper.info
         "%s: stay_silent loop recovered after non-silent turn \
          (previous_streak=%d)"
-        meta.Keeper_types.name
+        meta.name
         previous_streak
     | _ -> ()
   end;
-  match meta.Keeper_types.runtime.last_blocker with
-  | Some { Keeper_meta_contract.klass = Keeper_types.Stay_silent_loop; _ } ->
-    Keeper_types.map_runtime (fun rt -> { rt with last_blocker = None }) meta
+  match meta.runtime.last_blocker with
+  | Some { Keeper_meta_contract.klass = Keeper_meta_contract.Stay_silent_loop; _ } ->
+    Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
   | _ -> meta
 ;;

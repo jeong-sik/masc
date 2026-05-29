@@ -7,11 +7,13 @@
     an immutable {!hook_outputs} snapshot. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 
 type hook_accumulator =
-  { mutable meta : Keeper_types.keeper_meta
+  { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
   ; mutable completion_contract : Keeper_tool_completion_contract.completion_contract
@@ -28,7 +30,7 @@ type hook_accumulator =
   }
 
 type hook_outputs =
-  { out_meta : Keeper_types.keeper_meta
+  { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : tool_call_detail list
   ; out_completion_contract : Keeper_tool_completion_contract.completion_contract
   ; out_required_tool_use_seen : bool
@@ -60,7 +62,7 @@ let freeze (acc : hook_accumulator) : hook_outputs =
 ;;
 
 let merge_requested_tool_names_seen ~seen requested =
-  Keeper_types.dedupe_keep_order (seen @ requested)
+  Keeper_types_profile_toml_normalizers.dedupe_keep_order (seen @ requested)
 ;;
 
 let record_requested_tool_names (acc : hook_accumulator) requested =

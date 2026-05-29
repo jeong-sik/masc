@@ -32,7 +32,7 @@ let keeper_reaction_ledger_health_json () =
   | Some state ->
     let config = state.Mcp_server.room_config in
     let keeper_names =
-      try Keeper_types.keeper_names config |> sorted_unique_strings |> take 64 with
+      try Keeper_meta_store.keeper_names config |> sorted_unique_strings |> take 64 with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn

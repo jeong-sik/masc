@@ -781,7 +781,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some
       (Cascade_error_classify.Cascade_exhausted
-         { reason = Keeper_types.Max_turns_exceeded; _ }) ->
+         { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
       true
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Capacity_backpressure _)

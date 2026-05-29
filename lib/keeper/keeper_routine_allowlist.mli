@@ -75,7 +75,7 @@ val rule_label :
     path- and keeper-state-aware. *)
 val sandboxed_code_write_rule_label :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:Keeper_approval_queue.risk_level ->

@@ -146,16 +146,16 @@ val context_overflow_event_of_error
     Uses the first available model in the cascade rather than the largest
     fallback model, so lifecycle context math matches the provider that will
     receive the first request. Exposed for regression tests. *)
-val resolved_max_context_for_turn : meta:Keeper_types.keeper_meta -> string list -> int
+val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> string list -> int
 
 (** Persist paused/resumed state before mutating the live registry/phase.
     Returns [Error] when disk sync fails so callers can surface the failure
     instead of silently diverging runtime vs persisted state. *)
 val sync_keeper_paused_state
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> paused:bool
-  -> (Keeper_types.keeper_meta, string) result
+  -> (Keeper_meta_contract.keeper_meta, string) result
 
 (** Required-tool contract failures are persistent keeper/provider contract
     failures, not transient provider blips. Repeated occurrences should pause
@@ -265,7 +265,7 @@ val next_fail_open_cascade_for_turn
     a live provider cancellation. *)
 val record_streaming_cancelled_observation
   :  config:Coord.config
-  -> run_meta:Keeper_types.keeper_meta
+  -> run_meta:Keeper_meta_contract.keeper_meta
   -> run_generation:int
   -> cascade_name:Cascade_name.t
   -> keeper_turn_id:int
@@ -274,7 +274,7 @@ val record_streaming_cancelled_observation
 
 val run_keeper_cycle
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
   -> ?channel:Keeper_world_observation.keeper_cycle_channel
@@ -283,7 +283,7 @@ val run_keeper_cycle
   -> ?shared_context:Agent_sdk.Context.t
   -> ?selected_item:string * Cascade_ref.cascade_item
   -> unit
-  -> (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
+  -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
 
 (** Run a unified keeper turn.
 

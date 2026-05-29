@@ -5,6 +5,8 @@
    extracted to Keeper_turn_slot_acquire as part of godfile near-threshold split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_turn_slot_acquire
 

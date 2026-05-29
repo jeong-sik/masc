@@ -7,6 +7,8 @@
 *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** {1 Error Logging} *)
 

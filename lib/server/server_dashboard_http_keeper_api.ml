@@ -302,7 +302,7 @@ let handle_keeper_get_subroutes state req request reqd =
         reqd
     else
       let config = state.Mcp_server.room_config in
-      (match Keeper_types.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Error e ->
          respond_error ~status:`Internal_server_error reqd e
        | Ok None ->
@@ -429,7 +429,7 @@ let handle_keeper_get_subroutes state req request reqd =
          Keepers may also have a separate agent_name — look up both. *)
       let config = state.Mcp_server.room_config in
       let agent_name_opt =
-        match Keeper_types.read_meta config name with
+        match Keeper_meta_store.read_meta config name with
         | Ok (Some m) when m.agent_name <> name -> Some m.agent_name
         | _ -> None
       in
@@ -473,7 +473,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
       let stats = Thompson_sampling.get_stats name in
-      let meta = Keeper_types.read_meta
+      let meta = Keeper_meta_store.read_meta
           state.Mcp_server.room_config name in
       let tool_count = match meta with
         | Ok (Some m) ->
@@ -506,7 +506,7 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some m) ->
           let routing =
             Keeper_cascade_routing.select_cascade
-              ~base_cascade:(Keeper_types.cascade_name_of_meta m) ~phase:current
+              ~base_cascade:(Keeper_meta_contract.cascade_name_of_meta m) ~phase:current
           in
           let models = [ "candidate" ] in
           let provider_health = [] in

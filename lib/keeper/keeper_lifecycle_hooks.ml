@@ -34,7 +34,7 @@ let register (h : hook) : unit =
 
 let record_coverage_gap ?base_dir ?meta ~callback ~error () =
   match base_dir, meta with
-  | Some masc_root, Some (meta : Keeper_types.keeper_meta) -> (
+  | Some masc_root, Some (meta : Keeper_meta_contract.keeper_meta) -> (
       try
         Telemetry_coverage_gap.record
           ~masc_root

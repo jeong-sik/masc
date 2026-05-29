@@ -9,6 +9,8 @@
     complete or are recovered from disk as lost after a process restart. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type request_status =
   | Queued

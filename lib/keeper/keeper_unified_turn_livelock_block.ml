@@ -66,7 +66,7 @@ let record_escalation_log ~keeper_name ~keeper_turn_id ~turn_id ~reason_string ~
 
 let persist_turn_livelock_pause
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(detail : string)
   : unit
   =
@@ -77,7 +77,7 @@ let persist_turn_livelock_pause
       ~reason_tag:"turn_livelock"
       ~lifecycle_detail:detail
       ~log_message:(Printf.sprintf "paused keeper after turn livelock block: %s" detail)
-      ~blocker_class:(Some Keeper_types.Turn_livelock_blocked)
+      ~blocker_class:(Some Keeper_meta_contract.Turn_livelock_blocked)
       ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
       ()
   with
@@ -87,13 +87,13 @@ let persist_turn_livelock_pause
 
 let handle
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(generation : int)
       ~(keeper_turn_id : int)
       ~(turn_id : int)
       ~(initial_execution : Keeper_turn_cascade_budget.cascade_execution)
       ~(reason : Keeper_turn_livelock.gate_reason)
-  : (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
+  : (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
   =
   let reason_string = Keeper_turn_livelock.gate_reason_to_string reason in
   let terminal_reason_code = Printf.sprintf "turn_livelock:%s" reason_string in

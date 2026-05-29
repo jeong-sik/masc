@@ -1,7 +1,7 @@
 open Dashboard_http_keeper_types
 
 let keeper_trust_json ?(include_receipt = false)
-    (config : Coord.config) (meta : Keeper_types.keeper_meta) =
+    (config : Coord.config) (meta : Keeper_meta_contract.keeper_meta) =
   let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
   let runtime_trust =
     if include_receipt
@@ -14,9 +14,9 @@ let keeper_trust_json ?(include_receipt = false)
     | None ->
         `Assoc
           [
-            ("kind", `String (Keeper_types.sandbox_profile_to_string meta.sandbox_profile));
+            ("kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile));
             ("sandbox_root", `String config.base_path);
-            ("network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode));
+            ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
           ]
   in
   let approval_json =
@@ -38,7 +38,7 @@ let keeper_trust_json ?(include_receipt = false)
     | None ->
         `Assoc
           [
-            ("name", `String (Keeper_types.cascade_name_of_meta meta));
+            ("name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
             ("cascade_ref", cascade_ref_json);
             ("selected_model", `Null);
             ("attempt_count", `Int 0);

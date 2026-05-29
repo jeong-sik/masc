@@ -18,7 +18,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
     (Tools.raw_schemas
      @ Tool_schemas_misc.schemas
      @ Tool_board.tools
-     @ Keeper_types.schemas
+     @ Keeper_types_profile.schemas
      @ Tool_local_runtime.schemas
      @ Tool_agent_timeline.schemas
      @ Tool_shard.schemas

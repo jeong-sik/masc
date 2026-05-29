@@ -7,6 +7,8 @@
     are provided directly by this module. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** {1 Working Context Types (re-exported from Keeper_types)} *)
 

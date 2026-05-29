@@ -87,7 +87,7 @@ let find_empty_goal_keepers (config : Coord.config) : string list =
     Array.fold_left (fun acc entry ->
       if Filename.check_suffix entry ".json" then begin
         let name = Filename.chop_suffix entry ".json" in
-        match Keeper_types.read_meta config name with
+        match Keeper_meta_store.read_meta config name with
         | Ok (Some meta) when meta.active_goal_ids = [] ->
             name :: acc
         | _ -> acc
@@ -101,7 +101,7 @@ let find_empty_goal_keepers (config : Coord.config) : string list =
     [active_goal_ids]. Returns [Ok action] on success, [Error msg] on
     failure. *)
 let repair_keeper (config : Coord.config) (name : string) : (repair_action, string) result =
-  match Keeper_types.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Error e -> Error (Printf.sprintf "read_meta failed: %s" e)
   | Ok None -> Error "keeper meta not found"
   | Ok (Some meta) ->
@@ -112,7 +112,7 @@ let repair_keeper (config : Coord.config) (name : string) : (repair_action, stri
       let title = goal_title_of_purpose meta.goal in
       let assign_goal ~goal_id ~source =
         let updated = { meta with active_goal_ids = [ goal_id ] } in
-        match Keeper_types.write_meta config updated with
+        match Keeper_meta_store.write_meta config updated with
         | Error e ->
             Prometheus.inc_counter
               Keeper_metrics.(to_string WriteMetaFailures)
@@ -141,7 +141,7 @@ let repair_keeper (config : Coord.config) (name : string) : (repair_action, stri
 let dry_run (config : Coord.config) : repair_result =
   let names = find_empty_goal_keepers config in
   List.fold_left (fun acc name ->
-    match Keeper_types.read_meta config name with
+    match Keeper_meta_store.read_meta config name with
     | Error e -> { acc with errors = (name, e) :: acc.errors }
     | Ok None -> { acc with skipped = (name, "meta not found") :: acc.skipped }
     | Ok (Some meta) ->

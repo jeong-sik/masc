@@ -1,6 +1,8 @@
 (** Keeper_coordination — Coord presence and room cursor management. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val room_cursor_for : keeper_meta -> string -> int
 

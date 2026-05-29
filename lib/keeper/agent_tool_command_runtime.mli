@@ -43,7 +43,7 @@ val agent_tool_execute_shell_ir_native_min_timeout_sec : float
 
 val rewrite_turn_runtime_paths_to_host :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
 (** Rewrites occurrences of the keeper sandbox container root back to the
@@ -53,7 +53,7 @@ val rewrite_turn_runtime_paths_to_host :
 
 val rewrite_docker_host_paths_to_container :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
 (** Rewrites host playground root occurrences in keeper-issued Docker
@@ -65,7 +65,7 @@ val handle_tool_execute :
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   unit ->
   string
@@ -82,6 +82,6 @@ val handle_tool_search_files :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   string

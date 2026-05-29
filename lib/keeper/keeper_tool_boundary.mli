@@ -22,4 +22,4 @@ val create :
   'a context
 
 val dispatch :
-  _ context -> name:string -> args:Yojson.Safe.t -> Keeper_types.tool_result option
+  _ context -> name:string -> args:Yojson.Safe.t -> Keeper_types_profile.tool_result option

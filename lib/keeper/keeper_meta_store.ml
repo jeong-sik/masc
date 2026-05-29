@@ -4,9 +4,6 @@
     their public API while durable meta storage is separated from the
     compatibility facade. *)
 
-open Keeper_types_profile
-open Keeper_meta_contract
-open Keeper_meta_json
 
 let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
   ref (fun _ _ -> ())

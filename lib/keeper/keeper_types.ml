@@ -1,21 +1,12 @@
-(** Keeper_types - public keeper contract facade for profile, meta codec/store,
-    and health types. *)
+(** Keeper_types — health, continuity, and context types.
 
-(* Utility functions, canonical helpers, profile defaults, and dir helpers
-   extracted to Keeper_types_profile *)
-include Keeper_types_profile
+    Formerly a facade that re-exported [Keeper_meta_contract],
+    [Keeper_types_profile], [Keeper_meta_json], and [Keeper_meta_store]
+    via [include]. RFC-0205 removed the facade: consumers now access
+    those modules directly via qualified names.
 
-(* Policy/runtime/meta contract and pure helpers extracted from the
-   store/JSON facade. Keeper_types includes this module for API
-   compatibility. *)
-include Keeper_meta_contract
-
-(* JSON scrubbing, serialization, and parsing is factored out so this facade
-   can focus on keeper meta store I/O and the public contract surface. *)
-include Keeper_meta_json
-
-(* Durable meta store I/O and CAS write helpers. *)
-include Keeper_meta_store
+    This module owns only the types that cannot live closer to their
+    consumer without creating circular dependencies. *)
 
 (** Fiber-level health for keeper supervisor monitoring.
     Defined here (not in Keeper_supervisor) to avoid circular

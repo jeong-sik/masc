@@ -12,6 +12,8 @@
     @since 2.149.0 — .mli added to stabilize module interface *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type runtime_blocker_surface = {
   blocker_class : string;

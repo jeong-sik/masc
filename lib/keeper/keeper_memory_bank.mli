@@ -34,7 +34,7 @@ type keeper_policy_observation =
 
 val observation_has_question : string -> bool
 val keeper_policy_observation_of_room_message :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   room_id:string -> Masc_domain.message -> keeper_policy_observation
 
 type alert_channel_result =
@@ -342,7 +342,7 @@ val write_memory_bank_rows :
 val compact_memory_bank_if_needed :
   ?summarizer:memory_consolidation_summarizer ->
   Coord.config ->
-  Keeper_types.keeper_meta -> memory_bank_compaction
+  Keeper_meta_contract.keeper_meta -> memory_bank_compaction
 (** Run a compaction pass for the keeper if the file has crossed the
     byte trigger or note-count target; returns
     [no_memory_bank_compaction] when nothing happened. *)
@@ -351,7 +351,7 @@ val compact_memory_bank_if_needed :
 
 val append_memory_notes_from_reply :
   Coord.config ->
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   ?snapshot:keeper_state_snapshot ->
   turn:int -> reply:string -> unit -> int * string list
 (** Persist new memory rows derived from a turn's [reply] (and
@@ -362,7 +362,7 @@ val append_memory_notes_from_reply :
     [Multimodal.Tool_emission] reserved kind/id tags are eligible. *)
 val append_memory_notes_from_tool_results :
   Coord.config ->
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   turn:int ->
   results:Yojson.Safe.t list ->
   int

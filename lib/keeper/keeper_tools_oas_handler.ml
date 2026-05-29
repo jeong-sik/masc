@@ -16,7 +16,7 @@ let make_keeper_tool_handler
       ~(name : string)
       ~(input_schema : Yojson.Safe.t)
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
       ?turn_sandbox_factory_git

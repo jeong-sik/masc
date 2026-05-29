@@ -6,7 +6,7 @@ module U = Yojson.Safe.Util
 let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
 let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
 
-let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
+let lightweight_tool_audit_fallback_json (meta : Keeper_meta_contract.keeper_meta) =
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let has_runtime_activity =
     last_autonomous <> ""
@@ -71,7 +71,7 @@ let recent_tool_names_from_files config keeper_name =
 let keeper_tool_audit_fields
       ?(include_allowed_tools = true)
       config
-      (meta : Keeper_types.keeper_meta)
+      (meta : Keeper_meta_contract.keeper_meta)
   =
   let fallback_allowed =
     if include_allowed_tools then Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta else []
@@ -122,7 +122,7 @@ let keeper_tool_audit_fields
 let cached_tool_audit_json
       ~lightweight
       (config : Coord.config)
-      (meta : Keeper_types.keeper_meta)
+      (meta : Keeper_meta_contract.keeper_meta)
   =
   let base_hash = Digest.to_hex (Digest.string config.base_path) in
   let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in

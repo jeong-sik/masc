@@ -55,7 +55,7 @@ let trajectory_duration_ms duration_ms =
   else max 1 (int_of_float (Float.round duration_ms))
 
 let record_pre_tool_gate_attempt
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(tool_call_count_ref : int ref)
     ?(trajectory_acc : Trajectory.accumulator option)
     (event : Keeper_guards.gate_decision_event) =

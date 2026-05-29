@@ -25,7 +25,7 @@ let canonical_internal_name_for_tool_name tool_name =
 let public_names_for_internal internal_name =
   Agent_tool_descriptor.public_descriptors_for_internal internal_name
   |> List.map (fun descriptor -> descriptor.Agent_tool_descriptor.public_name)
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
 let public_name_for_internal internal_name =
@@ -41,7 +41,7 @@ let public_names_for_allowed_internal_names internal_names =
   |> List.filter (fun (descriptor : Agent_tool_descriptor.t) ->
     Hashtbl.mem allowed descriptor.internal_name)
   |> List.map (fun descriptor -> descriptor.Agent_tool_descriptor.public_name)
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
 let effect_domain_for_tool_name tool_name =

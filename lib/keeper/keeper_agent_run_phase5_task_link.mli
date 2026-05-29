@@ -3,7 +3,7 @@
 
 val run :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   acc:Keeper_run_tools.hook_accumulator ->
   unit ->
   unit

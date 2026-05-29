@@ -49,7 +49,7 @@ let oas_checkpoint_summary_json
 let inventory_json (config : Coord.config) (name : string)
   : [ `OK | `Not_found ] * Yojson.Safe.t
   =
-  match Keeper_types.read_meta_resolved config name with
+  match Keeper_meta_store.read_meta_resolved config name with
   | Error msg -> `Not_found, `Assoc [ "error", `String msg ]
   | Ok None ->
     ( `Not_found

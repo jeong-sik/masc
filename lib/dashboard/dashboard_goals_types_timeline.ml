@@ -11,7 +11,6 @@
     inspectors. Re-included by [Dashboard_goals_types] so the public
     surface is unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
 
 let goal_status_color = function
@@ -155,8 +154,8 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
   let meta = detail.meta in
   let latest_receipt = detail.latest_receipt in
   let latest_causal_event =
-    match detail.runtime_trust |> member "latest_causal_event" with
-    | `Assoc _ as event -> event
+    match Json_util.assoc_member_opt "latest_causal_event" detail.runtime_trust with
+    | Some (`Assoc _ as event) -> event
     | _ -> `Null
   in
   let latest_execution_outcome =
@@ -223,17 +222,17 @@ let timeline_event_json ~ts ~kind ~lane ~title ~summary ~severity =
     ]
 
 let json_member_or_null field = function
-  | `Assoc _ as json -> member field json
+  | `Assoc _ as json -> Option.value ~default:`Null (Json_util.assoc_member_opt field json)
   | _ -> `Null
 
 let goal_event_timeline_json event =
   let event_type =
-    event |> member "event_type" |> to_string_option
+    Json_util.get_string "event_type" event
     |> Option.value ~default:"goal_event"
   in
-  let payload = event |> member "payload" in
+  let payload = Option.value ~default:`Null (Json_util.assoc_member_opt "payload" event) in
   let payload_field field = json_member_or_null field payload in
-  let ts = event |> member "ts" |> to_string_option |> Option.value ~default:"" in
+  let ts = Json_util.get_string "ts" event |> Option.value ~default:"" in
   let title, summary, severity =
     match event_type with
     | "goal_phase" ->
@@ -343,15 +342,15 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let approval_events =
     approvals
     |> List.filter_map (fun approval ->
-           match approval |> member "requested_at_iso" |> to_string_option with
+           match Json_util.get_string "requested_at_iso" approval with
            | None -> None
            | Some requested_at ->
                let approval_id =
-                 approval |> member "id" |> to_string_option
+                 Json_util.get_string "id" approval
                  |> Option.value ~default:"approval"
                in
                let tool_name =
-                 approval |> member "tool_name" |> to_string_option
+                 Json_util.get_string "tool_name" approval
                  |> Option.value ~default:"tool"
                in
                Some
@@ -359,7 +358,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                     ~lane:("approval:" ^ approval_id)
                     ~title:(Printf.sprintf "Approval · %s" tool_name)
                     ~summary:
-                      (approval |> member "input_preview" |> to_string_option
+                      (Json_util.get_string "input_preview" approval
                        |> Option.value ~default:"pending operator decision")
                     ~severity:"warn"))
   in
@@ -369,19 +368,19 @@ let build_goal_timeline node linked_keepers approvals goal_events =
            match trust_latest_event detail.runtime_trust with
            | Some event ->
                let title =
-                 event |> member "title" |> to_string_option
+                 Json_util.get_string "title" event
                  |> Option.value ~default:(Printf.sprintf "Keeper · %s" detail.meta.name)
                in
                let summary =
-                 event |> member "summary" |> to_string_option
+                 Json_util.get_string "summary" event
                  |> Option.value ~default:"latest keeper event"
                in
                let severity =
-                 event |> member "severity" |> to_string_option
+                 Json_util.get_string "severity" event
                  |> Option.value ~default:"warn"
                in
                let ts =
-                 event |> member "ts" |> to_string_option
+                 Json_util.get_string "ts" event
                  |> Option.value ~default:(Masc_domain.now_iso ())
                in
                Some
@@ -421,6 +420,6 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let goal_events = List.map goal_event_timeline_json goal_events in
   task_events @ approval_events @ keeper_events @ goal_events
   |> List.sort (fun left right ->
-         let lts = left |> member "ts" |> to_string_option |> Option.value ~default:"" in
-         let rts = right |> member "ts" |> to_string_option |> Option.value ~default:"" in
+         let lts = Json_util.get_string "ts" left |> Option.value ~default:"" in
+         let rts = Json_util.get_string "ts" right |> Option.value ~default:"" in
          String.compare rts lts)

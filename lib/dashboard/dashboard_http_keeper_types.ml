@@ -69,7 +69,7 @@ let terminal_reason_code_of_decision_json json =
   match Json_util.assoc_string_opt "terminal_reason_code" json with
   | Some _ as value -> value
   | None ->
-    (match Yojson.Safe.Util.member "terminal_reason" json with
+    (match Json_util.assoc_member_opt "terminal_reason" json with
      | `Assoc _ as terminal_reason ->
        Json_util.assoc_string_opt "code" terminal_reason
      | _ -> None)
@@ -89,8 +89,8 @@ let latest_receipt_ts_of_keeper_rows rows =
   |> List.fold_left
        (fun acc row ->
          match
-           Yojson.Safe.Util.member "trust" row
-           |> Yojson.Safe.Util.member "last_receipt_at"
+           Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row)
+           |> (fun v -> Option.value ~default:`Null (Json_util.assoc_member_opt "last_receipt_at" v))
          with
          | `String iso -> (
              match Masc_domain.parse_iso8601_opt iso with
@@ -158,7 +158,7 @@ let string_member_nonempty key json =
   Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
 
 let int_member_fallback key json =
-  let usage = Yojson.Safe.Util.member "usage" json in
+  let usage = Option.value ~default:`Null (Json_util.assoc_member_opt "usage" json) in
   match Safe_ops.json_int_opt key usage with
   | Some value -> Some value
   | None -> Safe_ops.json_int_opt key json

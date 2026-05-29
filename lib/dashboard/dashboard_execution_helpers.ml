@@ -225,14 +225,13 @@ let load_persona_profile (persona_name : string) : agent_profile option =
     match Safe_ops.read_json_file_safe path with
     | Error _ -> None
     | Ok json ->
-        let open Yojson.Safe.Util in
         let name_val =
           Safe_ops.json_string_opt "name" json
           |> Option.value ~default:persona_name
         in
         let keeper_json =
           Safe_ops.protect ~default:None (fun () ->
-            Some (json |> member "keeper"))
+            Some (Option.value ~default:`Null (Json_util.assoc_member_opt "keeper" json)))
         in
         let model =
           match keeper_json with
@@ -281,14 +280,14 @@ let populate_neo4j_identity_cache_locked () =
   | Ok output -> (
       try
         let json = Yojson.Safe.from_string output in
-        let open Yojson.Safe.Util in
+        let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
         let edges =
-          json |> member "data" |> member "agents" |> member "edges"
-          |> to_list
+          json |> m "data" |> m "agents" |> m "edges"
+          |> Yojson.Safe.Util.to_list
         in
         List.iter
           (fun edge ->
-            let node = edge |> member "node" in
+            let node = edge |> m "node" in
             let name = Safe_ops.json_string ~default:"" "name" node in
             if name <> "" then begin
               let emoji =
@@ -302,11 +301,11 @@ let populate_neo4j_identity_cache_locked () =
               let model = Safe_ops.json_string_opt "model" node in
               let traits =
                 Safe_ops.protect ~default:[] (fun () ->
-                  node |> member "traits" |> to_list |> List.map to_string)
+                  node |> m "traits" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string)
               in
               let interests =
                 Safe_ops.protect ~default:[] (fun () ->
-                  node |> member "interests" |> to_list |> List.map to_string)
+                  node |> m "interests" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string)
               in
               let activity_level = Safe_ops.json_float_opt "activityLevel" node in
               let primary_value = Safe_ops.json_string_opt "primaryValue" node in

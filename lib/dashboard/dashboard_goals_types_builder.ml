@@ -14,7 +14,6 @@
     Re-included by [Dashboard_goals_types] so the public surface is
     unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
 open Dashboard_goals_types_health
 
@@ -184,7 +183,7 @@ let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_meta_contract.ke
         `Assoc
           [
             ( "tool_contract_result",
-              receipt |> member "tool_contract_result" );
+              Option.value ~default:`Null (Json_util.assoc_member_opt "tool_contract_result" receipt) );
             ("latest_receipt_at", `String ts);
           ] );
       ("runtime_blockers", `Assoc runtime_blocker_fields);
@@ -273,7 +272,7 @@ let rec build_tree context goals goal =
   let approval_activity_values =
     direct_pending_approvals
     |> List.filter_map (fun json ->
-           json |> member "requested_at_iso" |> to_string_option)
+           Json_util.get_string "requested_at_iso" json)
   in
   let receipt_activity_values =
     direct_receipts |> List.filter_map receipt_ended_at

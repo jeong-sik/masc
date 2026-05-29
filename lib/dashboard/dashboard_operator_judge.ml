@@ -1,5 +1,3 @@
-open Yojson.Safe.Util
-
 type runtime_snapshot = {
   enabled : bool;
   judge_online : bool;
@@ -110,8 +108,8 @@ let runtime_status base_path =
 let normalize_text = Dashboard_http_helpers.normalize_text
 
 let parse_string_list json key =
-  match json |> member key with
-  | `List items ->
+  match Json_util.assoc_member_opt key json with
+  | Some (`List items) ->
       items
       |> List.filter_map (function
              | `String value ->
@@ -128,20 +126,21 @@ let build_recommended_action ~actor ~target_type ~target_id json =
   match json with
   | `Assoc _ ->
       let action_type =
-        json |> member member_action_type |> to_string_option |> Option.map String.trim
+        Json_util.get_string member_action_type json |> Option.map String.trim
       in
       (match action_type with
       | Some action_type when action_type <> "" && allowed_action_type action_type ->
           let severity =
-            json |> member member_severity |> to_string_option
+            Json_util.get_string member_severity json
             |> Option.value ~default:severity_warn
           in
           let reason =
             normalize_text
-              (json |> member member_reason |> to_string_option |> Option.value ~default:"")
+              (Json_util.get_string member_reason json |> Option.value ~default:"")
           in
           let suggested_payload =
-            match json |> member member_suggested_payload with
+            match Json_util.assoc_member_opt member_suggested_payload json with
+            | Some (`Assoc _ as value) -> value
             | `Assoc _ as value -> value
             | _ -> `Assoc []
           in
@@ -185,15 +184,13 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
   | `Assoc _ ->
       let summary =
         normalize_text
-          (json |> member member_summary |> to_string_option |> Option.value ~default:"")
+          (Json_util.get_string member_summary json |> Option.value ~default:"")
       in
       if summary = "" then None
       else
         let confidence =
-          match json |> member member_confidence with
-          | `Float value -> value
-          | `Int value -> float_of_int value
-          | _ -> 0.0
+          Json_util.get_float member_confidence json
+          |> Option.value ~default:0.0
         in
         let fresh_until_unix =
           generated_at_unix +. float_of_int (room_ttl_sec ())
@@ -204,10 +201,10 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
              ~confidence ?model_name:None
              ?recommended_action:
                (build_recommended_action ~actor:keeper_name ~target_type:"root"
-                  ~target_id:None (json |> member member_recommended_action))
+                  ~target_id:None (Option.value ~default:`Null (Json_util.assoc_member_opt member_recommended_action json)))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:
-               (json |> member member_disagreement_with_truth |> to_bool_option
+               (Json_util.get_bool member_disagreement_with_truth json
                |> Option.value ~default:false)
              ~generated_at ~generated_at_unix
              ~fresh_until:(Dashboard_utils.iso_of_unix fresh_until_unix)

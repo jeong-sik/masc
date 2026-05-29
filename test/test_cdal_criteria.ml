@@ -30,10 +30,7 @@ let test_keeper_turn_capture_v1_roundtrip () =
     (Crit.Keeper_turn_capture_v1
        { keeper_name = "k-1"
        ; agent_name = "agent-1"
-       ; sandbox_profile = "local"
-       ; sandbox_image = None
        ; network_mode = "none"
-       ; allowed_paths = [ "/p1"; "/p2" ]
        ; active_goal_ids = [ "g1"; "g2" ]
        ; current_task_id = Some "task-1"
        })

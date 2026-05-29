@@ -18,7 +18,6 @@ let check_bool = check bool
 let make_contract
       ?(mode = Em.Execute)
       ?(risk = Risk.Low)
-      ?(mutations = [])
       ?(review = None)
       ?(eval = Crit.Free `Null)
       ()
@@ -27,7 +26,6 @@ let make_contract
     Rc.
       { requested_execution_mode = mode
       ; risk_class = risk
-      ; allowed_mutations = mutations
       ; review_requirement = review
       }
   in
@@ -65,14 +63,6 @@ let test_contract_id_sensitive_to_risk () =
   check_bool "different risks, different ids" true (id1 <> id2)
 ;;
 
-let test_contract_id_sensitive_to_mutations () =
-  let c1 = make_contract ~mutations:[ "Write" ] () in
-  let c2 = make_contract ~mutations:[ "Write"; "Execute" ] () in
-  let id1 = Rc.contract_id c1 in
-  let id2 = Rc.contract_id c2 in
-  check_bool "different mutations, different ids" true (id1 <> id2)
-;;
-
 let test_contract_id_sensitive_to_review () =
   let c1 = make_contract ~review:None () in
   let c2 = make_contract ~review:(Some "human-approval") () in
@@ -99,7 +89,7 @@ let test_canonical_json_is_sorted () =
 ;;
 
 let test_canonical_json_no_whitespace () =
-  let c = make_contract ~mutations:[ "Write"; "Execute" ] () in
+  let c = make_contract () in
   let json = Rc.canonical_json c in
   check_bool "compact (no newline)" true (not (String.contains json '\n'))
 ;;
@@ -138,7 +128,6 @@ let test_round_trip_full () =
     make_contract
       ~mode:Em.Execute
       ~risk:Risk.Critical
-      ~mutations:[ "Write"; "Execute"; "Edit" ]
       ~review:(Some "dual-approval")
       ~eval:(Crit.Free (`Assoc [ "max_retries", `Int 3; "threshold", `Float 0.95 ]))
       ()
@@ -152,11 +141,6 @@ let test_round_trip_full () =
       (Em.equal rc.requested_execution_mode rc'.requested_execution_mode)
       true;
     check_bool "risk" (Risk.equal rc.risk_class rc'.risk_class) true;
-    check
-      int
-      "mutations length"
-      (List.length rc.allowed_mutations)
-      (List.length rc'.allowed_mutations);
     check_bool "review" (rc.review_requirement = rc'.review_requirement) true;
     check_string "contract_id preserved" (Rc.contract_id c) (Rc.contract_id c')
   | Error e -> failf "full contract round-trip failed: %s" e
@@ -170,10 +154,6 @@ let () =
         ; test_case "prefix md5:" `Quick test_contract_id_starts_with_md5
         ; test_case "sensitive to mode" `Quick test_contract_id_sensitive_to_mode
         ; test_case "sensitive to risk" `Quick test_contract_id_sensitive_to_risk
-        ; test_case
-            "sensitive to mutations"
-            `Quick
-            test_contract_id_sensitive_to_mutations
         ; test_case "sensitive to review" `Quick test_contract_id_sensitive_to_review
         ; test_case "sensitive to eval" `Quick test_contract_id_sensitive_to_eval
         ] )

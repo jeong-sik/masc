@@ -21,7 +21,6 @@ type tool_effect_class =
 type violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
-  | Scope_violation
 
 val violation_kind_to_string : violation_kind -> string
 val violation_kind_of_string : string -> (violation_kind, string) result

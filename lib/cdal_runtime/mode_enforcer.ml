@@ -20,18 +20,15 @@ let json_kind_name = Effect_evidence.json_kind_name
 type violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
-  | Scope_violation
 
 let violation_kind_to_string = function
   | Mutating_in_diagnose -> "mutating_in_diagnose"
   | External_in_draft -> "external_in_draft"
-  | Scope_violation -> "scope_violation"
 ;;
 
 let violation_kind_of_string = function
   | "mutating_in_diagnose" -> Ok Mutating_in_diagnose
   | "external_in_draft" -> Ok External_in_draft
-  | "scope_violation" -> Ok Scope_violation
   | s -> Error (Printf.sprintf "unknown violation_kind: %s" s)
 ;;
 
@@ -156,7 +153,6 @@ let register_tool_class name cls =
 
 type state =
   { effective_mode : Execution_mode.t
-  ; allowed_mutations : string list
   ; review_requirement : string option
   ; tool_classifications : (string * tool_effect_class) list
   ; mutable violations : violation list
@@ -168,7 +164,6 @@ type state =
 let create ~contract ~effective_mode ?(tool_classifications = []) () =
   let rc = contract.Risk_contract.runtime_constraints in
   { effective_mode
-  ; allowed_mutations = rc.allowed_mutations
   ; review_requirement = rc.review_requirement
   ; tool_classifications
   ; violations = []
@@ -397,9 +392,9 @@ let violation_kind_for_class st cls =
      | External_effect -> Some External_in_draft
      | Read_only | Local_mutation | Shell_dynamic -> None)
   | Execution_mode.Execute ->
-    if List.mem "workspace_only" st.allowed_mutations && cls = External_effect
-    then Some Scope_violation
-    else None
+    (* Execute mode imposes no tool-effect-class violation. CDAL does not
+       gate tool actions by path/mutation scope (assurance plane only). *)
+    None
 ;;
 
 let record_effect_evidence

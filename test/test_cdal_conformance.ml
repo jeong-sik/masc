@@ -17,7 +17,6 @@ let risk_contract_v1_json = {|{
   "runtime_constraints": {
     "requested_execution_mode": "draft",
     "risk_class": "medium",
-    "allowed_mutations": ["tool_edit_file"],
     "review_requirement": null
   },
   "eval_criteria": {
@@ -68,9 +67,6 @@ let test_risk_contract_fixture () =
       (EM.to_string rc.runtime_constraints.requested_execution_mode);
     check string "risk_class" "medium"
       (RK.to_string rc.runtime_constraints.risk_class);
-    check (list string) "allowed_mutations"
-      ["tool_edit_file"]
-      rc.runtime_constraints.allowed_mutations;
     check bool "review_requirement is None"
       true (Option.is_none rc.runtime_constraints.review_requirement);
     (* eval_criteria is typed (RFC-0109 Phase A). The fixture shape doesn't

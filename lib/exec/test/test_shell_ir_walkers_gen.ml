@@ -2042,6 +2042,176 @@ let test_batch15_value_consuming_flags () =
    | w -> Alcotest.failf "Wget --output-document=out.html: expected output=Some out.html, got %a" pp w)
 ;;
 
+(* Batch 16: eq-form --flag=VALUE for subcommand+args parsers. Custom
+   parsers SKIP eq-form tokens entirely (token disappears). Generic
+   subcommand_args_ctor EXTRACTS value (only VALUE added to args).
+   Rsync DECOMPOSES into separate flag+value entries in flags list. *)
+let test_subcommand_args_eq_form_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Docker: --name=myapp (eq-form value flag → consumed, rest preserved) *)
+  let w_docker_eq =
+    of_simple
+      { (base "docker") with args = [ lit "run"; lit "--name=myapp"; lit "-d"; lit "nginx" ] }
+  in
+  (match w_docker_eq with
+   | W (Docker { subcommand = "run"; rest = [ "nginx" ]; detach = true; _ }) -> ()
+   | w -> Alcotest.failf "Docker --name=myapp: expected rest=[nginx],detach=true, got %a" pp w);
+  (* Docker: --name myapp (space-separated → two tokens in rest) *)
+  let w_docker_sp =
+    of_simple
+      { (base "docker") with args = [ lit "run"; lit "--name"; lit "myapp"; lit "-d"; lit "nginx" ] }
+  in
+  (match w_docker_sp with
+   | W (Docker { subcommand = "run"; rest = [ "nginx" ]; detach = true; _ }) -> ()
+   | w -> Alcotest.failf "Docker --name myapp: expected rest=[nginx],detach=true, got %a" pp w);
+  (* Cargo: --features=serde (special-cased → features field set) *)
+  let w_cargo_eq =
+    of_simple
+      { (base "cargo") with args = [ lit "build"; lit "--features=serde"; lit "--release" ] }
+  in
+  (match w_cargo_eq with
+   | W (Cargo { subcommand = "build"; features = Some "serde"; release = true; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Cargo --features=serde: expected features=Some serde, got %a" pp w);
+  (* Cargo: --target=triple (generic value flag → consumed, subcommand from next positional) *)
+  let w_cargo_target_eq =
+    of_simple
+      { (base "cargo") with args = [ lit "build"; lit "--target=x86_64-unknown-linux-gnu"; lit "src/main.rs" ] }
+  in
+  (match w_cargo_target_eq with
+   | W (Cargo { subcommand = "build"; rest = [ "src/main.rs" ]; _ }) -> ()
+   | w -> Alcotest.failf "Cargo --target=triple: expected rest=[src/main.rs], got %a" pp w);
+  (* Npm: --registry=URL *)
+  let w_npm_eq =
+    of_simple
+      { (base "npm") with args = [ lit "install"; lit "--registry=https://npm.example.com"; lit "lodash" ] }
+  in
+  (match w_npm_eq with
+   | W (Npm { subcommand = "install"; rest = [ "lodash" ]; _ }) -> ()
+   | w -> Alcotest.failf "Npm --registry=URL: expected rest=[lodash], got %a" pp w);
+  (* Go: -o=bin/myapp *)
+  let w_go_eq =
+    of_simple
+      { (base "go") with args = [ lit "build"; lit "-o=bin/myapp"; lit "main.go" ] }
+  in
+  (match w_go_eq with
+   | W (Go { subcommand = "build"; rest = [ "main.go" ]; _ }) -> ()
+   | w -> Alcotest.failf "Go -o=bin/myapp: expected rest=[main.go], got %a" pp w);
+  (* Mvn: -D=property=value *)
+  let w_mvn_eq =
+    of_simple
+      { (base "mvn") with args = [ lit "test"; lit "-D=skipTests=true"; lit "-q" ] }
+  in
+  (match w_mvn_eq with
+   | W (Mvn { subcommand = "test"; args = []; quiet = true; _ }) -> ()
+   | w -> Alcotest.failf "Mvn -D=skipTests: expected args=[],quiet=true, got %a" pp w);
+  (* Su: --shell=/bin/bash *)
+  let w_su_eq =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "--shell=/bin/bash"; lit "whoami" ] }
+  in
+  (match w_su_eq with
+   | W (Su { subcommand = "root"; args = [ "/bin/bash"; "whoami" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su --shell=/bin/bash: expected args=[/bin/bash;whoami], got %a" pp w);
+  (* Mkfs: -t=ext4 *)
+  let w_mkfs_eq =
+    of_simple
+      { (base "mkfs") with args = [ lit "-t=ext4"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_eq with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs -t=ext4: expected sub=/dev/sdb1,args=[ext4], got %a" pp w);
+  (* Gradle: --project-dir=/tmp *)
+  let w_gradle_eq =
+    of_simple
+      { (base "gradle") with args = [ lit "build"; lit "--project-dir=/tmp"; lit "--no-daemon" ] }
+  in
+  (match w_gradle_eq with
+   | W (Gradle { subcommand = "build"; rest = []; no_daemon = true; _ }) -> ()
+   | w -> Alcotest.failf "Gradle --project-dir=/tmp: expected rest=[],no_daemon=true, got %a" pp w);
+  (* Yarn: --cwd=/project *)
+  let w_yarn_eq =
+    of_simple
+      { (base "yarn") with args = [ lit "install"; lit "--cwd=/project" ] }
+  in
+  (match w_yarn_eq with
+   | W (Yarn { subcommand = "install"; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Yarn --cwd=/project: expected rest=[], got %a" pp w);
+  (* Opam: --switch=5.2.0 *)
+  let w_opam_eq =
+    of_simple
+      { (base "opam") with args = [ lit "switch"; lit "create"; lit "--switch=5.2.0" ] }
+  in
+  (match w_opam_eq with
+   | W (Opam { subcommand = "switch"; rest = [ "create"; "--switch=5.2.0" ]; _ }) -> ()
+   | w -> Alcotest.failf "Opam --switch=5.2.0: expected sub=switch,rest=[create;--switch=5.2.0], got %a" pp w);
+  (* Npx: --package=cowsay *)
+  let w_npx_eq =
+    of_simple
+      { (base "npx") with args = [ lit "cowsay"; lit "--package=cowsay"; lit "hello" ] }
+  in
+  (match w_npx_eq with
+   | W (Npx { subcommand = "cowsay"; rest = [ "hello" ]; _ }) -> ()
+   | w -> Alcotest.failf "Npx --package=cowsay: expected rest=[hello], got %a" pp w);
+  (* Ruff: --config=ruff.toml *)
+  let w_ruff_eq =
+    of_simple
+      { (base "ruff") with args = [ lit "check"; lit "--config=ruff.toml"; lit "src/" ] }
+  in
+  (match w_ruff_eq with
+   | W (Ruff { subcommand = "check"; rest = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Ruff --config=ruff.toml: expected rest=[src/], got %a" pp w);
+  (* Tsc: --target=es2020 *)
+  let w_tsc_eq =
+    of_simple
+      { (base "tsc") with args = [ lit "build"; lit "--target=es2020"; lit "src/" ] }
+  in
+  (match w_tsc_eq with
+   | W (Tsc { subcommand = "build"; rest = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tsc --target=es2020: expected rest=[src/], got %a" pp w);
+  (* Pip: --timeout=30 *)
+  let w_pip_eq =
+    of_simple
+      { (base "pip") with args = [ lit "install"; lit "--timeout=30"; lit "numpy" ] }
+  in
+  (match w_pip_eq with
+   | W (Pip { subcommand = "install"; packages = [ "numpy" ]; _ }) -> ()
+   | w -> Alcotest.failf "Pip --timeout=30: expected packages=[numpy], got %a" pp w);
+  (* Node: --max-old-space-size=4096 *)
+  let w_node_eq =
+    of_simple
+      { (base "node") with args = [ lit "--max-old-space-size=4096"; lit "server.js" ] }
+  in
+  (match w_node_eq with
+   | W (Node { script = "server.js"; args = []; inline = None; _ }) -> ()
+   | w -> Alcotest.failf "Node --max-old-space-size=4096: expected script=server.js, got %a" pp w);
+  (* Rsync: --exclude=.git *)
+  let w_rsync_eq =
+    of_simple
+      { (base "rsync") with args = [ lit "-av"; lit "--exclude=.git"; lit "src/"; lit "dest/" ] }
+  in
+  (match w_rsync_eq with
+   | W (Rsync { flags = [ "-av"; "--exclude"; ".git" ]; source = "src/"; dest = "dest/"; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --exclude=.git: expected flags=[-av;--exclude;.git], got %a" pp w);
+  (* Python: -W=ignore *)
+  let w_python_eq =
+    of_simple
+      { (base "python") with args = [ lit "-W=ignore"; lit "script.py" ] }
+  in
+  (match w_python_eq with
+   | W (Python { script = "script.py"; args = []; inline = None; _ }) -> ()
+   | w -> Alcotest.failf "Python -W=ignore: expected script=script.py, got %a" pp w)
+;;
+
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -2224,6 +2394,10 @@ let () =
             "Batch15 Rustc/Gofmt/Ninja/Su/Mkfs value flags"
             `Quick
             test_batch15_value_consuming_flags
+        ; Alcotest.test_case
+            "Batch16 eq-form --flag=VALUE for subcommand+args"
+            `Quick
+            test_subcommand_args_eq_form_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

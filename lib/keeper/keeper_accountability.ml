@@ -99,7 +99,7 @@ let decision_activity_for_keeper config ~keeper_name ~now =
       timestamps
   in
   { decision_signal_count = List.length timestamps
-  ; latest_decision_at = Option.map iso8601_of_unix latest
+  ; latest_decision_at = Option.map Masc_domain.iso8601_of_unix_seconds latest
   ; latest_decision_age_s = Option.map (fun ts -> Float.max 0.0 (now -. ts)) latest
   }
 ;;

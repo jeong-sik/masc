@@ -41,8 +41,8 @@ let latest_digest_ref ?summary () =
         {
           post_id = Board.Post_id.to_string post.id;
           title = post.title;
-          created_at = Server_utils.iso8601_of_unix post.created_at;
-          updated_at = Some (Server_utils.iso8601_of_unix post.updated_at);
+          created_at = Masc_domain.iso8601_of_unix_seconds post.created_at;
+          updated_at = Some (Masc_domain.iso8601_of_unix_seconds post.updated_at);
           hearth = post.hearth;
           digest_key;
           matches_summary;

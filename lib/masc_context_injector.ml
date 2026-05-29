@@ -13,6 +13,8 @@ type config = {
 let default_config () : config =
   { start_time = Unix.gettimeofday () }
 
+let iso8601_of_float ts = Masc_domain.iso8601_of_unix_seconds ts
+
 (* ================================================================ *)
 (* Context keys                                                      *)
 (* ================================================================ *)

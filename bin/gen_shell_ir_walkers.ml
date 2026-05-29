@@ -3190,7 +3190,7 @@ parse [] false false false false None None args|}
     ; parse_body =
         Some
           {|
-let node_value_flags = [ "--require"; "--loader"; "--max-old-space-size"; "--max-old-space-size"; "--inspect-port"; "--env-file"; "--input-type"; "--conditions"; "--experimental-specifier-resolution"; "--experimental-policy"; "--permission"; "--watch-paths"; "--watch-path"; "--title"; "--experimental-default-type" ] in
+let node_value_flags = [ "--require"; "--loader"; "--max-old-space-size"; "--inspect-port"; "--env-file"; "--input-type"; "--conditions"; "--experimental-specifier-resolution"; "--experimental-policy"; "--watch-paths"; "--watch-path"; "--title"; "--experimental-default-type" ] in
 let rec parse inline script extra dd = function
   | [] ->
     (match inline, script with
@@ -3992,7 +3992,7 @@ parse None false false false false args|}
     ; parse_body =
         Some
           {|
-let opam_value_flags = [ "--repo"; "--root"; "--switch"; "--dir"; "--solver"; "--best-effort-prefix"; "--json"; "--color"; "--safe"; "--no-depexts"; "--confirm-level" ] in
+let opam_value_flags = [ "--repo"; "--root"; "--switch"; "--dir"; "--solver"; "--best-effort-prefix"; "--color"; "--confirm-level" ] in
   let rec parse subcmd y dd = function
     | [] ->
       (match subcmd with
@@ -4047,7 +4047,7 @@ let opam_value_flags = [ "--repo"; "--root"; "--switch"; "--dir"; "--solver"; "-
     ; parse_body =
         Some
           {|
-let npx_value_flags = [ "--package"; "--cache"; "--userconfig"; "--call"; "--shell"; "-p" ] in
+let npx_value_flags = [ "--package"; "--cache"; "--userconfig"; "--call"; "-p" ] in
   let rec parse subcmd y dd = function
     | [] ->
       (match subcmd with
@@ -4105,7 +4105,7 @@ let npx_value_flags = [ "--package"; "--cache"; "--userconfig"; "--call"; "--she
     ; parse_body =
         Some
           {|
-let yarn_value_flags = [ "--cwd"; "--modules-folder"; "--cache-folder"; "--registry"; "--lockfile"; "--emoji"; "--mutex"; "--har"; "--ignore-platform"; "--ignore-engines"; "--ignore-scripts"; "--preferred-cache-folder"; "--network-timeout"; "--network-concurrency"; "--non-interactive"; "--no-lockfile"; "--update-checksums" ] in
+let yarn_value_flags = [ "--cwd"; "--modules-folder"; "--cache-folder"; "--registry"; "--mutex"; "--har"; "--preferred-cache-folder"; "--network-timeout"; "--network-concurrency" ] in
 let rec parse subcmd dev glb prod fl dd = function
   | [] ->
     (match subcmd with
@@ -4435,7 +4435,7 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let ruff_value_flags = [ "--config"; "--select"; "--ignore"; "--line-length"; "--target-version"; "--exclude"; "--extend-select"; "--per-file-ignores"; "--format"; "--fixable"; "--unfixable"; "--extend-ignore"; "--preview"; "--output-format" ] in
+let ruff_value_flags = [ "--config"; "--select"; "--ignore"; "--line-length"; "--target-version"; "--exclude"; "--extend-select"; "--per-file-ignores"; "--format"; "--fixable"; "--unfixable"; "--extend-ignore"; "--output-format" ] in
 let rec parse subcmd f s dd = function
   | [] ->
     (match subcmd with
@@ -4444,6 +4444,7 @@ let rec parse subcmd f s dd = function
      | None -> None)
   | "--fix" :: rest when not dd -> parse subcmd true s dd rest
   | "--show-source" :: rest when not dd -> parse subcmd f true dd rest
+  | "--preview" :: rest when not dd -> parse subcmd f s dd rest
   | "--" :: rest -> parse subcmd f s true rest
   (* Value-consuming flags: skip flag + value *)
   | arg :: _val :: rest

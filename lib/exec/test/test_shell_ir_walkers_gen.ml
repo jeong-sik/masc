@@ -2524,6 +2524,83 @@ let test_batch2_regression_fixes () =
   (match df3 with
    | W (Diff { file1 = "file1"; file2 = "file2"; _ }) -> ()
    | w -> Alcotest.failf "diff -W 120 file1 file2: expected file1=file1 file2=file2, got %a" pp w)
+
+let test_batch3_regression_fixes () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Node: --permission is boolean → should NOT eat "script.js" as value *)
+  let n =
+    of_simple { (base "node") with args = [ lit "--permission"; lit "script.js" ] }
+  in
+  (match n with
+   | W (Node { script = "script.js"; _ }) -> ()
+   | w -> Alcotest.failf "node --permission script.js: expected script=script.js, got %a" pp w);
+  (* Opam: --json is boolean → should NOT eat "install" as value *)
+  let o =
+    of_simple { (base "opam") with args = [ lit "install"; lit "--json"; lit "lwt" ] }
+  in
+  (match o with
+   | W (Opam { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lwt") rest) then
+       Alcotest.failf "opam install --json lwt: 'lwt' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "opam install --json lwt: expected Opam, got %a" pp w);
+  (* Opam: --safe is boolean → should NOT eat "lwt" as value *)
+  let o2 =
+    of_simple { (base "opam") with args = [ lit "install"; lit "--safe"; lit "lwt" ] }
+  in
+  (match o2 with
+   | W (Opam { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lwt") rest) then
+       Alcotest.failf "opam install --safe lwt: 'lwt' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "opam install --safe lwt: expected Opam, got %a" pp w);
+  (* Yarn: --ignore-scripts is boolean → should NOT eat "add" as value *)
+  let y =
+    of_simple { (base "yarn") with args = [ lit "--ignore-scripts"; lit "add"; lit "lodash" ] }
+  in
+  (match y with
+   | W (Yarn { rest; _ }) ->
+     if not (List.exists ((=) "add") rest) then
+       Alcotest.failf "yarn --ignore-scripts add lodash: 'add' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "yarn --ignore-scripts add lodash: expected Yarn, got %a" pp w);
+  (* Yarn: --no-lockfile is boolean → should NOT eat "install" as value *)
+  let y2 =
+    of_simple { (base "yarn") with args = [ lit "--no-lockfile"; lit "install" ] }
+  in
+  (match y2 with
+   | W (Yarn { rest; _ }) ->
+     if not (List.exists ((=) "install") rest) then
+       Alcotest.failf "yarn --no-lockfile install: 'install' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "yarn --no-lockfile install: expected Yarn, got %a" pp w);
+  (* Npx: --shell is boolean → should NOT eat "jest" as value *)
+  let nx =
+    of_simple { (base "npx") with args = [ lit "--shell"; lit "jest" ] }
+  in
+  (match nx with
+   | W (Npx { rest; _ }) ->
+     if not (List.exists ((=) "jest") rest) then
+       Alcotest.failf "npx --shell jest: 'jest' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "npx --shell jest: expected Npx, got %a" pp w);
+  (* Ruff: --preview is boolean → should NOT eat "check" as value *)
+  let r =
+    of_simple { (base "ruff") with args = [ lit "--preview"; lit "check"; lit "." ] }
+  in
+  (match r with
+   | W (Ruff { subcommand = "check"; _ }) -> ()
+   | w -> Alcotest.failf "ruff --preview check .: expected subcmd=check, got %a" pp w)
 ;;
 
 let () =
@@ -2585,6 +2662,10 @@ let () =
             "Batch 2 regression: boolean-as-value & missing value arms"
             `Quick
             test_batch2_regression_fixes
+        ; Alcotest.test_case
+            "Batch 3 regression: Node/Opam/Yarn/Npx/Ruff boolean-as-value"
+            `Quick
+            test_batch3_regression_fixes
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

@@ -1102,6 +1102,21 @@ let rec parse force force_with_lease set_upstream remote branch = function
   | "--force-with-lease" :: rest -> parse force true set_upstream remote branch rest
   | "-u" :: rest | "--set-upstream" :: rest -> parse force force_with_lease true remote branch rest
   | "--delete" :: rest -> parse force force_with_lease set_upstream remote branch rest
+  (* Combined short flags: -fu, -uf (force + set_upstream) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'f' || c = 'u')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let f' = ref force and u' = ref set_upstream in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'f' -> f' := true
+      | 'u' -> u' := true
+      | _ -> ()
+    done;
+    parse !f' force_with_lease !u' remote branch rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse force force_with_lease set_upstream remote branch rest
@@ -2300,6 +2315,20 @@ let rec parse recursive port src dest = function
   | "-C" :: rest -> parse recursive port src dest rest
   | "-v" :: rest -> parse recursive port src dest rest
   | "-q" :: rest -> parse recursive port src dest rest
+  (* Combined short flags: -rCv, -Cvr, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'r' || c = 'p' || c = 'C' || c = 'v' || c = 'q')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let r' = ref recursive in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'r' -> r' := true
+      | _ -> ()
+    done;
+    parse !r' port src dest rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive port src dest rest
@@ -2518,6 +2547,21 @@ let rec parse unified brief files = function
      | [ f1; f2 ] ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified; brief }))
      | _ -> None)
+  (* Combined short flags: -uq, -qu, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'u' || c = 'q')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let u' = ref unified and q' = ref brief in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'u' -> u' := true
+      | 'q' -> q' := true
+      | _ -> ()
+    done;
+    parse !u' !q' files rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse unified brief files rest

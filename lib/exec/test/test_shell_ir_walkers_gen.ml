@@ -901,7 +901,49 @@ let test_combined_short_flags () =
   in
   (match curl_kl with
    | W (Curl { follow_redirects = true; insecure = true; _ }) -> ()
-   | w -> Alcotest.failf "curl -kL: expected follow_redirects+insecure, got %a" pp w)
+   | w -> Alcotest.failf "curl -kL: expected follow_redirects+insecure, got %a" pp w);
+  (* git push -fu origin main *)
+  let git_fu =
+    of_simple { (base "git") with args = [ lit "push"; lit "-fu"; lit "origin"; lit "main" ] }
+  in
+  (match git_fu with
+   | W (Git_push { force = true; set_upstream = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push -fu: expected force+set_upstream, got %a" pp w);
+  (* git push -uf origin main *)
+  let git_uf =
+    of_simple { (base "git") with args = [ lit "push"; lit "-uf"; lit "origin"; lit "main" ] }
+  in
+  (match git_uf with
+   | W (Git_push { force = true; set_upstream = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push -uf: expected force+set_upstream, got %a" pp w);
+  (* scp -rCv src dst *)
+  let scp_rcv =
+    of_simple { (base "scp") with args = [ lit "-rCv"; lit "src"; lit "dst" ] }
+  in
+  (match scp_rcv with
+   | W (Scp { recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "scp -rCv: expected recursive, got %a" pp w);
+  (* scp -Cvr src dst *)
+  let scp_cvr =
+    of_simple { (base "scp") with args = [ lit "-Cvr"; lit "src"; lit "dst" ] }
+  in
+  (match scp_cvr with
+   | W (Scp { recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "scp -Cvr: expected recursive, got %a" pp w);
+  (* diff -uq file1 file2 *)
+  let diff_uq =
+    of_simple { (base "diff") with args = [ lit "-uq"; lit "a.txt"; lit "b.txt" ] }
+  in
+  (match diff_uq with
+   | W (Diff { unified = true; brief = true; _ }) -> ()
+   | w -> Alcotest.failf "diff -uq: expected unified+brief, got %a" pp w);
+  (* diff -qu file1 file2 *)
+  let diff_qu =
+    of_simple { (base "diff") with args = [ lit "-qu"; lit "a.txt"; lit "b.txt" ] }
+  in
+  (match diff_qu with
+   | W (Diff { unified = true; brief = true; _ }) -> ()
+   | w -> Alcotest.failf "diff -qu: expected unified+brief, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

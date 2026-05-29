@@ -122,7 +122,7 @@ let attempt_record_of_json = function
          match next_retry_at with
          | Some (`String value) -> Some value
          | Some `Null | None -> None
-         | _ -> None
+         | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
        in
        Some
          { connector_id
@@ -135,7 +135,7 @@ let attempt_record_of_json = function
          ; updated_at
          }
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let desired_record_json (record : desired_record) =
@@ -166,7 +166,7 @@ let desired_record_of_json = function
        |> Option.map (fun desired_state ->
          { connector_id; desired_state; generation; updated_by; updated_at })
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let sidecar_desired_path ~base_path id =
@@ -297,8 +297,8 @@ let observed_state_of_status_json = function
   | `Assoc fields ->
     (match List.assoc_opt "available" fields with
      | Some (`Bool true) -> Observed_available
-     | _ -> Observed_unavailable)
-  | _ -> Observed_unavailable
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> Observed_unavailable)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Observed_unavailable
 ;;
 
 (** Backoff window between repeated same-generation reconcile start
@@ -329,7 +329,7 @@ let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
     match previous with
     | Some attempt when attempt.generation = record.generation ->
       attempt.attempt_number + 1
-    | _ -> 1
+    | None | Some _ -> 1
   in
   { connector_id = record.connector_id
   ; generation = record.generation
@@ -382,7 +382,7 @@ let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_
      | Some attempt
        when attempt.generation = record.generation && retry_backoff_active ~now attempt ->
        "noop:backoff_active"
-     | _ -> "would_start")
+     | None | Some _ -> "would_start")
   | Desired_running, Observed_available -> "noop:already_available"
   | Desired_stopped, _ -> "noop:desired_stopped"
 ;;

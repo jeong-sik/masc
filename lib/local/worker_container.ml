@@ -141,7 +141,7 @@ let worker_meta_of_yojson json =
           match Json_util.get_string json "worker_name" with
           | None -> Error "worker meta missing worker_name"
           | Some worker_name -> (
-              match Worker_execution_backend.of_yojson (Json_util.assoc_member_opt "runtime_backend" json) with
+              match Worker_execution_backend.of_yojson (Json_util.assoc_member_opt "runtime_backend" json |> Option.value ~default:`Null) with
               | Error _ as err -> err
               | Ok runtime_backend ->
                   Ok

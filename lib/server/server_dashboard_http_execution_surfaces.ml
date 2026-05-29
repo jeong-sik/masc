@@ -461,7 +461,7 @@ let patched_keeper_status row ~keepalive_running =
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
   | `Assoc fields as row ->
     (match Json_util.assoc_member_opt "name" row with
-     | `String name when String.equal name keeper_name ->
+     | Some (`String name) when String.equal name keeper_name ->
        let row_fields : (string * Yojson.Safe.t) list = fields in
        let row_fields =
          row_fields

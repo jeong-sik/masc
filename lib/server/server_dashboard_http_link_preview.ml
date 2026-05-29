@@ -451,8 +451,8 @@ let fetch_preview ~clock ~net url =
                | exn -> Error (Printexc.to_string exn))
 
 let urls_of_request args =
-  match args |> Json_util.assoc_member_opt "urls" with
-  | `List items ->
+  match Json_util.assoc_member_opt "urls" args with
+  | Some (`List items) ->
       let urls =
         items
         |> List.filter_map (function

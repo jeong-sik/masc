@@ -46,11 +46,16 @@ let sdk_error_capacity_backpressure_source (err : Agent_sdk.Error.sdk_error)
 let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
   : capacity_backpressure_retry_hint option =
   match Cascade_error_classify.classify_masc_internal_error err with
-  | Some (Cascade_error_classify.Capacity_backpressure { retry_after_sec; _ }) ->
-    (match retry_after_sec with
-     | Some s when s > 0.0 -> Some (Cbr_explicit s)
-     | Some _ (* <= 0.0: treat as missing, fall back to synthetic *)
-     | None ->
+  | Some (Cascade_error_classify.Capacity_backpressure { retry_after; _ }) ->
+    (* Read provenance directly from the typed carrier: a [Synthetic_default]
+       can no longer reach the [Cbr_explicit] branch. *)
+    (match retry_after with
+     | Cascade_internal_error.Explicit s when s > 0.0 -> Some (Cbr_explicit s)
+     | Cascade_internal_error.Explicit _ ->
+       (* defensive: a non-positive explicit value is treated as missing *)
+       Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec)
+     | Cascade_internal_error.Synthetic_default s -> Some (Cbr_synthetic_default s)
+     | Cascade_internal_error.No_retry_hint ->
        Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec))
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)

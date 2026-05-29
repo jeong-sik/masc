@@ -465,7 +465,13 @@ let rec run
       run ~on_success ?resume_checkpoint ?per_provider_timeout_s
         ~pre_dispatch_required_tool_rejections_rev
         ~last_capacity_backpressure:
-          (Client_capacity, capacity_detail, retry_after_s)
+          ( Client_capacity
+          , capacity_detail
+          , (* a computed client-capacity cooldown is a real backoff, not a
+               blind synthetic default *)
+            (match retry_after_s with
+             | Some s -> Cascade_internal_error.Explicit s
+             | None -> Cascade_internal_error.No_retry_hint) )
         ctx rest last_err
     | (`No_client_capacity | `Acquired _) as capacity_slot ->
     let capacity_release =

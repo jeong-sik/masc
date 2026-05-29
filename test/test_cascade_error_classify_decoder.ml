@@ -123,7 +123,7 @@ let test_roundtrip_capacity_backpressure () =
   match decoded with
   | Some
       (Classify.Capacity_backpressure
-         { cascade_name; source; detail; retry_after_sec }) ->
+         { cascade_name; source; detail; retry_after }) ->
     Alcotest.(check string)
       "cascade name preserved"
       "tier-group.primary"
@@ -136,6 +136,14 @@ let test_roundtrip_capacity_backpressure () =
       "detail preserved"
       "client capacity key provider_k is full"
       detail;
+    (* a wire value without [retry_after_synthetic] decodes to [Explicit]
+       (legacy default), preserving the seconds *)
+    let retry_after_sec =
+      match retry_after with
+      | Masc_mcp.Cascade_internal_error.Explicit s
+      | Masc_mcp.Cascade_internal_error.Synthetic_default s -> Some s
+      | Masc_mcp.Cascade_internal_error.No_retry_hint -> None
+    in
     Alcotest.(check (option (float 0.001)))
       "retry_after preserved"
       (Some 2.5)

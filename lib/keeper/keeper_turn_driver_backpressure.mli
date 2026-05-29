@@ -19,10 +19,14 @@ val capacity_backpressure_of_http_error :
   Cascade_internal_error.masc_internal_error option
 
 (** Build a capacity-backpressure internal error from a pending
-    backpressure triple [(source, detail, retry_after_sec)]. *)
+    backpressure triple [(source, detail, retry_after)].  The retry-after
+    component carries its provenance ([Explicit] / [Synthetic_default] /
+    [No_retry_hint]) so a synthetic default is never read as an explicit
+    hint. *)
 val capacity_backpressure_of_pending :
   cascade_name:Cascade_name.t ->
-  (Cascade_internal_error.capacity_backpressure_source * string * float option) option ->
+  (Cascade_internal_error.capacity_backpressure_source * string
+   * Cascade_internal_error.capacity_retry_after) option ->
   Cascade_internal_error.masc_internal_error option
 
 (** Classify an SDK error into a capacity-backpressure error,

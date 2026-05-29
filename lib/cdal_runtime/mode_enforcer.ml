@@ -381,20 +381,15 @@ let evidence_effect_class_of_tool_class = function
   | Shell_dynamic -> Effect_evidence.Shell_dynamic
 ;;
 
-let violation_kind_for_class st cls =
-  match st.effective_mode with
-  | Execution_mode.Diagnose ->
-    (match cls with
-     | Local_mutation | External_effect -> Some Mutating_in_diagnose
-     | Read_only | Shell_dynamic -> None)
-  | Execution_mode.Draft ->
-    (match cls with
-     | External_effect -> Some External_in_draft
-     | Read_only | Local_mutation | Shell_dynamic -> None)
-  | Execution_mode.Execute ->
-    (* Execute mode imposes no tool-effect-class violation. CDAL does not
-       gate tool actions by path/mutation scope (assurance plane only). *)
-    None
+let violation_kind_for_class _st _cls =
+  (* CDAL does not gate tool actions by execution mode. Which tools an agent
+     may run is a control-plane concern, not part of CDAL's assurance ontology
+     (task/goal completion verdict). No tool call is ever classified as a
+     violation in any mode, so the PreToolUse hook never skips a tool. Effect
+     evidence is still recorded (as allowed) for the proof bundle. The
+     Mutating_in_diagnose / External_in_draft variants remain only for
+     decoding pre-existing proof records. *)
+  None
 ;;
 
 let record_effect_evidence

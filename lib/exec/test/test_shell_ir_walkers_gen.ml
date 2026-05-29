@@ -1787,6 +1787,117 @@ let test_batch14_value_consuming_flags () =
    | w -> Alcotest.failf "Pyright --project=VALUE: expected sub=src/ rest=[], got %a" pp w)
 ;;
 
+(* Batch 15: Rustc, Gofmt, Ninja, Su, Fs value-consuming flags *)
+let test_batch15_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Rustc: --edition VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_rustc =
+    of_simple
+      { (base "rustc") with args = [ lit "--edition"; lit "2021"; lit "src/main.rs" ] }
+  in
+  (match w_rustc with
+   | W (Rustc { subcommand = "2021"; rest = [ "src/main.rs" ]; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --edition: expected sub=2021 rest=[src/main.rs], got %a" pp w);
+  (* Rustc: --edition=VALUE (eq form) — entire token consumed, file becomes subcommand *)
+  let w_rustc_eq =
+    of_simple
+      { (base "rustc") with args = [ lit "--edition=2021"; lit "src/main.rs" ] }
+  in
+  (match w_rustc_eq with
+   | W (Rustc { subcommand = "src/main.rs"; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --edition=VALUE: expected sub=src/main.rs, got %a" pp w);
+  (* Rustc: --target VALUE with -O — VALUE passes through as subcommand *)
+  let w_rustc_target =
+    of_simple
+      { (base "rustc") with args = [ lit "-O"; lit "--target"; lit "x86_64-unknown-linux-gnu"; lit "main.rs" ] }
+  in
+  (match w_rustc_target with
+   | W (Rustc { subcommand = "x86_64-unknown-linux-gnu"; optimize = true; rest = [ "main.rs" ]; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --target: expected sub=x86_64-unknown-linux-gnu rest=[main.rs], got %a" pp w);
+  (* Gofmt: -tabs VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_gofmt =
+    of_simple
+      { (base "gofmt") with args = [ lit "-tabs"; lit "false"; lit "main.go" ] }
+  in
+  (match w_gofmt with
+   | W (Gofmt { subcommand = "false"; rest = [ "main.go" ]; _ }) -> ()
+   | w -> Alcotest.failf "Gofmt -tabs: expected sub=false rest=[main.go], got %a" pp w);
+  (* Gofmt: -tabwidth VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_gofmt_tw =
+    of_simple
+      { (base "gofmt") with args = [ lit "-l"; lit "-tabwidth"; lit "4"; lit "." ] }
+  in
+  (match w_gofmt_tw with
+   | W (Gofmt { subcommand = "4"; list_files = true; rest = [ "." ]; _ }) -> ()
+   | w -> Alcotest.failf "Gofmt -tabwidth: expected sub=4 list=true rest=[.], got %a" pp w);
+  (* Ninja: -C VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_ninja_c =
+    of_simple
+      { (base "ninja") with args = [ lit "-C"; lit "build"; lit "all" ] }
+  in
+  (match w_ninja_c with
+   | W (Ninja { subcommand = "build"; rest = [ "all" ]; _ }) -> ()
+   | w -> Alcotest.failf "Ninja -C: expected sub=build rest=[all], got %a" pp w);
+  (* Ninja: -f VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_ninja_f =
+    of_simple
+      { (base "ninja") with args = [ lit "-f"; lit "build.ninja"; lit "all" ] }
+  in
+  (match w_ninja_f with
+   | W (Ninja { subcommand = "build.ninja"; rest = [ "all" ]; _ }) -> ()
+   | w -> Alcotest.failf "Ninja -f: expected sub=build.ninja rest=[all], got %a" pp w);
+  (* Su: -c VALUE is consumed, subcommand remains *)
+  let w_su_c =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "-c"; lit "whoami" ] }
+  in
+  (match w_su_c with
+   | W (Su { subcommand = "root"; args = [ "whoami" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su -c: expected args=[whoami], got %a" pp w);
+  (* Su: --shell VALUE is consumed *)
+  let w_su_shell =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "--shell"; lit "/bin/bash" ] }
+  in
+  (match w_su_shell with
+   | W (Su { subcommand = "root"; args = [ "/bin/bash" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su --shell: expected args=[/bin/bash], got %a" pp w);
+  (* Mkfs: -t VALUE — value flag adds ext4 to args, device becomes subcommand *)
+  let w_mkfs_t =
+    of_simple
+      { (base "mkfs") with args = [ lit "-t"; lit "ext4"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_t with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs -t: expected sub=/dev/sdb1 args=[ext4], got %a" pp w);
+  (* Mkfs: --type=VALUE (eq form) — value extracted from =, device becomes subcommand *)
+  let w_mkfs_eq =
+    of_simple
+      { (base "mkfs") with args = [ lit "--type=ext4"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_eq with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs --type=VALUE: expected sub=/dev/sdb1 args=[ext4], got %a" pp w);
+  (* Mkfs: -t VALUE + -L VALUE — both values added to args *)
+  let w_mkfs_label =
+    of_simple
+      { (base "mkfs") with args = [ lit "-t"; lit "ext4"; lit "-L"; lit "MYDISK"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_label with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4"; "MYDISK" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs -L: expected sub=/dev/sdb1 args=[ext4;MYDISK], got %a" pp w)
+;;
+
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -1914,6 +2025,10 @@ let () =
             "Batch14 Opam/Npx/Yarn/Pnpm/Uv/Glab/Pytest/Pyright value flags"
             `Quick
             test_batch14_value_consuming_flags
+        ; Alcotest.test_case
+            "Batch15 Rustc/Gofmt/Ninja/Su/Mkfs value flags"
+            `Quick
+            test_batch15_value_consuming_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

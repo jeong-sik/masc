@@ -100,13 +100,7 @@ let rec parse subcmd extra dd = function
      | None -> None)
   | "--" :: rest -> parse subcmd extra true rest
   | arg :: _val :: rest
-    when not dd
-         && (List.mem arg [ %s ]
-             || (let s = arg in
-                 String.length s > 2 && String.sub s 0 2 = "--"
-                 && (match String.index_opt s '=' with
-                     | Some i -> List.mem (String.sub s 0 i) [ %s ]
-                     | None -> false))) ->
+    when not dd && List.mem arg [ %s ] ->
     parse subcmd (_val :: extra) dd rest
   | arg :: rest
     when not dd
@@ -116,14 +110,20 @@ let rec parse subcmd extra dd = function
                  && (match String.index_opt s '=' with
                      | Some i -> List.mem (String.sub s 0 i) [ %s ]
                      | None -> false))) ->
-    parse subcmd extra dd rest
+    let extra' =
+      let s = arg in
+      match String.index_opt s '=' with
+      | Some i -> String.sub s (i + 1) (String.length s - (i + 1)) :: extra
+      | None -> extra
+    in
+    parse subcmd extra' dd rest
   | arg :: rest ->
-    (match subcmd with
-     | None when not dd -> parse (Some arg) extra dd rest
-     | _ -> parse subcmd (arg :: extra) dd rest)
+    match subcmd with
+    | None when not dd -> parse (Some arg) extra dd rest
+    | _ -> parse subcmd (arg :: extra) dd rest
 in
 parse None [] false args|}
-             name flags_str flags_str flags_str flags_str)
+             name flags_str flags_str flags_str)
   ; no_expand_combined = false
   }
 

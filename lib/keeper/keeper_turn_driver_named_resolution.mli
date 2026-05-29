@@ -8,8 +8,6 @@ type secondary_resolver =
 type t = {
   configured_labels_result : (string list, string) result;
   candidate_cfgs_result : (Llm_provider.Provider_config.t list, string) result;
-  tiered_providers_result :
-    (Cascade_catalog_runtime_named_providers.tiered_provider list, string) result;
   secondary_resolver : secondary_resolver option;
 }
 

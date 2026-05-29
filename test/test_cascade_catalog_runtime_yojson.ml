@@ -169,16 +169,11 @@ tools-support = true
 [ollama.local-default]
 max-concurrent = 1
 
-[tier.local]
-members = ["ollama.local-default"]
-strategy = "failover"
-
-[tier-group.provider_k-coding-with-spark]
-tiers = ["local"]
-strategy = "failover"
+[profiles.provider_k-coding-with-spark]
+provider_filter = "ollama"
 
 [routes.keeper_turn]
-target = "tier-group.provider_k-coding-with-spark"
+target = "ollama.local-default"
 |}
 
 let test_local_probe_without_eio_is_skipped_not_error () =
@@ -193,7 +188,7 @@ let test_local_probe_without_eio_is_skipped_not_error () =
     let profile =
       List.find
         (fun (profile : C.profile_build) ->
-          String.equal profile.name "tier-group.provider_k-coding-with-spark")
+          String.equal profile.name "provider_k-coding-with-spark")
         snapshot.profiles
     in
     (match profile.probes with

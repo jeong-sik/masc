@@ -561,6 +561,55 @@ let test_posix_end_of_options () =
   (match grep with
    | W (Grep { pattern = "pattern"; path = Some "-file"; recursive = true; _ }) -> ()
    | w -> Alcotest.failf "Grep --: expected pattern+path, got %a" pp w);
+  (* Grep: -e -dashed-pattern (explicit pattern flag) *)
+  let grep_e =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "-e"; lit "-dashed-pattern"; lit "." ] }
+  in
+  (match grep_e with
+   | W (Grep { pattern = "-dashed-pattern"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep -e: expected pattern=-dashed-pattern, got %a" pp w);
+  (* Grep: --color=auto pattern file (--flag=VALUE form skipped) *)
+  let grep_color =
+    of_simple { (base "grep") with args = [ lit "--color=auto"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_color with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --color=auto: expected pattern=path, got %a" pp w);
+  (* Grep: -elongpattern file (combined -ePATTERN form, length>4 so no expansion) *)
+  let grep_epat =
+    of_simple { (base "grep") with args = [ lit "-elongpattern"; lit "file" ] }
+  in
+  (match grep_epat with
+   | W (Grep { pattern = "longpattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -ePATTERN: expected pattern=longpattern, got %a" pp w);
+  (* Grep: --include=*.ml pattern dir (--flag=VALUE form skipped, = present) *)
+  let grep_include_eq =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--include=*.ml"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_include_eq with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --include=VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: --include *.ml pattern dir (two-token value-consuming flag) *)
+  let grep_include_2tok =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--include"; lit "*.ml"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_include_2tok with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --include VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: --exclude *.log pattern dir (two-token value-consuming flag) *)
+  let grep_exclude =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--exclude"; lit "*.log"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_exclude with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --exclude VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: --exclude-dir .git pattern dir (two-token value-consuming flag) *)
+  let grep_excludedir =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--exclude-dir"; lit ".git"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_excludedir with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --exclude-dir VALUE: expected pattern=path, got %a" pp w);
   (* Find: -- /tmp -name "*.ml" *)
   let find =
     of_simple { (base "find") with args = [ lit "--"; lit "/tmp"; lit "-name"; lit "*.ml" ] }

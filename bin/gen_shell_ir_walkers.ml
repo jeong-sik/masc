@@ -824,6 +824,24 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
           | None -> collect (Some a) path tl
           | Some _ -> collect pattern (Some a) tl)
     in collect pattern path rest
+  (* -e PATTERN: explicit pattern (allows patterns starting with -) *)
+  | "-e" :: p :: rest ->
+    parse recursive case_sensitive files_with_matches (Some p) path rest
+  (* -ePATTERN combined form *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = 'e' ->
+    let p = String.sub arg 2 (String.length arg - 2) in
+    parse recursive case_sensitive files_with_matches (Some p) path rest
+  (* --color=auto and similar --flag=VALUE forms: skip *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = '-'
+         && String.contains arg '=' ->
+    parse recursive case_sensitive files_with_matches pattern path rest
+  (* --include, --exclude, --exclude-dir: value-consuming flags (skip both) *)
+  | ("--include" | "--exclude" | "--exclude-dir") :: _ :: rest ->
+    parse recursive case_sensitive files_with_matches pattern path rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (

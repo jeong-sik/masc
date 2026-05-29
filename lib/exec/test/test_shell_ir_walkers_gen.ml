@@ -447,6 +447,19 @@ let test_flag_equals_parsing () =
    | W (Curl { method_ = `POST; body = Some "hello"; url = "http://x"; _ }) -> ()
    | w ->
      Alcotest.failf "Curl --flag=value: expected POST+body, got %a" pp w);
+  (* Curl: --header=Content-Type:application/json *)
+  let curl_h =
+    of_simple
+      { (base "curl") with
+        args =
+          [ lit "--header=Content-Type:application/json"; lit "-X"; lit "POST"; lit "http://x" ]
+      }
+  in
+  (match curl_h with
+   | W (Curl { headers = Some [ ("Content-Type", "application/json") ]; method_ = `POST; _ }) ->
+     ()
+   | w ->
+     Alcotest.failf "Curl --header=value: expected header parsed, got %a" pp w);
   (* Git_log: --max-count=5 *)
   let gl =
     of_simple { (base "git") with args = [ lit "log"; lit "--max-count=5"; lit "--oneline" ] }

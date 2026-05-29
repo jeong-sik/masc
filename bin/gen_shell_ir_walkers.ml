@@ -385,6 +385,17 @@ let rec parse method_ headers body url output_file follow_redirects insecure dd 
        let value = String.trim (String.sub h (i + 1) (String.length h - i - 1)) in
        parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure dd rest
      | None -> None)
+  (* --header=VALUE form *)
+  | arg :: rest
+    when not dd && String.length arg > 9
+         && String.sub arg 0 9 = "--header=" ->
+    let h = String.sub arg 9 (String.length arg - 9) in
+    (match String.index_opt h ':' with
+     | Some i ->
+       let key = String.trim (String.sub h 0 i) in
+       let value = String.trim (String.sub h (i + 1) (String.length h - i - 1)) in
+       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure dd rest
+     | None -> None)
   | "-d" :: d :: rest | "--data" :: d :: rest when not dd ->
     (match body with
      | None -> parse method_ headers (Some d) url output_file follow_redirects insecure dd rest

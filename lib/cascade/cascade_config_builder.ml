@@ -24,7 +24,6 @@ let config_for_label
     ?tool_retry_policy
     ?enable_thinking
     ?compact_ratio
-    ?contract
     ?approval
     ~(description : string option)
     () : (Cascade_runner.config, Agent_sdk.Error.sdk_error) result =
@@ -50,7 +49,6 @@ let config_for_label
       memory;
       tool_retry_policy;
       enable_thinking;
-      contract;
       description;
       compact_ratio;
       approval;

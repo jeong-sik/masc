@@ -21,11 +21,6 @@ val registry_progress_on_event :
   Agent_sdk.Types.sse_event ->
   unit
 
-val select_cdal_proof :
-  result_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option ->
-  captured_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option ->
-  Masc_mcp_cdal_runtime.Cdal_proof.t option
-
 val should_require_provider_tool_choice_support :
   initial_tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   actionable_observation_requires_tool_support:bool ->

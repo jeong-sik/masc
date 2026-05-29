@@ -24,7 +24,6 @@ let finalize
     ~actual_keeper_tool_names_ref
     ~(result : Cascade_runner.run_result)
     ~checkpoint_persistence_error
-    ~proof_ref
     ~post_turn_t0
     ?provider_filter
     ~cascade_name_string
@@ -184,7 +183,6 @@ let finalize
       ; tools_used = actual_keeper_tool_names
       ; tool_calls = List.rev acc.tool_calls
       ; checkpoint = saved_checkpoint
-      ; proof = result.proof
       ; trace_ref = result.trace_ref
       ; run_validation = result.run_validation
       ; stop_reason = result.stop_reason

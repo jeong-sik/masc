@@ -19,9 +19,3 @@ val tool_contract_json :
   tools_used:string list ->
   Keeper_agent_run.run_result option ->
   Yojson.Safe.t
-
-val cdal_raw_evidence_ref_count :
-  Masc_mcp_cdal_runtime.Cdal_proof.t -> int
-
-val cdal_violation_ref_count :
-  Masc_mcp_cdal_runtime.Cdal_proof.t -> int

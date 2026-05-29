@@ -92,7 +92,6 @@ type config = Cascade_agent_context.config = {
   tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   required_tool_satisfaction :
     Agent_sdk.Completion_contract.required_tool_satisfaction;
-  contract : Masc_mcp_cdal_runtime.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -132,7 +131,6 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
   cascade_observation : Cascade_observation.cascade_observation option;
   stop_reason : stop_reason;
 }
@@ -146,8 +144,6 @@ type worker_lifecycle_classification =
 val worker_lifecycle_classification_of_result :
   (run_result, Agent_sdk.Error.sdk_error) result -> worker_lifecycle_classification
 
-val proof_result_status_to_string :
-  Masc_mcp_cdal_runtime.Cdal_proof.result_status -> string
 
 (** {1 Label resolution} *)
 
@@ -275,8 +271,6 @@ val run :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
-  ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   string ->
   (run_result, Agent_sdk.Error.sdk_error) result
 (** Runs an OAS agent against [goal].  When
@@ -291,7 +285,6 @@ val run_with_masc_tools :
   config:config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->

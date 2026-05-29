@@ -47,14 +47,12 @@ type try_provider_ctx =
   ; exit_condition_result : (int -> Cascade_runner.stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
-  ; contract : Masc_mcp_cdal_runtime.Risk_contract.t option
   ; sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; on_event : (Agent_sdk.Types.sse_event -> unit) option
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
-  ; proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref option
   ; event_bus : Agent_sdk.Event_bus.t option
   ; cascade_engine : Keeper_cascade_engine.t
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option

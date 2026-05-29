@@ -6,8 +6,8 @@ type paused_keeper_scan = {
 }
 val empty_paused_keeper_scan : paused_keeper_scan
 val sorted_unique_strings : String.t list -> String.t list
-val json_float_opt : 'a option -> [> `Float of 'a | `Null ]
-val json_string_opt : 'a option -> [> `Null | `String of 'a ]
+val json_float_opt : float option -> Yojson.Safe.t
+val json_string_opt : string option -> Yojson.Safe.t
 val effective_autoboot_enabled :
   string ->
   Keeper_meta_contract.keeper_meta -> bool
@@ -66,16 +66,6 @@ val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->
   phase_counts:keeper_phase_counts ->
-  paused_keepers_json:[> `Assoc of (string * [> `Int of int ]) list ] ->
+  paused_keepers_json:Yojson.Safe.t ->
   unit ->
-  [> `Assoc of
-       (string *
-        [> `Bool of bool
-         | `Int of int
-         | `List of
-             [> `Assoc of (string * [> `String of string ]) list
-              | `String of string ]
-             list
-         | `Null
-         | `String of string ])
-       list ]
+  Yojson.Safe.t

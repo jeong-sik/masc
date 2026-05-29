@@ -57,13 +57,12 @@ type run_result = {
   session_id : string;
   raw_trace_run : Agent_sdk.Raw_trace.run_ref option;
   api_response : Agent_sdk.Types.api_response option;
-  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
 }
 (** Summary of a finished worker run: aggregated text
     [output], the model id that handled the run,
     accumulated token / cost / tool-call counters, and the
-    optional OAS artifacts ([raw_trace_run], [api_response],
-    [proof]) attached when the worker ran through the OAS
+    optional OAS artifacts ([raw_trace_run], [api_response])
+    attached when the worker ran through the OAS
     SDK path.  Consumed by {!Worker_oas},
     {!Worker_runtime_helper_protocol}, and the run-result
     serializer. *)

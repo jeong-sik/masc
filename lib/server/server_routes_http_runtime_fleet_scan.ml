@@ -19,7 +19,6 @@ let empty_paused_keeper_scan =
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
-
 let effective_autoboot_enabled name (meta : Keeper_meta_contract.keeper_meta) =
   match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
   | Some value -> value

@@ -23,7 +23,6 @@ val config_for_label :
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   description:string option ->
   unit ->

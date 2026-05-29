@@ -619,8 +619,8 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
       ("description", `String meta.description);
       ("current", `String resolved.effective);
       ( "default",
-        Json_util.string_opt_to_json
-          (Option.first_some resolved.file_value resolved.default_value) );
+        ((match resolved.file_value with Some _ as v -> v | None -> resolved.default_value)
+         |> fun v -> match v with Some s -> `String s | None -> `Null) );
       ("effective", `String resolved.effective);
       ( "file_value", Json_util.string_opt_to_json resolved.file_value );
       ( "override_value", Json_util.string_opt_to_json resolved.override_value );

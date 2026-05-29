@@ -2600,7 +2600,17 @@ let test_batch3_regression_fixes () =
   in
   (match r with
    | W (Ruff { subcommand = "check"; _ }) -> ()
-   | w -> Alcotest.failf "ruff --preview check .: expected subcmd=check, got %a" pp w)
+   | w -> Alcotest.failf "ruff --preview check .: expected subcmd=check, got %a" pp w);
+  (* Npm: --timing is boolean → should NOT eat "install" as value *)
+  let np =
+    of_simple { (base "npm") with args = [ lit "install"; lit "--timing"; lit "lodash" ] }
+  in
+  (match np with
+   | W (Npm { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lodash") rest) then
+       Alcotest.failf "npm install --timing lodash: 'lodash' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "npm install --timing lodash: expected Npm, got %a" pp w)
 ;;
 
 let () =

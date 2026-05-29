@@ -3463,7 +3463,6 @@ let npm_value_flags =
   ; "--auth-type"
   ; "--otp"
   ; "--loglevel"
-  ; "--timing"
   ; "--workspace"; "-w"
   ; "--omit"
   ; "--install-strategy"

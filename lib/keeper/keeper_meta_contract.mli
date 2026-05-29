@@ -155,10 +155,11 @@ type cascade_exhaustion_reason =
           through to [Other_detail message], losing auto-recovery eligibility
           and triggering the harsher failure policy. *)
   | No_tool_capable
-      (** Cascade exhausted because no configured provider can satisfy the
-          required tool set.  Previously a standalone [blocker_class] variant;
-          reclassified here because the cascade rotation filtered all candidates
-          before dispatch — a semantic subset of cascade exhaustion. *)
+      (** Cascade exhausted because the provider rotation filtered out every
+          candidate before dispatch — none advertised the required tool
+          capability for this turn. Distinct from [Capacity_exhausted], which
+          reaches dispatch. Serialized via the [cascade_exhausted_no_tool_capable]
+          code; the related [blocker_class] variant is [No_tool_capable_provider]. *)
   | Other_detail of string
 
 type blocker_class =

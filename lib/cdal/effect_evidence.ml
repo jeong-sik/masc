@@ -22,15 +22,14 @@ let normalize_source_path = function
 let is_populated (ev : t) = source_path_is_populated ev.source_path
 
 let of_json (json : Yojson.Safe.t) : t =
-  let open Yojson.Safe.Util in
   try
     let source_path =
-      match json |> member "source_path" with
+      match json |> Json_util.assoc_member_opt "source_path" with
       | `String s -> normalize_source_path (String.trim s)
       | _ -> None
     in
     let source_line =
-      match json |> member "source_line" with
+      match json |> Json_util.assoc_member_opt "source_line" with
       | `Int n -> Some n
       | _ -> None
     in

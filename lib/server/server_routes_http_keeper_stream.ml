@@ -96,33 +96,32 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
   (success, body)
 
 let parse_keeper_chat_stream_request body_str =
-  let open Yojson.Safe.Util in
   try
     let json = Yojson.Safe.from_string body_str in
     if not (match json with `Assoc _ -> true | _ -> false) then
       Error "request body must be a JSON object"
     else
-      let name = json |> member "name" |> to_string_option |> Option.value ~default:"" |> String.trim in
+      let name = Json_util.get_string json "name" |> Option.value ~default:"" |> String.trim in
       let message =
-        json |> member "message" |> to_string_option |> Option.value ~default:""
+        Json_util.get_string json "message" |> Option.value ~default:""
         |> String.trim
       in
       let channel =
-        json |> member "channel" |> to_string_option |> Option.value ~default:""
+        Json_util.get_string json "channel" |> Option.value ~default:""
         |> String.trim
       in
       let channel_user_id =
-        json |> member "channel_user_id" |> to_string_option
+        Json_util.get_string json "channel_user_id"
         |> Option.value ~default:""
         |> String.trim
       in
       let channel_user_name =
-        json |> member "channel_user_name" |> to_string_option
+        Json_util.get_string json "channel_user_name"
         |> Option.value ~default:""
         |> String.trim
       in
       let channel_room_id =
-        json |> member "channel_room_id" |> to_string_option
+        Json_util.get_string json "channel_room_id"
         |> Option.value ~default:""
         |> String.trim
       in
@@ -131,13 +130,13 @@ let parse_keeper_chat_stream_request body_str =
         || channel_user_name <> "" || channel_room_id <> ""
       in
       let timeout_sec =
-        match json |> member "timeout_sec" with
-        | `Null -> Ok None
-        | `Int value when value > 0 -> Ok (Some (max 5 (min 300 value)))
-        | `Float value when value > 0.0 ->
+        match Json_util.assoc_member_opt "timeout_sec" json with
+        | None | Some `Null -> Ok None
+        | Some (`Int value) when value > 0 -> Ok (Some (max 5 (min 300 value)))
+        | Some (`Float value) when value > 0.0 ->
             Ok (Some (max 5 (min 300 (int_of_float (Float.ceil value)))))
-        | `Int _ | `Float _ -> Ok None
-        | _ -> Error "timeout_sec must be a positive number"
+        | Some (`Int _) | Some (`Float _) -> Ok None
+        | Some _ -> Error "timeout_sec must be a positive number"
       in
       if name = "" then
         Error "name is required"
@@ -354,9 +353,7 @@ let extract_visible_reply body =
     match payload_json_opt with
     | Some payload_json ->
         let reply_raw =
-          payload_json
-          |> Yojson.Safe.Util.member "reply"
-          |> Yojson.Safe.Util.to_string_option
+          Json_util.get_string payload_json "reply"
           |> Option.value ~default:""
         in
         let visible =
@@ -365,7 +362,7 @@ let extract_visible_reply body =
         in
         if visible = "" then
           Option.value ~default:"(empty reply)"
-            (Yojson.Safe.Util.to_string_option payload_json)
+            (match payload_json with `String s -> Some s | _ -> None)
         else visible
     | None ->
         let visible = strip_keeper_visible_reply body in

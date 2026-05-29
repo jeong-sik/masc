@@ -1,6 +1,4 @@
 open Printf
-open Yojson.Safe.Util
-
 open Result.Syntax
 
 type runtime = {
@@ -198,17 +196,17 @@ let refresh_runtime_metrics (runtime : runtime) =
   | _ -> { runtime with queue_depth }
 
 let normalize_runtime_json json =
-  let base_url = json |> member "base_url" |> to_string_option |> trim_opt in
+  let base_url = Json_util.get_string json "base_url" |> trim_opt in
   match base_url with
   | None -> Error "runtime.base_url is required"
   | Some base_url ->
       let id =
-        json |> member "id" |> to_string_option |> trim_opt
+        Json_util.get_string json "id" |> trim_opt
         |> Option.value ~default:(runtime_id_of_base_url base_url)
       in
-      let model = json |> member "model" |> to_string_option |> trim_opt in
+      let model = Json_util.get_string json "model" |> trim_opt in
       let max_concurrency =
-        match json |> member "max_concurrency" with
+        match json |> Json_util.assoc_member_opt "max_concurrency" with
         | `Int value -> max 1 value
         | `Intlit raw -> (
             match parse_int_opt raw with

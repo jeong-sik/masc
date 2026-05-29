@@ -133,48 +133,47 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
     ]
 
 let worker_meta_of_yojson json =
-  let open Yojson.Safe.Util in
   match json with
   | `Assoc fields -> (
       match validate_worker_meta_fields fields with
       | Error _ as err -> err
       | Ok () -> (
-          match json |> member "worker_name" |> to_string_option with
+          match Json_util.get_string json "worker_name" with
           | None -> Error "worker meta missing worker_name"
           | Some worker_name -> (
-              match Worker_execution_backend.of_yojson (json |> member "runtime_backend") with
+              match Worker_execution_backend.of_yojson (Json_util.assoc_member_opt "runtime_backend" json) with
               | Error _ as err -> err
               | Ok runtime_backend ->
                   Ok
                     {
                       version =
-                        json |> member "version" |> to_int_option
+                        Json_util.get_int json "version"
                         |> Option.value ~default:worker_container_version;
                       worker_name;
                       mcp_session_id =
-                        json |> member "mcp_session_id" |> to_string_option
+                        Json_util.get_string json "mcp_session_id"
                         |> Option.value ~default:(stable_worker_session_id worker_name);
                       workspace_path =
-                        json |> member "workspace_path" |> to_string_option
+                        Json_util.get_string json "workspace_path"
                         |> Option.value ~default:"";
-                      role = json |> member "role" |> to_string_option;
+                      role = Json_util.get_string json "role";
                       selection_note =
-                        json |> member "selection_note" |> to_string_option;
+                        Json_util.get_string json "selection_note";
                       runtime_backend;
                       thinking_enabled =
-                        json |> member "thinking_enabled" |> to_bool_option;
+                        Json_util.get_bool json "thinking_enabled";
                       timeout_seconds =
-                        json |> member "timeout_seconds" |> to_int_option;
+                        Json_util.get_int json "timeout_seconds";
                       effective_model =
-                        json |> member "effective_model" |> to_string_option
+                        Json_util.get_string json "effective_model"
                         |> Option.value ~default:"";
                       checkpoint_path =
-                        json |> member "checkpoint_path" |> to_string_option
+                        Json_util.get_string json "checkpoint_path"
                         |> Option.value ~default:"";
                       turn_log_path =
-                        json |> member "turn_log_path" |> to_string_option
+                        Json_util.get_string json "turn_log_path"
                         |> Option.value ~default:"";
-                      last_run_at = json |> member "last_run_at" |> to_float_option;
+                      last_run_at = Json_util.get_float json "last_run_at";
                       (* RFC-0084 host-config-cleanup-H — JSON I/O
                          round-trip deferred; always [None] until a
                          follow-up cleanup adds the schema. *)

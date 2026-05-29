@@ -64,7 +64,7 @@ let classify_history_jsonl_line (line : string) : history_line_action option =
   try
     let json = Yojson.Safe.from_string line in
     let source =
-      match Yojson.Safe.Util.(json |> member "source" |> to_string_option) with
+      match Json_util.get_string json "source" with
       | Some raw -> String.trim raw
       | None -> ""
     in

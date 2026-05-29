@@ -149,10 +149,9 @@ and goal_to_yojson (goal : goal) =
 
 and state_of_yojson = function
   | `Assoc _ as json ->
-      let open Yojson.Safe.Util in
       begin
-        match member "version" json, member "updated_at" json, member "goals" json with
-        | `Int version, `String updated_at, `List goals_json ->
+        match Json_util.assoc_member_opt "version" json, Json_util.assoc_member_opt "updated_at" json, Json_util.assoc_member_opt "goals" json with
+        | Some (`Int version), Some (`String updated_at), Some (`List goals_json) ->
             let rec collect acc = function
               | [] -> Ok (List.rev acc)
               | row :: rest -> (
@@ -170,39 +169,38 @@ and state_of_yojson = function
 
 and goal_of_yojson = function
   | `Assoc _ as json ->
-      let open Yojson.Safe.Util in
       begin
-        match member "id" json, horizon_of_yojson (member "horizon" json), member "title" json with
-        | `String id, Ok horizon, `String title ->
+        match Json_util.assoc_member_opt "id" json, horizon_of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "horizon" json)), Json_util.assoc_member_opt "title" json with
+        | Some (`String id), Ok horizon, Some (`String title) ->
             let legacy_status =
-              match member "status" json with
-              | `Null -> Ok Active
-              | status_json -> goal_status_of_yojson status_json
+              match Json_util.assoc_member_opt "status" json with
+              | None | Some `Null -> Ok Active
+              | Some status_json -> goal_status_of_yojson status_json
             in
             let phase =
-              match member "phase" json with
-              | `Null -> (
+              match Json_util.assoc_member_opt "phase" json with
+              | None | Some `Null -> (
                   match legacy_status with
                   | Ok status -> Ok (phase_of_goal_status status)
                   | Error msg -> Error msg)
-              | phase_json -> Goal_phase.of_yojson phase_json
+              | Some phase_json -> Goal_phase.of_yojson phase_json
             in
             let verifier_policy =
-              match member "verifier_policy" json with
-              | `Null -> Ok None
-              | policy_json ->
+              match Json_util.assoc_member_opt "verifier_policy" json with
+              | None | Some `Null -> Ok None
+              | Some policy_json ->
                   Result.map
                     Option.some
                     (Goal_verification.goal_verifier_policy_of_yojson policy_json)
             in
             let created_at =
-              match member "created_at" json with
-              | `String value -> Ok value
+              match Json_util.assoc_member_opt "created_at" json with
+              | Some (`String value) -> Ok value
               | _ -> Error "goal_of_yojson: created_at missing"
             in
             let updated_at =
-              match member "updated_at" json with
-              | `String value -> Ok value
+              match Json_util.assoc_member_opt "updated_at" json with
+              | Some (`String value) -> Ok value
               | _ -> Error "goal_of_yojson: updated_at missing"
             in
             begin
@@ -214,25 +212,25 @@ and goal_of_yojson = function
                          id;
                          horizon;
                          title;
-                         metric = member "metric" json |> to_string_option;
-                         target_value = member "target_value" json |> to_string_option;
-                         due_date = member "due_date" json |> to_string_option;
+                         metric = Json_util.get_string json "metric" ;
+                         target_value = Json_util.get_string json "target_value" ;
+                         due_date = Json_util.get_string json "due_date" ;
                          priority =
-                           (match member "priority" json with
-                           | `Int value -> clamp_priority value
+                           (match Json_util.assoc_member_opt "priority" json with
+                           | Some (`Int value) -> clamp_priority value
                            | _ -> 3);
                          status = goal_status_of_phase phase;
                          phase;
                          verifier_policy;
                          require_completion_approval =
-                           (match member "require_completion_approval" json with
-                           | `Bool value -> value
+                           (match Json_util.assoc_member_opt "require_completion_approval" json with
+                           | Some (`Bool value) -> value
                            | _ -> false);
                          active_verification_request_id =
-                           member "active_verification_request_id" json |> to_string_option;
-                         parent_goal_id = member "parent_goal_id" json |> to_string_option;
-                         last_review_note = member "last_review_note" json |> to_string_option;
-                         last_review_at = member "last_review_at" json |> to_string_option;
+                           Json_util.get_string json "active_verification_request_id" ;
+                         parent_goal_id = Json_util.get_string json "parent_goal_id" ;
+                         last_review_note = Json_util.get_string json "last_review_note" ;
+                         last_review_at = Json_util.get_string json "last_review_at" ;
                          created_at;
                          updated_at;
                        })

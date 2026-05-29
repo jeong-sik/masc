@@ -34,17 +34,16 @@ let violation_kind_to_string v =
 ;;
 
 let of_json (json : Yojson.Safe.t) : (t, string) result =
-  let open Yojson.Safe.Util in
   try
-    let ts = json |> member "ts" |> to_float in
-    let tool_name = json |> member "tool_name" |> to_string in
-    let input_summary = json |> member "input_summary" |> to_string in
+    let ts = Json_util.get_float json "ts" |> Option.value ~default:0.0 in
+    let tool_name = Json_util.get_string json "tool_name" |> Option.value ~default:"" in
+    let input_summary = Json_util.get_string json "input_summary" |> Option.value ~default:"" in
     match
-      Masc_mcp_cdal_runtime.Execution_mode.of_yojson (json |> member "effective_mode")
+      Masc_mcp_cdal_runtime.Execution_mode.of_yojson (Json_util.assoc_member_opt "effective_mode" json)
     with
     | Error e -> Error (Printf.sprintf "effective_mode parse: %s" e)
     | Ok effective_mode ->
-      (match violation_kind_of_string (json |> member "violation_kind" |> to_string) with
+      (match violation_kind_of_string (Json_util.get_string json "violation_kind" |> Option.value ~default:"" ) with
        | Ok violation_kind ->
          Ok { ts; tool_name; input_summary; effective_mode; violation_kind }
        | Error e -> Error e)

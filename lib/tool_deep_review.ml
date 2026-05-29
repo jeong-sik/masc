@@ -127,14 +127,14 @@ let handle_deep_review
   : Tool_result.result
   =
   let target_files =
-    match Yojson.Safe.Util.(member "target_files" args) with
-    | `List files ->
+    match Json_util.assoc_member_opt "target_files" args with
+    | Some (`List files) ->
         List.filter_map (function `String s -> Some s | _ -> None) files
     | _ -> []
   in
   let question =
-    match Yojson.Safe.Util.(member "question" args) with
-    | `String s -> s
+    match Json_util.assoc_member_opt "question" args with
+    | Some (`String s) -> s
     | _ -> ""
   in
   if Stdlib.List.length target_files = 0 || String.equal question "" then

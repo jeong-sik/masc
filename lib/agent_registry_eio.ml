@@ -119,10 +119,9 @@ let get_registry_locked s = s.registry
 *)
 let get_or_create_identity ?mcp_session_id params =
   let room_id =
-    match Yojson.Safe.Util.(params |> member "room") with
-    | `String r -> Some r
+    match Json_util.assoc_member_opt "room" params with
+    | Some (`String r) -> Some r
     | _ -> None
-    | exception Yojson.Safe.Util.Type_error _ -> None
   in
   with_state_rw (fun s ->
     let reg = get_registry_locked !s in

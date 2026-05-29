@@ -326,8 +326,8 @@ let gc config ?(days=7) () =
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat messages_path name in
         let json = read_json config path in
-        let ts = Yojson.Safe.Util.(member "timestamp" json |> to_string_option) in
-        let content = Yojson.Safe.Util.(member "content" json |> to_string_option)
+        let ts = Json_util.get_string json "timestamp" in
+        let content = Json_util.get_string json "content"
                       |> Option.value ~default:"" in
         match ts with
         | Some ts when ts < cutoff_iso ->
@@ -442,10 +442,10 @@ let gc config ?(days=7) () =
           try
             let json = read_json config sjson in
             let status =
-              Yojson.Safe.Util.(member "status" json |> to_string_option)
+              Json_util.get_string json "status"
               |> Option.value ~default:"" in
             let updated =
-              Yojson.Safe.Util.(member "updated_at_iso" json |> to_string_option)
+              Json_util.get_string json "updated_at_iso"
               |> Option.value ~default:"" in
             if (status = "completed" || status = "interrupted" || status = "cancelled") && updated <> "" && updated < cutoff_iso then begin
               mkdir_p archive_ts_dir;

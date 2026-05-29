@@ -681,9 +681,9 @@ let history_user_messages_from_lines
   |> List.filter_map (fun line ->
        try
          let json = Yojson.Safe.from_string line in
-         let role = Yojson.Safe.Util.(json |> member "role" |> to_string_option) in
+         let role = Json_util.get_string json "role" in
          let source =
-           Yojson.Safe.Util.(json |> member "source" |> to_string_option)
+           Json_util.get_string json "source"
            |> Option.value ~default:""
            |> String.trim
          in

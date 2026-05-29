@@ -245,7 +245,7 @@ let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
 
 (* Read document *)
 let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
-  let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
+  let topic = Json_util.get_string args "topic"
     |> Option.value ~default:"" in
   if String.equal topic "" then topic_required ~tool_name ~start_time
   else begin
@@ -344,9 +344,9 @@ verified_by: []
 
 (* Promote candidate to library *)
 let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
-  let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
+  let topic = Json_util.get_string args "topic"
     |> Option.value ~default:"" in
-  let new_confidence = Yojson.Safe.Util.(member "confidence" args |> to_float_option)
+  let new_confidence = Json_util.get_float args "confidence"
     |> Option.value ~default:0.7 in
 
   if String.equal topic "" then topic_required ~tool_name ~start_time
@@ -392,7 +392,7 @@ let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
 
 (* Search documents *)
 let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
-  let query = Yojson.Safe.Util.(member "query" args |> to_string_option)
+  let query = Json_util.get_string args "query"
     |> Option.value ~default:"" in
   if String.equal query "" then query_required ~tool_name ~start_time
   else begin

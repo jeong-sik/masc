@@ -66,8 +66,7 @@ let strip_mcp_prefix name =
 
 
 let has_agent_name_field (schema : Masc_domain.tool_schema) =
-  let open Yojson.Safe.Util in
-  match schema.input_schema |> member "properties" |> member "agent_name" with
+  match (match Json_util.assoc_member_opt "properties" schema.input_schema with Some x -> Json_util.assoc_member_opt "agent_name" x | None -> None) with
   | `Null -> false
   | _ -> true
 
@@ -101,8 +100,7 @@ let mcp_endpoint_url ~(auth_token : string option) =
   masc_http_base_url () ^ "/mcp"
 
 let request_id_matches request_id json =
-  let open Yojson.Safe.Util in
-  match member "id" json with
+  match Json_util.assoc_member_opt "id" json with
   | `Int value -> value = request_id
   | `Intlit value -> (
       match int_of_string_opt value with
@@ -141,8 +139,7 @@ let normalize_mcp_body ~request_id body =
       | [] -> body)
 
 let extract_tool_text json =
-  let open Yojson.Safe.Util in
-  match json |> member "result" |> member "content" with
+  match (match Json_util.assoc_member_opt "result" json with Some x -> Json_util.assoc_member_opt "content" x | None -> None) with
   | `List (`Assoc fields :: _) -> (
       match List.assoc_opt "text" fields with
       | Some (`String s) -> s
@@ -288,8 +285,7 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
   | Error e -> Error e
   | Ok json ->
       let is_error =
-        let open Yojson.Safe.Util in
-        match json |> member "result" |> member "isError" with
+        match (match Json_util.assoc_member_opt "result" json with Some x -> Json_util.assoc_member_opt "isError" x | None -> None) with
         | `Bool b -> b
         | _ -> false
       in

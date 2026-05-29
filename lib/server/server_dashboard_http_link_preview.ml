@@ -1,5 +1,3 @@
-open Yojson.Safe.Util
-
 type preview_extract = {
   title : string option;
   description : string option;
@@ -453,7 +451,7 @@ let fetch_preview ~clock ~net url =
                | exn -> Error (Printexc.to_string exn))
 
 let urls_of_request args =
-  match args |> member "urls" with
+  match args |> Json_util.assoc_member_opt "urls" with
   | `List items ->
       let urls =
         items

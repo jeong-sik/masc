@@ -6,10 +6,9 @@
 let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
   Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string body in
-    let open Yojson.Safe.Util in
-    let dur = json |> member "duration_ms" |> to_int_option
+    let dur = Json_util.get_int json "duration_ms"
               |> Option.value ~default:0 in
-    let tok = json |> member "total_tokens" |> to_int_option
+    let tok = Json_util.get_int json "total_tokens"
               |> Option.value ~default:0 in
     if dur = 0 && tok = 0 then None
     else
@@ -19,17 +18,16 @@ let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
 let extract_reply_text (body : string) : string =
   Safe_ops.protect ~default:body (fun () ->
     let json = Yojson.Safe.from_string body in
-    let open Yojson.Safe.Util in
-    match json |> member "reply" |> to_string_option with
+    match Json_util.get_string json "reply" with
     | Some r -> r
     | None -> body)
 
 let extract_structured (body : string) : Yojson.Safe.t option =
   Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string body in
-    match Yojson.Safe.Util.member "structured" json with
-    | `Null -> None
-    | v -> Some v)
+    match Json_util.assoc_member_opt "structured" json with
+    | None | Some `Null -> None
+    | Some v -> Some v)
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 

@@ -502,8 +502,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
         :: acc)
       nodes []
     |> List.sort (fun a b ->
-           let open Yojson.Safe.Util in
-           compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
+           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
   in
   let edges_json =
     Hashtbl.fold
@@ -522,8 +521,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
         :: acc)
       edges []
     |> List.sort (fun a b ->
-           let open Yojson.Safe.Util in
-           compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
+           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
   in
   let timeline =
     let total = List.length events in
@@ -533,8 +531,8 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     nodes_json
     |> List.fold_left
          (fun acc node ->
-           match Yojson.Safe.Util.member "kind" node with
-           | `String kind when String.equal kind prefix -> acc + 1
+           match Json_util.assoc_member_opt "kind" node with
+           | Some (`String kind) when String.equal kind prefix -> acc + 1
            | _ -> acc)
          0
   in
@@ -542,9 +540,8 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     nodes_json
     |> List.fold_left
          (fun acc node ->
-           let open Yojson.Safe.Util in
-           match (member "kind" node, member "status" node) with
-           | `String "agent", `String status
+           match (Json_util.assoc_member_opt "kind" node, Json_util.assoc_member_opt "status" node) with
+           | Some (`String "agent"), Some (`String status)
              when
                not
                  (List.mem status

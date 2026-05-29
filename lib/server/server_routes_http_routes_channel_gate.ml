@@ -56,9 +56,8 @@ let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = fun
   | Internal _ -> `Internal_server_error
 
 let metric_context_of_json json =
-  let open Yojson.Safe.Util in
   let field key =
-    json |> member key |> to_string_option
+    Json_util.get_string json key
     |> Option.value ~default:""
     |> String.trim
   in
@@ -352,14 +351,12 @@ let handle_bind_for_connector ~sw ~clock state request reqd
     try
       let json = Yojson.Safe.from_string body_str in
       let channel_id =
-        json |> Yojson.Safe.Util.member "channel_id"
-        |> Yojson.Safe.Util.to_string_option
+        Json_util.get_string json "channel_id"
         |> Option.value ~default:""
         |> String.trim
       in
       let keeper_name =
-        json |> Yojson.Safe.Util.member "keeper_name"
-        |> Yojson.Safe.Util.to_string_option
+        Json_util.get_string json "keeper_name"
         |> Option.value ~default:""
         |> String.trim
       in
@@ -404,8 +401,7 @@ let handle_unbind_for_connector state request reqd
     try
       let json = Yojson.Safe.from_string body_str in
       let channel_id =
-        json |> Yojson.Safe.Util.member "channel_id"
-        |> Yojson.Safe.Util.to_string_option
+        Json_util.get_string json "channel_id"
         |> Option.value ~default:""
         |> String.trim
       in

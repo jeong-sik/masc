@@ -206,21 +206,21 @@ let test_take_empty () =
 (* ─── option_string_json ───────────────────────────────────── *)
 
 let test_option_string_json_some () =
-  match B.option_string_json (Some "hello") with
+  match Json_util.string_opt_to_json_trimmed (Some "hello") with
   | `String "hello" -> ()
   | _ -> assert false
 
 let test_option_string_json_some_blank () =
   (* Behaviour contract: blank/whitespace-only strings are
      trimmed to "" and projected to `Null. *)
-  assert (B.option_string_json (Some "   ") = `Null);
-  assert (B.option_string_json (Some "") = `Null)
+  assert (Json_util.string_opt_to_json_trimmed (Some "   ") = `Null);
+  assert (Json_util.string_opt_to_json_trimmed (Some "") = `Null)
 
 let test_option_string_json_none () =
-  assert (B.option_string_json None = `Null)
+  assert (Json_util.string_opt_to_json_trimmed None = `Null)
 
 let test_option_string_json_trims () =
-  match B.option_string_json (Some "  trimmed  ") with
+  match Json_util.string_opt_to_json_trimmed (Some "  trimmed  ") with
   | `String "trimmed" -> ()
   | _ -> assert false
 

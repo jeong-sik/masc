@@ -10,7 +10,7 @@
 
     @since 2.187.0 — God file decomposition Phase 1.
 
-    Internal: \[U\] (Yojson.Safe.Util alias), \[json_string_option\],
+    Internal: \[U\] (Yojson.Safe.Util alias), \[Json_util.string_opt_to_json\],
     \[bool_arg_opt\], \[int_arg_opt\] (3 local args helpers
     duplicated from Tool_misc to avoid circular deps),
     \[permission_to_json\], \[auth_snapshot_json\] stay private —

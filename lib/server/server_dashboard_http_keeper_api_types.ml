@@ -162,7 +162,7 @@ let unique_present_paths paths =
   |> Json_util.dedupe_keep_order
 
 let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
-  let decision_string key = json_string_member_opt key row.decision in
+  let decision_string key = json_string_member_opt row.decision key in
   `Assoc
     [
       ("ts", `String row.ts);

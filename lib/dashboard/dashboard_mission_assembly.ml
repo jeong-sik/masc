@@ -100,9 +100,9 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
     ("latest_tool_names", Json_util.json_string_list latest_tool_names);
     ( "latest_tool_call_count",
       Json_util.option_to_yojson (fun value -> `Int value) latest_tool_call_count );
-    ("latest_action_source", json_string_option latest_action_source);
-    ("tool_audit_source", json_string_option tool_audit_source);
-    ("tool_audit_at", json_string_option tool_audit_at);
+    ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
+    ("tool_audit_source", Json_util.string_opt_to_json tool_audit_source);
+    ("tool_audit_at", Json_util.string_opt_to_json tool_audit_at);
   ]
 
 let action_identity action =
@@ -355,10 +355,10 @@ let operation_badge_json (operation : operation_context) =
     [
       ("operation_id", `String operation.operation_id);
       ("status", `String status_str);
-      ("stage", json_string_option operation.stage);
-      ("detachment_status", json_string_option detachment_status_str);
-      ("objective", json_string_option operation.objective);
-      ("updated_at", json_string_option operation.updated_at);
+      ("stage", Json_util.string_opt_to_json operation.stage);
+      ("detachment_status", Json_util.string_opt_to_json detachment_status_str);
+      ("objective", Json_util.string_opt_to_json operation.objective);
+      ("updated_at", Json_util.string_opt_to_json operation.updated_at);
     ]
 
 let operation_badges_for_session session operation_contexts =
@@ -435,7 +435,7 @@ let keeper_refs_for_session member_names keeper_briefs =
              (`Assoc
                [
                  ("name", `String name);
-                 ("agent_name", json_string_option agent_name);
+                 ("agent_name", Json_util.string_opt_to_json agent_name);
                  ("status", member_assoc "status" row);
                  ("generation", member_assoc "generation" row);
                  ("context_ratio", member_assoc "context_ratio" row);
@@ -471,17 +471,17 @@ let build_sessions ?(operation_contexts = []) sessions attention_queue agent_bri
              [
                ("session_id", `String session.session_id);
                ("goal", `String session.goal);
-               ("created_by", json_string_option session.created_by);
+               ("created_by", Json_util.string_opt_to_json session.created_by);
                ("origin_kind", `String session.origin_kind);
-               ("namespace", json_string_option session.namespace);
+               ("namespace", Json_util.string_opt_to_json session.namespace);
                ("status", `String (Dashboard_utils.string_of_session_lifecycle session.status));
                ("health", `String (Dashboard_utils.string_of_health_level session.health));
                ("member_names", Json_util.json_string_list session.member_names);
-               ("started_at", json_string_option session.started_at);
+               ("started_at", Json_util.string_opt_to_json session.started_at);
                ("elapsed_sec", Json_util.option_to_yojson (fun value -> `Int value) session.elapsed_sec);
-               ("operation_id", json_string_option session.operation_id);
-               ("blocker_summary", json_string_option session.blocker_summary);
-               ("last_event_at", json_string_option session.last_event_at);
+               ("operation_id", Json_util.string_opt_to_json session.operation_id);
+               ("blocker_summary", Json_util.string_opt_to_json session.blocker_summary);
+               ("last_event_at", Json_util.string_opt_to_json session.last_event_at);
                ("last_event_summary", `String session.last_event_summary);
                ("communication_summary", `String session.communication_summary);
                ("active_count", `Int session.active_count);

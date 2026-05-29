@@ -14,7 +14,7 @@ let non_empty_trimmed_string_opt value =
 let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   let cascade_name = Keeper_types.cascade_name_of_meta meta in
   let cascade_name_json =
-    string_option_to_json (non_empty_trimmed_string_opt cascade_name)
+    Json_util.string_opt_to_json (non_empty_trimmed_string_opt cascade_name)
   in
   (* RFC-0149 §3.3 — use the Result-returning resolver so an unresolved
      cascade surfaces as the original input on the canonical fields
@@ -38,7 +38,7 @@ let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
 
 let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   let cascade_name = non_empty_trimmed_string_opt (Keeper_types.cascade_name_of_meta meta) in
-  let cascade_json = string_option_to_json cascade_name in
+  let cascade_json = Json_util.string_opt_to_json cascade_name in
   [ "cascade_name", cascade_json
   ; "cascade_canonical", cascade_json
   ; "selected_cascade_canonical", cascade_json

@@ -394,14 +394,14 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
                        then None
                        else archived_reason_for_session related_session) );
                   ("status", `String status);
-                  ("current_work", json_string_option current_work);
-                  ("related_session_id", json_string_option (Option.map (fun s -> s.session_id) related_session));
-                  ("last_activity_at", json_string_option last_activity_at);
+                  ("current_work", Json_util.string_opt_to_json current_work);
+                  ("related_session_id", Json_util.string_opt_to_json (Option.map (fun s -> s.session_id) related_session));
+                  ("last_activity_at", Json_util.string_opt_to_json last_activity_at);
                   ("last_activity_age_sec", Json_util.option_to_yojson (fun value -> `Int value) last_activity_age_sec);
                   ("signal_truth", `String signal_truth);
                   ("evidence_source", `String evidence_source);
-                  ("recent_output_preview", json_string_option recent_output_preview);
-                  ("recent_input_preview", json_string_option recent_input_preview);
+                  ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
+                  ("recent_input_preview", Json_util.string_opt_to_json recent_input_preview);
                 ]);
          } : agent_context))
   |> List.sort (fun (left : agent_context) (right : agent_context) ->

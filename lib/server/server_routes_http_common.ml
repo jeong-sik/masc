@@ -250,3 +250,26 @@ let handle_ag_ui_events request reqd =
 let handle_presence_events request reqd =
   Server_mcp_transport_http.handle_presence_events
     ~deps:(mcp_transport_http_deps ()) request reqd
+
+(* Cached + offloaded dashboard read response.
+
+   The repeated dashboard-read pattern is: wrap a compute closure in the SWR
+   cache ([Dashboard_cache.get_or_compute]) and submit it to the shared
+   Executor_pool ([Domain_pool_ref.submit_io_or_inline]). ~20 routes inline
+   this 2-call nesting; ~28 dashboard GET routes still omit it and recompute
+   uncached on the main HTTP domain per request. The uncached ones (e.g.
+   /branches spawning `git branch`, /rooms querying up to 1000 messages,
+   /status) head-of-line-block other requests when a dashboard page fires
+   many calls in parallel — a 12-way parallel probe converged every endpoint
+   (incl. ms-cached ones) to ~3.4s because the uncached handlers held the
+   single Eio domain.
+
+   This combinator names the pattern so routes adopt it as a one-liner and
+   the uncached migration stops being N-of-M hand-patching. [cache_key]
+   stays caller-built so request params (limit, actor, ...) vary the entry. *)
+let respond_cached_read ?(compress = true) ~request ~reqd ~cache_key ~ttl compute =
+  let json =
+    Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
+      Domain_pool_ref.submit_io_or_inline compute)
+  in
+  Http.Response.json_value ~compress ~request json reqd

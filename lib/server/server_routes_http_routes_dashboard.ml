@@ -110,23 +110,17 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/branches" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         (* Dashboard_branches.json spawns `git -C <repo> branch` per request
-            via Exec_gate. Without caching, a burst of parallel dashboard
-            requests spawns one subprocess each AND runs it inline on the main
-            HTTP domain, head-of-line-blocking other requests. Wrap in the
-            shared get_or_compute + Executor_pool offload (mirrors /planning,
-            /nudges): parallel bursts collapse to one git spawn per TTL, run on
-            a pool domain. realtime TTL keeps the "live" branch list fresh. *)
+         (* /branches spawns `git -C <repo> branch` via Exec_gate. Cache +
+            offload (respond_cached_read) so a parallel dashboard burst
+            collapses to one git spawn per realtime TTL and the spawn runs on
+            an Executor_pool domain instead of blocking the main HTTP domain. *)
          let cache_key =
            Printf.sprintf "branches:%s"
              state.Mcp_server.room_config.base_path
          in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_branches.json ~config:state.Mcp_server.room_config))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         respond_cached_read ~request:req ~reqd ~cache_key
+           ~ttl:realtime_cache_ttl_s (fun () ->
+             Dashboard_branches.json ~config:state.Mcp_server.room_config)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/rooms" (fun request reqd ->
        with_public_read handle_dashboard_rooms request reqd)

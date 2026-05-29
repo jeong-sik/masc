@@ -14,7 +14,6 @@ let kind_t : S.kind Alcotest.testable =
     match (a, b) with
     | S.K_provider_rate_limited, S.K_provider_rate_limited
     | K_time_cap_fired, K_time_cap_fired
-    | K_all_tiers_filtered_after_cycles, K_all_tiers_filtered_after_cycles
     | K_inflight_capacity_full, K_inflight_capacity_full ->
         true
     | _ -> false
@@ -41,10 +40,6 @@ let sample_time_cap_fired_no_provider =
       provider_id = None;
     }
 
-let sample_all_filtered =
-  S.All_tiers_filtered_after_cycles
-    { cascade_name = "strict_tool_candidates"; cycle_count = 3 }
-
 let sample_inflight_full =
   S.Inflight_capacity_full
     { admission_key = "strict_tool_candidates"; max_inflight = 8 }
@@ -53,7 +48,6 @@ let all_samples =
   [ sample_provider_rate_limited;
     sample_time_cap_fired;
     sample_time_cap_fired_no_provider;
-    sample_all_filtered;
     sample_inflight_full;
   ]
 
@@ -66,7 +60,7 @@ let test_equal_distinct () =
   let pairs =
     [ (sample_provider_rate_limited, sample_time_cap_fired);
       (sample_time_cap_fired, sample_time_cap_fired_no_provider);
-      (sample_all_filtered, sample_inflight_full);
+      (sample_time_cap_fired, sample_inflight_full);
     ]
   in
   List.iter
@@ -81,8 +75,6 @@ let test_kind_mapping () =
     (S.kind sample_provider_rate_limited);
   Alcotest.check kind_t "time_cap_fired" S.K_time_cap_fired
     (S.kind sample_time_cap_fired);
-  Alcotest.check kind_t "all_tiers_filtered_after_cycles"
-    S.K_all_tiers_filtered_after_cycles (S.kind sample_all_filtered);
   Alcotest.check kind_t "inflight_capacity_full" S.K_inflight_capacity_full
     (S.kind sample_inflight_full)
 
@@ -93,9 +85,6 @@ let test_kind_to_string () =
   Alcotest.(check string)
     "time_cap_fired" "time_cap_fired"
     (S.kind_to_string S.K_time_cap_fired);
-  Alcotest.(check string)
-    "all_tiers_filtered_after_cycles" "all_tiers_filtered_after_cycles"
-    (S.kind_to_string S.K_all_tiers_filtered_after_cycles);
   Alcotest.(check string)
     "inflight_capacity_full" "inflight_capacity_full"
     (S.kind_to_string S.K_inflight_capacity_full)

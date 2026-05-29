@@ -15,10 +15,6 @@ type t =
       cap_ms : int;
       provider_id : string option;
     }
-  | All_tiers_filtered_after_cycles of {
-      cascade_name : string;
-      cycle_count : int;
-    }
   | Inflight_capacity_full of {
       admission_key : string;
       max_inflight : int;
@@ -27,19 +23,16 @@ type t =
 type kind =
   | K_provider_rate_limited
   | K_time_cap_fired
-  | K_all_tiers_filtered_after_cycles
   | K_inflight_capacity_full
 
 let kind = function
   | Provider_rate_limited _ -> K_provider_rate_limited
   | Time_cap_fired _ -> K_time_cap_fired
-  | All_tiers_filtered_after_cycles _ -> K_all_tiers_filtered_after_cycles
   | Inflight_capacity_full _ -> K_inflight_capacity_full
 
 let kind_to_string = function
   | K_provider_rate_limited -> "provider_rate_limited"
   | K_time_cap_fired -> "time_cap_fired"
-  | K_all_tiers_filtered_after_cycles -> "all_tiers_filtered_after_cycles"
   | K_inflight_capacity_full -> "inflight_capacity_full"
 
 let to_metric_label t = kind_to_string (kind t)
@@ -72,12 +65,6 @@ let to_yojson = function
         |> string_opt_field "provider_id" provider_id
       in
       `Assoc fields
-  | All_tiers_filtered_after_cycles { cascade_name; cycle_count } ->
-      `Assoc
-        [ ("kind", `String "all_tiers_filtered_after_cycles");
-          ("cascade_name", `String cascade_name);
-          ("cycle_count", `Int cycle_count);
-        ]
   | Inflight_capacity_full { admission_key; max_inflight } ->
       `Assoc
         [ ("kind", `String "inflight_capacity_full");
@@ -101,9 +88,6 @@ let to_log_string = function
       in
       Printf.sprintf "time_cap_fired observed_latency_ms=%d cap_ms=%d%s"
         observed_latency_ms cap_ms prov
-  | All_tiers_filtered_after_cycles { cascade_name; cycle_count } ->
-      Printf.sprintf "all_tiers_filtered_after_cycles cascade=%s cycles=%d"
-        cascade_name cycle_count
   | Inflight_capacity_full { admission_key; max_inflight } ->
       Printf.sprintf "inflight_capacity_full admission_key=%s max_inflight=%d"
         admission_key max_inflight
@@ -120,11 +104,6 @@ let equal a b =
       Time_cap_fired
         { observed_latency_ms = l2; cap_ms = c2; provider_id = p2 } ) ->
       Int.equal l1 l2 && Int.equal c1 c2 && Option.equal String.equal p1 p2
-  | ( All_tiers_filtered_after_cycles
-        { cascade_name = n1; cycle_count = c1 },
-      All_tiers_filtered_after_cycles
-        { cascade_name = n2; cycle_count = c2 } ) ->
-      String.equal n1 n2 && Int.equal c1 c2
   | ( Inflight_capacity_full { admission_key = a1; max_inflight = m1 },
       Inflight_capacity_full { admission_key = a2; max_inflight = m2 } ) ->
       String.equal a1 a2 && Int.equal m1 m2
@@ -183,12 +162,6 @@ let of_yojson json =
                         Ok
                           (Time_cap_fired
                              { observed_latency_ms; cap_ms; provider_id }))))
-        | "all_tiers_filtered_after_cycles" ->
-            bind (string_field "cascade_name" fields) (fun cascade_name ->
-                bind (int_field "cycle_count" fields) (fun cycle_count ->
-                    Ok
-                      (All_tiers_filtered_after_cycles
-                         { cascade_name; cycle_count })))
         | "inflight_capacity_full" ->
             bind (string_field "admission_key" fields) (fun admission_key ->
                 bind (int_field "max_inflight" fields) (fun max_inflight ->

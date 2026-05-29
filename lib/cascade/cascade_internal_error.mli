@@ -36,7 +36,6 @@ type provider_rejection = {
 type capacity_backpressure_source =
   | Provider_capacity
   | Client_capacity
-  | Admission_capacity
   | Cascade_slot
 
 val capacity_backpressure_source_to_string :

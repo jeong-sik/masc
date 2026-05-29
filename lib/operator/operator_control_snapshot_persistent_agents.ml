@@ -18,7 +18,6 @@
     Both paths emit the same wire shape — `runtime_class="keeper"`
     plus the standard operator-dashboard keeper fields. *)
 
-module U = Yojson.Safe.Util
 include Operator_control_context_snapshot
 
 let persistent_agents_json ?keeper_names ?keeper_rows config =

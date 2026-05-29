@@ -169,7 +169,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0148 | Typed `tool_error` Variant for LLM-Facing Tool Failure Surface | Implemented | ed8eb1d4c4 2026-05-21 | - |
 | 0149 | Audit-Driven Telemetry-as-Fix Sunset | Implemented | d2e231776b 2026-05-22 | - |
 | 0150 | Keeper Attention Signal — backend 단일 typed wire envelope | Implemented | dac9946522 2026-05-23 | - |
-| 0151 | 4-metric monotone-decrease ratchet for code-smell metrics | Implemented | b94b38d09a 2026-05-22 | - |
+| 0151 | 4-metric monotone-decrease ratchet for code-smell metrics | Withdrawn | 2026-05-29 (removed: maintenance cost > signal; baseline drift false-fails) | - |
 | 0152 | Keeper Auto-Resume for All Pause Paths | Active | 79a1b80529 2026-05-22 | - |
 | 0153 | Cascade Backpressure & Tier Admission | Implemented | b94b38d09a 2026-05-22 | - |
 | 0154 | System_error_class typed SSOT — close substring-classifier loop across backen... | Implemented | 52a91399a1 2026-05-21 | - |

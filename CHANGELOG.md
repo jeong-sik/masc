@@ -16,6 +16,15 @@
   the sidecar) is dropped — re-add as a follow-up if needed.
 
 ### Removed
+- RFC-0151 withdrawn: the code-smell monotone ratchet is removed
+  (`scripts/code-smell/measure.sh`, `scripts/lint/godfile-size-regression.sh`,
+  `ci/code-smell-baseline.json`, and the `Godfile size` CI job in
+  `fundamental-check.yml`). The `godfile_loc_1000plus` metric grew on natural
+  code/test expansion and each increase required a paired baseline regenerate
+  PR (#19231, #19433); the recurring baseline-drift false-fails blocked every
+  open PR, so maintenance cost exceeded signal value. Trade-off:
+  `catch_all_arms`/`contains_substring_defs` lose automated tracking and are
+  now handled at PR review per the CLAUDE.md workaround-rejection bar.
 - RFC-0203 Phase 3: `sidecars/discord-bot/` (Python connector, ~5000
   LoC) deleted. `Doctor_dispatch.known_sidecars` no longer lists
   "discord" — the doctor dispatcher only manages remaining external

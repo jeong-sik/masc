@@ -391,17 +391,7 @@ let handle_heartbeat
                    match Masc_domain.agent_of_yojson json with
                    | Ok agent ->
                      let now = Unix.gettimeofday () in
-                     let iso_now =
-                       let tm = Unix.gmtime now in
-                       Printf.sprintf
-                         "%04d-%02d-%02dT%02d:%02d:%02dZ"
-                         (1900 + tm.tm_year)
-                         (1 + tm.tm_mon)
-                         tm.tm_mday
-                         tm.tm_hour
-                         tm.tm_min
-                         tm.tm_sec
-                     in
+                     let iso_now = Masc_domain.iso8601_of_unix_seconds now in
                      let updated = { agent with Masc_domain.last_seen = iso_now } in
                      let content =
                        Yojson.Safe.to_string (Masc_domain.agent_to_yojson updated)

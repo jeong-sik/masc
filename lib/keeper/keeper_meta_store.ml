@@ -222,17 +222,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   read_candidate requested_name
 ;;
 
-let current_utc_timestamp () =
-  let t = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (t.tm_year + 1900)
-    (t.tm_mon + 1)
-    t.tm_mday
-    t.tm_hour
-    t.tm_min
-    t.tm_sec
-;;
+let current_utc_timestamp () = Masc_domain.now_iso ()
 
 let is_missing_progress_file_error exn =
   match exn with

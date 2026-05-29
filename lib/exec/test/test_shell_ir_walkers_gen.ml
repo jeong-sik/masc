@@ -988,6 +988,55 @@ let test_rg_value_consuming_flags () =
    | w -> Alcotest.failf "Rg -i --type py: expected pattern=pattern path=src case_sensitive=false, got %a" pp w)
 ;;
 
+let test_wget_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* wget --header "Accept: text/html" URL — header value should not become URL *)
+  let w1 =
+    of_simple { (base "wget") with args = [ lit "--header"; lit "Accept: text/html"; lit "https://example.com" ] }
+  in
+  (match w1 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --header: expected url=example.com, got %a" pp w);
+  (* wget --timeout 30 URL — timeout value should be skipped *)
+  let w2 =
+    of_simple { (base "wget") with args = [ lit "--timeout"; lit "30"; lit "https://example.com" ] }
+  in
+  (match w2 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --timeout: expected url=example.com, got %a" pp w);
+  (* wget --user agent --password secret URL — both value flags skipped *)
+  let w3 =
+    of_simple { (base "wget") with args = [ lit "--user"; lit "agent"; lit "--password"; lit "secret"; lit "https://example.com" ] }
+  in
+  (match w3 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --user --password: expected url=example.com, got %a" pp w);
+  (* wget -A '*.html' URL — short flag value-consuming *)
+  let w4 =
+    of_simple { (base "wget") with args = [ lit "-A"; lit "*.html"; lit "https://example.com" ] }
+  in
+  (match w4 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget -A: expected url=example.com, got %a" pp w);
+  (* wget -c --tries 3 -O out.html URL — combined boolean + value + output *)
+  let w5 =
+    of_simple { (base "wget") with args = [ lit "-c"; lit "--tries"; lit "3"; lit "-O"; lit "out.html"; lit "https://example.com" ] }
+  in
+  (match w5 with
+   | W (Wget { url = "https://example.com"; output = Some "out.html"; continue_ = true; _ }) -> ()
+   | w -> Alcotest.failf "Wget combined: expected url=example.com output=out.html continue_=true, got %a" pp w)
+;;
+
 (* --lines=N form for Head and Tail *)
 let test_lines_equals_form () =
   let open Shell_ir_typed in
@@ -1299,6 +1348,125 @@ let test_combined_short_flags () =
    | w -> Alcotest.failf "git commit -ma: expected message+amend, got %a" pp w)
 ;;
 
+let test_git_push_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* git push --repo upstream main — --repo consumes "upstream" as value, "main" becomes remote *)
+  let w1 =
+    of_simple { (base "git") with args = [ lit "push"; lit "--repo"; lit "upstream"; lit "main" ] }
+  in
+  (match w1 with
+   | W (Git_push { remote = Some "main"; branch = None; _ }) -> ()
+   | w -> Alcotest.failf "git push --repo upstream main: expected remote=main branch=None, got %a" pp w);
+  (* git push --set-upstream-to origin/main — should not become remote *)
+  let w2 =
+    of_simple { (base "git") with args = [ lit "push"; lit "--set-upstream-to"; lit "origin/main"; lit "origin"; lit "main" ] }
+  in
+  (match w2 with
+   | W (Git_push { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push --set-upstream-to: expected origin main, got %a" pp w);
+  (* git push --force-with-lease=origin/main — = form should be skipped *)
+  let w3 =
+    of_simple { (base "git") with args = [ lit "push"; lit "--force-with-lease=origin/main"; lit "origin"; lit "main" ] }
+  in
+  (match w3 with
+   | W (Git_push { force_with_lease = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push --force-with-lease=: expected force_with_lease, got %a" pp w);
+  (* git push -o ci.skip origin main — -o consumes "ci.skip" *)
+  let w4 =
+    of_simple { (base "git") with args = [ lit "push"; lit "-o"; lit "ci.skip"; lit "origin"; lit "main" ] }
+  in
+  (match w4 with
+   | W (Git_push { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push -o ci.skip: expected origin main, got %a" pp w);
+  (* git push --tags --dry-run origin — boolean + boolean + value flag *)
+  let w5 =
+    of_simple { (base "git") with args = [ lit "push"; lit "--tags"; lit "--dry-run"; lit "origin" ] }
+  in
+  (match w5 with
+   | W (Git_push { remote = Some "origin"; branch = None; _ }) -> ()
+   | w -> Alcotest.failf "git push --tags --dry-run origin: expected origin, got %a" pp w)
+;;
+
+let test_git_pull_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* git pull --repo upstream main — --repo consumes "upstream", "main" becomes remote *)
+  let w1 =
+    of_simple { (base "git") with args = [ lit "pull"; lit "--repo"; lit "upstream"; lit "main" ] }
+  in
+  (match w1 with
+   | W (Git_pull { remote = Some "main"; branch = None; _ }) -> ()
+   | w -> Alcotest.failf "git pull --repo upstream main: expected remote=main branch=None, got %a" pp w);
+  (* git pull --depth 1 origin main — --depth consumes "1" *)
+  let w2 =
+    of_simple { (base "git") with args = [ lit "pull"; lit "--depth"; lit "1"; lit "origin"; lit "main" ] }
+  in
+  (match w2 with
+   | W (Git_pull { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git pull --depth 1: expected origin main, got %a" pp w);
+  (* git pull --rebase origin main — --rebase is boolean, not value-consuming *)
+  let w3 =
+    of_simple { (base "git") with args = [ lit "pull"; lit "--rebase"; lit "origin"; lit "main" ] }
+  in
+  (match w3 with
+   | W (Git_pull { rebase = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git pull --rebase: expected rebase=true origin main, got %a" pp w)
+;;
+
+let test_git_log_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* git log --format="%h %s" — --format consumes the format string *)
+  let w1 =
+    of_simple { (base "git") with args = [ lit "log"; lit "--format"; lit "%h %s" ] }
+  in
+  (match w1 with
+   | W (Git_log { oneline = false; max_count = None; _ }) -> ()
+   | w -> Alcotest.failf "git log --format: expected defaults, got %a" pp w);
+  (* git log --since="2026-01-01" --author="user" — two value flags *)
+  let w2 =
+    of_simple { (base "git") with args = [ lit "log"; lit "--since"; lit "2026-01-01"; lit "--author"; lit "user" ] }
+  in
+  (match w2 with
+   | W (Git_log { oneline = false; max_count = None; _ }) -> ()
+   | w -> Alcotest.failf "git log --since --author: expected defaults, got %a" pp w);
+  (* git log --oneline -n5 --format=medium — oneline + max_count + = form *)
+  let w3 =
+    of_simple { (base "git") with args = [ lit "log"; lit "--oneline"; lit "-n5"; lit "--format=medium" ] }
+  in
+  (match w3 with
+   | W (Git_log { oneline = true; max_count = Some 5; _ }) -> ()
+   | w -> Alcotest.failf "git log --oneline -n5 --format=medium: expected oneline max_count=5, got %a" pp w)
+;;
+
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -1410,9 +1578,13 @@ let () =
         ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
         ; Alcotest.test_case "Rg value-consuming flags" `Quick test_rg_value_consuming_flags
+        ; Alcotest.test_case "Wget value-consuming flags" `Quick test_wget_value_consuming_flags
         ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
         ; Alcotest.test_case "--jobs=N form" `Quick test_jobs_equals_form
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
+        ; Alcotest.test_case "Git_push value-consuming flags" `Quick test_git_push_value_consuming_flags
+        ; Alcotest.test_case "Git_pull value-consuming flags" `Quick test_git_pull_value_consuming_flags
+        ; Alcotest.test_case "Git_log value-consuming flags" `Quick test_git_log_value_consuming_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

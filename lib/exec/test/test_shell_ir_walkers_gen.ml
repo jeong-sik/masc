@@ -745,7 +745,28 @@ let test_posix_end_of_options () =
   in
   (match sed with
    | W (Sed { expression = "s/a/b/"; file = "-file.txt"; suppress_output = true; _ }) -> ()
-   | w -> Alcotest.failf "Sed --: expected expr=s/a/b/ file=-file.txt suppress=true, got %a" pp w)
+   | w -> Alcotest.failf "Sed --: expected expr=s/a/b/ file=-file.txt suppress=true, got %a" pp w);
+  (* Rg: -i -- pattern -file.txt *)
+  let rg =
+    of_simple { (base "rg") with args = [ lit "-i"; lit "--"; lit "pattern"; lit "-file.txt" ] }
+  in
+  (match rg with
+   | W (Rg { pattern = "pattern"; path = Some "-file.txt"; case_sensitive = false; _ }) -> ()
+   | w -> Alcotest.failf "Rg --: expected pattern=path path=-file.txt case_sensitive=false, got %a" pp w);
+  (* Git_clone: --depth 1 -- -repo-name *)
+  let git_clone =
+    of_simple { (base "git") with args = [ lit "clone"; lit "--depth"; lit "1"; lit "--"; lit "-repo-name" ] }
+  in
+  (match git_clone with
+   | W (Git_clone { repo = "-repo-name"; depth = Some 1; _ }) -> ()
+   | w -> Alcotest.failf "Git_clone --: expected repo=-repo-name depth=1, got %a" pp w);
+  (* Curl: -L -- -url-path *)
+  let curl =
+    of_simple { (base "curl") with args = [ lit "-L"; lit "--"; lit "-url-path" ] }
+  in
+  (match curl with
+   | W (Curl { url = "-url-path"; follow_redirects = true; _ }) -> ()
+   | w -> Alcotest.failf "Curl --: expected url=-url-path follow_redirects=true, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)

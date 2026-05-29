@@ -195,24 +195,25 @@ parse [] None args|}
     ; parse_body =
         Some
           {|
-let rec parse case_sensitive pattern path = function
+let rec parse case_sensitive pattern path dd = function
   | [] ->
     (match pattern with
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rg { pattern = p; path; case_sensitive }))
      | None -> None)
-  | "-i" :: rest | "--ignore-case" :: rest -> parse false pattern path rest
+  | "-i" :: rest | "--ignore-case" :: rest when not dd -> parse false pattern path dd rest
+  | "--" :: rest -> parse case_sensitive pattern path true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse case_sensitive pattern path rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse case_sensitive pattern path dd rest
     else (
       match pattern with
-      | None -> parse case_sensitive (Some arg) path rest
+      | None -> parse case_sensitive (Some arg) path dd rest
       | Some _ ->
         (match path with
-         | None -> parse case_sensitive pattern (Some arg) rest
+         | None -> parse case_sensitive pattern (Some arg) dd rest
          | Some _ -> None))
 in
-parse true None None args|}
+parse true None None false args|}
     }
   ; { name = "Git_status"
     ; anon_pattern = "Git_status _"
@@ -264,33 +265,34 @@ parse false args|}
     ; parse_body =
         Some
           {|
-let rec parse depth branch repo = function
+let rec parse depth branch repo dd = function
   | [] ->
     (match repo with
      | Some r -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_clone { repo = r; branch; depth }))
      | None -> None)
-  | "--depth" :: n :: rest ->
+  | "--depth" :: n :: rest when not dd ->
     (match int_of_string_opt n with
-     | Some d -> parse (Some d) branch repo rest
+     | Some d -> parse (Some d) branch repo dd rest
      | None -> None)
-  | "-b" :: b :: rest | "--branch" :: b :: rest -> parse depth (Some b) repo rest
-  | arg :: rest when String.length arg > 8 && String.sub arg 0 8 = "--depth=" ->
+  | "-b" :: b :: rest | "--branch" :: b :: rest when not dd -> parse depth (Some b) repo dd rest
+  | arg :: rest when not dd && String.length arg > 8 && String.sub arg 0 8 = "--depth=" ->
     let n = String.sub arg 8 (String.length arg - 8) in
     (match int_of_string_opt n with
-     | Some d -> parse (Some d) branch repo rest
-     | None -> parse depth branch repo rest)
-  | arg :: rest when String.length arg > 9 && String.sub arg 0 9 = "--branch=" ->
+     | Some d -> parse (Some d) branch repo dd rest
+     | None -> parse depth branch repo dd rest)
+  | arg :: rest when not dd && String.length arg > 9 && String.sub arg 0 9 = "--branch=" ->
     let b = String.sub arg 9 (String.length arg - 9) in
-    parse depth (Some b) repo rest
+    parse depth (Some b) repo dd rest
+  | "--" :: rest -> parse depth branch repo true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse depth branch repo rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse depth branch repo dd rest
     else (
       match repo with
-      | None -> parse depth branch (Some arg) rest
+      | None -> parse depth branch (Some arg) dd rest
       | Some _ -> None)
 in
-parse None None None args|}
+parse None None None false args|}
     }
   ; { name = "Curl"
     ; anon_pattern = "Curl _"
@@ -328,7 +330,7 @@ parse None None None args|}
     ; parse_body =
         Some
           {|
-let rec parse method_ headers body url output_file follow_redirects insecure = function
+let rec parse method_ headers body url output_file follow_redirects insecure dd = function
   | [] ->
     (match url with
      | Some u ->
@@ -347,55 +349,55 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
                ; insecure
                }))
      | None -> None)
-  | "-X" :: m :: rest | "--request" :: m :: rest ->
+  | "-X" :: m :: rest | "--request" :: m :: rest when not dd ->
     (match String.uppercase_ascii m with
-     | "GET" -> parse `GET headers body url output_file follow_redirects insecure rest
-     | "POST" -> parse `POST headers body url output_file follow_redirects insecure rest
-     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
-     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
+     | "GET" -> parse `GET headers body url output_file follow_redirects insecure dd rest
+     | "POST" -> parse `POST headers body url output_file follow_redirects insecure dd rest
+     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure dd rest
+     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure dd rest
      | _ -> None)
   (* --request=METHOD form *)
   | arg :: rest
-    when String.length arg > 10
+    when not dd && String.length arg > 10
          && String.sub arg 0 10 = "--request=" ->
     let m = String.uppercase_ascii (String.sub arg 10 (String.length arg - 10)) in
     (match m with
-     | "GET" -> parse `GET headers body url output_file follow_redirects insecure rest
-     | "POST" -> parse `POST headers body url output_file follow_redirects insecure rest
-     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
-     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
+     | "GET" -> parse `GET headers body url output_file follow_redirects insecure dd rest
+     | "POST" -> parse `POST headers body url output_file follow_redirects insecure dd rest
+     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure dd rest
+     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure dd rest
      | _ -> None)
-  | "-H" :: h :: rest | "--header" :: h :: rest ->
+  | "-H" :: h :: rest | "--header" :: h :: rest when not dd ->
     (match String.index_opt h ':' with
      | Some i ->
        let key = String.trim (String.sub h 0 i) in
        let value = String.trim (String.sub h (i + 1) (String.length h - i - 1)) in
-       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure rest
+       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure dd rest
      | None -> None)
-  | "-d" :: d :: rest | "--data" :: d :: rest ->
+  | "-d" :: d :: rest | "--data" :: d :: rest when not dd ->
     (match body with
-     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
+     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure dd rest
      | Some _ -> None)
   (* --data=VALUE form *)
   | arg :: rest
-    when String.length arg > 7
+    when not dd && String.length arg > 7
          && String.sub arg 0 7 = "--data=" ->
     let d = String.sub arg 7 (String.length arg - 7) in
     (match body with
-     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
+     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure dd rest
      | Some _ -> None)
-  | "-o" :: o :: rest | "--output" :: o :: rest ->
-    parse method_ headers body url (Some o) follow_redirects insecure rest
+  | "-o" :: o :: rest | "--output" :: o :: rest when not dd ->
+    parse method_ headers body url (Some o) follow_redirects insecure dd rest
   (* --output=FILE form *)
   | arg :: rest
-    when String.length arg > 9
+    when not dd && String.length arg > 9
          && String.sub arg 0 9 = "--output=" ->
     let o = String.sub arg 9 (String.length arg - 9) in
-    parse method_ headers body url (Some o) follow_redirects insecure rest
-  | "-L" :: rest | "--location" :: rest ->
-    parse method_ headers body url output_file true insecure rest
-  | "-k" :: rest | "--insecure" :: rest ->
-    parse method_ headers body url output_file follow_redirects true rest
+    parse method_ headers body url (Some o) follow_redirects insecure dd rest
+  | "-L" :: rest | "--location" :: rest when not dd ->
+    parse method_ headers body url output_file true insecure dd rest
+  | "-k" :: rest | "--insecure" :: rest when not dd ->
+    parse method_ headers body url output_file follow_redirects true dd rest
   (* Flags that take an argument value *)
   | ( "--retry" | "--retry-max" | "--connect-timeout" | "--max-time"
     | "--max-filesize" | "--limit-rate" | "--retry-delay" | "--retry-count"
@@ -418,11 +420,11 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
     | "--tls-max" | "--tlsauthtype" | "--tlspassword"
     | "--tlsuser" | "--tlsv1.0" | "--tlsv1.1" | "--tlsv1.2"
     | "--trace" | "--trace-ascii" | "-u" | "--user" )
-    :: _val :: rest ->
-    parse method_ headers body url output_file follow_redirects insecure rest
+    :: _val :: rest when not dd ->
+    parse method_ headers body url output_file follow_redirects insecure dd rest
   (* Combined short flags: -Lk, -kL, etc. (boolean flags only) *)
   | arg :: rest
-    when String.length arg > 2
+    when not dd && String.length arg > 2
          && arg.[0] = '-'
          && arg.[1] <> '-'
          && String.for_all (fun c -> c = 'L' || c = 'k')
@@ -434,16 +436,17 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
       | 'k' -> ins' := true
       | _ -> ()
     done;
-    parse method_ headers body url output_file !fr' !ins' rest
+    parse method_ headers body url output_file !fr' !ins' dd rest
+  | "--" :: rest -> parse method_ headers body url output_file follow_redirects insecure true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse method_ headers body url output_file follow_redirects insecure rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse method_ headers body url output_file follow_redirects insecure dd rest
     else (
       match url with
-      | None -> parse method_ headers body (Some arg) output_file follow_redirects insecure rest
+      | None -> parse method_ headers body (Some arg) output_file follow_redirects insecure dd rest
       | Some _ -> None)
 in
-parse `GET [] None None None false false args|}
+parse `GET [] None None None false false false args|}
     }
   ; { name = "Rm"
     ; anon_pattern = "Rm _"

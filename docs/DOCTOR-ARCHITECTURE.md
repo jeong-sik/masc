@@ -3,7 +3,6 @@ status: design
 last_verified: 2026-04-23
 code_refs:
   - sidecars/shared/gate_shared/doctor.py
-  - sidecars/discord-bot/src/doctor.py
   - bin/main_eio.ml
   - lib/auth_doctor.ml
   - lib/doctor_dispatch.ml

@@ -322,22 +322,36 @@ and (_, _, _, _) command =
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Npm :
       { subcommand : string
-      ; args : string list
+      ; save_dev : bool
+      ; global : bool
+      ; force : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Cargo :
       { subcommand : string
-      ; args : string list
+      ; release : bool
+      ; verbose : bool
+      ; features : string option
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Go :
       { subcommand : string
-      ; args : string list
+      ; verbose : bool
+      ; race : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Gh :
       { subcommand : string
-      ; args : string list
+      ; action : string option
+      ; draft : bool
+      ; squash : bool
+      ; delete_branch : bool
+      ; body : string option
+      ; title : string option
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Chmod :
@@ -354,42 +368,61 @@ and (_, _, _, _) command =
       -> (unit, string, [ `Privileged ], [ `Host ]) command
   | Docker :
       { subcommand : string
-      ; args : string list
+      ; rm : bool
+      ; privileged : bool
+      ; detach : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Docker ]) command
   | Opam :
       { subcommand : string
-      ; args : string list
+      ; yes : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Npx :
       { subcommand : string
-      ; args : string list
+      ; yes : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Yarn :
       { subcommand : string
-      ; args : string list
+      ; dev : bool
+      ; global : bool
+      ; production : bool
+      ; frozen_lockfile : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Pnpm :
       { subcommand : string
-      ; args : string list
+      ; save_dev : bool
+      ; global : bool
+      ; force : bool
+      ; production : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Uv :
       { subcommand : string
-      ; args : string list
+      ; no_cache : bool
+      ; system : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Glab :
       { subcommand : string
-      ; args : string list
+      ; yes : bool
+      ; force : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Pytest :
       { subcommand : string
-      ; args : string list
+      ; verbose : bool
+      ; exitfirst : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Terminal_notifier :
@@ -399,17 +432,22 @@ and (_, _, _, _) command =
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Ruff :
       { subcommand : string
-      ; args : string list
+      ; fix : bool
+      ; show_source : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Pyright :
       { subcommand : string
-      ; args : string list
+      ; strict : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Tsc :
       { subcommand : string
-      ; args : string list
+      ; no_emit : bool
+      ; watch : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Ocamlfind :
@@ -419,22 +457,29 @@ and (_, _, _, _) command =
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Rustc :
       { subcommand : string
-      ; args : string list
+      ; optimize : bool
+      ; test : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Gofmt :
       { subcommand : string
-      ; args : string list
+      ; write : bool
+      ; list_files : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Gradle :
       { subcommand : string
-      ; args : string list
+      ; no_daemon : bool
+      ; parallel : bool
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Ninja :
       { subcommand : string
-      ; args : string list
+      ; jobs : int option
+      ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Java :
@@ -449,6 +494,9 @@ and (_, _, _, _) command =
       -> (unit, string, [ `Audited ], [ `Host ]) command
   | Mvn :
       { subcommand : string
+      ; offline : bool
+      ; batch_mode : bool
+      ; quiet : bool
       ; args : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command

@@ -253,6 +253,14 @@ let rec parse depth branch repo = function
      | Some d -> parse (Some d) branch repo rest
      | None -> None)
   | "-b" :: b :: rest | "--branch" :: b :: rest -> parse depth (Some b) repo rest
+  | arg :: rest when String.length arg > 8 && String.sub arg 0 8 = "--depth=" ->
+    let n = String.sub arg 8 (String.length arg - 8) in
+    (match int_of_string_opt n with
+     | Some d -> parse (Some d) branch repo rest
+     | None -> parse depth branch repo rest)
+  | arg :: rest when String.length arg > 9 && String.sub arg 0 9 = "--branch=" ->
+    let b = String.sub arg 9 (String.length arg - 9) in
+    parse depth (Some b) repo rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse depth branch repo rest
@@ -325,6 +333,17 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
      | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
      | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
      | _ -> None)
+  (* --request=METHOD form *)
+  | arg :: rest
+    when String.length arg > 10
+         && String.sub arg 0 10 = "--request=" ->
+    let m = String.uppercase_ascii (String.sub arg 10 (String.length arg - 10)) in
+    (match m with
+     | "GET" -> parse `GET headers body url output_file follow_redirects insecure rest
+     | "POST" -> parse `POST headers body url output_file follow_redirects insecure rest
+     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
+     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
+     | _ -> None)
   | "-H" :: h :: rest | "--header" :: h :: rest ->
     (match String.index_opt h ':' with
      | Some i ->
@@ -336,7 +355,21 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
     (match body with
      | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
      | Some _ -> None)
+  (* --data=VALUE form *)
+  | arg :: rest
+    when String.length arg > 7
+         && String.sub arg 0 7 = "--data=" ->
+    let d = String.sub arg 7 (String.length arg - 7) in
+    (match body with
+     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
+     | Some _ -> None)
   | "-o" :: o :: rest | "--output" :: o :: rest ->
+    parse method_ headers body url (Some o) follow_redirects insecure rest
+  (* --output=FILE form *)
+  | arg :: rest
+    when String.length arg > 9
+         && String.sub arg 0 9 = "--output=" ->
+    let o = String.sub arg 9 (String.length arg - 9) in
     parse method_ headers body url (Some o) follow_redirects insecure rest
   | "-L" :: rest | "--location" :: rest ->
     parse method_ headers body url output_file true insecure rest
@@ -491,6 +524,13 @@ let rec parse name type_ maxdepth path = function
      | None -> parse name type_ maxdepth path rest)
   | "-exec" :: rest | "-ok" :: rest
   | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ maxdepth path (skip_exec rest)
+  (* POSIX end-of-options: treat all remaining as path *)
+  | "--" :: rest ->
+    let resolved = match path with Some p -> p | None ->
+      (match List.find_opt (fun a -> String.length a > 0) rest with
+       | Some p -> p | None -> ".")
+    in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Find { path = resolved; name; type_; maxdepth }))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then (
@@ -657,6 +697,21 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
     parse recursive false files_with_matches pattern path rest
   | "-l" :: rest | "--files-with-matches" :: rest ->
     parse recursive case_sensitive true pattern path rest
+  (* POSIX end-of-options: treat all remaining as positional *)
+  | "--" :: rest ->
+    let rec collect pattern path = function
+      | [] ->
+        (match pattern with
+         | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Grep { pattern = p; path; recursive; case_sensitive; files_with_matches }))
+         | None -> None)
+      | a :: tl ->
+        if String.length a = 0
+        then collect pattern path tl
+        else (
+          match pattern with
+          | None -> collect (Some a) path tl
+          | Some _ -> collect pattern (Some a) tl)
+    in collect pattern path rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
@@ -828,6 +883,13 @@ let rec parse oneline max_count = function
     (match int_of_string_opt n with
      | Some c -> parse oneline (Some c) rest
      | None -> None)
+  (* --max-count=N form *)
+  | arg :: rest
+    when String.length arg > 12
+         && String.sub arg 0 12 = "--max-count=" ->
+    (match int_of_string_opt (String.sub arg 12 (String.length arg - 12)) with
+     | Some c -> parse oneline (Some c) rest
+     | None -> parse oneline max_count rest)
   (* Combined form: -n5 → max_count = Some 5 *)
   | arg :: rest
     when String.length arg > 2
@@ -1076,7 +1138,25 @@ let rec parse reverse numeric unique key file = function
     (try parse reverse numeric unique (Some (int_of_string n)) file rest
      with Failure _ -> None)
   | "-t" :: _ :: rest -> parse reverse numeric unique key file rest  (* -t SEP — consume separator *)
-  | "--key=" :: _ :: rest -> parse reverse numeric unique key file rest  (* malformed — skip *)
+  (* --key=N form *)
+  | arg :: rest
+    when String.length arg > 6
+         && String.sub arg 0 6 = "--key=" ->
+    let n_str = String.sub arg 6 (String.length arg - 6) in
+    (match int_of_string_opt n_str with
+     | Some n -> parse reverse numeric unique (Some n) file rest
+     | None -> parse reverse numeric unique key file rest)
+  (* POSIX end-of-options: treat all remaining as positional *)
+  | "--" :: rest ->
+    let rec collect file = function
+      | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sort { reverse; numeric; unique; key; file }))
+      | a :: tl ->
+        if String.length a = 0
+        then collect file tl
+        else (match file with
+          | None -> collect (Some a) tl
+          | Some _ -> collect file tl)
+    in collect file rest
   | arg :: rest ->
     (* Combined form: -k2, -k3rn — digits after -k, then optional flag chars *)
     if String.length arg >= 3 && arg.[0] = '-' && arg.[1] = 'k'
@@ -1141,6 +1221,13 @@ let rec parse delimiter fields file = function
   | arg :: rest when String.length arg >= 3 && arg.[0] = '-' && arg.[1] = 'f' ->
     (* Combined form: -f1 means -f 1 *)
     parse delimiter (Some (String.sub arg 2 (String.length arg - 2))) file rest
+  (* POSIX end-of-options: treat all remaining as positional *)
+  | "--" :: rest ->
+    (match fields with
+     | Some f ->
+       let file = List.find_opt (fun a -> String.length a > 0) rest in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cut { delimiter; fields = f; file }))
+     | None -> None)
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ "--delimiter"; d ] -> parse (Some d) fields file rest
@@ -2532,10 +2619,249 @@ let rec parse file patchfile strip reverse = function
 in
 parse None None 0 false args|}
     }
-  ; subcommand_args_ctor ~name:"Npm" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Cargo" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Go" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Gh" ~risk:"`Audited" ~sandbox:"`Host"
+  ; { name = "Npm"
+    ; anon_pattern = "Npm _"
+    ; bind_pattern = "Npm { subcommand; save_dev; global; force; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if save_dev then base @ [ "--save-dev" ] else base in
+        let base = if global then base @ [ "--global" ] else base in
+        let base = if force then base @ [ "--force" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Npm
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Npm"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd sd glb frc = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npm { subcommand = s; save_dev = sd; global = glb; force = frc; rest = [] }))
+     | None -> None)
+  | "--save-dev" :: rest -> parse subcmd true glb frc rest
+  | "-D" :: rest -> parse subcmd true glb frc rest
+  | "--global" :: rest -> parse subcmd sd true frc rest
+  | "-g" :: rest -> parse subcmd sd true frc rest
+  | "--force" :: rest -> parse subcmd sd glb true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) sd glb frc rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npm {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         save_dev = sd; global = glb; force = frc;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false false args|}
+    }
+  ; { name = "Cargo"
+    ; anon_pattern = "Cargo _"
+    ; bind_pattern = "Cargo { subcommand; release; verbose; features; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if release then base @ [ "--release" ] else base in
+        let base = if verbose then base @ [ "--verbose" ] else base in
+        let base = match features with Some f -> base @ [ "--features"; f ] | None -> base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Cargo
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Cargo"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd rel verb feat = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo { subcommand = s; release = rel; verbose = verb; features = feat; rest = [] }))
+     | None -> None)
+  | "--release" :: rest -> parse subcmd true verb feat rest
+  | "--verbose" :: rest -> parse subcmd rel true feat rest
+  | "-v" :: rest -> parse subcmd rel true feat rest
+  | "--features" :: f :: rest -> parse subcmd rel verb (Some f) rest
+  | arg :: rest ->
+    (* Handle --features=VALUE *)
+    if String.length arg > 11 && String.sub arg 0 11 = "--features="
+    then (
+      let f = String.sub arg 11 (String.length arg - 11) in
+      parse subcmd rel verb (Some f) rest)
+    else (
+      match subcmd with
+      | None -> parse (Some arg) rel verb feat rest
+      | Some _ ->
+        let rec collect acc = function
+          | [] -> List.rev acc
+          | x :: xs -> collect (x :: acc) xs
+        in
+        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo {
+          subcommand = (match subcmd with Some s -> s | None -> "");
+          release = rel; verbose = verb; features = feat;
+          rest = collect [ arg ] rest
+        })))
+in
+parse None false false None args|}
+    }
+  ; { name = "Go"
+    ; anon_pattern = "Go _"
+    ; bind_pattern = "Go { subcommand; verbose; race; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if verbose then base @ [ "-v" ] else base in
+        let base = if race then base @ [ "-race" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Go
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Go"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd v race = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Go { subcommand = s; verbose = v; race; rest = [] }))
+     | None -> None)
+  | "-v" :: rest -> parse subcmd true race rest
+  | "-race" :: rest -> parse subcmd v true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) v race rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Go {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         verbose = v; race;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
+  ; { name = "Gh"
+    ; anon_pattern = "Gh _"
+    ; bind_pattern = "Gh { subcommand; action; draft; squash; delete_branch; body; title; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args = [ subcommand ] in
+      let args = match action with Some a -> args @ [ a ] | None -> args in
+      let args = if draft then args @ [ "--draft" ] else args in
+      let args = if squash then args @ [ "--squash" ] else args in
+      let args = if delete_branch then args @ [ "--delete-branch" ] else args in
+      let args = match body with Some b -> args @ [ "--body"; b ] | None -> args in
+      let args = match title with Some t -> args @ [ "--title"; t ] | None -> args in
+      let args = args @ rest in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Gh
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Gh"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd act draft squash del_branch body title rest = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some
+         (Shell_ir_typed_types.W
+            (Shell_ir_typed_types.Gh
+               { subcommand = s
+               ; action = act
+               ; draft
+               ; squash
+               ; delete_branch = del_branch
+               ; body
+               ; title
+               ; rest = List.rev rest
+               }))
+     | None -> None)
+  | arg :: args ->
+    (match subcmd with
+     | None -> parse (Some arg) act draft squash del_branch body title rest args
+     | Some _ when act = None && String.length arg > 0 && arg.[0] <> '-' ->
+       parse subcmd (Some arg) draft squash del_branch body title rest args
+     | Some _ ->
+       (match arg with
+        | "--draft" -> parse subcmd act true squash del_branch body title rest args
+        | "--squash" -> parse subcmd act draft true del_branch body title rest args
+        | "--delete-branch" -> parse subcmd act draft squash true body title rest args
+        | "--body" ->
+          (match args with
+           | v :: rest' -> parse subcmd act draft squash del_branch (Some v) title rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title rest args)
+        | "--title" ->
+          (match args with
+           | v :: rest' -> parse subcmd act draft squash del_branch body (Some v) rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title rest args)
+        | arg when String.length arg > 7 && String.sub arg 0 7 = "--body=" ->
+          let v = String.sub arg 7 (String.length arg - 7) in
+          parse subcmd act draft squash del_branch (Some v) title rest args
+        | arg when String.length arg > 8 && String.sub arg 0 8 = "--title=" ->
+          let v = String.sub arg 8 (String.length arg - 8) in
+          parse subcmd act draft squash del_branch body (Some v) rest args
+        | "--repo" | "--assignee" | "--label" | "--milestone" | "--project"
+        | "--reviewer" | "--base" | "--head" | "--editor" | "--hostname"
+        | "--jq" | "--template" | "--limit" | "--state" | "--web"
+        | "-R" | "-a" | "-l" | "-p" | "-r" | "-B" | "-H" ->
+          (match args with
+           | _ :: rest' -> parse subcmd act draft squash del_branch body title rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title rest args)
+        | _ when String.length arg > 1 && arg.[0] = '-' && arg.[1] = '-' ->
+          (match String.index_opt arg '=' with
+           | Some _ -> parse subcmd act draft squash del_branch body title rest args
+           | None ->
+             (match args with
+              | v :: rest' when String.length v > 0 && v.[0] <> '-' ->
+                parse subcmd act draft squash del_branch body title rest rest'
+              | _ -> parse subcmd act draft squash del_branch body title rest args))
+        | _ -> parse subcmd act draft squash del_branch body title (arg :: rest) args))
+in
+parse None None false false false None None [] args|}
+    }
   ; { name = "Chmod"
     ; anon_pattern = "Chmod _"
     ; bind_pattern = "Chmod { mode; path; recursive }"
@@ -2622,14 +2948,409 @@ let rec parse recursive owner path = function
 in
 parse false None None args|}
     }
-  ; subcommand_args_ctor ~name:"Docker" ~risk:"`Audited" ~sandbox:"`Docker"
-  ; subcommand_args_ctor ~name:"Opam" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Npx" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Yarn" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Pnpm" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Uv" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Glab" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Pytest" ~risk:"`Audited" ~sandbox:"`Host"
+  ; { name = "Docker"
+    ; anon_pattern = "Docker _"
+    ; bind_pattern = "Docker { subcommand; rm; privileged; detach; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Docker"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if rm then base @ [ "--rm" ] else base in
+        let base = if privileged then base @ [ "--privileged" ] else base in
+        let base = if detach then base @ [ "-d" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Docker
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Docker"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd rm priv det = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker { subcommand = s; rm; privileged = priv; detach = det; rest = [] }))
+     | None -> None)
+  | "--rm" :: rest -> parse subcmd true priv det rest
+  | "--privileged" :: rest -> parse subcmd rm true det rest
+  | "-d" :: rest -> parse subcmd rm priv true rest
+  | "--detach" :: rest -> parse subcmd rm priv true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) rm priv det rest
+     | Some _ ->
+       (* accumulate remaining args in rest *)
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         rm; privileged = priv; detach = det;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false false args|}
+    }
+  ; { name = "Opam"
+    ; anon_pattern = "Opam _"
+    ; bind_pattern = "Opam { subcommand; yes; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if yes then base @ [ "-y" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Opam
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Opam"
+    ; parse_body =
+        Some
+          {|
+  let rec parse subcmd y = function
+    | [] ->
+      (match subcmd with
+       | Some s ->
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Opam { subcommand = s; yes = y; rest = [] }))
+       | None -> None)
+    | "-y" :: rest -> parse subcmd true rest
+    | "--yes" :: rest -> parse subcmd true rest
+    | arg :: rest ->
+      (match subcmd with
+       | None -> parse (Some arg) y rest
+       | Some _ ->
+         let rec collect acc = function
+           | [] -> List.rev acc
+           | x :: xs -> collect (x :: acc) xs
+         in
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Opam {
+           subcommand = (match subcmd with Some s -> s | None -> "");
+           yes = y;
+           rest = collect [ arg ] rest
+         })))
+  in
+  parse None false args|}
+    }
+  ; { name = "Npx"
+    ; anon_pattern = "Npx _"
+    ; bind_pattern = "Npx { subcommand; yes; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if yes then base @ [ "-y" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Npx
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Npx"
+    ; parse_body =
+        Some
+          {|
+  let rec parse subcmd y = function
+    | [] ->
+      (match subcmd with
+       | Some s ->
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npx { subcommand = s; yes = y; rest = [] }))
+       | None -> None)
+    | "-y" :: rest -> parse subcmd true rest
+    | "--yes" :: rest -> parse subcmd true rest
+    | arg :: rest ->
+      (match subcmd with
+       | None -> parse (Some arg) y rest
+       | Some _ ->
+         let rec collect acc = function
+           | [] -> List.rev acc
+           | x :: xs -> collect (x :: acc) xs
+         in
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npx {
+           subcommand = (match subcmd with Some s -> s | None -> "");
+           yes = y;
+           rest = collect [ arg ] rest
+         })))
+  in
+  parse None false args|}
+    }
+  ; { name = "Yarn"
+    ; anon_pattern = "Yarn _"
+    ; bind_pattern = "Yarn { subcommand; dev; global; production; frozen_lockfile; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if dev then base @ [ "--dev" ] else base in
+        let base = if global then base @ [ "--global" ] else base in
+        let base = if production then base @ [ "--production" ] else base in
+        let base = if frozen_lockfile then base @ [ "--frozen-lockfile" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Yarn
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Yarn"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd dev glb prod fl = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Yarn { subcommand = s; dev; global = glb; production = prod; frozen_lockfile = fl; rest = [] }))
+     | None -> None)
+  | "--dev" :: rest -> parse subcmd true glb prod fl rest
+  | "-D" :: rest -> parse subcmd true glb prod fl rest
+  | "--global" :: rest -> parse subcmd dev true prod fl rest
+  | "-g" :: rest -> parse subcmd dev true prod fl rest
+  | "--production" :: rest -> parse subcmd dev glb true fl rest
+  | "--prod" :: rest -> parse subcmd dev glb true fl rest
+  | "--frozen-lockfile" :: rest -> parse subcmd dev glb prod true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) dev glb prod fl rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Yarn {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         dev; global = glb; production = prod; frozen_lockfile = fl;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false false false args|}
+    }
+  ; { name = "Pnpm"
+    ; anon_pattern = "Pnpm _"
+    ; bind_pattern = "Pnpm { subcommand; save_dev; global; force; production; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if save_dev then base @ [ "--save-dev" ] else base in
+        let base = if global then base @ [ "--global" ] else base in
+        let base = if force then base @ [ "--force" ] else base in
+        let base = if production then base @ [ "--production" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pnpm
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pnpm"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd sd glb frc prod = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pnpm { subcommand = s; save_dev = sd; global = glb; force = frc; production = prod; rest = [] }))
+     | None -> None)
+  | "--save-dev" :: rest -> parse subcmd true glb frc prod rest
+  | "-D" :: rest -> parse subcmd true glb frc prod rest
+  | "--global" :: rest -> parse subcmd sd true frc prod rest
+  | "-g" :: rest -> parse subcmd sd true frc prod rest
+  | "--force" :: rest -> parse subcmd sd glb true prod rest
+  | "--production" :: rest -> parse subcmd sd glb frc true rest
+  | "--prod" :: rest -> parse subcmd sd glb frc true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) sd glb frc prod rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pnpm {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         save_dev = sd; global = glb; force = frc; production = prod;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false false false args|}
+    }
+  ; { name = "Uv"
+    ; anon_pattern = "Uv _"
+    ; bind_pattern = "Uv { subcommand; no_cache; system; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if no_cache then base @ [ "--no-cache" ] else base in
+        let base = if system then base @ [ "--system" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Uv
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Uv"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd nc sys = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uv { subcommand = s; no_cache = nc; system = sys; rest = [] }))
+     | None -> None)
+  | "--no-cache" :: rest -> parse subcmd true sys rest
+  | "-n" :: rest -> parse subcmd true sys rest
+  | "--system" :: rest -> parse subcmd nc true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) nc sys rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uv {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         no_cache = nc; system = sys;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
+  ; { name = "Glab"
+    ; anon_pattern = "Glab _"
+    ; bind_pattern = "Glab { subcommand; yes; force; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if yes then base @ [ "--yes" ] else base in
+        let base = if force then base @ [ "--force" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Glab
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Glab"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd y f = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Glab { subcommand = s; yes = y; force = f; rest = [] }))
+     | None -> None)
+  | "--yes" :: rest -> parse subcmd true f rest
+  | "-y" :: rest -> parse subcmd true f rest
+  | "--force" :: rest -> parse subcmd y true rest
+  | "-f" :: rest -> parse subcmd y true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) y f rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Glab {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         yes = y; force = f;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
+  ; { name = "Pytest"
+    ; anon_pattern = "Pytest _"
+    ; bind_pattern = "Pytest { subcommand; verbose; exitfirst; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if verbose then base @ [ "-v" ] else base in
+        let base = if exitfirst then base @ [ "-x" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pytest
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pytest"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd v x = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest { subcommand = s; verbose = v; exitfirst = x; rest = [] }))
+     | None -> None)
+  | "-v" :: rest -> parse subcmd true x rest
+  | "-x" :: rest -> parse subcmd v true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) v x rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         verbose = v; exitfirst = x;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
   ; { name = "Terminal_notifier"
     ; anon_pattern = "Terminal_notifier _"
     ; bind_pattern = "Terminal_notifier { title; message }"
@@ -2665,17 +3386,412 @@ let rec parse title message = function
 in
 parse None None args|}
     }
-  ; subcommand_args_ctor ~name:"Ruff" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Pyright" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Tsc" ~risk:"`Audited" ~sandbox:"`Host"
+  ; { name = "Ruff"
+    ; anon_pattern = "Ruff _"
+    ; bind_pattern = "Ruff { subcommand; fix; show_source; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if fix then base @ [ "--fix" ] else base in
+        let base = if show_source then base @ [ "--show-source" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ruff
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Ruff"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd f s = function
+  | [] ->
+    (match subcmd with
+     | Some sc ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ruff { subcommand = sc; fix = f; show_source = s; rest = [] }))
+     | None -> None)
+  | "--fix" :: rest -> parse subcmd true s rest
+  | "--show-source" :: rest -> parse subcmd f true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) f s rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ruff {
+         subcommand = (match subcmd with Some sc -> sc | None -> "");
+         fix = f; show_source = s;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
+  ; { name = "Pyright"
+    ; anon_pattern = "Pyright _"
+    ; bind_pattern = "Pyright { subcommand; strict; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if strict then base @ [ "--strict" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Pyright
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Pyright"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd st = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright { subcommand = s; strict = st; rest = [] }))
+     | None -> None)
+  | "--strict" :: rest -> parse subcmd true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) st rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         strict = st;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false args|}
+    }
+  ; { name = "Tsc"
+    ; anon_pattern = "Tsc _"
+    ; bind_pattern = "Tsc { subcommand; no_emit; watch; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if no_emit then base @ [ "--noEmit" ] else base in
+        let base = if watch then base @ [ "--watch" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Tsc
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Tsc"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd nw w = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc { subcommand = s; no_emit = nw; watch = w; rest = [] }))
+     | None -> None)
+  | "--noEmit" :: rest -> parse subcmd true w rest
+  | "--watch" :: rest -> parse subcmd nw true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) nw w rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         no_emit = nw; watch = w;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
   ; subcommand_args_ctor ~name:"Ocamlfind" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Rustc" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Gofmt" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Gradle" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Ninja" ~risk:"`Audited" ~sandbox:"`Host"
+  ; { name = "Rustc"
+    ; anon_pattern = "Rustc _"
+    ; bind_pattern = "Rustc { subcommand; optimize; test; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if optimize then base @ [ "-O" ] else base in
+        let base = if test then base @ [ "--test" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Rustc
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Rustc"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd opt tst = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc { subcommand = s; optimize = opt; test = tst; rest = [] }))
+     | None -> None)
+  | "-O" :: rest -> parse subcmd true tst rest
+  | "--test" :: rest -> parse subcmd opt true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) opt tst rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         optimize = opt; test = tst;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
+  ; { name = "Gofmt"
+    ; anon_pattern = "Gofmt _"
+    ; bind_pattern = "Gofmt { subcommand; write; list_files; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if write then base @ [ "-w" ] else base in
+        let base = if list_files then base @ [ "-l" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Gofmt
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Gofmt"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd w lf = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt { subcommand = s; write = w; list_files = lf; rest = [] }))
+     | None -> None)
+  | "-w" :: rest -> parse subcmd true lf rest
+  | "-l" :: rest -> parse subcmd w true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) w lf rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         write = w; list_files = lf;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
+  ; { name = "Gradle"
+    ; anon_pattern = "Gradle _"
+    ; bind_pattern = "Gradle { subcommand; no_daemon; parallel; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if no_daemon then base @ [ "--no-daemon" ] else base in
+        let base = if parallel then base @ [ "--parallel" ] else base in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Gradle
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Gradle"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd nd p = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gradle { subcommand = s; no_daemon = nd; parallel = p; rest = [] }))
+     | None -> None)
+  | "--no-daemon" :: rest -> parse subcmd true p rest
+  | "--parallel" :: rest -> parse subcmd nd true rest
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) nd p rest
+     | Some _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gradle {
+         subcommand = (match subcmd with Some s -> s | None -> "");
+         no_daemon = nd; parallel = p;
+         rest = collect [ arg ] rest
+       })))
+in
+parse None false false args|}
+    }
+  ; { name = "Ninja"
+    ; anon_pattern = "Ninja _"
+    ; bind_pattern = "Ninja { subcommand; jobs; rest }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base =
+          match jobs with
+          | Some n -> base @ [ Printf.sprintf "-j%d" n ]
+          | None -> base
+        in
+        base @ rest
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ninja
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Ninja"
+    ; parse_body =
+        Some
+          {|
+  let rec parse subcmd j = function
+    | [] ->
+      (match subcmd with
+       | Some s ->
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja { subcommand = s; jobs = j; rest = [] }))
+       | None -> None)
+    | arg :: rest ->
+      if String.length arg > 2 && String.sub arg 0 2 = "-j"
+      then
+        (try parse subcmd (Some (int_of_string (String.sub arg 2 (String.length arg - 2)))) rest
+         with Failure _ ->
+           match subcmd with
+           | None -> parse (Some arg) j rest
+           | Some _ ->
+             let rec collect acc = function
+               | [] -> List.rev acc
+               | x :: xs -> collect (x :: acc) xs
+             in
+             Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+               subcommand = (match subcmd with Some s -> s | None -> ""); jobs = j;
+               rest = collect [ arg ] rest
+             })))
+      else
+        match subcmd with
+        | None -> parse (Some arg) j rest
+        | Some _ ->
+          let rec collect acc = function
+            | [] -> List.rev acc
+            | x :: xs -> collect (x :: acc) xs
+          in
+          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+            subcommand = (match subcmd with Some s -> s | None -> ""); jobs = j;
+            rest = collect [ arg ] rest
+          }))
+  in
+  parse None None args|}
+    }
   ; subcommand_args_ctor ~name:"Java" ~risk:"`Audited" ~sandbox:"`Host"
   ; subcommand_args_ctor ~name:"Javac" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Mvn" ~risk:"`Audited" ~sandbox:"`Host"
+  ; { name = "Mvn"
+    ; anon_pattern = "Mvn _"
+    ; bind_pattern = "Mvn { subcommand; offline; batch_mode; quiet; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        let base = [ subcommand ] in
+        let base = if offline then base @ [ "-o" ] else base in
+        let base = if batch_mode then base @ [ "-B" ] else base in
+        let base = if quiet then base @ [ "-q" ] else base in
+        base @ args
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Mvn
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Mvn"
+    ; parse_body =
+        Some
+          {|
+  let rec parse subcmd off bat q = function
+    | [] ->
+      (match subcmd with
+       | Some s ->
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mvn {
+           subcommand = s; offline = off; batch_mode = bat; quiet = q; args = [] }))
+       | None -> None)
+    | "-o" :: rest -> parse subcmd true bat q rest
+    | "--offline" :: rest -> parse subcmd true bat q rest
+    | "-B" :: rest -> parse subcmd off true q rest
+    | "--batch-mode" :: rest -> parse subcmd off true q rest
+    | "-q" :: rest -> parse subcmd off bat true rest
+    | "--quiet" :: rest -> parse subcmd off bat true rest
+    | arg :: rest ->
+      (match subcmd with
+       | None -> parse (Some arg) off bat q rest
+       | Some _ ->
+         let rec collect acc = function
+           | [] -> List.rev acc
+           | x :: xs -> collect (x :: acc) xs
+         in
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mvn {
+           subcommand = (match subcmd with Some s -> s | None -> "");
+           offline = off; batch_mode = bat; quiet = q;
+           args = collect [ arg ] rest })))
+  in
+  parse None false false false args|}
+    }
   ; subcommand_args_ctor ~name:"Cmake" ~risk:"`Audited" ~sandbox:"`Host"
   ; subcommand_args_ctor ~name:"Dune_local_sh" ~risk:"`Audited" ~sandbox:"`Host"
   ; subcommand_args_ctor ~name:"Osascript" ~risk:"`Audited" ~sandbox:"`Host"

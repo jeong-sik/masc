@@ -149,7 +149,6 @@ scripts/lint/provider-adapter-removal-ratchet.sh
 rg -l 'Provider_adapter\.' lib test bin
 test ! -e lib/provider_adapter.ml
 test ! -e lib/provider_adapter.mli
-scripts/lint/no-provider-name-hardcoding.sh --fail
 git diff --check
 ```
 

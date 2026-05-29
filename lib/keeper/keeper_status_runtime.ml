@@ -154,17 +154,7 @@ let agent_runtime_has_live_work agent_status =
       agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
   | _ -> false
 
-let string_contains_ci haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    if idx + nlen > hlen then false
-    else if String.sub haystack idx nlen = needle then true
-    else loop (idx + 1)
-  in
-  needle <> "" && loop 0
+let string_contains_ci = String_util.contains_substring_ci
 
 let quiet_hours_active () =
   let current_hour =

@@ -589,24 +589,26 @@ target = "tier.ollama_cloud_primary"
        ~config_path:cascade_path "tier.ollama_cloud_primary")
 
 let test_catalog_validator_surfaces_adapter_errors () =
-  (* RFC-0058: a binding whose provider is not declared in [providers.*]
-     yields a [Binding_resolution_failed] adapter error. *)
+  (* A binding on a Messages_api provider (protocol provider_a-http) cannot be
+     materialized: provider_kind_for_http_provider returns None for Messages_api,
+     so resolve_binding_config emits a [Binding_resolution_failed] adapter error.
+     (This replaced the legacy [tier.X] member-resolution trigger.) *)
   let cascade_toml =
     {|
-[providers.ollama]
-protocol = "ollama-http"
-endpoint = "http://localhost:11434"
+[providers.provider_a]
+protocol = "provider_a-http"
+endpoint = "https://api.provider_a.example"
 
 [models.qwen3]
 api-name = "qwen3:8b"
 max-context = 32768
 tools-support = true
 
-[undeclared_provider.qwen3]
+[provider_a.qwen3]
 max-concurrent = 1
 
 [routes.keeper_turn]
-target = "undeclared_provider.qwen3"
+target = "provider_a.qwen3"
 |}
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
@@ -703,24 +705,25 @@ tools-support = true
            errors)
 
 let test_runtime_validation_rejects_declarative_adapter_errors () =
-  (* RFC-0058: a binding referencing an undeclared provider produces a
-     [Binding_resolution_failed] adapter error that runtime validation rejects. *)
+  (* A binding on a Messages_api provider (protocol provider_a-http) yields a
+     [Binding_resolution_failed] adapter error (provider_kind None) that runtime
+     validation rejects. (Replaced the legacy [tier.X] member-resolution trigger.) *)
   let cascade_toml =
     {|
-[providers.ollama]
-protocol = "ollama-http"
-endpoint = "http://localhost:11434"
+[providers.provider_a]
+protocol = "provider_a-http"
+endpoint = "https://api.provider_a.example"
 
 [models.qwen3]
 api-name = "qwen3:8b"
 max-context = 32768
 tools-support = true
 
-[undeclared_provider.qwen3]
+[provider_a.qwen3]
 max-concurrent = 1
 
 [routes.keeper_turn]
-target = "undeclared_provider.qwen3"
+target = "provider_a.qwen3"
 |}
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->

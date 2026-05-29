@@ -489,12 +489,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           acc)
     empty_metrics_summary lines
 
-let json_int_opt_member key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`Int value) -> Some value
-  | Some (`Intlit raw) -> (int_of_string_opt (raw))
-  | Some (`Float value) -> Some (int_of_float value)
-  | _ -> None
 
 let action_source_opt_member json =
   match Safe_ops.json_string_opt "action_source" json with
@@ -602,7 +596,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
               raise Exit
         in
         let tools = Json_util.json_string_list_member "tools_used" json in
-        let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+        let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
         let tool_call_count =
           match raw_tool_call_count with
           | Some _ as value -> value
@@ -669,7 +663,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
         Json_util.json_string_list_member "tools_used" json
         |> List.sort_uniq String.compare
       in
-      let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+      let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
       let tool_call_count =
         match raw_tool_call_count with
         | Some _ as value -> value

@@ -161,14 +161,6 @@ let region_key (r : code_region) =
 let read_regions ~base_dir ?(partition = Ide_paths.Legacy) ?file_path () =
   load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
 
-let json_string_field key json =
-  match json with
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String s) when s <> "" -> Some s
-      | _ -> None)
-  | _ -> None
-
 let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn json =
   let tool_name =
     match json with

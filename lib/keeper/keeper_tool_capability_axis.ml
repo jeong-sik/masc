@@ -66,13 +66,6 @@ let supports_any capability names =
   List.exists (supports capability) names
 ;;
 
-let json_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> Some value
-     | Some _ | None -> None)
-  | _ -> None
-;;
 
 let shell_quote_token token =
   let needs_quote =
@@ -128,7 +121,7 @@ let shell_command_input_candidates tool_name input =
   then
     match canonical_tool_name tool_name with
     | "tool_execute" ->
-      let candidates = [] |> add_candidate (json_string_opt "cmd" input) in
+      let candidates = [] |> add_candidate (Json_util.get_string input "cmd") in
       List.fold_left
         (fun acc command -> add_candidate (Some command) acc)
         candidates

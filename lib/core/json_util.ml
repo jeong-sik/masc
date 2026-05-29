@@ -99,6 +99,18 @@ let require_bool json key : (bool, string) result =
   | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
   | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not a bool" key)
 
+(** Value-level type discrimination — returns the JSON variant name as
+    a lowercase string.  Used in parse-error diagnostics across 5+ modules. *)
+let kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+
 (** Construction helpers *)
 
 let json_string_list xs = `List (List.map (fun s -> `String s) xs)
@@ -119,16 +131,6 @@ let int_option_to_yojson : int option -> Yojson.Safe.t = function
 let string_option_to_yojson : string option -> Yojson.Safe.t = function
   | Some s -> `String s
   | None -> `Null
-
-let kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "int"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
 
 let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =
   let s = Yojson.Safe.to_string json in

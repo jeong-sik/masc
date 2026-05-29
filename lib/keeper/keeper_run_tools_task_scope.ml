@@ -12,17 +12,10 @@ let task_scope_tool_names =
   ]
 ;;
 
-let json_string_opt name = function
-  | `Assoc fields ->
-    (match List.assoc_opt name fields with
-     | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
-     | _ -> None)
-  | _ -> None
-;;
 
 let task_id_scope_of_tool_input ~tool_name input =
   if List.mem tool_name task_scope_tool_names
-  then json_string_opt "task_id" input
+  then Json_util.get_string_nonempty input "task_id"
   else None
 ;;
 
@@ -47,8 +40,8 @@ let task_id_scope_of_claim_output ~tool_name output_text =
       | `Assoc fields ->
         (match List.assoc_opt "result" fields with
          | Some result ->
-           first_some (json_string_opt "task_id" result) (json_string_opt "task_id" (`Assoc fields))
-         | None -> json_string_opt "task_id" (`Assoc fields))
+           first_some (Json_util.get_string_nonempty result "task_id") (Json_util.get_string_nonempty (`Assoc fields) "task_id")
+         | None -> Json_util.get_string_nonempty (`Assoc fields) "task_id")
       | _ -> None
     with
     | Yojson.Json_error _ -> None)

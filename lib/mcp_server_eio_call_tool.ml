@@ -135,9 +135,6 @@ let nonempty_string_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let json_nonempty_string_opt key json =
-  nonempty_string_opt (Safe_ops.json_string_opt key json)
-
 type keeper_runtime_mcp_log_context = {
   keeper_name : string;
   agent_name : string option;
@@ -200,7 +197,7 @@ let runtime_mcp_keeper_log_context_of_entry
   in
   let model = "runtime" in
   let session_id =
-    match json_nonempty_string_opt "session_id" arguments with
+    match Json_util.get_string_nonempty arguments "session_id" with
     | Some _ as session_id -> session_id
     | None ->
         (match nonempty_string_opt mcp_session_id with
@@ -674,12 +671,12 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       if resolved <> "" then resolved else "unknown"
   in
   let telemetry_session_id =
-    match json_nonempty_string_opt "session_id" arguments with
+    match Json_util.get_string_nonempty arguments "session_id" with
     | Some _ as session_id -> session_id
     | None -> nonempty_string_opt mcp_session_id
   in
-  let telemetry_operation_id = json_nonempty_string_opt "operation_id" arguments in
-  let telemetry_worker_run_id = json_nonempty_string_opt "worker_run_id" arguments in
+  let telemetry_operation_id = Json_util.get_string_nonempty arguments "operation_id" in
+  let telemetry_worker_run_id = Json_util.get_string_nonempty arguments "worker_run_id" in
   let error_detail =
     if success then None
     else

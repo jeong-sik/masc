@@ -29,12 +29,6 @@ include Board_types
 let status_rollup_window_sec = 6. *. 60. *. 60.
 let max_status_rollup_body_length = 600
 
-let json_assoc_string_opt key = function
-  | Some json -> Json_util.assoc_string_opt key json
-  | None -> None
-
-;;
-
 let contains_any_substring text needles =
   List.exists (String_util.contains_substring_ci text) needles
 ;;
@@ -69,7 +63,7 @@ let task_id_from_text text =
 let status_rollup_task_id ~title ~body ~meta_json =
   match
     List.find_map
-      (fun key -> json_assoc_string_opt key meta_json)
+      (fun key -> Option.bind meta_json (Json_util.assoc_string_opt key))
       [ "task_id"; "current_task_id"; "claimed_task_id"; "task" ]
   with
   | Some task_id -> Some (String.lowercase_ascii task_id)

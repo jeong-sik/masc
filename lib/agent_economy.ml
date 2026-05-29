@@ -123,13 +123,7 @@ let json_string_field ~default key json =
   Json_util.get_string_with_default json ~key ~default
 
 let json_float_field ~default key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`Float f) -> f
-     | Some (`Int i) -> Float.of_int i
-     | _ -> default)
-  | _ -> default
+  Json_util.get_float json key |> Option.value ~default
 
 let transaction_of_json (json : Yojson.Safe.t) : transaction option =
   let id = json_string_field ~default:"" "id" json in

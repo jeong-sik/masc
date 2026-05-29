@@ -58,21 +58,6 @@ let to_json t =
     "prev_hash", (match t.prev_hash with Some s -> `String s | None -> `Null);
   ]
 
-(* Local [kind_name] — [shared_audit] is a leaf library that cannot
-   depend on [masc_core.Json_util].  Same total mapping as the
-   canonical helper (lib/core/json_util.ml:149); duplicated rather
-   than introducing an upward dependency.  RFC candidate: extract a
-   shared sub-leaf module for json kind diagnostics. *)
-let kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "int"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 let of_json = function
   | `Assoc fields ->
     (* Distinguish *missing field* from *field present with wrong
@@ -87,7 +72,7 @@ let of_json = function
           (Printf.sprintf
              "Envelope.of_json: field %S has wrong type (expected \
               string, got %s)"
-             k (kind_name other))
+             k (Json_util.kind_name other))
       | None ->
         Error (Printf.sprintf "Envelope.of_json: missing field %S" k)
     in
@@ -100,7 +85,7 @@ let of_json = function
           (Printf.sprintf
              "Envelope.of_json: field %S has wrong type (expected \
               float or int, got %s)"
-             k (kind_name other))
+             k (Json_util.kind_name other))
       | None ->
         Error (Printf.sprintf "Envelope.of_json: missing field %S" k)
     in
@@ -119,7 +104,7 @@ let of_json = function
           (Printf.sprintf
              "Envelope.of_json: bad prev_hash (expected string or \
               null, got %s)"
-             (kind_name other))
+             (Json_util.kind_name other))
     in
     (match
        get_string "id",
@@ -139,4 +124,4 @@ let of_json = function
     Error
       (Printf.sprintf
          "Envelope.of_json: expected JSON object, got %s"
-         (kind_name other))
+         (Json_util.kind_name other))

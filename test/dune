@@ -1797,6 +1797,8 @@
 
 (include stanzas/test_execute_timeout_schema_widen.inc)
 
+(include stanzas/test_limit_schema_widen.inc)
+
 (include stanzas/test_parse_outcome.inc)
 
 (include stanzas/test_pr_open_script.inc)

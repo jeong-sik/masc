@@ -94,15 +94,6 @@ let materialized_member_model_string json provider_id api_name =
          |> Option.map (fun prefix -> Printf.sprintf "%s:%s" prefix api_name)
        | None -> None)
 
-let json_string_list_member key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`List values) ->
-    values
-    |> List.filter_map (function
-         | `String value -> Some value
-         | _ -> None)
-  | _ -> []
-
 let materialized_model_api_name json model_id =
   match
     Option.bind (Json_util.assoc_member_opt "models" json) (fun models_json ->

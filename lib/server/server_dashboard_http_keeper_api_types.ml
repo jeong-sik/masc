@@ -125,41 +125,6 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
-let json_int_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
-let json_string_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `String value -> Some value
-  | _ -> None
-
-let json_bool_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Bool value -> Some value
-  | _ -> None
-
-let json_string_list_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `List values ->
-    values
-    |> List.filter_map (function
-      | `String value when String.trim value <> "" -> Some value
-      | _ -> None)
-    |> Json_util.dedupe_keep_order
-  | _ -> []
-
-let json_string_opt = Json_util.string_opt_to_json
-let json_assoc_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
-
-let json_string_value_opt = function
-  | `String value -> Some value
-  | _ -> None
 let manifest_row_matches ?turn_id keeper_name trace_id
     (row : Keeper_runtime_manifest.t) =
   String.equal row.keeper_name keeper_name

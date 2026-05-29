@@ -19,13 +19,8 @@ let empty_paused_keeper_scan =
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
-
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
+let json_float_opt = Json_util.float_opt_to_json
+let json_string_opt = Json_util.string_opt_to_json
 
 let effective_autoboot_enabled name (meta : Keeper_meta_contract.keeper_meta) =
   match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with

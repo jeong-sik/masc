@@ -1126,8 +1126,6 @@ let git_log_value_flags_no_eq =
   ; "-M"; "-C"; "-D"   (* diff-merges short forms *)
   ]
 in
-(* git log flags that use --flag=VALUE form *)
-let git_log_value_flags_eq : string list = [] in
 let rec parse oneline max_count = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_log { oneline; max_count }))
   | "--oneline" :: rest -> parse true max_count rest
@@ -1174,13 +1172,13 @@ let rec parse oneline max_count = function
   (* --flag VALUE form: flag in list (exact match) — MUST precede generic arg arm *)
   | flag :: _ :: rest when List.mem flag git_log_value_flags_no_eq ->
     parse oneline max_count rest
-  (* --flag=VALUE form: arg starts with a flag prefix that ends with = *)
+  (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
-    when List.exists
-           (fun vf ->
-             String.length arg > String.length vf
-             && String.sub arg 0 (String.length vf) = vf)
-           git_log_value_flags_eq ->
+    when (let s = arg in
+          String.length s > 2 && s.[0] = '-'
+          && (match String.index_opt s '=' with
+              | Some i -> List.mem (String.sub s 0 i) git_log_value_flags_no_eq
+              | None -> false)) ->
     parse oneline max_count rest
   | "--" :: rest -> parse oneline max_count rest
   | arg :: rest ->
@@ -1304,8 +1302,6 @@ let git_push_value_flags_no_eq =
   ; "-o"   (* push option *)
   ]
 in
-(* git push flags that use --flag=VALUE form *)
-let git_push_value_flags_eq : string list = [] in
 let rec parse force force_with_lease set_upstream remote branch = function
   | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_push { force; force_with_lease; set_upstream; remote; branch }))
   | "--force" :: rest | "-f" :: rest -> parse true force_with_lease set_upstream remote branch rest
@@ -1320,13 +1316,13 @@ let rec parse force force_with_lease set_upstream remote branch = function
   (* --flag VALUE form: flag in list (exact match) — MUST precede generic arg arm *)
   | flag :: _ :: rest when List.mem flag git_push_value_flags_no_eq ->
     parse force force_with_lease set_upstream remote branch rest
-  (* --flag=VALUE form: arg starts with a flag prefix that ends with = *)
+  (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
-    when List.exists
-           (fun vf ->
-             String.length arg > String.length vf
-             && String.sub arg 0 (String.length vf) = vf)
-           git_push_value_flags_eq ->
+    when (let s = arg in
+          String.length s > 2 && s.[0] = '-'
+          && (match String.index_opt s '=' with
+              | Some i -> List.mem (String.sub s 0 i) git_push_value_flags_no_eq
+              | None -> false)) ->
     parse force force_with_lease set_upstream remote branch rest
   | "--tags" :: rest | "--mirror" :: rest | "--prune" :: rest
   | "--follow-tags" :: rest | "--atomic" :: rest | "--quiet" :: rest
@@ -1401,8 +1397,6 @@ let git_pull_value_flags_no_eq =
   ; "-o"   (* transport option *)
   ]
 in
-(* git pull flags that use --flag=VALUE form *)
-let git_pull_value_flags_eq : string list = [] in
 (* git pull boolean flags that do NOT consume a value *)
 let git_pull_bool_flags =
   [ "--tags"; "--no-tags"; "--rebase"; "--no-rebase"
@@ -1422,13 +1416,13 @@ let rec parse rebase remote branch = function
   (* --flag VALUE form: flag in list (exact match) — MUST precede generic arg arm *)
   | flag :: _ :: rest when List.mem flag git_pull_value_flags_no_eq ->
     parse rebase remote branch rest
-  (* --flag=VALUE form: arg starts with a flag prefix that ends with = *)
+  (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
-    when List.exists
-           (fun vf ->
-             String.length arg > String.length vf
-             && String.sub arg 0 (String.length vf) = vf)
-           git_pull_value_flags_eq ->
+    when (let s = arg in
+          String.length s > 2 && s.[0] = '-'
+          && (match String.index_opt s '=' with
+              | Some i -> List.mem (String.sub s 0 i) git_pull_value_flags_no_eq
+              | None -> false)) ->
     parse rebase remote branch rest
   (* boolean flags: specific exact-match arms *)
   | "--rebase" :: rest -> parse true remote branch rest
@@ -2540,19 +2534,29 @@ let rec parse output continue_ ncc url dd = function
   | "--no-check-certificate" :: rest when not dd -> parse output continue_ true url dd rest
   (* POSIX end-of-options: skip --, remaining args are positional *)
   | "--" :: rest -> parse output continue_ ncc url true rest
-  (* value-consuming flags: skip flag + its value *)
+  (* value-consuming flags: skip flag + its value (space-separated) *)
   | flag :: _ :: rest when not dd && List.mem flag wget_value_flags ->
     parse output continue_ ncc url dd rest
-  | arg :: rest ->
+  (* Eq-form value flags: --flag=VALUE *)
+  | arg :: rest
+    when not dd
+         && (let s = arg in
+             String.length s > 2 && s.[0] = '-'
+             && (match String.index_opt s '=' with
+                 | Some i ->
+                   let prefix = String.sub s 0 i in
+                   prefix = "--output-document" || List.mem prefix wget_value_flags
+                 | None -> false)) ->
     (match String.split_on_char '=' arg with
-     | [ "--output-document"; o ] when not dd -> parse (Some o) continue_ ncc url dd rest
-     | _ ->
-       if not dd && String.length arg > 0 && arg.[0] = '-'
-       then parse output continue_ ncc url dd rest
-       else (
-         match url with
-         | None -> parse output continue_ ncc (Some arg) dd rest
-         | Some _ -> None))
+     | [ "--output-document"; o ] -> parse (Some o) continue_ ncc url dd rest
+     | _ -> parse output continue_ ncc url dd rest)
+  | arg :: rest ->
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse output continue_ ncc url dd rest
+    else (
+      match url with
+      | None -> parse output continue_ ncc (Some arg) dd rest
+      | Some _ -> None)
 in
 parse None false false None false args|}
     ; no_expand_combined = false

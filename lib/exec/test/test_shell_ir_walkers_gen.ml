@@ -1999,7 +1999,47 @@ let test_batch15_value_consuming_flags () =
   in
   (match w_find_mtime_eq with
    | W (Find { path = "."; type_ = Some `File; _ }) -> ()
-   | w -> Alcotest.failf "Find -mtime=7: expected type=File, got %a" pp w)
+   | w -> Alcotest.failf "Find -mtime=7: expected type=File, got %a" pp w);
+  (* Git_log: --format=oneline — eq-form value flag consumed *)
+  let w_git_log_eq =
+    of_simple
+      { (base "git") with args = [ lit "log"; lit "--format=oneline"; lit "-n"; lit "5" ] }
+  in
+  (match w_git_log_eq with
+   | W (Git_log { max_count = Some 5; _ }) -> ()
+   | w -> Alcotest.failf "Git_log --format=oneline: expected max=5, got %a" pp w);
+  (* Git_push: --repo=origin main — eq-form value flag consumed *)
+  let w_git_push_eq =
+    of_simple
+      { (base "git") with args = [ lit "push"; lit "--repo=origin"; lit "main" ] }
+  in
+  (match w_git_push_eq with
+   | W (Git_push { remote = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "Git_push --repo=origin: expected remote=main, got %a" pp w);
+  (* Git_pull: --depth=1 — eq-form value flag consumed *)
+  let w_git_pull_eq =
+    of_simple
+      { (base "git") with args = [ lit "pull"; lit "--depth=1"; lit "--rebase" ] }
+  in
+  (match w_git_pull_eq with
+   | W (Git_pull { rebase = true; _ }) -> ()
+   | w -> Alcotest.failf "Git_pull --depth=1: expected rebase=true, got %a" pp w);
+  (* Wget: --timeout=30 URL — eq-form value flag consumed *)
+  let w_wget_eq =
+    of_simple
+      { (base "wget") with args = [ lit "--timeout=30"; lit "http://example.com" ] }
+  in
+  (match w_wget_eq with
+   | W (Wget { url = "http://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --timeout=30: expected url=example.com, got %a" pp w);
+  (* Wget: --output-document=out.html URL — eq-form special case preserved *)
+  let w_wget_od_eq =
+    of_simple
+      { (base "wget") with args = [ lit "--output-document=out.html"; lit "http://example.com" ] }
+  in
+  (match w_wget_od_eq with
+   | W (Wget { url = "http://example.com"; output = Some "out.html"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --output-document=out.html: expected output=Some out.html, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

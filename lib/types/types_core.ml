@@ -442,7 +442,7 @@ let task_status_to_yojson = function
       ]
 
 let task_status_of_yojson json =
-  let req key = Json_util.get_string json key |> Option.value ~default:"" in
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
   try
     match req "status" with
@@ -678,7 +678,7 @@ let task_to_yojson t =
   | _ -> `Assoc with_do_not_reclaim
 
 let task_of_yojson json =
-  let req key = Json_util.get_string json key |> Option.value ~default:"" in
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
@@ -835,7 +835,7 @@ let tempo_config_to_yojson c =
 
 let tempo_config_of_yojson json =
   try
-    let mode_str = Json_util.get_string json "mode" |> Option.value ~default:"" in
+    let mode_str = Json_util.get_string_with_default json ~key:"mode" ~default:"" in
     let delay_ms = Json_util.get_int json "delay_ms" |> Option.value ~default:0 in
     let reason = Json_util.get_string json "reason" in
     let set_by = Json_util.get_string json "set_by" in
@@ -876,7 +876,7 @@ let backlog_of_yojson json =
        failed] entries/day driven [stale-claims] GC to skip mutation,
        so claims never transitioned).  Tolerate missing/null fields. *)
     let last_updated =
-      Json_util.get_string json "last_updated" |> Option.value ~default:""
+      Json_util.get_string_with_default json ~key:"last_updated" ~default:""
     in
     let version =
       Json_util.get_int json "version" |> Option.value ~default:1
@@ -967,7 +967,7 @@ let a2a_task_to_yojson t =
   ]
 
 let a2a_task_of_yojson json =
-  let req key = Json_util.get_string json key |> Option.value ~default:"" in
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
   try
     let a2a_id = req "id" in
     let from_agent = req "from" in
@@ -1002,7 +1002,7 @@ let portal_to_yojson p =
   ]
 
 let portal_of_yojson json =
-  let req key = Json_util.get_string json key |> Option.value ~default:"" in
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
   try
     let portal_from = req "from" in
     let portal_target = req "target" in

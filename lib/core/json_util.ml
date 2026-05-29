@@ -6,7 +6,7 @@
     Usage:
     {[
       open Json_util
-      let name = get_string_opt json "name" |> Option.value ~default:""
+      let name = get_string_with_default json ~key:"name" ~default:""
       let age = get_int_opt json "age" |> Option.value ~default:0
     ]}
 *)

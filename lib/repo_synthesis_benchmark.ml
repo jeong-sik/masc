@@ -187,7 +187,7 @@ let question_of_yojson (json : Yojson.Safe.t) =
         {
           question_id;
           title = Json_util.get_string json "title" |> Option.value ~default:question_id;
-          question = Json_util.get_string json "question" |> Option.value ~default:"";
+          question = Json_util.get_string_with_default json ~key:"question" ~default:"";
           artifact_scope = string_list_field "artifact_scope";
           required_claims = string_list_field "required_claims";
           gold_paths = string_list_field "gold_paths";
@@ -278,7 +278,7 @@ let score_summary_of_yojson (json : Yojson.Safe.t) =
   in
   {
     answer_set_label =
-      Json_util.get_string json "answer_set_label" |> Option.value ~default:"";
+      Json_util.get_string_with_default json ~key:"answer_set_label" ~default:"";
     question_count =
       Json_util.get_int json "question_count" |> Option.value ~default:0;
     answered_count =
@@ -338,12 +338,12 @@ let run_record_of_yojson (json : Yojson.Safe.t) =
       Some
         {
           benchmark_run_id;
-          created_at = Json_util.get_string json "created_at" |> Option.value ~default:"";
+          created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"";
           created_by = Json_util.get_string json "created_by";
-          goal = Json_util.get_string json "goal" |> Option.value ~default:"";
-          question = Json_util.get_string json "question" |> Option.value ~default:"";
+          goal = Json_util.get_string_with_default json ~key:"goal" ~default:"";
+          question = Json_util.get_string_with_default json ~key:"question" ~default:"";
           question_id = Json_util.get_string json "question_id";
-          repo_root = Json_util.get_string json "repo_root" |> Option.value ~default:"";
+          repo_root = Json_util.get_string_with_default json ~key:"repo_root" ~default:"";
           artifact_scope = string_list_field "artifact_scope";
           program_note = Json_util.get_string json "program_note";
           baseline_label = Json_util.get_string json "baseline_label";

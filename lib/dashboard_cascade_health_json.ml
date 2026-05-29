@@ -143,7 +143,7 @@ let health_json_compute ?(window_minutes = 30) ?(base_path : string option) () =
       []
   in
   `Assoc
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String (Masc_domain.now_iso ())
     ; (* Health tracker is the SSOT for these values; reading env here would
        diverge from what the tracker actually applied (e.g. if the operator
        sets a malformed value that falls back to the default, the tracker

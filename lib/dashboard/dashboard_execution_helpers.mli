@@ -151,6 +151,14 @@ val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
+val session_payload_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_meta_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_summary_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_team_health_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_communication_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_status_string : Yojson.Safe.t -> string
+val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
+val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
 val severity_rank : string -> int
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
 val execution_tool_preview_limit : int

@@ -23,7 +23,7 @@ let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event) : Yojson.Sa
 
 let strategy_trace_json ?limit ?cascade () =
   let events = Cascade_strategy_trace.snapshot ?limit ?cascade () in
-  let generated_at = now_iso () in
+  let generated_at = Masc_domain.now_iso () in
   `Assoc
     [ "updated_at", `String generated_at
     ; "generated_at_iso", `String generated_at

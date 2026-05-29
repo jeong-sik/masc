@@ -24,8 +24,6 @@ module Float = Stdlib.Float
 module CC = Cascade_config
 module StringSet = Set_util.StringSet
 
-let now_iso () = Masc_domain.now_iso ()
-
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc
     [ "model", `String c.model_string

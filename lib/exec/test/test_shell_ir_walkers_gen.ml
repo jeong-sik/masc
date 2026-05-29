@@ -610,6 +610,27 @@ let test_posix_end_of_options () =
   (match grep_excludedir with
    | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
    | w -> Alcotest.failf "Grep --exclude-dir VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: -A 5 pattern file (context flag consumes numeric arg) *)
+  let grep_after_context =
+    of_simple { (base "grep") with args = [ lit "-A"; lit "5"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_after_context with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -A 5: expected pattern+path, got %a" pp w);
+  (* Grep: -C 3 pattern file (context flag consumes numeric arg) *)
+  let grep_context =
+    of_simple { (base "grep") with args = [ lit "-C"; lit "3"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_context with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -C 3: expected pattern+path, got %a" pp w);
+  (* Grep: --after-context=5 pattern file (eq-form context flag) *)
+  let grep_after_eq =
+    of_simple { (base "grep") with args = [ lit "--after-context=5"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_after_eq with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --after-context=5: expected pattern+path, got %a" pp w);
   (* Find: -- /tmp -name "*.ml" *)
   let find =
     of_simple { (base "find") with args = [ lit "--"; lit "/tmp"; lit "-name"; lit "*.ml" ] }
@@ -1034,7 +1055,21 @@ let test_wget_value_consuming_flags () =
   in
   (match w5 with
    | W (Wget { url = "https://example.com"; output = Some "out.html"; continue_ = true; _ }) -> ()
-   | w -> Alcotest.failf "Wget combined: expected url=example.com output=out.html continue_=true, got %a" pp w)
+   | w -> Alcotest.failf "Wget combined: expected url=example.com output=out.html continue_=true, got %a" pp w);
+  (* wget --mirror URL — --mirror is boolean, should NOT consume URL *)
+  let w6 =
+    of_simple { (base "wget") with args = [ lit "--mirror"; lit "https://example.com" ] }
+  in
+  (match w6 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --mirror: expected url=example.com, got %a" pp w);
+  (* wget --page-requisites URL — boolean flag should not consume URL *)
+  let w7 =
+    of_simple { (base "wget") with args = [ lit "--page-requisites"; lit "https://example.com" ] }
+  in
+  (match w7 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --page-requisites: expected url=example.com, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)
@@ -1529,6 +1564,24 @@ let test_batch12_value_consuming_flags () =
      if not (List.exists ((=) "pkg") rest) then
        Alcotest.failf "Npm --registry ... pkg: 'pkg' should be in rest (%a)" pp n1
    | w -> Alcotest.failf "Npm --registry: expected Npm, got %a" pp w);
+  (* Npm: --save-exact is boolean, should NOT consume next arg as value *)
+  let n2 =
+    of_simple { (base "npm") with args = [ lit "install"; lit "--save-exact"; lit "lodash" ] }
+  in
+  (match n2 with
+   | W (Npm { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lodash") rest) then
+       Alcotest.failf "Npm --save-exact: 'lodash' should be in rest (%a)" pp n2
+   | w -> Alcotest.failf "Npm --save-exact: expected Npm, got %a" pp w);
+  (* Npm: -E is boolean, should NOT consume next arg as value *)
+  let n3 =
+    of_simple { (base "npm") with args = [ lit "install"; lit "-E"; lit "lodash" ] }
+  in
+  (match n3 with
+   | W (Npm { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lodash") rest) then
+       Alcotest.failf "Npm -E: 'lodash' should be in rest (%a)" pp n3
+   | w -> Alcotest.failf "Npm -E: expected Npm, got %a" pp w);
   (* Mvn: -D key=val → two-token form consumed *)
   let m1 =
     of_simple { (base "mvn") with args = [ lit "install"; lit "-D"; lit "skipTests=true" ] }
@@ -1800,15 +1853,15 @@ let test_batch15_value_consuming_flags () =
     }
   in
   let pp = Shell_ir_typed.pp in
-  (* Rustc: --edition VALUE — flag consumed, VALUE passes through as subcommand *)
+  (* Rustc: --edition VALUE — flag+value consumed, file becomes subcommand *)
   let w_rustc =
     of_simple
       { (base "rustc") with args = [ lit "--edition"; lit "2021"; lit "src/main.rs" ] }
   in
   (match w_rustc with
-   | W (Rustc { subcommand = "2021"; rest = [ "src/main.rs" ]; _ }) -> ()
-   | w -> Alcotest.failf "Rustc --edition: expected sub=2021 rest=[src/main.rs], got %a" pp w);
-  (* Rustc: --edition=VALUE (eq form) — entire token consumed, file becomes subcommand *)
+   | W (Rustc { subcommand = "src/main.rs"; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --edition: expected sub=src/main.rs, got %a" pp w);
+  (* Rustc: --edition=VALUE (eq form) — value extracted as positional → becomes subcommand *)
   let w_rustc_eq =
     of_simple
       { (base "rustc") with args = [ lit "--edition=2021"; lit "src/main.rs" ] }
@@ -1816,14 +1869,14 @@ let test_batch15_value_consuming_flags () =
   (match w_rustc_eq with
    | W (Rustc { subcommand = "2021"; rest = [ "src/main.rs" ]; _ }) -> ()
    | w -> Alcotest.failf "Rustc --edition=VALUE: expected sub=2021 rest=[src/main.rs], got %a" pp w);
-  (* Rustc: --target VALUE with -O — VALUE passes through as subcommand *)
+  (* Rustc: --target VALUE with -O — flag+value consumed, file becomes subcommand *)
   let w_rustc_target =
     of_simple
       { (base "rustc") with args = [ lit "-O"; lit "--target"; lit "x86_64-unknown-linux-gnu"; lit "main.rs" ] }
   in
   (match w_rustc_target with
-   | W (Rustc { subcommand = "x86_64-unknown-linux-gnu"; optimize = true; rest = [ "main.rs" ]; _ }) -> ()
-   | w -> Alcotest.failf "Rustc --target: expected sub=x86_64-unknown-linux-gnu rest=[main.rs], got %a" pp w);
+   | W (Rustc { subcommand = "main.rs"; optimize = true; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --target: expected sub=main.rs, got %a" pp w);
   (* Gofmt: -tabs VALUE — flag consumed, VALUE passes through as subcommand *)
   let w_gofmt =
     of_simple

@@ -901,6 +901,20 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
   (* --include, --exclude, --exclude-dir: value-consuming flags (skip both) *)
   | ("--include" | "--exclude" | "--exclude-dir") :: _ :: rest ->
     parse recursive case_sensitive files_with_matches pattern path rest
+  (* -A/-B/-C/-m NUM: context and max-count flags (consume the next arg) *)
+  | ("-A" | "-B" | "-C" | "-m") :: _ :: rest ->
+    parse recursive case_sensitive files_with_matches pattern path rest
+  (* --after-context, --before-context, --context, --max-count: value-consuming long flags *)
+  | ("--after-context" | "--before-context" | "--context" | "--max-count") :: _ :: rest ->
+    parse recursive case_sensitive files_with_matches pattern path rest
+  (* --after-context=NUM etc. eq-form *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = '-'
+         && (let k = try String.index arg '=' with Not_found -> -1 in
+             k > 0 && let pre = String.sub arg 0 k in
+             List.mem pre [ "--after-context"; "--before-context"; "--context"; "--max-count" ]) ->
+    parse recursive case_sensitive files_with_matches pattern path rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
@@ -2483,7 +2497,7 @@ let wget_value_flags =
   [ "--header"; "--execute"; "-e"
   ; "--post-data"; "--post-file"
   ; "--timeout"; "--connect-timeout"; "--dns-timeout"; "--read-timeout"
-  ; "--tries"; "--wait"; "--waitretry"; "--random-wait"
+  ; "--tries"; "--wait"; "--waitretry"
   ; "--domains"; "--exclude-domains"; "--reject"; "--accept"
   ; "--reject-regex"; "--accept-regex"
   ; "--user"; "--password"
@@ -2492,8 +2506,6 @@ let wget_value_flags =
   ; "--user-agent"; "--referer"
   ; "--certificate"; "--private-key"; "--ca-certificate"
   ; "--quota"; "--max-redirect"; "--max-filename-length"
-  ; "--mirror"; "--page-requisites"
-  ; "--span-hosts"; "--domains"
   ; "-i"   (* input file *)
   ; "-B"   (* base URL *)
   ; "-P"   (* directory prefix *)
@@ -3419,8 +3431,6 @@ let npm_value_flags =
   ; "--workspace"; "-w"
   ; "--omit"
   ; "--install-strategy"
-  ; "--save-exact"; "-E"
-  ; "--save-bundle"; "-B"
   ; "--proxy"; "--https-proxy"
   ; "--no-proxy"
   ]
@@ -4564,12 +4574,12 @@ let rec parse subcmd opt tst dd = function
   | arg :: _val :: rest
     when not dd
          && List.mem arg [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "-L"; "-l"; "--sysroot"; "--print" ] ->
-    parse subcmd opt tst dd (_val :: rest)
+    parse subcmd opt tst dd rest
   | arg :: rest
     when not dd
          && Shell_ir_typed_types.is_eq_form_flag arg
-              [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "--sysroot"; "--print" ] ->
-    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "--sysroot"; "--print" ] in
+              [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "-L"; "-l"; "--sysroot"; "--print" ] ->
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "-L"; "-l"; "--sysroot"; "--print" ] in
     parse subcmd opt tst dd (match ev with Some evv -> evv :: rest | None -> rest)
   | "--" :: rest -> parse subcmd opt tst true rest
   | arg :: rest ->

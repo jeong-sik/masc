@@ -277,7 +277,7 @@ let test_of_simple_round_trip () =
     ; W (Node { script = "server.js"; args = [ "8080" ]; inline = None })
     ; W (Python { script = "train.py"; args = [ "--epochs"; "10" ]; inline = None })
     ; W (Python3 { script = "train.py"; args = [ "--epochs"; "10" ]; inline = None })
-    ; W (Node { script = ""; args = [ "--max-old-space-size=4096" ]; inline = Some "console.log(1)" })
+    ; W (Node { script = ""; args = [ "--verbose" ]; inline = Some "console.log(1)" })
     ; W (Python { script = ""; args = []; inline = Some "print('hi')" })
     ; W (Python3 { script = ""; args = [ "-u" ]; inline = Some "import sys; print(sys.version)" })
     ; W (Pip { subcommand = "install"; packages = [ "numpy" ] })
@@ -299,7 +299,7 @@ let test_of_simple_round_trip () =
     ; W (Terminal_notifier { title = "Test"; message = "All passed" })
     ; W (Ruff { subcommand = "format"; fix = false; show_source = false; rest = [ "--check"; "src/" ] })
     ; W (Pyright { subcommand = ""; strict = true; rest = [] })
-    ; W (Tsc { subcommand = ""; no_emit = false; watch = false; rest = [ "--project"; "tsconfig.json" ] })
+    ; W (Tsc { subcommand = "build"; no_emit = false; watch = false; rest = [ "src/" ] })
     ; W (Ocamlfind { subcommand = "query"; args = [ "eio" ] })
     ; W (Rustc { subcommand = ""; optimize = true; test = false; rest = [ "src/main.rs" ] })
     ; W (Gofmt { subcommand = ""; write = false; list_files = true; rest = [ "." ] })
@@ -1565,6 +1565,95 @@ let test_batch12_value_consuming_flags () =
    | w -> Alcotest.failf "Gradle --gradle-user-home=: expected Gradle, got %a" pp w)
 ;;
 
+(* Batch 13: value-consuming flag handling for Node/Python/Python3/Pip/Ruff/Tsc.
+   Ensures that --flag VALUE pairs are consumed together, not split into
+   separate positional arguments. *)
+let test_batch13_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Node: --require module is consumed, script remains *)
+  let w_node =
+    of_simple { (base "node") with args = [ lit "--require"; lit "module"; lit "script.js" ] }
+  in
+  (match w_node with
+   | W (Node { script = "script.js"; args = []; inline = None }) -> ()
+   | w -> Alcotest.failf "Node --require: expected script=script.js, got %a" pp w);
+  (* Node: --max-old-space-size=4096 is consumed (eq form) *)
+  let w_node_eq =
+    of_simple { (base "node") with args = [ lit "--max-old-space-size=4096"; lit "app.js" ] }
+  in
+  (match w_node_eq with
+   | W (Node { script = "app.js"; args = []; inline = None }) -> ()
+   | w -> Alcotest.failf "Node --max-old-space-size=4096: expected script=app.js, got %a" pp w);
+  (* Python: -m is value-consuming flag; both -m and module are consumed *)
+  let w_python =
+    of_simple { (base "python") with args = [ lit "-m"; lit "module"; lit "script.py" ] }
+  in
+  (match w_python with
+   | W (Python { script = "script.py"; args = []; inline = None }) -> ()
+   | w -> Alcotest.failf "Python -m module: expected script=script.py, got %a" pp w);
+  (* Python: -W value-consuming flag *)
+  let w_python_w =
+    of_simple { (base "python") with args = [ lit "-W"; lit "error"; lit "main.py" ] }
+  in
+  (match w_python_w with
+   | W (Python { script = "main.py"; args = []; inline = None }) -> ()
+   | w -> Alcotest.failf "Python -W error: expected script=main.py, got %a" pp w);
+  (* Python3: -m value-consuming flag *)
+  let w_python3 =
+    of_simple { (base "python3") with args = [ lit "-m"; lit "uvicorn"; lit "app:main" ] }
+  in
+  (match w_python3 with
+   | W (Python3 { script = "app:main"; args = []; inline = None }) -> ()
+   | w -> Alcotest.failf "Python3 -m uvicorn: expected script=app:main, got %a" pp w);
+  (* Pip: --index-url value is consumed, package remains *)
+  let w_pip =
+    of_simple
+      { (base "pip") with
+        args = [ lit "install"; lit "--index-url"; lit "https://example.com/simple"; lit "flask" ]
+      }
+  in
+  (match w_pip with
+   | W (Pip { subcommand = "install"; packages = [ "flask" ] }) -> ()
+   | w -> Alcotest.failf "Pip --index-url: expected packages=[flask], got %a" pp w);
+  (* Pip: --index-url=VALUE (eq form) is consumed *)
+  let w_pip_eq =
+    of_simple
+      { (base "pip") with
+        args = [ lit "install"; lit "--index-url=https://example.com/simple"; lit "requests" ]
+      }
+  in
+  (match w_pip_eq with
+   | W (Pip { subcommand = "install"; packages = [ "requests" ] }) -> ()
+   | w -> Alcotest.failf "Pip --index-url=VALUE: expected packages=[requests], got %a" pp w);
+  (* Ruff: --select value is consumed, rest path remains *)
+  let w_ruff =
+    of_simple
+      { (base "ruff") with args = [ lit "check"; lit "--select"; lit "E501"; lit "src/" ] }
+  in
+  (match w_ruff with
+   | W (Ruff { subcommand = "check"; fix = false; show_source = false; rest = [ "src/" ] }) -> ()
+   | w -> Alcotest.failf "Ruff --select: expected rest=[src/], got %a" pp w);
+  (* Tsc: --target value is consumed, rest path remains *)
+  let w_tsc =
+    of_simple
+      { (base "tsc") with args = [ lit "build"; lit "--target"; lit "ES2020"; lit "src/" ] }
+  in
+  (match w_tsc with
+   | W (Tsc { subcommand = "build"; no_emit = false; watch = false; rest = [ "src/" ] }) -> ()
+   | w -> Alcotest.failf "Tsc --target: expected rest=[src/], got %a" pp w)
+;;
+
+>>>>>>> 14ef88a38 (feat(shell-ir): value-consuming flags for Node/Python/Python3/Pip/Ruff/Tsc)
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -1684,6 +1773,10 @@ let () =
         ; Alcotest.test_case "Git_pull value-consuming flags" `Quick test_git_pull_value_consuming_flags
         ; Alcotest.test_case "Git_log value-consuming flags" `Quick test_git_log_value_consuming_flags
         ; Alcotest.test_case "Batch 12: Docker/Go/Cargo/Npm/Mvn/Gradle value flags" `Quick test_batch12_value_consuming_flags
+        ; Alcotest.test_case
+            "Batch13 Node/Python/Pip/Ruff/Tsc value flags"
+            `Quick
+            test_batch13_value_consuming_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

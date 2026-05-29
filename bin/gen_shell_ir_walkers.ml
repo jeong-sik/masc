@@ -3105,6 +3105,7 @@ parse [] false false false false None None args|}
     ; parse_body =
         Some
           {|
+let node_value_flags = [ "--require"; "--loader"; "--max-old-space-size"; "--max-old-space-size"; "--inspect-port"; "--env-file"; "--input-type"; "--conditions"; "--experimental-specifier-resolution"; "--experimental-policy"; "--permission"; "--watch-paths"; "--watch-path"; "--title"; "--experimental-default-type" ] in
 let rec parse inline script extra dd = function
   | [] ->
     (match inline, script with
@@ -3115,6 +3116,17 @@ let rec parse inline script extra dd = function
      | None, None -> None)
   | "-e" :: code :: rest when not dd -> parse (Some code) script extra dd rest
   | "--" :: rest -> parse inline script extra true rest
+  (* Value-consuming flags: skip flag + value to prevent value becoming script *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg node_value_flags ->
+    parse inline script extra dd rest
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i -> let flag = String.sub arg 0 i in List.mem flag node_value_flags
+              | None -> false) ->
+    parse inline script extra dd rest
   | arg :: rest ->
     (match inline, script with
      | Some _, _ -> parse inline script (arg :: extra) dd rest
@@ -3150,6 +3162,7 @@ parse None None [] false args|}
     ; parse_body =
         Some
           {|
+let python_value_flags = [ "-m"; "-W"; "-X"; "--check-hash-based-pycs" ] in
 let rec parse inline script extra dd = function
   | [] ->
     (match inline, script with
@@ -3160,6 +3173,16 @@ let rec parse inline script extra dd = function
      | None, None -> None)
   | "-c" :: code :: rest when not dd -> parse (Some code) script extra dd rest
   | "--" :: rest -> parse inline script extra true rest
+  (* Value-consuming flags: skip flag + value *)
+  | arg :: _val :: rest
+    when not dd && List.mem arg python_value_flags ->
+    parse inline script extra dd rest
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i -> let flag = String.sub arg 0 i in List.mem flag python_value_flags
+              | None -> false) ->
+    parse inline script extra dd rest
   | arg :: rest ->
     (match inline, script with
      | Some _, _ -> parse inline script (arg :: extra) dd rest
@@ -3195,6 +3218,7 @@ parse None None [] false args|}
     ; parse_body =
         Some
           {|
+let python3_value_flags = [ "-m"; "-W"; "-X"; "--check-hash-based-pycs" ] in
 let rec parse inline script extra dd = function
   | [] ->
     (match inline, script with
@@ -3205,6 +3229,16 @@ let rec parse inline script extra dd = function
      | None, None -> None)
   | "-c" :: code :: rest when not dd -> parse (Some code) script extra dd rest
   | "--" :: rest -> parse inline script extra true rest
+  (* Value-consuming flags: skip flag + value *)
+  | arg :: _val :: rest
+    when not dd && List.mem arg python3_value_flags ->
+    parse inline script extra dd rest
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i -> let flag = String.sub arg 0 i in List.mem flag python3_value_flags
+              | None -> false) ->
+    parse inline script extra dd rest
   | arg :: rest ->
     (match inline, script with
      | Some _, _ -> parse inline script (arg :: extra) dd rest
@@ -3236,6 +3270,7 @@ parse None None [] false args|}
     ; parse_body =
         Some
           {|
+let pip_value_flags = [ "--index-url"; "--extra-index-url"; "--timeout"; "-r"; "--constraint"; "--prefix"; "--target"; "--log"; "--proxy"; "--root"; "--format"; "--python-version"; "--implementation"; "--abi"; "--platform"; "--trusted-host"; "--client-cert"; "--key"; "--global-option"; "--hash" ] in
 let rec parse subcmd pkgs dd = function
   | [] ->
     (match subcmd with
@@ -3243,6 +3278,17 @@ let rec parse subcmd pkgs dd = function
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pip { subcommand = s; packages = List.rev pkgs }))
      | None -> None)
   | "--" :: rest -> parse subcmd pkgs true rest
+  (* Value-consuming flags: skip flag + value *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg pip_value_flags ->
+    parse subcmd pkgs dd rest
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i -> let flag = String.sub arg 0 i in List.mem flag pip_value_flags
+              | None -> false) ->
+    parse subcmd pkgs dd rest
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) pkgs dd rest
@@ -4304,6 +4350,7 @@ parse None None args|}
     ; parse_body =
         Some
           {|
+let ruff_value_flags = [ "--config"; "--select"; "--ignore"; "--line-length"; "--target-version"; "--exclude"; "--extend-select"; "--per-file-ignores"; "--format"; "--fixable"; "--unfixable"; "--extend-ignore"; "--preview"; "--output-format" ] in
 let rec parse subcmd f s dd = function
   | [] ->
     (match subcmd with
@@ -4313,6 +4360,17 @@ let rec parse subcmd f s dd = function
   | "--fix" :: rest when not dd -> parse subcmd true s dd rest
   | "--show-source" :: rest when not dd -> parse subcmd f true dd rest
   | "--" :: rest -> parse subcmd f s true rest
+  (* Value-consuming flags: skip flag + value *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg ruff_value_flags ->
+    parse subcmd f s dd rest
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i -> let flag = String.sub arg 0 i in List.mem flag ruff_value_flags
+              | None -> false) ->
+    parse subcmd f s dd rest
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) f s dd rest
@@ -4402,6 +4460,7 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
+let tsc_value_flags = [ "--target"; "--module"; "--lib"; "--outDir"; "--rootDir"; "--jsx"; "--moduleResolution"; "--types"; "--typeRoots"; "--baseUrl"; "--paths"; "--outFile"; "--sourceMap"; "--declaration"; "--declarationDir"; "--emitDeclarationOnly"; "--importHelpers"; "--downlevelIteration"; "--strict"; "--project"; "--extends"; "--init"; "--locale"; "--mapRoot"; "--sourceRoot"; "--configFilePath" ] in
 let rec parse subcmd nw w dd = function
   | [] ->
     (match subcmd with
@@ -4411,6 +4470,17 @@ let rec parse subcmd nw w dd = function
   | "--noEmit" :: rest when not dd -> parse subcmd true w dd rest
   | "--watch" :: rest when not dd -> parse subcmd nw true dd rest
   | "--" :: rest -> parse subcmd nw w true rest
+  (* Value-consuming flags: skip flag + value *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg tsc_value_flags ->
+    parse subcmd nw w dd rest
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i -> let flag = String.sub arg 0 i in List.mem flag tsc_value_flags
+              | None -> false) ->
+    parse subcmd nw w dd rest
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) nw w dd rest

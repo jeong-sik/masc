@@ -902,6 +902,49 @@ let test_lines_equals_form () =
    | w -> Alcotest.failf "Head --lines=0: expected lines=0, got %a" pp w)
 ;;
 
+(* --jobs=N and --jobs VALUE form for Make and Ninja *)
+let test_jobs_equals_form () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Make: --jobs=8 target *)
+  let make =
+    of_simple { (base "make") with args = [ lit "--jobs=8"; lit "all" ] }
+  in
+  (match make with
+   | W (Make { target = Some "all"; jobs = Some 8; _ }) -> ()
+   | w -> Alcotest.failf "Make --jobs=8: expected jobs=8, got %a" pp w);
+  (* Make: --jobs 4 target *)
+  let make2 =
+    of_simple { (base "make") with args = [ lit "--jobs"; lit "4"; lit "test" ] }
+  in
+  (match make2 with
+   | W (Make { target = Some "test"; jobs = Some 4; _ }) -> ()
+   | w -> Alcotest.failf "Make --jobs 4: expected jobs=4, got %a" pp w);
+  (* Ninja: --jobs=16 subcommand *)
+  let ninja =
+    of_simple { (base "ninja") with args = [ lit "--jobs=16"; lit "build" ] }
+  in
+  (match ninja with
+   | W (Ninja { subcommand = "build"; jobs = Some 16; _ }) -> ()
+   | w -> Alcotest.failf "Ninja --jobs=16: expected jobs=16, got %a" pp w);
+  (* Ninja: --jobs 2 subcommand *)
+  let ninja2 =
+    of_simple { (base "ninja") with args = [ lit "--jobs"; lit "2"; lit "test" ] }
+  in
+  (match ninja2 with
+   | W (Ninja { subcommand = "test"; jobs = Some 2; _ }) -> ()
+   | w -> Alcotest.failf "Ninja --jobs 2: expected jobs=2, got %a" pp w)
+;;
+
 (* Combined short-flag parsing: -rf → -r + -f *)
 let test_combined_short_flags () =
   let open Shell_ir_typed in
@@ -1245,6 +1288,7 @@ let () =
         ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
         ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
+        ; Alcotest.test_case "--jobs=N form" `Quick test_jobs_equals_form
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"

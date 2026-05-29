@@ -2653,6 +2653,18 @@ let rec parse jobs target dd = function
     (match int_of_string_opt n with
      | Some j -> parse (Some j) target dd rest
      | None -> None)
+  | "--jobs" :: n :: rest when not dd ->
+    (match int_of_string_opt n with
+     | Some j -> parse (Some j) target dd rest
+     | None -> None)
+  | arg :: rest
+    when not dd
+         && String.length arg > 7
+         && String.sub arg 0 7 = "--jobs=" ->
+    let n = String.sub arg 7 (String.length arg - 7) in
+    (match int_of_string_opt n with
+     | Some j -> parse (Some j) target dd rest
+     | None -> None)
   (* Combined form: -j4 → jobs = Some 4 *)
   | arg :: rest
     when not dd
@@ -4273,6 +4285,31 @@ parse None false false false args|}
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja { subcommand = s; jobs = j; rest = [] }))
        | None -> None)
     | "--" :: rest -> parse subcmd j true rest
+    | "--jobs" :: n :: rest when not dd ->
+      (match int_of_string_opt n with
+       | Some j' -> parse subcmd (Some j') dd rest
+       | None ->
+         let rec collect acc = function
+           | [] -> List.rev acc
+           | x :: xs -> collect (x :: acc) xs
+         in
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+           subcommand = (match subcmd with Some s -> s | None -> n); jobs = j;
+           rest = collect (match subcmd with Some _ -> [ n ] | None -> []) rest
+         })))
+    | arg :: rest when not dd && String.length arg > 7 && String.sub arg 0 7 = "--jobs=" ->
+      let n = String.sub arg 7 (String.length arg - 7) in
+      (match int_of_string_opt n with
+       | Some j' -> parse subcmd (Some j') dd rest
+       | None ->
+         let rec collect acc = function
+           | [] -> List.rev acc
+           | x :: xs -> collect (x :: acc) xs
+         in
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+           subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
+           rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         })))
     | arg :: rest ->
       if not dd && String.length arg > 2 && String.sub arg 0 2 = "-j"
       then

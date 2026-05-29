@@ -25,10 +25,6 @@ let compute_outcomes_rollup = Outcomes.compute_outcomes_rollup
    last_latency_ms_json moved to Dashboard_http_keeper_types
    (intra-library file split, 2026-05-16). *)
 
-(* json_string_list_member + json_string_member_opt +
-   terminal_reason_code_of_decision_json moved to
-   Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
-
 let keeper_trust_json = Trust.keeper_trust_json
 
 (* execution_trust_source / _producer / _dashboard_surface / _freshness_slo_s

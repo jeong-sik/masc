@@ -153,19 +153,19 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Json_util.json_string_list missing_required_tools );
                   ( "turn_lane",
                     Json_util.string_opt_to_json
-                      (json_string_member_opt "turn_lane" tool_decision) );
+                      (Json_util.get_string tool_decision "turn_lane") );
                   ( "tool_surface_class",
                     Json_util.string_opt_to_json
-                      (json_string_member_opt "tool_surface_class"
-                         tool_decision) );
+                      (Json_util.get_string tool_decision
+                         "tool_surface_class") );
                   ( "tool_requirement",
                     Json_util.string_opt_to_json
                       (first_string_opt
                          [
-                           json_string_member_opt "tool_requirement"
-                             tool_decision;
-                           json_string_member_opt "tool_requirement"
-                             lane_decision;
+                           Json_util.get_string tool_decision
+                             "tool_requirement";
+                           Json_util.get_string lane_decision
+                             "tool_requirement";
                          ]) );
                   ( "visible_tool_count",
                     Json_util.int_opt_to_json
@@ -195,7 +195,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ("status", Json_util.string_opt_to_json provider_lane_status);
                   ( "resolved_lane",
                     Json_util.string_opt_to_json
-                      (json_string_member_opt "resolved_lane" lane_decision)
+                      (Json_util.get_string lane_decision "resolved_lane")
                   );
                   ( "effective_tool_count",
                     Json_util.int_opt_to_json

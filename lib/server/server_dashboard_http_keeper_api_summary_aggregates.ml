@@ -17,7 +17,7 @@ let provider_attempts_summary_json (scan : runtime_manifest_scan) : Yojson.Safe.
   let terminal = scan.provider_terminal_row in
   let terminal_decision_string key =
     Option.bind terminal (fun row ->
-      json_string_member_opt key row.Keeper_runtime_manifest.decision)
+      Json_util.get_string row.Keeper_runtime_manifest.decision key)
   in
   `Assoc
     [ "started_count", `Int scan.provider_started_count

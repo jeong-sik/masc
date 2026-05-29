@@ -12,7 +12,7 @@ let clock_refs decision =
 
 let clock_string row key =
   match clock_refs row.Keeper_runtime_manifest.decision with
-  | Some refs -> json_string_member_opt key refs
+  | Some refs -> Json_util.get_string refs key
   | None -> None
 
 let clock_string_non_empty row key =
@@ -63,12 +63,12 @@ let fallback_checkpoint_id row =
   let decision = row.Keeper_runtime_manifest.decision in
   first_string_opt
     [
-      json_string_member_opt "session_id" decision
+      Json_util.get_string decision "session_id"
       |> Option.map (fun session_id ->
         Printf.sprintf "checkpoint:%s:oas-%s" session_id (oas_turn_label row));
       basename_opt row.Keeper_runtime_manifest.links.checkpoint_path
       |> Option.map (fun base -> "checkpoint:" ^ base);
-      json_string_member_opt "checkpoint_path" decision
+      Json_util.get_string decision "checkpoint_path"
       |> basename_opt
       |> Option.map (fun base -> "checkpoint:" ^ base);
     ]
@@ -191,14 +191,14 @@ let clock_edge_json ~idx ~provider_attempt_index row =
     first_string_opt
       [
         clock_string row "event_bus_correlation_id";
-        json_string_member_opt "correlation_id" decision;
+        Json_util.get_string decision "correlation_id";
       ]
   in
   let event_bus_run_id =
     first_string_opt
       [
         clock_string row "event_bus_run_id";
-        json_string_member_opt "run_id" decision;
+        Json_util.get_string decision "run_id";
       ]
   in
   let event_bus_event_count =
@@ -273,7 +273,7 @@ let clock_edge_json ~idx ~provider_attempt_index row =
       ] );
     ]
 
-let edge_string key edge = json_string_member_opt key edge
+let edge_string key edge = Json_util.get_string edge key
 let edge_int key edge = Json_util.get_int edge key
 let edge_string_list key edge = Json_util.get_string_list edge key
 

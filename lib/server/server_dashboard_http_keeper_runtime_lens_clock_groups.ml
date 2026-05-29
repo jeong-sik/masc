@@ -8,7 +8,7 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let edge_string key edge = json_string_member_opt key edge
+let edge_string key edge = Json_util.get_string edge key
 let edge_int key edge = Json_util.get_int edge key
 let edge_string_list key edge = Json_util.get_string_list edge key
 
@@ -183,7 +183,7 @@ let clock_group_open_gap ~code ~severity ~lane ~label groups =
   let open_ids =
     groups
     |> List.filter_map (fun group ->
-      match Json_util.get_bool group "closed", json_string_member_opt "group_id" group with
+      match Json_util.get_bool group "closed", Json_util.get_string group "group_id" with
       | Some false, Some group_id when String.trim group_id <> "" -> Some group_id
       | _ -> None)
   in
@@ -204,7 +204,7 @@ let runtime_lens_clock_group_gaps scan =
   let groups = clock_group_jsons scan in
   let groups_of_type group_type =
     List.filter
-      (fun group -> json_string_member_opt "group_type" group = Some group_type)
+      (fun group -> Json_util.get_string group "group_type" = Some group_type)
       groups
   in
   let edge_ids =

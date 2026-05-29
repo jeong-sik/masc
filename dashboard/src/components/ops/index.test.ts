@@ -138,7 +138,7 @@ describe('Ops surface', () => {
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
   }, 120000)
 
-  it('points to Monitor → Keeper Fleet instead of rendering its own keeper roster', async () => {
+  it('does not render its own keeper roster or fleet pointer (lives on Monitor → Keeper Fleet)', async () => {
     const {
       Ops,
       route,
@@ -180,10 +180,9 @@ describe('Ops surface', () => {
     expect(container.querySelector('[data-testid="keeper-utilities-panel"]')).toBeNull()
     expect(container.querySelector('[data-testid="keeper-action-panel"]')).toBeNull()
 
-    const pointer = container.querySelector('[data-testid="ops-keeper-fleet-link"]')
-    expect(pointer).toBeTruthy()
-    const link = pointer?.querySelector('a')
-    expect(link?.getAttribute('href')).toBe('#monitoring?section=agents')
+    // The keeper-fleet pointer card was removed: it had no action of its own,
+    // only a link to Monitor → Keeper Fleet (reachable from the sidebar).
+    expect(container.querySelector('[data-testid="ops-keeper-fleet-link"]')).toBeNull()
   }, 60000)
 
   it('renders the same single surface when active review items are present (no 3-column unhealthy branch)', async () => {

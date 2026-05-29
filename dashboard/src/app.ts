@@ -33,6 +33,7 @@ import {
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
+import { EmergencyStopControl } from './components/emergency-stop-control'
 import { TransportBeacon } from './components/transport-beacon'
 import { DashboardSurfaceTabs } from './components/dashboard-surface-tabs'
 import { SkipLink } from './components/skip-link'
@@ -283,6 +284,7 @@ export function App() {
           </div>
 
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
+            <${EmergencyStopControl} />
             <${Suspense} fallback=${authStatusFallback()}>
               <${LazyAuthStatus} />
             <//>

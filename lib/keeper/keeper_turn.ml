@@ -301,7 +301,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let build_turn_prompt ~base_system_prompt ~messages
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
-              (* 1. Recovery + tiered memory context *)
+              (* 1. Recovery + layered memory context *)
               let continuity_snapshot = latest_state_snapshot_from_messages messages in
               let progress_cache =
                 Keeper_memory_policy.read_progress_snapshot_cache

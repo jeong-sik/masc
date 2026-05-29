@@ -83,7 +83,7 @@ type 'a selection = {
 (** {1 Execute}
 
     Run branches under budget. STUB: sequential, first-success
-    wins. Future tier replaces with Eio.Switch-based race + abort.
+    wins. Future level replaces with Eio.Switch-based race + abort.
 
     Outcome semantics:
     - First branch to return [Ok value] →

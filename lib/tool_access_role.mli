@@ -18,7 +18,7 @@ val worker_only_tools : unit -> string list
 val policy_for_role : Masc_domain.agent_role -> Tool_access_policy.t
 (** Build the access policy for a role.
     - Admin: all permission-mapped tools allowed
-    - Worker: worker-tier permission-mapped tools allowed
+    - Worker: worker-role permission-mapped tools allowed
     - Unregistered/unmapped tool names are not allowed by the policy
 
     Note: Keeper_denied and Keeper_internal filtering is handled separately

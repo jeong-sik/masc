@@ -1,5 +1,5 @@
 (** Memory_oas_bridge — MASC-side adapter that projects product memory into
-    OAS Memory.t 5-tier primitives.
+    OAS Memory.t 5-level primitives.
 
     Tier mapping:
     - {b Long_term} — JSONL files under [.masc/memory/<agent>/<session>.jsonl]
@@ -20,7 +20,7 @@
     whether a PG pool is available.  PG long_term was removed in 2.140.0.
 
     @since 2.122.0 (long_term only)
-    @since 2.124.0 (5-tier: episodic + procedural seeding/flushing)
+    @since 2.124.0 (5-level: episodic + procedural seeding/flushing)
     @since 2.140.0 (filesystem-first: JSONL long_term_backend always)
     @since 2.266.0 (RFC-MASC-004 Phase 3: imperative seeding removed) *)
 
@@ -212,7 +212,7 @@ let read_institution_welcome (config : Coord_utils.config) : string option =
   if welcome = "" then None else Some welcome
 
 (* ================================================================ *)
-(* Episodic tier: Institution_eio JSONL <-> OAS episodes            *)
+(* Episodic level: Institution_eio JSONL <-> OAS episodes            *)
 (* ================================================================ *)
 
 let default_episode_salience (episode : Institution_eio.episode) =
@@ -606,7 +606,7 @@ let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
   flushed
 
 (* ================================================================ *)
-(* Procedural tier: Procedural_memory <-> OAS procedures            *)
+(* Procedural level: Procedural_memory <-> OAS procedures            *)
 (* ================================================================ *)
 
 (** Convert a [Procedural_memory.procedure] to an OAS [procedure].
@@ -669,7 +669,7 @@ let replace_first_procedure_by_id id updated procs =
 
 (** Flush OAS procedures back to [Procedural_memory].
 
-    Extracts procedures from the Procedural tier that have been updated
+    Extracts procedures from the Procedural level that have been updated
     (new success/failure counts) and persists them.
     Returns the number of procedures flushed. *)
 let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =

@@ -141,7 +141,7 @@ let thinking_mode_of_record record =
      | Some (`Bool true) -> "enabled"
      | Some (`Bool false) -> "disabled"
      | _ -> "<missing thinking_enabled field>")
-  | _ -> "<non-object record envelope>"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> "<non-object record envelope>"
 
 let bool_field_opt record field =
   match record with
@@ -149,7 +149,7 @@ let bool_field_opt record field =
     (match List.assoc_opt field fields with
      | Some (`Bool value) -> Some value
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let tool_success_of_record record =
   match bool_field_opt record "semantic_success" with
@@ -181,7 +181,7 @@ let hour_key_of_record record =
      | Some (`String s) when String.length s >= 13 -> String.sub s 0 13
      | Some (`String s) -> s
      | _ -> "<missing or non-numeric ts field>")
-  | _ -> "<non-object record envelope>"
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> "<non-object record envelope>"
 
 let update_rate_table table key ok =
   let key = if String.trim key = "" then "unknown" else key in
@@ -320,7 +320,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
          | Some (`Float f) -> f
          | Some (`Int i) -> Float.of_int i
          | _ -> 0.0)
-      | _ -> 0.0
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0.0
     in
     let output_chars = match record with
       | `Assoc fields ->
@@ -343,7 +343,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     in
     let was_truncated = match record with
       | `Assoc fields -> List.assoc_opt "truncated_to" fields <> None
-      | _ -> false
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
     in
     if ok then incr success;
     (* hourly trend bucketing *)
@@ -398,7 +398,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
               | Some (`String p) -> p
               | _ -> "")
            | _ -> "")
-        | _ -> ""
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ""
       in
       let cat =
         match semantic_outcome with

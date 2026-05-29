@@ -495,10 +495,10 @@ let keeper_context_status_json
     if ctx_max = 0 then 0.0 else float_of_int ctx_tokens /. float_of_int ctx_max
   in
   (* RFC-0149 §3.1 — route through typed Result resolver so a memory
-     bank IO fault surfaces as the sibling [memory_tier_error_class]
-     field instead of an empty [memory_tier_summary] that is
+     bank IO fault surfaces as the sibling [memory_kind_error_class]
+     field instead of an empty [memory_kind_summary] that is
      indistinguishable from "no recorded horizons". *)
-  let memory_tier_summary, memory_tier_error_class =
+  let memory_kind_summary, memory_kind_error_class =
     match
       Keeper_memory_recall.read_memory_horizon_counts_result
         config
@@ -552,9 +552,9 @@ let keeper_context_status_json
                        `Assoc [ ("tool", `String s.tool_name); ("outcome", `String s.outcome) ])
                     meta.runtime.last_turn_tool_calls) )
            ; "recovery_source", `String recovery_source
-           ; "memory_tier_summary", `Assoc memory_tier_summary
-           ; ( "memory_tier_error_class"
-             , match memory_tier_error_class with
+           ; "memory_kind_summary", `Assoc memory_kind_summary
+           ; ( "memory_kind_error_class"
+             , match memory_kind_error_class with
                | Some label -> `String label
                | None -> `Null )
            ]))

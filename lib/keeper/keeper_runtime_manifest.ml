@@ -123,7 +123,7 @@ let extract_string_field key json =
     (match List.assoc_opt key fields with
     | Some (`String value) -> Some value
     | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let extract_int_field key json =
   match json with
@@ -131,12 +131,12 @@ let extract_int_field key json =
     (match List.assoc_opt key fields with
     | Some (`Int value) -> Some value
     | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let extract_clock_refs decision =
   match decision with
   | `Assoc fields -> List.assoc_opt "clock_refs" fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let source_clock_from_manifest manifest =
   match extract_clock_refs manifest.decision with
@@ -144,7 +144,7 @@ let source_clock_from_manifest manifest =
     (match List.assoc_opt "source_clock" fields with
     | Some (`String s) -> source_clock_of_string s
     | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let logical_ordering manifest =
   match extract_clock_refs manifest.decision with
@@ -165,7 +165,7 @@ let logical_ordering manifest =
       | _ -> None
     in
     { parent_event_id; caused_by; logical_seq }
-  | _ -> { parent_event_id = None; caused_by = None; logical_seq = None }
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> { parent_event_id = None; caused_by = None; logical_seq = None }
 
 let comparable_for_latency a b =
   match source_clock_from_manifest a, source_clock_from_manifest b with
@@ -463,7 +463,7 @@ let reject_retired_decision_fields decision =
         |> List.mapi (fun idx value -> idx, value)
         |> List.find_map (fun (idx, value) ->
           check (Printf.sprintf "%s[%d]" path idx) value)
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   match check "" decision with
   | Some path ->
@@ -815,7 +815,7 @@ let append_unfinished_provider_attempt_finished_best_effort
       match started.decision with
       | `Assoc fields ->
         List.filter (fun (k, _) -> not (String.equal k "clock_refs")) fields
-      | _ -> []
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
     in
     let terminal_fields =
       [

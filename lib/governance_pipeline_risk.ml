@@ -134,7 +134,7 @@ let classify_name name =
 
    Values reproduce the prior (substring + override) verdict exactly,
    so the eight typed entries of the former [risk_overrides] list are
-   folded into the tier they belong to (e.g. [Goal_upsert -> Medium],
+   folded into the level they belong to (e.g. [Goal_upsert -> Medium],
    [Memory_write -> Low]) rather than patched at runtime. The one
    non-typed override ([masc_a2a_query_skill], absent from [Tool_name])
    survives in [residual_risk_overrides] below.

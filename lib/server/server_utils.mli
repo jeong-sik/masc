@@ -97,7 +97,7 @@ val board_fetch_limit :
     Resolves a raw author/voter string (which can be a keeper
     name, an agent name aliased through the keeper registry, or a
     plain agent id) into a structured identity record.  Three
-    lookup tiers, all operator-visible through the [source] field:
+    lookup levels, all operator-visible through the [source] field:
 
     1. [keeper_registry_agent_name] —
        {!Keeper_registry_lookup.find_by_agent_name}
@@ -116,7 +116,7 @@ val board_actor_keeper_identity :
   string -> (string * string option * string) option
 (** [board_actor_keeper_identity raw] returns
     [Some (keeper_name, runtime_agent_name, source)] when [raw]
-    resolves to a keeper through any of the three lookup tiers,
+    resolves to a keeper through any of the three lookup levels,
     [None] otherwise.  [source] is one of the three literals
     listed above — operator runbooks grep on these. *)
 

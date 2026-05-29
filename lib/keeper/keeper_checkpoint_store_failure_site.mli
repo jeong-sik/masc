@@ -13,7 +13,7 @@ type t =
   | Oas_cleanup (** OAS checkpoint cleanup pass failed. *)
   | Oas_save (** OAS checkpoint primary save failed. *)
   | Oas_delete (** OAS checkpoint delete failed. *)
-  | Oas_archive_fallback (** Archive-tier fallback save failed. *)
-  | Oas_archive_primary (** Archive-tier primary save failed. *)
+  | Oas_archive_fallback (** Archive-level fallback save failed. *)
+  | Oas_archive_primary (** Archive-level primary save failed. *)
 
 val to_label : t -> string

@@ -3,7 +3,7 @@
     {!Cascade_strategy.order_candidates} currently logs cycle-level
     filtering through {!Log.Misc.info}.  That is useful for tail -f
     but invisible to the dashboard; operators cannot answer
-    "how often did priority_tier filter to empty?" or
+    "how often did priority_level filter to empty?" or
     "how long did cascade backoff take in the last hour?".
 
     This module captures the decision outcome of every cycle iteration

@@ -7,7 +7,7 @@
     (kern.maxfiles, default 491_520).
 
     Reference incident: 2026-05-16 18:08-18:15 ENFILE storm —
-    12+ keepers concurrently retried cascade tiers, each retry
+    12+ keepers concurrently retried cascade levels, each retry
     spawned a fresh [docker run --rm], no backpressure existed at
     the host layer.
 

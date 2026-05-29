@@ -303,7 +303,7 @@ let cascade_exhaustion_reason_of_json = function
         | Some (`String msg) -> Some (Other_detail msg)
         | _ -> None)
      | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 (* ── Unified blocker_info: typed klass + free-form detail ───────
@@ -366,7 +366,7 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
          | _ -> ""
        in
        Some { klass; detail })
-  | _ -> None
+  `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 type cascade_attempt_record =
@@ -395,7 +395,7 @@ let cascade_attempt_outcome_of_json = function
      | _ -> None)
   | `String "success" -> Some `Success
   | `String "failure" -> Some (`Failure "")
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let cascade_attempt_record_to_json (record : cascade_attempt_record) : Yojson.Safe.t =
@@ -442,7 +442,7 @@ let cascade_attempt_record_of_json (json : Yojson.Safe.t)
      | Some provider_id, Some outcome, Some timestamp ->
        Some { provider_id; http_status; outcome; timestamp }
      | _ -> None)
-  | _ -> None
+  `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 type usage_metrics =
@@ -682,7 +682,7 @@ let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
     |> List.filter (fun key ->
       match Yojson.Safe.Util.member key args with
       | `Null -> false
-      | _ -> true)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true)
   in
   match present with
   | [] -> Ok ()

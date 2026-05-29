@@ -4,7 +4,7 @@
     [effective_attempt_budget(i) = min(default_amplifier, deadline - now())]
 
     PR-1 establishes the type and math helpers; PR-2 wires it into
-    [Cascade_tier_wait_scheduler.try_admission_or_wait]; PR-3 has
+    [Cascade_wait_scheduler.try_admission_or_wait]; PR-3 has
     [Keeper_agent_run] compute it from [admission_wait_timeout_sec] and
     thread through the keeper turn driver chain.
 

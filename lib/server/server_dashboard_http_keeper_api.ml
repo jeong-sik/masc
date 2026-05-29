@@ -531,14 +531,14 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let cascade_models = [] in
       let last_provider = `Null in
-      (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
-         summary). Each kind reports used / cap so the dashboard tier
+      (* Memory kind usage: join kind_caps (policy) with kind_counts (bank
+         summary). Each kind reports used / cap so the dashboard kind
          panel can render saturation without re-reading the memory file.
 
          RFC-0149 §3.1: route the bank read through the typed Result
          resolver.  [memory_kind_usage] keeps its [`List …] shape for
          existing dashboard consumers
-         (dashboard/src/components/keeper-memory-tier-panel.ts,
+         (dashboard/src/components/keeper-memory-kind-panel.ts,
          dashboard/src/components/ide/ide-persistence-panel.ts).  The
          typed [Keeper_memory_recall_exn_class.t] label rides on the
          sibling [memory_kind_usage_error_class] field so an IO fault is

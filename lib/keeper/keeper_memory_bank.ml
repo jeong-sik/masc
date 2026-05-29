@@ -20,10 +20,10 @@
    This block is the reverse-direction citation so code search for
    "KeeperMemoryLifecycle" lands in this module too â completing the
    sibling pair with keeper_memory_policy.ml which carries the
-   horizon-tier and producer anchor (memory_horizon_of_kind_opt).
+   horizon-level and producer anchor (memory_horizon_of_kind_opt).
 
    Sibling division of labor:
-     keeper_memory_policy.ml   tier vocabulary, producer,
+     keeper_memory_policy.ml   level vocabulary, producer,
                                classification.
      keeper_memory_bank.ml     persistence, compaction,
                                summarization, provenance enforcement.
@@ -37,7 +37,7 @@
      - handoff clears stale short-term notes.  The generation-handoff
        path here explicitly clears short_mem that has not been
        promoted to mid_mem.
-     - each tier stays within its configured bound.
+     - each level stays within its configured bound.
        select_memory_candidates (this file) walks rows under the
        tier-specific cap from Keeper_memory_policy.kind_caps. *)
 

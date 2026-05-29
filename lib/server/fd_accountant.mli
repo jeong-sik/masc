@@ -5,7 +5,7 @@
     that shares the host [kern.maxfiles] ceiling.
 
     Reference incident: 2026-05-16 18:08-18:15 ENFILE storm — 12+
-    keepers concurrently retried cascade tiers, each retry spawned a
+    keepers concurrently retried cascade levels, each retry spawned a
     fresh [docker run --rm], no backpressure existed at the host
     layer. PR #15727 closed docker; this module closes the other
     classes against the same ceiling.

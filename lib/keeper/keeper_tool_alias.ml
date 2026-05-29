@@ -1,6 +1,6 @@
 (** Keeper_tool_alias — flat routing table for two-surface tool naming.
 
-    RFC-0064: replaces the 3-tier classification (aliases / oas_dual_register
+    RFC-0064: replaces the 3-level classification (aliases / oas_dual_register
     / hallucinated_builtins) with a single [route] type. Each LLM-native tool
     name maps to one route record containing the internal handler name, an
     input translator, and an optional public schema.

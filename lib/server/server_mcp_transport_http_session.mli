@@ -125,7 +125,7 @@ val get_cookie_value :
     [None] when absent or blank. *)
 
 val get_session_id_any : Httpun.Request.t -> string option
-(** Three-tier session-id resolution: query param →
+(** Three-level session-id resolution: query param →
     [Mcp-Session-Id] header → [mcp-session-id] cookie.  The
     fallback order is the operator contract — clients that
     drop one channel still authenticate via the next. *)

@@ -3,7 +3,7 @@
     Replaces the binary [('a, 'e) result] with a three-class outcome that
     treats partial success as a first-class citizen, not a silent coercion
     of [Ok]. This is the type Autonomous returns from [tick] and that
-    Resilience adapters wrap in higher tiers.
+    Resilience adapters wrap in higher levels.
 
     Three classes:
     - [FullSuccess]: everything completed; all declared artifacts produced.

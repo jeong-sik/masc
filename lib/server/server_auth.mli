@@ -98,7 +98,7 @@ val verify_mcp_observer_stream_auth :
 
 val verify_operator_mcp_auth :
   base_path:string -> Httpun.Request.t -> ('a option, string) result
-(** Variant for [/mcp/operator] (admin-tier). *)
+(** Variant for [/mcp/operator] (admin-role). *)
 
 (** {1 Dashboard actor identification} *)
 
@@ -275,7 +275,7 @@ val with_admin_auth :
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Require admin-tier auth (operator MCP). *)
+(** Require admin-role auth (operator MCP). *)
 
 val is_public_read_path : String.t -> bool
 (** [true] when [path] is on the public-read allowlist. *)
@@ -295,7 +295,7 @@ val authorize_permission_request :
 
 val authorize_read_request :
   base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
-(** Check read-tier auth. *)
+(** Check read-role auth. *)
 
 val authorize_tool_request :
   base_path:string ->
@@ -327,14 +327,14 @@ val with_read_auth :
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Read-tier auth combinator. *)
+(** Read-role auth combinator. *)
 
 val with_permission_auth :
   permission:Masc_domain.permission ->
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Permission-tier combinator. *)
+(** Permission-level combinator. *)
 
 val with_tool_auth :
   tool_name:string ->

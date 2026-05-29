@@ -1,4 +1,4 @@
-(** Degradation — tiered capability levels for resilience.
+(** Degradation — layered capability levels for resilience.
 
     Cycle 27 / Tier A11 (partial — degradation only; speculative
     in companion module {!Speculative}).
@@ -38,7 +38,7 @@
 
     {!authorize_transition} returns [Ok ()] unconditionally in
     this PR; the real OAS [Policy.evaluate_with_lineage] integration
-    lands in a follow-up tier (A11b) without renaming the function.
+    lands in a follow-up level (A11b) without renaming the function.
 
     @stability Evolving
     @since 0.18.10 *)

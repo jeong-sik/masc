@@ -35,7 +35,7 @@ type pre_compact_event =
 (** Wake-time payload observation.
 
     Captured once per keeper turn, just before [Keeper_turn_driver.run_named] fires.
-    Phase 0 baseline for the tiered-hydration redesign (Option C).
+    Phase 0 baseline for the layered-hydration redesign (Option C).
 
     [approx_body_bytes] is a MASC-side estimate (sum of content text,
     tool definition JSON, system prompt, plus the pending user turn).

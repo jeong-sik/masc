@@ -20,11 +20,11 @@ module Float = Stdlib.Float
     Derived mechanically from Tool_permission_map.permission_for_tool, which
     reads Tool_catalog-declared required_permission metadata.
 
-    Each tool's required permission determines which role tier it belongs to:
-    - Worker tier: CanReadState, CanJoin, CanLeave, CanAddTask, CanClaimTask,
+    Each tool's required permission determines which role it belongs to:
+    - Worker role: CanReadState, CanJoin, CanLeave, CanAddTask, CanClaimTask,
                    CanCompleteTask, CanBroadcast,
                    CanOpenPortal, CanSendPortal
-    - Admin tier:  CanInit, CanReset, CanAdmin
+    - Admin role:  CanInit, CanReset, CanAdmin
 
     @since 2.204.0 *)
 

@@ -28,7 +28,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
         | Some (`Int value) -> Some value
         | Some (`Intlit value) -> int_of_string_opt value
         | _ -> None)
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   let float_opt_of_assoc key = function
     | `Assoc fields -> (
@@ -38,7 +38,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
         | Some (`Intlit value) ->
             Option.map float_of_int (int_of_string_opt value)
         | _ -> None)
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   match json with
   | `Assoc fields -> (
@@ -88,7 +88,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      match List.assoc_opt "retry_after_synthetic" fields with
                      | Some (`Bool b) -> b
                      | _ -> false)
-                 | _ -> false
+                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
                in
                let retry_after =
                  match float_opt_of_assoc "retry_after_sec" json with
@@ -161,7 +161,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                   match List.assoc_opt "wait_sec" fields with
                   | Some (`Float v) -> v
                   | _ -> 0.0)
-              | _ -> 0.0
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0.0
             in
             Some
               (Admission_queue_timeout
@@ -185,7 +185,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               | Some (`Float v) ->
                 Some (Turn_timeout { elapsed_sec = v })
               | _ -> None)
-          | _ -> None)
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
       | Some (`String "provider_timeout") -> (
           match json with
           | `Assoc fields -> (
@@ -217,7 +217,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                              (string_opt_of_assoc "phase" json);
                        })
               | _ -> None)
-          | _ -> None)
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
       | Some (`String "max_tokens_ceiling_violation") -> (
           match
             string_opt_of_assoc "cascade_name" json,
@@ -280,7 +280,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           | Some reason -> Some (Internal_contract_rejected { reason })
           | _ -> None)
       | _ -> None)
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let classify_masc_internal_error_of_string (raw : string) :
     masc_internal_error option =

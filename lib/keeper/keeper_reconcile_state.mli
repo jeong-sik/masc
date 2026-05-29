@@ -20,7 +20,7 @@
 
     Note: in-process state, [Hashtbl.t] guarded by a [Mutex]. No
     cross-process synchronisation — each server replica maintains its own
-    counters. Threshold defaults are conservative; the dedup/demote tier
+    counters. Threshold defaults are conservative; the dedup/demote level
     is a [WORKAROUND-CARRYOVER §Symptom-억제] band-aid for invalid TOML
     drift, not a structural fix. Root fix: invalid keeper TOML cleanup +
     [keeper_assignable=false] policy decision (separate RFC). *)

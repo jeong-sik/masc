@@ -27,7 +27,7 @@ val diagnose_catalog : config_path:string -> issue list
 
     - hard-invalid model specs (unknown provider / invalid syntax)
     - unknown strategy names
-    - [priority_tier] presets whose tiers collapse structurally
+    - [priority_level] presets whose levels collapse structurally
 
     Provider-unavailable entries are not treated as hard failures here:
     the validator is intended to catch broken catalog structure, not

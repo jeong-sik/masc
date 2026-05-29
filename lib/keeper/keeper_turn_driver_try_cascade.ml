@@ -872,7 +872,7 @@ let rec run
            ~cascade_name:ctx.error_cascade_name
            ~outcome:`Rejected ~observation:(Some observation) ();
          Log.Misc.error
-           "cascade %s exhausted: all tiers rejected by accept predicate \
+           "cascade %s exhausted: all levels rejected by accept predicate \
             (last runtime=%s, reason=%s)"
            ctx.cascade_name runtime_candidate_label reason;
          Error
@@ -1000,7 +1000,7 @@ let rec run
                 Log.Misc.warn
               else Log.Misc.error
             in
-            log "cascade %s exhausted: all tiers failed (last runtime=%s, error=%s)"
+            log "cascade %s exhausted: all levels failed (last runtime=%s, error=%s)"
               ctx.cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
             Error
               (Option.value

@@ -105,7 +105,7 @@ val invalid_assignments_for_public_profiles :
     Phase 9.3 retired the JSON-native authoring mode and the on-disk JSON
     sibling, so the [config_path] and [raw_json_editable] fields are gone.
     [assist] is a dashboard authoring helper derived from the same TOML source:
-    it exposes only opaque provider/model/tier identifiers and supported
+    it exposes only opaque provider/model/kind identifiers and supported
     MASC-side feature parameter names, not provider-specific model semantics.
 
     @since 0.160.1 *)

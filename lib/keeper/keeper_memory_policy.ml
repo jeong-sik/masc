@@ -29,7 +29,7 @@
       - every persisted note has provenance
       - overflow / handoff do not silently drop retained notes
       - handoff clears stale short-term notes
-      - each tier stays within its configured bound
+      - each level stays within its configured bound
 
     Sibling spec anchors deferred:
       - keeper_memory_bank.ml (open_short / provenanced semantics) *)

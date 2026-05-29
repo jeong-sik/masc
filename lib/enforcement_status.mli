@@ -13,7 +13,7 @@
     {- [Advisory_only]: stored in configuration but not wired into a
        runtime check (informational; deprecation-track candidate).}}
 
-    Adding a new enforcement tier now forces the [to_label] match arm
+    Adding a new enforcement level now forces the [to_label] match arm
     to be added, preventing silent vocabulary drift in the surface
     inventory wire format. *)
 

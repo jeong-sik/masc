@@ -332,7 +332,7 @@ let () =
 
    Track recent terminations across all keepers in a small bounded
    window.  When the number of distinct keepers in the window reaches
-   the threshold we emit a fleet-tier WARN and a Prometheus counter
+   the threshold we emit a fleet-level WARN and a Prometheus counter
    labelled by the low-cardinality [batch_root_cause].
 
    This is deliberately observation-only.  A fleet-wide stale burst is a

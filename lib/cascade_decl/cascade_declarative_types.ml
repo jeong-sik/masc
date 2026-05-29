@@ -201,7 +201,7 @@ type cascade_model_capabilities =
     (** Provider_a-style explicit prompt cache_control blocks. *)
   ; prompt_cache_alignment : int option
     (** Token-boundary alignment for prompt cache breakpoints (Provider_a
-          requires multiples of 1024 in some tiers). *)
+          requires multiples of 1024 in some levels). *)
   ; (* Sampling parameters *)
     supports_top_k : bool
   ; supports_min_p : bool

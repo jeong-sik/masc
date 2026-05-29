@@ -44,7 +44,7 @@ let trajectory_tool_call_json = function
       | _ ->
           List.mem_assoc "tool_name" fields
           && List.mem_assoc "ts" fields)
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 (* ── Timestamp extraction ───────────────────────────── *)
 
@@ -75,7 +75,7 @@ let extract_ts (json : Yojson.Safe.t) : float =
        first_some try_iso_field
          [ "ts_iso"; "ts"; "recorded_at"; "ended_at"; "started_at" ]
        |> Option.value ~default:0.0)
-  | _ -> 0.0
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0.0
 
 let day_string_of_unix_seconds ts =
   let tm = Unix.gmtime ts in
@@ -375,7 +375,7 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
     || check "agent_name"
     || check "agent"
     || check_runtime_contract ()
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 let matches_field fields field expected =
   match List.assoc_opt field fields with
@@ -657,7 +657,7 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
           (match List.assoc_opt "source" fields with
            | Some (`String "keeper_metric") -> true  (* already filtered *)
            | _ -> matches_keeper name json)
-        | _ -> true
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true
       ) all_entries
   in
   let filtered =

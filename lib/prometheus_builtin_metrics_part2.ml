@@ -410,7 +410,7 @@ let register
   add
     metric_memory_pipeline_flush_records
     "Total memory records persisted by the AfterTurn bridge. Labels: agent_name, \
-     tier=episodic|procedural."
+     kind=episodic|procedural."
     `Counter;
   add
     metric_memory_pipeline_flush_duration_seconds

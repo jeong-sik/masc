@@ -271,7 +271,7 @@ module CascadeSaturationSignal : sig
       ([masc_keeper_cascade_saturation_signal_total]) with a typed
       [kind] label whenever a saturation event matching
       {!Cascade_saturation_signal.t} is observed. Used to feed
-      Phase B (tier admission semaphore) and Phase C (adaptive
+      Phase B (cascade admission semaphore) and Phase C (adaptive
       throttling) without altering any existing wire format,
       string label, or control-flow path. *)
 end

@@ -1,6 +1,6 @@
 (** Git_op — typed classification of the first positional after [git].
 
-    Three severity tiers, each a polymorphic variant.  Unknown
+    Three severity levels, each a polymorphic variant.  Unknown
     subcommands return an error so the caller decides: in practice the
     approval policy maps them to [Ask]. *)
 

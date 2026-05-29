@@ -312,7 +312,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
    the Event_bus Custom event below.
 
    Cycle 49 observability addition: when the gate rejects, the turn
-   becomes terminal WITHOUT any cascade tier ever being attempted.  A
+   becomes terminal WITHOUT any cascade level ever being attempted.  A
    dashboard reading only the final outcome ("Turn_gate_rejected") cannot
    distinguish "all gates rejected, cascade=none" from "all cascades
    exhausted" — both surface as terminal failure.  We add a Prometheus
@@ -337,7 +337,7 @@ let () =
     ~help:
       "Total turns terminated by a pre_tool_use gate rejection \
        (Override or ApprovalRequired) without ever attempting a \
-       cascade tier.  A non-zero rate on a keeper indicates \
+       cascade level.  A non-zero rate on a keeper indicates \
        pre_tool_use guards short-circuit before the cascade ever \
        runs — useful for distinguishing 'all gates rejected, \
        cascade=none' from 'all cascades exhausted' in the keeper \

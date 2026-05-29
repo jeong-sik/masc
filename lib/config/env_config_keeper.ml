@@ -714,7 +714,7 @@ end
 
 (** {1 Wake-time Payload Telemetry}
 
-    Phase 0 observability for the tiered-hydration redesign (Option C).
+    Phase 0 observability for the layered-hydration redesign (Option C).
     When enabled, every keeper wake captures an approximation of the LLM
     request payload size just before [Keeper_turn_driver.run_named] is invoked.
     The record is appended to

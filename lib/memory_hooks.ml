@@ -1,7 +1,7 @@
 (** Memory_hooks — OAS hook adapter for hook-first memory injection.
 
     RFC-MASC-004: Instead of imperatively pushing memory into OAS
-    [Memory.t] tiers before [Agent.run], this module injects memory
+    [Memory.t] kinds before [Agent.run], this module injects memory
     as text via [extra_system_context] in the [BeforeTurnParams] hook
     and flushes incrementally in the [AfterTurn] hook.
 
@@ -123,16 +123,16 @@ let record_pipeline_flush
     Prometheus.metric_memory_pipeline_flush_duration_seconds
     ~labels:outcome_labels
     duration_s;
-  let record_records ~tier count =
+  let record_records ~kind count =
     if count > 0 then
       Prometheus.inc_counter
         Prometheus.metric_memory_pipeline_flush_records
-        ~labels:[ ("agent_name", agent_name); ("tier", tier) ]
+        ~labels:[ ("agent_name", agent_name); ("kind", kind) ]
         ~delta:(float_of_int count)
         ()
   in
-  record_records ~tier:"episodic" episodes;
-  record_records ~tier:"procedural" procedures
+  record_records ~kind:"episodic" episodes;
+  record_records ~kind:"procedural" procedures
 
 let append_runtime_manifest
     ?runtime_manifest_context

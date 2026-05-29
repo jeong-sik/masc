@@ -30,7 +30,7 @@
 type principal_kind =
   | Operator
   | Keeper
-  (** Who's signing off.  [Operator] = a human-tier reviewer
+  (** Who's signing off.  [Operator] = a human-level reviewer
       acting through the operator surface.  [Keeper] = an
       autonomous agent submitting a verdict. *)
 

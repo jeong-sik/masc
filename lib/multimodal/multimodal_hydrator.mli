@@ -32,7 +32,7 @@
     The DAG is a flat edge list — no transitive closure cached;
     queries traverse on demand. Cycles are not enforced absent
     in {!add_edge} (the keeper does not produce cyclic provenance
-    by construction); future tiers may add a runtime guard if
+    by construction); future levels may add a runtime guard if
     serialised input is admitted.
 
     @stability Evolving

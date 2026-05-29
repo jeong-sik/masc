@@ -26,7 +26,7 @@ let receipt_row_matches ?turn_id keeper_name trace_id json =
   let turn_matches =
     match turn_id with
     | None -> false
-    | Some wanted -> json_int_member_opt "turn_count" json = Some wanted
+    | Some wanted -> Json_util.get_int json "turn_count" = Some wanted
   in
   keeper_matches && (trace_matches || turn_matches)
 ;;

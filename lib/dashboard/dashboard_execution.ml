@@ -453,10 +453,10 @@ let build_keeper_execution_queue keepers =
                 ; "target_id", `String keeper_name
                 ; "linked_session_id", `Null
                 ; "linked_operation_id", `Null
-                ; "last_seen_at", json_string_option last_seen_at
+                ; "last_seen_at", Json_util.string_opt_to_json last_seen_at
                 ; "attention_reason", member_assoc "attention_reason" trust
-                ; "next_human_action", json_string_option next_human_action
-                ; "terminal_reason_code", json_string_option terminal_code
+                ; "next_human_action", Json_util.string_opt_to_json next_human_action
+                ; "terminal_reason_code", Json_util.string_opt_to_json terminal_code
                 ; "runtime_trust", trust
                 ; "top_handoff", command_handoff
                 ; "intervene_handoff", intervene_handoff

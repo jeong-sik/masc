@@ -33,9 +33,9 @@ let room_json config =
       ; "cluster", `String (Env_config_core.cluster_name ())
       ; "project", `String state.project
       ; "paused", `Bool state.paused
-      ; "pause_reason", Operator_pending_confirm.string_option_to_json state.pause_reason
-      ; "paused_by", Operator_pending_confirm.string_option_to_json state.paused_by
-      ; "paused_at", Operator_pending_confirm.string_option_to_json state.paused_at
+      ; "pause_reason", Json_util.string_opt_to_json state.pause_reason
+      ; "paused_by", Json_util.string_opt_to_json state.paused_by
+      ; "paused_at", Json_util.string_opt_to_json state.paused_at
       ; "tempo_interval_s", `Float tempo.current_interval_s
       ; "agent_count", `Int (List.length agents)
       ; "task_count", `Int (List.length tasks)

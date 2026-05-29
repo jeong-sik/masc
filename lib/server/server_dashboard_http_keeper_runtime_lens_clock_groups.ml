@@ -9,8 +9,8 @@ open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 let edge_string key edge = json_string_member_opt key edge
-let edge_int key edge = json_int_member_opt key edge
-let edge_string_list key edge = json_string_list_member key edge
+let edge_int key edge = Json_util.get_int edge key
+let edge_string_list key edge = Json_util.get_string_list edge key
 
 let add_unique value values =
   if List.mem value values then values else values @ [ value ]
@@ -183,7 +183,7 @@ let clock_group_open_gap ~code ~severity ~lane ~label groups =
   let open_ids =
     groups
     |> List.filter_map (fun group ->
-      match json_bool_member_opt "closed" group, json_string_member_opt "group_id" group with
+      match Json_util.get_bool group "closed", json_string_member_opt "group_id" group with
       | Some false, Some group_id when String.trim group_id <> "" -> Some group_id
       | _ -> None)
   in

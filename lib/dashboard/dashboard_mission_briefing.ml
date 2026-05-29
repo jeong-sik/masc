@@ -85,7 +85,7 @@ let pending_json ~now ~last_error =
       ("criteria", criteria_json ());
       ("sections", `List []);
       ("error", `Null);
-      ("last_error", option_string_json last_error);
+      ("last_error", Json_util.string_opt_to_json last_error);
     ]
 
 let with_cached_flag cached json =
@@ -104,7 +104,7 @@ let annotate_delivery_state json ~cached ~stale ~refreshing ~last_error =
   |> with_cached_flag cached
   |> upsert_field "stale" (`Bool stale)
   |> upsert_field "refreshing" (`Bool refreshing)
-  |> upsert_field "last_error" (option_string_json last_error)
+  |> upsert_field "last_error" (Json_util.string_opt_to_json last_error)
 
 (* ── Compute ────────────────────────────────────────────────────── *)
 

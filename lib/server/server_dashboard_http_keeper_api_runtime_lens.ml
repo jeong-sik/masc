@@ -171,21 +171,18 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Json_util.int_opt_to_json
                       (first_int_opt
                          [
-                           json_int_member_opt "visible_tool_count"
-                             tool_decision;
-                           json_int_member_opt "effective_tool_count"
-                             lane_decision;
+                           Json_util.get_int tool_decision "visible_tool_count";
+                           Json_util.get_int lane_decision "effective_tool_count";
                          ]) );
                   ( "tool_gate_enabled",
                     match
-                      json_bool_member_opt "tool_gate_enabled" tool_decision
+                      Json_util.get_bool tool_decision "tool_gate_enabled"
                     with
                     | Some value -> `Bool value
                     | None -> `Null );
                   ( "tool_surface_fallback_used",
                     match
-                      json_bool_member_opt "tool_surface_fallback_used"
-                        tool_decision
+                      Json_util.get_bool tool_decision "tool_surface_fallback_used"
                     with
                     | Some value -> `Bool value
                     | None -> `Null );
@@ -202,12 +199,10 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   );
                   ( "effective_tool_count",
                     Json_util.int_opt_to_json
-                      (json_int_member_opt "effective_tool_count"
-                         lane_decision) );
+                      (Json_util.get_int lane_decision "effective_tool_count") );
                   ( "runtime_mcp_policy_present",
                     match
-                      json_bool_member_opt "runtime_mcp_policy_present"
-                        lane_decision
+                      Json_util.get_bool lane_decision "runtime_mcp_policy_present"
                     with
                     | Some value -> `Bool value
                     | None -> `Null );

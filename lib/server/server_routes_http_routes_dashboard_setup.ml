@@ -25,8 +25,6 @@ let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
 let invalid_cascade_assignment_profiles =
   Cascade_profile_gate.invalid_assignment_profiles
 
-let option_int_json = Json_util.option_to_yojson (fun v -> `Int v)
-let option_string_json = Json_util.option_to_yojson (fun v -> `String v)
 
 (* Dashboard /logs JSON builder extracted to
    [Server_dashboard_logs_json] (godfile decomp). *)

@@ -1,6 +1,6 @@
-val current_task_id_opt : Keeper_types.keeper_meta -> string option
-val primary_goal_id_opt : Keeper_types.keeper_meta -> string option
-val backend_of_meta : Keeper_types.keeper_meta -> string
+val current_task_id_opt : Keeper_meta_contract.keeper_meta -> string option
+val primary_goal_id_opt : Keeper_meta_contract.keeper_meta -> string option
+val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
 val task_is_linked_to_keeper_goals :
   string list -> Masc_domain.task -> bool
 
@@ -19,14 +19,14 @@ val resolve_claim_goal_scope :
       flag is set. *)
   ?allow_empty_goal_scope_fallback:bool ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   unit ->
   claim_goal_scope
 
 val resolve_observation_claim_goal_scope :
   ?agent_tool_names:string list ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   unit ->
   claim_goal_scope
 (** Signal-only claim scope for world observations. Auto-repaired keeper-purpose
@@ -34,7 +34,7 @@ val resolve_observation_claim_goal_scope :
     [active_goal_ids] remain scoped. *)
 
 val runtime_contract_json :
-  ?config:Coord.config -> Keeper_types.keeper_meta -> Yojson.Safe.t
+  ?config:Coord.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 
 val runtime_contract_json_from_fields :
   keeper_name:string ->

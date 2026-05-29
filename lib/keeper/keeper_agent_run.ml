@@ -70,7 +70,7 @@ end
            attempts do not duplicate the user entry in session history *)
 let run_turn
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)
       ~(build_turn_prompt :
@@ -794,7 +794,7 @@ let run_turn
                    Error
                      (Keeper_agent_run_tool_surface_violation.to_sdk_error
                         ~keeper_name:meta.name
-                        ~cascade_name:(Keeper_types.cascade_name_of_meta meta)
+                        ~cascade_name:(Keeper_meta_contract.cascade_name_of_meta meta)
                         ~requested_tool_names_seen:acc.requested_tool_names_seen
                         ~unexpected_tool_names))
                  else (

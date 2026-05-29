@@ -11,7 +11,6 @@ let rule_id_violated = "cdal_verdict_violated"
 let rule_id_inconclusive = "cdal_verdict_inconclusive_incomplete"
 let rule_id_missing_verdict = "cdal_verdict_missing"
 
-let string_list_to_json xs = `List (List.map (fun s -> `String s) xs)
 
 (* Project a contract_verdict to a JSON envelope for the operator. The
    shape is stable so log/dashboard consumers can match on it. *)
@@ -37,7 +36,7 @@ let payload_of_inconclusive_verdict ~task_id ~required_evidence
     ; "run_id", `String v.run_id
     ; "contract_id", `String v.contract_id
     ; "judgment_hash", `String v.judgment_hash
-    ; "required_evidence_unsatisfied", string_list_to_json required_evidence
+    ; "required_evidence_unsatisfied", Json_util.json_string_list required_evidence
     ; ( "completeness_gaps"
       , `List (List.map Cdal_types.completeness_gap_to_json v.completeness_gaps) )
     ]

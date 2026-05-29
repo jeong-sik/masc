@@ -1,12 +1,13 @@
 (** Keeper status bridge helpers. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
-let string_list_to_json = Json_util.json_string_list
 
 let drift_surface_json ~unknown_toml_keys =
   `Assoc
-    [ "unknown_toml_keys", string_list_to_json unknown_toml_keys
+    [ "unknown_toml_keys", Json_util.json_string_list unknown_toml_keys
     ; "unknown_toml_keys_count", `Int (List.length unknown_toml_keys)
     ]
 ;;
@@ -17,8 +18,8 @@ let auto_execution_session_surface_json () =
 
 let coordination_surface_json (meta : keeper_meta) =
   `Assoc
-    [ "mention_targets", string_list_to_json meta.mention_targets
-    ; "joined_room_ids", string_list_to_json meta.joined_room_ids
+    [ "mention_targets", Json_util.json_string_list meta.mention_targets
+    ; "joined_room_ids", Json_util.json_string_list meta.joined_room_ids
     ]
 ;;
 
@@ -370,7 +371,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "paused", Some "inspect_blocker_before_resume"
       | Some blocker when is_cascade_exhausted_blocker_class blocker.blocker_class ->
         true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
-      | Some blocker when is_no_tool_capable_provider_blocker_class blocker.blocker_class ->
+      | Some blocker when is_no_tool_capable_blocker_class blocker.blocker_class ->
         true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
       | Some blocker when is_completion_contract_blocker_class blocker.blocker_class ->
         true, Some "completion_contract_violation", Some "inspect_completion_contract"
@@ -392,12 +393,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
   ]
 ;;
 
-let json_string_opt_member json key =
-  match Yojson.Safe.Util.member key json with
-  | `String value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
-  | _ -> None
+let json_string_opt_member = Json_util.get_string_nonempty
 ;;
 
 let assoc_upsert fields key value =
@@ -610,7 +606,7 @@ let source_provenance_json config (meta : keeper_meta) =
      ]
      @ cascade_catalog_source_fields resolution
      @ [ "has_live_override", `Bool (override_fields <> [])
-       ; "override_fields", string_list_to_json override_fields
+       ; "override_fields", Json_util.json_string_list override_fields
        ; ( "override_field_sources"
          , `List
              (List.map

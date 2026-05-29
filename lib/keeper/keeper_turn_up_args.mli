@@ -5,6 +5,8 @@
     structured data instead of 60+ local bindings. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Parsed [keeper_up] tool arguments. Every optional field is
     [None] when the JSON arg was absent or [`Null]; non-optional
@@ -51,9 +53,6 @@ val normalize_tool_name_list : string list -> string list
 
 (** Project an [`Assoc] member at [key]; [None] for non-objects or
     missing keys. *)
-val json_assoc_member_opt :
-  string -> Yojson.Safe.t -> Yojson.Safe.t option
-
 (** [true] iff [key] exists in the assoc and its value is not
     [`Null]. *)
 val json_non_null_member_present : string -> Yojson.Safe.t -> bool

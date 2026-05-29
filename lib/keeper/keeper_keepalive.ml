@@ -27,6 +27,9 @@
     keeper lifecycle start/stop. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 include Keeper_turn_slot
@@ -94,7 +97,7 @@ let persist_directive_meta_update
          | latest_path :: _ -> latest_path
          | [] -> default_path))
   in
-  match Keeper_fs.save_json_atomic persisted_path (meta_to_json updated_meta) with
+  match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
   | Ok () ->
     Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
   | Error msg ->
@@ -479,7 +482,12 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
       | Some repaired -> repaired
       | None -> m
     in
-    let synced = ensure_keeper_room_presence ctx.config m in
+    let (synced, presence_errors) = ensure_keeper_room_presence ctx.config m in
+    List.iter
+      (fun (e : Keeper_context_runtime.room_presence_error) ->
+        Log.Keeper.warn "keepalive_room_presence_error keeper=%s room=%s exn=%s"
+          m.name e.room_id e.exn_msg)
+      presence_errors;
     (* Reset stale timestamp from previous server lifecycle.
 
        Use [Time_compat.now ()] (not [0.0]). The original intent was to

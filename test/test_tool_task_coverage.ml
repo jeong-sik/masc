@@ -1632,7 +1632,7 @@ let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () 
     | Ok meta -> meta
     | Error e -> failwith ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true ctx.config initial_meta with
+  (match Keeper_meta_store.write_meta ~force:true ctx.config initial_meta with
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
   (match

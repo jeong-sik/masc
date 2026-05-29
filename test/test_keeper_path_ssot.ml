@@ -25,6 +25,7 @@
     should still pass and the diagnosis must look elsewhere. *)
 
 module Coord = Masc_mcp.Coord
+module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
@@ -44,7 +45,7 @@ let make_meta ~name ~sandbox =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "path ssot invariant test");
         ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
+          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -95,17 +96,17 @@ let assert_ssot ~name ~sandbox =
        "[%s/%s] host_root_abs_of_meta must equal base_path / \
         allowed_root_rel_of_meta"
        name
-       (Keeper_types.sandbox_profile_to_string sandbox))
+       (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox))
     constructed host_abs
 
 let test_ssot_docker_keeper () =
-  assert_ssot ~name:"sangsu" ~sandbox:Keeper_types.Docker
+  assert_ssot ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker
 
 let test_ssot_local_keeper () =
-  assert_ssot ~name:"analyst" ~sandbox:Keeper_types.Local
+  assert_ssot ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Local
 
 let test_ssot_docker_keeper_with_dashed_name () =
-  assert_ssot ~name:"masc-improver" ~sandbox:Keeper_types.Docker
+  assert_ssot ~name:"masc-improver" ~sandbox:Keeper_types_profile_sandbox.Docker
 
 (* ── Wrong-meta detection: changing the keeper name MUST change the root ── *)
 
@@ -116,8 +117,8 @@ let test_root_depends_on_keeper_name () =
      masc-improver request" symptom proves the roots are in fact
      name-distinct, so this invariant must hold. *)
   let config = make_config () in
-  let m1 = make_meta ~name:"masc-improver" ~sandbox:Keeper_types.Docker in
-  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker in
+  let m1 = make_meta ~name:"masc-improver" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let r1 = Keeper_sandbox.host_root_abs_of_meta ~config m1 in
   let r2 = Keeper_sandbox.host_root_abs_of_meta ~config m2 in
   Alcotest.(check bool)
@@ -130,10 +131,10 @@ let test_root_depends_on_sandbox_profile () =
      metas that share a name but differ in profile must also diverge. *)
   let config = make_config () in
   let m_docker =
-    make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker
+    make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker
   in
   let m_local =
-    make_meta ~name:"sangsu" ~sandbox:Keeper_types.Local
+    make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Local
   in
   let r_docker = Keeper_sandbox.host_root_abs_of_meta ~config m_docker in
   let r_local = Keeper_sandbox.host_root_abs_of_meta ~config m_local in
@@ -146,7 +147,7 @@ let test_root_depends_on_sandbox_profile () =
 
 let test_ssot_idempotent () =
   let config = make_config () in
-  let meta = make_meta ~name:"scholar" ~sandbox:Keeper_types.Docker in
+  let meta = make_meta ~name:"scholar" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let r1 = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let r2 = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Alcotest.(check string) "host_root_abs_of_meta is pure / idempotent" r1 r2
@@ -236,22 +237,22 @@ let assert_egress_path_ssot ~name ~sandbox =
        "[%s/%s] egress_policy_path must equal host_root_abs_of_meta / \
         egress.json"
        name
-       (Keeper_types.sandbox_profile_to_string sandbox))
+       (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox))
     expected actual
 
 let test_egress_path_docker () =
-  assert_egress_path_ssot ~name:"sangsu" ~sandbox:Keeper_types.Docker
+  assert_egress_path_ssot ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker
 
 let test_egress_path_local () =
-  assert_egress_path_ssot ~name:"ramarama" ~sandbox:Keeper_types.Local
+  assert_egress_path_ssot ~name:"ramarama" ~sandbox:Keeper_types_profile_sandbox.Local
 
 let test_egress_path_dashed () =
-  assert_egress_path_ssot ~name:"masc-improver" ~sandbox:Keeper_types.Docker
+  assert_egress_path_ssot ~name:"masc-improver" ~sandbox:Keeper_types_profile_sandbox.Docker
 
 let test_egress_path_distinct_per_keeper () =
   let config = make_config () in
-  let m1 = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
-  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker in
+  let m1 = make_meta ~name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let p1 = Keeper_sandbox_docker.egress_policy_path ~config ~meta:m1 in
   let p2 = Keeper_sandbox_docker.egress_policy_path ~config ~meta:m2 in
   Alcotest.(check bool)
@@ -260,8 +261,8 @@ let test_egress_path_distinct_per_keeper () =
 
 let test_egress_path_distinct_per_profile () =
   let config = make_config () in
-  let m_docker = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
-  let m_local = make_meta ~name:"executor" ~sandbox:Keeper_types.Local in
+  let m_docker = make_meta ~name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let m_local = make_meta ~name:"executor" ~sandbox:Keeper_types_profile_sandbox.Local in
   let p_docker =
     Keeper_sandbox_docker.egress_policy_path ~config ~meta:m_docker
   in

@@ -8,7 +8,7 @@
 
     Re-exports {!Keeper_meta_tool_access} via [include] for the
     [tool_preset] / [tool_access] ADT — callers can reach those
-    via either {!Keeper_types.tool_preset} or
+    via either {!Keeper_meta_contract.tool_preset} or
     {!Keeper_meta_contract.tool_preset} interchangeably (type
     identity preserved through the cascade).
 
@@ -154,6 +154,11 @@ type cascade_exhaustion_reason =
           Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
           through to [Other_detail message], losing auto-recovery eligibility
           and triggering the harsher failure policy. *)
+  | No_tool_capable
+      (** Cascade exhausted because no configured provider can satisfy the
+          required tool set.  Previously a standalone [blocker_class] variant;
+          reclassified here because the cascade rotation filtered all candidates
+          before dispatch — a semantic subset of cascade exhaustion. *)
   | Other_detail of string
 
 type blocker_class =
@@ -167,7 +172,6 @@ type blocker_class =
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout

@@ -4,36 +4,9 @@ let nonempty_trimmed raw =
   let trimmed = String.trim raw in
   if trimmed = "" then None else Some trimmed
 
-let json_string_list_member json key =
-  match Yojson.Safe.Util.member key json with
-  | `List items ->
-      items
-      |> List.filter_map Yojson.Safe.Util.to_string_option
-      |> List.filter_map nonempty_trimmed
-  | _ -> []
-
 let assoc_string_opt key fields =
   match List.assoc_opt key fields with
   | Some (`String value) -> nonempty_trimmed value
-  | _ -> None
-
-let assoc_int_opt key fields =
-  match List.assoc_opt key fields with
-  | Some (`Int value) -> Some value
-  | Some (`Intlit value) -> int_of_string_opt value
-  | _ -> None
-
-let assoc_bool_opt key fields =
-  match List.assoc_opt key fields with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-
-let json_string_opt_member json key =
-  match json with
-  | `Assoc _ ->
-      (match Yojson.Safe.Util.member key json with
-       | `String value -> nonempty_trimmed value
-       | _ -> None)
   | _ -> None
 
 let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
@@ -163,7 +136,7 @@ let latest_cascade_for_current_config ~current_cascade_name latest_metrics =
   | None -> None
   | Some cascade ->
       let cascade_name_matches =
-        match json_string_opt_member cascade "cascade_name" with
+        match Json_util.assoc_string_opt "cascade_name" cascade with
         | Some observed_name -> String.equal observed_name current_cascade_name
         | None -> true
       in

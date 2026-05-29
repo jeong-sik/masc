@@ -11,6 +11,8 @@
     produce, so [classify_tool_result_payload] infers the same outcome. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val handle_time_now : args:Yojson.Safe.t -> string
 
@@ -222,7 +224,7 @@ val handle_masc_keeper
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?mcp_session_id:string
   -> config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
   -> unit

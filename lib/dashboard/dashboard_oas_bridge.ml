@@ -67,9 +67,6 @@ let status_to_yojson = function
         ]
   | Timeout -> `Assoc [ ("kind", `String "timeout") ]
 
-let int_opt_to_yojson = function Some value -> `Int value | None -> `Null
-let float_opt_to_yojson = function Some value -> `Float value | None -> `Null
-let bool_opt_to_yojson = function Some value -> `Bool value | None -> `Null
 let public_runtime_provider_label = "runtime"
 let public_runtime_model_label = "runtime"
 let source_label = "oas_runtime_bridge"
@@ -103,12 +100,12 @@ let sample_to_yojson (s : sample) =
       ("total_duration_ms", `Float s.total_duration_ms);
       ("serialization_ms", `Float s.serialization_ms);
       ("usage_reported", `Bool s.usage_reported);
-      ("input_tokens", int_opt_to_yojson s.input_tokens);
-      ("output_tokens", int_opt_to_yojson s.output_tokens);
+      ("input_tokens", Json_util.int_opt_to_json s.input_tokens);
+      ("output_tokens", Json_util.int_opt_to_json s.output_tokens);
       ( "throughput_tokens_per_s",
-        float_opt_to_yojson s.throughput_tokens_per_s );
-      ("cost_usd", float_opt_to_yojson s.cost_usd);
-      ("cache_hit", bool_opt_to_yojson s.cache_hit);
+        Json_util.float_opt_to_json s.throughput_tokens_per_s );
+      ("cost_usd", Json_util.float_opt_to_json s.cost_usd);
+      ("cache_hit", Json_util.bool_opt_to_json s.cache_hit);
       ("status", status_to_yojson s.status);
       ("retry_count", `Int s.retry_count);
     ]

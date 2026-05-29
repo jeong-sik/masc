@@ -5,6 +5,8 @@
     Extracted from the SearchFiles dispatcher as part of godfile near-threshold split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 (* RFC-0084 host-config-cleanup-C — coreutils path migration.

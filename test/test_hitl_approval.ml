@@ -10,6 +10,7 @@ module Types = Masc_domain
     5. Approval callback returns correct OAS decisions *)
 
 module GP = Masc_mcp.Governance_pipeline
+module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
 module AQ = Masc_mcp.Keeper_approval_queue
 module KT = Masc_mcp.Keeper_types
 module SDH = Masc_mcp.Server_dashboard_http
@@ -24,7 +25,7 @@ let temp_dir () =
   dir
 
 let meta_from_json json =
-  match KT.meta_of_json json with
+  match Keeper_meta_json_parse.meta_of_json json with
   | Ok m -> m
   | Error e -> Alcotest.fail ("meta parse failed: " ^ e)
 

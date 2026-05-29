@@ -11,22 +11,9 @@ let parse_iso_opt = function
 
 let first_some a b = match a with Some _ as v -> v | None -> b
 
-let string_contains ~needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  if n = 0 then true
-  else if n > h then false
-  else
-    let rec loop i =
-      if i > h - n then false
-      else String.sub haystack i n = needle || loop (i + 1)
-    in
-    loop 0
+let string_contains = String_util.string_contains_substring
 
-let string_contains_ci ~needle haystack =
-  string_contains
-    ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
+let string_contains_ci = String_util.string_contains_substring_ci
 
 
 module String_set = Set_util.StringSet
@@ -49,14 +36,6 @@ let string_list_of_json json =
              | _ -> None)
   | _ -> []
 
-let json_string_option value =
-  match value with
-  | Some text ->
-      let trimmed = String.trim text in
-      if trimmed <> "" then `String trimmed else `Null
-  | None -> `Null
-
-let option_to_json = Json_util.option_to_yojson
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
@@ -95,17 +74,7 @@ let status_rank = function
 let rec take n items =
   if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs
 
-let compact_text ?(max_len = 160) raw =
-  let normalized =
-    String.trim raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun v -> v <> "")
-    |> String.concat " "
-    |> String.trim
-  in
-  if normalized = "" then ""
-  else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"\xe2\x80\xa6" normalized |> String_util.to_string
+let compact_text = String_util.compact_text
 
 let normalized_text_key text =
   compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii

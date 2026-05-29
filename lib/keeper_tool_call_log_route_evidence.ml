@@ -5,22 +5,6 @@ let assoc_opt = function
   | _ -> None
 ;;
 
-let assoc_member_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-;;
-
-let assoc_string_opt name json =
-  match assoc_member_opt name json with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
-;;
-
-let assoc_bool_opt name json =
-  match assoc_member_opt name json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-;;
 
 let route_candidate_has_fields json =
   match assoc_opt json with
@@ -44,10 +28,10 @@ let route_candidate_of_output json =
   if route_candidate_has_fields json
   then Some json
   else (
-    match assoc_member_opt "result" json with
+    match Json_util.assoc_member_opt "result" json with
     | Some result when route_candidate_has_fields result -> Some result
     | _ ->
-      (match assoc_member_opt "detail" json with
+      (match Json_util.assoc_member_opt "detail" json with
        | Some detail when route_candidate_has_fields detail -> Some detail
        | _ -> None))
 ;;
@@ -92,9 +76,9 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
     | None -> None
   in
   let command =
-    match assoc_string_opt "cmd" input with
+    match Json_util.assoc_string_opt "cmd" input with
     | Some cmd -> Some cmd
-    | None -> assoc_string_opt "op" input
+    | None -> Json_util.assoc_string_opt "op" input
   in
   let add_string name value fields =
     match value with
@@ -123,16 +107,16 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
            "status"
            (Option.map
               (Observability_redact.preview_json_strings ~max_len:max_output_len)
-              (assoc_member_opt "status" output_json))
+              (Json_util.assoc_member_opt "status" output_json))
       |> add_string
            "effective_sandbox_image"
-           (assoc_string_opt "effective_sandbox_image" output_json)
-      |> add_string "network_mode" (assoc_string_opt "network_mode" output_json)
-      |> add_bool "git_creds_enabled" (assoc_bool_opt "git_creds_enabled" output_json)
-      |> add_string "sandbox_profile" (assoc_string_opt "sandbox_profile" output_json)
-      |> add_string "via" (assoc_string_opt "via" output_json)
-      |> add_string "path" (safe_input_string (assoc_string_opt "path" input))
-      |> add_string "cwd" (safe_input_string (assoc_string_opt "cwd" input))
+           (Json_util.assoc_string_opt "effective_sandbox_image" output_json)
+      |> add_string "network_mode" (Json_util.assoc_string_opt "network_mode" output_json)
+      |> add_bool "git_creds_enabled" (Json_util.assoc_bool_opt "git_creds_enabled" output_json)
+      |> add_string "sandbox_profile" (Json_util.assoc_string_opt "sandbox_profile" output_json)
+      |> add_string "via" (Json_util.assoc_string_opt "via" output_json)
+      |> add_string "path" (safe_input_string (Json_util.assoc_string_opt "path" input))
+      |> add_string "cwd" (safe_input_string (Json_util.assoc_string_opt "cwd" input))
       |> add_string "command" (safe_input_string command)
       |> add_string "tool_name" (Some tool_name)
     in

@@ -18,6 +18,8 @@ module Coord = Masc_mcp.Coord
 module Coord_utils = Coord_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_meta_store = Masc_mcp.Keeper_meta_store
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_runtime = Masc_mcp.Keeper_runtime
@@ -1068,7 +1070,7 @@ let keeper_doctor_claim_scope_json ~keeper_name =
       ]
 
 let keeper_doctor_config_drift_json ~config ~keeper_name =
-  match Keeper_types.read_meta config keeper_name with
+  match Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = keeper_doctor_json_string_list "override_fields" sources in
@@ -1123,7 +1125,7 @@ let keeper_doctor_config_drift_json ~config ~keeper_name =
       ]
 
 let keeper_doctor_current_task_json config meta =
-  match meta.Keeper_types.current_task_id with
+  match meta.Keeper_meta_contract.current_task_id with
   | None -> `Assoc [ "present", `Bool false; "task_id", `Null ]
   | Some task_id ->
     let task_id_s = Keeper_id.Task_id.to_string task_id in
@@ -1245,7 +1247,7 @@ let doctor_keeper_report base_path keeper_name =
   in
   let config = Coord.default_config config_report.base_path in
   Keeper_tool_call_log.init ~base_path:config.base_path ();
-  let meta_result = Keeper_types.read_meta config keeper_name in
+  let meta_result = Keeper_meta_store.read_meta config keeper_name in
   let claim_scope = keeper_doctor_claim_scope_json ~keeper_name in
   let config_drift = keeper_doctor_config_drift_json ~config ~keeper_name in
   let async = keeper_doctor_async_json ~keeper_name ~claim_scope in

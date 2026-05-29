@@ -15,8 +15,8 @@ val max_consecutive_heartbeat_failures : unit -> int
 val max_consecutive_turn_failures : unit -> int
 
 val write_heartbeat_snapshot :
-  ctx:'a Keeper_types.context ->
-  meta_current:Keeper_types.keeper_meta ->
+  ctx:'a Keeper_types_profile.context ->
+  meta_current:Keeper_meta_contract.keeper_meta ->
   now_ts:float ->
   consecutive_hb_failures:int ->
   timing_ring:Keeper_keepalive_signal.stage_timing array ->

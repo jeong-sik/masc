@@ -4,6 +4,12 @@
     describe what happened after a turn; manifest rows record the routing and
     context decisions that explain why the turn took that path.
 
+    All type definitions ([event_kind], [links], [t], [turn_context]) and
+    their pure converters live in {!Keeper_runtime_manifest_types}.
+    Re-exported here so callers can continue using
+    [Keeper_runtime_manifest.event_kind] etc. without reaching into
+    the types submodule.
+
     {2 Layered SSOT}
 
     The manifest is structured in five layers.  Each layer has a single
@@ -30,67 +36,18 @@
       fields based on consumer identity.  SSOT is the consumer capability
       profile. *)
 
-type event_kind =
-  | Turn_started
-  | Phase_gate_decided
-  | Cascade_routed
-  | Pre_dispatch_blocked
-  | Tool_surface_selected
-  | Provider_lane_resolved
-  | Tool_lineage_recorded
-  | Provider_attempt_started
-  | Provider_attempt_finished
-  | Context_injected
-  | Context_compacted
-  | State_snapshot_sidecar_saved
-  | Working_state_sidecar_saved
-  | Event_bus_correlated
-  | Memory_injected
-  | Memory_flushed
-  | Checkpoint_loaded
-  | Checkpoint_saved
-  | Receipt_appended
-  | Turn_finished
+(** {1 SSOT Types} *)
+include module type of struct
+  include Keeper_runtime_manifest_types
+end
 
-type links = {
-  receipt_path : string option;
-  checkpoint_path : string option;
-  tool_call_log_path : string option;
-}
-
-type t = {
-  schema_version : int;
-  ts : string;
-  keeper_name : string;
-  agent_name : string option;
-  trace_id : string;
-  generation : int option;
-  keeper_turn_id : int option;
-  oas_turn_count : int option;
-  logical_seq : int option;
-  event : event_kind;
-  cascade_name : string option;
-  status : string;
-  decision : Yojson.Safe.t;
-  links : links;
-}
-
-type turn_context = {
-  manifest_keeper_name : string;
-  manifest_agent_name : string option;
-  manifest_trace_id : string;
-  manifest_generation : int option;
-  manifest_keeper_turn_id : int option;
-}
+(** {1 Own-module types} *)
 
 type payload_role =
   | Model_input
   | Operator_evidence
   | Checkpoint
   | Memory_store
-
-val payload_role_to_string : payload_role -> string
-val payload_role_of_string : string -> payload_role option
 
 type source_clock =
   | Wall
@@ -99,14 +56,29 @@ type source_clock =
   | Provider
   | Event_bus
 
+(** {2 F5: Clock separation policy}
+
+    Wall-clock ([ts]) is display-only.  Ordering uses logical
+    [parent_event_id]/[caused_by]/[logical_seq].  Latency comparison
+    ([elapsed_ms]) is only valid between events that share the same
+    [source_clock]. *)
+
+type logical_ordering = {
+  parent_event_id : string option;
+  caused_by : string option;
+  logical_seq : int option;
+}
+
+(** {1 Own-module vals} *)
+
+val payload_role_to_string : payload_role -> string
+val payload_role_of_string : string -> payload_role option
+
 val source_clock_to_string : source_clock -> string
 val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
-val all_event_kinds : event_kind list
-val event_kind_to_string : event_kind -> string
-val event_kind_of_string : string -> event_kind option
 val safe_segment : string -> string
 
 val clock_refs :
@@ -220,19 +192,6 @@ val append_unfinished_provider_attempt_finished_best_effort :
   ?exception_kind:string ->
   unit ->
   unit
-
-(** {2 F5: Clock separation policy}
-
-    Wall-clock ([ts]) is display-only.  Ordering uses logical
-    [parent_event_id]/[caused_by]/[logical_seq].  Latency comparison
-    ([elapsed_ms]) is only valid between events that share the same
-    [source_clock]. *)
-
-type logical_ordering = {
-  parent_event_id : string option;
-  caused_by : string option;
-  logical_seq : int option;
-}
 
 (** Extract the source_clock from a manifest's decision JSON. *)
 val source_clock_from_manifest : t -> source_clock option

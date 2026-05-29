@@ -1,4 +1,3 @@
-module U = Yojson.Safe.Util
 include Dashboard_utils
 
 (* Types from Dashboard_mission_assembly, re-exported for backward compat. *)
@@ -325,12 +324,12 @@ let build_attention_queue incidents actions sessions =
                      ("severity", `String severity);
                      ("summary", `String summary);
                      ("target_type", `String target_type);
-                     ("target_id", json_string_option target_id);
+                     ("target_id", Json_util.string_opt_to_json target_id);
                      ("top_action", Json_util.option_to_yojson (fun value -> value) top_action);
                      ("related_session_ids", `List (List.map (fun value -> `String value) related_session_ids));
                      ("related_agent_names", `List (List.map (fun value -> `String value) related_agent_names));
                      ("evidence_preview", `List (List.map (fun value -> `String value) (evidence_preview_strings (member_assoc "evidence" incident))));
-                     ("last_seen_at", json_string_option last_seen_at);
+                     ("last_seen_at", Json_util.string_opt_to_json last_seen_at);
                    ];
              })
   |> List.sort (fun left right ->
@@ -445,8 +444,8 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
     `Assoc
       [
         ("room_health", `String (string_field ~default:"ok" "health" projection.digest_json));
-        ("cluster", json_string_option (Some (string_field "cluster" projection.namespace_json)));
-        ("project", json_string_option (Some (string_field "project" projection.namespace_json)));
+        ("cluster", Json_util.string_opt_to_json (Some (string_field "cluster" projection.namespace_json)));
+        ("project", Json_util.string_opt_to_json (Some (string_field "project" projection.namespace_json)));
       ]
   in
   let command_focus_json =

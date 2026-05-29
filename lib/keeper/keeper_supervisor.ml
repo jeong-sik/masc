@@ -8,6 +8,9 @@
     [Keeper_supervisor_launch] (godfile decomp). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 
 include Keeper_supervisor_launch
@@ -469,7 +472,7 @@ let sweep_and_recover (ctx : _ context) =
      on restart. The queue itself is in-memory, but paused keeper meta is
      durable, so rebuild the human gate from persisted blocker evidence. *)
   let sweep_names_ym = Eio_guard.create_yield_meter () in
-  Keeper_types.keeper_names ctx.config
+  Keeper_meta_store.keeper_names ctx.config
   |> List.iter (fun name ->
     (match read_meta ctx.config name with
      | Ok (Some meta)
@@ -481,7 +484,7 @@ let sweep_and_recover (ctx : _ context) =
   (* Phase 3: prune stale paused keeper meta files from disk. Keep
      reconcile-recovery pauses until the operator explicitly resolves them. *)
   let paused_ttl_sec = Env_config.KeeperSupervisor.paused_cleanup_ttl_sec in
-  Keeper_types.keeper_names ctx.config
+  Keeper_meta_store.keeper_names ctx.config
   |> List.iter (fun name ->
     if Keeper_registry.is_running ~base_path name
     then ()
@@ -492,7 +495,7 @@ let sweep_and_recover (ctx : _ context) =
              && (not (paused_meta_requires_reconcile_recovery meta))
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
         ->
-        let path = Keeper_types.keeper_meta_path ctx.config name in
+        let path = Keeper_types_profile.keeper_meta_path ctx.config name in
         (try
            Sys.remove path;
            publish_lifecycle
@@ -524,7 +527,7 @@ let sweep_and_recover (ctx : _ context) =
      [paused = false] here lets Phase 4 (reconcile_keepalive_keepers) pick them
      up and restart them on the same sweep.  Reconcile-gated pauses and
      intentional operator pauses are skipped. *)
-  Keeper_types.keeper_names ctx.config
+  Keeper_meta_store.keeper_names ctx.config
   |> List.iter (fun name ->
     if Keeper_registry.is_running ~base_path name
     then ()
@@ -534,7 +537,7 @@ let sweep_and_recover (ctx : _ context) =
         when Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
         ->
-        let cascade_name = Keeper_types.cascade_name_of_meta meta in
+        let cascade_name = Keeper_meta_contract.cascade_name_of_meta meta in
         let cascade_status = Keeper_health_probe.get_cascade_status ~cascade_name in
         (* Three-valued admission:
                     Unhealthy   — block, the probe saw restart pressure.

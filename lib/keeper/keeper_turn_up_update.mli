@@ -17,10 +17,10 @@ val resolve_active_goal_ids :
 (** Update an existing keeper's meta record. Validates tool-access
     transitions, resolves active goals, applies parsed-arg overrides,
     persists the new meta, and broadcasts state-machine events.
-    Returns structured {!Keeper_types.tool_result}; failures carry their
+    Returns structured {!Keeper_types_profile.tool_result}; failures carry their
     message on the typed error payload. *)
 val update_keeper :
-  _ Keeper_types.context ->
+  _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
-  Keeper_types.keeper_meta ->
-  Keeper_types.tool_result
+  Keeper_meta_contract.keeper_meta ->
+  Keeper_types_profile.tool_result

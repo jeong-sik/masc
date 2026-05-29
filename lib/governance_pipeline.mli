@@ -107,7 +107,7 @@ val to_oas_approval_callback :
   ?config:Coord.config ->
   governance_level:string ->
   keeper_name:string ->
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
   Agent_sdk.Hooks.approval_callback

@@ -8,6 +8,8 @@
    Public sub-module included by [Keeper_unified_turn]. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Deterministic decision for the phase-buffer fallback boundary. This
     does not probe runtime liveness; it only decides whether the selected

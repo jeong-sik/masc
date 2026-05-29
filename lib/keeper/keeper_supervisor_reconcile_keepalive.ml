@@ -5,6 +5,9 @@
     the [Keeper_supervisor_cleanup_tombstone] sibling. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 let reconcile_keepalive_keepers
       ~publish_lifecycle
@@ -12,7 +15,7 @@ let reconcile_keepalive_keepers
       (ctx : _ context)
   =
   let base_path = ctx.config.base_path in
-  let names = Keeper_types.keepalive_keeper_names ctx.config in
+  let names = Keeper_meta_store.keepalive_keeper_names ctx.config in
   Log.Keeper.debug
     "reconcile_keepalive_keepers: started (candidates=%d)"
     (List.length names);

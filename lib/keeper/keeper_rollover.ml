@@ -43,6 +43,8 @@
     runtime — this is the generation contract the rollover enforces. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_core
 
 type handoff_rollover = {
@@ -79,7 +81,6 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout

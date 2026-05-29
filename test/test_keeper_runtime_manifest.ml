@@ -911,10 +911,10 @@ let test_pre_dispatch_terminal_observation_invalidates_keeper_status_cache () =
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
       let meta = make_meta ~name:"pre-dispatch-status-cache" () in
-      (match Masc_mcp.Keeper_types.write_meta config meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> Alcotest.fail ("meta write failed: " ^ err));
-      let ctx : _ Masc_mcp.Keeper_types.context =
+      let ctx : _ Masc_mcp.Keeper_types_profile.context =
         {
           config;
           agent_name = "operator";
@@ -2068,7 +2068,7 @@ let test_runtime_trace_api_surfaces_meta_read_error_without_trace_id () =
     (fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
       let keeper_name = "runtime-trace-corrupt-meta" in
-      let meta_path = Masc_mcp.Keeper_types.keeper_meta_path config keeper_name in
+      let meta_path = Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name in
       Fs_compat.mkdir_p (Filename.dirname meta_path);
       append_raw_line meta_path "{not-json";
       let status, json =

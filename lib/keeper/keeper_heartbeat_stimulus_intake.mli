@@ -5,6 +5,8 @@
     window before falling back to a single non-board queue dequeue. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_execution
 
 (** [stimulus_urgency_to_string u] returns the Prometheus / log label

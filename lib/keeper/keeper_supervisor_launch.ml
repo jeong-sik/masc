@@ -3,6 +3,9 @@
     liveness/restart policy outside the turn loop. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 module Startup_helpers = Keeper_supervisor_startup_helpers
 
@@ -416,6 +419,7 @@ let launch_supervised_fiber
                   meta.name
                   (Some (Keeper_registry.Fiber_unresolved Cancelled_by_parent));
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
+                (* fire-and-forget: resolve_done signals completion *)
                 ignore (resolve_done (`Crashed "cancelled_by_parent")))
               else (
 	                let reason =

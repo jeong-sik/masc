@@ -66,7 +66,7 @@ let sample_session_plan () =
       ~container_root:"/keeper/sess"
       ~base_path:"/srv/masc"
       ~container_kind:"turn"
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
       ~host_root:"/var/masc/sess"
       ~uid:4321
       ~gid:8765

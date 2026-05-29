@@ -252,7 +252,7 @@ let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_n
       tools_for_gated_affordance affordance
       |> List.filter (fun n -> String_set.mem (canonicalize n) allowed_set)
     | None -> [])
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let preferred_tool_names_for_turn_affordances turn_affordances =
   turn_affordances
@@ -275,7 +275,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_task_submit_for_verification"; "keeper_task_done";
            "masc_transition" ]
        )
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
    affordance only counts when the keeper actually has a tool that can
@@ -322,7 +322,7 @@ let tool_names_for_required_gate_surface
   let canonical_required_tool_names =
     required_tool_names
     |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   let is_explicit_required_tool_name name =
     List.mem
@@ -337,7 +337,7 @@ let tool_names_for_required_gate_surface
         is_explicit_required_tool_name name
         || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
             && not (is_stay_silent name)))
-      |> Keeper_types.dedupe_keep_order
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     match actionable with
     | [] -> tool_names
@@ -378,14 +378,14 @@ let generic_required_actionable_tool_names ~(has_current_task : bool)
   let preferred =
     preferred_tool_names_for_turn_affordances turn_affordances
     |> List.filter can_recommend_tool
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   match preferred with
   | _ :: _ -> preferred
   | [] ->
     allowed_tool_names
     |> List.filter can_recommend_tool
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
@@ -549,20 +549,20 @@ let outstanding_required_tool_names ~(required_tool_names : string list)
   let satisfied =
     satisfied_tool_names
     |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   required_tool_names
   |> List.filter (fun name ->
     let canonical = Keeper_tool_resolution.canonical_tool_name name in
     not (List.mem canonical satisfied))
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let satisfied_required_tool_names_of_outcomes
     (calls : (string * string) list) =
   calls
   |> List.filter_map (fun (tool_name, outcome) ->
     if String.equal outcome "ok" then Some tool_name else None)
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =

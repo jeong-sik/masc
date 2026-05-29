@@ -9,7 +9,6 @@ let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
     ; "coordination_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
-    ; "cluster", `String (Env_config_core.cluster_name ())
     ; "project", `String room_state.project
     ; "tempo_interval_s", `Float tempo.current_interval_s
     ; "paused", `Bool room_state.paused
@@ -92,21 +91,13 @@ let dashboard_message_json (message : Masc_domain.message) =
 let dashboard_tasks_safe config = Coord.get_tasks_safe config
 let dashboard_agents_safe config = Coord.get_active_agents config
 
-let json_assoc_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> Some value
-     | _ -> None)
-  | _ -> None
-;;
-
 let active_agent_summary_json json =
-  match json_assoc_string_opt "status" json with
+  match Json_util.assoc_string_opt "status" json with
   | Some status ->
     (match String.lowercase_ascii (String.trim status) with
      | "active" | "busy" | "listening" ->
        let agent_type =
-         json_assoc_string_opt "agent_type" json
+         Json_util.assoc_string_opt "agent_type" json
          |> Option.value ~default:"unknown"
          |> String.trim
          |> String.lowercase_ascii

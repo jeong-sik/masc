@@ -62,8 +62,6 @@ let all_cascade_counters : (string * string) list =
        | hard_quota | terminal_failure). Counter complement to the \
        existing [keeper_provider_block_duration_sec] histogram \
        (duration distribution, this is entry rate by cause)." )
-  ; ( "masc_cascade_strategy_starvation_guard_total"
-    , "masc_cascade_strategy_starvation_guard_total" )
   ; ( "masc_cascade_capacity_probe_result_total"
     , "Total successful capacity probe results by source. Labels: url, \
        source (discovered | fallback). Provides visibility into whether \

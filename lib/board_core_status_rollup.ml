@@ -30,14 +30,8 @@ let status_rollup_window_sec = 6. *. 60. *. 60.
 let max_status_rollup_body_length = 600
 
 let json_assoc_string_opt key = function
-  | Some (`Assoc fields) ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) ->
-       let value = String.trim value in
-       if String.equal value "" then None else Some value
-     | _ -> None)
-  | _ -> None
-;;
+  | Some json -> Json_util.assoc_string_opt key json
+  | None -> None
 
 ;;
 

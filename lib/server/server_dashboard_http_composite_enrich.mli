@@ -1,4 +1,3 @@
-val compact_preview : max_chars:int -> string -> string * bool
 val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t
 val json_string : string -> Yojson.Safe.t -> string option
 val json_int : string -> Yojson.Safe.t -> int option
@@ -41,7 +40,7 @@ val composite_execution_saturated : Yojson.Safe.t -> bool
 val composite_execution_claim_no_eligible : Yojson.Safe.t -> bool
 val composite_execution_config_drift : Yojson.Safe.t -> bool
 val keeper_activation_readiness_json :
-  Keeper_types.keeper_meta -> Yojson.Safe.t
+  Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 val composite_execution_blocked : Yojson.Safe.t -> bool
 val composite_execution_receipt_present : Yojson.Safe.t -> bool
 val composite_execution_receipt_epoch : Yojson.Safe.t -> float option

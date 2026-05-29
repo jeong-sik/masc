@@ -13,5 +13,5 @@ val task_id_scope_of_tool_call :
   tool_name:string ->
   input:Yojson.Safe.t ->
   output_text:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string option

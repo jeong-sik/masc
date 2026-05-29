@@ -8,8 +8,6 @@
    Pure JSON builder over [Log.Ring.entry list] - the ring read happens
    in the caller. *)
 
-let option_int_json = Json_util.option_to_yojson (fun v -> `Int v)
-let option_string_json = Json_util.option_to_yojson (fun v -> `String v)
 
 let store_path ~masc_root =
   Filename.concat
@@ -66,12 +64,12 @@ let build
              ; "applied_level", `String (Log.level_to_string applied_level)
              ; "min_level", `Int min_level
              ; "module", `String module_filter
-             ; "since_seq", option_int_json since_seq
+             ; "since_seq", Json_util.int_option_to_yojson since_seq
              ] )
        ; "returned", `Int (List.length entries)
-       ; "latest_seq", option_int_json (entry_seq_json newest)
-       ; "oldest_seq", option_int_json (entry_seq_json oldest)
-       ; "latest_ts_iso", option_string_json (entry_ts_json newest)
+       ; "latest_seq", Json_util.int_option_to_yojson (entry_seq_json newest)
+       ; "oldest_seq", Json_util.int_option_to_yojson (entry_seq_json oldest)
+       ; "latest_ts_iso", Json_util.string_option_to_yojson (entry_ts_json newest)
        ]
        @ fields)
   | json -> json

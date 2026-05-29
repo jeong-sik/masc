@@ -7,6 +7,8 @@
     [Keeper_supervisor.supervision_cohort] etc. unchanged. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val supervision_cohort_size : int
 (** Target keeper count per supervisor cohort.  The first 2-level

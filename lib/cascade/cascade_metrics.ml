@@ -376,24 +376,6 @@ let on_provider_cooldown ~provider ~reason =
     ~labels:[ ("provider", provider); ("reason", reason) ]
     ()
 
-(* [Cascade_strategy.Priority_tier] has a "starvation guard"
-   fail-OPEN: when every candidate reports capacity=0 the function
-   falls through with the pre-filter candidate list so at least one
-   call is attempted (and the upstream real error — rate limit,
-   auth — surfaces) instead of silently exhausting the cascade.
-
-   A non-zero rate signals capacity probes have been judging the
-   cascade exhausted; pair with iter-8 probe metrics and iter-20
-   provider_cooldown to attribute the cause.
-
-   Cardinality: cascades (~10) x strategies (1) = ~10 series. *)
-let metric_strategy_starvation_guard = "masc_cascade_strategy_starvation_guard_total"
-
-let on_strategy_starvation_guard ~cascade ~strategy =
-  Prometheus.inc_counter metric_strategy_starvation_guard
-    ~labels:[ ("cascade", cascade); ("strategy", strategy) ]
-    ()
-
 let metric_capacity_probe = "masc_cascade_capacity_probe_result_total"
 
 let on_capacity_probe ~url ~source =

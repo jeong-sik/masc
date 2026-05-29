@@ -626,6 +626,30 @@ let test_slice_fanout_flag_reads_env () =
         Alcotest.(check bool) "env=false → disabled"
           false (Ws.slice_index_enabled ())))
 
+(* ====== Dashboard auth state (RFC-0204 §8.4, Phase 1) ====== *)
+
+let test_dashboard_auth_unauthenticated () =
+  Alcotest.(check bool) "Unauthenticated is not authenticated"
+    false (Ws.dashboard_auth_is_authenticated Ws.Unauthenticated);
+  Alcotest.(check (option string)) "Unauthenticated carries no agent"
+    None (Ws.dashboard_auth_agent Ws.Unauthenticated)
+
+let test_dashboard_auth_authenticated_with_agent () =
+  let st = Ws.Authenticated { agent = Some "garnet" } in
+  Alcotest.(check bool) "Authenticated counts as authenticated"
+    true (Ws.dashboard_auth_is_authenticated st);
+  Alcotest.(check (option string)) "agent name is carried through"
+    (Some "garnet") (Ws.dashboard_auth_agent st)
+
+let test_dashboard_auth_authenticated_tokenless () =
+  (* An auth config that permits tokenless dashboard reads resolves to an
+     authenticated state with no agent name. *)
+  let st = Ws.Authenticated { agent = None } in
+  Alcotest.(check bool) "tokenless still counts as authenticated"
+    true (Ws.dashboard_auth_is_authenticated st);
+  Alcotest.(check (option string)) "tokenless carries no agent"
+    None (Ws.dashboard_auth_agent st)
+
 let () =
   Alcotest.run "WebSocket Transport" [
     ("session_registry", [
@@ -722,5 +746,13 @@ let () =
         test_slice_fanout_flag_default_is_on;
       Alcotest.test_case "flag reads env var" `Quick
         test_slice_fanout_flag_reads_env;
+    ]);
+    ("dashboard_auth_state", [
+      Alcotest.test_case "Unauthenticated has no auth and no agent" `Quick
+        test_dashboard_auth_unauthenticated;
+      Alcotest.test_case "Authenticated carries the agent name" `Quick
+        test_dashboard_auth_authenticated_with_agent;
+      Alcotest.test_case "tokenless Authenticated has no agent" `Quick
+        test_dashboard_auth_authenticated_tokenless;
     ]);
   ]

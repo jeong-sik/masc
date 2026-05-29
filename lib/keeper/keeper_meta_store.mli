@@ -4,18 +4,16 @@
     keep their public API while durable meta storage is separated
     from the compatibility facade. *)
 
-open Keeper_types_profile
-open Keeper_meta_contract
 
 (** Hook invoked after each successful [write_meta] /
     [write_meta_with_merge]. Reset by the runtime to keep
     [Coord_state] caches in sync. *)
 val runtime_meta_write_sync_hook :
-  (Coord.config -> keeper_meta -> unit) ref
+  (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) ref
 
 (** Replace [runtime_meta_write_sync_hook] with [f]. *)
 val register_runtime_meta_write_sync :
-  (Coord.config -> keeper_meta -> unit) -> unit
+  (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
 
 (** Pre-compiled regex matching the CAS [meta version conflict]
     error message. Exposed for symmetry — used internally by
@@ -26,7 +24,7 @@ val version_conflict_re : Re.re
     the file does not exist; warns on unknown keys; scrubs deprecated
     persisted fields before parsing. *)
 val read_meta_file_path :
-  string -> (keeper_meta option, string) result
+  string -> (Keeper_meta_contract.keeper_meta option, string) result
 
 (** Sidecar stem suffixes (without the trailing [.json]). Files
     matching [<name><suffix>.json] are filtered out of the keeper
@@ -66,11 +64,11 @@ val persistent_agent_names : Coord.config -> string list
 val read_meta_resolved :
   Coord.config ->
   string ->
-  ((string * keeper_meta) option, string) result
+  ((string * Keeper_meta_contract.keeper_meta) option, string) result
 
 (** Like [read_meta_resolved] but discards the filename component. *)
 val read_meta :
-  Coord.config -> string -> (keeper_meta option, string) result
+  Coord.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
 (** Read keeper meta only if the canonical [name] file's mtime exceeds
     [last_mtime]. Returns [Some (meta, mtime)] when changed, [None] when
@@ -79,7 +77,7 @@ val read_meta_if_changed :
   Coord.config ->
   string ->
   last_mtime:float ->
-  (keeper_meta * float) option
+  (Keeper_meta_contract.keeper_meta * float) option
 
 (** Current UTC timestamp as ISO-8601 (Z-suffixed). *)
 val current_utc_timestamp : unit -> string
@@ -94,14 +92,14 @@ val refresh_progress_updated_line : Coord.config -> string -> unit
     [runtime_meta_write_sync_hook] and refreshes the progress
     timestamp on success. *)
 val persist_meta :
-  Coord.config -> string -> keeper_meta -> (unit, string) result
+  Coord.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
 (** Persist [m] with a CAS bump on [meta_version]. When [force] is
     set, the version is bumped without checking the disk version. *)
 val write_meta :
   ?force:bool ->
   Coord.config ->
-  keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   (unit, string) result
 
 (** [true] iff [msg] matches [version_conflict_re]. *)
@@ -114,7 +112,7 @@ val is_version_conflict_error : string -> bool
     writers own specific fields. *)
 val write_meta_with_merge :
   ?max_retries:int ->
-  merge:(latest:keeper_meta -> caller:keeper_meta -> keeper_meta) ->
+  merge:(latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
   Coord.config ->
-  keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   (unit, string) result

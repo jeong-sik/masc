@@ -38,10 +38,10 @@ val tree_badges :
 
 val approval_matches_goal : string -> Yojson.Safe.t -> bool
 
-val keeper_name_matches_meta : Keeper_types.keeper_meta list -> string -> bool
+val keeper_name_matches_meta : Keeper_meta_contract.keeper_meta list -> string -> bool
 
 val keeper_name_of_assignee :
-  Keeper_types.keeper_meta list -> string -> string option
+  Keeper_meta_contract.keeper_meta list -> string -> string option
 
 val goal_fsm_state_kind : Goal_phase.t -> string
 

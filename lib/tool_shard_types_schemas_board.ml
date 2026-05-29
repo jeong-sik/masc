@@ -125,9 +125,18 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ "type", `String "integer"
+                      [ (* Issue #18472: same wire-format widening as
+                           PR #19383 on [tool_execute.timeout_sec]. The
+                           board_list runtime accepts both shapes; the
+                           strict ["integer"] only fires Anthropic-SDK
+                           [correction_pipeline] coerce. *)
+                        ( "type"
+                        , `List [ `String "integer"; `String "string" ] )
                       ; ( "description"
-                        , `String "Max posts to return (default: 20, max: 50)" )
+                        , `String
+                            "Max posts to return (default: 20, max: 50). \
+                             Numeric strings are accepted; prefer the bare \
+                             integer form." )
                       ] )
                 ; (* Issue #8513: derive from local mirror tracking
            [Board_dispatch.valid_sort_order_strings].  Schema used to
@@ -221,8 +230,17 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ "type", `String "integer"
-                      ; "description", `String "Max results (default: 20)"
+                      [ (* Issue #18472: same widening as PR #19383 / sibling
+                           sites above. No fleet evidence yet on this site
+                           (board_search), but bundled here per RFC-0088 §3
+                           N-of-M avoidance — three [limit] sites with the
+                           same defect; fix all at once. *)
+                        ( "type"
+                        , `List [ `String "integer"; `String "string" ] )
+                      ; ( "description"
+                        , `String
+                            "Max results (default: 20). Numeric strings are \
+                             accepted; prefer the bare integer form." )
                       ] )
                 ] )
           ; "required", `List [ `String "query" ]

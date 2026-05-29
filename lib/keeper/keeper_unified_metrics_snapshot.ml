@@ -2,6 +2,8 @@
     keeper_unified_metrics.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
 

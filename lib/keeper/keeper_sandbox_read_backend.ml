@@ -8,6 +8,8 @@
     other's flags. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let is_hardened = function
   | Docker -> true

@@ -7,9 +7,9 @@
 
 open Keeper_tools_oas_workflow
 
-let json_assoc_field_opt = Keeper_tools_oas_json.json_assoc_field_opt
+let json_assoc_field_opt = Json_util.assoc_member_opt
 let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
-let json_assoc_string_opt = Keeper_tools_oas_json.json_assoc_string_opt
+let json_assoc_string_opt = Json_util.assoc_string_opt
 
 let recovery_plan_json_opt json =
   match json_assoc_field_opt "recovery_plan" json with

@@ -61,3 +61,36 @@ val unbind :
   (Yojson.Safe.t, string) result
 (** Remove a channel→keeper binding, append an audit event, and
     return the removed binding row as JSON. *)
+
+(** {1 In-process gateway support}
+
+    Used by {!Server_discord_in_process_gateway}, the OCaml gateway
+    that replaces the deleted [sidecars/discord-bot/] Python
+    connector. *)
+
+val keeper_for_channel : channel_id:string -> string option
+(** Look up the keeper bound to a Discord channel snowflake.
+    Returns [None] when no binding exists, when the channel id is
+    blank, or when the binding store is unreadable. *)
+
+(** Typed failure modes for {!send_message}. Closed sum — adding
+    a new variant forces every consumer to handle it. *)
+type send_error =
+  | Missing_token
+    (** [DISCORD_BOT_TOKEN] is unset or empty. *)
+  | Rest_error of Discord_rest_client.error
+    (** Discord REST returned a typed failure. *)
+
+val pp_send_error : Format.formatter -> send_error -> unit
+
+val send_message :
+  channel_id:string ->
+  content:string ->
+  (string, send_error) result
+(** Post a single message to a Discord channel. Returns the created
+    message id on success. Bot token is resolved from
+    [DISCORD_BOT_TOKEN] at call time so a token rotation doesn't
+    require a server restart.
+
+    Must be called inside an Eio context (the underlying REST
+    client uses the piaf-backed http pool). *)

@@ -134,16 +134,16 @@ let o5_agent_board_inputs (config : Coord.config) =
     |> max 0
   in
   let now = Unix.gettimeofday () in
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
   |> List.filter_map (fun name ->
-       match Keeper_types.read_meta config name with
+       match Keeper_meta_store.read_meta config name with
        | Ok (Some meta) ->
            let blocked_on =
              match meta.runtime.last_blocker with
              | Some info ->
                let value = String.trim info.detail in
                if value = "" then
-                 Some (Keeper_types.blocker_class_to_string info.klass)
+                 Some (Keeper_meta_contract.blocker_class_to_string info.klass)
                else Some value
              | None -> None
            in
@@ -278,10 +278,10 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
          let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names
@@ -310,10 +310,10 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names
@@ -328,10 +328,10 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names
@@ -346,10 +346,10 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names

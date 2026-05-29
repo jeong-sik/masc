@@ -319,20 +319,22 @@ let is_write_operation (words : string list) =
   | [] -> false
 ;;
 
+let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-'
+let has_short_flag flag arg = is_short_option arg && String.contains arg flag
+
+let is_protected_branch_target arg =
+  let target = String.lowercase_ascii arg in
+  List.mem
+    target
+    [ "main"; "master"; "origin/main"; "origin/master";
+      "refs/heads/main"; "refs/heads/master" ]
+  || List.exists
+       (fun suffix -> String.ends_with ~suffix target)
+       [ ":main"; ":master"; ":origin/main"; ":origin/master";
+         ":refs/heads/main"; ":refs/heads/master" ]
+;;
+
 let is_destructive_bash_operation (words : string list) =
-  let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-' in
-  let has_short_flag flag arg = is_short_option arg && String.contains arg flag in
-  let is_protected_branch_target arg =
-    let target = String.lowercase_ascii arg in
-    List.mem
-      target
-      [ "main"; "master"; "origin/main"; "origin/master";
-        "refs/heads/main"; "refs/heads/master" ]
-    || List.exists
-         (fun suffix -> String.ends_with ~suffix target)
-         [ ":main"; ":master"; ":origin/main"; ":origin/master";
-           ":refs/heads/main"; ":refs/heads/master" ]
-  in
   match words with
   | "git" :: "push" :: rest ->
     let has_force =
@@ -360,20 +362,216 @@ let is_destructive_bash_operation (words : string list) =
   | _ -> false
 ;;
 
+(* --- Word-list decision (pre-typed-GADT path) -----------------------
+
+   Retained for the [Generic] escape hatch (env/redirect/$VAR/unknown
+   bin), for [Pipeline]s, and as the differential baseline that
+   [risk_of_typed] must never under-classify. *)
+
+let classify_words (words : string list) : risk_class =
+  if is_destructive_bash_operation words then Destructive_protected
+  else if is_write_operation words then
+    (match classify_write_detail words with
+     | Some r -> r
+     | None -> R2_Irreversible)
+  else
+    (match words with
+     | "gh" :: _ -> classify_repo_hosting_cli words
+     | _ -> R0_Read)
+;;
+
+(* --- Typed-GADT decision substrate (RFC-0160 §S1 completion) ----------
+
+   [risk_of_typed] is the risk opinion implied by the typed command
+   shape alone — the first decision path that reads the [Shell_ir_typed]
+   GADT instead of re-flattening to a word list. [classify] combines it
+   with the word-list floor ([classify_words]) by taking the stricter of
+   the two, so the overall decision is monotone-safe by construction.
+
+   The match is exhaustive (no [_ ->] catch-all): adding a constructor
+   to [Shell_ir_typed_types.command] forces a compile error here, so a
+   new typed command cannot reach dispatch without a risk decision.
+   CLAUDE.md §"FSM Sparse Match" — every constructor named, no wildcard.
+
+   Policy (2026-05-29, option B — monotone-safe, escalate dangerous
+   gaps only): the type closes word-list holes it makes visible —
+   [Sudo] (privilege escalation; the word-list head token was "sudo" so
+   its "rm"/"git push" arms never fired -> silent R0), [Su] and [Mkfs]
+   (R0 -> R2). Commands the word-list already classifies keep their risk
+   (curl/sed/git pull stay R0; git push/commit stay R1; rm -rf protected
+   stays Destructive). [Gh] and [Generic] return R0 here because the
+   type cannot see their risk-bearing tokens (gh -X METHOD / graphql
+   body live in [rest]); the word-list floor in [classify] supplies it.
+   Dropping that floor is gated on the typed model subsuming it. *)
+
+let npm_write_subcommands =
+  [ "add"; "install"; "link"; "prune"; "publish"; "remove"; "unlink";
+    "update"; "up" ]
+;;
+
+let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
+  let open Shell_ir_typed in
+  match w with
+  (* --- read / inspection: R0_Read ----------------------------------- *)
+  | W (Ls _) -> R0_Read
+  | W (Cat _) -> R0_Read
+  | W (Rg _) -> R0_Read
+  | W (Find _) -> R0_Read
+  | W (Head _) -> R0_Read
+  | W (Tail _) -> R0_Read
+  | W (Grep _) -> R0_Read
+  | W (Wc _) -> R0_Read
+  | W (Pwd _) -> R0_Read
+  | W (Echo _) -> R0_Read
+  | W (Which _) -> R0_Read
+  | W (Sort _) -> R0_Read
+  | W (Cut _) -> R0_Read
+  | W (Tr _) -> R0_Read
+  | W (Date _) -> R0_Read
+  | W (Env _) -> R0_Read
+  | W (Printenv _) -> R0_Read
+  | W (Uniq _) -> R0_Read
+  | W (Basename _) -> R0_Read
+  | W (Dirname _) -> R0_Read
+  | W (Test _) -> R0_Read
+  | W (Stat _) -> R0_Read
+  | W (Hostname _) -> R0_Read
+  | W (Whoami _) -> R0_Read
+  | W (Du _) -> R0_Read
+  | W (Df _) -> R0_Read
+  | W (File _) -> R0_Read
+  | W (Printf _) -> R0_Read
+  | W (Uname _) -> R0_Read
+  | W (Ps _) -> R0_Read
+  | W (Tty _) -> R0_Read
+  | W (Diff _) -> R0_Read
+  (* git read subcommands: R0 (parity with word-list) *)
+  | W (Git_status _) -> R0_Read
+  | W (Git_diff _) -> R0_Read
+  | W (Git_log _) -> R0_Read
+  (* git pull: word-list does not list "pull" as write -> R0 (kept under
+     option B; escalation deferred to a correctness follow-up) *)
+  | W (Git_pull _) -> R0_Read
+  (* network commands the word-list leaves at R0 (option B: unchanged) *)
+  | W (Curl _) -> R0_Read
+  | W (Wget _) -> R0_Read
+  | W (Ssh _) -> R0_Read
+  | W (Scp _) -> R0_Read
+  | W (Tar _) -> R0_Read
+  | W (Sed _) -> R0_Read
+  | W (Rsync _) -> R0_Read
+  (* interpreters / build tools the word-list leaves at R0 *)
+  | W (Node _) -> R0_Read
+  | W (Python _) -> R0_Read
+  | W (Python3 _) -> R0_Read
+  | W (Pip _) -> R0_Read
+  | W (Patch _) -> R0_Read
+  | W (Cargo _) -> R0_Read
+  | W (Go _) -> R0_Read
+  | W (Opam _) -> R0_Read
+  | W (Npx _) -> R0_Read
+  | W (Uv _) -> R0_Read
+  | W (Glab _) -> R0_Read
+  | W (Pytest _) -> R0_Read
+  | W (Terminal_notifier _) -> R0_Read
+  | W (Ruff _) -> R0_Read
+  | W (Pyright _) -> R0_Read
+  | W (Tsc _) -> R0_Read
+  | W (Ocamlfind _) -> R0_Read
+  | W (Rustc _) -> R0_Read
+  | W (Gofmt _) -> R0_Read
+  | W (Gradle _) -> R0_Read
+  | W (Ninja _) -> R0_Read
+  | W (Java _) -> R0_Read
+  | W (Javac _) -> R0_Read
+  | W (Mvn _) -> R0_Read
+  | W (Cmake _) -> R0_Read
+  | W (Dune_local_sh _) -> R0_Read
+  | W (Osascript _) -> R0_Read
+  | W (Play _) -> R0_Read
+  | W (Rec _) -> R0_Read
+  | W (Ffplay _) -> R0_Read
+  | W (Mpg123 _) -> R0_Read
+  | W (Open _) -> R0_Read
+  (* --- reversible mutation: R1 (parity with word-list write list) --- *)
+  | W (Mkdir _) -> R1_Reversible_mutation
+  | W (Chmod _) -> R1_Reversible_mutation
+  | W (Chown _) -> R1_Reversible_mutation
+  | W (Make _) -> R1_Reversible_mutation
+  | W (Git_clone _) -> R1_Reversible_mutation
+  | W (Git_commit _) -> R1_Reversible_mutation
+  (* node package managers: write subcommands -> R1, else R0 *)
+  | W (Npm { subcommand; _ }) ->
+    if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
+    else R0_Read
+  | W (Yarn { subcommand; _ }) ->
+    if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
+    else R0_Read
+  | W (Pnpm { subcommand; _ }) ->
+    if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
+    else R0_Read
+  (* git push: force / force-with-lease to a protected branch is
+     Destructive_protected (word-list parity via [is_protected_branch_target]
+     on the typed [branch] field); any other push is R1 *)
+  | W (Git_push { force; force_with_lease; branch; _ }) ->
+    let forced = force || force_with_lease in
+    let protected_target =
+      match branch with
+      | Some b -> is_protected_branch_target b
+      | None -> false
+    in
+    if forced && protected_target then Destructive_protected
+    else R1_Reversible_mutation
+  (* --- irreversible: R2 --------------------------------------------- *)
+  (* Su / Dd / Mkfs: word-list head-token match missed Su/Mkfs (-> R0);
+     the type makes them visible. Dd was already R2 in the word-list. *)
+  | W (Su _) -> R2_Irreversible
+  | W (Dd _) -> R2_Irreversible
+  | W (Mkfs _) -> R2_Irreversible
+  (* rm: recursive + force -> Destructive_protected, else R2 (word-list
+     parity with [is_destructive_bash_operation] / [classify_write_detail]) *)
+  | W (Rm { recursive; force; _ }) ->
+    if recursive && force then Destructive_protected else R2_Irreversible
+  (* --- privilege escalation: Destructive_protected ------------------ *)
+  (* sudo wraps an arbitrary argv; the word-list head was "sudo" so its
+     "rm"/"git push" arms never fired (silent R0). Privilege escalation
+     always requires approval. *)
+  | W (Sudo _) -> Destructive_protected
+  (* gh: the typed [Gh] constructor buries the HTTP method (-X DELETE)
+     and graphql body in [rest], so the type alone cannot decide gh
+     risk. [classify]'s word-list floor supplies it; revisit here once
+     the typed model captures the method + graphql body. *)
+  | W (Gh _) -> R0_Read
+  | W (Docker _) -> R0_Read
+  (* escape hatch (env/redirect/$VAR/unknown bin): no typed shape to
+     read; [classify]'s word-list floor classifies it. *)
+  | W (Generic _) -> R0_Read
+;;
+
 (* --- Main classifier ------------------------------------------------ *)
 
+let risk_rank = function
+  | R0_Read -> 0
+  | R1_Reversible_mutation -> 1
+  | R2_Irreversible -> 2
+  | Destructive_protected -> 3
+;;
+
+let max_risk a b = if risk_rank a >= risk_rank b then a else b
+
+(* The decision is the stricter of the typed-shape opinion and the
+   word-list floor, so it is monotone-safe by construction: never lower
+   than the legacy word-list verdict. The typed path contributes
+   escalations the substring path missed (Sudo/Su/Mkfs); the word-list
+   floor covers what the type cannot fully see (gh -X METHOD, Generic,
+   multi-stage pipelines). Removing the floor is gated on the typed
+   model becoming complete enough to subsume it (RFC-0160 follow-up). *)
 let classify (T ir : undecided t) : decided decided_ir =
-  let words = flat_stage_words ir in
-  let risk =
-    if is_destructive_bash_operation words then
-      Destructive_protected
-    else if is_write_operation words then
-      (match classify_write_detail words with
-       | Some r -> r
-       | None -> R2_Irreversible)
-    else
-      (match words with
-       | "gh" :: _ -> classify_repo_hosting_cli words
-       | _ -> R0_Read)
+  let word_risk = classify_words (flat_stage_words ir) in
+  let typed_risk =
+    match ir with
+    | Shell_ir.Simple s -> risk_of_typed (Shell_ir_typed.of_simple s)
+    | Shell_ir.Pipeline _ -> R0_Read
   in
-  { ir; risk }
+  { ir; risk = max_risk typed_risk word_risk }
+;;

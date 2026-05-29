@@ -74,35 +74,12 @@ let to_string = function
 
 (* ── JSON helpers ─────────────────────────────────────────────── *)
 
-let assoc_field_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
-let assoc_string_opt key json =
-  match assoc_field_opt key json with
-  | Some (`String value) -> Some value
-  | _ -> None
-;;
-
-let assoc_int_opt key json =
-  match assoc_field_opt key json with
-  | Some (`Int value) -> Some value
-  | _ -> None
-;;
-
-let assoc_bool_opt key json =
-  match assoc_field_opt key json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-;;
-
 let detail_assoc_field_opt key json =
-  match assoc_field_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some _ as value -> value
   | None ->
-    (match assoc_field_opt "detail" json with
-     | Some detail -> assoc_field_opt key detail
+    (match Json_util.assoc_member_opt "detail" json with
+     | Some detail -> Json_util.assoc_member_opt key detail
      | None -> None)
 ;;
 
@@ -110,11 +87,11 @@ let detail_assoc_field_opt key json =
    to a nested ["detail"] object. Mirrors the lookup pattern used in
    [keeper_tools_oas.workflow_rejection_info_of_raw]. *)
 let error_or_detail_string key json =
-  match assoc_string_opt key json with
+  match Json_util.assoc_string_opt key json with
   | Some _ as v -> v
   | None ->
-    (match assoc_field_opt "detail" json with
-     | Some detail -> assoc_string_opt key detail
+    (match Json_util.assoc_member_opt "detail" json with
+     | Some detail -> Json_util.assoc_string_opt key detail
      | None -> None)
 ;;
 
@@ -176,7 +153,7 @@ let path_check_reason_of_explicit = function
 let classify_deterministic_retry json =
   match detail_assoc_field_opt "deterministic_retry" json with
   | Some (`Assoc _ as retry) ->
-    (match assoc_bool_opt "retry_same_args" retry, assoc_string_opt "reason" retry with
+    (match Json_util.assoc_bool_opt "retry_same_args" retry, Json_util.assoc_string_opt "reason" retry with
      | Some false, Some reason -> reason_of_wire reason
      | (Some true | None), _
      | _, None ->
@@ -206,9 +183,9 @@ let classify_path_check json =
      [detail.path_check.reason]. Both are checked against a closed
      allow-list (no substring scanning). *)
   let from_path_check_field =
-    match assoc_field_opt "path_check" json with
+    match Json_util.assoc_member_opt "path_check" json with
     | Some pc ->
-      (match assoc_string_opt "reason" pc with
+      (match Json_util.assoc_string_opt "reason" pc with
        | Some v -> path_check_reason_of_explicit v
        | None -> None)
     | None -> None

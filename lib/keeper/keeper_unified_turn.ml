@@ -7,6 +7,9 @@
     @since Unified Keeper Loop *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
 module KCP = Keeper_cascade_profile

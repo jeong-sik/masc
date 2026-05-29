@@ -7,6 +7,8 @@
     unchanged. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module StringMap : Map.S with type key = string
 

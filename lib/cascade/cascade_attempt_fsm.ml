@@ -68,7 +68,16 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   (* All other MASC-internal classifications (and unclassified errors) fall
      through to the structured [match err with] below to derive the cascade
      outcome from the raw [sdk_error] payload. *)
-  | Some (Cascade_error_classify.Capacity_backpressure { detail; retry_after_sec; source; _ }) ->
+  | Some (Cascade_error_classify.Capacity_backpressure { detail; retry_after; source; _ }) ->
+    (* Re-expose only a concrete backoff as the Http [retry_after]; a synthetic
+       default is dropped to [None] so it is not re-derived as an explicit hint
+       on the next pass. *)
+    let retry_after_sec =
+      match retry_after with
+      | Cascade_internal_error.Explicit s -> Some s
+      | Cascade_internal_error.Synthetic_default _
+      | Cascade_internal_error.No_retry_hint -> None
+    in
     Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.ProviderFailure
@@ -781,7 +790,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some
       (Cascade_error_classify.Cascade_exhausted
-         { reason = Keeper_types.Max_turns_exceeded; _ }) ->
+         { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
       true
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Capacity_backpressure _)

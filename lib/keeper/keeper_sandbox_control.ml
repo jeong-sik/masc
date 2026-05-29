@@ -7,6 +7,8 @@
     turn containers before TTL cleanup. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let managed_kind = "managed"
 let turn_kind = "turn"

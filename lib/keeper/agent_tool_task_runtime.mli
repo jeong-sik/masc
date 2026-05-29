@@ -2,7 +2,7 @@
 
 val handle_keeper_task_tool :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   name:string ->
   args:Yojson.Safe.t ->
   string

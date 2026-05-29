@@ -3,8 +3,9 @@
 open Alcotest
 
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 
-let make_meta ?(sandbox = Keeper_types.Docker) name =
+let make_meta ?(sandbox = Keeper_types_profile_sandbox.Docker) name =
   let json =
     `Assoc
       [
@@ -13,7 +14,7 @@ let make_meta ?(sandbox = Keeper_types.Docker) name =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "repo readiness test");
         ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
+          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

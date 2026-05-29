@@ -6,6 +6,8 @@
     see continued presence and the registry can detect stuck turns. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_execution
 
 let in_turn_liveness_pulse_interval_sec () =

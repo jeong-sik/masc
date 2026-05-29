@@ -24,7 +24,7 @@ let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
 
 let resolve_keeper_meta_for_name (ctx : 'a context) ~(name : string) =
-  match Keeper_types.read_meta_resolved ctx.config name with
+  match Keeper_meta_store.read_meta_resolved ctx.config name with
   | Error err -> Error err
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)

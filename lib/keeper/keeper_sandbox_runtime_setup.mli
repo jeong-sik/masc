@@ -43,7 +43,6 @@ val docker_preflight_min_sec : float
 val docker_preflight_max_sec : float
 val docker_preflight_timeout : timeout_sec:float -> float
 val required_commands : string list
-val option_field : 'a -> 'b option -> 'a * [> `Null | `String of 'b ]
 type cleanup_result = { scanned : int; removed : int; errors : string list; }
 val sandbox_component_label_key : string
 val sandbox_component_label_value : string
@@ -91,7 +90,7 @@ val docker_label_args :
   keeper_name:string ->
   container_kind:string -> network_label:string -> unit -> string list
 val docker_network_args :
-  Keeper_types.network_mode -> string list * string
+  Keeper_types_profile_sandbox.network_mode -> string list * string
 val docker_nofile_args : unit -> string list
 val container_masc_runtime_base : container_root:'a -> string
 val container_masc_dir : container_root:'a -> string

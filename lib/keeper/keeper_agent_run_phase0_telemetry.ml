@@ -1,7 +1,7 @@
 (** Phase-0 wake-time payload telemetry, extracted from [Keeper_agent_run]. *)
 
 let record_if_enabled
-    ~(meta : Keeper_types.keeper_meta)
+    ~(meta : Keeper_meta_contract.keeper_meta)
     ~turn_system_prompt
     ~tools
     ~history_messages

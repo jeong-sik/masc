@@ -20,7 +20,7 @@ val pre_tool_gate_error :
 val trajectory_duration_ms : float -> int
 
 val record_pre_tool_gate_attempt :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   tool_call_count_ref:int ref ->
   ?trajectory_acc:Trajectory.accumulator ->
   Keeper_guards.gate_decision_event ->

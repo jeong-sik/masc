@@ -4,6 +4,8 @@
     (included below). This module adds recall-specific logic on top. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** {1 Re-exported from Keeper_memory_bank} *)
 

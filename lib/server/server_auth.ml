@@ -278,11 +278,30 @@ let sanitize_dashboard_actor_name raw =
    (Ok None / Error err arms in [dashboard_actor_for_request]) onto a single
    helper. The message rendering and prometheus labels are owned by
    [Auth_error_kind] so the contract is round-tripped through a typed
-   record rather than two parallel inline format strings. *)
+   record rather than two parallel inline format strings.
+
+   Log dedup: a stale dashboard token triggers this path on *every* HTTP
+   request the browser makes.  Without a cooldown, 140+ identical WARN
+   lines/day accumulate for the same token hash prefix.  The Prometheus
+   counter is always incremented (metrics remain accurate); the log line
+   is emitted at most once per [warn_cooldown_sec] per token prefix. *)
+let warn_cooldown_sec = 300.0
+
+let stale_token_warn_log : (string, float) Hashtbl.t = Hashtbl.create 16
+
 let record_dashboard_actor_fallback
     (fb : Auth_error_kind.dashboard_actor_fallback) =
-  Log.Auth.warn "%s"
-    (Auth_error_kind.dashboard_actor_fallback_log_message fb);
+  let now = Time_compat.now () in
+  let should_log =
+    match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
+    | Some last_ts -> now -. last_ts >= warn_cooldown_sec
+    | None -> true
+  in
+  if should_log then begin
+    Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+    Log.Auth.warn "%s"
+      (Auth_error_kind.dashboard_actor_fallback_log_message fb)
+  end;
   Prometheus.inc_counter
     Prometheus.metric_silent_dashboard_actor_fallback
     ~labels:(Auth_error_kind.dashboard_actor_fallback_prometheus_labels fb)
@@ -410,10 +429,9 @@ let host_port_of_request request =
           host_header (Printexc.to_string exn);
         None)
 
-(* Evaluated at module init time (eager). MASC_ALLOW_ANONYMOUS_MUTATIONS
-   must be set before the module is loaded. This is safe because the
-   server process sets all env vars at startup before any module init. *)
-let allow_anonymous_mutations =
+(* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
+   can be toggled without restarting the server process. *)
+let allow_anonymous_mutations () =
   match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
   | Some ("1" | "true") -> true
   | _ -> false
@@ -444,17 +462,36 @@ let is_allowlisted_loopback_dev_origin origin =
       |> List.exists (fun allowed -> allowed = candidate)
   | _ -> false
 
+(* Browsers omit Origin for same-origin requests per the Fetch spec, but
+   always include Referer.  If the Referer's host:port matches the
+   request's Host header, the request is same-origin and trusted. *)
+let is_same_server_referer referer request =
+  match host_port_scheme_of_origin referer, host_port_of_request request with
+  | Some (ref_host, ref_port, scheme), Some (req_host, req_port)
+    when String.equal
+           (normalize_loopback_host ref_host)
+           (normalize_loopback_host req_host) ->
+    let default = default_port_of_scheme scheme in
+    let norm p = match p with Some _ -> p | None -> default in
+    norm ref_port = norm req_port
+  | _ -> false
+
 let ensure_same_origin_browser_request request :
     (unit, Masc_domain.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None ->
-    if allow_anonymous_mutations then Ok ()
-    else
-      Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-        { reason = Missing_token
-        ; message = "Authentication required: provide a bearer token or Origin header. \
-                     Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."
-        }))
+    (* Same-origin browser requests don't send Origin.  Check Referer
+       as a fallback — browsers always include it even for same-origin. *)
+    (match Httpun.Headers.get request.Httpun.Request.headers "referer" with
+     | Some referer when is_same_server_referer referer request -> Ok ()
+     | _ ->
+       if allow_anonymous_mutations () then Ok ()
+       else
+         Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+           { reason = Missing_token
+           ; message = "Authentication required: provide a bearer token or Origin header. \
+                        Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."
+           })))
   | Some origin -> (
       match host_port_scheme_of_origin origin, host_port_of_request request with
       | Some (origin_host, origin_port, scheme),

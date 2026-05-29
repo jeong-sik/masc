@@ -851,6 +851,7 @@
   test_board_karma_ledger
   test_task_dispatch
   test_coord_task_lifecycle
+  test_coord_task_classify_guard
   test_make_required_tools_predicate
   test_coord_task_verification_phase_e
   test_drift_guard_core
@@ -1074,6 +1075,7 @@
   test_board_karma_ledger
   test_task_dispatch
   test_coord_task_lifecycle
+  test_coord_task_classify_guard
   test_make_required_tools_predicate
   test_coord_task_verification_phase_e
   test_drift_guard_core
@@ -1494,6 +1496,8 @@
 
 (include stanzas/test_channel_gate_metrics.inc)
 
+(include stanzas/test_channel_gate_discord_state_in_process.inc)
+
 (include stanzas/test_discord_gateway_state.inc)
 
 (include stanzas/test_discord_rest_client.inc)
@@ -1794,6 +1798,10 @@
 (include stanzas/test_executable_not_allowlisted_hint.inc)
 
 (include stanzas/test_claim_outcome_typed.inc)
+
+(include stanzas/test_execute_timeout_schema_widen.inc)
+
+(include stanzas/test_limit_schema_widen.inc)
 
 (include stanzas/test_parse_outcome.inc)
 

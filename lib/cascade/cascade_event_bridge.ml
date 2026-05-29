@@ -33,12 +33,12 @@ let payload_agent_name payload =
      envelope [agent_name] is Null for 9%+ of daily events, breaking
      per-agent filters over the Dated_jsonl store under [.masc/oas-events/].
      See #7827. *)
-  match payload_string_opt "agent_name" payload with
+  match Json_util.get_string payload "agent_name" with
   | Some _ as value -> value
   | None ->
-    (match payload_string_opt "agent" payload with
+    (match Json_util.get_string payload "agent" with
      | Some _ as value -> value
-     | None -> payload_string_opt "keeper_name" payload)
+     | None -> Json_util.get_string payload "keeper_name")
 ;;
 
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
@@ -137,10 +137,10 @@ let wrap_event
     ; "ts_unix", `Float ts
     ; "correlation_id", `String correlation_id
     ; "run_id", `String run_id
-    ; "agent_name", json_string_opt agent_name
-    ; "task_id", json_string_opt task_id
+    ; "agent_name", Json_util.string_opt_to_json_trimmed agent_name
+    ; "task_id", Json_util.string_opt_to_json_trimmed task_id
     ; "turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn
-    ; "tool_name", json_string_opt tool_name
+    ; "tool_name", Json_util.string_opt_to_json_trimmed tool_name
     ; "payload", payload
     ]
 ;;
@@ -361,9 +361,9 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~event_type
          ~payload
          ?agent_name:(payload_agent_name payload)
-         ?task_id:(payload_string_opt "task_id" payload)
-         ?turn:(payload_int_opt "turn" payload)
-         ?tool_name:(payload_string_opt "tool_name" payload)
+         ?task_id:(Json_util.assoc_string_opt "task_id" payload)
+         ?turn:(Json_util.assoc_int_opt "turn" payload)
+         ?tool_name:(Json_util.assoc_string_opt "tool_name" payload)
          ())
   | Agent_sdk.Event_bus.InferenceTelemetry
       { provider
@@ -460,19 +460,11 @@ let relay_stage_to_string = function
   | Broadcast -> "broadcast"
 ;;
 
-let json_field_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) when String.trim value <> "" -> Some value
-     | _ -> None)
-  | _ -> None
-;;
-
 let relay_event_type json =
-  match json_field_string_opt "event_type" json with
+  match Json_util.assoc_string_opt "event_type" json with
   | Some value -> value
   | None ->
-    (match json_field_string_opt "type" json with
+    (match Json_util.assoc_string_opt "type" json with
      | Some value -> value
      | None -> "unknown")
 ;;
@@ -512,8 +504,8 @@ let emit_relay_retry_log
     (relay_stage_to_string stage)
     attempt
     relay_max_attempts
-    (Option.value ~default:"<none>" (json_field_string_opt "correlation_id" pending.json))
-    (Option.value ~default:"<none>" (json_field_string_opt "run_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "correlation_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "run_id" pending.json))
     (Printexc.to_string exn)
 ;;
 
@@ -528,8 +520,8 @@ let emit_relay_drop_log
     (relay_event_type pending.json)
     stage_label
     attempts
-    (Option.value ~default:"<none>" (json_field_string_opt "correlation_id" pending.json))
-    (Option.value ~default:"<none>" (json_field_string_opt "run_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "correlation_id" pending.json))
+    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "run_id" pending.json))
 ;;
 
 let broadcast_drop_marker
@@ -543,15 +535,15 @@ let broadcast_drop_marker
       ; "event_type", `String "relay_dropped"
       ; "ts_unix", `Float (Time_compat.now ())
       ; ( "correlation_id"
-        , match json_field_string_opt "correlation_id" pending.json with
+        , match Json_util.assoc_string_opt "correlation_id" pending.json with
           | Some value -> `String value
           | None -> `Null )
       ; ( "run_id"
-        , match json_field_string_opt "run_id" pending.json with
+        , match Json_util.assoc_string_opt "run_id" pending.json with
           | Some value -> `String value
           | None -> `Null )
       ; ( "agent_name"
-        , match json_field_string_opt "agent_name" pending.json with
+        , match Json_util.assoc_string_opt "agent_name" pending.json with
           | Some value -> `String value
           | None -> `Null )
       ; "failed_stage", `String stage_label

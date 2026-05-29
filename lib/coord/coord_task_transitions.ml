@@ -198,6 +198,9 @@ let transition_task_r
               | Masc_domain.InProgress _, Masc_domain.Claim ->
                 " Remediation: task is already in_progress under someone. Use \
                  masc_claim_next for unclaimed work."
+              | Masc_domain.InProgress _, Masc_domain.Start ->
+                " Remediation: task is already in_progress. Valid actions from \
+                 in_progress: done, submit_for_verification, release, cancel."
               | Masc_domain.Done _, _ ->
                 " Remediation: task is already in a terminal state (done). Use \
                  masc_add_task for new work or masc_tasks to find claimable items."

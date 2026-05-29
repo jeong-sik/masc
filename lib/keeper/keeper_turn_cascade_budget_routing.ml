@@ -1,6 +1,8 @@
 (** Fail-open cascade routing helpers for keeper turn budgeting. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 module EC = Keeper_error_classify
 

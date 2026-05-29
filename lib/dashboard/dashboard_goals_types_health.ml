@@ -9,7 +9,6 @@
     record + the [human_duration] helper. Re-included by
     [Dashboard_goals_types] so the public surface is unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
 
 let goal_phase_to_health = function
@@ -89,18 +88,15 @@ let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalle
   List.rev !badges
 
 let approval_matches_goal goal_id approval_json =
-  let goal_ids =
-    approval_json |> member "goal_ids" |> to_list
-    |> List.filter_map to_string_option
-  in
+  let goal_ids = Json_util.get_string_list approval_json "goal_ids" in
   List.mem goal_id goal_ids
   ||
-  match approval_json |> member "goal_id" |> to_string_option with
+  match Json_util.get_string approval_json "goal_id" with
   | Some pending_goal_id -> String.equal pending_goal_id goal_id
   | None -> false
 
 let keeper_name_matches_meta metas name =
-  List.exists (fun (meta : Keeper_types.keeper_meta) -> String.equal meta.name name) metas
+  List.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> String.equal meta.name name) metas
 
 let keeper_name_of_assignee metas assignee =
   match Keeper_identity.canonical_keeper_name_from_agent_name assignee with
@@ -173,11 +169,11 @@ let display_disposition_of_receipt_json receipt =
      regression in alerting), but the reason label now distinguishes
      them so the operator can chase the right producer fix. *)
   let operator_disposition =
-    receipt |> member "operator_disposition" |> to_string_option
+    Json_util.get_string receipt "operator_disposition"
     |> Option.value ~default:"<missing operator_disposition field>"
   in
   let operator_disposition_reason =
-    receipt |> member "operator_disposition_reason" |> to_string_option
+    Json_util.get_string receipt "operator_disposition_reason"
     |> Option.value ~default:""
   in
   let reason fallback =

@@ -19,6 +19,8 @@
        along with structured [docker_mount_failure_details]. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let status_label = function
   | Unix.WEXITED n -> Printf.sprintf "exit=%d" n

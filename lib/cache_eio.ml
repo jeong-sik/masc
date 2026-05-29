@@ -75,10 +75,7 @@ let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
     ; "value", `String entry.value
     ; "value_size", `Int (String.length entry.value)
     ; "created_at", `Float entry.created_at
-    ; ( "expires_at"
-      , match entry.expires_at with
-        | Some t -> `Float t
-        | None -> `Null )
+    ; ( "expires_at", Json_util.float_opt_to_json entry.expires_at )
     ; "tags", `List (List.map (fun t -> `String t) entry.tags)
     ]
 ;;

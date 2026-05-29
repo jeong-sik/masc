@@ -279,19 +279,12 @@ let cascade_attempt_terminal_event_json ?slot_release_at_phase
       ("event", `String "cascade_attempt_terminal");
       ("model_id", `String public_runtime_model_label);
       ("model_label", `Null);
-      ( "latency_ms",
-        match latency_ms with Some n -> `Int n | None -> `Null );
+      ( "latency_ms", Json_util.int_opt_to_json latency_ms );
       ("outcome", `String outcome);
-      ( "error_message",
-        match error with Some s -> `String s | None -> `Null );
-      ( "slot_release_at_phase",
-        match slot_release_at_phase with Some s -> `String s | None -> `Null );
-      ( "productive_phase_elapsed_ms",
-        match productive_phase_elapsed_ms with
-        | Some n -> `Int n
-        | None -> `Null );
-      ( "retry_phase_elapsed_ms",
-        match retry_phase_elapsed_ms with Some n -> `Int n | None -> `Null );
+      ( "error_message", Json_util.string_opt_to_json error );
+      ( "slot_release_at_phase", Json_util.string_opt_to_json slot_release_at_phase );
+      ( "productive_phase_elapsed_ms", Json_util.int_opt_to_json productive_phase_elapsed_ms );
+      ( "retry_phase_elapsed_ms", Json_util.int_opt_to_json retry_phase_elapsed_ms );
     ]
 
 let log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error =

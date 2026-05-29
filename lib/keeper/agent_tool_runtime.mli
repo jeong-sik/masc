@@ -11,7 +11,7 @@
    when unset. *)
 type context =
   { config : Coord.config
-  ; meta : Keeper_types.keeper_meta
+  ; meta : Keeper_meta_contract.keeper_meta
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   ; turn_sandbox_factory_git : Keeper_sandbox_factory.t option

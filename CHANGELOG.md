@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Added
+- RFC-0203 Phase 3: in-process Discord gateway
+  (`Server_discord_in_process_gateway`) replaces the deleted Python
+  sidecar at `sidecars/discord-bot/`. `DISCORD_BOT_TOKEN` env var now
+  activates the in-process WSS gateway at server boot; inbound
+  messages are routed to keepers via the existing
+  `Channel_gate.handle_inbound` entry point and replies are pushed
+  back through the new `Channel_gate_discord_state.send_message`.
+  `MASC_DISCORD_TRIGGER_POLICY` controls the inbound filter
+  (`mention_only` default, `user_only:<id>`, `all`). The `board.posted`
+  /`board.commented` activity-polling auto-push (previously done by
+  the sidecar) is dropped — re-add as a follow-up if needed.
+
+### Removed
+- RFC-0203 Phase 3: `sidecars/discord-bot/` (Python connector, ~5000
+  LoC) deleted. `Doctor_dispatch.known_sidecars` no longer lists
+  "discord" — the doctor dispatcher only manages remaining external
+  sidecars (slack/telegram/imessage/cli). The Channel Gate HTTP
+  routes (`/api/v1/gate/message` etc.) remain unchanged and continue
+  to serve the other external connectors.
+
 ## [0.19.35] - 2026-05-27
 
 ### Added
@@ -30,6 +51,30 @@
   optional `~extra_fields:(string * Yojson.Safe.t) list` so the typed
   CDAL verdict payload can be embedded in the rejection envelope
   without a schema break (RFC-0109 Phase D).
+
+## [0.19.35] - 2026-05-28
+
+### Added
+- RFC-0201 Steps 2+3+5: wait-free snapshot for activity graph and
+  swimlane views, retired PR #19150 cache wrapper for activity events.
+
+### Changed
+- Optimized HTTP dispatch, encoding, prefix route lookup, response
+  header, and body chunk accumulation hot paths.
+- Bumped agent SDK pin to 0.200.6.
+- Dashboard refactors: extracted `errorMessageOr`, `UNKNOWN_STATUS_LABEL`,
+  `MISSING_DATA_DASH`, `isRecord`, `isNonEmptyString`, `isAbortError` to
+  shared `lib/format-string` and `lib/type-guards`; removed inspector pin
+  wrapper, session trace trigger aliases, and agent identity tuple wrapper.
+- Removed retired PR tool family wording and helper guard labels.
+- Removed code smell ratchet wrapper and MCP server Eio transport mode
+  reexport.
+- Fixed `Execute` tool `rg` context path args.
+
+### Fixed
+- Regenerated `runtime-tunables.md` to fix env knob catalog drift.
+- Resolved pre-existing CI gate failures (version truth, code-smell
+  baseline drift, RFC numbering).
 
 ## [0.19.31] - 2026-05-26
 

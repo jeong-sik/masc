@@ -15,6 +15,7 @@
 open Alcotest
 
 module WO = Masc_mcp.Keeper_world_observation
+module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
 module DA = Masc_mcp.Keeper_decision_audit
 module TS = Masc_mcp.Tool_shard
 module KTP = Masc_mcp.Keeper_tool_policy
@@ -242,7 +243,7 @@ let make_obs_meta name =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  match KTypes.meta_of_json json with
+  match Keeper_meta_json_parse.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
 

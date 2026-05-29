@@ -167,7 +167,7 @@ val docker_mount_failure_details :
     container shares the host network namespace (needed for
     `git clone` / `gh push` from keepers running under this profile;
     see #10431).  The MASC label remains ["inherit"]. *)
-val docker_network_args : Keeper_types.network_mode -> string list * string
+val docker_network_args : Keeper_types_profile_sandbox.network_mode -> string list * string
 
 (** Docker [--ulimit nofile=<soft>:<hard>] argv fragment for keeper
     sandbox containers. *)
@@ -331,7 +331,7 @@ val docker_preflight_failure_message : docker_preflight -> string
     inventory remains in [docker_preflight] for doctor/status surfaces. *)
 val ensure_keeper_startup_preflight
   :  timeout_sec:float
-  -> sandbox_profile:Keeper_types.sandbox_profile
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
   -> (unit, string) result
 
 (** Lightweight image-presence gate for per-command execution paths. The

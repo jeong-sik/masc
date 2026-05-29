@@ -35,10 +35,7 @@ let fetch_limit limit = clamp ~min_v:limit ~max_v:1000 (limit * 10)
 
 let take = List.take
 
-let assoc_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
+let assoc_opt = Json_util.assoc_member_opt
 
 let string_member key json =
   match assoc_opt key json with

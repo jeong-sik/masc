@@ -1,6 +1,8 @@
 (* keeper_turn_slot — semaphores, autonomous wait queue, budget-exhaustion strikes, and the main [with_keeper_turn_slot] gate.  Extracted from keeper_keepalive.ml to isolate concurrency-control logic ... *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** The three semaphore pools that gate keeper turn admission. Closed sum type: adding a new pool requires updating every match site, which the compiler enforces exhaustively. *)
 type slot_pool = Keeper_turn_slot_types.slot_pool =

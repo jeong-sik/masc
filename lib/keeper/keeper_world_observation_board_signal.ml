@@ -1,6 +1,8 @@
 (** See [keeper_world_observation_board_signal.mli] for the contract. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module Message_scope = Keeper_world_observation_message_scope
 

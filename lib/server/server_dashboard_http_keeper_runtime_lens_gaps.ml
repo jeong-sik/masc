@@ -12,18 +12,7 @@ let first_non_empty_string_list values =
   | Some values -> values
   | None -> []
 
-let string_contains ~needle value =
-  let value = String.lowercase_ascii value in
-  let needle = String.lowercase_ascii needle in
-  let value_len = String.length value in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= value_len
-      && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
-    in
-    loop 0
+let string_contains = String_util.string_contains_substring_ci
 
 let runtime_lens_tool_surface_parts scan =
   (* sound-partial: allow absent runtime-lens decisions as empty evidence while
@@ -40,24 +29,23 @@ let runtime_lens_tool_surface_parts scan =
     | None -> `Assoc []
   in
   let requested_tools =
-    json_string_list_member "requested_tool_names" lane_decision
+    Json_util.get_string_list lane_decision "requested_tool_names"
   in
   let required_tools =
     first_non_empty_string_list
       [
-        json_string_list_member "required_tool_names" lane_decision;
-        json_string_list_member "required_tool_names" tool_decision;
+        Json_util.get_string_list lane_decision "required_tool_names";
+        Json_util.get_string_list tool_decision "required_tool_names";
       ]
   in
   let materialized_tools =
-    json_string_list_member "materialized_tool_names" lane_decision
+    Json_util.get_string_list lane_decision "materialized_tool_names"
   in
   let missing_required_tools =
     first_non_empty_string_list
       [
-        json_string_list_member "missing_required_tool_names_after_lane"
-          lane_decision;
-        json_string_list_member "missing_required_tool_names" tool_decision;
+        Json_util.get_string_list lane_decision "missing_required_tool_names_after_lane";
+        Json_util.get_string_list tool_decision "missing_required_tool_names";
       ]
   in
   ( tool_decision
@@ -92,20 +80,20 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
     || scan.context_compacted_event_count > 0
     || scan.event_bus_count > 0
   in
-  let claim_status = json_string_member_opt "status" claim_scope in
-  let claim_mode = json_string_member_opt "mode" claim_scope in
-  let claim_excluded_count = json_int_member_opt "excluded_count" claim_scope in
+  let claim_status = Json_util.get_string claim_scope "status" in
+  let claim_mode = Json_util.get_string claim_scope "mode" in
+  let claim_excluded_count = Json_util.get_int claim_scope "excluded_count" in
   let cascade_override =
     Option.value
-      (json_bool_member_opt "cascade_override" config_drift)
+      (Json_util.get_bool config_drift "cascade_override")
       ~default:false
   in
   let pre_dispatch_reason =
     match scan.latest_pre_dispatch_blocked_row with
     | Some row ->
       first_string_opt
-        [ json_string_member_opt "reason" row.Keeper_runtime_manifest.decision
-        ; json_string_member_opt "terminal_reason_code" row.Keeper_runtime_manifest.decision
+        [ Json_util.get_string row.Keeper_runtime_manifest.decision "reason"
+        ; Json_util.get_string row.Keeper_runtime_manifest.decision "terminal_reason_code"
         ; Some row.Keeper_runtime_manifest.status
         ]
     | None -> None
@@ -163,10 +151,10 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
                Some
                  (Printf.sprintf "default=%s live=%s"
                     (Option.value
-                       (json_string_member_opt "default_cascade_name" config_drift)
+                       (Json_util.get_string config_drift "default_cascade_name")
                        ~default:"unknown")
                     (Option.value
-                       (json_string_member_opt "live_cascade_name" config_drift)
+                       (Json_util.get_string config_drift "live_cascade_name")
                        ~default:"unknown"))
            }
            gaps
@@ -429,7 +417,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          match scan.provider_terminal_row with
          | Some row ->
            let decision = row.Keeper_runtime_manifest.decision in
-           (match json_string_member_opt "terminal_provider_kind" decision with
+           (match Json_util.get_string decision "terminal_provider_kind" with
             | Some _ -> gaps
             | None ->
               { code = "provider_provenance_missing"
@@ -490,7 +478,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          | Some row ->
            let decision = row.Keeper_runtime_manifest.decision in
            let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
-           (match json_string_member_opt "compaction_source" clock_refs with
+           (match Json_util.get_string clock_refs "compaction_source" with
             | Some _ -> gaps
             | None ->
               { code = "compaction_source_missing"
@@ -504,7 +492,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          match scan.latest_context_injected_row with
          | Some row ->
            let decision = row.Keeper_runtime_manifest.decision in
-           (match json_string_member_opt "context_digest" decision with
+           (match Json_util.get_string decision "context_digest" with
             | Some _ -> gaps
             | None ->
               { code = "context_digest_missing"
@@ -518,7 +506,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          match scan.latest_memory_injected_row with
          | Some row ->
            let decision = row.Keeper_runtime_manifest.decision in
-           (match json_string_member_opt "payload_digest" decision with
+           (match Json_util.get_string decision "payload_digest" with
             | Some _ -> gaps
             | None ->
               { code = "memory_payload_digest_missing"

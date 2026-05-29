@@ -8,6 +8,8 @@
     See Keeper_tool_policy_config for the declarative tool groups and presets. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let dedupe_tool_names names =
   dedupe_keep_order (names |> List.map String.trim |> List.filter (fun name -> name <> ""))

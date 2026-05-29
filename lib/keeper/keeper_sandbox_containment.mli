@@ -28,7 +28,7 @@
     A no-op (always [Ok ()]) for local keepers. *)
 val check_read_target :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   target:string ->
   (unit, string) result
 
@@ -37,6 +37,6 @@ val check_read_target :
     host writes are limited to the keeper playground bundle. *)
 val check_write_target :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   target:string ->
   (unit, string) result

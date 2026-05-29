@@ -7,6 +7,7 @@
     module. *)
 
 module Coord = Masc_mcp.Coord
+module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
@@ -79,7 +80,7 @@ let make_meta ~name ~sandbox =
         ("goal", `String "search files containment test");
         ("allowed_paths", `List [ `String "*" ]);
         ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
+          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -202,7 +203,7 @@ let blocked_by_sandbox_boundary raw =
       || starts_with "path_outside_project_root" err
 
 let test_legacy_keeper_unaffected () =
-  setup ~keeper_name:"alice" ~sandbox:Keeper_types.Local
+  setup ~keeper_name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "secret.txt" in
   let raw =
@@ -218,7 +219,7 @@ let test_legacy_keeper_unaffected () =
     (blocked_by_symmetric_sandbox raw)
 
 let test_docker_keeper_blocks_ls_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -237,7 +238,7 @@ let test_docker_keeper_blocks_ls_outside () =
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_blocks_cat_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "host_secret.txt" in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
@@ -254,7 +255,7 @@ let test_docker_keeper_blocks_cat_outside () =
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_blocks_rg_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -282,7 +283,7 @@ let test_docker_keeper_blocks_rg_outside () =
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_blocks_find_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -306,7 +307,7 @@ let test_docker_keeper_blocks_find_outside () =
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_allows_inside_playground () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
@@ -321,7 +322,7 @@ let test_docker_keeper_allows_inside_playground () =
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_relative_repos_path_resolves_inside_playground () =
-  setup ~keeper_name:"provider_k-coding" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"provider_k-coding" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
   ensure_dir repos;
@@ -336,7 +337,7 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
     Alcotest.fail ("bare repos should stay inside playground: " ^ e)
 
 let test_docker_relative_repos_cwd_resolves_inside_playground () =
-  setup ~keeper_name:"provider_k-coding" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"provider_k-coding" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let repo = Filename.concat playground "repos/masc-mcp" in
   ensure_dir repo;
@@ -351,7 +352,7 @@ let test_docker_relative_repos_cwd_resolves_inside_playground () =
     Alcotest.fail ("relative repos cwd should stay inside playground: " ^ e)
 
 let test_docker_container_cwd_maps_to_host_worktree () =
-  setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let host_worktree =
     Filename.concat playground "repos/masc-mcp/.worktrees/task-186"
@@ -376,7 +377,7 @@ let test_docker_container_cwd_maps_to_host_worktree () =
   | Error e -> Alcotest.fail ("write cwd should map container path: " ^ e)
 
 let test_docker_container_file_path_maps_to_host_worktree () =
-  setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let host_file =
     Filename.concat playground
@@ -399,7 +400,7 @@ let test_docker_container_file_path_maps_to_host_worktree () =
   | Error e -> Alcotest.fail ("file path should map container path: " ^ e)
 
 let test_docker_other_container_root_stays_blocked () =
-  setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
   let other_container_cwd =
     Filename.concat
@@ -414,7 +415,7 @@ let test_docker_other_container_root_stays_blocked () =
       (String_util.contains_substring e "path_outside_project_root")
 
 let test_docker_git_creds_contained () =
-  setup ~keeper_name:"poe" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "git_secret.txt" in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in

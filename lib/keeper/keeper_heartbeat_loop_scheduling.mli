@@ -23,6 +23,6 @@ val decide_keepalive_scheduling :
   ?cascade_status_of_name:
     (cascade_name:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   keepalive_scheduling_decision

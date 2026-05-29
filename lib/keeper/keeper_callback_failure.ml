@@ -5,7 +5,7 @@ let durable_store = "keeper_lifecycle_events"
 let dashboard_surface = "keeper_lifecycle"
 let stale_reason = "callback_exception"
 
-let record ~(base_dir : string) ~(meta : Keeper_types.keeper_meta)
+let record ~(base_dir : string) ~(meta : Keeper_meta_contract.keeper_meta)
     ~(callback : string) exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e

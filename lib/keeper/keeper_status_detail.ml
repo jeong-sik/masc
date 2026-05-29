@@ -7,6 +7,9 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_alerting
 open Agent_tool_dispatch_runtime
@@ -15,7 +18,7 @@ open Keeper_status_runtime
 open Keeper_status_metrics
 open Keeper_status_bridge
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
   match read_file_tail_lines_result path ~max_bytes ~max_lines with
@@ -187,7 +190,7 @@ let hash_status_args _config resolved_name args =
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
 let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
-let json_string_opt_member = Keeper_status_detail_observability.json_string_opt_member
+let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
@@ -717,7 +720,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
 
          let json = `Assoc ([
            ("name", `String name);
-           ("meta", meta_to_json m);
+           ("meta", Keeper_meta_json.meta_to_json m);
            ("goal", `String m.goal);
            ("short_goal", `String m.short_goal);
            ("mid_goal", `String m.mid_goal);
@@ -764,11 +767,11 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("sandbox_live", sandbox_live);
            ("effective_sandbox_image",
              Json_util.string_opt_to_json effective_sandbox_image);
-           ("tool_denylist", string_list_to_json m.tool_denylist);
-           ("allowed_tool_names", string_list_to_json allowed_tools);
-           ("allowed_tool_preview", string_list_to_json allowed_tool_preview);
+           ("tool_denylist", Json_util.json_string_list m.tool_denylist);
+           ("allowed_tool_names", Json_util.json_string_list allowed_tools);
+           ("allowed_tool_preview", Json_util.json_string_list allowed_tool_preview);
            ("latest_tool_names",
-             string_list_to_json tool_audit_snapshot.latest_tool_names);
+             Json_util.json_string_list tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",
              Json_util.int_opt_to_json tool_audit_snapshot.latest_tool_call_count);
            ("latest_action_source",
@@ -819,10 +822,10 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                `String (network_mode_to_string m.network_mode));
              ("effective_sandbox_image",
                Json_util.string_opt_to_json effective_sandbox_image);
-             ("allowed_paths", string_list_to_json m.allowed_paths);
-           ("allowed_tools", string_list_to_json allowed_tools);
-            ("available_internal_tools", string_list_to_json all_internal_tools);
-            ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
+             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
+           ("allowed_tools", Json_util.json_string_list allowed_tools);
+            ("available_internal_tools", Json_util.json_string_list all_internal_tools);
+            ("blocked_internal_tools", Json_util.json_string_list blocked_internal_tools);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
            ("auto_execution_session_enabled", `Bool false);
@@ -864,7 +867,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                else `String m.runtime.last_social_transition_reason);
              ("last_blocker",
                match m.runtime.last_blocker with
-               | Some info -> Keeper_types.blocker_info_to_json info
+               | Some info -> Keeper_meta_contract.blocker_info_to_json info
                | None -> `Null);
              ("last_need",
                if String.trim m.runtime.last_need = ""
@@ -980,7 +983,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
              ("sandbox_live", sandbox_live);
              ("effective_sandbox_image",
                Json_util.string_opt_to_json effective_sandbox_image);
-             ("allowed_paths", string_list_to_json m.allowed_paths);
+             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
              ("playground_repos",
                Keeper_sandbox_control.playground_repos_json
                  ~config:config ~meta:m);

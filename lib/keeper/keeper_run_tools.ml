@@ -4,6 +4,8 @@
    Extracted from keeper_agent_run.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 open Keeper_agent_error
@@ -17,7 +19,7 @@ module Tool_search = Keeper_run_tools_search
     they write into this single mutable record during Agent.run execution.
     After execution completes, {!freeze} produces an immutable snapshot. *)
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
-  { mutable meta : Keeper_types.keeper_meta
+  { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
   ; mutable completion_contract : Keeper_tool_completion_contract.completion_contract
@@ -34,7 +36,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
-  { out_meta : Keeper_types.keeper_meta
+  { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : tool_call_detail list
   ; out_completion_contract : Keeper_tool_completion_contract.completion_contract
   ; out_required_tool_use_seen : bool

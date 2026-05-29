@@ -170,7 +170,7 @@ let model_facing_name name =
 ;;
 
 let model_facing_allowed_tool_names allowed_tool_names =
-  allowed_tool_names |> List.map model_facing_name |> Keeper_types.dedupe_keep_order
+  allowed_tool_names |> List.map model_facing_name |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
 let allowed_hints ~allowed_tool_names =

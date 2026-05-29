@@ -6,6 +6,8 @@
    computed score+reasons pair, not a stateful FSM transition. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 
 let keeper_model_tools = Tool_shard.keeper_model_tools

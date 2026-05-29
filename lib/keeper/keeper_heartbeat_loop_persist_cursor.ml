@@ -26,6 +26,9 @@
     external modules — no parent-local dependencies. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
   let updated = Keeper_world_observation.apply_message_cursor_updates meta updates in

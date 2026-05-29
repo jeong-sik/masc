@@ -1,7 +1,7 @@
 
 (** Public facade for keeper MCP tools. *)
 
-type 'a context = 'a Keeper_types.context = {
+type 'a context = 'a Keeper_types_profile.context = {
   config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
@@ -10,7 +10,7 @@ type 'a context = 'a Keeper_types.context = {
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
 }
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 val schemas : Masc_domain.tool_schema list
 

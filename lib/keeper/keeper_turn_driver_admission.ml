@@ -22,30 +22,8 @@ let provider_config_identity_key (cfg : Llm_provider.Provider_config.t) =
       cfg.headers,
       cfg.supports_tool_choice_override )
 
-let runtime_candidates_of_providers tiered_providers provider_cfgs =
-  let tier_index = Hashtbl.create (List.length tiered_providers) in
-  List.iter
-    (fun (tiered : Cascade_catalog_runtime_named_providers.tiered_provider) ->
-       let key = provider_config_identity_key tiered.provider_cfg in
-       let queue =
-         match Hashtbl.find_opt tier_index key with
-         | Some queue -> queue
-         | None ->
-           let queue = Queue.create () in
-           Hashtbl.add tier_index key queue;
-           queue
-       in
-       Queue.add tiered.admission_key queue)
-    tiered_providers;
-  List.map
-    (fun provider_cfg ->
-       let admission_key =
-         match Hashtbl.find_opt tier_index (provider_config_identity_key provider_cfg) with
-         | Some queue when not (Queue.is_empty queue) -> Some (Queue.pop queue)
-         | _ -> None
-       in
-        Cascade_runtime_candidate.of_provider_config ?admission_key provider_cfg)
-    provider_cfgs
+let runtime_candidates_of_providers provider_cfgs =
+  Cascade_runtime_candidate.of_provider_configs provider_cfgs
 
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)

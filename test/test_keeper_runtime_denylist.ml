@@ -79,7 +79,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_types.write_meta ~force:true config initial_meta with
+  (match Keeper_meta_store.write_meta ~force:true config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
   (* 3. Call ensure_keeper_meta — should resync denylist from TOML *)
@@ -91,9 +91,9 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
         (list string)
         "returned meta denylist resynced from TOML"
         [ "toml-tool-x"; "toml-tool-y" ]
-        updated.Keeper_types.tool_denylist;
+        updated.Keeper_meta_contract.tool_denylist;
       (* 4b. Persisted meta also has TOML denylist *)
-      (match Keeper_types.read_meta config keeper_name with
+      (match Keeper_meta_store.read_meta config keeper_name with
       | Error e -> fail ("read_meta failed: " ^ e)
       | Ok None -> fail "meta should exist after ensure_keeper_meta"
       | Ok (Some persisted) ->
@@ -101,7 +101,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
             (list string)
             "persisted meta denylist resynced from TOML"
             [ "toml-tool-x"; "toml-tool-y" ]
-            persisted.Keeper_types.tool_denylist))
+            persisted.Keeper_meta_contract.tool_denylist))
 
 let () =
   run "Keeper_runtime denylist resync"

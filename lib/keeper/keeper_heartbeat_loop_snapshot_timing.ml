@@ -22,6 +22,8 @@
     Eio, Prometheus, Keeper_metrics, Log) directly. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let maybe_write_heartbeat_snapshot
       ~(ctx : _ context)

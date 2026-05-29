@@ -189,9 +189,7 @@ let config t = t.config
 
 (* ── JSON helpers (internal) ───────────────────────────────────── *)
 
-let assoc_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+let assoc_opt = Json_util.assoc_member_opt
 
 let field_int_opt name json =
   match assoc_opt name json with
@@ -335,17 +333,32 @@ let decode_dispatch ~bot_user_id ~event_name ~payload =
    suppressed (the "quiet, mention-triggered bot" default), per
    RFC-0203 §Shape interpretation. *)
 
-let message_passes_policy policy ~author_id ~mentions_bot =
-  match policy with
-  | All -> true
-  | Mention_only -> mentions_bot
-  | User_only id -> String.equal author_id id
+(* Self-skip guard: an inbound event whose actor is the bot itself
+   is always suppressed, regardless of trigger policy. [Mention_only]
+   is naturally safe — the bot doesn't @itself — but [All] accepts
+   everything and [User_only id] can collide with [bot_user_id] (the
+   operator pastes the wrong snowflake), so the guard is unconditional
+   to make the self-reply-loop class of bug structurally impossible. *)
+let is_self ~bot_user_id actor_id =
+  match bot_user_id with
+  | Some self -> String.equal self actor_id
+  | None -> false
 
-let reaction_passes_policy policy ~user_id =
-  match policy with
-  | All -> true
-  | Mention_only -> false
-  | User_only id -> String.equal user_id id
+let message_passes_policy policy ~bot_user_id ~author_id ~mentions_bot =
+  if is_self ~bot_user_id author_id then false
+  else
+    match policy with
+    | All -> true
+    | Mention_only -> mentions_bot
+    | User_only id -> String.equal author_id id
+
+let reaction_passes_policy policy ~bot_user_id ~user_id =
+  if is_self ~bot_user_id user_id then false
+  else
+    match policy with
+    | All -> true
+    | Mention_only -> false
+    | User_only id -> String.equal user_id id
 
 (* ── Outbound frame builders (internal) ────────────────────────── *)
 
@@ -496,12 +509,15 @@ let handle_dispatch t (frame : frame) =
              ] )
        | Ok (Message_create { author_id; mentions_bot; _ } as ev) ->
            if
-             message_passes_policy t'.config.trigger_policy ~author_id
+             message_passes_policy t'.config.trigger_policy
+               ~bot_user_id:t'.config.bot_user_id ~author_id
                ~mentions_bot
            then (t', [ Emit_event ev ])
            else no_op t'
        | Ok (Reaction_add { user_id; _ } as ev) ->
-           if reaction_passes_policy t'.config.trigger_policy ~user_id
+           if
+             reaction_passes_policy t'.config.trigger_policy
+               ~bot_user_id:t'.config.bot_user_id ~user_id
            then (t', [ Emit_event ev ])
            else no_op t'
        | Ok (Ignored "RESUMED") ->

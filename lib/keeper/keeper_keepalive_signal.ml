@@ -5,6 +5,9 @@
    Extracted from keeper_keepalive.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 
@@ -67,7 +70,7 @@ let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
    skip the [current_task_id] field or persist a different id. *)
 let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
   ignore meta; ignore task_id
-  [@@fsm_guard "meta.Keeper_types.current_task_id = Some task_id"]
+  [@@fsm_guard "meta.current_task_id = Some task_id"]
 
 (* HeartbeatTick: the [compare_and_set wakeup true false] in
    [interruptible_sleep] succeeded — wakeup transitioned TRUE -> FALSE
@@ -234,9 +237,8 @@ let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.keeper_boa
       ; "author", `String signal.author
       ; "title", `String signal.title
       ; "content", `String signal.content
-      ; "hearth", (match signal.hearth with Some v -> `String v | None -> `Null)
-      ; ( "updated_at_unix"
-        , match signal.updated_at with Some v -> `Float v | None -> `Null )
+      ; "hearth", Json_util.string_opt_to_json signal.hearth
+      ; ( "updated_at_unix", Json_util.float_opt_to_json signal.updated_at )
       ; "wake_reason", `String reason
       ]
     |> Yojson.Safe.to_string

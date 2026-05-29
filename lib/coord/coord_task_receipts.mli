@@ -21,8 +21,6 @@ val latest_execution_receipt_json
   -> agent_name:string
   -> Yojson.Safe.t option
 
-val json_string_list : string -> Yojson.Safe.t -> string list
-
 val latest_receipt_blocks_required_tool_claim
   :  Coord_utils.config
   -> agent_name:string

@@ -1,7 +1,6 @@
 (** Dashboard Goals — goal tree with explicit task linkage, health badges,
     and goal-first detail evidence. *)
 
-open Yojson.Safe.Util
 
 
 
@@ -15,7 +14,7 @@ include Dashboard_goals_types
 let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
   let labels = [ ("goal_id", goal.id) ] in
   let measured, pct =
-    match attainment |> member "attainment_pct" |> to_int_option with
+    match Json_util.get_int attainment "attainment_pct" with
     | Some pct -> (1.0, float_of_int pct)
     | None -> (0.0, 0.0)
   in
@@ -32,7 +31,7 @@ let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
 
 
 
-let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_types.keeper_meta) =
+let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
   | exn ->
       let error = Printexc.to_string exn in
@@ -60,9 +59,9 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
     | Some parent_id -> not (List.mem parent_id goal_ids)
   in
   let keeper_metas =
-    Keeper_types.keeper_names config
+    Keeper_meta_store.keeper_names config
     |> List.filter_map (fun keeper_name ->
-           match Keeper_types.read_meta config keeper_name with
+           match Keeper_meta_store.read_meta config keeper_name with
            | Ok (Some meta) -> Some meta
            | Ok None | Error _ -> None)
   in
@@ -73,7 +72,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
   in
   let latest_receipts =
     keeper_metas
-    |> List.map (fun (meta : Keeper_types.keeper_meta) -> meta.name)
+    |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
   let context =
@@ -85,7 +84,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
       latest_receipts;
       latest_runtime_trusts =
         keeper_metas
-        |> List.map (fun (meta : Keeper_types.keeper_meta) ->
+        |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) ->
                ( meta.name,
                  keeper_runtime_trust_snapshot_json ~config ~meta ));
     }
@@ -139,7 +138,7 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
     requests;
   List.iter
     (fun json ->
-      match json |> member "goal_id" |> to_string_option with
+      match Json_util.get_string json "goal_id" with
       | Some goal_id ->
           let existing =
             Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
@@ -198,18 +197,12 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("badges", `List (List.map (fun badge -> `String badge) node.badges));
       ("status_reason", `String node.status_reason);
       ("priority", `Int goal.priority);
-      ("metric",
-       match goal.metric with Some metric -> `String metric | None -> `Null);
-      ("target_value",
-       match goal.target_value with Some value -> `String value | None -> `Null);
+      ("metric", Json_util.string_opt_to_json goal.metric);
+      ("target_value", Json_util.string_opt_to_json goal.target_value);
       ( "require_completion_approval",
         `Bool goal.Goal_store.require_completion_approval );
-      ("due_date",
-       match goal.due_date with Some due_date -> `String due_date | None -> `Null);
-      ("parent_goal_id",
-       match goal.parent_goal_id with
-       | Some parent_goal_id -> `String parent_goal_id
-       | None -> `Null);
+      ("due_date", Json_util.string_opt_to_json goal.due_date);
+      ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("convergence", `Float node.convergence);
       ("convergence_pct", `Int (int_of_float (node.convergence *. 100.0)));
       ("attainment", attainment);
@@ -300,9 +293,9 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
   | Some node ->
       let keeper_details =
-        Keeper_types.keeper_names config
+        Keeper_meta_store.keeper_names config
         |> List.filter_map (fun keeper_name ->
-               match Keeper_types.read_meta config keeper_name with
+               match Keeper_meta_store.read_meta config keeper_name with
                | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->
                    let latest_receipt =
                      List.assoc_opt meta.name

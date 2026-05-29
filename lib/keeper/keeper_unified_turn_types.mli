@@ -77,7 +77,7 @@ val record_turn_tool_events :
     [Keeper_turn_helpers.record_pre_dispatch_terminal_observation]. *)
 val record_streaming_cancelled_observation :
   config:Coord.config ->
-  run_meta:Keeper_types.keeper_meta ->
+  run_meta:Keeper_meta_contract.keeper_meta ->
   run_generation:int ->
   cascade_name:Cascade_name.t ->
   keeper_turn_id:int ->

@@ -1,7 +1,10 @@
-let known_sidecars = [ "discord"; "slack"; "telegram"; "imessage"; "cli" ]
+(* RFC-0203 Phase 3: the "discord" sidecar was deleted. The Discord
+   connector now lives in-process under {!Server_discord_in_process_gateway}
+   and {!Channel_gate_discord_state}; there is no external process
+   for the doctor dispatcher to invoke. *)
+let known_sidecars = [ "slack"; "telegram"; "imessage"; "cli" ]
 
 let sidecar_dir = function
-  | "discord" -> Some "sidecars/discord-bot"
   | "slack" -> Some "sidecars/slack-bot"
   | "telegram" -> Some "sidecars/telegram-bot"
   | "imessage" -> Some "sidecars/imessage-bot"

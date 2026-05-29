@@ -11,6 +11,7 @@
    Closes the §R1 gap from the 2026-05-20 consolidated state report. *)
 
 module Classify = Masc_mcp.Cascade_error_classify
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Keeper_types = Masc_mcp.Keeper_types
 
 let pp_internal_error fmt = function
@@ -51,7 +52,7 @@ let test_roundtrip_other_detail () =
       "tier-group.primary"
       (Classify.cascade_name_to_string cascade_name);
     (match reason with
-     | Keeper_types.Other_detail msg ->
+     | Keeper_meta_contract.Other_detail msg ->
        Alcotest.(check string) "Other_detail payload preserved" "all providers tried" msg
      | _ -> Alcotest.fail "expected Other_detail reason")
   | _ -> Alcotest.fail "expected Cascade_exhausted"
@@ -74,7 +75,7 @@ let test_roundtrip_structural_attempt_timeout () =
   match decoded with
   | Some (Classify.Cascade_exhausted { reason; _ }) ->
     (match reason with
-     | Keeper_types.Structural_attempt_timeout { detail } ->
+     | Keeper_meta_contract.Structural_attempt_timeout { detail } ->
        Alcotest.(check string)
          "Structural_attempt_timeout detail preserved"
          "max_execution_time_s exceeded"
@@ -102,7 +103,7 @@ let test_roundtrip_bare_string_reason () =
          (fun fmt _ -> Format.fprintf fmt "reason")
          ( = ))
       "bare string reason decoded"
-      Keeper_types.No_providers_available
+      Keeper_meta_contract.No_providers_available
       reason
   | _ -> Alcotest.fail "expected Cascade_exhausted"
 
@@ -122,7 +123,7 @@ let test_roundtrip_capacity_backpressure () =
   match decoded with
   | Some
       (Classify.Capacity_backpressure
-         { cascade_name; source; detail; retry_after_sec }) ->
+         { cascade_name; source; detail; retry_after }) ->
     Alcotest.(check string)
       "cascade name preserved"
       "tier-group.primary"
@@ -135,6 +136,14 @@ let test_roundtrip_capacity_backpressure () =
       "detail preserved"
       "client capacity key provider_k is full"
       detail;
+    (* a wire value without [retry_after_synthetic] decodes to [Explicit]
+       (legacy default), preserving the seconds *)
+    let retry_after_sec =
+      match retry_after with
+      | Masc_mcp.Cascade_internal_error.Explicit s
+      | Masc_mcp.Cascade_internal_error.Synthetic_default s -> Some s
+      | Masc_mcp.Cascade_internal_error.No_retry_hint -> None
+    in
     Alcotest.(check (option (float 0.001)))
       "retry_after preserved"
       (Some 2.5)

@@ -186,14 +186,12 @@ let handle_keeper_get_subroutes state req request reqd =
               ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
               ("dashboard_surface", `String dashboard_surface);
               ("freshness_slo_s", `Float freshness_slo_s);
-              ( "latest_ts_unix",
-                match latest_ts with Some ts -> `Float ts | None -> `Null );
+              ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
               ( "latest_ts_iso",
                 match latest_ts with
                 | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
                 | None -> `Null );
-              ( "latest_age_s",
-                match latest_age_s with Some age -> `Float age | None -> `Null );
+              ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
               ("health", `String health);
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
@@ -280,14 +278,12 @@ let handle_keeper_get_subroutes state req request reqd =
         ("durable_store", `String (Filename.concat masc_root "tool_calls"));
         ("dashboard_surface", `String dashboard_surface);
         ("freshness_slo_s", `Float freshness_slo_s);
-        ( "latest_ts_unix",
-          match latest_ts with Some ts -> `Float ts | None -> `Null );
+        ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
         ( "latest_ts_iso",
           match latest_ts with
           | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
           | None -> `Null );
-        ( "latest_age_s",
-          match latest_age_s with Some age -> `Float age | None -> `Null );
+        ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
         ("health", `String health);
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
@@ -306,7 +302,7 @@ let handle_keeper_get_subroutes state req request reqd =
         reqd
     else
       let config = state.Mcp_server.room_config in
-      (match Keeper_types.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Error e ->
          respond_error ~status:`Internal_server_error reqd e
        | Ok None ->
@@ -433,7 +429,7 @@ let handle_keeper_get_subroutes state req request reqd =
          Keepers may also have a separate agent_name — look up both. *)
       let config = state.Mcp_server.room_config in
       let agent_name_opt =
-        match Keeper_types.read_meta config name with
+        match Keeper_meta_store.read_meta config name with
         | Ok (Some m) when m.agent_name <> name -> Some m.agent_name
         | _ -> None
       in
@@ -477,7 +473,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
       let stats = Thompson_sampling.get_stats name in
-      let meta = Keeper_types.read_meta
+      let meta = Keeper_meta_store.read_meta
           state.Mcp_server.room_config name in
       let tool_count = match meta with
         | Ok (Some m) ->
@@ -510,7 +506,7 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some m) ->
           let routing =
             Keeper_cascade_routing.select_cascade
-              ~base_cascade:(Keeper_types.cascade_name_of_meta m) ~phase:current
+              ~base_cascade:(Keeper_meta_contract.cascade_name_of_meta m) ~phase:current
           in
           let models = [ "candidate" ] in
           let provider_health = [] in
@@ -662,7 +658,7 @@ let handle_keeper_get_subroutes state req request reqd =
     in
     let json =
       `Assoc [
-        "generated_at", `Float (Unix.gettimeofday ());
+        "generated_at", `String (Masc_domain.now_iso ());
         "count", `Int (List.length snapshots);
         "snapshots",
           `List

@@ -833,6 +833,54 @@ let test_release_stale_claims_preserves_other_agent_task () =
   )
 
 
+(* AwaitingVerification tasks with stale assignees must be released
+   back to Todo, just like Claimed/InProgress. This closes the
+   verification deadlock where a zombie assignee blocks the task
+   indefinitely — the deadline mechanism only handles verifier absence,
+   not assignee zombification. *)
+let test_release_stale_claims_releases_stale_verification () =
+  with_test_env (fun config ->
+    let _ = Coord.join config ~agent_name:stale_nick ~capabilities:[] () in
+    let _ = Coord.add_task config ~title:"Stale verification" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
+    (* Force task into AwaitingVerification with an old submitted_at
+       by reading the backlog, mutating the task status, and writing back. *)
+    let old_time = "2020-01-01T00:00:00Z" in
+    let backlog = Coord.read_backlog config in
+    let updated_tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           if task.id = "task-001"
+           then
+             { task with
+               task_status =
+                 Masc_domain.AwaitingVerification
+                   { assignee = stale_nick
+                   ; submitted_at = old_time
+                   ; verification_id = "vrf-test"
+                   ; deadline = None
+                   }
+             }
+           else task)
+        backlog.tasks
+    in
+    Coord.write_backlog config { backlog with tasks = updated_tasks };
+    (* ttl_seconds:0.0 forces any timestamp to be stale *)
+    let released = Coord.release_stale_claims config ~ttl_seconds:0.0 in
+    Alcotest.(check (list (pair string string)))
+      "task-001 released from stale verification"
+      [("task-001", stale_nick)] released;
+    (* Verify task is back to Todo *)
+    let backlog = Coord.read_backlog config in
+    match List.find_opt (fun t -> (t : Masc_domain.task).id = "task-001") backlog.tasks with
+    | Some task ->
+      (match task.task_status with
+       | Masc_domain.Todo -> ()
+       | other -> Alcotest.failf "expected Todo, got %s"
+           (Masc_domain.task_status_to_string other))
+    | None -> Alcotest.fail "task-001 not found in backlog"
+  )
+
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
     (* Heartbeat for non-joined agent *)
@@ -1783,6 +1831,8 @@ let () =
         test_release_stale_claims_clears_agent_current_task;
       Alcotest.test_case "release stale claims preserves other agent task" `Quick
         test_release_stale_claims_preserves_other_agent_task;
+      Alcotest.test_case "release stale claims releases stale verification" `Quick
+        test_release_stale_claims_releases_stale_verification;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

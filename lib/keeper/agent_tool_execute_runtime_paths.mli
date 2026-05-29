@@ -5,12 +5,12 @@ val replace_all_substrings :
 
 val rewrite_turn_runtime_paths_to_host :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
 
 val rewrite_docker_host_paths_to_container :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string

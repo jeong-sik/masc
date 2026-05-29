@@ -8,12 +8,11 @@
 open Masc_domain
 open Server_utils
 
-let compact_preview = Server_dashboard_http_json_utils.compact_preview
 let json_member = Server_dashboard_http_json_utils.json_member
-let json_string = Server_dashboard_http_json_utils.json_string
-let json_int = Server_dashboard_http_json_utils.json_int
-let json_float = Server_dashboard_http_json_utils.json_float
-let json_bool = Server_dashboard_http_json_utils.json_bool
+let json_string key json = Json_util.get_string json key
+let json_int key json = Json_util.get_int json key
+let json_float key json = Json_util.get_float json key
+let json_bool key json = Json_util.get_bool json key
 
 let compact_receipt_error_json = Server_dashboard_compact_receipt_json.compact_receipt_error_json
 let compact_receipt_cascade_json = Server_dashboard_compact_receipt_json.compact_receipt_cascade_json
@@ -134,7 +133,7 @@ let find_override_field_source field sources =
 ;;
 
 let composite_config_drift_json ~config ~keeper_name =
-  match Keeper_types.read_meta config keeper_name with
+  match Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = Json_util.get_string_list sources "override_fields" in

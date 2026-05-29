@@ -26,13 +26,10 @@ let task_id_scope_of_tool_input ~tool_name input =
   else None
 ;;
 
-let first_some left right =
-  match left with
-  | Some _ -> left
-  | None -> right
+let first_some = Dashboard_utils.first_some
 ;;
 
-let current_task_id_of_meta (meta : Keeper_types.keeper_meta) =
+let current_task_id_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id
 ;;
 

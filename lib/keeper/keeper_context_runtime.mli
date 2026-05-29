@@ -7,6 +7,8 @@
     are provided directly by this module. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** {1 Working Context Types (re-exported from Keeper_types)} *)
 
@@ -286,7 +288,15 @@ val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resoluti
 val room_cursor_for : keeper_meta -> string -> int
 val set_room_cursor : keeper_meta -> string -> int -> keeper_meta
 val room_ids_for_meta : Coord.config -> keeper_meta -> string list
-val ensure_keeper_room_presence : Coord.config -> keeper_meta -> keeper_meta
+type room_presence_error = {
+  room_id : string;
+  exn_msg : string;
+}
+
+val ensure_keeper_room_presence
+  :  Coord.config
+  -> keeper_meta
+  -> keeper_meta * room_presence_error list
 
 (** {1 Mention Detection} *)
 

@@ -4,19 +4,6 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let json_string_opt = Json_util.string_opt_to_json
-
-let json_int_opt = Json_util.int_opt_to_json
-
-let json_string_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List items ->
-    List.filter_map
-      (function
-        | `String value when String.trim value <> "" -> Some value
-        | _ -> None)
-      items
-  | _ -> []
 
 let clock_refs decision =
   match Yojson.Safe.Util.member "clock_refs" decision with
@@ -25,7 +12,7 @@ let clock_refs decision =
 
 let clock_string row key =
   match clock_refs row.Keeper_runtime_manifest.decision with
-  | Some refs -> json_string_member_opt key refs
+  | Some refs -> Json_util.get_string refs key
   | None -> None
 
 let clock_string_non_empty row key =
@@ -76,12 +63,12 @@ let fallback_checkpoint_id row =
   let decision = row.Keeper_runtime_manifest.decision in
   first_string_opt
     [
-      json_string_member_opt "session_id" decision
+      Json_util.get_string decision "session_id"
       |> Option.map (fun session_id ->
         Printf.sprintf "checkpoint:%s:oas-%s" session_id (oas_turn_label row));
       basename_opt row.Keeper_runtime_manifest.links.checkpoint_path
       |> Option.map (fun base -> "checkpoint:" ^ base);
-      json_string_member_opt "checkpoint_path" decision
+      Json_util.get_string decision "checkpoint_path"
       |> basename_opt
       |> Option.map (fun base -> "checkpoint:" ^ base);
     ]
@@ -204,26 +191,26 @@ let clock_edge_json ~idx ~provider_attempt_index row =
     first_string_opt
       [
         clock_string row "event_bus_correlation_id";
-        json_string_member_opt "correlation_id" decision;
+        Json_util.get_string decision "correlation_id";
       ]
   in
   let event_bus_run_id =
     first_string_opt
       [
         clock_string row "event_bus_run_id";
-        json_string_member_opt "run_id" decision;
+        Json_util.get_string decision "run_id";
       ]
   in
   let event_bus_event_count =
     match event with
     | Keeper_runtime_manifest.Event_bus_correlated ->
-      json_int_member_opt "event_count" decision
+      Json_util.get_int decision "event_count"
     | _ -> None
   in
   let event_bus_payload_kinds =
     match event with
     | Keeper_runtime_manifest.Event_bus_correlated ->
-      json_string_list_member "payload_kinds" decision
+      Json_util.get_string_list decision "payload_kinds"
     | _ -> []
   in
   `Assoc
@@ -257,38 +244,38 @@ let clock_edge_json ~idx ~provider_attempt_index row =
            | Some value -> value
            | None -> event_source_clock event) );
       ( "started_at",
-        json_string_opt
+        Json_util.string_opt_to_json
           (first_string_opt [ clock_string row "started_at"; event_started_at row ]) );
       ( "finished_at",
-        json_string_opt
+        Json_util.string_opt_to_json
           (first_string_opt [ clock_string row "finished_at"; event_finished_at row ]) );
       ("trace_id", `String row.Keeper_runtime_manifest.trace_id);
-      ("keeper_turn_id", json_int_opt row.Keeper_runtime_manifest.keeper_turn_id);
-      ("oas_turn_count", json_int_opt row.Keeper_runtime_manifest.oas_turn_count);
-      ("provider_attempt_id", json_string_opt provider_attempt_id);
-      ("tool_batch_id", json_string_opt tool_batch_id);
-      ("checkpoint_id", json_string_opt checkpoint_id);
-      ("compaction_id", json_string_opt compaction_id);
-      ("memory_injection_id", json_string_opt memory_injection_id);
-      ("event_bus_correlation_id", json_string_opt event_bus_correlation_id);
-      ("event_bus_run_id", json_string_opt event_bus_run_id);
-      ("event_bus_event_count", json_int_opt event_bus_event_count);
+      ("keeper_turn_id", Json_util.int_opt_to_json row.Keeper_runtime_manifest.keeper_turn_id);
+      ("oas_turn_count", Json_util.int_opt_to_json row.Keeper_runtime_manifest.oas_turn_count);
+      ("provider_attempt_id", Json_util.string_opt_to_json provider_attempt_id);
+      ("tool_batch_id", Json_util.string_opt_to_json tool_batch_id);
+      ("checkpoint_id", Json_util.string_opt_to_json checkpoint_id);
+      ("compaction_id", Json_util.string_opt_to_json compaction_id);
+      ("memory_injection_id", Json_util.string_opt_to_json memory_injection_id);
+      ("event_bus_correlation_id", Json_util.string_opt_to_json event_bus_correlation_id);
+      ("event_bus_run_id", Json_util.string_opt_to_json event_bus_run_id);
+      ("event_bus_event_count", Json_util.int_opt_to_json event_bus_event_count);
       ("event_bus_payload_kinds", Json_util.json_string_list event_bus_payload_kinds);
-      ("parent_event_id", json_string_opt (clock_string row "parent_event_id"));
-      ("caused_by", json_string_opt (clock_string row "caused_by"));
+      ("parent_event_id", Json_util.string_opt_to_json (clock_string row "parent_event_id"));
+      ("caused_by", Json_util.string_opt_to_json (clock_string row "caused_by"));
       ( "links",
         `Assoc
           [
-            ("receipt_path", json_string_opt row.Keeper_runtime_manifest.links.receipt_path);
-            ("checkpoint_path", json_string_opt row.Keeper_runtime_manifest.links.checkpoint_path);
+            ("receipt_path", Json_util.string_opt_to_json row.Keeper_runtime_manifest.links.receipt_path);
+            ("checkpoint_path", Json_util.string_opt_to_json row.Keeper_runtime_manifest.links.checkpoint_path);
             ( "tool_call_log_path",
-              json_string_opt row.Keeper_runtime_manifest.links.tool_call_log_path );
+              Json_util.string_opt_to_json row.Keeper_runtime_manifest.links.tool_call_log_path );
       ] );
     ]
 
-let edge_string key edge = json_string_member_opt key edge
-let edge_int key edge = json_int_member_opt key edge
-let edge_string_list key edge = json_string_list_member key edge
+let edge_string key edge = Json_util.get_string edge key
+let edge_int key edge = Json_util.get_int edge key
+let edge_string_list key edge = Json_util.get_string_list edge key
 
 let clock_edge_jsons scan =
   let provider_attempt_index = ref 0 in

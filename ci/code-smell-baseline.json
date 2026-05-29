@@ -45,7 +45,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3105,
+      "baseline": 3096,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -339,10 +339,6 @@
         {
           "file": "lib/cascade/cascade_observation.ml",
           "value": 5
-        },
-        {
-          "file": "lib/cascade/cascade_openai_probe.ml",
-          "value": 4
         },
         {
           "file": "lib/cascade/cascade_pool.ml",
@@ -935,10 +931,6 @@
         {
           "file": "lib/gate/discord_gateway_state.ml",
           "value": 8
-        },
-        {
-          "file": "lib/gate/discord_rest_client.ml",
-          "value": 4
         },
         {
           "file": "lib/gate/gate_protocol.ml",
@@ -1706,7 +1698,7 @@
         },
         {
           "file": "lib/keeper/keeper_tool_progress.ml",
-          "value": 6
+          "value": 5
         },
         {
           "file": "lib/keeper/keeper_tool_resolution.ml",
@@ -3097,7 +3089,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 62,
+      "baseline": 61,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3210,10 +3202,6 @@
         },
         {
           "file": "lib/keeper/keeper_persona_authoring.ml",
-          "value": 1
-        },
-        {
-          "file": "lib/keeper/keeper_supervisor_launch.ml",
           "value": 1
         },
         {

@@ -191,7 +191,7 @@ let sandbox_worktree_code_path path =
 
 let sandboxed_code_write_rule_label
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~tool_name
       ~input
       ~risk_level

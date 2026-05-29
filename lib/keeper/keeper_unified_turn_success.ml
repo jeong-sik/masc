@@ -4,6 +4,7 @@ module KCB = Keeper_turn_cascade_budget
 module KEC = Keeper_context_runtime
 module KUM = Keeper_unified_metrics
 module Social = Keeper_social_model
+open Keeper_meta_contract
 
 (* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
 let runtime_lane_label =
@@ -32,13 +33,13 @@ let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_block
         KEC.dispatch_keeper_phase_event
           ~config
           ~origin:Keeper_registry.Post_turn_lifecycle
-          ~keeper_name:meta.Keeper_types.name
+          ~keeper_name:meta.name
           Keeper_state_machine.Compaction_started)
       ~on_handoff_started:(fun () ->
         KEC.dispatch_keeper_phase_event
           ~config
           ~origin:Keeper_registry.Post_turn_lifecycle
-          ~keeper_name:meta.Keeper_types.name
+          ~keeper_name:meta.name
           Keeper_state_machine.Handoff_started)
       ~meta
       ~model:result.Keeper_agent_run.model_used
@@ -49,7 +50,7 @@ let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_block
   in
   KEC.dispatch_post_turn_lifecycle_events
     ~config
-    ~keeper_name:meta.Keeper_types.name
+    ~keeper_name:meta.name
     lifecycle;
   lifecycle
 ;;
@@ -58,8 +59,8 @@ let apply_loop_detectors ~config updated_meta result =
   let updated_meta =
     match
       Keeper_stay_silent_loop_detector.record_turn
-        ~keeper_name:updated_meta.Keeper_types.name
-        ~speech_act:updated_meta.Keeper_types.runtime.last_speech_act
+        ~keeper_name:updated_meta.Keeper_meta_contract.name
+        ~speech_act:updated_meta.runtime.last_speech_act
     with
     | Keeper_stay_silent_loop_detector.Normal -> updated_meta
     | Keeper_stay_silent_loop_detector.Loop_detected { streak; threshold } ->
@@ -104,7 +105,7 @@ let apply_loop_detectors ~config updated_meta result =
         | _ -> Keeper_tool_progress.Streak_reset
   in
   Keeper_passive_loop_detector.record_turn_effect
-    ~keeper_name:updated_meta.Keeper_types.name
+    ~keeper_name:updated_meta.name
     turn_effect;
   updated_meta
 ;;
@@ -164,7 +165,7 @@ let append_metrics_snapshot
     Prometheus.inc_counter
       Keeper_metrics.(to_string MetricEmitDropped)
       ~labels:
-        [ "keeper", updated_meta.Keeper_types.name
+        [ "keeper", updated_meta.name
         ; "channel", channel
         ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
         ]
@@ -175,7 +176,7 @@ let append_metrics_snapshot
     Prometheus.inc_counter
       Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
       ~labels:
-        [ "keeper", meta.Keeper_types.name
+        [ "keeper", meta.Keeper_meta_contract.name
         ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
         ]
       ()
@@ -197,7 +198,7 @@ let emit_activity_graph
     let event =
       Activity_graph.emit
         config
-        ~actor:{ kind = "agent"; id = updated_meta.Keeper_types.agent_name }
+        ~actor:{ kind = "agent"; id = updated_meta.Keeper_meta_contract.agent_name }
         ~kind:"keeper.turn_completed"
         ~payload:
           (`Assoc
@@ -253,20 +254,20 @@ let emit_activity_graph
     in
     Log.Keeper.debug
       "%s: activity graph turn_completed emitted seq=%d"
-      updated_meta.Keeper_types.name
+      updated_meta.name
       event.seq
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
       ~config
-      ~keeper_name:updated_meta.Keeper_types.name
+      ~keeper_name:updated_meta.name
       ~side_effect:"activity graph turn_completed emit"
       (Printexc.to_string exn)
 ;;
 
 let record_accountability ~config ~updated_meta ~social_state ~result claim =
-  let trace_id = Keeper_id.Trace_id.to_string updated_meta.Keeper_types.runtime.trace_id in
+  let trace_id = Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id in
   let validated_evidence = KUM.visible_run_validation result in
   let strong_evidence =
     KUM.has_substantive_tool_calls result.Keeper_agent_run.tools_used
@@ -319,7 +320,7 @@ let emit_usage_metrics_and_log
   in
   Prometheus.inc_counter
     Keeper_metrics.(to_string Turns)
-    ~labels:[ "keeper_name", updated_meta.Keeper_types.name; "outcome", outcome_label ]
+    ~labels:[ "keeper_name", updated_meta.name; "outcome", outcome_label ]
     ();
   if usage_trusted
   then (
@@ -396,12 +397,12 @@ let emit_usage_metrics_and_log
 
 let persist_success_meta ~config ~original_meta ~updated_meta =
   let updated_meta =
-    if updated_meta.Keeper_types.auto_resume_after_sec <> None
+    if updated_meta.auto_resume_after_sec <> None
     then { updated_meta with auto_resume_after_sec = None }
     else updated_meta
   in
   (match
-     Keeper_types.write_meta_with_merge
+     Keeper_meta_store.write_meta_with_merge
        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
        config
        updated_meta
@@ -413,18 +414,18 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
        ~labels:
          [ "keeper", updated_meta.name
          ; ( "phase"
-           , if Keeper_types.is_version_conflict_error msg
+           , if Keeper_meta_store.is_version_conflict_error msg
              then "keeper_cycle_cas_race"
              else "keeper_cycle" )
          ]
        ();
-     if Keeper_types.is_version_conflict_error msg
+     if Keeper_meta_store.is_version_conflict_error msg
      then Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
      else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
   Prometheus.inc_counter
     Keeper_metrics.(to_string WriteMetaCycleFailures)
     ~labels:
-      [ "keeper", original_meta.Keeper_types.name
+      [ "keeper", original_meta.name
       ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
       ]
     ();
@@ -436,7 +437,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
     Log.Keeper.info
       "keeper:%s turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
-      updated_meta.Keeper_types.name
+      updated_meta.name
       turns_used
       limit;
     Keeper_registry.reset_turn_failures
@@ -573,7 +574,7 @@ let handle
     result.Keeper_agent_run.tool_calls
     |> List.map (fun (d : Keeper_agent_run.tool_call_detail) ->
        ( { tool_name = d.tool_name; outcome = d.outcome }
-         : Keeper_types.tool_call_summary ))
+         : Keeper_meta_contract.tool_call_summary ))
     |> fun l ->
     let rec take n = function [] -> [] | h :: t -> if n <= 0 then [] else h :: take (n - 1) t in
     take max_tool_calls l
@@ -584,7 +585,7 @@ let handle
     }
   in
   Keeper_turn_fsm.emit_transition
-    ~keeper_name:meta.Keeper_types.name
+    ~keeper_name:meta.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Streaming
     Keeper_turn_fsm.Completing;

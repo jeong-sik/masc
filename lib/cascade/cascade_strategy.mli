@@ -8,10 +8,11 @@
     after a backoff sleep); the strategy can return a different ordering
     because health and capacity signals may have changed.
 
-    The shipped runtime supports two operator-visible strategies:
-    [Failover] and [Priority_tier].  Older experimental strategies were
-    retired from the public ADT so they cannot be selected accidentally
-    by config, tests, or internal callers.
+    The shipped runtime supports a single operator-visible strategy:
+    [Failover].  Older experimental strategies (priority-tier and the
+    pre-RFC-0058 tier-group routing) were retired from the public ADT so
+    they cannot be selected accidentally by config, tests, or internal
+    callers.
 
     @since 0.9.6 *)
 
@@ -40,8 +41,9 @@ type signal_ctx = {
       current shipped strategies do not read it. *)
 
   cascade_name : Cascade_name.t;
-  (** Cascade identifier (the [<name>] in [<name>_models]).  Used for
-      priority-tier starvation telemetry. *)
+  (** Cascade identifier (the [<name>] in [<name>_models]).  Kept in the
+      signal context for call-site stability; current shipped strategies
+      do not read it. *)
 }
 
 (** {1 Cycle policy — orthogonal to strategy kind} *)
@@ -74,16 +76,8 @@ val backoff_ms : cycle_policy -> cycle:int -> int
 type kind =
   | Failover
     (** S1 — input order preserved, always-available.  Equivalent to
-        the pre-strategy behaviour (linear failover). *)
-
-  | Priority_tier
-    (** S2 — providers grouped into ordered tiers via [tiers] in {!t}.
-        Cycle [n] only considers tier [n] (clamped to last tier).
-        Within a tier, capacity-aware filtering is applied; the tier
-        is "active" iff at least one of its providers survives the
-        filter, otherwise the cycle yields the empty list and the
-        caller advances to the next cycle (i.e. next tier).
-        @since 0.9.7 *)
+        the pre-strategy behaviour (linear failover).  The sole shipped
+        strategy after priority-tier removal. *)
 [@@deriving tla]
 (** [@@deriving tla] generates [to_tla_symbol] (kind -> string),
     [all_symbols] (string list), and [all_states] (kind list) so
@@ -124,17 +118,10 @@ val parse_config_kind : string -> (kind, string) result
 type t = {
   kind : kind;
   cycle : cycle_policy;
-
-  tiers : string list list;
-  (** Used only by [Priority_tier].  Each inner list is the set of
-      provider keys (matched against [adapter.health_key]) that form
-      one tier; outer order is tier order (tier 0 = highest priority).
-      Empty list when the strategy is not [Priority_tier].
-      @since 0.9.7 *)
 }
 
 val failover : t
-(** [{ kind = Failover; cycle = default_cycle_policy; tiers = [] }].
+(** [{ kind = Failover; cycle = default_cycle_policy }].
     What callers receive when no per-cascade strategy is configured. *)
 
 (** {1 Candidate adapter}
@@ -162,8 +149,7 @@ val order_candidates :
   'a list
 (** [order_candidates t ~adapter ~ctx ~cycle candidates] is the ordered
     subset of [candidates] to attempt in [cycle].  Returns the empty
-    list when no candidate is usable right now (e.g. all capacity domains
-    report [process_available = 0] for S2), in which case the caller
+    list when no candidate is usable right now, in which case the caller
     should either advance to the next cycle with a backoff or report
     [Cascade_exhausted].
 
@@ -172,18 +158,10 @@ val order_candidates :
     concrete capacity-backpressure error while avoiding repeated attempts
     against the same saturated key.
 
-    This function is pure and must not perform IO.  [cycle] is
-    0-indexed (first cycle = 0). *)
-
-val latency_score_for_provider :
-  Cascade_health_tracker.t -> provider_key:string -> float
-(** [latency_score_for_provider health ~provider_key] maps a provider's
-    recent p50 latency hint to a routing score in [0.0, 1.0].
-
-    Unknown providers and providers without latency samples score [1.0],
-    preserving optimistic fail-open behaviour. Slow persisted latency
-    hints score lower so trust snapshots can restore routing penalties
-    after process restart. *)
+    This function is pure and must not perform IO.  [cycle] is accepted
+    for call-site stability but no longer selects a tier (failover is
+    cycle-independent; health and capacity signals are re-read each
+    cycle). *)
 
 (** {1 Completion hook} *)
 

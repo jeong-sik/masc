@@ -1,8 +1,8 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val persona_summary_to_json : persona_summary -> Yojson.Safe.t
-val string_list_to_json : string list -> Yojson.Safe.t
-
 val read_jsonl_rows :
   string -> max_bytes:int -> max_lines:int -> Yojson.Safe.t list
 

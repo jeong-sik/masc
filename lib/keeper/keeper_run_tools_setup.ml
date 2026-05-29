@@ -2,6 +2,8 @@
    Contains the full implementation of prepare_agent_setup. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 open Keeper_agent_error
@@ -9,7 +11,7 @@ open Keeper_agent_prompt_metrics
 
 let prepare_agent_setup
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_work : working_context)
       ~(session : Keeper_types.session_context)
       ~(base_system_prompt : string)
@@ -359,7 +361,7 @@ let prepare_agent_setup
   let descriptor_internal_names =
     Agent_tool_descriptor.public_descriptors
     |> List.concat_map Agent_tool_descriptor.internal_names
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   (* Only include a public name when its descriptor internal target is
      itself in [allowed_exec_names]. Otherwise the public name (e.g. "Execute")
@@ -448,7 +450,7 @@ let prepare_agent_setup
        with
        | Some (task : Masc_domain.task) ->
          (match task.contract with
-          | Some contract -> Keeper_types.dedupe_keep_order contract.required_tools
+          | Some contract -> Keeper_types_profile_toml_normalizers.dedupe_keep_order contract.required_tools
           | None -> [])
        | None -> [])
   in
@@ -482,10 +484,10 @@ let prepare_agent_setup
   let filter_visible_policy_surface names =
     names
     |> List.filter_map visible_policy_name_opt
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   let validate_allow_list ~turn raw =
-    let raw = raw |> List.map visible_policy_name |> Keeper_types.dedupe_keep_order in
+    let raw = raw |> List.map visible_policy_name |> Keeper_types_profile_toml_normalizers.dedupe_keep_order in
     let validated, dropped_names =
       List.fold_right
         (fun n (validated, dropped_names) ->
@@ -716,7 +718,7 @@ let prepare_agent_setup
         ~current_task_required_tool_names:(current_task_required_tools ())
         ~per_call_required_tool_names:required_tool_names
       |> List.map Keeper_tool_resolution.canonical_tool_name
-      |> Keeper_types.dedupe_keep_order
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     let required_tool_names =
       outstanding_required_tool_names
@@ -730,15 +732,15 @@ let prepare_agent_setup
       | _ -> current_tool_choice
     in
     let visible_required_tool_names =
-      required_tool_names |> validate_allow_list ~turn |> Keeper_types.dedupe_keep_order
+      required_tool_names |> validate_allow_list ~turn |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     let visible_affordance_tool_names =
       preferred_tool_names_for_turn_affordances turn_affordances
       |> filter_visible_policy_surface
-      |> Keeper_types.dedupe_keep_order
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     let merged =
-      Keeper_types.dedupe_keep_order
+      Keeper_types_profile_toml_normalizers.dedupe_keep_order
         (merged @ visible_required_tool_names @ visible_affordance_tool_names)
     in
     let selection_mode : Keeper_agent_tool_surface.tool_selection_mode =
@@ -747,7 +749,7 @@ let prepare_agent_setup
       else Selection_core_plus_prefilter_plus_discovered
     in
     let deterministic_floor_set =
-      Keeper_types.dedupe_keep_order
+      Keeper_types_profile_toml_normalizers.dedupe_keep_order
         (core @ deterministic_prefilter @ List.sort String.compare discovered)
     in
     let llm_only_count =
@@ -845,11 +847,11 @@ let prepare_agent_setup
               then [ "keeper_task_claim" ]
               else []
             in
-            Keeper_types.dedupe_keep_order (visible_affordance_tool_names @ claim_tools))
+            Keeper_types_profile_toml_normalizers.dedupe_keep_order (visible_affordance_tool_names @ claim_tools))
           else []
         in
         let essential_names =
-          Keeper_types.dedupe_keep_order
+          Keeper_types_profile_toml_normalizers.dedupe_keep_order
             (visible_always_include_tools @ required_turn_essential_tool_names)
         in
         Keeper_run_tools_search.truncate_tool_surface_names ~max_tools ~essential_names all_allowed)
@@ -858,7 +860,7 @@ let prepare_agent_setup
     let allowed_canonical_tool_names =
       all_allowed
       |> List.map Keeper_tool_resolution.canonical_tool_name
-      |> Keeper_types.dedupe_keep_order
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     let missing_required_tool_names =
       List.filter

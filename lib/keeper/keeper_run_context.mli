@@ -1,6 +1,8 @@
 (* keeper_run_context — Steps 0–4 of run_turn. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =

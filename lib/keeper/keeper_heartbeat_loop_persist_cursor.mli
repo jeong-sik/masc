@@ -2,6 +2,6 @@
 
 val persist_message_cursor_updates :
   config:Coord.config ->
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   (string * int) list ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta

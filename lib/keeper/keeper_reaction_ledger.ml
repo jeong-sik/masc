@@ -370,9 +370,6 @@ let nested_float_field outer inner json =
   | None -> None
 ;;
 
-let option_string_json = Json_util.option_to_yojson (fun v -> `String v)
-let option_float_json = Json_util.option_to_yojson (fun v -> `Float v)
-
 let summary_schema = "keeper.reaction_ledger.summary.v1"
 let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v1"
 
@@ -598,8 +595,8 @@ let summarize_rows ~keeper_name ~limit rows =
           (List.map
              (fun value -> `String value)
              (cap_list 8 pending_stimulus_ids)) )
-    ; "latest_recorded_at_unix", option_float_json !latest_recorded_at
-    ; "latest_stimulus_id", option_string_json !latest_stimulus_id
+    ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
+    ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
     ]
 ;;

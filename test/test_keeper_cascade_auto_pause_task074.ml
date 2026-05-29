@@ -26,6 +26,7 @@
 
 open Alcotest
 module EC = Masc_mcp.Keeper_error_classify
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Regime = Masc_mcp.Keeper_behavioral_regime
@@ -38,7 +39,7 @@ let cascade_name raw = Cascade_name.of_string_exn raw
 let mk_cascade_exhausted () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Cascade_exhausted
-       { cascade_name = cascade_name "test"; reason = KT.All_providers_failed })
+       { cascade_name = cascade_name "test"; reason = Keeper_meta_contract.All_providers_failed })
 
 let mk_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error

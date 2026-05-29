@@ -5,6 +5,8 @@
 
 open Printf
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_context_core_accessors
 

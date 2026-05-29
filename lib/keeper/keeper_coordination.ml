@@ -1,6 +1,8 @@
 (** Keeper_coordination — Coord presence and room cursor management. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let room_cursor_for meta room_id =
   meta.last_seen_seq_by_room

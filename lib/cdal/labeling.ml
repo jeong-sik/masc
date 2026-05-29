@@ -119,10 +119,7 @@ let labeled_verdict_to_json v =
       ("verdict", Cdal_types.contract_verdict_to_json v.verdict);
       ("label", label_to_json v.label);
       ("labeler", `String v.labeler);
-      ( "note",
-        match v.note with
-        | Some n -> `String n
-        | None -> `Null );
+      ( "note", Json_util.string_opt_to_json v.note );
       ("labeled_at", `String v.labeled_at);
     ]
 

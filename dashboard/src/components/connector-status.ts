@@ -63,8 +63,12 @@ function activeConnectorFilter(): string | null {
   return KNOWN_CONNECTOR_IDS.includes(connector as KnownConnectorId) ? connector : null
 }
 
-// Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper
-// (discord/imessage/slack/telegram) — see sidecars/<id>-bot/run.sh.
+// Per-connector lifecycle hints. The three remaining external sidecars
+// (imessage/slack/telegram) ship a run.sh wrapper — see
+// sidecars/<id>-bot/run.sh. Discord runs in-process under
+// Server_discord_in_process_gateway (RFC-0203 §Phase 3, PR #19393);
+// no sidecar process, no lifecycle command panel — see
+// {@link IN_PROCESS_CONNECTOR_IDS}.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
 interface SidecarCommands {
   start: string
@@ -73,10 +77,35 @@ interface SidecarCommands {
   stop: string
 }
 
-// Known connectors with first-class onboarding/lifecycle support. Source of
-// truth: the four sidecars under /sidecars/ and config/navigation.ts.
+// Known connectors that appear in the dashboard (status panels, accent
+// colours, channel icons). Includes both external sidecars and the
+// in-process Discord gateway — the operator still wants to see Discord's
+// status row even though there's no sidecar process to start.
+//
+// Source of truth: the three remaining sidecars under /sidecars/, the
+// in-process gateway under lib/server/server_discord_in_process_gateway.{ml,mli},
+// and config/navigation.ts.
 export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
 export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
+
+// Subset of {@link KNOWN_CONNECTOR_IDS} that run inside the server
+// process. For these, the "사이드카 미시작 / Start / Stop / tail
+// run.sh" lifecycle affordances are suppressed because there is no
+// sidecar process — the operator boots them by setting an env var and
+// restarting the server. RFC-0203 §Phase 3.
+export const IN_PROCESS_CONNECTOR_IDS = ['discord'] as const
+export type InProcessConnectorId = (typeof IN_PROCESS_CONNECTOR_IDS)[number]
+
+export function isInProcessConnector(connectorId: string): boolean {
+  return (IN_PROCESS_CONNECTOR_IDS as readonly string[]).includes(connectorId)
+}
+
+// The env var the operator must set to activate an in-process connector.
+// One per IN_PROCESS_CONNECTOR_IDS entry. Used by the status panel hint
+// shown in place of the "Start sidecar" affordance.
+export const IN_PROCESS_CONNECTOR_ENV: Record<InProcessConnectorId, string> = {
+  discord: 'DISCORD_BOT_TOKEN',
+}
 
 export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
   discord: 'Discord',
@@ -85,8 +114,10 @@ export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
   telegram: 'Telegram',
 }
 
+// Sidecar directories — only for connectors that actually run as
+// external sidecar processes. Discord is intentionally absent
+// (RFC-0203 §Phase 3 deleted sidecars/discord-bot/).
 const SIDECAR_DIRS: Record<string, string> = {
-  discord: 'sidecars/discord-bot',
   imessage: 'sidecars/imessage-bot',
   slack: 'sidecars/slack-bot',
   telegram: 'sidecars/telegram-bot',
@@ -749,8 +780,19 @@ function ConnectorLivePanel({
 
   const showNoKeeperEmpty =
     configuredBindings.length === 0 && !connector?.available && keepers.length === 0 && !keeperDirectoryError
+  // RFC-0203 §Phase 3: in-process connectors (currently just Discord)
+  // have no sidecar process and therefore no "사이드카 미시작" Start
+  // affordance. Render the in-process info hint instead — see
+  // showInProcessUnavailableHint below.
   const showSidecarOffEmpty =
-    !showNoKeeperEmpty && configuredBindings.length === 0 && !connector?.available
+    !showNoKeeperEmpty
+    && configuredBindings.length === 0
+    && !connector?.available
+    && !isInProcessConnector(connectorId)
+  const showInProcessUnavailableHint =
+    !showNoKeeperEmpty
+    && !connector?.available
+    && isInProcessConnector(connectorId)
 
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
@@ -775,7 +817,7 @@ function ConnectorLivePanel({
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</${MutedSpan}>`
           : null}
         <span class="ml-auto flex items-center gap-2">
-          ${connector?.available
+          ${connector?.available && !isInProcessConnector(connectorId)
             ? html`
                 <button
                   type="button"
@@ -811,6 +853,12 @@ function ConnectorLivePanel({
           {
             openConfig: () => openConnectorConfig(connectorId),
             toggleProcess: () => {
+              // RFC-0203 §Phase 3: in-process gateways have no
+              // sidecar process to toggle. The readiness rail still
+              // gets a callback to keep the type stable, but it's a
+              // no-op for these connectors — the operator manages
+              // them via env var + server restart.
+              if (isInProcessConnector(connectorId)) return
               const isUp = connector?.available === true
               void withRailInflight(connectorId, 'process', () =>
                 isUp ? stopSidecar(connectorId) : startSidecar(connectorId),
@@ -1015,6 +1063,42 @@ function ConnectorLivePanel({
                       variant="secondary"
                     />
                   </div>
+                </div>
+                <${SetupGuideCard} connectorId=${connectorId} />
+              </${SurfaceCard}>
+            `
+          })()
+        : null}
+
+      ${showInProcessUnavailableHint
+        ? (() => {
+            // RFC-0203 §Phase 3: in-process gateways (Discord) have no
+            // sidecar process to start, so the operator sees this hint
+            // instead of the "Start sidecar" panel. Same amber tone as
+            // the sidecar panel — "needs action, not broken" — but the
+            // remediation is an env var + restart, not a CLI command.
+            const envVar = IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]
+            return html`
+              <${SurfaceCard}
+                class="mt-3 !border-dashed !border-[var(--warn-20)] !border-l-4 !border-l-[var(--color-warn)] !bg-[var(--warn-10)] !px-3 !py-3 text-xs"
+                data-in-process-not-running-panel
+              >
+                <div class="mb-1 flex flex-wrap items-center gap-2">
+                  <span
+                    class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                    aria-label=${`${connectorName} in-process gateway 상태: 연결되지 않음`}
+                    data-in-process-status-chip
+                  >
+                    <span aria-hidden="true">⊘</span>
+                    <span>연결되지 않음</span>
+                  </span>
+                  <span class="font-medium text-[var(--color-fg-primary)]">서버 내장 게이트웨이</span>
+                  ${connector?.updated_at
+                    ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">last seen ${timeAgo(connector.updated_at)}</span>`
+                    : null}
+                </div>
+                <div class="text-2xs text-[var(--color-status-warn)]/80">
+                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${envVar}<//> 환경변수를 설정하고 서버를 재기동하면 자동으로 Discord Gateway 에 연결됩니다.
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />
               </${SurfaceCard}>

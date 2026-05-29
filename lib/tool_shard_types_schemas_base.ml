@@ -61,8 +61,20 @@ let base_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ "type", `String "integer"
-                      ; "description", `String "max results (1-10, default 5)"
+                      [ (* Issue #18472: LLM keepers emit [limit] as a JSON
+                           string (["5"]); strict ["integer"] routes through
+                           [correction_pipeline] for a silent coerce. The
+                           runtime handler reads via [Safe_ops.json_int] /
+                           [json_float] which accepts both shapes, so this is
+                           wire-format only. Mirrors PR #19383's widening on
+                           [tool_execute.timeout_sec]. *)
+                        ( "type"
+                        , `List [ `String "integer"; `String "string" ] )
+                      ; ( "description"
+                        , `String
+                            "max results (1-10, default 5). Numeric strings \
+                             (e.g. \"5\") are accepted; prefer the bare \
+                             integer form." )
                       ] )
                 ; (* Issue #8484: derive from local mirror that tracks
            [Agent_tool_memory_runtime.valid_memory_search_source_strings]. *)

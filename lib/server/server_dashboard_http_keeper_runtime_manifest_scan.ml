@@ -124,8 +124,8 @@ let update_runtime_manifest_scan scan row =
      let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
      match clock_refs with
      | `Assoc _ ->
-       let event_id = json_string_member_opt "event_id" clock_refs in
-       let parent_event_id = json_string_member_opt "parent_event_id" clock_refs in
+       let event_id = Json_util.get_string clock_refs "event_id" in
+       let parent_event_id = Json_util.get_string clock_refs "parent_event_id" in
        (match event_id, parent_event_id with
         | Some eid, Some peid -> Some (peid, eid)
         | _ -> None)
@@ -155,7 +155,7 @@ let update_runtime_manifest_scan scan row =
     in
     match clock_refs with
     | `Assoc _ ->
-      (match json_string_member_opt "source_clock" clock_refs with
+      (match Json_util.get_string clock_refs "source_clock" with
        | Some clock -> (
          match Keeper_runtime_manifest.source_clock_of_string clock with
          | Some valid -> Keeper_runtime_manifest.source_clock_to_string valid
@@ -199,29 +199,27 @@ let update_runtime_manifest_scan scan row =
      scan.latest_context_compacted_row <- Some row
    | Keeper_runtime_manifest.State_snapshot_sidecar_saved ->
      scan.active_open_loop_count <-
-       json_int_member_opt "active_open_loop_count"
-         row.Keeper_runtime_manifest.decision
+       Json_util.get_int row.Keeper_runtime_manifest.decision "active_open_loop_count"
    | Keeper_runtime_manifest.Working_state_sidecar_saved ->
      scan.active_open_loop_count <-
-       json_int_member_opt "active_open_loop_count"
-         row.Keeper_runtime_manifest.decision
+       Json_util.get_int row.Keeper_runtime_manifest.decision "active_open_loop_count"
    | Keeper_runtime_manifest.Event_bus_correlated ->
      let decision = row.Keeper_runtime_manifest.decision in
      scan.event_bus_count <- scan.event_bus_count + 1;
-     (match json_string_member_opt "correlation_id" decision with
+     (match Json_util.get_string decision "correlation_id" with
       | Some value -> scan.event_bus_correlation_ids <- value :: scan.event_bus_correlation_ids
       | None -> ());
-     (match json_string_member_opt "run_id" decision with
+     (match Json_util.get_string decision "run_id" with
       | Some value -> scan.event_bus_run_ids <- value :: scan.event_bus_run_ids
       | None -> ());
      scan.context_compact_started_count <-
        scan.context_compact_started_count
        + Option.value
-           (json_int_member_opt "context_compact_started_count" decision)
+           (Json_util.get_int decision "context_compact_started_count")
            ~default:0;
      scan.context_compacted_count <-
        scan.context_compacted_count
-       + Option.value (json_int_member_opt "context_compacted_count" decision)
+       + Option.value (Json_util.get_int decision "context_compacted_count")
            ~default:0;
      (match Yojson.Safe.Util.member "last_compaction" decision with
       | `Assoc _ as obj -> scan.last_compaction <- Some obj
@@ -240,10 +238,10 @@ let update_runtime_manifest_scan scan row =
      then scan.memory_flush_error_count <- scan.memory_flush_error_count + 1;
      scan.episodes_flushed <-
        scan.episodes_flushed
-       + Option.value (json_int_member_opt "episodes_flushed" decision) ~default:0;
+       + Option.value (Json_util.get_int decision "episodes_flushed") ~default:0;
      scan.procedures_flushed <-
        scan.procedures_flushed
-       + Option.value (json_int_member_opt "procedures_flushed" decision) ~default:0
+       + Option.value (Json_util.get_int decision "procedures_flushed") ~default:0
    | Keeper_runtime_manifest.Provider_attempt_started ->
      scan.provider_started_count <- scan.provider_started_count + 1;
      push_bounded scan.provider_attempt_rows scan.limit row

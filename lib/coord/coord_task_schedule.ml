@@ -118,8 +118,6 @@ let json_raw_string_path = Coord_task_receipts.json_raw_string_path
 let json_string_path = Coord_task_receipts.json_string_path
 let receipt_sort_key = Coord_task_receipts.receipt_sort_key
 let latest_execution_receipt_json = Coord_task_receipts.latest_execution_receipt_json
-let json_string_list = Coord_task_receipts.json_string_list
-
 let latest_receipt_blocks_required_tool_claim =
   Coord_task_receipts.latest_receipt_blocks_required_tool_claim
 ;;
@@ -470,7 +468,15 @@ let claim_next_r
           make_required_tools_predicate ?agent_tool_names ()
         in
         let required_tool_claim_allowed (task : Masc_domain.task) =
-          let required_tools = task_required_tools task in
+          let required_tools =
+            match task_required_tools task with
+            | [] ->
+              (* Fallback for tasks created before required_tools inference:
+                 infer from title/description keywords. *)
+              Coord_task_classify.infer_required_tools_from_text
+                ~title:task.title ~description:task.description
+            | tools -> tools
+          in
           required_tools_allowed_for_agent required_tools
           && not (receipt_blocks_task task)
         in
@@ -825,7 +831,25 @@ let release_stale_claims config ~ttl_seconds =
                  clear_assignee_current_task ~assignee ~task_id:task.id;
                  { task with task_status = Todo })
                else task
-             | AwaitingVerification _ -> task (* leave alone; awaiting verifier *)
+             | AwaitingVerification { assignee; submitted_at; _ } ->
+               let ts =
+                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) submitted_at
+               in
+               if now_f -. ts > ttl_seconds
+               then (
+                 stale_tasks := (task.id, assignee) :: !stale_tasks;
+                 log_event
+                   config
+                   (`Assoc
+                       [ "type", `String "stale_verification_released"
+                       ; "task_id", `String task.id
+                       ; "assignee", `String assignee
+                       ; "age_s", age_seconds_json ts
+                       ; "ts", `String now_str
+                       ]);
+                 clear_assignee_current_task ~assignee ~task_id:task.id;
+                 { task with task_status = Todo })
+               else task
              | Todo | Done _ | Cancelled _ -> task)
           backlog.tasks
       in

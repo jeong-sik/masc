@@ -112,7 +112,7 @@ let source_assist_json source_text =
       cfg.Cascade_declarative_types.aliases
       |> List.map Cascade_declarative_types.alias_key
     in
-    let string_list values = string_list_to_json (sorted_unique_strings values) in
+    let string_list values = Json_util.json_string_list (sorted_unique_strings values) in
     `Assoc
       [ "parse_status", `String "parsed"
       ; ( "providers"
@@ -229,7 +229,7 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
   `Assoc
     (keeper_profile_fields
        ~keeper:entry.name
-       ~cascade_name:(Keeper_types.cascade_name_of_meta entry.meta))
+       ~cascade_name:(Keeper_meta_contract.cascade_name_of_meta entry.meta))
 ;;
 
 let invalid_profiles_of_config_path = function
@@ -250,7 +250,7 @@ let validation_summary_json ?config_path () =
     in
     [ "validation_status", `String status
     ; ( "validation_errors"
-      , string_list_to_json (json_string_list (json_assoc_member "errors" rejection_json))
+      , Json_util.json_string_list (json_string_list (json_assoc_member "errors" rejection_json))
       )
     ; "invalid_profiles", `List (List.map invalid_profile_to_json invalid_profiles)
     ]
@@ -347,7 +347,7 @@ let config_json ?base_path () =
       let names, _ =
         List.fold_left
           (fun (acc, seen) (e : Keeper_registry.registry_entry) ->
-             add_profile_name (acc, seen) (Keeper_types.cascade_name_of_meta e.meta))
+             add_profile_name (acc, seen) (Keeper_meta_contract.cascade_name_of_meta e.meta))
           (acc_after_catalog, seen_after_catalog)
           keeper_entries
       in
@@ -356,10 +356,7 @@ let config_json ?base_path () =
   in
   let fields =
     [ "updated_at", `String (now_iso ())
-    ; ( "config_path"
-      , match config_path with
-        | Some p -> `String p
-        | None -> `Null )
+    ; ( "config_path", Json_util.string_opt_to_json config_path )
     ]
     @ source_json_fields source
     @ validation_summary_json ?config_path ()
@@ -439,10 +436,7 @@ let raw_config_json_compute () =
     ; "source_text", `String source_text
     ; "assist", source_assist_json source_text
     ; "raw_json", `String raw_json
-    ; ( "materialization_error"
-      , match materialization_error with
-        | Some msg -> `String msg
-        | None -> `Null )
+    ; ( "materialization_error", Json_util.string_opt_to_json materialization_error )
     ]
 ;;
 

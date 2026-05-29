@@ -184,7 +184,7 @@ let repos_path_hint_of_stages ~cmd stages =
            | None -> None)) stages
 
 let resolve_sandbox_root_git_cwd_of_stages
-    ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ~cwd ~cmd stages
+    ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) ~cwd ~cmd stages
   =
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta

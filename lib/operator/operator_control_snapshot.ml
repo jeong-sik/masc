@@ -76,7 +76,7 @@ let keepers_json
   let names =
     match keeper_names with
     | Some n -> n
-    | None -> Keeper_types.keeper_names config
+    | None -> Keeper_meta_store.keeper_names config
   in
   (* Parallel keeper I/O with concurrency cap: at most
      _keeper_snapshot_max_concurrency fibers run simultaneously.
@@ -141,7 +141,7 @@ let keepers_json
           results.(idx)
           <- (try
                 let t0 = Time_compat.now () in
-                match Keeper_types.read_meta config name with
+                match Keeper_meta_store.read_meta config name with
                 | Error _ | Ok None -> None
                 | Ok (Some meta) ->
                   dt_meta := Time_compat.now () -. t0;
@@ -474,19 +474,19 @@ let keepers_json
                                  (fun value -> `Int value)
                                  latest_tool_call_count )
                            ; ( "latest_action_source"
-                             , string_option_to_json latest_action_source )
-                           ; "tool_audit_source", string_option_to_json tool_audit_source
-                           ; "tool_audit_at", string_option_to_json tool_audit_at
+                             , Json_util.string_opt_to_json latest_action_source )
+                           ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
+                           ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
                            ; ( "last_speech_act"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value = String.trim meta.runtime.last_speech_act in
                                   if value = "" then None else Some value) )
                            ; ( "delivery_surface_view"
-                             , string_option_to_json delivery_surface_view )
+                             , Json_util.string_opt_to_json delivery_surface_view )
                            ; ( "delivery_surface_view_source"
-                             , string_option_to_json delivery_surface_view_source )
+                             , Json_util.string_opt_to_json delivery_surface_view_source )
                            ; ( "last_social_transition_reason"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value =
                                     String.trim meta.runtime.last_social_transition_reason
                                   in
@@ -583,20 +583,20 @@ let keepers_json
                                dt_profile := Time_compat.now () -. t_profile;
                                result )
                            ; ( "last_proactive_reason"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value =
                                     String.trim meta.runtime.proactive_rt.last_reason
                                   in
                                   if value = "" then None else Some value) )
                            ; ( "last_proactive_preview"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value =
                                     String.trim meta.runtime.proactive_rt.last_preview
                                   in
                                   if value = "" then None else Some value) )
                            ; ( "last_blocker"
                              , match meta.runtime.last_blocker with
-                               | Some info -> Keeper_types.blocker_info_to_json info
+                               | Some info -> Keeper_meta_contract.blocker_info_to_json info
                                | None -> `Null )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
@@ -880,11 +880,11 @@ let snapshot_json
         else [])
     in
     let keeper_names =
-      if initialized && include_keepers then Keeper_types.keeper_names config else []
+      if initialized && include_keepers then Keeper_meta_store.keeper_names config else []
     in
     let persistent_keeper_names =
       if initialized && include_keepers
-      then Keeper_types.persistent_agent_names config
+      then Keeper_meta_store.persistent_agent_names config
       else []
     in
     let result =

@@ -80,8 +80,8 @@ let attention_item_to_yojson (item : attention_item) =
       ("severity", `String (operator_severity_to_string item.severity));
       ("summary", `String item.summary);
       ("target_type", `String item.target_type);
-      ("target_id", string_option_to_json item.target_id);
-      ("actor", string_option_to_json item.actor);
+      ("target_id", Json_util.string_opt_to_json item.target_id);
+      ("actor", Json_util.string_opt_to_json item.actor);
       ("evidence", item.evidence);
       ("provenance", `String "derived");
       ("authoritative", `Bool false);
@@ -96,7 +96,7 @@ let recommended_action_to_yojson ~actor (item : recommended_action) =
         ("actor", `String actor);
         ("action_type", `String item.action_type);
         ("target_type", `String item.target_type);
-        ("target_id", string_option_to_json item.target_id);
+        ("target_id", Json_util.string_opt_to_json item.target_id);
         ("payload", item.suggested_payload);
       ]
   in
@@ -104,7 +104,7 @@ let recommended_action_to_yojson ~actor (item : recommended_action) =
     [
       ("action_type", `String item.action_type);
       ("target_type", `String item.target_type);
-      ("target_id", string_option_to_json item.target_id);
+      ("target_id", Json_util.string_opt_to_json item.target_id);
       ("severity", `String (operator_severity_to_string item.severity));
       ("reason", `String item.reason);
       ("confirm_required", `Bool (recommended_confirm_required item.action_type));

@@ -349,7 +349,7 @@ let () =
          constructor will fail to compile here AND in
          tool_preset_to_string. *)
       Alcotest.test_case "witness covers all variants" `Quick (fun () ->
-        let open Masc_mcp.Keeper_types in
+        let open Masc_mcp.Keeper_meta_tool_access in
         let witness s =
           let actual = tool_preset_to_string s in
           if not (List.mem actual valid_tool_preset_strings) then
@@ -360,18 +360,18 @@ let () =
         Alcotest.(check int) "count" 7 (List.length valid_tool_preset_strings));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         (* Keeper_schema.tool_preset_enum_strings is a hand-mirrored copy
-           of Keeper_types.valid_tool_preset_strings (cycle-avoidance).
+           of Keeper_meta_tool_access.valid_tool_preset_strings (cycle-avoidance).
            If they ever diverge this test fails and a silently-dropped
            schema enum constructor is caught immediately. *)
         Alcotest.(check (list string)) "schema mirror == variant SSOT"
-          Masc_mcp.Keeper_types.valid_tool_preset_strings
+          Masc_mcp.Keeper_meta_tool_access.valid_tool_preset_strings
           Masc_mcp.Keeper_schema.tool_preset_enum_strings);
       Alcotest.test_case "TOML parser mirror stays in sync" `Quick (fun () ->
         (* Keeper_types_profile cannot depend on Keeper_types because
            Keeper_types includes it, so the raw TOML allow-list is mirrored
            there and guarded here. *)
         Alcotest.(check (list string)) "profile mirror == variant SSOT"
-          Masc_mcp.Keeper_types.valid_tool_preset_strings
+          Masc_mcp.Keeper_meta_tool_access.valid_tool_preset_strings
           Masc_mcp.Keeper_types_profile.valid_tool_preset_raw_strings);
       Alcotest.test_case "tool_access schema mirror stays in sync" `Quick (fun () ->
         let open Yojson.Safe.Util in
@@ -390,10 +390,10 @@ let () =
           |> List.map to_string
         in
       Alcotest.(check (list string)) "tool_access enum == variant SSOT"
-        Masc_mcp.Keeper_types.valid_tool_preset_strings
+        Masc_mcp.Keeper_meta_tool_access.valid_tool_preset_strings
         enum);
       Alcotest.test_case "room signal defaults follow keeper tool access" `Quick (fun () ->
-        let open Masc_mcp.Keeper_types in
+        let open Masc_mcp.Keeper_meta_tool_access in
         let check_access label expected access =
           Alcotest.(check bool) label expected
             (tool_access_default_room_signal_prompt_enabled
@@ -419,7 +419,7 @@ let () =
         check_access "custom board allowlist listens" true
           (Custom [ "keeper_board_post" ]));
       Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->
-        let open Masc_mcp.Keeper_types in
+        let open Masc_mcp.Keeper_meta_tool_access in
         Alcotest.(check bool) "social present" true
           (List.mem "social" valid_tool_preset_strings);
         Alcotest.(check bool) "dispatch present" true
@@ -845,12 +845,12 @@ let () =
           if not (List.mem actual C.valid_kind_strings) then
             Alcotest.failf "kind_to_string %S not in valid_kind_strings" actual)
           C.all_kinds;
-        Alcotest.(check int) "count" 2 (List.length C.all_kinds);
-        Alcotest.(check int) "strings count" 2
+        Alcotest.(check int) "count" 1 (List.length C.all_kinds);
+        Alcotest.(check int) "strings count" 1
           (List.length C.valid_kind_strings));
       Alcotest.test_case "valid_kind_strings pinned to wire format" `Quick (fun () ->
         Alcotest.(check (list string)) "wire-format names"
-          [ "failover"; "priority_tier" ]
+          [ "failover" ]
           Masc_mcp.Cascade_strategy.valid_kind_strings);
       Alcotest.test_case "parse_kind error mentions every valid kind" `Quick (fun () ->
         let module C = Masc_mcp.Cascade_strategy in

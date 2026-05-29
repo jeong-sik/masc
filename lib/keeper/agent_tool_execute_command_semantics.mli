@@ -26,7 +26,7 @@ val repo_hosting_cli_repo_flag_api_misuse_of_stages :
 
 val resolve_sandbox_root_git_cwd_of_stages :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   cmd:string ->
   parsed_stage list ->

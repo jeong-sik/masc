@@ -72,6 +72,6 @@ let recent_json ~keeper_name ~limit =
     `Assoc [
       ("ts", `Float e.ts);
       ("event", `String e.event_name);
-      ("phase", match e.phase with None -> `Null | Some p -> `String p);
+      ("phase", Json_util.string_opt_to_json e.phase);
       ("detail", `String e.detail);
     ]) entries)

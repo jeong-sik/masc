@@ -152,7 +152,7 @@ val timing_guard : tool_start_time:float ref -> Agent_sdk.Hooks.hooks
 (** User-supplied guard. Short-circuits via [Override] when the
     callback returns [Some reason_text]. *)
 val custom_guard :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   guard:(tool_name:string -> input:Yojson.Safe.t -> string option) ->
   Agent_sdk.Hooks.hooks
@@ -162,7 +162,7 @@ val custom_guard :
     "same operation, different targets" pattern that OAS's exact
     name+args idle detection misses. *)
 val streak_guard :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   state:streak_state ->
   threshold:int ->
@@ -170,7 +170,7 @@ val streak_guard :
 
 (** Reject every tool name in [denied]. *)
 val deny_guard :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   denied:string list ->
   Agent_sdk.Hooks.hooks
@@ -178,7 +178,7 @@ val deny_guard :
 (** Reject when the running cost meets or exceeds [max_cost_usd].
     No-op when [None]. *)
 val cost_guard :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   max_cost_usd:float option ->
   Agent_sdk.Hooks.hooks
@@ -186,7 +186,7 @@ val cost_guard :
 (** Destructive-pattern detection for tools flagged by descriptor-aware
     capability projection; runs only when [enabled]. *)
 val destructive_guard :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   enabled:bool ->
   Agent_sdk.Hooks.hooks
@@ -194,7 +194,7 @@ val destructive_guard :
 (** Governance gate. Escalates via [ApprovalRequired] when the
     assessed risk meets or exceeds the keeper-confirm threshold. *)
 val governance_approval_guard :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   Agent_sdk.Hooks.hooks
 
@@ -202,7 +202,7 @@ val governance_approval_guard :
     timing -> custom -> streak -> deny -> cost -> destructive ->
     governance_approval. *)
 val build_chain :
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   tool_start_time:float ref ->
   streak_state:streak_state ->
   streak_threshold:int ->

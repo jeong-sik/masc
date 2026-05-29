@@ -674,6 +674,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
+      (* RFC-0203 Phase 3: in-process Discord gateway replaces the
+         deleted sidecars/discord-bot/ Python connector. Always-on:
+         if DISCORD_BOT_TOKEN is unset the start function logs a
+         warning and skips, leaving the server otherwise unaffected. *)
+      Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
       (* Create the shared Domain_pool for dashboard compute and optional

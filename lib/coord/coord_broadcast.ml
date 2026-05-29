@@ -34,22 +34,10 @@ let emit_message_activity config ~from_agent ~content ~mention
     `Assoc
       [
         ("content", `String content);
-        ( "mention",
-          match mention with
-          | Some value -> `String value
-          | None -> `Null );
-        ( "session_id",
-          match session_id with
-          | Some value when String.trim value <> "" -> `String value
-          | _ -> `Null );
-        ( "operation_id",
-          match operation_id with
-          | Some value when String.trim value <> "" -> `String value
-          | _ -> `Null );
-        ( "worker_run_id",
-          match worker_run_id with
-          | Some value when String.trim value <> "" -> `String value
-          | _ -> `Null );
+        ( "mention", Json_util.string_opt_to_json mention );
+        ( "session_id", Json_util.string_opt_to_json_trimmed session_id );
+        ( "operation_id", Json_util.string_opt_to_json_trimmed operation_id );
+        ( "worker_run_id", Json_util.string_opt_to_json_trimmed worker_run_id );
         ( "evidence_refs",
           `List (List.map (fun value -> `String value) evidence_refs) );
       ]

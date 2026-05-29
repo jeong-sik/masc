@@ -108,7 +108,7 @@ let client_capacity_history_json ?limit ?kind ?since_ts () =
           () )
     ; ( "query"
       , cascade_query_json
-          [ "limit", (match limit with None -> `Null | Some n -> `Int n)
+          [ "limit", Json_util.int_opt_to_json limit
           ; optional_string_field "kind" kind
           ; optional_float_field "since_ts" since_ts
           ] )

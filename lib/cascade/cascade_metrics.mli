@@ -124,11 +124,6 @@ val on_provider_cooldown : provider:string -> reason:string -> unit
     histogram, which captures duration distribution but not entry
     rate or reason. *)
 
-val on_strategy_starvation_guard : cascade:string -> strategy:string -> unit
-(** Tick the strategy-starvation-guard counter when
-    [Cascade_strategy.order_candidates] falls through with the
-    pre-capacity-filter candidate list because every candidate
-    reported capacity=0.  [strategy] must be [priority_tier]. *)
 
 val on_capacity_probe : url:string -> source:string -> unit
 (** Tick the capacity-probe result counter when a probe (ollama or

@@ -1,15 +1,15 @@
 type t = {
   config : Coord.config;
-  meta : Keeper_types.keeper_meta;
+  meta : Keeper_meta_contract.keeper_meta;
   turn_id : int;
-  default_network_override : Keeper_types.network_mode option;
+  default_network_override : Keeper_types_profile_sandbox.network_mode option;
   cache :
     ((bool * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
   mutex : Eio.Mutex.t;
 }
 
 let create ?default_network_override
-    ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ?(turn_id = 0) () =
+    ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) ?(turn_id = 0) () =
   {
     config;
     meta;
@@ -47,10 +47,10 @@ let resolve (t : t) ~cwd =
       Option.value t.default_network_override ~default:effective_network
     in
     match effective_profile with
-    | Keeper_types.Local -> None
-    | Keeper_types.Docker ->
+    | Keeper_types_profile_sandbox.Local -> None
+    | Keeper_types_profile_sandbox.Docker ->
       let key =
-        (in_playground, Keeper_types.network_mode_to_string actual_network)
+        (in_playground, Keeper_types_profile_sandbox.network_mode_to_string actual_network)
       in
       match Hashtbl.find_opt t.cache key with
       | Some r -> Some r

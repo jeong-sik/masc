@@ -5,6 +5,9 @@
     policy validation, and keepalive restart. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_keepalive
 open Keeper_turn_up_args
 
@@ -411,4 +414,4 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
        | Ok () ->
          stop_keepalive ~base_path:ctx.config.base_path updated.name;
          start_keepalive ctx updated;
-         tool_result_ok (Yojson.Safe.to_string (meta_to_json updated))))
+         tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated))))

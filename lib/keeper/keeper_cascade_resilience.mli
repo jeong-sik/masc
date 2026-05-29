@@ -13,6 +13,6 @@ type cascade_resilience =
 
 val cascade_resilience_of_name : string -> cascade_resilience
 
-val cascade_resilience_of_meta : Keeper_types.keeper_meta -> cascade_resilience
+val cascade_resilience_of_meta : Keeper_meta_contract.keeper_meta -> cascade_resilience
 
 val cascade_resilience_error_message : cascade_resilience -> string option

@@ -11,7 +11,6 @@
     inspectors. Re-included by [Dashboard_goals_types] so the public
     surface is unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
 
 let goal_status_color = function
@@ -155,7 +154,7 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
   let meta = detail.meta in
   let latest_receipt = detail.latest_receipt in
   let latest_causal_event =
-    match detail.runtime_trust |> member "latest_causal_event" with
+    match m detail.runtime_trust "latest_causal_event" with
     | `Assoc _ as event -> event
     | _ -> `Null
   in
@@ -223,17 +222,17 @@ let timeline_event_json ~ts ~kind ~lane ~title ~summary ~severity =
     ]
 
 let json_member_or_null field = function
-  | `Assoc _ as json -> member field json
+  | `Assoc _ as json -> m json field
   | _ -> `Null
 
 let goal_event_timeline_json event =
   let event_type =
-    event |> member "event_type" |> to_string_option
+    Json_util.get_string event "event_type"
     |> Option.value ~default:"goal_event"
   in
-  let payload = event |> member "payload" in
+  let payload = m event "payload" in
   let payload_field field = json_member_or_null field payload in
-  let ts = event |> member "ts" |> to_string_option |> Option.value ~default:"" in
+  let ts = Json_util.get_string event "ts" |> Option.value ~default:"" in
   let title, summary, severity =
     match event_type with
     | "goal_phase" ->
@@ -249,11 +248,11 @@ let goal_event_timeline_json event =
            any producer, so a non-zero appearance is an unambiguous
            producer-side fix signal. *)
         let phase =
-          payload_field "phase" |> to_string_option
+          Json_util.get_string (payload_field "phase")
           |> Option.value ~default:"<missing payload.phase>"
         in
         let actor =
-          payload_field "actor" |> json_member_or_null "id" |> to_string_option
+          Json_util.get_string (payload_field "actor" |> json_member_or_null "id")
         in
         ( "Goal Phase",
           (match actor with
@@ -266,12 +265,13 @@ let goal_event_timeline_json event =
     | "goal_verification_opened" ->
         let request = payload_field "request" in
         let request_id =
-          request |> json_member_or_null "id" |> to_string_option
+          Json_util.get_string (request |> json_member_or_null "id")
           |> Option.value ~default:"request"
         in
         let required =
-          request |> json_member_or_null "policy_snapshot"
-          |> json_member_or_null "required_verdicts" |> to_int_option
+          Json_util.get_int
+            (request |> json_member_or_null "policy_snapshot"
+             |> json_member_or_null "required_verdicts")
         in
         ( "Goal Verification Opened",
           (match required with
@@ -281,12 +281,12 @@ let goal_event_timeline_json event =
     | "goal_vote" ->
         let vote = payload_field "vote" in
         let decision =
-          vote |> json_member_or_null "decision" |> to_string_option
+          Json_util.get_string (vote |> json_member_or_null "decision")
           |> Option.value ~default:"<missing payload.vote.decision>"
         in
         let principal =
-          vote |> json_member_or_null "principal" |> json_member_or_null "id"
-          |> to_string_option
+          Json_util.get_string
+            (vote |> json_member_or_null "principal" |> json_member_or_null "id")
           |> Option.value ~default:"principal"
         in
         ( "Goal Vote",
@@ -294,7 +294,7 @@ let goal_event_timeline_json event =
           if String.equal decision "reject" then "bad" else "ok" )
     | "goal_verification_resolved" ->
         let status =
-          payload_field "status" |> to_string_option
+          Json_util.get_string (payload_field "status")
           |> Option.value ~default:"<missing payload.status>"
         in
         ( "Goal Verification Resolved",
@@ -304,7 +304,7 @@ let goal_event_timeline_json event =
           | "rejected" -> "bad"
           | _ -> "warn") )
     | "goal_approval_opened" ->
-        let request_id = payload_field "request_id" |> to_string_option in
+        let request_id = Json_util.get_string (payload_field "request_id") in
         ( "Goal Approval Opened",
           (match request_id with
           | Some id -> Printf.sprintf "request %s is awaiting operator approval" id
@@ -312,7 +312,7 @@ let goal_event_timeline_json event =
           "warn" )
     | "goal_approval_resolved" ->
         let decision =
-          payload_field "decision" |> to_string_option
+          Json_util.get_string (payload_field "decision")
           |> Option.value ~default:"<missing payload.decision>"
         in
         ( "Goal Approval Resolved",
@@ -343,15 +343,15 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let approval_events =
     approvals
     |> List.filter_map (fun approval ->
-           match approval |> member "requested_at_iso" |> to_string_option with
+           match Json_util.get_string approval "requested_at_iso" with
            | None -> None
            | Some requested_at ->
                let approval_id =
-                 approval |> member "id" |> to_string_option
+                 Json_util.get_string approval "id"
                  |> Option.value ~default:"approval"
                in
                let tool_name =
-                 approval |> member "tool_name" |> to_string_option
+                 Json_util.get_string approval "tool_name"
                  |> Option.value ~default:"tool"
                in
                Some
@@ -359,7 +359,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                     ~lane:("approval:" ^ approval_id)
                     ~title:(Printf.sprintf "Approval · %s" tool_name)
                     ~summary:
-                      (approval |> member "input_preview" |> to_string_option
+                      (Json_util.get_string approval "input_preview"
                        |> Option.value ~default:"pending operator decision")
                     ~severity:"warn"))
   in
@@ -369,19 +369,19 @@ let build_goal_timeline node linked_keepers approvals goal_events =
            match trust_latest_event detail.runtime_trust with
            | Some event ->
                let title =
-                 event |> member "title" |> to_string_option
+                 Json_util.get_string event "title"
                  |> Option.value ~default:(Printf.sprintf "Keeper · %s" detail.meta.name)
                in
                let summary =
-                 event |> member "summary" |> to_string_option
+                 Json_util.get_string event "summary"
                  |> Option.value ~default:"latest keeper event"
                in
                let severity =
-                 event |> member "severity" |> to_string_option
+                 Json_util.get_string event "severity"
                  |> Option.value ~default:"warn"
                in
                let ts =
-                 event |> member "ts" |> to_string_option
+                 Json_util.get_string event "ts"
                  |> Option.value ~default:(Masc_domain.now_iso ())
                in
                Some
@@ -421,6 +421,6 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let goal_events = List.map goal_event_timeline_json goal_events in
   task_events @ approval_events @ keeper_events @ goal_events
   |> List.sort (fun left right ->
-         let lts = left |> member "ts" |> to_string_option |> Option.value ~default:"" in
-         let rts = right |> member "ts" |> to_string_option |> Option.value ~default:"" in
+         let lts = Json_util.get_string left "ts" |> Option.value ~default:"" in
+         let rts = Json_util.get_string right "ts" |> Option.value ~default:"" in
          String.compare rts lts)

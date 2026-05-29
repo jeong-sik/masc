@@ -571,9 +571,7 @@ let handle_keeper_get_subroutes state req request reqd =
           ]) caps)
       in
       let memory_kind_usage_error_class_json : Yojson.Safe.t =
-        match memory_kind_usage_error_class with
-        | Some label -> `String label
-        | None -> `Null
+        Json_util.string_opt_to_json memory_kind_usage_error_class
       in
       (* Compaction sub-FSM: only emit a diagram when the keeper is in
          the [Compacting] phase. The three nodes mirror

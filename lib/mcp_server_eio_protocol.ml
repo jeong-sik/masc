@@ -554,10 +554,7 @@ let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_sessi
      ; "tool_name", `String tool_name
      ; "phase", `String phase
      ; "request_id", `String (jsonrpc_id_label id)
-     ; ( "session_id"
-       , match mcp_session_id with
-         | Some session_id -> `String session_id
-         | None -> `Null )
+     ; ( "session_id", Json_util.string_opt_to_json mcp_session_id )
      ; "profile", `String (tool_profile_label profile)
      ]
      @

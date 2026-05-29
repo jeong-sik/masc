@@ -270,10 +270,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             (`Assoc
               [
                 ("content", `String content);
-                ( "post_id",
-                  match post_id with
-                  | Some id -> `String id
-                  | None -> `Null );
+                ( "post_id", Json_util.string_opt_to_json post_id );
               ])
           ();
         (* Mention processing — mirror masc_broadcast pattern *)

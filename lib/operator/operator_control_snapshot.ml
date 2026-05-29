@@ -532,14 +532,9 @@ let keepers_json
                                         max_turns_override_source
                                           profile.max_turns_per_call_scheduled_autonomous
                                       in
-                                      let raw_override_int = function
-                                        | Some n -> `Int n
-                                        | None -> `Null
-                                      in
+                                      let raw_override_int = Json_util.int_opt_to_json in
                                       let manifest_path_json =
-                                        match profile.manifest_path with
-                                        | Some p -> `String p
-                                        | None -> `Null
+                                        Json_util.string_opt_to_json profile.manifest_path
                                       in
                                       `Assoc
                                         [ ( "reactive"

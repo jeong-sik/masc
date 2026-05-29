@@ -658,9 +658,7 @@ let phase_diagnosis_to_json
     "can_execute_turn", `Bool (Keeper_state_machine.can_execute_turn derived_phase);
     "conditions", Keeper_state_machine_json.conditions_to_json conditions;
     "determining_condition",
-      (match determining with
-       | Some key -> `String key
-       | None -> `Null);
+      Json_util.string_opt_to_json determining;
     "rows",
       `List
         (List.map
@@ -718,9 +716,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "started_at", `Float live.started_at;
           "last_progress_at", `Float live.last_progress_at;
           "last_progress_kind",
-            (match live.last_progress_kind with
-             | Some kind -> `String kind
-             | None -> `Null);
+            Json_util.string_opt_to_json live.last_progress_kind;
         ]
       | None -> `Null);
     "last_outcome", (match s.last_outcome with
@@ -732,9 +728,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "cascade_state",
             `String (cascade_state_to_string lo.cascade_state);
           "selected_model",
-            (match lo.selected_model with
-             | Some model -> `String model
-             | None -> `Null);
+            Json_util.string_opt_to_json lo.selected_model;
         ]
       | None -> `Null);
     "fiber_stop_flag", `Bool s.fiber_stop_flag;

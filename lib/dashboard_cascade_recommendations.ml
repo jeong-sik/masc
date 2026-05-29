@@ -135,10 +135,7 @@ let recommendation_to_json (r : recommendation) : Yojson.Safe.t =
     ; "trust_score", `Float r.rec_trust_score
     ; "same_fingerprint_count", `Int r.rec_same_fingerprint_count
     ; "events_in_window", `Int r.rec_events_in_window
-    ; ( "top_fingerprint"
-      , match r.rec_top_fingerprint with
-        | Some fp -> `String fp
-        | None -> `Null )
+    ; ( "top_fingerprint", Json_util.string_opt_to_json r.rec_top_fingerprint )
     ; "action", `String (recommendation_action_to_string r.rec_action)
     ; "rationale", `String r.rec_rationale
     ]

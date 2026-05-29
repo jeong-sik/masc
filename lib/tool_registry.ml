@@ -225,9 +225,7 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
       , `Int (if calls > 0 then Atomic.get stats.total_duration_ms / calls else 0) )
     ; "last_called_at", `Float (Atomic.get stats.last_called_at)
     ; ( "last_assignment_id"
-      , match Atomic.get stats.last_assignment_id with
-        | Some aid -> `String aid
-        | None -> `Null )
+      , Json_util.string_opt_to_json (Atomic.get stats.last_assignment_id) )
     ; ( "by_source"
       , `Assoc
           [ "external_mcp", `Int (Atomic.get stats.external_mcp_count)

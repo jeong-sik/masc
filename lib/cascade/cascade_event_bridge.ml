@@ -535,17 +535,14 @@ let broadcast_drop_marker
       ; "event_type", `String "relay_dropped"
       ; "ts_unix", `Float (Time_compat.now ())
       ; ( "correlation_id"
-        , match Json_util.assoc_string_opt "correlation_id" pending.json with
-          | Some value -> `String value
-          | None -> `Null )
+        , Json_util.string_opt_to_json
+            (Json_util.assoc_string_opt "correlation_id" pending.json) )
       ; ( "run_id"
-        , match Json_util.assoc_string_opt "run_id" pending.json with
-          | Some value -> `String value
-          | None -> `Null )
+        , Json_util.string_opt_to_json
+            (Json_util.assoc_string_opt "run_id" pending.json) )
       ; ( "agent_name"
-        , match Json_util.assoc_string_opt "agent_name" pending.json with
-          | Some value -> `String value
-          | None -> `Null )
+        , Json_util.string_opt_to_json
+            (Json_util.assoc_string_opt "agent_name" pending.json) )
       ; "failed_stage", `String stage_label
       ; "attempts", `Int attempts
       ; "original_event_type", `String (relay_event_type pending.json)

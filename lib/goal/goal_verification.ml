@@ -33,10 +33,7 @@ let goal_principal_to_yojson (principal : goal_principal) =
     [
       ("kind", principal_kind_to_yojson principal.kind);
       ("id", `String principal.id);
-      ( "display_name",
-        match principal.display_name with
-        | Some value -> `String value
-        | None -> `Null );
+      ( "display_name", Json_util.string_opt_to_json principal.display_name );
     ]
 
 let goal_principal_of_yojson = function
@@ -95,10 +92,7 @@ let goal_verifier_policy_to_yojson (policy : goal_verifier_policy) =
     [
       ("inherit_mode", inherit_mode_to_yojson policy.inherit_mode);
       ("principals", `List (List.map goal_principal_to_yojson policy.principals));
-      ( "required_verdicts",
-        match policy.required_verdicts with
-        | Some value -> `Int value
-        | None -> `Null );
+      ( "required_verdicts", Json_util.int_opt_to_json policy.required_verdicts );
     ]
 
 let goal_verifier_policy_of_yojson = function

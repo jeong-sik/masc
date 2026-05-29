@@ -462,9 +462,7 @@ let social_model_resolution_fields_json (meta : keeper_meta) =
   ; "configured_social_model", trimmed_string_json meta.social_model
   ; "social_model_recognized", `Bool recognized
   ; ( "social_model_fallback"
-    , match Keeper_social_model.fallback_social_model meta.social_model with
-      | Some fallback -> `String fallback
-      | None -> `Null )
+    , Json_util.string_opt_to_json (Keeper_social_model.fallback_social_model meta.social_model) )
   ]
 ;;
 
@@ -508,10 +506,7 @@ let runtime_surface_json config (meta : keeper_meta) =
   `Assoc
     ([ "paused", `Bool meta.paused
      ; "keepalive_running", `Bool keepalive_running
-     ; ( "phase"
-       , match phase with
-         | Some p -> `String p
-         | None -> `Null )
+     ; ( "phase", Json_util.string_opt_to_json phase )
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
      ; "last_cascade_attempt", last_cascade_attempt_json meta
      ]

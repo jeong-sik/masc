@@ -409,10 +409,6 @@ let int_field_opt key = function
   | None -> None
 ;;
 
-let int_option_json = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
 
 let http_listener_mode () =
   Env_config.Transport.use_h2 () |> Env_config.Transport.h2_mode_to_string
@@ -604,7 +600,7 @@ let transport_health_json ~config =
                    ~relay_queue_depth
                    ~relay_retry_total
                    ~relay_drop_total) )
-          ; "recent_messages", int_option_json recent_messages
+          ; "recent_messages", Json_util.int_opt_to_json recent_messages
           ; "recent_messages_available", `Bool recent_messages_available
           ; "recent_messages_source", `String degraded_source
           ; "external_fanout_targets", `Int sse_external_subscribers
@@ -734,15 +730,15 @@ let transport_health_json ~config =
           ; "room_id", `String room_id
           ; "topology_available", `Bool topology_available
           ; "topology_source", `String degraded_source
-          ; "total_units", int_option_json (int_field_opt "total_units" topology_summary)
+          ; "total_units", Json_util.int_opt_to_json (int_field_opt "total_units" topology_summary)
           ; ( "managed_units"
-            , int_option_json (int_field_opt "managed_unit_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "managed_unit_count" topology_summary) )
           ; ( "live_agents"
-            , int_option_json (int_field_opt "live_agent_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "live_agent_count" topology_summary) )
           ; ( "active_operations"
-            , int_option_json (int_field_opt "active_operation_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "active_operation_count" topology_summary) )
           ; ( "stale_units"
-            , int_option_json (int_field_opt "stale_unit_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "stale_unit_count" topology_summary) )
           ] )
     ; ( "agent_health"
       , `Assoc

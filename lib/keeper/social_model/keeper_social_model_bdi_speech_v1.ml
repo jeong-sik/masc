@@ -316,10 +316,7 @@ let deliver_request_help_post ~(meta : keeper_meta)
               ("agent_name", `String meta.agent_name);
               ("belief_summary", `String state.belief_summary);
               ("blocker", `String blocker);
-              ( "need",
-                match state.need with
-                | Some value -> `String value
-                | None -> `Null );
+              ( "need", Json_util.string_opt_to_json state.need );
             ])
       in
       match

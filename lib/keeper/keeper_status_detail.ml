@@ -846,9 +846,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                else `String (String.trim m.social_model));
              ("recognized_model", `Bool (Keeper_social_model.is_known_social_model m.social_model));
              ("fallback_model",
-               match Keeper_social_model.fallback_social_model m.social_model with
-               | Some model -> `String model
-               | None -> `Null);
+               Json_util.string_opt_to_json (Keeper_social_model.fallback_social_model m.social_model));
              ("last_speech_act",
                if String.trim m.runtime.last_speech_act = ""
                then `Null
@@ -908,9 +906,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("metrics_overview", metrics_summary_to_json metrics_overview);
            ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("memory_bank_error_class",
-             match memory_bank_error_class with
-             | Some label -> `String label
-             | None -> `Null);
+             Json_util.string_opt_to_json memory_bank_error_class);
            ("generation_lineage", generation_lineage);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);

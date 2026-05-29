@@ -109,9 +109,7 @@ let composite_claim_scope_json ~keeper_name =
           Json_util.json_string_list
             (Json_util.get_string_list claim_scope "effective_goal_ids") )
       ; ( "excluded_count",
-          match json_int "excluded_count" claim_scope with
-          | Some value -> `Int value
-          | None -> `Null )
+          Json_util.int_opt_to_json (json_int "excluded_count" claim_scope) )
       ; ( "claimed_task_id",
           match claimed_task with
           | Some task -> Json_util.string_opt_to_json (json_string "task_id" task)

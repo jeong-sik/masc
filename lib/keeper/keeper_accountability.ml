@@ -699,14 +699,8 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
         then `String "recent_decisions_without_accountability_claims"
         else `Null )
     ; "decision_signal_count", `Int decision_activity.decision_signal_count
-    ; ( "latest_decision_at"
-      , match decision_activity.latest_decision_at with
-        | Some value -> `String value
-        | None -> `Null )
-    ; ( "latest_decision_age_s"
-      , match decision_activity.latest_decision_age_s with
-        | Some value -> `Float value
-        | None -> `Null )
+    ; ( "latest_decision_at", Json_util.string_opt_to_json decision_activity.latest_decision_at )
+    ; ( "latest_decision_age_s", Json_util.float_opt_to_json decision_activity.latest_decision_age_s )
     ; "coverage_routing_hint", `String coverage_routing_hint
     ]
   in

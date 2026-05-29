@@ -727,9 +727,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
           status )
   in
   let stale_reason =
-    match full_health_snapshot_stale_reason ~now snapshot with
-    | Some reason -> `String reason
-    | None -> `Null
+    Json_util.string_opt_to_json (full_health_snapshot_stale_reason ~now snapshot)
   in
   let stale_age_ms = full_health_snapshot_stale_age_ms ~now snapshot in
   let section_timings_json =

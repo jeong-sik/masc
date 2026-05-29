@@ -372,9 +372,7 @@ let result_to_json result =
   `Assoc [
     ("status", `String status_str);
     ("reason", `String result.reason);
-    ("final_output", match result.final_output with
-      | Some s -> `String s
-      | None -> `Null);
+    ("final_output", Json_util.string_opt_to_json result.final_output);
     ("stats", `Assoc [
       ("turns", `Int result.stats.turns);
       ("tokens_in", `Int result.stats.tokens_in);
@@ -385,9 +383,7 @@ let result_to_json result =
       ("elapsed_seconds", `Float (Time_compat.now () -. result.stats.start_time));
     ]);
     ("history", `List history_json);
-    ("warning", match result.warning with
-      | Some w -> `String w
-      | None -> `Null);
+    ("warning", Json_util.string_opt_to_json result.warning);
   ]
 
 (** Parse retry config from JSON *)

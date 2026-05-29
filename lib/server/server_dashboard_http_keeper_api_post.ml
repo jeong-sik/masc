@@ -239,10 +239,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
               ("keeper", `String name);
               ( "trace_id",
                 `String trace_id );
-              ( "turn_id",
-                match turn_id with
-                | Some value -> `Int value
-                | None -> `Null );
+              ( "turn_id", Json_util.int_opt_to_json turn_id );
               ("manifest_path", `String manifest_scan.path);
               ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
               ("manifest_total_rows", `Int manifest_scan.total_rows);
@@ -257,10 +254,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
                   manifest_scan );
               ("health", `String health);
-              ( "stale_reason",
-                match stale_reason with
-                | Some value -> `String value
-                | None -> `Null );
+              ( "stale_reason", Json_util.string_opt_to_json stale_reason );
               ( "linked_artifacts",
                 `Assoc
                   [

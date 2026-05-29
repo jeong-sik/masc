@@ -543,10 +543,7 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.ag
     [ "name", `String agent.name
     ; "agent_type", `String agent.agent_type
     ; "status", `String (Masc_domain.string_of_agent_status agent.status)
-    ; ( "current_task"
-      , match agent.current_task with
-        | Some task -> `String task
-        | None -> `Null )
+    ; ( "current_task", Json_util.string_opt_to_json agent.current_task )
     ; "joined_at", `String agent.joined_at
     ; "last_seen", `String agent.last_seen
     ; "capabilities", `List (List.map (fun value -> `String value) agent.capabilities)

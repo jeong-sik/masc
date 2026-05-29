@@ -198,9 +198,7 @@ let handle_telemetry request reqd =
     in
     let query_json =
       let source_query =
-        match Server_utils.query_param req "source" with
-        | Some value -> `String value
-        | None -> `Null
+        Json_util.string_opt_to_json (Server_utils.query_param req "source")
       in
       `Assoc
         [

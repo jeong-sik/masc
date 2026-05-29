@@ -92,10 +92,7 @@ let attempt_record_json (record : attempt_record) =
     ; "attempt_id", `String record.attempt_id
     ; "attempt_number", `Int record.attempt_number
     ; "last_attempt_result", `String record.last_attempt_result
-    ; ( "next_retry_at"
-      , match record.next_retry_at with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "next_retry_at", Json_util.string_opt_to_json record.next_retry_at )
     ; "operator_next_action", `String record.operator_next_action
     ; "updated_at", `String record.updated_at
     ]
@@ -418,10 +415,7 @@ let attempt_fields = function
     ]
   | Some attempt ->
     [ "last_attempt_result", `String attempt.last_attempt_result
-    ; ( "next_retry_at"
-      , match attempt.next_retry_at with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "next_retry_at", Json_util.string_opt_to_json attempt.next_retry_at )
     ; "operator_next_action", `String attempt.operator_next_action
     ; "attempt_id", `String attempt.attempt_id
     ]

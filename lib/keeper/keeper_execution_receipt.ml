@@ -38,13 +38,9 @@ let cascade_rotation_attempt_to_json attempt =
       , string_opt_json
           (Option.map slot_release_phase_to_string attempt.slot_release_at_phase) )
     ; ( "productive_phase_elapsed_ms"
-      , match attempt.productive_phase_elapsed_ms with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json attempt.productive_phase_elapsed_ms )
     ; ( "retry_phase_elapsed_ms"
-      , match attempt.retry_phase_elapsed_ms with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json attempt.retry_phase_elapsed_ms )
     ; "error_kind", string_opt_json (Option.map error_kind_to_string attempt.error_kind)
     ; "error_message", string_opt_json attempt.error_message
     ; "recorded_at", `String attempt.recorded_at
@@ -456,13 +452,8 @@ let to_json (receipt : t) =
     | error_kind, error_message ->
       `Assoc
         [ ( "kind"
-          , match error_kind with
-            | Some value -> `String (error_kind_to_string value)
-            | None -> `Null )
-        ; ( "message"
-          , match error_message with
-            | Some value -> `String value
-            | None -> `Null )
+          , string_opt_json (Option.map error_kind_to_string error_kind) )
+        ; ( "message", string_opt_json error_message )
         ]
   in
   let runtime_contract =
@@ -511,24 +502,12 @@ let to_json (receipt : t) =
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; "generation", `Int receipt.generation
-    ; ( "turn_count"
-      , match receipt.turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "oas_turn_count"
-      , match receipt.oas_turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "oas_dispatch_mode"
-      , match receipt.oas_dispatch_mode with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
+    ; ( "oas_turn_count", Json_util.int_opt_to_json receipt.oas_turn_count )
+    ; ( "oas_dispatch_mode", string_opt_json receipt.oas_dispatch_mode )
     ; ( "oas_internal_cascade_disabled"
       , `Bool receipt.oas_internal_cascade_disabled )
-    ; ( "current_task_id"
-      , match receipt.current_task_id with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
@@ -573,19 +552,13 @@ let to_json (receipt : t) =
     ; ( "sandbox"
       , `Assoc
           [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
-          ; ( "sandbox_root"
-            , match receipt.sandbox_root with
-              | Some value -> `String value
-              | None -> `Null )
+          ; ( "sandbox_root", string_opt_json receipt.sandbox_root )
           ; ( "network_mode"
             , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
           ] )
     ; ( "approval"
       , `Assoc
-          [ ( "profile"
-            , match receipt.approval_profile with
-              | Some value -> `String value
-              | None -> `Null )
+          [ ( "profile", string_opt_json receipt.approval_profile )
           ; "derived", `Bool receipt.approval_profile_derived
           ] )
     ; ( "cascade"
@@ -620,30 +593,18 @@ let to_json (receipt : t) =
     ; "started_at", `String receipt.started_at
     ; "ended_at", `String receipt.ended_at
     ; ( "extra_system_context_digest"
-      , match receipt.extra_system_context_digest with
-        | Some value -> `String value
-        | None -> `Null )
+      , string_opt_json receipt.extra_system_context_digest )
     ; ( "extra_system_context_injected_size"
-      , match receipt.extra_system_context_injected_size with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.extra_system_context_injected_size )
     ; ( "extra_system_context_computed_size"
-      , match receipt.extra_system_context_computed_size with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.extra_system_context_computed_size )
     ; ( "pre_dispatch_compacted", `Bool receipt.pre_dispatch_compacted )
     ; ( "pre_dispatch_compaction_trigger"
-      , match receipt.pre_dispatch_compaction_trigger with
-        | Some value -> `String value
-        | None -> `Null )
+      , string_opt_json receipt.pre_dispatch_compaction_trigger )
     ; ( "pre_dispatch_compaction_before_tokens"
-      , match receipt.pre_dispatch_compaction_before_tokens with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.pre_dispatch_compaction_before_tokens )
     ; ( "pre_dispatch_compaction_after_tokens"
-      , match receipt.pre_dispatch_compaction_after_tokens with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.pre_dispatch_compaction_after_tokens )
     ]
 ;;
 
@@ -757,28 +718,19 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; "generation", `Int receipt.generation
-    ; ( "turn_count"
-      , match receipt.turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; "disposition", `String disposition_s
     ; "disposition_reason", `String reason_s
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
-    ; ( "current_task_id"
-      , match receipt.current_task_id with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
     ; "cascade_name", `String (Cascade_name.to_string receipt.cascade_name)
     ; "cascade_outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
     ; ( "tool_contract_result"
       , `String (tool_contract_result_to_string receipt.tool_contract_result) )
-    ; ( "last_tool_name"
-      , match last_tool_name receipt with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "last_tool_name", string_opt_json (last_tool_name receipt) )
     ; "tools_used", list_json receipt.tools_used
     ; ( "contract_violation_detail"
       , match decode_contract_violation_reason terminal_reason_code with
@@ -830,10 +782,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
       , match receipt.error_kind with
         | Some v -> `String (error_kind_to_string v)
         | None -> `Null )
-    ; ( "error_message"
-      , match receipt.error_message with
-        | Some v -> `String v
-        | None -> `Null )
+    ; ( "error_message", string_opt_json receipt.error_message )
     ; "ended_at", `String receipt.ended_at
     ]
 ;;

@@ -96,10 +96,7 @@ let cached_surface_json surface =
       ("last_attempt_at", Json_util.string_opt_to_json surface.last_attempt_at);
       ("last_error_at", Json_util.string_opt_to_json surface.last_error_at);
       ("stale_reason", Json_util.string_opt_to_json stale_reason);
-      ( "stale_age_ms",
-        match stale_age_ms with
-        | Some value -> `Int value
-        | None -> `Null );
+      ( "stale_age_ms", Json_util.int_opt_to_json stale_age_ms );
     ]
 
 let cached_surface_has_success surface =

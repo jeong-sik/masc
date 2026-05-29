@@ -173,30 +173,13 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
       ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
       ("cascade_name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
       ( "approval_profile",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_approval_profile receipt with
-             | Some profile -> `String profile
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_approval_profile) );
       ( "cascade_outcome",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_cascade_outcome receipt with
-             | Some outcome -> `String outcome
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_cascade_outcome) );
       ( "latest_execution_outcome",
-        match latest_execution_outcome with
-        | Some outcome -> `String outcome
-        | None -> `Null );
+        Json_util.string_opt_to_json latest_execution_outcome );
       ( "latest_execution_at",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_ended_at receipt with
-             | Some ended_at -> `String ended_at
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_ended_at) );
       ( "latest_receipt",
         match latest_receipt with
         | Some receipt -> receipt

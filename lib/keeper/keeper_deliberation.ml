@@ -91,10 +91,7 @@ let rec deliberation_action_to_json = function
         [
           ("type", `String "board_post");
           ("content", `String content);
-          ( "hearth",
-            match hearth with
-            | Some h -> `String h
-            | None -> `Null );
+          ( "hearth", Json_util.string_opt_to_json hearth );
         ]
   | BoardComment { post_id; content } ->
       `Assoc
@@ -510,10 +507,7 @@ let execution_result_to_json (result : execution_result) : Yojson.Safe.t =
       ("selected_action", deliberation_action_to_json result.selected_action);
       ("action_source", action_source_to_json result.action_source);
       ("fallback_used", `Bool result.fallback_used);
-      ( "fallback_reason",
-        match result.fallback_reason with
-        | Some reason -> `String reason
-        | None -> `Null );
+      ( "fallback_reason", Json_util.string_opt_to_json result.fallback_reason );
       ("policy_labels", `List (List.map (fun label -> `String label) result.policy_labels));
       ("reasoning", `String result.reasoning);
       ("confidence", `Float result.confidence);

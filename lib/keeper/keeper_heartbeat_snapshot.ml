@@ -451,9 +451,7 @@ let write_heartbeat_snapshot
         ; "goal_drift", `Float auto_rules.goal_drift
         ; "guardrail_stop", `Bool auto_rules.guardrail_stop
         ; ( "guardrail_stop_reason"
-          , match auto_rules.guardrail_reason with
-            | Some reason -> `String reason
-            | None -> `Null )
+          , Json_util.string_opt_to_json auto_rules.guardrail_reason )
         ; "handoff", `Assoc [ "performed", `Bool false ]
         ; "stage_timing", Keeper_keepalive_signal.stage_timing_to_json ~ring:timing_ring ~count:timing_filled
         ]

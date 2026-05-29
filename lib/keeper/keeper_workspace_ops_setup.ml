@@ -99,10 +99,7 @@ let render_completed_process_result
        ~extra:([
            "op", `String op;
            "cmd", `String cmd;
-           ( "cwd",
-             match cwd with
-             | Some dir -> `String dir
-             | None -> `Null );
+           ( "cwd", Json_util.string_opt_to_json cwd );
          ] @ extra_with_via @ insight_extra)
        ~status:st
        ~output:out

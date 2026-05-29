@@ -133,10 +133,7 @@ let to_yojson = function
           ("kind", `String "resume") ;
           ("transport", `String (transport_to_string transport)) ;
           ("session_id", `String session_id) ;
-          ( "last_event_id",
-            match last_event_id with
-            | Some id -> `String id
-            | None -> `Null ) ;
+          ( "last_event_id", Json_util.string_opt_to_json last_event_id ) ;
           ("replayed", `Int replayed) ;
         ]
   | Evict { transport ; session_id ; reason } ->

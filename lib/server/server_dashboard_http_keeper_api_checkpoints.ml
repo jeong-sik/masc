@@ -34,14 +34,8 @@ let oas_checkpoint_summary_json
           (match checkpoint.system_prompt with
            | Some prompt -> String.trim prompt <> ""
            | None -> false) )
-    ; ( "latest_preview"
-      , match latest_preview_of_messages messages with
-        | Some preview -> `String preview
-        | None -> `Null )
-    ; ( "continuity_summary"
-      , match continuity_summary with
-        | Some summary -> `String summary
-        | None -> `Null )
+    ; ( "latest_preview", Json_util.string_opt_to_json (latest_preview_of_messages messages) )
+    ; ( "continuity_summary", Json_util.string_opt_to_json continuity_summary )
     ; "file_stat", stat_json_of_path path
     ]
 ;;

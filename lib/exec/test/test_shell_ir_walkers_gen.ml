@@ -2445,6 +2445,87 @@ let test_constructor_names_in_declaration_order () =
     Shell_ir_typed_walkers_gen.gen_constructor_names
 ;;
 
+(* Batch 2 regression tests: boolean-as-value misclassification & missing value arms *)
+let test_batch2_regression_fixes () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Git_push: --signed is boolean → should NOT eat "origin" as value *)
+  let gp =
+    of_simple { (base "git") with args = [ lit "push"; lit "--signed"; lit "origin"; lit "main" ] }
+  in
+  (match gp with
+   | W (Git_push { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push --signed origin main: expected remote=origin branch=main, got %a" pp w);
+  (* Git_pull: --recurse-submodules is boolean → should NOT eat "origin" as value *)
+  let gl =
+    of_simple { (base "git") with args = [ lit "pull"; lit "--recurse-submodules"; lit "origin"; lit "main" ] }
+  in
+  (match gl with
+   | W (Git_pull { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git pull --recurse-submodules origin main: expected remote=origin branch=main, got %a" pp w);
+  (* Git_log: --merges is boolean → should NOT eat "--oneline" as value *)
+  let gl2 =
+    of_simple { (base "git") with args = [ lit "log"; lit "--merges"; lit "--oneline" ] }
+  in
+  (match gl2 with
+   | W (Git_log { oneline = true; _ }) -> ()
+   | w -> Alcotest.failf "git log --merges --oneline: expected oneline=true, got %a" pp w);
+  (* Git_log: --no-merges is boolean → should NOT eat "-n5" as value *)
+  let gl3 =
+    of_simple { (base "git") with args = [ lit "log"; lit "--no-merges"; lit "-n5" ] }
+  in
+  (match gl3 with
+   | W (Git_log { max_count = Some 5; _ }) -> ()
+   | w -> Alcotest.failf "git log --no-merges -n5: expected max_count=5, got %a" pp w);
+  (* Docker: --oom-kill-disable is boolean → should NOT eat "--name" as value *)
+  let dk =
+    of_simple { (base "docker") with args = [ lit "run"; lit "--oom-kill-disable"; lit "--name"; lit "foo"; lit "img" ] }
+  in
+  (match dk with
+   | W (Docker { subcommand = "run"; rest; _ }) ->
+     if not (List.exists ((=) "foo") rest) then
+       Alcotest.failf "docker run --oom-kill-disable --name foo: 'foo' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "docker run --oom-kill-disable --name foo: expected Docker, got %a" pp w);
+  (* Ninja: -C /builddir → /builddir promoted to subcmd when none exists, "all" goes to rest *)
+  let nj =
+    of_simple { (base "ninja") with args = [ lit "-C"; lit "/builddir"; lit "all" ] }
+  in
+  (match nj with
+   | W (Ninja { subcommand = "/builddir"; rest = [ "all" ]; _ }) -> ()
+   | w -> Alcotest.failf "ninja -C /builddir all: expected sub=/builddir rest=[all], got %a" pp w);
+  (* Diff: -L label → label consumed, file1 file2 are positional *)
+  let df =
+    of_simple { (base "diff") with args = [ lit "-L"; lit "old"; lit "file1"; lit "file2" ] }
+  in
+  (match df with
+   | W (Diff { file1 = "file1"; file2 = "file2"; _ }) -> ()
+   | w -> Alcotest.failf "diff -L old file1 file2: expected file1=file1 file2=file2, got %a" pp w);
+  (* Diff: -U 3 → unified consumed, file1 file2 are positional *)
+  let df2 =
+    of_simple { (base "diff") with args = [ lit "-U"; lit "3"; lit "file1"; lit "file2" ] }
+  in
+  (match df2 with
+   | W (Diff { file1 = "file1"; file2 = "file2"; _ }) -> ()
+   | w -> Alcotest.failf "diff -U 3 file1 file2: expected file1=file1 file2=file2, got %a" pp w);
+  (* Diff: -W 120 → width consumed, file1 file2 are positional *)
+  let df3 =
+    of_simple { (base "diff") with args = [ lit "-W"; lit "120"; lit "file1"; lit "file2" ] }
+  in
+  (match df3 with
+   | W (Diff { file1 = "file1"; file2 = "file2"; _ }) -> ()
+   | w -> Alcotest.failf "diff -W 120 file1 file2: expected file1=file1 file2=file2, got %a" pp w)
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -2500,6 +2581,10 @@ let () =
             "Batch16 eq-form --flag=VALUE for subcommand+args"
             `Quick
             test_subcommand_args_eq_form_flags
+        ; Alcotest.test_case
+            "Batch 2 regression: boolean-as-value & missing value arms"
+            `Quick
+            test_batch2_regression_fixes
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

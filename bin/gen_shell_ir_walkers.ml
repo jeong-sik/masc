@@ -1121,11 +1121,9 @@ parse false false [] args|}
 (* git log flags that consume the next argument as a value (--flag VALUE form) *)
 let git_log_value_flags_no_eq =
   [ "--format"; "--pretty"; "--date"; "--since"; "--until"; "--before"; "--after"
-  ; "--author"; "--committer"; "--grep"; "--grep-reflog"; "--merges"
-  ; "--diff-filter"; "--encoding"; "--output"; "--break-rewrites"
-  ; "--pickaxe-all"; "--pickaxe-regex"
-  ; "--diff-merges"; "--remerge-diff"
-  ; "-M"; "-C"; "-D"   (* diff-merges short forms *)
+  ; "--author"; "--committer"; "--grep"; "--grep-reflog"
+  ; "--diff-filter"; "--encoding"; "--output"
+  ; "--diff-merges"
   ]
 in
 let rec parse oneline max_count = function
@@ -1162,14 +1160,17 @@ let rec parse oneline max_count = function
   | "--graph" :: rest | "--all" :: rest | "--decorate" :: rest
   | "--stat" :: rest | "--name-only" :: rest | "--name-status" :: rest
   | "--summary" :: rest | "--shortstat" :: rest
-  | "--no-merges" :: rest | "--first-parent" :: rest
+  | "--no-merges" :: rest | "--merges" :: rest | "--first-parent" :: rest
   | "--full-history" :: rest | "--simplify-merges" :: rest
   | "--topo-order" :: rest | "--date-order" :: rest | "--reverse" :: rest
   | "--follow" :: rest | "--full-diff" :: rest
   | "--ignore-submodules" :: rest
   | "--no-walk" :: rest | "--no-decorate" :: rest
   | "--no-patch" :: rest | "-s" :: rest | "--sparse" :: rest
-  | "--show-signature" :: rest ->
+  | "--show-signature" :: rest
+  | "--pickaxe-all" :: rest | "--pickaxe-regex" :: rest
+  | "--break-rewrites" :: rest | "--remerge-diff" :: rest
+  | "-M" :: rest | "-C" :: rest | "-D" :: rest ->
     parse oneline max_count rest
   (* --flag VALUE form: flag in list (exact match) — MUST precede generic arg arm *)
   | flag :: _ :: rest when List.mem flag git_log_value_flags_no_eq ->
@@ -1296,7 +1297,6 @@ parse None false args|}
 (* git push flags that consume the next argument as a value (--flag VALUE form) *)
 let git_push_value_flags_no_eq =
   [ "--repo"; "--receive-pack"; "--upload-pack"; "--exec"
-  ; "--signed"
   ; "--set-upstream-to"
   ; "-o"   (* push option *)
   ]
@@ -1389,7 +1389,7 @@ parse false false false None None args|}
 (* git pull flags that consume the next argument as a value (--flag VALUE form) *)
 let git_pull_value_flags_no_eq =
   [ "--repo"; "--upload-pack"; "--receive-pack"; "--depth"
-  ; "--recurse-submodules"; "--jobs"
+  ; "--jobs"
   ; "-o"   (* transport option *)
   ]
 in
@@ -2969,6 +2969,14 @@ let rec parse unified brief files = function
   | "--unified" :: rest -> parse true brief files rest
   | "-q" :: rest -> parse unified true files rest
   | "--brief" :: rest -> parse unified true files rest
+  | "-L" :: _ :: rest -> parse unified brief files rest
+  | "--label" :: _ :: rest -> parse unified brief files rest
+  | "-U" :: _ :: rest -> parse unified brief files rest
+  | "--unified=" :: rest -> parse unified brief files rest
+  | "-I" :: _ :: rest -> parse unified brief files rest
+  | "--ignore-matching-lines" :: _ :: rest -> parse unified brief files rest
+  | "-W" :: _ :: rest -> parse unified brief files rest
+  | "--width" :: _ :: rest -> parse unified brief files rest
   | "--" :: rest ->
     (* POSIX end-of-options: remaining are file1, file2 *)
     let remaining = List.filter (fun a -> String.length a > 0) rest in
@@ -3911,7 +3919,7 @@ let docker_value_flags =
   ; "--pid"
   ; "--pids-limit"
   ; "--memory-swap"; "--memory-reservation"
-  ; "--kernel-memory"; "--oom-kill-disable"; "--oom-score-adj"
+  ; "--kernel-memory"; "--oom-score-adj"
   ; "--ulimit"
   ; "--security-opt"; "--cap-add"; "--cap-drop"
   ; "--group-add"
@@ -4782,9 +4790,11 @@ parse None false false false args|}
            subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
            rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
          })))
-    | arg :: _val :: rest
+    | arg :: v :: rest
       when not dd && List.mem arg [ "-C"; "-f"; "-k"; "-l"; "-d" ] ->
-      parse subcmd j dd (_val :: rest)
+      (match subcmd with
+       | None -> parse (Some v) j dd rest
+       | Some _ -> parse subcmd j dd (v :: rest))
     | arg :: rest
       when not dd
            && Shell_ir_typed_types.is_eq_form_flag arg

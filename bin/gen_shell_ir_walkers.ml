@@ -438,6 +438,16 @@ let rec parse recursive force paths = function
      | _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rm { paths = List.rev paths; recursive; force })))
   | "-r" :: rest | "-R" :: rest | "--recursive" :: rest -> parse true force paths rest
   | "-f" :: rest | "--force" :: rest -> parse recursive true paths rest
+  (* Combined short flags: -rf, -fr, -rfr, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'r' || c = 'R' || c = 'f')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let has_r = String.contains arg 'r' || String.contains arg 'R' in
+    let has_f = String.contains arg 'f' in
+    parse (recursive || has_r) (force || has_f) paths rest
   (* POSIX end-of-options: all remaining are paths *)
   | "--" :: rest ->
     let remaining = List.filter (fun a -> String.length a > 0) rest in

@@ -2810,14 +2810,14 @@ let rec parse in_place ext_re suppress expr file dd = function
      | Some e, Some f ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place; extended_regex = ext_re; suppress_output = suppress }))
      | _ -> None)
-  | "-i" :: rest when not dd ->
+  | "-i" :: rest | "--in-place" :: rest when not dd ->
     (* macOS sed -i '' takes an empty suffix; GNU sed -i has no suffix.
        Only skip the next token if it's an explicit empty string (macOS style).
        Non-empty non-flag tokens are the expression, not a suffix. *)
     (match rest with
      | "" :: rest' -> parse true ext_re suppress expr file dd rest'   (* -i '' — macOS empty suffix *)
      | _ -> parse true ext_re suppress expr file dd rest)              (* -i at end or GNU style *)
-  | "-e" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
+  | "-e" :: e :: rest | "--expression" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
   | "-E" :: rest | "--regexp-extended" :: rest when not dd -> parse in_place true suppress expr file dd rest
   | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest when not dd -> parse in_place ext_re true expr file dd rest
   (* POSIX end-of-options: remaining are expression, file *)
@@ -3133,8 +3133,8 @@ parse None [] false args|}
 let rec parse file patchfile strip reverse = function
   | [] ->
     Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file; patchfile; strip; reverse }))
-  | "-R" :: rest -> parse file patchfile strip true rest
-  | "-i" :: p :: rest -> parse file (Some p) strip reverse rest
+  | "-R" :: rest | "--reverse" :: rest -> parse file patchfile strip true rest
+  | "-i" :: p :: rest | "--input" :: p :: rest -> parse file (Some p) strip reverse rest
   | "--" :: rest ->
     (* POSIX end-of-options: remaining non-empty args are file *)
     let remaining = List.filter (fun a -> String.length a > 0) rest in
@@ -3142,6 +3142,14 @@ let rec parse file patchfile strip reverse = function
      | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file; patchfile; strip; reverse }))
      | [ f ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Patch { file = Some f; patchfile; strip; reverse }))
      | _ -> None)
+  (* --strip=N form *)
+  | arg :: rest
+    when String.length arg > 9
+         && String.sub arg 0 9 = "--strip=" ->
+    let n_str = String.sub arg 9 (String.length arg - 9) in
+    (match int_of_string_opt n_str with
+     | Some n -> parse file patchfile n reverse rest
+     | None -> parse file patchfile strip reverse rest)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then (

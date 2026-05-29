@@ -1017,6 +1017,49 @@ let test_ssh_long_forms () =
    | w -> Alcotest.failf "Ssh -i: expected file, got %a" pp w)
 ;;
 
+(* Sed long-form flag parsing *)
+let test_sed_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* sed --in-place -e 's/foo/bar/' file.txt *)
+  let sed1 =
+    of_simple { (base "sed") with args = [ lit "--in-place"; lit "-e"; lit "s/foo/bar/"; lit "file.txt" ] }
+  in
+  (match sed1 with
+   | W (Sed { in_place = true; expression = "s/foo/bar/"; file = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "sed --in-place -e: expected in_place=true, got %a" pp w);
+  (* sed --expression 's/a/b/' file.txt *)
+  let sed2 =
+    of_simple { (base "sed") with args = [ lit "--expression"; lit "s/a/b/"; lit "file.txt" ] }
+  in
+  (match sed2 with
+   | W (Sed { expression = "s/a/b/"; file = "file.txt"; in_place = false; _ }) -> ()
+   | w -> Alcotest.failf "sed --expression: expected expr, got %a" pp w);
+  (* sed --in-place '' -e 's/x/y/' file.txt (macOS style) *)
+  let sed3 =
+    of_simple { (base "sed") with args = [ lit "--in-place"; lit ""; lit "-e"; lit "s/x/y/"; lit "file.txt" ] }
+  in
+  (match sed3 with
+   | W (Sed { in_place = true; expression = "s/x/y/"; file = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "sed --in-place '': expected macOS style, got %a" pp w);
+  (* sed --quiet --regexp-extended -e 'pattern' file *)
+  let sed4 =
+    of_simple { (base "sed") with args = [ lit "--quiet"; lit "--regexp-extended"; lit "-e"; lit "pattern"; lit "file" ] }
+  in
+  (match sed4 with
+   | W (Sed { suppress_output = true; extended_regex = true; expression = "pattern"; _ }) -> ()
+   | w -> Alcotest.failf "sed --quiet --regexp-extended: expected both flags, got %a" pp w)
+;;
+
 (* Combined short-flag parsing: -rf → -r + -f *)
 let test_combined_short_flags () =
   let open Shell_ir_typed in
@@ -1363,6 +1406,7 @@ let () =
         ; Alcotest.test_case "--jobs=N form" `Quick test_jobs_equals_form
         ; Alcotest.test_case "--message= form" `Quick test_git_commit_message_equals
         ; Alcotest.test_case "--port=/--identity-file= form" `Quick test_ssh_long_forms
+        ; Alcotest.test_case "sed --in-place/--expression form" `Quick test_sed_long_forms
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"

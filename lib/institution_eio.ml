@@ -190,14 +190,13 @@ let rec episode_to_json (e : episode) : Yojson.Safe.t =
 
 and episode_of_json json =
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
-  { id = Json_util.get_string json "id" |> Option.value ~default:""
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
   ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
   ; participants = Json_util.get_string_list json "participants"
-  ; event_type = Json_util.get_string json "event_type" |> Option.value ~default:""
-  ; summary = Json_util.get_string json "summary" |> Option.value ~default:""
+  ; event_type = Json_util.get_string_with_default json ~key:"event_type" ~default:""
+  ; summary = Json_util.get_string_with_default json ~key:"summary" ~default:""
   ; outcome =
-      Json_util.get_string json "outcome"
-      |> Option.value ~default:""
+      Json_util.get_string_with_default json ~key:"outcome" ~default:""
       |> outcome_of_string
   ; learnings = Json_util.get_string_list json "learnings"
   ; context =
@@ -223,11 +222,11 @@ and knowledge_to_json (k : knowledge) : Yojson.Safe.t =
     ]
 
 and knowledge_of_json json =
-  { id = Json_util.get_string json "id" |> Option.value ~default:""
-  ; topic = Json_util.get_string json "topic" |> Option.value ~default:""
-  ; content = Json_util.get_string json "content" |> Option.value ~default:""
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; topic = Json_util.get_string_with_default json ~key:"topic" ~default:""
+  ; content = Json_util.get_string_with_default json ~key:"content" ~default:""
   ; confidence = Json_util.get_float json "confidence" |> Option.value ~default:0.0
-  ; source = Json_util.get_string json "source" |> Option.value ~default:""
+  ; source = Json_util.get_string_with_default json ~key:"source" ~default:""
   ; created_at = Json_util.get_float json "created_at" |> Option.value ~default:0.0
   ; last_verified = Json_util.get_float json "last_verified" |> Option.value ~default:0.0
   ; references = Json_util.get_string_list json "references"
@@ -250,10 +249,10 @@ and pattern_to_json (p : pattern) : Yojson.Safe.t =
     ]
 
 and pattern_of_json json =
-  { id = Json_util.get_string json "id" |> Option.value ~default:""
-  ; name = Json_util.get_string json "name" |> Option.value ~default:""
-  ; description = Json_util.get_string json "description" |> Option.value ~default:""
-  ; trigger = Json_util.get_string json "trigger" |> Option.value ~default:""
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; name = Json_util.get_string_with_default json ~key:"name" ~default:""
+  ; description = Json_util.get_string_with_default json ~key:"description" ~default:""
+  ; trigger = Json_util.get_string_with_default json ~key:"trigger" ~default:""
   ; steps = Json_util.get_string_list json "steps"
   ; success_rate = Json_util.get_float json "success_rate" |> Option.value ~default:0.0
   ; usage_count = Json_util.get_int json "usage_count" |> Option.value ~default:0
@@ -277,9 +276,9 @@ and cultural_value_to_json (c : cultural_value) : Yojson.Safe.t =
     ]
 
 and cultural_value_of_json json =
-  { id = Json_util.get_string json "id" |> Option.value ~default:""
-  ; name = Json_util.get_string json "name" |> Option.value ~default:""
-  ; description = Json_util.get_string json "description" |> Option.value ~default:""
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; name = Json_util.get_string_with_default json ~key:"name" ~default:""
+  ; description = Json_util.get_string_with_default json ~key:"description" ~default:""
   ; weight = Json_util.get_float json "weight" |> Option.value ~default:0.0
   ; examples = Json_util.get_string_list json "examples"
   ; anti_patterns = Json_util.get_string_list json "anti_patterns"
@@ -299,8 +298,7 @@ and succession_of_json json =
   { onboarding_steps = Json_util.get_string_list json "onboarding_steps"
   ; required_knowledge = Json_util.get_string_list json "required_knowledge"
   ; mentor_assignment =
-      Json_util.get_string json "mentor_assignment"
-      |> Option.value ~default:"best_fit"
+      Json_util.get_string_with_default json ~key:"mentor_assignment" ~default:"best_fit"
       |> mentor_of_string
   ; probation_period = Json_util.get_float json "probation_period" |> Option.value ~default:0.0
   ; graduation_criteria = Json_util.get_string_list json "graduation_criteria"
@@ -316,9 +314,9 @@ and identity_to_json (i : identity) : Yojson.Safe.t =
     ]
 
 and identity_of_json json =
-  { id = Json_util.get_string json "id" |> Option.value ~default:""
-  ; name = Json_util.get_string json "name" |> Option.value ~default:""
-  ; mission = Json_util.get_string json "mission" |> Option.value ~default:""
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; name = Json_util.get_string_with_default json ~key:"name" ~default:""
+  ; mission = Json_util.get_string_with_default json ~key:"mission" ~default:""
   ; founded_at = Json_util.get_float json "founded_at" |> Option.value ~default:0.0
   ; generation = Json_util.get_int json "generation" |> Option.value ~default:0
   }

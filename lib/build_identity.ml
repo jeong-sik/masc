@@ -24,12 +24,7 @@ type t =
   }
 [@@deriving yojson { strict = false }]
 
-let iso8601_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
+let iso8601_of_unix = Masc_domain.iso8601_of_unix_seconds
     tm.Unix.tm_mday
     tm.Unix.tm_hour
     tm.Unix.tm_min

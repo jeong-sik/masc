@@ -704,10 +704,10 @@ let stats () =
         | `Assoc fields ->
           (match List.assoc_opt "ttl_remaining_ms" fields with
            | Some (`Int n) -> n
-           | _ ->
+           | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) ->
              (match List.assoc_opt "computing_for_ms" fields with
               | Some (`Int n) -> -n  (* computing slots first *)
-              | _ -> max_int))
+              | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> max_int))
         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> max_int
       in
       List.sort (fun a b -> compare (key_of a) (key_of b)) all

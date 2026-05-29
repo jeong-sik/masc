@@ -1022,7 +1022,7 @@ let light_runtime_resolution_json (config : Coord.config) =
   let fleet_safety =
     match List.assoc_opt "keeper_fleet_safety" fleet_fields with
     | Some ((`Assoc _) as json) -> Some json
-    | _ -> None
+    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None
   in
   let fleet_warning =
     match fleet_safety with
@@ -1030,15 +1030,15 @@ let light_runtime_resolution_json (config : Coord.config) =
       let status =
         match List.assoc_opt "status" fields with
         | Some (`String status) -> status
-        | _ -> "unknown"
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> "unknown"
       in
       let operator_action_required =
         match List.assoc_opt "operator_action_required" fields with
         | Some (`Bool value) -> value
-        | _ -> false
+        | None | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false
       in
       (not (String.equal status "ok")) || operator_action_required
-    | _ -> false
+    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> false
   in
   let warnings =
     []

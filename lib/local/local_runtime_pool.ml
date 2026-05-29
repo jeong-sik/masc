@@ -212,7 +212,7 @@ let normalize_runtime_json json =
             match parse_int_opt raw with
             | Some value -> max 1 value
             | None -> default_parallel_hint)
-        | _ -> default_parallel_hint
+        | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) | None -> default_parallel_hint
       in
       Ok
         {

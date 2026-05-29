@@ -336,7 +336,7 @@ let assoc_field name = function
 let string_field name json =
   match assoc_field name json with
   | Some (`String value) -> Some value
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
 ;;
 
 let float_field name json =
@@ -349,13 +349,13 @@ let float_field name json =
 let int_field name json =
   match assoc_field name json with
   | Some (`Int value) -> value
-  | _ -> 0
+  | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> 0
 ;;
 
 let bool_field name json =
   match assoc_field name json with
   | Some (`Bool value) -> value
-  | _ -> false
+  | None | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false
 ;;
 
 let nested_string_field outer inner json =
@@ -502,7 +502,7 @@ let summarize_rows ~keeper_name ~limit rows =
     | Some stimulus_json ->
       (match assoc_field "payload_parse_error" stimulus_json with
        | Some (`String _) -> incr payload_parse_error_count
-       | _ -> ())
+       | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> ())
     | None -> ()
   in
   List.iter
@@ -648,7 +648,7 @@ let summary_status json =
 let summary_read_error_count json =
   match assoc_field "read_error" json with
   | Some (`String _) -> 1
-  | _ -> 0
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> 0
 ;;
 
 let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =

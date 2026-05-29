@@ -199,7 +199,7 @@ let add_routes router =
              | `Assoc fields ->
                (match List.assoc_opt key fields with
                 | Some (`String s) when s <> "" -> Some s
-                | _ -> None)
+                | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
            in
            let find_int key =
@@ -208,7 +208,7 @@ let add_routes router =
                (match List.assoc_opt key fields with
                 | Some (`Int i) -> Some i
                 | Some (`Intlit s) -> int_of_string_opt s
-                | _ -> None)
+                | None | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
            in
            match

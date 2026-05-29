@@ -6,8 +6,6 @@ type paused_keeper_scan = {
 }
 val empty_paused_keeper_scan : paused_keeper_scan
 val sorted_unique_strings : String.t list -> String.t list
-val json_float_opt : float option -> Yojson.Safe.t
-val json_string_opt : string option -> Yojson.Safe.t
 val effective_autoboot_enabled :
   string ->
   Keeper_meta_contract.keeper_meta -> bool

@@ -94,15 +94,9 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
         ("source", `String source);
         ("provenance", `String provenance);
         ("target_kind", `String target_kind);
-        ( "target_id",
-          match target_id with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "target_id", Json_util.string_opt_to_json target_id );
         ("suggested_tab", `String suggested_tab);
-        ( "suggested_surface",
-          match suggested_surface with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "suggested_surface", Json_util.string_opt_to_json suggested_surface );
         ("suggested_params", suggested_params);
       ]
   in
@@ -147,15 +141,9 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
         ("source", `String "execution");
         ("provenance", `String "derived");
         ("target_kind", `String "queue");
-        ( "target_id",
-          match target_id with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "target_id", Json_util.string_opt_to_json target_id );
         ("suggested_tab", `String suggested_tab);
-        ( "suggested_surface",
-          match suggested_surface with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "suggested_surface", Json_util.string_opt_to_json suggested_surface );
         ("suggested_params", suggested_params);
       ]
   in
@@ -474,22 +462,10 @@ let attention_event_json
       ("kind", `String kind);
       ("summary", `String summary);
       ("requires_decision", `Bool requires_decision);
-      ( "keeper_name",
-        match keeper_name with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "target_type",
-        match target_type with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "target_id",
-        match target_id with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "recommended_action",
-        match recommended_action with
-        | Some value -> `String value
-        | None -> `Null );
+      ( "keeper_name", Json_util.string_opt_to_json keeper_name );
+      ( "target_type", Json_util.string_opt_to_json target_type );
+      ( "target_id", Json_util.string_opt_to_json target_id );
+      ( "recommended_action", Json_util.string_opt_to_json recommended_action );
       ("provenance", `String provenance);
     ]
 

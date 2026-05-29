@@ -175,17 +175,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                            Json_util.get_int lane_decision "effective_tool_count";
                          ]) );
                   ( "tool_gate_enabled",
-                    match
-                      Json_util.get_bool tool_decision "tool_gate_enabled"
-                    with
-                    | Some value -> `Bool value
-                    | None -> `Null );
+                    Json_util.bool_opt_to_json
+                      (Json_util.get_bool tool_decision "tool_gate_enabled") );
                   ( "tool_surface_fallback_used",
-                    match
-                      Json_util.get_bool tool_decision "tool_surface_fallback_used"
-                    with
-                    | Some value -> `Bool value
-                    | None -> `Null );
+                    Json_util.bool_opt_to_json
+                      (Json_util.get_bool tool_decision "tool_surface_fallback_used") );
                   ("terminal_status", `String tool_runtime_status);
                 ] );
             ( "provider_lane",
@@ -201,11 +195,8 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Json_util.int_opt_to_json
                       (Json_util.get_int lane_decision "effective_tool_count") );
                   ( "runtime_mcp_policy_present",
-                    match
-                      Json_util.get_bool lane_decision "runtime_mcp_policy_present"
-                    with
-                    | Some value -> `Bool value
-                    | None -> `Null );
+                    Json_util.bool_opt_to_json
+                      (Json_util.get_bool lane_decision "runtime_mcp_policy_present") );
                   ("required_tools", Json_util.json_string_list required_tools);
                   ("materialized_tools", Json_util.json_string_list materialized_tools);
                   ( "missing_required_tools",

@@ -59,15 +59,7 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
       ("status", `String status);
       ("status_color", `String (task_status_color status));
       ("priority", `Int task.priority);
-      ("goal_id", Json_util.string_opt_to_json task.goal_id);
-      ("assignee",
-       match task_assignee task with
-       | Some assignee -> `String assignee
-       | None -> `Null);
-      ("goal_id",
-       match task.goal_id with
-       | Some goal_id -> `String goal_id
-       | None -> `Null);
+      ("assignee", Json_util.string_opt_to_json (task_assignee task));
       ("linkage_source", `String linkage_source);
       ("is_terminal", `Bool (task_is_terminal task));
       ("created_at", `String task.created_at);

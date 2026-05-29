@@ -501,10 +501,7 @@ let recent_json ?provider ?limit () =
       ("source", `String source_label);
       ("retention", retention_json);
       ("provider", provider_json provider);
-      ( "limit",
-        match limit with
-        | Some limit -> `Int limit
-        | None -> `Null );
+      ( "limit", Json_util.int_opt_to_json limit );
       ("count", `Int (List.length samples));
       ("samples", `List (List.map sample_entry_to_yojson samples));
     ]
@@ -518,10 +515,7 @@ let summary_json ?provider ?limit () =
       ("source", `String source_label);
       ("retention", retention_json);
       ("provider", provider_json provider);
-      ( "limit",
-        match limit with
-        | Some limit -> `Int limit
-        | None -> `Null );
+      ( "limit", Json_util.int_opt_to_json limit );
       ("summary", summary_to_yojson summary);
     ]
 

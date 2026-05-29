@@ -111,7 +111,7 @@ let handover_of_json (json : Yojson.Safe.t) : handover_record option =
   let str_list key = Json_util.get_string_list json key in
   let int_val key = Json_util.get_int json key |> Option.value ~default:0 in
   let float_val key = Json_util.get_float json key |> Option.value ~default:0.0 in
-  Some {
+  try Some {
     id = str "id";
     from_agent = str "from_agent";
     to_agent = str_opt "to_agent";

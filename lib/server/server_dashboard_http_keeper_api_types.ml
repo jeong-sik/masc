@@ -268,10 +268,7 @@ let first_string_opt values =
 let first_int_opt values =
   List.find_map (fun value -> value) values
 
-let string_has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
+let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
 
 let claim_status_of_output output =
   let result =

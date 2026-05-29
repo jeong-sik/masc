@@ -50,8 +50,8 @@ let bool_field_opt record field =
   | `Assoc fields ->
     (match List.assoc_opt field fields with
      | Some (`Bool value) -> Some value
-     | _ -> None)
-  | _ -> None
+     | None | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let tool_success_of_record record =
   match bool_field_opt record "semantic_success" with
@@ -67,8 +67,8 @@ let float_field_opt record field =
     (match List.assoc_opt field fields with
      | Some (`Float value) -> Some value
      | Some (`Int value) -> Some (Float.of_int value)
-     | _ -> None)
-  | _ -> None
+     | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let string_list_field = Json_util.get_string_list
 

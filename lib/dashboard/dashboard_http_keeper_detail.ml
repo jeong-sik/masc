@@ -195,7 +195,7 @@ let compute_metrics_window
         let memory_note_kinds =
           match j |> m "memory_note_kinds" with
           | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some (String.trim s) | _ -> None) xs
-          | _ -> []
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
         in
         let memory_compaction_performed_now = Safe_ops.json_bool ~default:false "memory_compaction_performed" j in
         let memory_compaction_before_notes_now = Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j in
@@ -204,7 +204,7 @@ let compute_metrics_window
         let tools_used =
           match j |> m "tools_used" with
           | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some s | _ -> None) xs
-          | _ -> []
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
         in
         let tool_call_count_now = Safe_ops.json_int ~default:(List.length tools_used) "tool_call_count" j in
         let metric_event = Safe_ops.json_string ~default:"" "metric_event" j in

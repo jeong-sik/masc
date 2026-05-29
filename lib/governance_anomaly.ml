@@ -281,18 +281,18 @@ let load_profile ~base_path ~agent_id =
                 match List.assoc_opt key fields with
                 | Some (`Float f) -> Some f
                 | Some (`Int i) -> Some (float_of_int i)
-                | _ -> None
+                | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
               in
               let get_string key =
                 match List.assoc_opt key fields with
                 | Some (`String s) -> Some s
-                | _ -> None
+                | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
               in
               let get_int key =
                 match List.assoc_opt key fields with
                 | Some (`Int i) -> Some i
                 | Some (`Float f) -> Some (int_of_float f)
-                | _ -> None
+                | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
               in
               let get_stat key =
                 match List.assoc_opt key fields with
@@ -301,18 +301,18 @@ let load_profile ~base_path ~agent_id =
                       match List.assoc_opt "mean" stat_fields with
                       | Some (`Float f) -> Some f
                       | Some (`Int i) -> Some (float_of_int i)
-                      | _ -> None
+                      | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
                     in
                     let stddev =
                       match List.assoc_opt "stddev" stat_fields with
                       | Some (`Float f) -> Some f
                       | Some (`Int i) -> Some (float_of_int i)
-                      | _ -> None
+                      | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
                     in
                     match (mean, stddev) with
                     | Some m, Some s -> Some { mean = m; stddev = s }
                     | _ -> None)
-                | _ -> None
+                | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None
               in
               (match (get_string "agent_id", get_int "window_days", get_int "sample_count") with
               | Some agent_id, Some window_days, Some sample_count -> (

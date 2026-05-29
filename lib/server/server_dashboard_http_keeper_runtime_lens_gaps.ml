@@ -83,10 +83,10 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
   in
   let claim_status = json_string_member_opt "status" claim_scope in
   let claim_mode = json_string_member_opt "mode" claim_scope in
-  let claim_excluded_count = json_int_member_opt "excluded_count" claim_scope in
+  let claim_excluded_count = Safe_ops.json_int_opt "excluded_count" claim_scope in
   let cascade_override =
     Option.value
-      (json_bool_member_opt "cascade_override" config_drift)
+      (Safe_ops.json_bool_opt "cascade_override" config_drift)
       ~default:false
   in
   let pre_dispatch_reason =

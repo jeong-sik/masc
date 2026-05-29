@@ -342,11 +342,11 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
       "tasks array is empty or missing"
   else
   let validated = List.mapi (fun idx t ->
-    let title = String.trim (Json_util.get_string "title" t |> Option.value ~default:"") in
-    let priority = Json_util.get_int "priority" t |> Option.value ~default:3 in
-    let description = Json_util.get_string "description" t |> Option.value ~default:"" in
+    let title = String.trim (Json_util.get_string t "title" |> Option.value ~default:"") in
+    let priority = Json_util.get_int t "priority" |> Option.value ~default:3 in
+    let description = Json_util.get_string t "description" |> Option.value ~default:"" in
     let goal_id =
-      match Json_util.get_string "goal_id" t with
+      match Json_util.get_string t "goal_id" with
       | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
       | _ -> None
     in

@@ -33,7 +33,7 @@ let payload_agent_name payload =
      envelope [agent_name] is Null for 9%+ of daily events, breaking
      per-agent filters over the Dated_jsonl store under [.masc/oas-events/].
      See #7827. *)
-  match payload_string_opt "agent_name" payload with
+  match Safe_ops.json_string_opt "agent_name" payload with
   | Some _ as value -> value
   | None ->
     (match payload_string_opt "agent" payload with

@@ -20,7 +20,7 @@ type archetype_axes =
   ; risk_posture : string option
   }
 
-let string_list_to_json = Archetypes.string_list_to_json
+let string_list_to_json = Json_util.json_string_list
 let option_field = Archetypes.option_field
 
 let assoc_without key fields =

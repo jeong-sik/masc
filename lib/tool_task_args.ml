@@ -6,11 +6,9 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
-open Yojson.Safe.Util
-
 let parse_task_contract args =
-  match args |> member "contract" with
-  | `Null -> Ok None
+  match Json_util.assoc_member_opt "contract" args with
+  | None | Some `Null -> Ok None
   | (`Assoc _ as json) -> (
       match Masc_domain.task_contract_of_yojson json with
       | Ok contract -> Ok (Some contract)
@@ -45,8 +43,8 @@ let unknown_args ~valid_keys args =
    to keep the synthesized summary single-line. *)
 let synthesize_summary_from_siblings args =
   let pick key =
-    match args |> member key with
-    | `String s ->
+    match Json_util.assoc_member_opt key args with
+    | Some (`String s) ->
         let trimmed = String.trim s in
         if String.equal trimmed "" then None else Some trimmed
     | _ -> None
@@ -99,15 +97,15 @@ let transition_action_requires_summary : Masc_domain.task_action -> bool =
 let parse_handoff_context ~(agent_name : string)
     ~(action : Masc_domain.task_action) args =
   let summary_required = transition_action_requires_summary action in
-  match args |> member "handoff_context" with
-  | `Null ->
+  match Json_util.assoc_member_opt "handoff_context" args with
+  | None | Some `Null ->
     (* No handoff_context object provided. For entry-class actions this
        is the expected shape; for exit-class actions the caller's
        strict-release / contract checks downstream will surface the
        missing summary if the task contract demands it. We do not
        fabricate an empty handoff_context here. *)
     Ok None
-  | (`Assoc _ as json) -> (
+  | Some (`Assoc _ as json) -> (
       match Masc_domain.task_handoff_context_of_yojson json with
       | Error error ->
           Error
@@ -149,7 +147,7 @@ let parse_handoff_context ~(agent_name : string)
                    updated_at = Some (Masc_domain.now_iso ());
                    updated_by = Some agent_name;
                  }))
-  | other ->
+  | Some other ->
       Error
         (Printf.sprintf
            "handoff_context must be an object when provided (received %s)"

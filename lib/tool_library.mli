@@ -66,7 +66,7 @@ val source_of_string_opt : string -> library_source option
 
 (** {1 String helper} *)
 
-val string_contains : sub:string -> string -> bool
+val string_contains : needle:string -> string -> bool
 (** [string_contains ~sub s] is [true] iff [sub] is a contiguous
     substring of [s].  Byte-wise — case-sensitive.  Callers
     lowercase both inputs when case-insensitive matching is

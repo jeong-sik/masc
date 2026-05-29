@@ -3,7 +3,7 @@
 
 module U = Yojson.Safe.Util
 
-let string_option_to_json = Operator_pending_confirm.string_option_to_json
+let string_option_to_json = Json_util.string_opt_to_json
 let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
 let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
 

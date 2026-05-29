@@ -676,38 +676,34 @@ let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Sa
     malformed or represents an empty snapshot (all fields absent/empty).
     RFC-MASC-001 Phase 1: structured working_context in Checkpoint. *)
 let keeper_state_snapshot_of_json (json : Yojson.Safe.t) : keeper_state_snapshot option =
-  try
-    let open Yojson.Safe.Util in
-    let string_opt key = json |> member key |> to_string_option in
-    let string_list key =
-      match json |> member key with
-      | `List items ->
-        List.filter_map (function `String s -> Some s | _ -> None) items
-      | _ -> []
-    in
-    let snapshot =
-      { goal = string_opt "goal"
-      ; progress = string_opt "progress"
-      ; done_summary = string_opt "done_summary"
-      ; next_summary = string_opt "next_summary"
-      ; next_items = string_list "next_items"
-      ; decisions = string_list "decisions"
-      ; open_questions = string_list "open_questions"
-      ; constraints = string_list "constraints"
-      }
-    in
-    if snapshot.goal = None
-       && snapshot.progress = None
-       && snapshot.done_summary = None
-       && snapshot.next_summary = None
-       && snapshot.next_items = []
-       && snapshot.decisions = []
-       && snapshot.open_questions = []
-       && snapshot.constraints = []
-    then None
-    else Some snapshot
-  with
-  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+  let string_opt key = Json_util.get_string key json in
+  let string_list key =
+    match Json_util.assoc_member_opt key json with
+    | Some (`List items) ->
+      List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> []
+  in
+  let snapshot =
+    { goal = string_opt "goal"
+    ; progress = string_opt "progress"
+    ; done_summary = string_opt "done_summary"
+    ; next_summary = string_opt "next_summary"
+    ; next_items = string_list "next_items"
+    ; decisions = string_list "decisions"
+    ; open_questions = string_list "open_questions"
+    ; constraints = string_list "constraints"
+    }
+  in
+  if snapshot.goal = None
+     && snapshot.progress = None
+     && snapshot.done_summary = None
+     && snapshot.next_summary = None
+     && snapshot.next_items = []
+     && snapshot.decisions = []
+     && snapshot.open_questions = []
+     && snapshot.constraints = []
+  then None
+  else Some snapshot
 
 (** Structured JSON wrapper for Checkpoint.working_context.
     Embeds the snapshot under a "state_snapshot" key alongside a
@@ -729,16 +725,14 @@ let replay_metadata_of_snapshot
 
 let snapshot_of_replay_metadata
     (json : Yojson.Safe.t) : keeper_state_snapshot option =
-  try
-    let open Yojson.Safe.Util in
-    let kind = json |> member "kind" |> to_string_option in
-    let version = json |> member "version" |> to_int_option in
-    match kind, version with
-    | Some kind, Some 1 when String.equal kind replay_metadata_kind ->
-        keeper_state_snapshot_of_json (json |> member "payload")
-    | _ -> None
-  with
-  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+  let kind = Json_util.get_string json "kind" in
+  let version = Json_util.get_int json "version" in
+  match kind, version with
+  | Some kind, Some 1 when String.equal kind replay_metadata_kind ->
+      (match Json_util.assoc_member_opt "payload" json with
+       | Some payload -> keeper_state_snapshot_of_json payload
+       | None -> None)
+  | _ -> None
 
 let with_snapshot_metadata
     (msg : Agent_sdk.Types.message)
@@ -770,16 +764,13 @@ let snapshot_of_structured_working_context
   match snapshot_of_replay_metadata json with
   | Some _ as snapshot -> snapshot
   | None ->
-      (try
-         let open Yojson.Safe.Util in
-         let version = json |> member "version" |> to_int_option in
-         match version with
-         | Some 1 ->
-             let snapshot_json = json |> member "state_snapshot" in
-             keeper_state_snapshot_of_json snapshot_json
-         | _ -> None
-       with
-       | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None)
+      let version = Json_util.get_int json "version" in
+      (match version with
+       | Some 1 ->
+           (match Json_util.assoc_member_opt "state_snapshot" json with
+            | Some snapshot_json -> keeper_state_snapshot_of_json snapshot_json
+            | None -> None)
+       | _ -> None)
 
 let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
     keeper_state_snapshot option =

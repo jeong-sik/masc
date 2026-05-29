@@ -677,7 +677,7 @@ let handle_request
                  | Some params ->
                    (try
                       let name =
-                        Json_util.get_string "name" params |> Option.value ~default:""
+                        Json_util.get_string params "name" |> Option.value ~default:""
                       in
                       (* Issue #8699: exhaustive match on tool_profile.
                                Catch-all `_ -> Full` would silently elevate any

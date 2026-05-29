@@ -67,11 +67,11 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
   `Assoc
     [ "trace_id", `String entry.trace_id
     ; "actor", `String entry.actor
-    ; "remote_session_id", Operator_pending_confirm.string_option_to_json entry.remote_session_id
+    ; "remote_session_id", Json_util.string_opt_to_json entry.remote_session_id
     ; "remote_client_type", `String entry.remote_client_type
     ; "action_type", `String entry.action_type
     ; "target_type", `String entry.target_type
-    ; "target_id", Operator_pending_confirm.string_option_to_json entry.target_id
+    ; "target_id", Json_util.string_opt_to_json entry.target_id
     ; "delegated_tool", `String entry.delegated_tool
     ; ( "confirmation_state"
       , `String (confirmation_state_to_string entry.confirmation_state) )

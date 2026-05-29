@@ -295,16 +295,16 @@ type inference_params =
       [reasoning_effort]) happens downstream in OAS. *)
   }
 
-let read_float_field json key = Json_util.get_float key json
+let read_float_field json key = Json_util.get_float json key
 
-let read_int_field json key = Json_util.get_int key json
+let read_int_field json key = Json_util.get_int json key
 
 let read_string_field json key =
-  Json_util.get_string key json
+  Json_util.get_string json key
   |> Option.map String.trim
-  |> Option.bind (fun s -> if s <> "" then Some s else None)
+  |> Option.filter (fun s -> s <> "")
 
-let read_bool_field json key = Json_util.get_bool key json
+let read_bool_field json key = Json_util.get_bool json key
 
 let resolve_inference_params ~config_path ~name =
   match load_catalog_source config_path with

@@ -157,7 +157,7 @@ let runtime_lens_accumulate_tool_proof acc json =
   runtime_lens_update_latest_ts acc json;
   let tool = Option.value (json_string_member_opt "tool" json) ~default:"unknown_tool" in
   runtime_lens_set_add acc.tools tool;
-  if json_bool_member_opt "success" json = Some true then (
+  if Safe_ops.json_bool_opt "success" json = Some true then (
     acc.successful_tool_call_count <- acc.successful_tool_call_count + 1;
     runtime_lens_set_add acc.successful_tools tool)
   else (

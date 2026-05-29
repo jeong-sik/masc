@@ -23,20 +23,20 @@ let provider_attempts_summary_json (scan : runtime_manifest_scan) : Yojson.Safe.
     [ "started_count", `Int scan.provider_started_count
     ; "finished_count", `Int scan.provider_finished_count
     ; ( "terminal_status"
-      , json_string_opt
+      , Json_util.string_opt_to_json
           (Option.map (fun row -> row.Keeper_runtime_manifest.status) terminal) )
-    ; "terminal_model_source", json_string_opt (terminal_decision_string "model_source")
+    ; "terminal_model_source", Json_util.string_opt_to_json (terminal_decision_string "model_source")
     ; ( "terminal_resolved_model_source"
-      , json_string_opt (terminal_decision_string "resolved_model_source") )
+      , Json_util.string_opt_to_json (terminal_decision_string "resolved_model_source") )
     ; ( "terminal_capability_source"
-      , json_string_opt (terminal_decision_string "capability_source") )
+      , Json_util.string_opt_to_json (terminal_decision_string "capability_source") )
     ; ( "terminal_fallback_authority"
-      , json_string_opt (terminal_decision_string "fallback_authority") )
+      , Json_util.string_opt_to_json (terminal_decision_string "fallback_authority") )
     ; ( "terminal_provider_source_cascade"
-      , json_string_opt (terminal_decision_string "provider_source_cascade") )
-    ; "terminal_error", json_string_opt (terminal_decision_string "error")
+      , Json_util.string_opt_to_json (terminal_decision_string "provider_source_cascade") )
+    ; "terminal_error", Json_util.string_opt_to_json (terminal_decision_string "error")
     ; ( "terminal_exception_kind"
-      , json_string_opt (terminal_decision_string "exception_kind") )
+      , Json_util.string_opt_to_json (terminal_decision_string "exception_kind") )
     ; "attempts", `List (List.map provider_attempt_row_json attempt_rows)
     ]
 ;;

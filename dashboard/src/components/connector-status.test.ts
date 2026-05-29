@@ -657,16 +657,26 @@ describe('ConnectorStatusPanel', () => {
   })
 
   it('shows sidecar-off empty state when no bindings and sidecar offline', async () => {
+    // RFC-0203 §Phase 3 — Discord is in-process and does not render
+    // the sidecar-off panel anymore; use Slack as the representative
+    // external sidecar for this assertion. The in-process hint case
+    // (Discord with !available) is covered by the follow-up test
+    // below.
+    const slackConnector = {
+      ...sampleConnectorsResponse().connectors[0],
+      connector_id: 'slack',
+      display_name: 'Slack',
+      channel: 'slack',
+      available: false,
+      connected: false,
+      stale: false,
+      status: 'offline',
+      status_path: '/tmp/slack_status.json',
+      configured_bindings: [],
+    }
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
-      connectors: [{
-        ...sampleConnectorsResponse().connectors[0],
-        available: false,
-        connected: false,
-        stale: false,
-        status: 'offline',
-        configured_bindings: [],
-      }],
+      connectors: [slackConnector],
     }))
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
 
@@ -682,9 +692,9 @@ describe('ConnectorStatusPanel', () => {
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('사이드카 미시작')
-    expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
+    expect(text).toContain('cd sidecars/slack-bot && ./run.sh')
     expect(text).toContain('사이드카 status 파일이')
-    expect(text).toContain('/tmp/discord_status.json')
+    expect(text).toContain('/tmp/slack_status.json')
     expect(text).toContain('관찰되지 않았습니다')
     expect(text).toContain('Start')
     expect(text).toContain('status')
@@ -710,11 +720,68 @@ describe('ConnectorStatusPanel', () => {
     const copyLabels = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[data-copy-button]'))
       .map(button => button.getAttribute('aria-label'))
     expect(copyLabels).toEqual([
-      'Copy Discord sidecar start command',
-      'Copy Discord sidecar tail logs command',
-      'Copy Discord sidecar status command',
-      'Copy Discord sidecar stop command',
+      'Copy Slack sidecar start command',
+      'Copy Slack sidecar tail logs command',
+      'Copy Slack sidecar status command',
+      'Copy Slack sidecar stop command',
     ])
+  })
+
+  // RFC-0203 §Phase 3 — Discord runs in-process. When the gateway
+  // hasn't connected (e.g. DISCORD_BOT_TOKEN unset), the operator
+  // sees the in-process hint panel instead of the sidecar-off panel,
+  // and there are no Start/Stop buttons or run.sh hints anywhere.
+  it('shows in-process unavailable hint for Discord (no sidecar Start panel, no run.sh)', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        available: false,
+        connected: false,
+        stale: false,
+        status: 'offline',
+        configured_bindings: [],
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    // The new in-process hint replaces the sidecar Start panel.
+    expect(text).toContain('서버 내장 게이트웨이')
+    expect(text).toContain('DISCORD_BOT_TOKEN')
+    expect(text).toContain('재기동')
+    // None of the sidecar-only affordances should appear for discord.
+    expect(text).not.toContain('사이드카 미시작')
+    expect(text).not.toContain('cd sidecars/discord-bot && ./run.sh')
+
+    // The in-process panel uses the same amber tone for visual
+    // consistency with the sidecar-off panel, but it's a different
+    // data attribute so existing sidecar-targeted CSS / hooks don't
+    // accidentally apply.
+    const sidecarPanel = container.querySelector('[data-sidecar-not-started-panel]')
+    expect(sidecarPanel).toBeNull()
+    const inProcessPanel = container.querySelector('[data-in-process-not-running-panel]') as HTMLElement | null
+    expect(inProcessPanel).toBeTruthy()
+    expect(inProcessPanel!.className).toContain('bg-[var(--warn-10)]')
+    expect(inProcessPanel!.className).toContain('border-l-[var(--color-warn)]')
+
+    const chip = inProcessPanel!.querySelector('[data-in-process-status-chip]')
+    expect(chip).toBeTruthy()
+    expect(chip!.textContent).toContain('연결되지 않음')
+
+    // No Start/Stop button, no copyable run.sh command.
+    expect(inProcessPanel!.querySelector('button[aria-label*="start"]')).toBeNull()
+    expect(inProcessPanel!.querySelector('[data-copy-button]')).toBeNull()
   })
 
   it('shows no-keepers empty state when keeper directory is empty', async () => {

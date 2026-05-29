@@ -136,14 +136,11 @@ let composite_config_drift_json ~config ~keeper_name =
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = Json_util.get_string_list sources "override_fields" in
     let cascade_detail = find_override_field_source "model.cascade_name" sources in
-    let string_member key json =
-      match json_member key json with
-      | `String value -> Some value
-      | _ -> None
-    in
     let default_cascade_name, live_cascade_name =
       match cascade_detail with
-      | Some detail -> string_member "default_value" detail, string_member "live_value" detail
+      | Some detail ->
+        Json_util.get_string detail "default_value",
+        Json_util.get_string detail "live_value"
       | None -> None, None
     in
     let cascade_override = Option.is_some cascade_detail in

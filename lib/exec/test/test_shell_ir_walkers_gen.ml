@@ -2122,6 +2122,35 @@ let test_is_eq_form_flag () =
   Alcotest.(check bool) "empty flags" false (is_eq_form_flag "--output=file" [])
 ;;
 
+let test_eq_form_flag_value () =
+  let open Shell_ir_typed_types in
+  let flags = [ "--output"; "--timeout"; "-o" ] in
+  let check_val desc expected arg =
+    Alcotest.(check (option string)) desc expected (eq_form_flag_value arg flags)
+  in
+  (* Positive: extract value *)
+  check_val "--output=file" (Some "file") "--output=file";
+  check_val "--timeout=30" (Some "30") "--timeout=30";
+  check_val "-o=file" (Some "file") "-o=file";
+  check_val "--output=a=b" (Some "a=b") "--output=a=b";
+  check_val "--output=" (Some "") "--output=";
+  (* Negative: no '=' → None *)
+  check_val "--output" None "--output";
+  check_val "-o" None "-o";
+  (* Negative: not in flags *)
+  check_val "--unknown=val" None "--unknown=val";
+  (* Negative: too short *)
+  check_val "-=" None "-=";
+  (* Negative: no leading dash *)
+  check_val "output=file" None "output=file";
+  (* Edge: empty flags list *)
+  Alcotest.(check (option string))
+    "empty flags"
+    None
+    (eq_form_flag_value "--output=file" [])
+
+;;
+
 let test_constructor_names_in_declaration_order () =
   Alcotest.(check (list string))
     "generated names match declaration order"
@@ -2198,6 +2227,7 @@ let () =
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag
+        ; Alcotest.test_case "eq_form_flag_value helper" `Quick test_eq_form_flag_value
         ; Alcotest.test_case "constructor count baseline" `Quick test_constructor_count
         ; Alcotest.test_case
             "constructor names declaration-order"

@@ -105,15 +105,10 @@ let rec parse subcmd extra dd = function
   | arg :: rest
     when not dd
          && (List.mem arg [ %s ]
-             || (let s = arg in
-                 String.length s > 2 && String.sub s 0 2 = "--"
-                 && (match String.index_opt s '=' with
-                     | Some i -> List.mem (String.sub s 0 i) [ %s ]
-                     | None -> false))) ->
+             || Shell_ir_typed_types.is_eq_form_flag arg [ %s ]) ->
     let extra' =
-      let s = arg in
-      match String.index_opt s '=' with
-      | Some i -> String.sub s (i + 1) (String.length s - (i + 1)) :: extra
+      match Shell_ir_typed_types.eq_form_flag_value arg [ %s ] with
+      | Some v -> v :: extra
       | None -> extra
     in
     parse subcmd extra' dd rest
@@ -123,7 +118,7 @@ let rec parse subcmd extra dd = function
     | _ -> parse subcmd (arg :: extra) dd rest
 in
 parse None [] false args|}
-             name flags_str flags_str flags_str)
+             name flags_str flags_str flags_str flags_str)
   ; no_expand_combined = false
   }
 

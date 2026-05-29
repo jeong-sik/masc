@@ -465,7 +465,7 @@ let snapshot_json ?hearth ~limit config =
     Meta_cognition_rules.belief_rules
     |> List.filter_map (fun rule -> belief_json ~limit rule sources)
     |> List.sort (fun a b ->
-           let count_of json key = json |> Yojson.Safe.Util.member key |> Yojson.Safe.Util.to_int in
+           let count_of json key = Option.value ~default:0 (Json_util.get_int json key) in
            compare (count_of b "support_agent_count") (count_of a "support_agent_count"))
   in
   let total_belief_count = List.length all_beliefs in
@@ -473,9 +473,9 @@ let snapshot_json ?hearth ~limit config =
   let all_contested =
     all_beliefs
     |> List.filter (fun json ->
-           (match Yojson.Safe.Util.member "status" json with
-            | `String s -> String.equal s "contested"
-            | _ -> false))
+           (match Json_util.get_string json "status" with
+            | Some s -> String.equal s "contested"
+            | None -> false))
   in
   let total_contested_belief_count = List.length all_contested in
   let contested_beliefs = take limit all_contested in
@@ -483,10 +483,7 @@ let snapshot_json ?hearth ~limit config =
     Meta_cognition_rules.tension_rules
     |> List.filter_map (fun rule -> tension_json ~limit governance_cases rule sources)
     |> List.sort (fun a b ->
-           let count_of json =
-             json |> Yojson.Safe.Util.member "recurrence_count"
-             |> Yojson.Safe.Util.to_int
-           in
+           let count_of json = Option.value ~default:0 (Json_util.get_int json "recurrence_count") in
            compare (count_of b) (count_of a))
     |> take limit
   in
@@ -494,10 +491,7 @@ let snapshot_json ?hearth ~limit config =
     Meta_cognition_rules.desire_rules
     |> List.filter_map (fun rule -> desire_json ~limit rule sources)
     |> List.sort (fun a b ->
-           let count_of json =
-             json |> Yojson.Safe.Util.member "source_agent_count"
-             |> Yojson.Safe.Util.to_int
-           in
+           let count_of json = Option.value ~default:0 (Json_util.get_int json "source_agent_count") in
            compare (count_of b) (count_of a))
     |> take limit
   in
@@ -593,8 +587,8 @@ let assoc_subset_or_null json fields =
   | value -> value
 
 let first_item_or_null json key =
-  match Yojson.Safe.Util.member key json with
-  | `List (item :: _) -> item
+  match Json_util.assoc_member_opt key json with
+  | Some (`List (item :: _)) -> item
   | _ -> `Null
 
 let summary_json ?hearth config =
@@ -602,10 +596,10 @@ let summary_json ?hearth config =
   `Assoc
     [
       ( "stagnation_score",
-        Yojson.Safe.Util.member "stagnation_score" snapshot );
-      ("belief_count", Yojson.Safe.Util.member "total_belief_count" snapshot);
+        Option.value ~default:`Null (Json_util.assoc_member_opt "stagnation_score" snapshot) );
+      ("belief_count", Option.value ~default:`Null (Json_util.assoc_member_opt "total_belief_count" snapshot));
       ("contested_belief_count",
-        Yojson.Safe.Util.member "total_contested_belief_count" snapshot);
+        Option.value ~default:`Null (Json_util.assoc_member_opt "total_contested_belief_count" snapshot));
       ( "dominant_belief",
         assoc_subset_or_null
           (first_item_or_null snapshot "beliefs")

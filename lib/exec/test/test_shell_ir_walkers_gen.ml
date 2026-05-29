@@ -641,6 +641,63 @@ let test_lines_equals_form () =
    | w -> Alcotest.failf "Head --lines=0: expected lines=0, got %a" pp w)
 ;;
 
+(* Combined short-flag parsing: -rf → -r + -f *)
+let test_combined_short_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* rm -rf dir/ *)
+  let rm_rf =
+    of_simple { (base "rm") with args = [ lit "-rf"; lit "dir/" ] }
+  in
+  (match rm_rf with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -rf: expected recursive+force, got %a" pp w);
+  (* rm -fr dir/ *)
+  let rm_fr =
+    of_simple { (base "rm") with args = [ lit "-fr"; lit "dir/" ] }
+  in
+  (match rm_fr with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -fr: expected recursive+force, got %a" pp w);
+  (* rm -rfr dir/ (redundant r) *)
+  let rm_rfr =
+    of_simple { (base "rm") with args = [ lit "-rfr"; lit "dir/" ] }
+  in
+  (match rm_rfr with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -rfr: expected recursive+force, got %a" pp w);
+  (* rm -R dir/ (uppercase R = recursive) *)
+  let rm_R =
+    of_simple { (base "rm") with args = [ lit "-R"; lit "dir/" ] }
+  in
+  (match rm_R with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = false; _ }) -> ()
+   | w -> Alcotest.failf "rm -R: expected recursive only, got %a" pp w);
+  (* rm -f file.txt (single flag, no combine needed) *)
+  let rm_f =
+    of_simple { (base "rm") with args = [ lit "-f"; lit "file.txt" ] }
+  in
+  (match rm_f with
+   | W (Rm { paths = [ "file.txt" ]; recursive = false; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -f: expected force only, got %a" pp w);
+  (* rm -rf -f dir/ (combined + separate) *)
+  let rm_rf_f =
+    of_simple { (base "rm") with args = [ lit "-rf"; lit "-f"; lit "dir/" ] }
+  in
+  (match rm_rf_f with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -rf -f: expected recursive+force, got %a" pp w)
+;;
+
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -752,6 +809,7 @@ let () =
         ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
         ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
+        ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

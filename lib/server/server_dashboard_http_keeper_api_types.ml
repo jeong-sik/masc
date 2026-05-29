@@ -306,7 +306,7 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
         | _ ->
             match Safe_ops.json_string_opt "ts" json with
             | Some value when String.trim value <> "" -> value
-            | _ -> Dashboard_utils.iso_of_unix ts
+            | _ -> Masc_domain.iso8601_of_unix_seconds ts
       in
       Some
         (Trajectory.Thinking

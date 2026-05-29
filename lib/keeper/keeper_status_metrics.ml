@@ -511,10 +511,10 @@ let json_iso_opt json =
       if trimmed <> "" then Some trimmed
       else
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
-        if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
+        if ts_unix > 0.0 then Some (Masc_domain.iso8601_of_unix_seconds ts_unix) else None
   | None ->
       let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
-      if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
+      if ts_unix > 0.0 then Some (Masc_domain.iso8601_of_unix_seconds ts_unix) else None
 
 let read_recent_metrics_lines config keeper_name =
   let store = Keeper_types_support.keeper_metrics_store config keeper_name in

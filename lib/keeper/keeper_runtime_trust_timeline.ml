@@ -34,8 +34,6 @@ let assoc_json_opt key fields =
   | Some `Null | None -> None
   | Some value -> Some value
 
-let iso_of_unix_seconds ts =
-  Masc_domain.iso8601_of_unix_seconds ts
 
 let take = List.take
 
@@ -62,9 +60,9 @@ let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
   `Assoc
     [
       ("kind", `String kind);
-      ("ts", `String (iso_of_unix_seconds ts_unix));
+      ("ts", `String (Masc_domain.iso8601_of_unix_seconds ts_unix));
       ("ts_unix", `Float ts_unix);
-      ("observed_at", `String (iso_of_unix_seconds observed_at_unix));
+      ("observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix));
       ("observed_at_unix", `Float observed_at_unix);
       ("observation_only", `Bool observation_only);
       ("trace_id", Json_util.string_opt_to_json trace_id);

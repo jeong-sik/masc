@@ -2594,8 +2594,11 @@ let rec parse action compression archive paths = function
                { action = a; archive = f; paths = List.rev paths; compression }))
      | _ -> None)
   | "-c" :: rest -> parse (Some `Create) compression archive paths rest
+  | "--create" :: rest -> parse (Some `Create) compression archive paths rest
   | "-x" :: rest -> parse (Some `Extract) compression archive paths rest
+  | "--extract" :: rest -> parse (Some `Extract) compression archive paths rest
   | "-t" :: rest -> parse (Some `List) compression archive paths rest
+  | "--list" :: rest -> parse (Some `List) compression archive paths rest
   | "-z" :: rest -> parse action `Gzip archive paths rest
   | "-j" :: rest -> parse action `Bzip2 archive paths rest
   | "-J" :: rest -> parse action `Xz archive paths rest
@@ -2970,6 +2973,7 @@ let rec parse inline script extra dd = function
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = s; args = List.rev extra; inline = None }))
      | None, None -> None)
   | "-e" :: code :: rest when not dd -> parse (Some code) script extra dd rest
+  | "--eval" :: code :: rest when not dd -> parse (Some code) script extra dd rest
   | "--" :: rest -> parse inline script extra true rest
   | arg :: rest ->
     (match inline, script with
@@ -3928,12 +3932,12 @@ parse None false false false args|}
           {|
 let rec parse subcmd v x dd = function
   | [] ->
-    (match subcmd with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest { subcommand = s; verbose = v; exitfirst = x; rest = [] }))
-     | None -> None)
+    let s = match subcmd with Some s -> s | None -> "" in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest { subcommand = s; verbose = v; exitfirst = x; rest = [] }))
   | "-v" :: rest when not dd -> parse subcmd true x dd rest
+  | "--verbose" :: rest when not dd -> parse subcmd true x dd rest
   | "-x" :: rest when not dd -> parse subcmd v true dd rest
+  | "--exitfirst" :: rest when not dd -> parse subcmd v true dd rest
   | "--" :: rest -> parse subcmd v x true rest
   | arg :: rest ->
     (match subcmd with
@@ -4063,10 +4067,8 @@ parse None false false false args|}
           {|
 let rec parse subcmd st dd = function
   | [] ->
-    (match subcmd with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright { subcommand = s; strict = st; rest = [] }))
-     | None -> None)
+    let s = match subcmd with Some s -> s | None -> "" in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright { subcommand = s; strict = st; rest = [] }))
   | "--strict" :: rest when not dd -> parse subcmd true dd rest
   | "--" :: rest -> parse subcmd st true rest
   | arg :: rest ->
@@ -4112,10 +4114,8 @@ parse None false false args|}
           {|
 let rec parse subcmd nw w dd = function
   | [] ->
-    (match subcmd with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc { subcommand = s; no_emit = nw; watch = w; rest = [] }))
-     | None -> None)
+    let s = match subcmd with Some s -> s | None -> "" in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc { subcommand = s; no_emit = nw; watch = w; rest = [] }))
   | "--noEmit" :: rest when not dd -> parse subcmd true w dd rest
   | "--watch" :: rest when not dd -> parse subcmd nw true dd rest
   | "--" :: rest -> parse subcmd nw w true rest
@@ -4163,10 +4163,8 @@ parse None false false false args|}
           {|
 let rec parse subcmd opt tst dd = function
   | [] ->
-    (match subcmd with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc { subcommand = s; optimize = opt; test = tst; rest = [] }))
-     | None -> None)
+    let s = match subcmd with Some s -> s | None -> "" in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc { subcommand = s; optimize = opt; test = tst; rest = [] }))
   | "-O" :: rest when not dd -> parse subcmd true tst dd rest
   | "--test" :: rest when not dd -> parse subcmd opt true dd rest
   | "--" :: rest -> parse subcmd opt tst true rest
@@ -4213,10 +4211,8 @@ parse None false false false args|}
           {|
 let rec parse subcmd w lf dd = function
   | [] ->
-    (match subcmd with
-     | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt { subcommand = s; write = w; list_files = lf; rest = [] }))
-     | None -> None)
+    let s = match subcmd with Some s -> s | None -> "" in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt { subcommand = s; write = w; list_files = lf; rest = [] }))
   | "-w" :: rest when not dd -> parse subcmd true lf dd rest
   | "-l" :: rest when not dd -> parse subcmd w true dd rest
   | "--" :: rest -> parse subcmd w lf true rest
@@ -4316,10 +4312,8 @@ parse None false false false args|}
           {|
   let rec parse subcmd j dd = function
     | [] ->
-      (match subcmd with
-       | Some s ->
-         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja { subcommand = s; jobs = j; rest = [] }))
-       | None -> None)
+      let s = match subcmd with Some s -> s | None -> "" in
+      Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja { subcommand = s; jobs = j; rest = [] }))
     | "--" :: rest -> parse subcmd j true rest
     | "--jobs" :: n :: rest when not dd ->
       (match int_of_string_opt n with

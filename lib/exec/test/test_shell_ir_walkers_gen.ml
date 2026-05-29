@@ -1166,6 +1166,97 @@ let test_scp_long_forms () =
    | w -> Alcotest.failf "scp -r: got %a" pp w)
 ;;
 
+let test_pytest_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* pytest --verbose --exitfirst *)
+  let py1 =
+    of_simple { (base "pytest") with args = [ lit "--verbose"; lit "--exitfirst" ] }
+  in
+  (match py1 with
+   | W (Pytest { subcommand = ""; verbose = true; exitfirst = true; _ }) -> ()
+   | w -> Alcotest.failf "pytest --verbose --exitfirst: got %a" pp w);
+  (* pytest -vx *)
+  let py2 =
+    of_simple { (base "pytest") with args = [ lit "-v"; lit "-x" ] }
+  in
+  (match py2 with
+   | W (Pytest { subcommand = ""; verbose = true; exitfirst = true; _ }) -> ()
+   | w -> Alcotest.failf "pytest -vx: got %a" pp w)
+;;
+
+let test_tar_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* tar --create -f out.tar dir/ *)
+  let tar1 =
+    of_simple { (base "tar") with args = [ lit "--create"; lit "-f"; lit "out.tar"; lit "dir/" ] }
+  in
+  (match tar1 with
+   | W (Tar { action = `Create; archive = "out.tar"; paths = [ "dir/" ]; _ }) -> ()
+   | w -> Alcotest.failf "tar --create: got %a" pp w);
+  (* tar --extract -zf archive.tar.gz *)
+  let tar2 =
+    of_simple { (base "tar") with args = [ lit "--extract"; lit "-zf"; lit "archive.tar.gz" ] }
+  in
+  (match tar2 with
+   | W (Tar { action = `Extract; archive = "archive.tar.gz"; compression = `Gzip; _ }) -> ()
+   | w -> Alcotest.failf "tar --extract -zf: got %a" pp w);
+  (* tar --list -f archive.tar *)
+  let tar3 =
+    of_simple { (base "tar") with args = [ lit "--list"; lit "-f"; lit "archive.tar" ] }
+  in
+  (match tar3 with
+   | W (Tar { action = `List; archive = "archive.tar"; _ }) -> ()
+   | w -> Alcotest.failf "tar --list: got %a" pp w)
+;;
+
+let test_node_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* node --eval "console.log(42)" *)
+  let n1 =
+    of_simple { (base "node") with args = [ lit "--eval"; lit "console.log(42)" ] }
+  in
+  (match n1 with
+   | W (Node { inline = Some "console.log(42)"; _ }) -> ()
+   | w -> Alcotest.failf "node --eval: got %a" pp w);
+  (* node -e "1+1" *)
+  let n2 =
+    of_simple { (base "node") with args = [ lit "-e"; lit "1+1" ] }
+  in
+  (match n2 with
+   | W (Node { inline = Some "1+1"; _ }) -> ()
+   | w -> Alcotest.failf "node -e: got %a" pp w)
+;;
+
 (* Combined short-flag parsing: -rf → -r + -f *)
 let test_combined_short_flags () =
   let open Shell_ir_typed in
@@ -1517,6 +1608,9 @@ let () =
         ; Alcotest.test_case "uname --all/--kernel-name form" `Quick test_uname_long_forms
         ; Alcotest.test_case "ps --all/--full/--user form" `Quick test_ps_long_forms
         ; Alcotest.test_case "scp --recursive form" `Quick test_scp_long_forms
+        ; Alcotest.test_case "pytest --verbose/--exitfirst form" `Quick test_pytest_long_forms
+        ; Alcotest.test_case "tar --create/--extract/--list form" `Quick test_tar_long_forms
+        ; Alcotest.test_case "node --eval form" `Quick test_node_long_forms
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"

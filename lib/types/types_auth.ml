@@ -81,24 +81,23 @@ let agent_credential_to_yojson (c : agent_credential) =
   ]
 
 let agent_credential_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let agent_name = json |> member "agent_name" |> to_string in
-    let token = json |> member "token" |> to_string in
+    let agent_name = Json_util.get_string json "agent_name" |> Option.value ~default:"" in
+    let token = Json_util.get_string json "token" |> Option.value ~default:"" in
     let role =
-      match json |> member "role" |> to_string_option with
+      match Json_util.get_string json "role" with
       | Some s -> agent_role_of_string s
       | None ->
-        let is_admin = json |> member "admin" |> to_bool_option |> Option.value ~default:false in
+        let is_admin = Json_util.get_bool json "admin" |> Option.value ~default:false in
         Ok (if is_admin then Admin else Worker)
     in
     (match role with
      | Error e -> Error e
      | Ok role ->
-       let created_at = json |> member "created_at" |> to_string in
-       let expires_at = json |> member "expires_at" |> to_string_option in
-       let id = json |> member "id" |> to_string_option |> Option.map Credential_id.of_string in
-       let agent_id = json |> member "agent_id" |> to_string_option |> Option.map Agent_id.of_string in
+       let created_at = Json_util.get_string json "created_at" |> Option.value ~default:"" in
+       let expires_at = Json_util.get_string json "expires_at" in
+       let id = Json_util.get_string json "id" |> Option.map Credential_id.of_string in
+       let agent_id = Json_util.get_string json "agent_id" |> Option.map Agent_id.of_string in
        Ok { id; agent_id; agent_name; token; role; created_at; expires_at })
   with e -> Error (Printexc.to_string e)
 
@@ -126,12 +125,11 @@ let auth_config_to_yojson c =
   ]
 
 let auth_config_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let enabled = json |> member "enabled" |> to_bool in
-    let room_secret_hash = json |> member "room_secret_hash" |> to_string_option in
-    let require_token = json |> member "require_token" |> to_bool in
-    let token_expiry_hours = json |> member "token_expiry_hours" |> to_int in
+    let enabled = Json_util.get_bool json "enabled" |> Option.value ~default:true in
+    let room_secret_hash = Json_util.get_string json "room_secret_hash" in
+    let require_token = Json_util.get_bool json "require_token" |> Option.value ~default:false in
+    let token_expiry_hours = Json_util.get_int json "token_expiry_hours" |> Option.value ~default:24 in
     Ok { enabled; room_secret_hash; require_token; token_expiry_hours }
   with e -> Error (Printexc.to_string e)
 

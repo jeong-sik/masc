@@ -400,11 +400,11 @@ let keeper_decisions_log_json
                 in
                 let summary = String.concat " \xc2\xb7 " summary_parts in
                 let evidence_refs =
-                  let refs = json_string_list_member "evidence_refs" json in
+                  let refs = Json_util.get_string_list json "evidence_refs" in
                   let refs =
                     if refs <> []
                     then refs
-                    else json_string_list_member "raw_evidence_refs" json
+                    else Json_util.get_string_list json "raw_evidence_refs"
                   in
                   List.map (fun value -> `String value) refs
                 in

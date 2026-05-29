@@ -37,8 +37,8 @@ type workflow_rejection_block =
   ; blocked_at : float
   }
 
-let json_assoc_field_opt = Keeper_tools_oas_json.json_assoc_field_opt
-let json_assoc_string_opt = Keeper_tools_oas_json.json_assoc_string_opt
+let json_assoc_field_opt = Json_util.assoc_member_opt
+let json_assoc_string_opt = Json_util.assoc_string_opt
 let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
 let json_or_detail_string_opt = Keeper_tools_oas_json.json_or_detail_string_opt
 let json_or_detail_bool_opt = Keeper_tools_oas_json.json_or_detail_bool_opt

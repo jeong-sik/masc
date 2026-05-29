@@ -857,8 +857,8 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
       ("shell_arbitration_allowed", `Bool false);
       ("live_total_runtimes", `Int runtime_count);
       ("live_keepers", `Int live_keepers);
-      ("configured_keepers", json_int_opt configured_keepers_count);
-      ("configured_minus_live_keepers", json_int_opt configured_minus_live);
+      ("configured_keepers", Json_util.int_opt_to_json configured_keepers_count);
+      ("configured_minus_live_keepers", Json_util.int_opt_to_json configured_minus_live);
       ( "count_roles",
         `Assoc
           [

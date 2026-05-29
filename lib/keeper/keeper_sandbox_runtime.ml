@@ -634,11 +634,11 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     ; "git_egress", `String preflight.git_egress
     ; "image", `String preflight.image
     ; "docker_runtime_ok", `Bool preflight.docker_runtime_ok
-    ; option_field "docker_runtime_error" preflight.docker_runtime_error
+    ; Json_util.string_opt_field "docker_runtime_error" preflight.docker_runtime_error
     ; "hardening_ok", `Bool preflight.hardening_ok
-    ; option_field "hardening_error" preflight.hardening_error
+    ; Json_util.string_opt_field "hardening_error" preflight.hardening_error
     ; "image_present", `Bool preflight.image_present
-    ; option_field "image_error" preflight.image_error
+    ; Json_util.string_opt_field "image_error" preflight.image_error
     ; ( "failure_classes"
       , `List
           (List.map

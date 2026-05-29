@@ -34,19 +34,18 @@ let runtime_lens_tool_surface_parts scan =
   let required_tools =
     first_non_empty_string_list
       [
-        json_string_list_member "required_tool_names" lane_decision;
-        json_string_list_member "required_tool_names" tool_decision;
+        Json_util.get_string_list lane_decision "required_tool_names";
+        Json_util.get_string_list tool_decision "required_tool_names";
       ]
   in
   let materialized_tools =
-    json_string_list_member "materialized_tool_names" lane_decision
+    Json_util.get_string_list lane_decision "materialized_tool_names"
   in
   let missing_required_tools =
     first_non_empty_string_list
       [
-        json_string_list_member "missing_required_tool_names_after_lane"
-          lane_decision;
-        json_string_list_member "missing_required_tool_names" tool_decision;
+        Json_util.get_string_list lane_decision "missing_required_tool_names_after_lane";
+        Json_util.get_string_list tool_decision "missing_required_tool_names";
       ]
   in
   ( tool_decision
@@ -83,10 +82,10 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
   in
   let claim_status = json_string_member_opt "status" claim_scope in
   let claim_mode = json_string_member_opt "mode" claim_scope in
-  let claim_excluded_count = json_int_member_opt "excluded_count" claim_scope in
+  let claim_excluded_count = Json_util.get_int claim_scope "excluded_count" in
   let cascade_override =
     Option.value
-      (json_bool_member_opt "cascade_override" config_drift)
+      (Json_util.get_bool config_drift "cascade_override")
       ~default:false
   in
   let pre_dispatch_reason =

@@ -33,12 +33,12 @@ let payload_agent_name payload =
      envelope [agent_name] is Null for 9%+ of daily events, breaking
      per-agent filters over the Dated_jsonl store under [.masc/oas-events/].
      See #7827. *)
-  match payload_string_opt "agent_name" payload with
+  match Json_util.get_string payload "agent_name" with
   | Some _ as value -> value
   | None ->
-    (match payload_string_opt "agent" payload with
+    (match Json_util.get_string payload "agent" with
      | Some _ as value -> value
-     | None -> payload_string_opt "keeper_name" payload)
+     | None -> Json_util.get_string payload "keeper_name")
 ;;
 
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =

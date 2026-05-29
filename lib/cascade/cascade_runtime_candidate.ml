@@ -124,7 +124,11 @@ let cli_sentinel_of_kind kind =
     None
 
 let capacity_key_of_config (cfg : Llm_provider.Provider_config.t) =
-  if cfg.base_url <> "" then cfg.base_url
+  let base_url = String.trim cfg.base_url in
+  if base_url <> "" then
+    let model_id = String.trim cfg.model_id in
+    if model_id <> "" then Printf.sprintf "%s:%s" base_url model_id
+    else base_url
   else
     match cli_sentinel_of_kind cfg.kind with
     | Some sentinel -> sentinel

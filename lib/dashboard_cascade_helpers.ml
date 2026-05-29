@@ -73,7 +73,7 @@ let invalid_profiles_with_internal_names profiles =
 ;;
 
 let qualified_profile_candidates name =
-  [ String.trim name ]
+  Option.to_list (String_util.trim_to_option name)
 ;;
 
 let invalid_assignment_reasons ~known_internal_profiles ~invalid_profiles name =
@@ -103,17 +103,15 @@ let invalid_assignments_for_public_profiles ~known_internal_profiles
     | None -> None)
 ;;
 
-let member = Yojson.Safe.Util.member
-
 let invalid_profiles_of_rejection_json rejection_json =
-  match member "profiles" rejection_json with
-  | `List profiles ->
+  match Json_util.get_array rejection_json "profiles" with
+  | Some (`List profiles) ->
     List.filter_map
       (fun profile_json ->
-         match member "name" profile_json with
-         | `String name ->
+         match Json_util.assoc_string_opt "name" profile_json with
+         | Some name ->
            Some (name, Json_util.get_string_list profile_json "errors")
-         | _ -> None)
+         | None -> None)
       profiles
     |> invalid_profiles_with_internal_names
   | _ -> []

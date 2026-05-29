@@ -92,14 +92,14 @@ let last_attempt_error attempts =
 ;;
 
 let audit_run_json_of_record json =
-  let observation = Yojson.Safe.Util.member "observation" json in
-  let list_member key json =
-    match Yojson.Safe.Util.member key json with
-    | `List values -> values
+  let observation = Option.value ~default:`Null (Json_util.assoc_member_opt "observation" json) in
+  let get_array_or_empty key json =
+    match Json_util.get_array json key with
+    | Some (`List values) -> values
     | _ -> []
   in
-  let attempts = list_member "attempts" observation in
-  let fallback_events = list_member "fallback_events" observation in
+  let attempts = get_array_or_empty "attempts" observation in
+  let fallback_events = get_array_or_empty "fallback_events" observation in
   let selected_attempt_index = Json_util.assoc_int_opt "selected_index" observation in
   let cascade =
     first_nonempty

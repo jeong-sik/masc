@@ -12,8 +12,7 @@ open Dashboard_cascade_helpers
 
 let sorted_unique_strings values =
   values
-  |> List.map String.trim
-  |> List.filter (fun value -> not (String.equal value ""))
+  |> List.filter_map String_util.trim_to_option
   |> List.sort_uniq String.compare
 ;;
 

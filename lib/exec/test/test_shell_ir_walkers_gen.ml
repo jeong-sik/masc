@@ -2613,6 +2613,79 @@ let test_batch3_regression_fixes () =
    | w -> Alcotest.failf "npm install --timing lodash: expected Npm, got %a" pp w)
 ;;
 
+let test_batch4_posix_end_of_options () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Sudo: -- command arg1 → target_argv = ["command"; "arg1"] *)
+  let s =
+    of_simple { (base "sudo") with args = [ lit "--"; lit "command"; lit "arg1" ] }
+  in
+  (match s with
+   | W (Sudo { target_argv }) ->
+     if target_argv <> [ "command"; "arg1" ] then
+       Alcotest.failf "sudo -- command arg1: expected [command; arg1], got [%s]"
+         (String.concat "; " target_argv)
+   | w -> Alcotest.failf "sudo -- command arg1: expected Sudo, got %a" pp w);
+  (* Echo: -- hello → args = ["hello"] *)
+  let e =
+    of_simple { (base "echo") with args = [ lit "--"; lit "hello" ] }
+  in
+  (match e with
+   | W (Echo { args = echo_args }) ->
+     if echo_args <> [ "hello" ] then
+       Alcotest.failf "echo -- hello: expected [hello], got [%s]"
+         (String.concat "; " echo_args)
+   | w -> Alcotest.failf "echo -- hello: expected Echo, got %a" pp w);
+  (* Which: -- command → names = ["command"] *)
+  let w =
+    of_simple { (base "which") with args = [ lit "--"; lit "command" ] }
+  in
+  (match w with
+   | W (Which { names }) ->
+     if names <> [ "command" ] then
+       Alcotest.failf "which -- command: expected [command], got [%s]"
+         (String.concat "; " names)
+   | w -> Alcotest.failf "which -- command: expected Which, got %a" pp w);
+  (* Printenv: -- VAR → name = Some "VAR" *)
+  let pe =
+    of_simple { (base "printenv") with args = [ lit "--"; lit "VAR" ] }
+  in
+  (match pe with
+   | W (Printenv { name = Some "VAR" }) -> ()
+   | w -> Alcotest.failf "printenv -- VAR: expected Printenv(Some VAR), got %a" pp w);
+  (* Printf: -- %s\n hello → format="%s\n", args=["hello"] *)
+  let pf =
+    of_simple { (base "printf") with args = [ lit "--"; lit "%s\\n"; lit "hello" ] }
+  in
+  (match pf with
+   | W (Printf { format; args = pf_args }) ->
+     if format <> "%s\\n" then
+       Alcotest.failf "printf -- %%s\\n hello: expected format=%%s\\n, got %s" format;
+     if pf_args <> [ "hello" ] then
+       Alcotest.failf "printf -- %%s\\n hello: expected args=[hello], got [%s]"
+         (String.concat "; " pf_args)
+   | w -> Alcotest.failf "printf -- %%s\\n hello: expected Printf, got %a" pp w);
+  (* Test: -- -f file → expression = ["-f"; "file"] *)
+  let t =
+    of_simple { (base "test") with args = [ lit "--"; lit "-f"; lit "file" ] }
+  in
+  (match t with
+   | W (Test { expression }) ->
+     if expression <> [ "-f"; "file" ] then
+       Alcotest.failf "test -- -f file: expected [-f; file], got [%s]"
+         (String.concat "; " expression)
+   | w -> Alcotest.failf "test -- -f file: expected Test, got %a" pp w)
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -2676,6 +2749,10 @@ let () =
             "Batch 3 regression: Node/Opam/Yarn/Npx/Ruff boolean-as-value"
             `Quick
             test_batch3_regression_fixes
+        ; Alcotest.test_case
+            "Batch 4: POSIX -- end-of-options for Sudo/Echo/Which/Printenv/Printf/Test"
+            `Quick
+            test_batch4_posix_end_of_options
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

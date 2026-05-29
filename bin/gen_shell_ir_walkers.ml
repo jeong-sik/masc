@@ -595,7 +595,10 @@ parse false false [] args|}
         Some
           {|match args with
 | [] -> None
-| args -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sudo { target_argv = args }))|}
+| args ->
+  (* POSIX end-of-options: strip leading -- *)
+  let args = match args with "--" :: rest -> rest | _ -> args in
+  Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sudo { target_argv = args }))|}
     ; no_expand_combined = false
     }
   ; { name = "Find"
@@ -1482,7 +1485,9 @@ parse false None None args|}
     ; bin_variant = Some "Echo"
     ; parse_body =
         Some
-          {|Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Echo { args = args }))|}
+          {|(* POSIX end-of-options: strip leading -- *)
+let args = match args with "--" :: rest -> rest | _ -> args in
+Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Echo { args = args }))|}
     ; no_expand_combined = false
     }
   ; { name = "Which"
@@ -1504,7 +1509,10 @@ parse false None None args|}
         Some
           {|match args with
 | [] -> None
-| names -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Which { names }))|}
+| names ->
+  (* POSIX end-of-options: strip leading -- *)
+  let names = match names with "--" :: rest -> rest | _ -> names in
+  Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Which { names }))|}
     ; no_expand_combined = false
     }
   ; { name = "Sort"
@@ -1810,6 +1818,8 @@ match args with
     ; parse_body =
         Some
           {|
+(* POSIX end-of-options: strip leading -- *)
+let args = match args with "--" :: rest -> rest | _ -> args in
 match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = None }))
 | [ n ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = Some n }))
@@ -1963,6 +1973,8 @@ match args with
     ; parse_body =
         Some
           {|
+(* POSIX end-of-options: strip leading -- *)
+let args = match args with "--" :: rest -> rest | _ -> args in
 match args with
 | [] -> None
 | expression -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Test { expression }))
@@ -2316,6 +2328,8 @@ parse false false args|}
     ; parse_body =
         Some
           {|
+(* POSIX end-of-options: strip leading -- *)
+let args = match args with "--" :: rest -> rest | _ -> args in
 match args with
 | [] -> None
 | format :: rest ->

@@ -126,7 +126,6 @@ let test_worker_runtime_helper_protocol_roundtrip () =
       session_id = "worker-session";
       raw_trace_run = None;
       api_response = None;
-      proof = None;
     }
   in
   let encoded =

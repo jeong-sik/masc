@@ -55,24 +55,24 @@ let load_file_config path =
   if Sys.file_exists path then
     try
       let json = Safe_ops.read_json_eio path in
-        let open Yojson.Safe.Util in
-        let spawn_json = member "worker_spawn" json in
+        let m key src = Option.value ~default:`Null (Json_util.assoc_member_opt key src) in
+        let spawn_json = m "worker_spawn" json in
         let backend =
-          match spawn_json |> member "backend" with
+          match m "backend" spawn_json with
           | `String value -> (
               match Worker_execution_backend.of_string value with
               | Some backend -> backend
               | None -> default.worker_spawn.backend)
           | _ -> default.worker_spawn.backend
         in
-        let docker_json = spawn_json |> member "docker" in
+        let docker_json = m "docker" spawn_json in
         let image =
-          match docker_json |> member "image" with
+          match m "image" docker_json with
           | `String value when String.trim value <> "" -> value
           | _ -> default.worker_spawn.docker.image
         in
         let host_mcp_base_url =
-          match docker_json |> member "host_mcp_base_url" with
+          match m "host_mcp_base_url" docker_json with
           | `String value ->
               let trimmed = String.trim value in
               if trimmed = "" then None else Some trimmed

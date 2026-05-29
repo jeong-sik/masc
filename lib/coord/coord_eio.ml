@@ -249,21 +249,21 @@ let room_state_to_json state =
   ]
 
 let room_state_of_json json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     Ok {
-      protocol_version = json |> member "protocol_version" |> to_string;
-      started_at = json |> member "started_at" |> to_float;
-      last_updated = json |> member "last_updated" |> to_float;
-      active_agents = json |> member "active_agents" |> to_list |> List.map to_string;
-      message_seq = json |> member "message_seq" |> to_int;
+      protocol_version = (match m "protocol_version" with `String s -> s | _ -> raise (Invalid_argument "protocol_version"));
+      started_at = (match m "started_at" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "started_at"));
+      last_updated = (match m "last_updated" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "last_updated"));
+      active_agents = (match m "active_agents" with `List items -> List.filter_map (function `String s -> Some s | _ -> None) items | _ -> []);
+      message_seq = (match m "message_seq" with `Int i -> i | _ -> 0);
       (* Backward compat: default to 0 if event_seq missing from old state files *)
       event_seq = Safe_ops.json_int ~default:0 "event_seq" json;
-      mode = json |> member "mode" |> to_string;
-      paused = json |> member "paused" |> to_bool;
-      paused_by = json |> member "paused_by" |> to_string_option;
-      paused_at = json |> member "paused_at" |> to_float_option;
-      pause_reason = json |> member "pause_reason" |> to_string_option;
+      mode = (match m "mode" with `String s -> s | _ -> "");
+      paused = (match m "paused" with `Bool b -> b | _ -> false);
+      paused_by = Json_util.get_string json "paused_by";
+      paused_at = Json_util.get_float json "paused_at";
+      pause_reason = Json_util.get_string json "pause_reason";
     }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -343,13 +343,13 @@ let agent_state_to_json agent =
   ]
 
 let agent_state_of_json json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     Ok {
-      name = json |> member "name" |> to_string;
-      last_seen = json |> member "last_seen" |> to_float;
-      capabilities = json |> member "capabilities" |> to_list |> List.map to_string;
-      status = json |> member "status" |> to_string;
+      name = (match m "name" with `String s -> s | _ -> raise (Invalid_argument "name"));
+      last_seen = (match m "last_seen" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "last_seen"));
+      capabilities = (match m "capabilities" with `List items -> List.filter_map (function `String s -> Some s | _ -> None) items | _ -> []);
+      status = (match m "status" with `String s -> s | _ -> raise (Invalid_argument "status"));
     }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -466,7 +466,7 @@ let lock_info_to_json lock =
   ]
 
 let lock_info_of_json json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     let parse_float = function
       | `Float f -> Some f
@@ -479,10 +479,10 @@ let lock_info_of_json json =
       | `String s -> Some s
       | _ -> None
     in
-    let resource_opt = parse_string (member "resource" json) in
-    let owner_opt = parse_string (member "owner" json) in
-    let acquired_at_opt = parse_float (member "acquired_at" json) in
-    let expires_at_opt = parse_float (member "expires_at" json) in
+    let resource_opt = parse_string (m "resource") in
+    let owner_opt = parse_string (m "owner") in
+    let acquired_at_opt = parse_float (m "acquired_at") in
+    let expires_at_opt = parse_float (m "expires_at") in
     match resource_opt, owner_opt, acquired_at_opt, expires_at_opt with
     | Some resource, Some owner, Some acquired_at, Some expires_at ->
         Ok { resource; owner; acquired_at; expires_at }
@@ -574,14 +574,14 @@ let message_to_json msg =
   ]
 
 let message_of_json json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     Ok {
-      seq = json |> member "seq" |> to_int;
-      from_agent = json |> member "from" |> to_string;
-      content = json |> member "content" |> to_string;
-      mention = json |> member "mention" |> to_string_option;
-      timestamp = json |> member "timestamp" |> to_float;
+      seq = (match m "seq" with `Int i -> i | _ -> raise (Invalid_argument "seq"));
+      from_agent = (match m "from" with `String s -> s | _ -> raise (Invalid_argument "from"));
+      content = (match m "content" with `String s -> s | _ -> raise (Invalid_argument "content"));
+      mention = Json_util.get_string json "mention";
+      timestamp = (match m "timestamp" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "timestamp"));
     }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

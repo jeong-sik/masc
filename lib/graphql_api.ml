@@ -663,22 +663,13 @@ let handle_request ~config body_str =
   | Error msg ->
       { status = `Bad_request; body = graphql_error msg }
   | Ok payload ->
-      let open Yojson.Safe.Util in
-      let query =
-        match payload |> member "query" with
-        | `String q -> Some q
-        | _ -> None
-      in
+      let query = Json_util.get_string payload "query" in
       let variables_json =
-        match payload |> member "variables" with
-        | `Null -> None
-        | other -> Some other
+        match Json_util.assoc_member_opt "variables" payload with
+        | Some `Null -> None
+        | opt -> opt
       in
-      let operation_name =
-        match payload |> member "operationName" with
-        | `String s -> Some s
-        | _ -> None
-      in
+      let operation_name = Json_util.get_string payload "operationName" in
       (match query with
        | None ->
            { status = `Bad_request; body = graphql_error "Missing query field" }

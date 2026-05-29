@@ -27,13 +27,13 @@ This produces two compounding fragilities:
 
 ### Fragility 1 — string literals are unguarded by the type system
 
-Adding a new flavor adds a variant and forces an exhaustive `match` update — that part is fine. But the *string form* picked for the new variant has no compiler-checked relationship to the fixture or runtime TOML. Drift between the literal (`"provider_d"`), the fixture (`provider_d-http`), and the runtime config (`~/.masc/config/cascade.toml`'s `protocol = "provider_d-http"`) is only caught by tests, and only the tests that happen to exercise that path.
+Adding a new flavor adds a variant and forces an exhaustive `match` update — that part is fine. But the *string form* picked for the new variant has no compiler-checked relationship to the fixture or runtime TOML. Drift between the literal (`"provider_d"`), the fixture (`provider_d-http`), and the runtime config (`<MASC_BASE>/.masc/config/cascade.toml`'s `protocol = "provider_d-http"`) is only caught by tests, and only the tests that happen to exercise that path.
 
-PR #18837's dropped commit `1e0f96365` ("fix(cascade): accept hyphenated protocol/flavor strings in phonebook parser", 2026-05-27) is the concrete evidence: an LLM-authored fix claimed PR #18232 had renamed fixtures from underscore to hyphen, but main fixture (`test/test_cascade_phonebook.ml`), branch base fixture (`57ac702a245`), and runtime `~/.masc/config/cascade.toml` were *all* still underscore. The "fix" introduced an inconsistency it then patched with alt-form parsing (`"provider-d" | "provider_d" -> Provider_d_wire`). This is CLAUDE.md §워크어라운드 §2 (string/substring classifier 보강) verbatim — `pr-rfc-check.sh --workaround-gate-only` would have flagged it at push time.
+PR #18837's dropped commit `1e0f96365` ("fix(cascade): accept hyphenated protocol/flavor strings in phonebook parser", 2026-05-27) is the concrete evidence: an LLM-authored fix claimed PR #18232 had renamed fixtures from underscore to hyphen, but main fixture (`test/test_cascade_phonebook.ml`), branch base fixture (`57ac702a245`), and runtime `<MASC_BASE>/.masc/config/cascade.toml` were *all* still underscore. The "fix" introduced an inconsistency it then patched with alt-form parsing (`"provider-d" | "provider_d" -> Provider_d_wire`). This is CLAUDE.md §워크어라운드 §2 (string/substring classifier 보강) verbatim — `pr-rfc-check.sh --workaround-gate-only` would have flagged it at push time.
 
 ### Fragility 2 — generic placeholder names are semantically empty
 
-RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`, `deepseek`, `groq`, `zai`) with placeholders (`provider_d`, `provider_g`, `provider_h`, `provider_k`). The typed OCaml variants kept their semantics in trailing comments (`Provider_d_wire (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)`), but the string surface lost all meaning. A reader of `~/.masc/config/cascade.toml` who sees `protocol = "provider_d-http"` cannot tell what wire format it commits to without bouncing through `cascade_phonebook_types.ml`.
+RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`, `deepseek`, `groq`, `zai`) with placeholders (`provider_d`, `provider_g`, `provider_h`, `provider_k`). The typed OCaml variants kept their semantics in trailing comments (`Provider_d_wire (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)`), but the string surface lost all meaning. A reader of `<MASC_BASE>/.masc/config/cascade.toml` who sees `protocol = "provider_d-http"` cannot tell what wire format it commits to without bouncing through `cascade_phonebook_types.ml`.
 
 `"zai-provider_k"` is the proof — the purge stripped vendors but left `zai-` as a partial prefix, because the variant name (`Provider_k_zai`) preserved the vendor reference. The string surface is now half-purged, half-vendor, half-placeholder.
 
@@ -64,14 +64,14 @@ Recommendation pending RFC-0181 decision: **A** if RFC-0181 introduces new typed
 
 - Vendor name restoration (option B) requires legal/IP review of the RFC-0172/0173 purge rationale — not in scope here.
 - `cascade.toml` per-tier-group / per-provider field renames (covered by RFC-0181 §Q3-Q5).
-- Runtime config migration from `~/.masc/config/cascade.toml` to a versioned schema (separate RFC if A is picked).
+- Runtime config migration from `<MASC_BASE>/.masc/config/cascade.toml` to a versioned schema (separate RFC if A is picked).
 
 ## 4. Verification plan (when activated)
 
 - Acceptance: `flavor_to_string >> flavor_of_string = Ok` for every constructor (qcheck or hand-rolled property). Same for `protocol`.
 - Drift gate: `pr-rfc-check.sh --workaround-gate-only` extension that flags any new `| "foo" | "bar" ->` alt-form arm in `lib/cascade/cascade_phonebook_types.ml` as `WORKAROUND` requiring §override 3-line label.
 - Regression: existing `test_cascade_phonebook` 24/24 must continue PASS after the migration.
-- Smoke: runtime `~/.masc/config/cascade.toml` parses unchanged, hot-reload preserves every (protocol, flavor, provider) tuple.
+- Smoke: runtime `<MASC_BASE>/.masc/config/cascade.toml` parses unchanged, hot-reload preserves every (protocol, flavor, provider) tuple.
 
 ## 5. Why this RFC matters even while deferred
 
@@ -95,7 +95,7 @@ Interim mitigation (no code change): add an entry to `pr-rfc-check.sh`'s grep th
   - PR #18837 commit `1e0f96365` body (false-premise documentation) + diff vs main (`provider_d-http` vs `provider-d-http`)
   - `git show 57ac702a245:test/test_cascade_phonebook.ml | rg "protocol = "` → all `provider_d-http` (underscore)
   - `git show origin/main:test/test_cascade_phonebook.ml | rg "protocol = "` → all `provider_d-http` (underscore)
-  - `rg "^protocol\s*=" ~/me/.masc/config/cascade.toml` → all `provider_d-http` (underscore)
+  - `rg "^protocol\s*=" <MASC_BASE>/.masc/config/cascade.toml` → all `provider_d-http` (underscore)
   - PR #18232 (RFC-0172 vendor purge) merged 2026-05-24, commit `6426b841d` (RFC-0173)
   - PR #18697 (RFC-0181) OPEN, Q1~Q5 architect decision pending per memory
 - **Timestamp**: 2026-05-27

@@ -402,7 +402,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
   (* #18965 — removed [is_agent_joined] hard gate.  Keeper-internal tag
      dispatch path bypasses MCP entry auto-join, so this gate produced
      false-negative rejects for every keeper turn (fleet evidence:
-     ~/.masc/agents/ empty while keepers run normally; only
+     <MASC_BASE>/.masc/agents/ empty while keepers run normally; only
      masc_claim/masc_claim_next failed).  Coord.claim_task_r works on
      agent_name alone; gate added no real authorization. *)
   if not ((=) (args |> member "agent_role") `Null) then

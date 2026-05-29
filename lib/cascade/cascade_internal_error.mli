@@ -31,7 +31,7 @@ type provider_rejection = {
 (** {1 Capacity backpressure source}
 
     Names the system component that issued the backpressure signal.  Used by
-    operators and dashboards to attribute saturation to a specific tier. *)
+    operators and dashboards to attribute saturation to a specific cascade. *)
 
 type capacity_backpressure_source =
   | Provider_capacity
@@ -73,6 +73,18 @@ type retry_admission_denial =
 val retry_admission_denial_to_yojson :
   retry_admission_denial -> Yojson.Safe.t
 
+(** Provenance-preserving retry-after hint for capacity backpressure.
+    [Explicit] is a concrete backoff to trust (an upstream Retry-After or a
+    real locally-computed wait); [Synthetic_default] is a fabricated
+    fixed-default applied when no real signal was available; [No_retry_hint]
+    means neither.  Keeping synthetic distinct from explicit at the type level
+    prevents a fabricated default being laundered into the explicit path
+    (audit 2026-05-29, PR #19329). *)
+type capacity_retry_after =
+  | Explicit of float
+  | Synthetic_default of float
+  | No_retry_hint
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : Cascade_name.t;
@@ -82,7 +94,7 @@ type masc_internal_error =
       cascade_name : Cascade_name.t;
       source : capacity_backpressure_source;
       detail : string;
-      retry_after_sec : float option;
+      retry_after : capacity_retry_after;
     }
   | Resumable_cli_session of {
       cascade_name : Cascade_name.t;

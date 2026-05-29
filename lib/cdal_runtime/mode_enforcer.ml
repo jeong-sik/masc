@@ -20,18 +20,15 @@ let json_kind_name = Effect_evidence.json_kind_name
 type violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
-  | Scope_violation
 
 let violation_kind_to_string = function
   | Mutating_in_diagnose -> "mutating_in_diagnose"
   | External_in_draft -> "external_in_draft"
-  | Scope_violation -> "scope_violation"
 ;;
 
 let violation_kind_of_string = function
   | "mutating_in_diagnose" -> Ok Mutating_in_diagnose
   | "external_in_draft" -> Ok External_in_draft
-  | "scope_violation" -> Ok Scope_violation
   | s -> Error (Printf.sprintf "unknown violation_kind: %s" s)
 ;;
 
@@ -139,34 +136,16 @@ type token_snapshot =
 
 (* ── Tool classification registry ────────────────────────────────── *)
 
-(** Default tool-id -> effect-class mappings. RFC-0005 §3.1 — keys are
-    [Tool_id.t] poly-variant constructors so that adding a new built-in
-    tool requires extending [Tool_id] and the compiler then flags every
-    site that needs to acknowledge it. The runtime registry below stays
-    string-keyed because plugin tools register at runtime by name. *)
-(* RFC-OAS-012: emptied. Hardcoded consumer-side tool names (Claude Code /
-   Serena / agent_llm_a-in-chrome MCP / Team_X ) were a layering violation —
-   masc_mcp.cdal_runtime is a generic governance framework and should not
-   pre-classify particular consumer tool catalogues. Consumers now register
-   their tools via [register_tool_class] or supply [Tool.descriptor.mutation_class]
-   at construction; classify_tool returns External_effect (fail-closed) for
-   anything not registered. The 46 hardcoded entries that lived here were
-   originally the closest-to-OAS surface and were migrated verbatim from
-   OAS in MM-2; their cleanup was the original intent of RFC-OAS-009 v1
-   and is finished here, post-migration. *)
-let default_tool_entries : (Tool_id.t * tool_effect_class) list = []
-
-(** Global mutable registry seeded from [default_tool_entries].
-    Supports runtime extension via [register_tool_class].
-    Keys are wire-format strings so plugin tools registered by name
-    interoperate transparently with the typed defaults. *)
-let tool_registry : (string, tool_effect_class) Hashtbl.t =
-  let tbl = Hashtbl.create (List.length default_tool_entries) in
-  List.iter
-    (fun (id, cls) -> Hashtbl.replace tbl (Tool_id.to_string id) cls)
-    default_tool_entries;
-  tbl
-;;
+(* RFC-OAS-012 emptied the hardcoded consumer-side tool classifications
+   (Claude Code / Serena / browser MCP / Team_X): masc_mcp.cdal_runtime is a
+   generic governance framework and must not pre-classify particular consumer
+   tool catalogues. The typed [Tool_id.t] default table that annotated that
+   (already empty) seed list was vestigial — its only production use was a
+   compile-time type annotation on the empty list — and has been removed.
+   Consumers register their tools at runtime via [register_tool_class] or
+   supply [Tool.descriptor.mutation_class] at construction; classify_tool
+   returns External_effect (fail-closed) for anything not registered. *)
+let tool_registry : (string, tool_effect_class) Hashtbl.t = Hashtbl.create 16
 
 let register_tool_class name cls =
   Hashtbl.replace tool_registry (String.lowercase_ascii name) cls
@@ -174,7 +153,6 @@ let register_tool_class name cls =
 
 type state =
   { effective_mode : Execution_mode.t
-  ; allowed_mutations : string list
   ; review_requirement : string option
   ; tool_classifications : (string * tool_effect_class) list
   ; mutable violations : violation list
@@ -186,7 +164,6 @@ type state =
 let create ~contract ~effective_mode ?(tool_classifications = []) () =
   let rc = contract.Risk_contract.runtime_constraints in
   { effective_mode
-  ; allowed_mutations = rc.allowed_mutations
   ; review_requirement = rc.review_requirement
   ; tool_classifications
   ; violations = []
@@ -415,9 +392,9 @@ let violation_kind_for_class st cls =
      | External_effect -> Some External_in_draft
      | Read_only | Local_mutation | Shell_dynamic -> None)
   | Execution_mode.Execute ->
-    if List.mem "workspace_only" st.allowed_mutations && cls = External_effect
-    then Some Scope_violation
-    else None
+    (* Execute mode imposes no tool-effect-class violation. CDAL does not
+       gate tool actions by path/mutation scope (assurance plane only). *)
+    None
 ;;
 
 let record_effect_evidence

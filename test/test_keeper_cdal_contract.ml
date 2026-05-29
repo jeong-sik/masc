@@ -16,7 +16,7 @@ let make_meta ?(name = "cdal-keeper") ?current_task_id () =
     ; "network_mode", `String "none"
     ; "allowed_paths", `List [ `String "/workspace/project" ]
     ; "active_goal_ids", `List [ `String "goal-cdal" ]
-    ; "tool_access", Masc_mcp.Keeper_meta_contract.tool_access_to_json (Masc_mcp.Keeper_meta_contract.Custom [ "tool_execute" ])
+    ; "tool_access", Keeper_meta_tool_access.tool_access_to_json (Keeper_meta_tool_access.Custom [ "tool_execute" ])
     ]
   in
   let fields =
@@ -102,17 +102,14 @@ let test_keeper_meta_projects_capture_only_contract () =
   let constraints = contract.RC.runtime_constraints in
   check string "requested mode" "execute" (EM.to_string constraints.requested_execution_mode);
   check string "risk class" "low" (RK.to_string constraints.risk_class);
-  check (list string) "allowed mutations" [] constraints.allowed_mutations;
   check (option string) "review requirement" None constraints.review_requirement;
   (* Typed criteria assertion (RFC-0109 Phase A) *)
   (match contract.RC.eval_criteria with
    | Crit.Keeper_turn_capture_v1 r ->
      check string "keeper_name (typed)" "cdal-keeper" r.keeper_name;
      check string "agent_name (typed)" "cdal-keeper-agent" r.agent_name;
-     check string "sandbox_profile (typed)" "local" r.sandbox_profile;
      check string "network_mode (typed)" "none" r.network_mode;
      check (option string) "current_task_id (typed)" (Some "task-cdal-001") r.current_task_id;
-     check (list string) "allowed_paths (typed)" [ "/workspace/project" ] r.allowed_paths;
      check (list string) "active_goal_ids (typed)" [ "goal-cdal" ] r.active_goal_ids
    | other ->
      failf "expected Keeper_turn_capture_v1, got criteria_kind=%s" (Crit.criteria_kind other));
@@ -121,16 +118,9 @@ let test_keeper_meta_projects_capture_only_contract () =
   check_json_string "kind" "keeper_turn_capture_v1" criteria;
   check_json_string "keeper_name" "cdal-keeper" criteria;
   check_json_string "agent_name" "cdal-keeper-agent" criteria;
-  check_json_string "sandbox_profile" "local" criteria;
   check_json_string "network_mode" "none" criteria;
   check_json_string "current_task_id_at_start" "task-cdal-001" criteria;
-  check_json_list "allowed_paths" [ "/workspace/project" ] criteria;
-  check_json_list "active_goal_ids" [ "goal-cdal" ] criteria;
-  match member "tool_access" criteria with
-  | `Assoc _ as tool_access ->
-    check_json_string "kind" "custom" tool_access;
-    check_json_list "tools" [ "tool_execute" ] tool_access
-  | value -> failf "expected tool_access object, got %s" (Yojson.Safe.to_string value)
+  check_json_list "active_goal_ids" [ "goal-cdal" ] criteria
 ;;
 
 let test_contract_id_is_stable_for_same_meta () =

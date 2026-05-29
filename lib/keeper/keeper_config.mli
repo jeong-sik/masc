@@ -127,9 +127,6 @@ val reject_removed_keeper_msg_input_keys :
 
 (** {1 UTF-8 Safety} *)
 
-(** Truncate a string to at most [max_bytes] bytes on a valid UTF-8 boundary. *)
-val utf8_safe_prefix_bytes : string -> max_bytes:int -> string
-
 (** Replace invalid UTF-8 sequences with U+FFFD. *)
 val utf8_repair_string : string -> string
 

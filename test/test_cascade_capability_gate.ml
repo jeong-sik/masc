@@ -108,7 +108,7 @@ let with_temp_cascade_toml body f =
 let test_cascade_output_cap_not_context_window () =
   (* RFC-0058: ceilings resolve a concrete binding/alias key (route/profile
      ceiling resolution was removed with the tier concept). The narrowest
-     member of the former [tier.primary] is the [remote.long] binding. *)
+     member of the former [cascade.primary] is the [remote.long] binding. *)
   let cascade_name = Cascade_name.of_string_exn "remote.long" in
   with_temp_cascade_toml
     {|
@@ -142,7 +142,7 @@ target = "remote.long"
 
 let test_public_cap_helper_clamps_caller_override_to_cascade_ceiling () =
   (* RFC-0058: ceiling resolves the concrete [remote.narrow] binding key
-     (former sole member of [tier.primary]). *)
+     (former sole member of [cascade.primary]). *)
   let cascade_name = Cascade_name.of_string_exn "remote.narrow" in
   with_temp_cascade_toml
     {|
@@ -183,7 +183,7 @@ target = "remote.narrow"
 
 let test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling () =
   (* RFC-0058: ceilings resolve a concrete member key. The narrowest former
-     [tier.strict_tool_candidates] member is the provider_c alias, whose model
+     [cascade.strict_tool_candidates] member is the provider_c alias, whose model
      capability (16384) caps the alias [max-output] (64000). *)
   let cascade_name =
     Cascade_name.of_string_exn "cli_tool_c.provider_c-cli-coding.tool_candidate"
@@ -291,7 +291,7 @@ let test_auto_max_tokens_clamp_warning_dedupes_by_tuple () =
 
 let test_resolve_provider_derived_max_tokens_matches_failover_ceiling () =
   (* RFC-0058: ceilings resolve a concrete member key. The narrowest member
-     of the former [tier-group.strict_tool_candidates] (spanning two tiers) is
+     of the former [cascade.strict_tool_candidates] (spanning two tiers) is
      the ollama recovery alias, whose model capability is 8192. *)
   let cascade_name =
     Cascade_name.of_string_exn "ollama.local-recovery.recovery"
@@ -379,7 +379,7 @@ target = "ollama.local-recovery.recovery"
         ~provider_ceiling:ceiling resolved
       |> check_ok "narrowest failover value accepted" 8192)
 
-let test_resolve_tier_group_max_tokens_uses_model_capability_ceiling () =
+let test_resolve_cascade_max_tokens_uses_model_capability_ceiling () =
   let cascade_name =
     Cascade_name.of_string_exn
       "runpod_mtp.qwen36-mtp.keeper"
@@ -433,11 +433,11 @@ target = "runpod_mtp.qwen36-mtp.keeper"
 |}
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
-      check (option int) "tier-group output ceiling" (Some 8192) ceiling;
+      check (option int) "cascade output ceiling" (Some 8192) ceiling;
       let resolved =
         CI.resolve_max_tokens ~cascade_name ~fallback:(fun () -> 65536)
       in
-      check int "tier-group max_tokens follows model capability ceiling" 8192
+      check int "cascade max_tokens follows model capability ceiling" 8192
         resolved;
       CI.validate_max_tokens_within_ceiling ~cascade_name
         ~provider_ceiling:ceiling resolved
@@ -477,8 +477,8 @@ let () =
         `Quick
         test_resolve_provider_derived_max_tokens_matches_failover_ceiling;
       test_case
-        "tier-group max_tokens uses model capability ceiling"
+        "cascade max_tokens uses model capability ceiling"
         `Quick
-        test_resolve_tier_group_max_tokens_uses_model_capability_ceiling;
+        test_resolve_cascade_max_tokens_uses_model_capability_ceiling;
     ];
   ]

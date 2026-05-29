@@ -62,17 +62,17 @@ tools-support = true
 is-default = true
 max-concurrent = 1
 
-[tier.primary_profile]
+[cascade.primary_profile]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.primary_profile]
+[cascade.primary_profile]
 tiers = ["primary_profile"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.primary_profile"
+target = "cascade.primary_profile"
 |}
 
 let with_fake_docker script f =
@@ -316,20 +316,20 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.provider_k-coding-primary]
+[cascade.provider_k-coding-primary]
 members = ["cli_tool_a.agent_code-spark"]
 strategy = "failover"
 
-[tier-group.provider_k-coding-with-spark]
+[cascade.provider_k-coding-with-spark]
 tiers = ["provider_k-coding-primary"]
 strategy = "priority_tier"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.provider_k-coding-with-spark"
+target = "cascade.provider_k-coding-with-spark"
 
 [routes.tool_required]
-target = "tier-group.provider_k-coding-with-spark"
+target = "cascade.provider_k-coding-with-spark"
 |}
     config_root;
   write_per_keeper_token
@@ -408,20 +408,20 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.provider_k-coding-primary]
+[cascade.provider_k-coding-primary]
 members = ["provider_k-coding.provider_k-5-1"]
 strategy = "failover"
 
-[tier-group.provider_k-coding-with-spark]
+[cascade.provider_k-coding-with-spark]
 tiers = ["provider_k-coding-primary"]
 strategy = "priority_tier"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.provider_k-coding-with-spark"
+target = "cascade.provider_k-coding-with-spark"
 
 [routes.tool_required]
-target = "tier-group.provider_k-coding-with-spark"
+target = "cascade.provider_k-coding-with-spark"
 |}
     config_root;
   with_config_dir config_root @@ fun () ->
@@ -438,11 +438,11 @@ target = "tier-group.provider_k-coding-with-spark"
   check string "status escalates to error" "error" (status report.status);
   check bool "keeper route tool warning present" true
     (list_contains_substring
-       ~needle:"Tool-required cascade route keeper_turn targets tier-group.provider_k-coding-with-spark"
+       ~needle:"Tool-required cascade route keeper_turn targets cascade.provider_k-coding-with-spark"
        report.warnings);
   check bool "tool route tool warning present" true
     (list_contains_substring
-       ~needle:"Tool-required cascade route tool_required targets tier-group.provider_k-coding-with-spark"
+       ~needle:"Tool-required cascade route tool_required targets cascade.provider_k-coding-with-spark"
        report.warnings);
   check bool "forced tool-use reason present" true
     (list_contains_substring
@@ -490,20 +490,20 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.agent_code-primary]
+[cascade.agent_code-primary]
 members = ["cli_tool_a.agent_code-spark"]
 strategy = "failover"
 
-[tier-group.strict_tool_candidates]
+[cascade.strict_tool_candidates]
 tiers = ["agent_code-primary"]
 strategy = "priority_tier"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.strict_tool_candidates"
+target = "cascade.strict_tool_candidates"
 
 [routes.tool_required]
-target = "tier-group.strict_tool_candidates"
+target = "cascade.strict_tool_candidates"
 |}
     config_root;
   with_config_dir config_root @@ fun () ->

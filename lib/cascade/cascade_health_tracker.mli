@@ -184,7 +184,7 @@ val record_failure :
     Prior to 0.160.0 this path called {!record_success} (the response
     technically arrived), which silently masked gate drift: a provider
     could rank 100% healthy while every call fell through to the next
-    cascade tier.
+    cascade.
 
     See {!record_failure} for [error_kind] / [error_reason] semantics.
 

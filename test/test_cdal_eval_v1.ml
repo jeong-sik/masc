@@ -50,7 +50,6 @@ let make_contract () : Masc_mcp_cdal_runtime.Risk_contract.t =
   { runtime_constraints =
       { requested_execution_mode = Execute
       ; risk_class = Low
-      ; allowed_mutations = [ "tool_edit_file" ]
       ; review_requirement = None
       }
   ; eval_criteria =
@@ -63,7 +62,6 @@ let make_contract_with_review_requirement () : Masc_mcp_cdal_runtime.Risk_contra
   { runtime_constraints =
       { requested_execution_mode = Execute
       ; risk_class = Low
-      ; allowed_mutations = [ "tool_edit_file" ]
       ; review_requirement = Some "human_review"
       }
   ; eval_criteria =

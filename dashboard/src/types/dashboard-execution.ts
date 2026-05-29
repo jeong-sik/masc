@@ -1,4 +1,4 @@
-import type { Agent, BoardPost, StopCause } from './core'
+import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
 import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, PendingConfirmation, PendingConfirmSummary } from './governance'
 
@@ -552,8 +552,8 @@ export interface DashboardExecutionWorkerSupportBrief {
   focus: string
   last_signal_at?: string | null
   last_signal_age_sec?: number | null
-  signal_truth?: 'live' | 'stale' | 'absent'
-  evidence_source?: 'message' | 'presence' | 'none'
+  signal_truth?: ExecutionSignalTruth
+  evidence_source?: EvidenceSourceCore
   active_task_count?: number
   related_session_id?: string | null
   related_operation_id?: string | null

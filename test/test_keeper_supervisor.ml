@@ -4,6 +4,10 @@
 
 open Alcotest
 module Sup = Masc_mcp.Keeper_supervisor
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
+module Keeper_meta_store = Masc_mcp.Keeper_meta_store
+module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
+module Keeper_types_profile = Masc_mcp.Keeper_types_profile
 module Reg = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_meta_contract
 module KTypes = Masc_mcp.Keeper_types
@@ -207,7 +211,7 @@ let test_should_cleanup_dead_true () =
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
       ] in
-      match Masc_mcp.Keeper_meta_json.meta_of_json json with
+      match Keeper_meta_json_parse.meta_of_json json with
       | Ok meta -> meta
       | Error err -> fail err)
   in
@@ -227,7 +231,7 @@ let test_should_cleanup_dead_false_when_recent () =
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
       ] in
-      match Masc_mcp.Keeper_meta_json.meta_of_json json with
+      match Keeper_meta_json_parse.meta_of_json json with
       | Ok meta -> meta
       | Error err -> fail err)
   in
@@ -282,7 +286,7 @@ let make_meta name =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  match Masc_mcp.Keeper_meta_json.meta_of_json json with
+  match Keeper_meta_json_parse.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
@@ -472,10 +476,10 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
   let name = "spawn-denied-no-fork" in
   let meta = make_meta name in
-  (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+  (match Keeper_meta_store.write_meta config meta with
    | Ok () -> ()
    | Error err -> fail err);
-  let ctx : _ Masc_mcp.Keeper_types_profile.context =
+  let ctx : _ Keeper_types_profile.context =
     {
       config;
       agent_name = "supervisor";
@@ -701,16 +705,16 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
               base.runtime with
               last_blocker =
                 Some
-                  (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+                  (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
-                     KT.Ambiguous_post_commit_timeout);
+                     Keeper_meta_contract.Ambiguous_post_commit_timeout);
             };
         }
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -746,7 +750,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
        | Ok () -> ()
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       let resumed_meta =
-        match Masc_mcp.Keeper_meta_store.read_meta config meta.name with
+        match Keeper_meta_store.read_meta config meta.name with
         | Ok (Some value) -> value
         | Ok None -> fail "expected resumed keeper meta"
         | Error err -> fail err
@@ -774,7 +778,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -793,7 +797,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
           Masc_mcp.Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -852,7 +856,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
           Masc_mcp.Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -897,7 +901,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "dead-alert-keeper" in
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -917,7 +921,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -957,12 +961,12 @@ let with_reap_ready_dead_keeper name f =
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       ignore (Reg.register ~base_path:config.base_path name meta);
       Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1040,7 +1044,7 @@ let test_stale_storm_pause_skips_restart () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "stale-storm-keeper" in
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1060,7 +1064,7 @@ let test_stale_storm_pause_skips_restart () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1084,7 +1088,7 @@ let test_stale_storm_pause_skips_restart () =
         baseline_dead after_dead;
       (* meta.paused must be true on disk so reconcile + future sweeps
          honor the pause across server restarts. *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after storm pause"
              true m.paused;
@@ -1114,7 +1118,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "legacy-stale-fleet-batch-keeper" in
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1131,7 +1135,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1148,7 +1152,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       in
       check (float 0.001) "legacy fleet batch follows restart/dead budget"
         (baseline_dead +. 1.0) after_dead;
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays false for legacy fleet batch"
              false m.paused
@@ -1171,7 +1175,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "provider-timeout-loop-keeper" in
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1188,7 +1192,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1211,7 +1215,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
         (baseline_pause +. 1.0) after_pause;
       check (float 0.001) "dead counter NOT incremented (budget loop is pause)"
         baseline_dead after_dead;
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after provider timeout loop pause"
              true m.paused
@@ -1235,7 +1239,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "unresolved-watchdog-stopped" in
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1244,7 +1248,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Provider_timeout_loop { count = 3 }));
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1255,14 +1259,14 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after unresolved watchdog stop"
              true m.paused;
            check bool "provider timeout blocker class preserved"
              true
              (match m.runtime.last_blocker with
-              | Some b -> b.klass = Masc_mcp.Keeper_meta_contract.Turn_timeout
+              | Some b -> b.klass = Keeper_meta_contract.Turn_timeout
               | None -> false)
        | Ok None -> fail "meta missing after unresolved watchdog stop"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1287,7 +1291,7 @@ let test_non_storm_crashed_restarts_normally () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "non-storm-keeper" in
       let meta = make_meta name in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1307,7 +1311,7 @@ let test_non_storm_crashed_restarts_normally () =
       let baseline_pause =
         Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1324,7 +1328,7 @@ let test_non_storm_crashed_restarts_normally () =
       check (float 0.001) "stale_storm_paused counter NOT incremented for non-storm"
         baseline_pause after_pause;
       (* meta.paused stays false. *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays false after non-storm crash"
              false m.paused
@@ -1352,7 +1356,7 @@ let test_storm_pause_requires_manual_resume () =
       (* Ensure no prior auto_resume_after_sec. *)
       check bool "initial auto_resume_after_sec = None"
         true (meta.auto_resume_after_sec = None);
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1361,7 +1365,7 @@ let test_storm_pause_requires_manual_resume () =
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1374,7 +1378,7 @@ let test_storm_pause_requires_manual_resume () =
       Sup.sweep_and_recover ctx;
       (* Stale storms are operator-owned pauses: no timer should re-enter
          the same failed cascade/tool loop automatically. *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true" true m.paused;
            check bool "auto_resume_after_sec remains None"
@@ -1413,7 +1417,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
           auto_resume_after_sec = Some 3600.0;
         }
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta config initial_meta with
+      (match Keeper_meta_store.write_meta config initial_meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name initial_meta in
@@ -1422,7 +1426,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Provider_timeout_loop { count = 3 }));
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1434,7 +1438,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
       in
       Sup.sweep_and_recover ctx;
       (* Back-off must double: 3600 -> 7200. *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true" true m.paused;
            (match m.auto_resume_after_sec with
@@ -1478,7 +1482,7 @@ let test_sweep_auto_resumes_after_backoff () =
           updated_at = two_hours_ago;
         }
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       check bool "precondition: paused keeper is not bootable" false
@@ -1487,7 +1491,7 @@ let test_sweep_auto_resumes_after_backoff () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1499,7 +1503,7 @@ let test_sweep_auto_resumes_after_backoff () =
       in
       Sup.sweep_and_recover ctx;
       (* meta.paused must be cleared after the back-off timer elapsed. *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = false after auto-resume"
              false m.paused;
@@ -1550,7 +1554,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
           updated_at = two_hours_ago;
         }
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       let entry = Reg.register ~base_path:config.base_path name paused_meta in
@@ -1565,7 +1569,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
            check string "precondition: registry phase paused" "paused"
              (KSM.phase_to_string phase)
        | None -> fail "precondition: registry entry missing");
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1576,7 +1580,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = false after auto-resume" false m.paused
        | Ok None -> fail "meta missing after auto-resume"
@@ -1621,7 +1625,7 @@ let test_operator_pause_not_auto_resumed () =
           updated_at = two_hours_ago;
         }
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       check bool "precondition: operator pause is not bootable" false
@@ -1630,7 +1634,7 @@ let test_operator_pause_not_auto_resumed () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1642,7 +1646,7 @@ let test_operator_pause_not_auto_resumed () =
       in
       Sup.sweep_and_recover ctx;
       (* meta.paused must remain true: operator pauses need human action. *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays true for operator pause"
              true m.paused
@@ -1682,7 +1686,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
           t.tm_hour t.tm_min t.tm_sec
       in
       let timeout_blocker =
-        Masc_mcp.Keeper_meta_contract.blocker_info_of_class ~detail:"turn_timeout" Masc_mcp.Keeper_meta_contract.Turn_timeout
+        Keeper_meta_contract.blocker_info_of_class ~detail:"turn_timeout" Keeper_meta_contract.Turn_timeout
       in
       let paused_meta =
         { (make_meta name) with
@@ -1700,7 +1704,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
         (Masc_mcp.Keeper_supervisor_types.paused_meta_auto_resume_due
            ~now:(Unix.time ())
            paused_meta);
-      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       check bool "precondition: timeout pause is not bootable" false
@@ -1709,7 +1713,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1720,7 +1724,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays true without explicit resume policy"
              true m.paused;
@@ -1729,7 +1733,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
            check bool "timeout blocker stays recorded for operator inspection"
              true
              (match m.runtime.last_blocker with
-              | Some info -> info.klass = Masc_mcp.Keeper_meta_contract.Turn_timeout
+              | Some info -> info.klass = Keeper_meta_contract.Turn_timeout
               | None -> false)
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1778,9 +1782,9 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
             { (make_meta name).runtime with
               last_blocker =
                 Some
-                  (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+                  (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"capacity exhausted before explicit resume policy"
-                     KT.Capacity_backpressure);
+                     Keeper_meta_contract.Capacity_backpressure);
             };
         }
       in
@@ -1789,7 +1793,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
         (Masc_mcp.Keeper_supervisor_types.paused_meta_auto_resume_due
            ~now:(Unix.time ())
            paused_meta);
-      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       check bool "precondition: capacity pause is not bootable" false
@@ -1798,7 +1802,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
       in
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1809,14 +1813,14 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays true without explicit resume policy"
              true m.paused;
            check bool "capacity blocker stays recorded for operator inspection"
              true
              (match m.runtime.last_blocker with
-              | Some info -> info.klass = KT.Capacity_backpressure
+              | Some info -> info.klass = Keeper_meta_contract.Capacity_backpressure
               | None -> false)
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1852,7 +1856,7 @@ let test_initial_auto_resume_capped_at_max () =
       let meta = make_meta name in
       check bool "precondition: auto_resume_after_sec = None"
         true (meta.auto_resume_after_sec = None);
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1908,11 +1912,11 @@ let test_persisted_blocker_survives_unregister () =
           runtime =
             {
               meta.runtime with
-              last_blocker = Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Masc_mcp.Keeper_meta_contract.Turn_timeout);
+              last_blocker = Some (Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Keeper_meta_contract.Turn_timeout);
             };
         }
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1921,18 +1925,18 @@ let test_persisted_blocker_survives_unregister () =
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
-      let ctx : _ Masc_mcp.Keeper_types_profile.context =
+      let ctx : _ Keeper_types_profile.context =
         { config; agent_name = "supervisor"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = Some (Eio.Stdenv.net env) }
       in
       Sup.sweep_and_recover ctx;
       
       (* Check if blocker is persisted *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass" true (b.klass = Masc_mcp.Keeper_meta_contract.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass" true (b.klass = Keeper_meta_contract.Turn_timeout)
             | None -> fail "expected blocker after storm pause");
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1941,12 +1945,12 @@ let test_persisted_blocker_survives_unregister () =
       Reg.unregister ~base_path:config.base_path name;
       
       (* Read again and verify *)
-      (match Masc_mcp.Keeper_meta_store.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Masc_mcp.Keeper_meta_contract.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Keeper_meta_contract.Turn_timeout)
             | None -> fail "expected blocker after unregister")
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))
@@ -2353,7 +2357,7 @@ let () =
                 ignore (Reg.dispatch_event ~base_path:config.base_path name
                           KSM.Fiber_started);
                 Reg.set_started_at_for_test ~base_path:config.base_path name 1.0;
-                let ctx : _ Masc_mcp.Keeper_types_profile.context =
+                let ctx : _ Keeper_types_profile.context =
                   {
                     config;
                     agent_name = "supervisor";
@@ -2442,7 +2446,7 @@ let () =
                 ignore (Reg.dispatch_event ~base_path:config.base_path name
                           KSM.Fiber_started);
                 Reg.set_started_at_for_test ~base_path:config.base_path name 1.0;
-                let ctx : _ Masc_mcp.Keeper_types_profile.context =
+                let ctx : _ Keeper_types_profile.context =
                   {
                     config;
                     agent_name = "supervisor";

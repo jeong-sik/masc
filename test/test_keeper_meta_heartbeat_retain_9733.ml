@@ -1,5 +1,5 @@
 (** #9733 keeper_msg turn migration: pin the contract that
-    [Masc_mcp.Keeper_meta_store.write_meta_with_merge ~merge:heartbeat_fields_from_disk]
+    [Keeper_meta_store.write_meta_with_merge ~merge:heartbeat_fields_from_disk]
     actually retains the disk-owned heartbeat fields after a CAS
     retry, while letting the caller's payload win at the cycle-owned
     fields.
@@ -58,13 +58,13 @@ let make_meta ~name =
   | Error e -> fail ("meta_of_json failed: " ^ e)
 
 let read_meta_exn config name =
-  match Masc_mcp.Keeper_meta_store.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Ok (Some meta) -> meta
   | Ok None -> fail ("read_meta returned None for " ^ name)
   | Error err -> fail ("read_meta failed: " ^ err)
 
 let room_cursor meta room_id =
-  meta.Masc_mcp.Keeper_meta_contract.last_seen_seq_by_room
+  meta.Keeper_meta_contract.last_seen_seq_by_room
   |> List.find_map (fun (rid, seq) ->
        if String.equal rid room_id then Some seq else None)
   |> Option.value ~default:0
@@ -95,10 +95,10 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
       let m = make_meta ~name in
       { m with joined_room_ids = ["r1"] }
     in
-    (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config m0 with
+    (match Keeper_meta_store.write_meta ~force:true config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
-    let caller_view = match Masc_mcp.Keeper_meta_store.read_meta config name with
+    let caller_view = match Keeper_meta_store.read_meta config name with
       | Ok (Some m) -> m
       | _ -> fail "seed read failed"
     in
@@ -106,7 +106,7 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
     let heartbeat_payload =
       { caller_view with joined_room_ids = ["r1"; "r2"] }
     in
-    (match Masc_mcp.Keeper_meta_store.write_meta config heartbeat_payload with
+    (match Keeper_meta_store.write_meta config heartbeat_payload with
      | Ok () -> ()
      | Error e -> fail ("heartbeat write failed: " ^ e));
     (* Cycle fiber: had stale joined_room_ids; writes its own
@@ -121,7 +121,7 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
         ()
     in
     (match
-       Masc_mcp.Keeper_meta_store.write_meta_with_merge
+       Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
          config cycle_payload
      with
@@ -133,7 +133,7 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
         ~labels:[("keeper_name", name)]
         ()
     in
-    let final = match Masc_mcp.Keeper_meta_store.read_meta config name with
+    let final = match Keeper_meta_store.read_meta config name with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
@@ -159,13 +159,13 @@ let test_no_race_writes_first_attempt () =
     ignore (Coord.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"smooth9733" in
     (match
-       Masc_mcp.Keeper_meta_store.write_meta_with_merge
+       Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
          config m0
      with
      | Ok () -> ()
      | Error e -> fail ("first write failed: " ^ e));
-    let on_disk = match Masc_mcp.Keeper_meta_store.read_meta config "smooth9733" with
+    let on_disk = match Keeper_meta_store.read_meta config "smooth9733" with
       | Ok (Some m) -> m
       | _ -> fail "read failed"
     in
@@ -188,7 +188,7 @@ let test_message_cursor_updates_persist_before_turn () =
         last_seen_seq_by_room = [ ("default", 0) ];
       }
     in
-    (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config seed with
+    (match Keeper_meta_store.write_meta ~force:true config seed with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let before = read_meta_exn config name in
@@ -220,14 +220,14 @@ let test_message_cursor_updates_merge_after_cas_race () =
         goal = "seed";
       }
     in
-    (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config seed with
+    (match Keeper_meta_store.write_meta ~force:true config seed with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let observer_view = read_meta_exn config name in
     let racing_payload =
       { observer_view with goal = "concurrent writer wins other fields" }
     in
-    (match Masc_mcp.Keeper_meta_store.write_meta config racing_payload with
+    (match Keeper_meta_store.write_meta config racing_payload with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     let returned =

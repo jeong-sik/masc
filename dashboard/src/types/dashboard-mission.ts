@@ -1,4 +1,4 @@
-import type { KeeperDiagnostic, KeeperTrustSummary, Message } from './core'
+import type { KeeperDiagnostic, KeeperTrustSummary, Message, MissionSignalTruth, MissionEvidenceSource } from './core'
 import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
 
 export interface DashboardMissionSummary {
@@ -121,8 +121,8 @@ export interface DashboardMissionAgentBrief {
   related_attention_count: number
   last_activity_at?: string | null
   last_activity_age_sec?: number | null
-  signal_truth?: 'live' | 'stale' | 'archived' | 'unknown'
-  evidence_source?: 'message' | 'presence' | 'session' | 'none'
+  signal_truth?: MissionSignalTruth
+  evidence_source?: MissionEvidenceSource
   recent_output_preview?: string | null
   recent_input_preview?: string | null
   recent_event?: string | null

@@ -1,13 +1,14 @@
-(** Cdal_judge -- Phase 1A contract judge with 5 active checks.
+(** Cdal_judge -- Phase 1A contract judge with 6 active checks.
 
     Evaluates a loaded proof bundle against its contract constraints:
     execution mode propagation and escalation, risk class match,
-    contract snapshot integrity, required artifact presence, and
-    review-requirement bridgeability.
+    contract snapshot integrity, required artifact presence,
+    review-requirement bridgeability, and runtime terminal status
+    (completion precondition).
 
     @since CDAL Phase 1A *)
 
-(** Evaluate all 5 checks and derive run-level verdict. *)
+(** Evaluate all 6 checks and derive run-level verdict. *)
 val judge : Cdal_loader.loaded_bundle -> Cdal_types.contract_verdict
 
 (** {2 Individual checks (exposed for testing)} *)
@@ -29,53 +30,8 @@ val check_required_artifact : Cdal_loader.loaded_bundle -> Cdal_types.check_resu
     [Inconclusive] until explicit verification occurs downstream. *)
 val check_review_requirement : Cdal_loader.loaded_bundle -> Cdal_types.check_result
 
-(** {2 Exec-outcome verifiable markers}
-
-    Structured evidence lifted out of a completed shell command's
-    semantic exit + stdout/stderr, so the verifier cascade can route
-    without regex scraping.  Each marker carries a confidence label:
-    [`Exact] means the signal was derived from an authoritative
-    status (e.g. process exit code), [`Heuristic] means it was
-    inferred from the output text and should be cross-checked before
-    being treated as proof. *)
-
-type marker_confidence =
-  [ `Exact
-  | `Heuristic
-  ]
-
-type verifiable_marker =
-  | Test_pass of
-      { count : int
-      ; confidence : marker_confidence
-      }
-  | Test_fail of
-      { count : int
-      ; confidence : marker_confidence
-      }
-  | Build_ok of { confidence : marker_confidence }
-  | Build_fail of { confidence : marker_confidence }
-  | Lint_clean of { confidence : marker_confidence }
-  | Lint_dirty of
-      { count : int
-      ; confidence : marker_confidence
-      }
-  | Git_clean of { confidence : marker_confidence }
-  | Git_dirty of { confidence : marker_confidence }
-  | Git_not_a_repo
-
-(** Classify a completed exec outcome.  Returns the empty list when
-    no signal can be lifted — callers must treat absence as {i "no
-    evidence"}, not as failure.  Markers do not overlap; a single
-    command produces zero or one domain-specific marker (tests,
-    build, lint, git) though different domains may coexist when the
-    output covers several. *)
-val of_exec_outcome
-  :  semantic:Masc_exec.Exec_semantic.t
-  -> stdout:string
-  -> stderr:string
-  -> verifiable_marker list
-
-(** Stable wire tag, e.g. ["test_pass:2:exact"].  Intended for
-    JSON emission and test assertions; not a pretty-printer. *)
-val marker_to_string : verifiable_marker -> string
+(** Check the proof's terminal [result_status]. Only a [Completed] run can be
+    [Satisfied]; [Errored] is [Violated]; [Timed_out]/[Cancelled]/
+    [Context_overflow] are [Inconclusive] with a blocking gap (completion
+    cannot be verified from an unfinished run). *)
+val check_result_status : Cdal_loader.loaded_bundle -> Cdal_types.check_result

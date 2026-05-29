@@ -30,12 +30,7 @@ let test_keeper_turn_capture_v1_roundtrip () =
     (Crit.Keeper_turn_capture_v1
        { keeper_name = "k-1"
        ; agent_name = "agent-1"
-       ; sandbox_profile = "local"
-       ; sandbox_image = None
        ; network_mode = "none"
-       ; tool_access = `Assoc [ "kind", `String "custom"; "tools", `List [ `String "x" ] ]
-       ; tool_denylist = [ "danger" ]
-       ; allowed_paths = [ "/p1"; "/p2" ]
        ; active_goal_ids = [ "g1"; "g2" ]
        ; current_task_id = Some "task-1"
        })
@@ -75,8 +70,6 @@ let test_legacy_keeper_kind_field () =
       ; "sandbox_profile", `String "local"
       ; "sandbox_image", `Null
       ; "network_mode", `String "none"
-      ; "tool_access", `Null
-      ; "tool_denylist", `List []
       ; "allowed_paths", `List []
       ; "active_goal_ids", `List []
       ]

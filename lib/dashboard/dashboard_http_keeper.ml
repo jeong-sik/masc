@@ -175,14 +175,13 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               (List.rev parsed_metrics)
           in
 	          let (last_skill_primary, last_skill_secondary, last_skill_reason) =
-	            let open Yojson.Safe.Util in
 	            let rec find_latest = function
 	              | [] -> (None, [], None)
 	              | j :: tl ->
 	                  (match Safe_ops.json_string_opt "skill_primary" j with
 	                   | Some primary when String.trim primary <> "" ->
 	                       let secondary =
-	                         match j |> member "skill_secondary" with
+	                         match Json_util.assoc_member_opt "skill_secondary" j |> Option.value ~default:`Null with
 	                         | `List xs ->
 	                             xs
 	                             |> List.filter_map (fun v ->
@@ -344,13 +343,13 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             Keeper_runtime_contract.runtime_contract_json ~config m
           in
           let goal_progress =
-            Yojson.Safe.Util.member "goal_progress" runtime_contract
+            Option.value ~default:`Null (Json_util.assoc_member_opt "goal_progress" runtime_contract)
           in
           let blocked_task_count =
             Safe_ops.json_int "blocked_task_count" ~default:0 runtime_contract
           in
           let approval_policy_effective =
-            Yojson.Safe.Util.member "approval_policy_effective" runtime_contract
+            Option.value ~default:`Null (Json_util.assoc_member_opt "approval_policy_effective" runtime_contract)
           in
           let sandbox_target =
             Safe_ops.json_string "sandbox_target" ~default:"unknown"
@@ -857,18 +856,18 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
           |> List.map (fun row ->
                  `Assoc
                    [
-                     ("name", Yojson.Safe.Util.member "name" row);
-                     ("agent_name", Yojson.Safe.Util.member "agent_name" row);
-                     ("keeper_id", Yojson.Safe.Util.member "keeper_id" row);
-                     ("phase", Yojson.Safe.Util.member "phase" row);
+                     ("name", Option.value ~default:`Null (Json_util.assoc_member_opt "name" row));
+                     ("agent_name", Option.value ~default:`Null (Json_util.assoc_member_opt "agent_name" row));
+                     ("keeper_id", Option.value ~default:`Null (Json_util.assoc_member_opt "keeper_id" row));
+                     ("phase", Option.value ~default:`Null (Json_util.assoc_member_opt "phase" row));
                      ( "pipeline_stage",
-                       Yojson.Safe.Util.member "pipeline_stage" row );
-                     ("status", Yojson.Safe.Util.member "status" row);
-                     ("trace_id", Yojson.Safe.Util.member "trace_id" row);
-                     ("generation", Yojson.Safe.Util.member "generation" row);
-                     ("current_task_id", Yojson.Safe.Util.member "current_task_id" row);
-                     ("active_goal_ids", Yojson.Safe.Util.member "active_goal_ids" row);
-                     ("trust", Yojson.Safe.Util.member "trust" row);
+                       Option.value ~default:`Null (Json_util.assoc_member_opt "pipeline_stage" row) );
+                     ("status", Option.value ~default:`Null (Json_util.assoc_member_opt "status" row));
+                     ("trace_id", Option.value ~default:`Null (Json_util.assoc_member_opt "trace_id" row));
+                     ("generation", Option.value ~default:`Null (Json_util.assoc_member_opt "generation" row));
+                     ("current_task_id", Option.value ~default:`Null (Json_util.assoc_member_opt "current_task_id" row));
+                     ("active_goal_ids", Option.value ~default:`Null (Json_util.assoc_member_opt "active_goal_ids" row));
+                     ("trust", Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row));
                    ])
         | _ -> [])
     | _ -> []

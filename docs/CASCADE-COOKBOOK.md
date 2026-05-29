@@ -4,7 +4,7 @@ Copy-paste examples for declarative `config/cascade.toml`.
 
 The old flat profile cookbook is retired. Do not write top-level profile tables
 with inline model lists; declare providers, models, bindings, tiers,
-tier-groups, and routes explicitly.
+cascades, and routes explicitly.
 
 ## Provider-K Coding Plan + Provider-C CLI
 
@@ -52,13 +52,13 @@ max-concurrent = 1
 members = ["provider-k-coding.provider-k-5-turbo", "cli-tool-c.provider-c-coding"]
 strategy = "failover"
 
-[tier-group.provider-k-coding-with-spark]
+[cascade.provider-k-coding-with-spark]
 tiers = ["provider-k-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.provider-k-coding-with-spark"
+target = "cascade.provider-k-coding-with-spark"
 ```
 
 ## Ollama Fallback
@@ -86,13 +86,13 @@ max-concurrent = 1
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.recovery]
+[cascade.recovery]
 tiers = ["recovery", "provider-k-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.phase_recovery]
-target = "tier-group.recovery"
+target = "cascade.recovery"
 ```
 
 ## Qwen3.6 35B-A3B MTP GGUF
@@ -199,7 +199,7 @@ Official source: <https://unsloth.ai/docs/models/qwen3.6#mtp-qwen3.6-35b-a3b>
 
 ## Notes
 
-- Routes should target `tier-group.<name>` unless a caller intentionally needs a
+- Routes should target `cascade.<name>` unless a caller intentionally needs a
   single tier or binding.
 - Keep provider credentials in provider sub-tables; do not recreate per-profile
   `api_key_env` blocks.

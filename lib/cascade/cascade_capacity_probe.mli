@@ -47,7 +47,7 @@ val can_probe : url:string -> bool
     recognises [url].  Pure: no IO. *)
 val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
 
-(** [capacity url] is the 3-tier resolution chain:
+(** [capacity url] is the 3-level resolution chain:
     [Cascade_throttle] → registered probes' cache →
     [Cascade_client_capacity].  Identical semantics to the previous
     per-caller hardcoded chain. *)

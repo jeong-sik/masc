@@ -24,6 +24,12 @@ type t = private {
   generated_at : float;          (** Unix.gettimeofday at publish.  *)
   generation : int;              (** Monotonic publish counter.    *)
   shell : Yojson.Safe.t;
+  shell_light : Yojson.Safe.t;
+  (** RFC-0204 section 8.3 ("A").  The [~light] projection of [shell],
+      published alongside it so [shell?light=true] is served wait-free
+      from the snapshot instead of recomputing.  Different shape from
+      [shell] (light skips belief/tension and uses the light agent-count /
+      runtime projections), hence stored, not derived. *)
   tools : Yojson.Safe.t;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
@@ -89,6 +95,7 @@ val publish_for_test : t -> unit
 
 val make_for_test :
   shell:Yojson.Safe.t ->
+  ?shell_light:Yojson.Safe.t ->
   tools:Yojson.Safe.t ->
   namespace_truth:Yojson.Safe.t ->
   telemetry_summary:Yojson.Safe.t ->

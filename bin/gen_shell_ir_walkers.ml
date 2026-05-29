@@ -37,6 +37,11 @@ type ctor =
        The parameter is named [args].  For Git sub-commands [args] is
        the remainder after the sub-command has already been stripped.
        [None] for [Generic]. *)
+  ; no_expand_combined : bool
+    (* If true, skip [expand_combined_short_flags] pre-processing before
+       calling the parse body.  Use when the parser has its own combined-
+       flag handler that needs to see the original combined token (e.g.
+       [git commit -am MESSAGE] where [-am] must not be split). *)
   }
 
 (* Helper for the ~27 constructors that share the standard
@@ -66,19 +71,21 @@ let subcommand_args_ctor ~name ~risk ~sandbox =
       Some
         (Printf.sprintf
            {|
-let rec parse subcmd extra = function
+let rec parse subcmd extra dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.%s { subcommand = s; args = List.rev extra }))
      | None -> None)
+  | "--" :: rest -> parse subcmd extra true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) extra rest
-     | Some _ -> parse subcmd (arg :: extra) rest)
+     | None when not dd -> parse (Some arg) extra dd rest
+     | _ -> parse subcmd (arg :: extra) dd rest)
 in
-parse None [] args|}
+parse None [] false args|}
            name)
+  ; no_expand_combined = false
   }
 
 (* Order mirrors lib/exec/shell_ir_typed.{ml,mli} declaration order
@@ -145,6 +152,7 @@ let rec parse flags path = function
       | Some _ -> None)
 in
 parse [] None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Cat"
     ; anon_pattern = "Cat _"
@@ -170,6 +178,7 @@ parse [] None args|}
    | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cat { path = p }))
    | None -> None)
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Rg"
     ; anon_pattern = "Rg _"
@@ -195,24 +204,26 @@ parse [] None args|}
     ; parse_body =
         Some
           {|
-let rec parse case_sensitive pattern path = function
+let rec parse case_sensitive pattern path dd = function
   | [] ->
     (match pattern with
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rg { pattern = p; path; case_sensitive }))
      | None -> None)
-  | "-i" :: rest | "--ignore-case" :: rest -> parse false pattern path rest
+  | "-i" :: rest | "--ignore-case" :: rest when not dd -> parse false pattern path dd rest
+  | "--" :: rest -> parse case_sensitive pattern path true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse case_sensitive pattern path rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse case_sensitive pattern path dd rest
     else (
       match pattern with
-      | None -> parse case_sensitive (Some arg) path rest
+      | None -> parse case_sensitive (Some arg) path dd rest
       | Some _ ->
         (match path with
-         | None -> parse case_sensitive pattern (Some arg) rest
+         | None -> parse case_sensitive pattern (Some arg) dd rest
          | Some _ -> None))
 in
-parse true None None args|}
+parse true None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_status"
     ; anon_pattern = "Git_status _"
@@ -240,6 +251,7 @@ let rec parse short = function
   | _ :: rest -> parse short rest
 in
 parse false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_clone"
     ; anon_pattern = "Git_clone _"
@@ -264,33 +276,35 @@ parse false args|}
     ; parse_body =
         Some
           {|
-let rec parse depth branch repo = function
+let rec parse depth branch repo dd = function
   | [] ->
     (match repo with
      | Some r -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_clone { repo = r; branch; depth }))
      | None -> None)
-  | "--depth" :: n :: rest ->
+  | "--depth" :: n :: rest when not dd ->
     (match int_of_string_opt n with
-     | Some d -> parse (Some d) branch repo rest
+     | Some d -> parse (Some d) branch repo dd rest
      | None -> None)
-  | "-b" :: b :: rest | "--branch" :: b :: rest -> parse depth (Some b) repo rest
-  | arg :: rest when String.length arg > 8 && String.sub arg 0 8 = "--depth=" ->
+  | "-b" :: b :: rest | "--branch" :: b :: rest when not dd -> parse depth (Some b) repo dd rest
+  | arg :: rest when not dd && String.length arg > 8 && String.sub arg 0 8 = "--depth=" ->
     let n = String.sub arg 8 (String.length arg - 8) in
     (match int_of_string_opt n with
-     | Some d -> parse (Some d) branch repo rest
-     | None -> parse depth branch repo rest)
-  | arg :: rest when String.length arg > 9 && String.sub arg 0 9 = "--branch=" ->
+     | Some d -> parse (Some d) branch repo dd rest
+     | None -> parse depth branch repo dd rest)
+  | arg :: rest when not dd && String.length arg > 9 && String.sub arg 0 9 = "--branch=" ->
     let b = String.sub arg 9 (String.length arg - 9) in
-    parse depth (Some b) repo rest
+    parse depth (Some b) repo dd rest
+  | "--" :: rest -> parse depth branch repo true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse depth branch repo rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse depth branch repo dd rest
     else (
       match repo with
-      | None -> parse depth branch (Some arg) rest
+      | None -> parse depth branch (Some arg) dd rest
       | Some _ -> None)
 in
-parse None None None args|}
+parse None None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Curl"
     ; anon_pattern = "Curl _"
@@ -328,7 +342,7 @@ parse None None None args|}
     ; parse_body =
         Some
           {|
-let rec parse method_ headers body url output_file follow_redirects insecure = function
+let rec parse method_ headers body url output_file follow_redirects insecure dd = function
   | [] ->
     (match url with
      | Some u ->
@@ -347,55 +361,66 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
                ; insecure
                }))
      | None -> None)
-  | "-X" :: m :: rest | "--request" :: m :: rest ->
+  | "-X" :: m :: rest | "--request" :: m :: rest when not dd ->
     (match String.uppercase_ascii m with
-     | "GET" -> parse `GET headers body url output_file follow_redirects insecure rest
-     | "POST" -> parse `POST headers body url output_file follow_redirects insecure rest
-     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
-     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
+     | "GET" -> parse `GET headers body url output_file follow_redirects insecure dd rest
+     | "POST" -> parse `POST headers body url output_file follow_redirects insecure dd rest
+     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure dd rest
+     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure dd rest
      | _ -> None)
   (* --request=METHOD form *)
   | arg :: rest
-    when String.length arg > 10
+    when not dd && String.length arg > 10
          && String.sub arg 0 10 = "--request=" ->
     let m = String.uppercase_ascii (String.sub arg 10 (String.length arg - 10)) in
     (match m with
-     | "GET" -> parse `GET headers body url output_file follow_redirects insecure rest
-     | "POST" -> parse `POST headers body url output_file follow_redirects insecure rest
-     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure rest
-     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure rest
+     | "GET" -> parse `GET headers body url output_file follow_redirects insecure dd rest
+     | "POST" -> parse `POST headers body url output_file follow_redirects insecure dd rest
+     | "PUT" -> parse `PUT headers body url output_file follow_redirects insecure dd rest
+     | "DELETE" -> parse `DELETE headers body url output_file follow_redirects insecure dd rest
      | _ -> None)
-  | "-H" :: h :: rest | "--header" :: h :: rest ->
+  | "-H" :: h :: rest | "--header" :: h :: rest when not dd ->
     (match String.index_opt h ':' with
      | Some i ->
        let key = String.trim (String.sub h 0 i) in
        let value = String.trim (String.sub h (i + 1) (String.length h - i - 1)) in
-       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure rest
+       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure dd rest
      | None -> None)
-  | "-d" :: d :: rest | "--data" :: d :: rest ->
+  (* --header=VALUE form *)
+  | arg :: rest
+    when not dd && String.length arg > 9
+         && String.sub arg 0 9 = "--header=" ->
+    let h = String.sub arg 9 (String.length arg - 9) in
+    (match String.index_opt h ':' with
+     | Some i ->
+       let key = String.trim (String.sub h 0 i) in
+       let value = String.trim (String.sub h (i + 1) (String.length h - i - 1)) in
+       parse method_ ((key, value) :: headers) body url output_file follow_redirects insecure dd rest
+     | None -> None)
+  | "-d" :: d :: rest | "--data" :: d :: rest when not dd ->
     (match body with
-     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
+     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure dd rest
      | Some _ -> None)
   (* --data=VALUE form *)
   | arg :: rest
-    when String.length arg > 7
+    when not dd && String.length arg > 7
          && String.sub arg 0 7 = "--data=" ->
     let d = String.sub arg 7 (String.length arg - 7) in
     (match body with
-     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure rest
+     | None -> parse method_ headers (Some d) url output_file follow_redirects insecure dd rest
      | Some _ -> None)
-  | "-o" :: o :: rest | "--output" :: o :: rest ->
-    parse method_ headers body url (Some o) follow_redirects insecure rest
+  | "-o" :: o :: rest | "--output" :: o :: rest when not dd ->
+    parse method_ headers body url (Some o) follow_redirects insecure dd rest
   (* --output=FILE form *)
   | arg :: rest
-    when String.length arg > 9
+    when not dd && String.length arg > 9
          && String.sub arg 0 9 = "--output=" ->
     let o = String.sub arg 9 (String.length arg - 9) in
-    parse method_ headers body url (Some o) follow_redirects insecure rest
-  | "-L" :: rest | "--location" :: rest ->
-    parse method_ headers body url output_file true insecure rest
-  | "-k" :: rest | "--insecure" :: rest ->
-    parse method_ headers body url output_file follow_redirects true rest
+    parse method_ headers body url (Some o) follow_redirects insecure dd rest
+  | "-L" :: rest | "--location" :: rest when not dd ->
+    parse method_ headers body url output_file true insecure dd rest
+  | "-k" :: rest | "--insecure" :: rest when not dd ->
+    parse method_ headers body url output_file follow_redirects true dd rest
   (* Flags that take an argument value *)
   | ( "--retry" | "--retry-max" | "--connect-timeout" | "--max-time"
     | "--max-filesize" | "--limit-rate" | "--retry-delay" | "--retry-count"
@@ -418,11 +443,11 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
     | "--tls-max" | "--tlsauthtype" | "--tlspassword"
     | "--tlsuser" | "--tlsv1.0" | "--tlsv1.1" | "--tlsv1.2"
     | "--trace" | "--trace-ascii" | "-u" | "--user" )
-    :: _val :: rest ->
-    parse method_ headers body url output_file follow_redirects insecure rest
+    :: _val :: rest when not dd ->
+    parse method_ headers body url output_file follow_redirects insecure dd rest
   (* Combined short flags: -Lk, -kL, etc. (boolean flags only) *)
   | arg :: rest
-    when String.length arg > 2
+    when not dd && String.length arg > 2
          && arg.[0] = '-'
          && arg.[1] <> '-'
          && String.for_all (fun c -> c = 'L' || c = 'k')
@@ -434,16 +459,18 @@ let rec parse method_ headers body url output_file follow_redirects insecure = f
       | 'k' -> ins' := true
       | _ -> ()
     done;
-    parse method_ headers body url output_file !fr' !ins' rest
+    parse method_ headers body url output_file !fr' !ins' dd rest
+  | "--" :: rest -> parse method_ headers body url output_file follow_redirects insecure true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse method_ headers body url output_file follow_redirects insecure rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse method_ headers body url output_file follow_redirects insecure dd rest
     else (
       match url with
-      | None -> parse method_ headers body (Some arg) output_file follow_redirects insecure rest
+      | None -> parse method_ headers body (Some arg) output_file follow_redirects insecure dd rest
       | Some _ -> None)
 in
-parse `GET [] None None None false false args|}
+parse `GET [] None None None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Rm"
     ; anon_pattern = "Rm _"
@@ -494,6 +521,7 @@ let rec parse recursive force paths = function
     else parse recursive force (arg :: paths) rest
 in
 parse false false [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Sudo"
     ; anon_pattern = "Sudo _"
@@ -515,6 +543,7 @@ parse false false [] args|}
           {|match args with
 | [] -> None
 | args -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sudo { target_argv = args }))|}
+    ; no_expand_combined = false
     }
   ; { name = "Find"
     ; anon_pattern = "Find _"
@@ -602,6 +631,7 @@ let rec parse name type_ maxdepth path = function
       | Some _ -> None)
 in
 parse None None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Head"
     ; anon_pattern = "Head _"
@@ -670,6 +700,7 @@ let rec parse lines path = function
       | Some _ -> None)
 in
 parse 10 None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tail"
     ; anon_pattern = "Tail _"
@@ -738,6 +769,7 @@ let rec parse lines path = function
       | Some _ -> None)
 in
 parse 10 None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Grep"
     ; anon_pattern = "Grep _"
@@ -793,6 +825,24 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
           | None -> collect (Some a) path tl
           | Some _ -> collect pattern (Some a) tl)
     in collect pattern path rest
+  (* -e PATTERN: explicit pattern (allows patterns starting with -) *)
+  | "-e" :: p :: rest ->
+    parse recursive case_sensitive files_with_matches (Some p) path rest
+  (* -ePATTERN combined form *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = 'e' ->
+    let p = String.sub arg 2 (String.length arg - 2) in
+    parse recursive case_sensitive files_with_matches (Some p) path rest
+  (* --color=auto and similar --flag=VALUE forms: skip *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = '-'
+         && String.contains arg '=' ->
+    parse recursive case_sensitive files_with_matches pattern path rest
+  (* --include, --exclude, --exclude-dir: value-consuming flags (skip both) *)
+  | ("--include" | "--exclude" | "--exclude-dir") :: _ :: rest ->
+    parse recursive case_sensitive files_with_matches pattern path rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
@@ -822,6 +872,7 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
          | Some _ -> None))
 in
 parse false true false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Mkdir"
     ; anon_pattern = "Mkdir _"
@@ -868,6 +919,7 @@ let rec parse parents path = function
       | Some _ -> None)
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Wc"
     ; anon_pattern = "Wc _"
@@ -932,6 +984,7 @@ let rec parse mode path = function
       | Some _ -> None)
 in
 parse None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_diff"
     ; anon_pattern = "Git_diff _"
@@ -966,6 +1019,7 @@ let rec parse stat cached paths = function
     else parse stat cached (arg :: paths) rest
 in
 parse false false [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_log"
     ; anon_pattern = "Git_log _"
@@ -1027,6 +1081,7 @@ let rec parse oneline max_count = function
     else parse oneline max_count rest
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_commit"
     ; anon_pattern = "Git_commit _"
@@ -1062,12 +1117,48 @@ let rec parse message amend = function
      | Some _ -> None)
   | "-a" :: rest | "--all" :: rest -> parse message amend rest
   | "--no-edit" :: rest -> parse message amend rest
+  (* Combined short flags: -am MESSAGE, -ma MESSAGE *)
+  | arg :: rest
+    when String.length arg >= 3
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.contains arg 'm'
+         && String.contains arg 'a' ->
+    let has_a = ref amend in
+    let msg_buf = Buffer.create 16 in
+    let m_seen = ref false in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'a' when !m_seen ->
+        (* 'a' after 'm' is a flag, not part of the message *)
+        has_a := true
+      | 'a' -> has_a := true
+      | 'm' -> m_seen := true
+      | c when !m_seen -> Buffer.add_char msg_buf c
+      | _ -> ()
+    done;
+    let msg_from_combined =
+      if Buffer.length msg_buf > 0 then Some (Buffer.contents msg_buf) else None
+    in
+    (match msg_from_combined with
+     | Some prefix ->
+       (* -m consumed the rest of this token; next arg is message continuation or standalone *)
+       (match rest with
+        | next :: rest' when String.length next > 0 && next.[0] <> '-' ->
+          parse (Some (prefix ^ " " ^ next)) !has_a rest'
+        | _ -> parse (Some prefix) !has_a rest)
+     | None ->
+       (* -m found but no inline text; next arg is the message *)
+       (match rest with
+        | m :: rest' -> parse (Some m) !has_a rest'
+        | _ -> None))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse message amend rest
     else parse message amend rest
 in
 parse None false args|}
+    ; no_expand_combined = true
     }
   ; { name = "Git_push"
     ; anon_pattern = "Git_push _"
@@ -1129,6 +1220,7 @@ let rec parse force force_with_lease set_upstream remote branch = function
          | Some _ -> parse force force_with_lease set_upstream remote branch rest))
 in
 parse false false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_pull"
     ; anon_pattern = "Git_pull _"
@@ -1170,6 +1262,7 @@ let rec parse rebase remote branch = function
          | Some _ -> parse rebase remote branch rest))
 in
 parse false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pwd"
     ; anon_pattern = "Pwd _"
@@ -1191,6 +1284,7 @@ parse false None None args|}
           {|match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pwd ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Echo"
     ; anon_pattern = "Echo _"
@@ -1210,6 +1304,7 @@ parse false None None args|}
     ; parse_body =
         Some
           {|Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Echo { args = args }))|}
+    ; no_expand_combined = false
     }
   ; { name = "Which"
     ; anon_pattern = "Which _"
@@ -1231,6 +1326,7 @@ parse false None None args|}
           {|match args with
 | [] -> None
 | names -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Which { names }))|}
+    ; no_expand_combined = false
     }
   ; { name = "Sort"
     ; anon_pattern = "Sort _"
@@ -1323,6 +1419,7 @@ let rec parse reverse numeric unique key file = function
       | Some _ -> None)
 in
 parse false false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Cut"
     ; anon_pattern = "Cut _"
@@ -1380,6 +1477,7 @@ let rec parse delimiter fields file = function
          | Some _ -> None))
 in
 parse None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tr"
     ; anon_pattern = "Tr _"
@@ -1451,6 +1549,7 @@ let rec parse delete squeeze set1 set2 = function
          | Some _ -> None))
 in
 parse false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Date"
     ; anon_pattern = "Date _"
@@ -1481,6 +1580,7 @@ let rec parse utc format = function
     else parse utc (Some arg) rest
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Env"
     ; anon_pattern = "Env _"
@@ -1503,6 +1603,7 @@ parse false None args|}
 match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Env ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Printenv"
     ; anon_pattern = "Printenv _"
@@ -1527,6 +1628,7 @@ match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = None }))
 | [ n ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = Some n }))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Uniq"
     ; anon_pattern = "Uniq _"
@@ -1594,6 +1696,7 @@ let rec parse count duplicates unique skip_fields skip_chars file = function
     else parse count duplicates unique skip_fields skip_chars (Some arg) rest
 in
 parse false false false None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Basename"
     ; anon_pattern = "Basename _"
@@ -1627,6 +1730,7 @@ match args with
    | [ path; suffix ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = Some suffix }))
    | _ -> None)
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Dirname"
     ; anon_pattern = "Dirname _"
@@ -1653,6 +1757,7 @@ match args with
    | Some path -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dirname { path }))
    | None -> None)
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Test"
     ; anon_pattern = "Test _"
@@ -1676,6 +1781,7 @@ match args with
 | [] -> None
 | expression -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Test { expression }))
     |}
+    ; no_expand_combined = false
     }
   ; { name = "Stat"
     ; anon_pattern = "Stat _"
@@ -1724,6 +1830,7 @@ let rec parse format = function
     else Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Stat { format; path = arg }))
 in
 parse None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Hostname"
     ; anon_pattern = "Hostname _"
@@ -1753,6 +1860,7 @@ let rec parse short = function
     else parse short rest
 in
 parse false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Whoami"
     ; anon_pattern = "Whoami _"
@@ -1775,6 +1883,7 @@ parse false args|}
 match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Whoami ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Du"
     ; anon_pattern = "Du _"
@@ -1865,6 +1974,7 @@ let rec parse human_readable summary max_depth = function
                  })))
 in
 parse false false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Df"
     ; anon_pattern = "Df _"
@@ -1935,6 +2045,7 @@ let rec parse human_readable fs_type = function
                  { path = Some arg; human_readable; filesystem_type = fs_type })))
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "File"
     ; anon_pattern = "File _"
@@ -1993,6 +2104,7 @@ let rec parse mime brief = function
            (Shell_ir_typed_types.File { path = arg; mime; brief }))
 in
 parse false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Printf"
     ; anon_pattern = "Printf _"
@@ -2021,6 +2133,7 @@ match args with
 | format :: rest ->
   Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printf { format; args = rest }))
 |}
+    ; no_expand_combined = false
     }
   ; { name = "Uname"
     ; anon_pattern = "Uname _"
@@ -2082,6 +2195,7 @@ let rec parse all kn rel mach = function
     else parse all kn rel mach rest
 in
 parse false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ps"
     ; anon_pattern = "Ps _"
@@ -2139,6 +2253,7 @@ let rec parse all full user = function
     else parse all full user rest
 in
 parse false false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tty"
     ; anon_pattern = "Tty _"
@@ -2161,6 +2276,7 @@ parse false false None args|}
 match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tty ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Wget"
     ; anon_pattern = "Wget _"
@@ -2211,6 +2327,7 @@ let rec parse output continue_ ncc url dd = function
          | Some _ -> None))
 in
 parse None false false None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
@@ -2253,6 +2370,14 @@ let rec parse port id_file host user command dd = function
     (match int_of_string_opt p_str with
      | Some p -> parse (Some p) id_file host user command dd rest
      | None -> parse port id_file host user command dd rest)
+  (* Combined form: -p22 *)
+  | arg :: rest
+    when not dd && String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = 'p'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let p = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse (Some p) id_file host user command dd rest
   | "-i" :: f :: rest when not dd -> parse port (Some f) host user command dd rest
   | "-o" :: _ :: rest when not dd -> parse port id_file host user command dd rest
   | "-L" :: _ :: rest when not dd -> parse port id_file host user command dd rest
@@ -2280,6 +2405,7 @@ let rec parse port id_file host user command dd = function
           { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port; identity_file = id_file })))
 in
 parse None None None None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"
@@ -2315,6 +2441,14 @@ let rec parse recursive port src dest = function
     (match int_of_string_opt p_str with
      | Some p -> parse recursive (Some p) src dest rest
      | None -> parse recursive port src dest rest)
+  (* Combined form: -P22 *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = 'P'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let p = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse recursive (Some p) src dest rest
   | "-p" :: rest -> parse recursive port src dest rest
   | "-C" :: rest -> parse recursive port src dest rest
   | "-v" :: rest -> parse recursive port src dest rest
@@ -2355,6 +2489,7 @@ let rec parse recursive port src dest = function
         | Some _ -> None)
 in
 parse false None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tar"
     ; anon_pattern = "Tar _"
@@ -2438,6 +2573,10 @@ let rec parse action compression archive paths = function
   | "-J" :: rest -> parse action `Xz archive paths rest
   | "--zstd" :: rest -> parse action `Zstd archive paths rest
   | "-f" :: f :: rest -> parse action compression (Some f) paths rest
+  | "--file" :: f :: rest -> parse action compression (Some f) paths rest
+  | "--gzip" :: rest -> parse action `Gzip archive paths rest
+  | "--bzip2" :: rest -> parse action `Bzip2 archive paths rest
+  | "--xz" :: rest -> parse action `Xz archive paths rest
   (* POSIX end-of-options: all remaining args are paths *)
   | "--" :: rest ->
     let paths' = List.rev_append (List.filter (fun a -> String.length a > 0) rest) paths in
@@ -2445,6 +2584,11 @@ let rec parse action compression archive paths = function
      | Some a, Some f ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tar { action = a; archive = f; paths = List.rev paths'; compression }))
      | _ -> None)
+  (* --file=ARCHIVE equal-sign form *)
+  | arg :: rest
+    when String.length arg > 7 && String.sub arg 0 7 = "--file=" ->
+    let f = String.sub arg 7 (String.length arg - 7) in
+    parse action compression (Some f) paths rest
   | arg :: rest ->
     if String.length arg >= 3 && arg.[0] = '-'
     then (
@@ -2478,6 +2622,7 @@ let rec parse action compression archive paths = function
     else parse action compression archive (arg :: paths) rest
 in
 parse None `None None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Make"
     ; anon_pattern = "Make _"
@@ -2508,6 +2653,18 @@ let rec parse jobs target dd = function
     (match int_of_string_opt n with
      | Some j -> parse (Some j) target dd rest
      | None -> None)
+  | "--jobs" :: n :: rest when not dd ->
+    (match int_of_string_opt n with
+     | Some j -> parse (Some j) target dd rest
+     | None -> None)
+  | arg :: rest
+    when not dd
+         && String.length arg > 7
+         && String.sub arg 0 7 = "--jobs=" ->
+    let n = String.sub arg 7 (String.length arg - 7) in
+    (match int_of_string_opt n with
+     | Some j -> parse (Some j) target dd rest
+     | None -> None)
   (* Combined form: -j4 → jobs = Some 4 *)
   | arg :: rest
     when not dd
@@ -2530,6 +2687,7 @@ let rec parse jobs target dd = function
       | Some _ -> None)
 in
 parse None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Diff"
     ; anon_pattern = "Diff _"
@@ -2592,6 +2750,7 @@ let rec parse unified brief files = function
     else parse unified brief (files @ [ arg ]) rest
 in
 parse false false [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Sed"
     ; anon_pattern = "Sed _"
@@ -2647,6 +2806,7 @@ let rec parse in_place ext_re suppress expr file dd = function
         | Some _ -> None)
 in
 parse false false false None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Rsync"
     ; anon_pattern = "Rsync _"
@@ -2748,6 +2908,7 @@ let rec parse flags archive delete dry_run compress src dst = function
            | Some _ -> None))
 in
 parse [] false false false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Node"
     ; anon_pattern = "Node _"
@@ -2772,7 +2933,7 @@ parse [] false false false false None None args|}
     ; parse_body =
         Some
           {|
-let rec parse inline script extra = function
+let rec parse inline script extra dd = function
   | [] ->
     (match inline, script with
      | Some code, _ ->
@@ -2780,17 +2941,19 @@ let rec parse inline script extra = function
      | None, Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Node { script = s; args = List.rev extra; inline = None }))
      | None, None -> None)
-  | "-e" :: code :: rest -> parse (Some code) script extra rest
+  | "-e" :: code :: rest when not dd -> parse (Some code) script extra dd rest
+  | "--" :: rest -> parse inline script extra true rest
   | arg :: rest ->
     (match inline, script with
-     | Some _, _ -> parse inline script (arg :: extra) rest
-     | None, Some _ -> parse inline script (arg :: extra) rest
+     | Some _, _ -> parse inline script (arg :: extra) dd rest
+     | None, Some _ -> parse inline script (arg :: extra) dd rest
      | None, None ->
-       if String.length arg > 0 && arg.[0] = '-'
-       then parse inline script extra rest
-       else parse inline (Some arg) extra rest)
+       if not dd && String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra dd rest
+       else parse inline (Some arg) extra dd rest)
 in
-parse None None [] args|}
+parse None None [] false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Python"
     ; anon_pattern = "Python _"
@@ -2815,7 +2978,7 @@ parse None None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse inline script extra = function
+let rec parse inline script extra dd = function
   | [] ->
     (match inline, script with
      | Some code, _ ->
@@ -2823,17 +2986,19 @@ let rec parse inline script extra = function
      | None, Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python { script = s; args = List.rev extra; inline = None }))
      | None, None -> None)
-  | "-c" :: code :: rest -> parse (Some code) script extra rest
+  | "-c" :: code :: rest when not dd -> parse (Some code) script extra dd rest
+  | "--" :: rest -> parse inline script extra true rest
   | arg :: rest ->
     (match inline, script with
-     | Some _, _ -> parse inline script (arg :: extra) rest
-     | None, Some _ -> parse inline script (arg :: extra) rest
+     | Some _, _ -> parse inline script (arg :: extra) dd rest
+     | None, Some _ -> parse inline script (arg :: extra) dd rest
      | None, None ->
-       if String.length arg > 0 && arg.[0] = '-'
-       then parse inline script extra rest
-       else parse inline (Some arg) extra rest)
+       if not dd && String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra dd rest
+       else parse inline (Some arg) extra dd rest)
 in
-parse None None [] args|}
+parse None None [] false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Python3"
     ; anon_pattern = "Python3 _"
@@ -2858,7 +3023,7 @@ parse None None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse inline script extra = function
+let rec parse inline script extra dd = function
   | [] ->
     (match inline, script with
      | Some code, _ ->
@@ -2866,17 +3031,19 @@ let rec parse inline script extra = function
      | None, Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Python3 { script = s; args = List.rev extra; inline = None }))
      | None, None -> None)
-  | "-c" :: code :: rest -> parse (Some code) script extra rest
+  | "-c" :: code :: rest when not dd -> parse (Some code) script extra dd rest
+  | "--" :: rest -> parse inline script extra true rest
   | arg :: rest ->
     (match inline, script with
-     | Some _, _ -> parse inline script (arg :: extra) rest
-     | None, Some _ -> parse inline script (arg :: extra) rest
+     | Some _, _ -> parse inline script (arg :: extra) dd rest
+     | None, Some _ -> parse inline script (arg :: extra) dd rest
      | None, None ->
-       if String.length arg > 0 && arg.[0] = '-'
-       then parse inline script extra rest
-       else parse inline (Some arg) extra rest)
+       if not dd && String.length arg > 0 && arg.[0] = '-'
+       then parse inline script extra dd rest
+       else parse inline (Some arg) extra dd rest)
 in
-parse None None [] args|}
+parse None None [] false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pip"
     ; anon_pattern = "Pip _"
@@ -2897,18 +3064,20 @@ parse None None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd pkgs = function
+let rec parse subcmd pkgs dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pip { subcommand = s; packages = List.rev pkgs }))
      | None -> None)
+  | "--" :: rest -> parse subcmd pkgs true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) pkgs rest
-     | Some _ -> parse subcmd (arg :: pkgs) rest)
+     | None when not dd -> parse (Some arg) pkgs dd rest
+     | _ -> parse subcmd (arg :: pkgs) dd rest)
 in
-parse None [] args|}
+parse None [] false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Patch"
     ; anon_pattern = "Patch _"
@@ -2961,6 +3130,7 @@ let rec parse file patchfile strip reverse = function
       | Some _ -> None)
 in
 parse None None 0 false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Npm"
     ; anon_pattern = "Npm _"
@@ -2987,32 +3157,35 @@ parse None None 0 false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd sd glb frc = function
+let rec parse subcmd sd glb frc dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npm { subcommand = s; save_dev = sd; global = glb; force = frc; rest = [] }))
      | None -> None)
-  | "--save-dev" :: rest -> parse subcmd true glb frc rest
-  | "-D" :: rest -> parse subcmd true glb frc rest
-  | "--global" :: rest -> parse subcmd sd true frc rest
-  | "-g" :: rest -> parse subcmd sd true frc rest
-  | "--force" :: rest -> parse subcmd sd glb true rest
+  | "--save-dev" :: rest when not dd -> parse subcmd true glb frc dd rest
+  | "-D" :: rest when not dd -> parse subcmd true glb frc dd rest
+  | "--global" :: rest when not dd -> parse subcmd sd true frc dd rest
+  | "-g" :: rest when not dd -> parse subcmd sd true frc dd rest
+  | "--force" :: rest when not dd -> parse subcmd sd glb true dd rest
+  (* POSIX end-of-options: all remaining args are positional *)
+  | "--" :: rest -> parse subcmd sd glb frc true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) sd glb frc rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) sd glb frc dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npm {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          save_dev = sd; global = glb; force = frc;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false false args|}
+parse None false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Cargo"
     ; anon_pattern = "Cargo _"
@@ -3039,37 +3212,40 @@ parse None false false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd rel verb feat = function
+let rec parse subcmd rel verb feat dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo { subcommand = s; release = rel; verbose = verb; features = feat; rest = [] }))
      | None -> None)
-  | "--release" :: rest -> parse subcmd true verb feat rest
-  | "--verbose" :: rest -> parse subcmd rel true feat rest
-  | "-v" :: rest -> parse subcmd rel true feat rest
-  | "--features" :: f :: rest -> parse subcmd rel verb (Some f) rest
+  | "--release" :: rest when not dd -> parse subcmd true verb feat dd rest
+  | "--verbose" :: rest when not dd -> parse subcmd rel true feat dd rest
+  | "-v" :: rest when not dd -> parse subcmd rel true feat dd rest
+  | "--features" :: f :: rest when not dd -> parse subcmd rel verb (Some f) dd rest
+  (* POSIX end-of-options: all remaining args are positional *)
+  | "--" :: rest -> parse subcmd rel verb feat true rest
   | arg :: rest ->
     (* Handle --features=VALUE *)
-    if String.length arg > 11 && String.sub arg 0 11 = "--features="
+    if not dd && String.length arg > 11 && String.sub arg 0 11 = "--features="
     then (
       let f = String.sub arg 11 (String.length arg - 11) in
-      parse subcmd rel verb (Some f) rest)
+      parse subcmd rel verb (Some f) dd rest)
     else (
       match subcmd with
-      | None -> parse (Some arg) rel verb feat rest
-      | Some _ ->
+      | None when not dd -> parse (Some arg) rel verb feat dd rest
+      | _ ->
         let rec collect acc = function
           | [] -> List.rev acc
           | x :: xs -> collect (x :: acc) xs
         in
         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo {
-          subcommand = (match subcmd with Some s -> s | None -> "");
+          subcommand = (match subcmd with Some s -> s | None -> arg);
           release = rel; verbose = verb; features = feat;
-          rest = collect [ arg ] rest
+          rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
         })))
 in
-parse None false false None args|}
+parse None false false None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Go"
     ; anon_pattern = "Go _"
@@ -3095,29 +3271,32 @@ parse None false false None args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd v race = function
+let rec parse subcmd v race dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Go { subcommand = s; verbose = v; race; rest = [] }))
      | None -> None)
-  | "-v" :: rest -> parse subcmd true race rest
-  | "-race" :: rest -> parse subcmd v true rest
+  | "-v" :: rest when not dd -> parse subcmd true race dd rest
+  | "-race" :: rest when not dd -> parse subcmd v true dd rest
+  (* POSIX end-of-options: all remaining args are positional *)
+  | "--" :: rest -> parse subcmd v race true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) v race rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) v race dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Go {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          verbose = v; race;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Gh"
     ; anon_pattern = "Gh _"
@@ -3204,6 +3383,7 @@ let rec parse subcmd act draft squash del_branch body title rest = function
         | _ -> parse subcmd act draft squash del_branch body title (arg :: rest) args))
 in
 parse None None false false false None None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Chmod"
     ; anon_pattern = "Chmod _"
@@ -3257,6 +3437,7 @@ let rec parse recursive mode path = function
          | Some _ -> None))
 in
 parse false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Chown"
     ; anon_pattern = "Chown _"
@@ -3310,6 +3491,7 @@ let rec parse recursive owner path = function
          | Some _ -> None))
 in
 parse false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Docker"
     ; anon_pattern = "Docker _"
@@ -3336,32 +3518,35 @@ parse false None None args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd rm priv det = function
+let rec parse subcmd rm priv det dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker { subcommand = s; rm; privileged = priv; detach = det; rest = [] }))
      | None -> None)
-  | "--rm" :: rest -> parse subcmd true priv det rest
-  | "--privileged" :: rest -> parse subcmd rm true det rest
-  | "-d" :: rest -> parse subcmd rm priv true rest
-  | "--detach" :: rest -> parse subcmd rm priv true rest
+  | "--rm" :: rest when not dd -> parse subcmd true priv det dd rest
+  | "--privileged" :: rest when not dd -> parse subcmd rm true det dd rest
+  | "-d" :: rest when not dd -> parse subcmd rm priv true dd rest
+  | "--detach" :: rest when not dd -> parse subcmd rm priv true dd rest
+  (* POSIX end-of-options: all remaining args are positional *)
+  | "--" :: rest -> parse subcmd rm priv det true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) rm priv det rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) rm priv det dd rest
+     | _ ->
        (* accumulate remaining args in rest *)
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          rm; privileged = priv; detach = det;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false false args|}
+parse None false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Opam"
     ; anon_pattern = "Opam _"
@@ -3386,29 +3571,31 @@ parse None false false false args|}
     ; parse_body =
         Some
           {|
-  let rec parse subcmd y = function
+  let rec parse subcmd y dd = function
     | [] ->
       (match subcmd with
        | Some s ->
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Opam { subcommand = s; yes = y; rest = [] }))
        | None -> None)
-    | "-y" :: rest -> parse subcmd true rest
-    | "--yes" :: rest -> parse subcmd true rest
+    | "-y" :: rest when not dd -> parse subcmd true dd rest
+    | "--yes" :: rest when not dd -> parse subcmd true dd rest
+    | "--" :: rest -> parse subcmd y true rest
     | arg :: rest ->
       (match subcmd with
-       | None -> parse (Some arg) y rest
-       | Some _ ->
+       | None when not dd -> parse (Some arg) y dd rest
+       | _ ->
          let rec collect acc = function
            | [] -> List.rev acc
            | x :: xs -> collect (x :: acc) xs
          in
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Opam {
-           subcommand = (match subcmd with Some s -> s | None -> "");
+           subcommand = (match subcmd with Some s -> s | None -> arg);
            yes = y;
-           rest = collect [ arg ] rest
+           rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
          })))
   in
-  parse None false args|}
+  parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Npx"
     ; anon_pattern = "Npx _"
@@ -3433,29 +3620,31 @@ parse None false false false args|}
     ; parse_body =
         Some
           {|
-  let rec parse subcmd y = function
+  let rec parse subcmd y dd = function
     | [] ->
       (match subcmd with
        | Some s ->
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npx { subcommand = s; yes = y; rest = [] }))
        | None -> None)
-    | "-y" :: rest -> parse subcmd true rest
-    | "--yes" :: rest -> parse subcmd true rest
+    | "-y" :: rest when not dd -> parse subcmd true dd rest
+    | "--yes" :: rest when not dd -> parse subcmd true dd rest
+    | "--" :: rest -> parse subcmd y true rest
     | arg :: rest ->
       (match subcmd with
-       | None -> parse (Some arg) y rest
-       | Some _ ->
+       | None when not dd -> parse (Some arg) y dd rest
+       | _ ->
          let rec collect acc = function
            | [] -> List.rev acc
            | x :: xs -> collect (x :: acc) xs
          in
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Npx {
-           subcommand = (match subcmd with Some s -> s | None -> "");
+           subcommand = (match subcmd with Some s -> s | None -> arg);
            yes = y;
-           rest = collect [ arg ] rest
+           rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
          })))
   in
-  parse None false args|}
+  parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Yarn"
     ; anon_pattern = "Yarn _"
@@ -3483,34 +3672,37 @@ parse None false false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd dev glb prod fl = function
+let rec parse subcmd dev glb prod fl dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Yarn { subcommand = s; dev; global = glb; production = prod; frozen_lockfile = fl; rest = [] }))
      | None -> None)
-  | "--dev" :: rest -> parse subcmd true glb prod fl rest
-  | "-D" :: rest -> parse subcmd true glb prod fl rest
-  | "--global" :: rest -> parse subcmd dev true prod fl rest
-  | "-g" :: rest -> parse subcmd dev true prod fl rest
-  | "--production" :: rest -> parse subcmd dev glb true fl rest
-  | "--prod" :: rest -> parse subcmd dev glb true fl rest
-  | "--frozen-lockfile" :: rest -> parse subcmd dev glb prod true rest
+  | "--dev" :: rest when not dd -> parse subcmd true glb prod fl dd rest
+  | "-D" :: rest when not dd -> parse subcmd true glb prod fl dd rest
+  | "--global" :: rest when not dd -> parse subcmd dev true prod fl dd rest
+  | "-g" :: rest when not dd -> parse subcmd dev true prod fl dd rest
+  | "--production" :: rest when not dd -> parse subcmd dev glb true fl dd rest
+  | "--prod" :: rest when not dd -> parse subcmd dev glb true fl dd rest
+  | "--frozen-lockfile" :: rest when not dd -> parse subcmd dev glb prod true dd rest
+  (* POSIX end-of-options: all remaining args are positional *)
+  | "--" :: rest -> parse subcmd dev glb prod fl true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) dev glb prod fl rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) dev glb prod fl dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Yarn {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          dev; global = glb; production = prod; frozen_lockfile = fl;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false false false args|}
+parse None false false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pnpm"
     ; anon_pattern = "Pnpm _"
@@ -3538,34 +3730,37 @@ parse None false false false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd sd glb frc prod = function
+let rec parse subcmd sd glb frc prod dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pnpm { subcommand = s; save_dev = sd; global = glb; force = frc; production = prod; rest = [] }))
      | None -> None)
-  | "--save-dev" :: rest -> parse subcmd true glb frc prod rest
-  | "-D" :: rest -> parse subcmd true glb frc prod rest
-  | "--global" :: rest -> parse subcmd sd true frc prod rest
-  | "-g" :: rest -> parse subcmd sd true frc prod rest
-  | "--force" :: rest -> parse subcmd sd glb true prod rest
-  | "--production" :: rest -> parse subcmd sd glb frc true rest
-  | "--prod" :: rest -> parse subcmd sd glb frc true rest
+  | "--save-dev" :: rest when not dd -> parse subcmd true glb frc prod dd rest
+  | "-D" :: rest when not dd -> parse subcmd true glb frc prod dd rest
+  | "--global" :: rest when not dd -> parse subcmd sd true frc prod dd rest
+  | "-g" :: rest when not dd -> parse subcmd sd true frc prod dd rest
+  | "--force" :: rest when not dd -> parse subcmd sd glb true prod dd rest
+  | "--production" :: rest when not dd -> parse subcmd sd glb frc true dd rest
+  | "--prod" :: rest when not dd -> parse subcmd sd glb frc true dd rest
+  (* POSIX end-of-options: all remaining args are positional *)
+  | "--" :: rest -> parse subcmd sd glb frc prod true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) sd glb frc prod rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) sd glb frc prod dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pnpm {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          save_dev = sd; global = glb; force = frc; production = prod;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false false false args|}
+parse None false false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Uv"
     ; anon_pattern = "Uv _"
@@ -3591,30 +3786,33 @@ parse None false false false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd nc sys = function
+let rec parse subcmd nc sys dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uv { subcommand = s; no_cache = nc; system = sys; rest = [] }))
      | None -> None)
-  | "--no-cache" :: rest -> parse subcmd true sys rest
-  | "-n" :: rest -> parse subcmd true sys rest
-  | "--system" :: rest -> parse subcmd nc true rest
+  | "--no-cache" :: rest when not dd -> parse subcmd true sys dd rest
+  | "-n" :: rest when not dd -> parse subcmd true sys dd rest
+  | "--system" :: rest when not dd -> parse subcmd nc true dd rest
+  (* POSIX end-of-options: all remaining args are positional *)
+  | "--" :: rest -> parse subcmd nc sys true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) nc sys rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) nc sys dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uv {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          no_cache = nc; system = sys;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Glab"
     ; anon_pattern = "Glab _"
@@ -3640,31 +3838,33 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd y f = function
+let rec parse subcmd y f dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Glab { subcommand = s; yes = y; force = f; rest = [] }))
      | None -> None)
-  | "--yes" :: rest -> parse subcmd true f rest
-  | "-y" :: rest -> parse subcmd true f rest
-  | "--force" :: rest -> parse subcmd y true rest
-  | "-f" :: rest -> parse subcmd y true rest
+  | "--yes" :: rest when not dd -> parse subcmd true f dd rest
+  | "-y" :: rest when not dd -> parse subcmd true f dd rest
+  | "--force" :: rest when not dd -> parse subcmd y true dd rest
+  | "-f" :: rest when not dd -> parse subcmd y true dd rest
+  | "--" :: rest -> parse subcmd y f true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) y f rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) y f dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Glab {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          yes = y; force = f;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pytest"
     ; anon_pattern = "Pytest _"
@@ -3690,29 +3890,31 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd v x = function
+let rec parse subcmd v x dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest { subcommand = s; verbose = v; exitfirst = x; rest = [] }))
      | None -> None)
-  | "-v" :: rest -> parse subcmd true x rest
-  | "-x" :: rest -> parse subcmd v true rest
+  | "-v" :: rest when not dd -> parse subcmd true x dd rest
+  | "-x" :: rest when not dd -> parse subcmd v true dd rest
+  | "--" :: rest -> parse subcmd v x true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) v x rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) v x dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          verbose = v; exitfirst = x;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Terminal_notifier"
     ; anon_pattern = "Terminal_notifier _"
@@ -3748,6 +3950,7 @@ let rec parse title message = function
                        | Some _ -> None))
 in
 parse None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ruff"
     ; anon_pattern = "Ruff _"
@@ -3773,29 +3976,31 @@ parse None None args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd f s = function
+let rec parse subcmd f s dd = function
   | [] ->
     (match subcmd with
      | Some sc ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ruff { subcommand = sc; fix = f; show_source = s; rest = [] }))
      | None -> None)
-  | "--fix" :: rest -> parse subcmd true s rest
-  | "--show-source" :: rest -> parse subcmd f true rest
+  | "--fix" :: rest when not dd -> parse subcmd true s dd rest
+  | "--show-source" :: rest when not dd -> parse subcmd f true dd rest
+  | "--" :: rest -> parse subcmd f s true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) f s rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) f s dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ruff {
-         subcommand = (match subcmd with Some sc -> sc | None -> "");
+         subcommand = (match subcmd with Some sc -> sc | None -> arg);
          fix = f; show_source = s;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pyright"
     ; anon_pattern = "Pyright _"
@@ -3820,28 +4025,30 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd st = function
+let rec parse subcmd st dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright { subcommand = s; strict = st; rest = [] }))
      | None -> None)
-  | "--strict" :: rest -> parse subcmd true rest
+  | "--strict" :: rest when not dd -> parse subcmd true dd rest
+  | "--" :: rest -> parse subcmd st true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) st rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) st dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pyright {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          strict = st;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false args|}
+parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tsc"
     ; anon_pattern = "Tsc _"
@@ -3867,29 +4074,31 @@ parse None false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd nw w = function
+let rec parse subcmd nw w dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc { subcommand = s; no_emit = nw; watch = w; rest = [] }))
      | None -> None)
-  | "--noEmit" :: rest -> parse subcmd true w rest
-  | "--watch" :: rest -> parse subcmd nw true rest
+  | "--noEmit" :: rest when not dd -> parse subcmd true w dd rest
+  | "--watch" :: rest when not dd -> parse subcmd nw true dd rest
+  | "--" :: rest -> parse subcmd nw w true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) nw w rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) nw w dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tsc {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          no_emit = nw; watch = w;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; subcommand_args_ctor ~name:"Ocamlfind" ~risk:"`Audited" ~sandbox:"`Host"
   ; { name = "Rustc"
@@ -3916,29 +4125,31 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd opt tst = function
+let rec parse subcmd opt tst dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc { subcommand = s; optimize = opt; test = tst; rest = [] }))
      | None -> None)
-  | "-O" :: rest -> parse subcmd true tst rest
-  | "--test" :: rest -> parse subcmd opt true rest
+  | "-O" :: rest when not dd -> parse subcmd true tst dd rest
+  | "--test" :: rest when not dd -> parse subcmd opt true dd rest
+  | "--" :: rest -> parse subcmd opt tst true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) opt tst rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) opt tst dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rustc {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          optimize = opt; test = tst;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Gofmt"
     ; anon_pattern = "Gofmt _"
@@ -3964,29 +4175,31 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd w lf = function
+let rec parse subcmd w lf dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt { subcommand = s; write = w; list_files = lf; rest = [] }))
      | None -> None)
-  | "-w" :: rest -> parse subcmd true lf rest
-  | "-l" :: rest -> parse subcmd w true rest
+  | "-w" :: rest when not dd -> parse subcmd true lf dd rest
+  | "-l" :: rest when not dd -> parse subcmd w true dd rest
+  | "--" :: rest -> parse subcmd w lf true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) w lf rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) w lf dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gofmt {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          write = w; list_files = lf;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Gradle"
     ; anon_pattern = "Gradle _"
@@ -4012,29 +4225,31 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd nd p = function
+let rec parse subcmd nd p dd = function
   | [] ->
     (match subcmd with
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gradle { subcommand = s; no_daemon = nd; parallel = p; rest = [] }))
      | None -> None)
-  | "--no-daemon" :: rest -> parse subcmd true p rest
-  | "--parallel" :: rest -> parse subcmd nd true rest
+  | "--no-daemon" :: rest when not dd -> parse subcmd true p dd rest
+  | "--parallel" :: rest when not dd -> parse subcmd nd true dd rest
+  | "--" :: rest -> parse subcmd nd p true rest
   | arg :: rest ->
     (match subcmd with
-     | None -> parse (Some arg) nd p rest
-     | Some _ ->
+     | None when not dd -> parse (Some arg) nd p dd rest
+     | _ ->
        let rec collect acc = function
          | [] -> List.rev acc
          | x :: xs -> collect (x :: acc) xs
        in
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Gradle {
-         subcommand = (match subcmd with Some s -> s | None -> "");
+         subcommand = (match subcmd with Some s -> s | None -> arg);
          no_daemon = nd; parallel = p;
-         rest = collect [ arg ] rest
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
        })))
 in
-parse None false false args|}
+parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ninja"
     ; anon_pattern = "Ninja _"
@@ -4063,42 +4278,69 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-  let rec parse subcmd j = function
+  let rec parse subcmd j dd = function
     | [] ->
       (match subcmd with
        | Some s ->
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja { subcommand = s; jobs = j; rest = [] }))
        | None -> None)
+    | "--" :: rest -> parse subcmd j true rest
+    | "--jobs" :: n :: rest when not dd ->
+      (match int_of_string_opt n with
+       | Some j' -> parse subcmd (Some j') dd rest
+       | None ->
+         let rec collect acc = function
+           | [] -> List.rev acc
+           | x :: xs -> collect (x :: acc) xs
+         in
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+           subcommand = (match subcmd with Some s -> s | None -> n); jobs = j;
+           rest = collect (match subcmd with Some _ -> [ n ] | None -> []) rest
+         })))
+    | arg :: rest when not dd && String.length arg > 7 && String.sub arg 0 7 = "--jobs=" ->
+      let n = String.sub arg 7 (String.length arg - 7) in
+      (match int_of_string_opt n with
+       | Some j' -> parse subcmd (Some j') dd rest
+       | None ->
+         let rec collect acc = function
+           | [] -> List.rev acc
+           | x :: xs -> collect (x :: acc) xs
+         in
+         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
+           subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
+           rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+         })))
     | arg :: rest ->
-      if String.length arg > 2 && String.sub arg 0 2 = "-j"
+      if not dd && String.length arg > 2 && String.sub arg 0 2 = "-j"
       then
-        (try parse subcmd (Some (int_of_string (String.sub arg 2 (String.length arg - 2)))) rest
+        (try parse subcmd (Some (int_of_string (String.sub arg 2 (String.length arg - 2)))) dd rest
          with Failure _ ->
            match subcmd with
-           | None -> parse (Some arg) j rest
-           | Some _ ->
+           | None when not dd -> parse (Some arg) j dd rest
+           | _ ->
              let rec collect acc = function
                | [] -> List.rev acc
                | x :: xs -> collect (x :: acc) xs
              in
              Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
-               subcommand = (match subcmd with Some s -> s | None -> ""); jobs = j;
-               rest = collect [ arg ] rest
+               subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
+               rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
              })))
       else
         match subcmd with
-        | None -> parse (Some arg) j rest
-        | Some _ ->
+        | None when not dd -> parse (Some arg) j dd rest
+        | _ ->
           let rec collect acc = function
             | [] -> List.rev acc
             | x :: xs -> collect (x :: acc) xs
           in
           Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {
-            subcommand = (match subcmd with Some s -> s | None -> ""); jobs = j;
-            rest = collect [ arg ] rest
+            subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
+            rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
           }))
   in
-  parse None None args|}
+  parse None None false args|}
+    ; no_expand_combined = false
     }
   ; subcommand_args_ctor ~name:"Java" ~risk:"`Audited" ~sandbox:"`Host"
   ; subcommand_args_ctor ~name:"Javac" ~risk:"`Audited" ~sandbox:"`Host"
@@ -4127,33 +4369,35 @@ parse None false false args|}
     ; parse_body =
         Some
           {|
-  let rec parse subcmd off bat q = function
+  let rec parse subcmd off bat q dd = function
     | [] ->
       (match subcmd with
        | Some s ->
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mvn {
            subcommand = s; offline = off; batch_mode = bat; quiet = q; args = [] }))
        | None -> None)
-    | "-o" :: rest -> parse subcmd true bat q rest
-    | "--offline" :: rest -> parse subcmd true bat q rest
-    | "-B" :: rest -> parse subcmd off true q rest
-    | "--batch-mode" :: rest -> parse subcmd off true q rest
-    | "-q" :: rest -> parse subcmd off bat true rest
-    | "--quiet" :: rest -> parse subcmd off bat true rest
+    | "-o" :: rest when not dd -> parse subcmd true bat q dd rest
+    | "--offline" :: rest when not dd -> parse subcmd true bat q dd rest
+    | "-B" :: rest when not dd -> parse subcmd off true q dd rest
+    | "--batch-mode" :: rest when not dd -> parse subcmd off true q dd rest
+    | "-q" :: rest when not dd -> parse subcmd off bat true dd rest
+    | "--quiet" :: rest when not dd -> parse subcmd off bat true dd rest
+    | "--" :: rest -> parse subcmd off bat q true rest
     | arg :: rest ->
       (match subcmd with
-       | None -> parse (Some arg) off bat q rest
-       | Some _ ->
+       | None when not dd -> parse (Some arg) off bat q dd rest
+       | _ ->
          let rec collect acc = function
            | [] -> List.rev acc
            | x :: xs -> collect (x :: acc) xs
          in
          Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mvn {
-           subcommand = (match subcmd with Some s -> s | None -> "");
+           subcommand = (match subcmd with Some s -> s | None -> arg);
            offline = off; batch_mode = bat; quiet = q;
-           args = collect [ arg ] rest })))
+           args = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest })))
   in
-  parse None false false false args|}
+  parse None false false false false args|}
+    ; no_expand_combined = false
     }
   ; subcommand_args_ctor ~name:"Cmake" ~risk:"`Audited" ~sandbox:"`Host"
   ; subcommand_args_ctor ~name:"Dune_local_sh" ~risk:"`Audited" ~sandbox:"`Host"
@@ -4174,6 +4418,7 @@ parse None false false args|}
     ; to_simple_body = " simple"
     ; bin_variant = None
     ; parse_body = None
+    ; no_expand_combined = false
     }
   ]
 ;;
@@ -4299,7 +4544,7 @@ let emit_of_simple buf spec =
              then String.sub c.name 4 (String.length c.name - 4)
              else c.name
            in
-           Some (subcmd, c.name)
+           Some (subcmd, c.name, c.no_expand_combined)
          | _ -> None)
       spec
   in
@@ -4367,12 +4612,15 @@ let emit_of_simple buf spec =
   Buffer.add_string buf "        | Some Exec_program.Git ->\n";
   Buffer.add_string buf "          (match lit_argv with\n";
   List.iter
-    (fun (subcmd_name, ctor_name) ->
+    (fun (subcmd_name, ctor_name, no_expand) ->
        let parse_fn = Printf.sprintf "gen_parse_%s" ctor_name in
+       let arg_expr =
+         if no_expand then "rest" else "(expand_combined_short_flags rest)"
+       in
        Buffer.add_string
          buf
          (Printf.sprintf
-            "           | %S :: rest -> %s (expand_combined_short_flags rest)\n" subcmd_name parse_fn))
+            "           | %S :: rest -> %s %s\n" subcmd_name parse_fn arg_expr))
     git_entries;
   Buffer.add_string buf "           | _ -> None)\n";
   (* Non-Git entries with parse_body — auto-generated from spec.

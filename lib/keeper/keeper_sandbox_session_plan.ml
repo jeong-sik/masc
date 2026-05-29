@@ -17,7 +17,6 @@ type plan_error =
   | Invalid_host_root of string
 
 (* Named constants — CLAUDE.md §Magic Number 금지. *)
-let default_hash_algo = Keeper_hash_algo.SHA_256
 let nofile_ulimit_name = "nofile"
 
 (* MUST match Keeper_sandbox_runtime.docker_identity_dir's subdir +
@@ -124,7 +123,7 @@ let of_request
   else (
     let container_name =
       Keeper_container_name.derive
-        ~algo:default_hash_algo
+        ~algo:Keeper_hash_algo.default
         ~turn_id
         ~attempt
         ~suffix:meta_name

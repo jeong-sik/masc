@@ -12,7 +12,11 @@ let meta_of_json = Keeper_meta_json.meta_of_json
 let meta_to_json = Keeper_meta_json.meta_to_json
 let warn_unknown_keeper_meta_keys = Keeper_meta_json.warn_unknown_keeper_meta_keys
 
-let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
+open Keeper_types_profile
+open Keeper_meta_contract
+open Keeper_meta_json
+
+let runtime_meta_write_sync_hook : (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
 ;;
 
@@ -20,14 +24,14 @@ let register_runtime_meta_write_sync f = runtime_meta_write_sync_hook := f
 
 let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
 
-let read_meta_file_path path : (keeper_meta option, string) result =
+let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
   if not (Fs_compat.file_exists path)
   then Ok None
   else (
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
-      let json, _scrubbed = scrub_persisted_keeper_meta_json ~path json in
+      let json, _scrubbed = Keeper_meta_json_scrub.scrub_persisted_keeper_meta_json ~path json in
       warn_unknown_keeper_meta_keys ~path json;
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)
@@ -165,7 +169,7 @@ let persistent_agent_names config =
       None)
 ;;
 
-let read_meta_resolved config name : ((string * keeper_meta) option, string) result =
+let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta) option, string) result =
   let requested_name = String.trim name in
   if requested_name = ""
   then Ok None
@@ -174,7 +178,7 @@ let read_meta_resolved config name : ((string * keeper_meta) option, string) res
     |> Result.map (Option.map (fun meta -> requested_name, meta))
 ;;
 
-let read_meta config name : (keeper_meta option, string) result =
+let read_meta config name : (Keeper_meta_contract.keeper_meta option, string) result =
   let requested_name = String.trim name in
   let path = keeper_meta_path config requested_name in
   if keeper_debug
@@ -194,7 +198,7 @@ let read_meta config name : (keeper_meta option, string) result =
     Returns [Some (meta, new_mtime)] when the file changed, [None] when
     unchanged. Avoids parsing JSON on every heartbeat cycle when no
     operator has modified the meta file. *)
-let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * float) option =
+let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contract.keeper_meta * float) option =
   let requested_name = String.trim name in
   let read_candidate candidate =
     let path = keeper_meta_path config candidate in
@@ -285,7 +289,7 @@ let persist_meta config path persisted =
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
 ;;
 
-let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
+let write_meta ?(force = false) config (m : Keeper_meta_contract.keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config m.name in
   if force
   then (
@@ -328,13 +332,13 @@ let is_version_conflict_error msg =
    [last_seen_seq_by_room]). *)
 let write_meta_with_merge
       ?(max_retries = 3)
-      ~(merge : latest:keeper_meta -> caller:keeper_meta -> keeper_meta)
+      ~(merge : latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta)
       config
-      (m : keeper_meta)
+      (m : Keeper_meta_contract.keeper_meta)
   : (unit, string) result
   =
   let path = keeper_meta_path config m.name in
-  let rec attempt n (caller : keeper_meta) =
+  let rec attempt n (caller : Keeper_meta_contract.keeper_meta) =
     match write_meta config caller with
     | Ok () -> Ok ()
     | Error msg when n >= max_retries -> Error msg

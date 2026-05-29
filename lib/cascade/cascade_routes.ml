@@ -110,7 +110,7 @@ let logical_use_of_string_opt raw =
              if String.equal normalized spec.key then Some spec.use else None)
 
 (* RFC-0058 v2 route encoding in the materialized JSON:
-   {"routes": {"X": {"target": "tier-..."}}}.
+   {"routes": {"X": {"target": "provider:model"}}}.
    The TOML materializer passes [routes.X] sub-tables through verbatim,
    so this consumer extracts the [target] field. *)
 let target_of_route_value : Yojson.Safe.t -> string option = function

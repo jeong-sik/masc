@@ -107,8 +107,8 @@ operator_broadcast_required emitted disposition=pause_human reason=internal_erro
 ```
 
 7 keepers × ~1 turn/min for an entire incident window. Underlying
-cause is operational (cascade tier-group misroute + missing API keys —
-memory `project_cascade_tier_group_misroute_2026_05_17.md`); the
+cause is operational (cascade cascade misroute + missing API keys —
+memory `project_cascade_misroute_2026_05_17.md`); the
 *FSM-side amplification* is that the turn starts an attempt that fails
 within milliseconds and trips a per-turn `pause_human` broadcast each
 time. The information (one cascade outage) is correct; the cadence
@@ -242,7 +242,7 @@ No new helper is introduced; the existing template is the contract.
 
 ## 9. Out of scope
 
-- Operational fix for the current incident (tier-group misroute, missing
+- Operational fix for the current incident (cascade misroute, missing
   keys) — that is config and operator action, not architecture.
 - `[fsm:transition]` log-volume reduction — once this RFC ships, the
   remaining transitions per turn drop from 3 to 1 in the unavailable

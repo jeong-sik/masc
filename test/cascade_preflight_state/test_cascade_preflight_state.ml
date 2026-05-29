@@ -16,7 +16,7 @@
 
     - First record returns [`First]; subsequent records of same
       fingerprint advance the count.
-    - Same (tier_group, provider, reason) reaching [threshold]
+    - Same (cascade_name, provider, reason) reaching [threshold]
       returns [`Threshold_disable n] exactly once. Subsequent same
       records return [`Already_disabled].
     - Different reasons for the same provider count independently
@@ -52,7 +52,7 @@ let outcome = Alcotest.testable outcome_pp outcome_eq
 let test_first_call_returns_first () =
   let t = S.create ~threshold:5 () in
   let o =
-    S.record t ~tier_group:"strict_tool_candidates" ~provider:"http://a"
+    S.record t ~cascade_name:"strict_tool_candidates" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check outcome) "first" `First o
@@ -61,11 +61,11 @@ let test_first_call_returns_first () =
 let test_second_call_returns_repeated_2 () =
   let t = S.create ~threshold:5 () in
   let _ =
-    S.record t ~tier_group:"strict_tool_candidates" ~provider:"http://a"
+    S.record t ~cascade_name:"strict_tool_candidates" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let o =
-    S.record t ~tier_group:"strict_tool_candidates" ~provider:"http://a"
+    S.record t ~cascade_name:"strict_tool_candidates" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check outcome) "second is repeated=2" (`Repeated 2) o
@@ -76,11 +76,11 @@ let test_threshold_disable_at_exact_count () =
   let group = "strict_tool_candidates" in
   let prov = "http://a" in
   let reason = S.Health_check_failed_repeatedly in
-  let r1 = S.record t ~tier_group:group ~provider:prov ~reason in
-  let r2 = S.record t ~tier_group:group ~provider:prov ~reason in
-  let r3 = S.record t ~tier_group:group ~provider:prov ~reason in
-  let r4 = S.record t ~tier_group:group ~provider:prov ~reason in
-  let r5 = S.record t ~tier_group:group ~provider:prov ~reason in
+  let r1 = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let r2 = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let r3 = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let r4 = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let r5 = S.record t ~cascade_name:group ~provider:prov ~reason in
   Alcotest.(check outcome) "1=First" `First r1;
   Alcotest.(check outcome) "2=Repeated 2" (`Repeated 2) r2;
   Alcotest.(check outcome) "3=Repeated 3" (`Repeated 3) r3;
@@ -93,11 +93,11 @@ let test_after_threshold_returns_already_disabled () =
   let group = "g" in
   let prov = "http://a" in
   let reason = S.Health_check_failed_repeatedly in
-  let _ = S.record t ~tier_group:group ~provider:prov ~reason in
-  let _ = S.record t ~tier_group:group ~provider:prov ~reason in
-  let _ = S.record t ~tier_group:group ~provider:prov ~reason in
-  let r4 = S.record t ~tier_group:group ~provider:prov ~reason in
-  let r5 = S.record t ~tier_group:group ~provider:prov ~reason in
+  let _ = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let _ = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let _ = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let r4 = S.record t ~cascade_name:group ~provider:prov ~reason in
+  let r5 = S.record t ~cascade_name:group ~provider:prov ~reason in
   Alcotest.(check outcome) "after threshold = Already_disabled" `Already_disabled r4;
   Alcotest.(check outcome) "still already-disabled" `Already_disabled r5
 ;;
@@ -109,16 +109,16 @@ let test_different_reasons_count_independently () =
   let group = "g" in
   let prov = "http://a" in
   let r1 =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
   in
   let r2 =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Permanent_unhealthy
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Permanent_unhealthy
   in
   let r3 =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Transient_unhealthy
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Transient_unhealthy
   in
   let r4 =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Rate_limited_long_window
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Rate_limited_long_window
   in
   Alcotest.(check outcome) "reason1 First" `First r1;
   Alcotest.(check outcome) "reason2 First (different fingerprint)" `First r2;
@@ -134,17 +134,17 @@ let test_provider_disabled_by_any_reason_blocks_other_reasons () =
   let group = "g" in
   let prov = "http://a" in
   let _ =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
   in
   let _ =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
   in
   let r =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check outcome) "threshold reached on reason A" (`Threshold_disable 3) r;
   let cross =
-    S.record t ~tier_group:group ~provider:prov ~reason:S.Permanent_unhealthy
+    S.record t ~cascade_name:group ~provider:prov ~reason:S.Permanent_unhealthy
   in
   Alcotest.(check outcome) "reason B blocked too" `Already_disabled cross
 ;;
@@ -156,13 +156,13 @@ let test_is_disabled_membership () =
   Alcotest.(check bool) "not disabled initially" false
     (S.is_disabled t ~provider:"http://a");
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check bool) "not disabled after 1" false
     (S.is_disabled t ~provider:"http://a");
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check bool) "disabled after threshold" true
@@ -176,11 +176,11 @@ let test_is_disabled_membership () =
 let test_reset_on_health_recovery_clears_disabled () =
   let t = S.create ~threshold:2 () in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check bool) "disabled" true (S.is_disabled t ~provider:"http://a");
@@ -195,16 +195,16 @@ let test_reset_after_clear_restarts_count () =
      First again, not Already_disabled or some leftover count. *)
   let t = S.create ~threshold:2 () in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let _ = S.reset_on_health_recovery t ~provider:"http://a" in
   let r =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check outcome) "post-reset is First again" `First r
@@ -221,19 +221,19 @@ let test_reset_when_not_disabled_returns_false () =
 let test_disabled_providers_snapshot () =
   let t = S.create ~threshold:2 () in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://b"
+    S.record t ~cascade_name:"g" ~provider:"http://b"
       ~reason:S.Permanent_unhealthy
   in
   let _ =
-    S.record t ~tier_group:"g" ~provider:"http://b"
+    S.record t ~cascade_name:"g" ~provider:"http://b"
       ~reason:S.Permanent_unhealthy
   in
   let snap = List.sort String.compare (S.disabled_providers t) in
@@ -275,11 +275,11 @@ let test_disabled_provider_auto_expires_after_ttl () =
   let clock_0 () = fixed_time in
   (* Drive to threshold using fixed clock *)
   let _ =
-    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+    S.record ~clock:clock_0 t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let _ =
-    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+    S.record ~clock:clock_0 t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   (* Immediately after: disabled *)
@@ -304,11 +304,11 @@ let test_ttl_disabled_provider_re_enables_then_re_thresholds () =
   let clock_0 () = fixed_time in
   (* Drive to threshold using fixed clock *)
   let _ =
-    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+    S.record ~clock:clock_0 t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   let _ =
-    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+    S.record ~clock:clock_0 t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   (* Expire via TTL *)
@@ -317,7 +317,7 @@ let test_ttl_disabled_provider_re_enables_then_re_thresholds () =
     (S.is_disabled ~clock:clock_after t ~provider:"http://a");
   (* New record after expiry starts fresh at First *)
   let r =
-    S.record t ~tier_group:"g" ~provider:"http://a"
+    S.record t ~cascade_name:"g" ~provider:"http://a"
       ~reason:S.Health_check_failed_repeatedly
   in
   Alcotest.(check outcome) "fresh start after TTL expiry" `First r

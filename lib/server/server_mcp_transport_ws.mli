@@ -62,12 +62,19 @@
 
 (** {1 Session record} *)
 
+type dashboard_auth_state =
+  | Unauthenticated
+  | Authenticated of { agent : string option }
+(** Dashboard handshake state for a session.  Set once by [dashboard_hello],
+    read on the SSE forward hot path and the dashboard RPC auth gates.  Held
+    in an [Atomic.t] field so the single write and many reads are tear-free if
+    dashboard serving moves off the main Eio domain (RFC-0204 §8.4, Phase 1). *)
+
 type ws_session = {
   id : string;
   wsd : Httpun_ws.Wsd.t;
   mutable closed : bool;
-  mutable dashboard_authenticated : bool;
-  mutable dashboard_agent : string option;
+  dashboard_auth : dashboard_auth_state Atomic.t;
   mutable dashboard_route : string option;
   dashboard_slices : (string, unit) Hashtbl.t;
   mutable dashboard_seq : int;
@@ -83,6 +90,12 @@ type ws_session = {
     the dashboard handshake / ack state machine; see the
     [#10648] / dashboard-ws.v1 protocol notes in the .ml
     for the field semantics. *)
+
+val dashboard_auth_is_authenticated : dashboard_auth_state -> bool
+(** [true] once [dashboard_hello] has authenticated the session. *)
+
+val dashboard_auth_agent : dashboard_auth_state -> string option
+(** Resolved agent name for an [Authenticated] state, [None] otherwise. *)
 
 (** {1 SSE parse record} *)
 

@@ -352,12 +352,12 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       | None -> false)
   in
   let total = keeper_count enabled in
-  let has_recent_meta_evidence (meta : Keeper_meta_contract.keeper_meta) =
-    meta.runtime.proactive_rt.count_total > 0
+  let has_recent_meta_evidence meta =
+    meta.Keeper_meta_contract.runtime.proactive_rt.count_total > 0
     && timestamp_within_window ?window_hours ~now
-         meta.runtime.proactive_rt.last_ts
+         meta.Keeper_meta_contract.runtime.proactive_rt.last_ts
     && not
-         (meta.runtime.proactive_rt.last_outcome
+         (meta.Keeper_meta_contract.runtime.proactive_rt.last_outcome
           = Keeper_meta_contract.Proactive_error)
   in
   let has_recent_decision_evidence snapshot =
@@ -396,12 +396,12 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       let stat = decision_stat_for snapshot.keeper_name in
       let meta_count =
         match snapshot.meta with
-        | Some meta -> meta.runtime.proactive_rt.count_total
+        | Some meta -> meta.Keeper_meta_contract.runtime.proactive_rt.count_total
         | None -> 0
       in
       let meta_last_ts =
         match snapshot.meta with
-        | Some meta -> meta.runtime.proactive_rt.last_ts
+        | Some meta -> meta.Keeper_meta_contract.runtime.proactive_rt.last_ts
         | None -> 0.0
       in
       let meta_recent =
@@ -414,7 +414,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         | Some meta ->
           Some
             (Keeper_meta_contract.proactive_cycle_outcome_to_string
-               meta.runtime.proactive_rt.last_outcome)
+               meta.Keeper_meta_contract.runtime.proactive_rt.last_outcome)
         | None -> None
       in
       `Assoc [

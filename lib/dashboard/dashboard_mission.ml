@@ -1,4 +1,3 @@
-module U = Yojson.Safe.Util
 include Dashboard_utils
 
 (* Types from Dashboard_mission_assembly, re-exported for backward compat. *)

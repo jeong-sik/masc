@@ -42,7 +42,7 @@ let kind_of_string = function
 module Id = struct
   type t = string
 
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  let valid_pattern = Board_types.alphanumeric_id_re
 
   let of_string s =
     let s = String.trim s in

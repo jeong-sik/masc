@@ -51,8 +51,8 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
     match tool_access with
     | Some value -> value
     | None ->
-        Masc_mcp.Keeper_meta_contract.Preset
-          { preset = Masc_mcp.Keeper_meta_contract.Full; also_allow = [] }
+        Masc_mcp.Keeper_meta_tool_access.Preset
+          { preset = Masc_mcp.Keeper_meta_tool_access.Full; also_allow = [] }
   in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -64,7 +64,7 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
           ("allowed_paths", `List [ `String "*" ]);
           ("policy_voice_enabled", `Bool policy_voice_enabled);
           ( "tool_access",
-            Masc_mcp.Keeper_meta_contract.tool_access_to_json tool_access );
+            Masc_mcp.Keeper_meta_tool_access.tool_access_to_json tool_access );
         ])
   with
   | Ok meta -> meta
@@ -164,7 +164,7 @@ let test_malformed_json_like_payload_detected () =
 
 let test_execute_with_outcome_policy_gate_is_failure () =
   with_exec_fixture
-    ~tool_access:(Masc_mcp.Keeper_meta_contract.Custom [ "keeper_tools_list" ])
+    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_tools_list" ])
     "agent_tool_dispatch_runtime_policy_gate"
     (fun ~config ~meta ~ctx_work ->
       let result =
@@ -196,7 +196,7 @@ let test_tool_not_allowed_increments_counter () =
   let tool = "tool_read_file" in
   let reason = "not_in_allow_set" in
   with_exec_fixture
-    ~tool_access:(Masc_mcp.Keeper_meta_contract.Custom [ "keeper_tools_list" ])
+    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_tools_list" ])
     "agent_tool_dispatch_runtime_not_allowed_counter"
     (fun ~config ~meta ~ctx_work ->
       let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
@@ -229,8 +229,8 @@ let test_tool_not_allowed_denied_by_policy_counter () =
           ; ("trace_id", `String "test-not-allowed-b")
           ; ("allowed_paths", `List [ `String "*" ])
           ; ( "tool_access"
-            , Masc_mcp.Keeper_meta_contract.tool_access_to_json
-                (Masc_mcp.Keeper_meta_contract.Custom [ "keeper_board_post" ]) )
+            , Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+                (Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_board_post" ]) )
           ; ( "tool_denylist"
             , `List [ `String "keeper_board_post" ] )
           ])
@@ -269,7 +269,7 @@ let test_tool_not_allowed_reason_label_is_bounded () =
   (* Verify that the reason label written into the JSON payload is one
      of the three bounded vocabulary values, not a free-form string. *)
   with_exec_fixture
-    ~tool_access:(Masc_mcp.Keeper_meta_contract.Custom [ "keeper_tools_list" ])
+    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_tools_list" ])
     "agent_tool_dispatch_runtime_reason_bounded"
     (fun ~config ~meta ~ctx_work ->
       let result =
@@ -290,7 +290,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     make_meta
       ~policy_voice_enabled:true
       ~tool_access:
-        (Masc_mcp.Keeper_meta_contract.Custom
+        (Masc_mcp.Keeper_meta_tool_access.Custom
            [ "keeper_board_post";
              "keeper_board_fake";
              "keeper_voice_speak";

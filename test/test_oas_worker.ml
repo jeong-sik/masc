@@ -170,11 +170,11 @@ max-concurrent = 1
 %s
 %s
 %s
-[tier.%s]
+[cascade.%s]
 members = [%s]
 strategy = "failover"
 
-[tier-group.%s]
+[cascade.%s]
 tiers = [%s]
 strategy = "priority_tier"
 fallback = true
@@ -715,11 +715,7 @@ let test_default_model_strings_unknown () =
 
 let test_default_model_strings_local_only () =
   let models = Cascade_oas_runner.default_model_strings ~cascade_name:"local_only" in
-  Alcotest.(check bool) "local_only has models" true (models <> []);
-  Alcotest.(check bool)
-    "local_only stays local"
-    true
-    (Cascade_runtime.labels_are_pure_local models)
+  Alcotest.(check bool) "local_only has models" true (models <> [])
 ;;
 
 (** Test default_config_path with a controlled fixture so the result
@@ -2399,8 +2395,8 @@ let test_classify_masc_internal_error_roundtrip () =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             internal_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
-         ; reason = Masc_mcp.Keeper_meta_contract.All_providers_failed
+             internal_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+         ; reason = Keeper_meta_contract.All_providers_failed
          })
   in
   (match Keeper_turn_driver.classify_masc_internal_error cascade_err with
@@ -2411,8 +2407,8 @@ let test_classify_masc_internal_error_roundtrip () =
        (internal_cascade_name_to_string cascade_name);
      Alcotest.(check string)
        "cascade reason"
-       (Masc_mcp.Keeper_meta_contract.cascade_exhaustion_summary Masc_mcp.Keeper_meta_contract.All_providers_failed)
-       (Masc_mcp.Keeper_meta_contract.cascade_exhaustion_summary reason)
+       (Keeper_meta_contract.cascade_exhaustion_summary Keeper_meta_contract.All_providers_failed)
+       (Keeper_meta_contract.cascade_exhaustion_summary reason)
    | _ -> Alcotest.fail "expected structured cascade exhaustion");
   let accept_err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error

@@ -4,6 +4,7 @@ module KCB = Keeper_turn_cascade_budget
 module KEC = Keeper_context_runtime
 module KUM = Keeper_unified_metrics
 module Social = Keeper_social_model
+open Keeper_meta_contract
 
 (* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
 let runtime_lane_label =
@@ -58,7 +59,7 @@ let apply_loop_detectors ~config (updated_meta : Keeper_meta_contract.keeper_met
   let updated_meta =
     match
       Keeper_stay_silent_loop_detector.record_turn
-        ~keeper_name:updated_meta.name
+        ~keeper_name:updated_meta.Keeper_meta_contract.name
         ~speech_act:updated_meta.runtime.last_speech_act
     with
     | Keeper_stay_silent_loop_detector.Normal -> updated_meta
@@ -175,7 +176,7 @@ let append_metrics_snapshot
     Prometheus.inc_counter
       Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
       ~labels:
-        [ "keeper", meta.name
+        [ "keeper", meta.Keeper_meta_contract.name
         ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
         ]
       ()
@@ -197,7 +198,7 @@ let emit_activity_graph
     let event =
       Activity_graph.emit
         config
-        ~actor:{ kind = "agent"; id = updated_meta.agent_name }
+        ~actor:{ kind = "agent"; id = updated_meta.Keeper_meta_contract.agent_name }
         ~kind:"keeper.turn_completed"
         ~payload:
           (`Assoc

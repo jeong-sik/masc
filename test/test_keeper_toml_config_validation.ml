@@ -1,7 +1,8 @@
 open Alcotest
 
 module KTP = Masc_mcp.Keeper_types_profile
-module KT = Masc_mcp.Keeper_meta_contract
+module Keeper_meta_tool_access = Masc_mcp.Keeper_meta_tool_access
+module KT = Masc_mcp.Keeper_types
 module KPolicy = Masc_mcp.Keeper_tool_policy
 module TaskPayloads = Masc_mcp.Tool_task_payloads
 
@@ -107,7 +108,7 @@ let test_committed_keepers_are_pr_work_capable () =
              match defaults.tool_preset with
              | None -> fail (Printf.sprintf "%s: tool_access.preset is required" file)
              | Some raw ->
-                 (match Masc_mcp.Keeper_meta_contract.tool_preset_of_string raw with
+                 (match Keeper_meta_tool_access.tool_preset_of_string raw with
                   | Some preset -> preset
                   | None -> fail (Printf.sprintf "%s: unknown preset %S" file raw))
            in
@@ -121,7 +122,7 @@ let test_committed_keepers_are_pr_work_capable () =
                     ( "tool_access",
                       `Assoc [
                         ("kind", `String "preset");
-                        ("preset", `String (KT.tool_preset_to_string preset));
+                        ("preset", `String (Keeper_meta_tool_access.tool_preset_to_string preset));
                         ("also_allow", `List []);
                       ] );
                     ("tool_denylist", `List []);
@@ -190,7 +191,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
       let preset =
         match defaults.tool_preset with
         | Some raw -> (
-            match Masc_mcp.Keeper_meta_contract.tool_preset_of_string raw with
+            match Keeper_meta_tool_access.tool_preset_of_string raw with
             | Some preset -> preset
             | None -> fail (Printf.sprintf "unknown verifier preset %S" raw))
         | None -> fail "verifier tool_access.preset is required"
@@ -209,7 +210,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
                    `Assoc
                      [
                        ("kind", `String "preset");
-                       ("preset", `String (KT.tool_preset_to_string preset));
+                       ("preset", `String (Keeper_meta_tool_access.tool_preset_to_string preset));
                        ( "also_allow",
                          `List (List.map (fun value -> `String value) also_allow) );
                      ] );
@@ -343,35 +344,35 @@ max-concurrent = 1
 [ollama.qwen3-small]
 max-concurrent = 1
 
-[tier.primary]
+[cascade.primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier.backup]
+[cascade.backup]
 members = ["ollama.qwen3-small"]
 strategy = "failover"
 
-[tier.scoring]
+[cascade.scoring]
 keeper-assignable = false
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary", "backup"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.scoring]
+[cascade.scoring]
 tiers = ["scoring"]
 strategy = "priority_tier"
 fallback = false
 keeper-assignable = false
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 
 [routes.llm_rerank]
-target = "tier-group.scoring"
+target = "cascade.scoring"
 |}
 
 let with_temp_config_dir cascade_toml f =
@@ -562,51 +563,53 @@ tools-support = true
 [ollama.qwen3]
 max-concurrent = 1
 
-[tier.provider_k-coding-primary]
+[cascade.provider_k-coding-primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier.ollama_cloud_primary]
+[cascade.ollama_cloud_primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 keeper-assignable = true
 
-[tier-group.provider_k-coding-with-spark]
+[cascade.provider_k-coding-with-spark]
 tiers = ["provider_k-coding-primary"]
 strategy = "failover"
 
 [routes.keeper_turn]
-target = "tier-group.provider_k-coding-with-spark"
+target = "cascade.provider_k-coding-with-spark"
 
 [routes.provider_benchmark]
-target = "tier.ollama_cloud_primary"
+target = "cascade.ollama_cloud_primary"
 |}
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   check string "assignable concrete route target is preserved"
-    "tier.ollama_cloud_primary"
+    "cascade.ollama_cloud_primary"
     (Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-       ~config_path:cascade_path "tier.ollama_cloud_primary")
+       ~config_path:cascade_path "cascade.ollama_cloud_primary")
 
 let test_catalog_validator_surfaces_adapter_errors () =
-  (* RFC-0058: a binding whose provider is not declared in [providers.*]
-     yields a [Binding_resolution_failed] adapter error. *)
+  (* A binding on a Messages_api provider (protocol provider_a-http) cannot be
+     materialized: provider_kind_for_http_provider returns None for Messages_api,
+     so resolve_binding_config emits a [Binding_resolution_failed] adapter error.
+     (This replaced the legacy [cascade.X] member-resolution trigger.) *)
   let cascade_toml =
     {|
-[providers.ollama]
-protocol = "ollama-http"
-endpoint = "http://localhost:11434"
+[providers.provider_a]
+protocol = "provider_a-http"
+endpoint = "https://api.provider_a.example"
 
 [models.qwen3]
 api-name = "qwen3:8b"
 max-context = 32768
 tools-support = true
 
-[undeclared_provider.qwen3]
+[provider_a.qwen3]
 max-concurrent = 1
 
 [routes.keeper_turn]
-target = "undeclared_provider.qwen3"
+target = "provider_a.qwen3"
 |}
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
@@ -703,24 +706,25 @@ tools-support = true
            errors)
 
 let test_runtime_validation_rejects_declarative_adapter_errors () =
-  (* RFC-0058: a binding referencing an undeclared provider produces a
-     [Binding_resolution_failed] adapter error that runtime validation rejects. *)
+  (* A binding on a Messages_api provider (protocol provider_a-http) yields a
+     [Binding_resolution_failed] adapter error (provider_kind None) that runtime
+     validation rejects. (Replaced the legacy [cascade.X] member-resolution trigger.) *)
   let cascade_toml =
     {|
-[providers.ollama]
-protocol = "ollama-http"
-endpoint = "http://localhost:11434"
+[providers.provider_a]
+protocol = "provider_a-http"
+endpoint = "https://api.provider_a.example"
 
 [models.qwen3]
 api-name = "qwen3:8b"
 max-context = 32768
 tools-support = true
 
-[undeclared_provider.qwen3]
+[provider_a.qwen3]
 max-concurrent = 1
 
 [routes.keeper_turn]
-target = "undeclared_provider.qwen3"
+target = "provider_a.qwen3"
 |}
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->

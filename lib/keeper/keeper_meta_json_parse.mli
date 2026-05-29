@@ -9,6 +9,9 @@ open Keeper_meta_tool_access
 open Keeper_meta_contract
 
 
+open Keeper_types_profile
+open Keeper_meta_contract
+
 (** Parsed identity slice of a persisted keeper meta. *)
 type parsed_keeper_identity =
   { pk_name : string

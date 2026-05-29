@@ -1,4 +1,4 @@
-(** Cascade_saturation_signal — Typed signal for tier saturation events.
+(** Cascade_saturation_signal — Typed signal for cascade saturation events.
 
     RFC-0153 Phase A.1. See .mli for full documentation.
 

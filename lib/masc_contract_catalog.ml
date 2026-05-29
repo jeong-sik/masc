@@ -4,7 +4,6 @@ type contract_spec =
   ; invariants : string list
   ; requested_execution_mode : Masc_mcp_cdal_runtime.Execution_mode.t
   ; risk_class : Masc_mcp_cdal_runtime.Risk_class.t
-  ; allowed_mutations : string list
   ; review_requirement : string option
   }
 
@@ -19,7 +18,6 @@ let cascade_critical =
       ]
   ; requested_execution_mode = Masc_mcp_cdal_runtime.Execution_mode.Execute
   ; risk_class = Masc_mcp_cdal_runtime.Risk_class.Critical
-  ; allowed_mutations = [ "cascade_route"; "provider_fallback"; "telemetry_emit" ]
   ; review_requirement = None
   }
 ;;
@@ -34,8 +32,6 @@ let keeper_lifecycle =
       ]
   ; requested_execution_mode = Masc_mcp_cdal_runtime.Execution_mode.Draft
   ; risk_class = Masc_mcp_cdal_runtime.Risk_class.High
-  ; allowed_mutations =
-      [ "keeper_lifecycle_update"; "supervisor_restart"; "telemetry_emit" ]
   ; review_requirement = None
   }
 ;;
@@ -50,7 +46,6 @@ let dashboard_telemetry =
       ]
   ; requested_execution_mode = Masc_mcp_cdal_runtime.Execution_mode.Diagnose
   ; risk_class = Masc_mcp_cdal_runtime.Risk_class.Medium
-  ; allowed_mutations = []
   ; review_requirement = None
   }
 ;;
@@ -73,7 +68,6 @@ let to_risk_contract spec : Masc_mcp_cdal_runtime.Risk_contract.t =
   { runtime_constraints =
       { requested_execution_mode = spec.requested_execution_mode
       ; risk_class = spec.risk_class
-      ; allowed_mutations = spec.allowed_mutations
       ; review_requirement = spec.review_requirement
       }
   ; eval_criteria = eval_criteria spec

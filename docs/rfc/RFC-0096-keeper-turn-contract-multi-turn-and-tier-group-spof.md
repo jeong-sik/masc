@@ -1,17 +1,18 @@
 ---
 rfc: "0096"
-title: "Keeper Turn Contract — multi-turn reasoning + tier-group SPOF root-fix"
-status: Implemented
+title: "Keeper Turn Contract — multi-turn reasoning + cascade SPOF root-fix"
+status: Withdrawn
 created: 2026-05-17
-updated: 2026-05-22
+updated: 2026-05-29
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0084", "0085", "0086", "0087", "0089"]
 implementation_prs: [15688]
+withdrawn_reason: "Tier-group concept removed by PR #19381. Multi-turn reasoning content preserved in archive."
 ---
 
-# RFC-0096 — Keeper Turn Contract: multi-turn reasoning + tier-group SPOF
+# RFC-0096 — Keeper Turn Contract: multi-turn reasoning + cascade SPOF
 
 > Promote the causal-chain map in issue #15319 to a design-doc level RFC,
 > scoped tightly to two root mismatches. Closes the loop on a 17-second
@@ -51,7 +52,7 @@ let required_tool_satisfaction call =
 1. Keeper turn-level `required_tool_use` contract 가 **multi-turn intent
    window** 를 인식해 `board_list` 같은 *읽기 turn* 을 contract violation
    으로 변환하지 않는다.
-2. `tier-group.coding_plan` 의 단일-lane 구조 (`tiers =
+2. `cascade.coding_plan` 의 단일-lane 구조 (`tiers =
    ["coding_plan_primary"]`, `members = ["provider-k-coding.provider-k-5-1"]`) 가
    **multi-lane** 으로 확장돼 단일 모델 fail 이 fleet 정지로 confluence
    되지 않는다.
@@ -138,7 +139,7 @@ legacy 시뮬레이터 / 백테스트 용도로만 노출.
   prerequisite" 으로 인정할지 vs "intent 미시작" 으로 볼지 — 전자가
   더 안전 (default).
 
-## §5 Root #3 — tier-group SPOF (single lane)
+## §5 Root #3 — cascade SPOF (single lane)
 
 ### §5.1 증상
 
@@ -159,7 +160,7 @@ route SPOF.
 `.masc/config/cascade.toml`:
 
 ```toml
-[tier-group.coding_plan]
+[cascade.coding_plan]
 tiers = ["coding_plan_primary"]
 
 [tier.coding_plan_primary]
@@ -174,7 +175,7 @@ fleet 정지로 직결.
 multi-lane:
 
 ```toml
-[tier-group.coding_plan]
+[cascade.coding_plan]
 tiers = ["coding_plan_primary", "coding_plan_secondary"]
 
 [tier.coding_plan_primary]
@@ -208,7 +209,7 @@ Schema 변경 없음. RFC-0086 의 keeper namespace bulk promotion 흐름
 ## §7 닫히는 이슈 (예상)
 
 - #15319 (meta) — 본 RFC 가 Root #1/#3 매핑을 design-doc 으로 promote, scope 확정 → close-by-RFC
-- #15113 — tier-group SPOF → Phase 2 로 직접 해소
+- #15113 — cascade SPOF → Phase 2 로 직접 해소
 - #15171 — post-claim OAS turn stall → Phase 1 로 직접 해소
 - #15526 — cascade exhausted after health/cooldown → Phase 2 + 3 trigger 정렬로 해소
 - #15542 — `require_tool_use` violated → Phase 1 로 직접 해소

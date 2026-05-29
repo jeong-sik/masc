@@ -48,15 +48,10 @@ type stop_result =
    tab-separated fields into 3 and breaking the exact-match parser
    below. Strip only the line-terminator [\r] so trailing-empty
    tab-separated fields survive. *)
-let strip_cr line =
-  let n = String.length line in
-  if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line
-;;
-
 let nonempty_lines out =
   out
   |> String.split_on_char '\n'
-  |> List.map strip_cr
+  |> List.map String_util.strip_trailing_cr
   |> List.filter (fun line -> line <> "")
 ;;
 

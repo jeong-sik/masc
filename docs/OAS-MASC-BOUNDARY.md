@@ -66,7 +66,7 @@ OAS  ──does not know──→ MASC
 - OAS provider catalog / capability manifest / pricing override는 generic
   provider runtime contract다. MASC may pass logical runtime intent and
   capability requirements into those OAS contracts, but OAS must not learn MASC routes,
-  keeper phases, tier-groups, board/governance semantics, or dashboard policy.
+  keeper phases, cascades, board/governance semantics, or dashboard policy.
 - `provider/model-free` in MASC means MASC policy code routes by logical use,
   declared capability, profile order, health, capacity, and receipt state; it
   does not branch on vendor/model literals. Provider/model ids remain

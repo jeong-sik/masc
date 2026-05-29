@@ -262,7 +262,7 @@ let purge_agent_filesystem_artifacts config agent_names =
 
 let purge_keeper_artifacts config requested_name
     ({ keeper_name; agent_name; trace_id; toml_path } : keeper_purge_target) =
-  let keeper_dir = Keeper_types_profile.keeper_dir config in
+  let keeper_dir = Keeper_fs.keeper_dir config in
   let keeper_runtime_dir = Filename.concat keeper_dir keeper_name in
   let cleanup_names =
     [ requested_name; keeper_name; agent_name ]

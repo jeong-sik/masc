@@ -31,7 +31,7 @@ let iso_of_unix ts =
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent") ()
-    : Masc_mcp.Keeper_meta_contract.keeper_meta =
+    : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
           (`Assoc
              [
@@ -39,9 +39,9 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
                ("agent_name", `String agent_name);
                ("trace_id", `String "test-trace-accountability");
                ( "tool_access",
-                 Masc_mcp.Keeper_meta_contract.tool_access_to_json
-                   (Masc_mcp.Keeper_meta_contract.Preset
-                      { preset = Masc_mcp.Keeper_meta_contract.Full; also_allow = [] }) );
+                 Keeper_meta_tool_access.tool_access_to_json
+                   (Keeper_meta_tool_access.Preset
+                      { preset = Keeper_meta_tool_access.Full; also_allow = [] }) );
              ])
   with
   | Ok meta -> meta
@@ -670,6 +670,8 @@ let test_summary_json_rereads_window_per_agent () =
 (* --- Attribution tests --- *)
 
 module A = Masc_mcp.Attribution
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
+module Keeper_meta_tool_access = Masc_mcp.Keeper_meta_tool_access
 module KA = Masc_mcp.Keeper_accountability
 
 let outcome_kind = function

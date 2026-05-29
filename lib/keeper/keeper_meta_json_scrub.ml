@@ -41,7 +41,7 @@ let drop_assoc_keys (keys : string list) (json : Yojson.Safe.t) : Yojson.Safe.t 
 ;;
 
 let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
-  let present = present_json_keys removed_keeper_meta_key_names json in
+  let present = Keeper_config_text.present_json_keys Keeper_config_text.removed_keeper_meta_key_names json in
   match present with
   | [] -> Ok ()
   | fields ->
@@ -71,7 +71,7 @@ let persisted_retired_keeper_meta_key_names =
 ;;
 
 let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =
-  let present = present_json_keys legacy_keeper_meta_key_names json in
+  let present = Keeper_config_text.present_json_keys legacy_keeper_meta_key_names json in
   match present with
   | [] -> Ok ()
   | fields ->
@@ -85,7 +85,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
   match json with
   | `Assoc fields ->
     let scrub_candidate_key_names =
-      removed_keeper_meta_key_names
+      Keeper_config_text.removed_keeper_meta_key_names
       @ persisted_retired_keeper_meta_key_names
       @ config_field_names
     in

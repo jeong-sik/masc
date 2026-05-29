@@ -85,7 +85,7 @@ let rewrite_goal_updated_at config ~goal_id ~updated_at =
   in
   Goal_store.write_state config { state with updated_at; goals }
 
-let test_cascade_name = "tier.test"
+let test_cascade_name = "cascade.test"
 
 let make_keeper_meta ~name ~goal_id =
   match
@@ -115,7 +115,7 @@ let append_keeper_receipt
     ?(tool_requirement = Keeper_agent_tool_surface.Required)
     ?(cascade_outcome : Keeper_execution_receipt.cascade_outcome =
       Cascade_completed) (config : Coord.config)
-    (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) =
+    (meta : Keeper_meta_contract.keeper_meta) =
   let started_at = Masc_domain.now_iso () in
   let ended_at = Masc_domain.now_iso () in
   let receipt : Keeper_execution_receipt.t =
@@ -159,7 +159,7 @@ let append_keeper_receipt
       network_mode = meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name = Cascade_name.of_string_exn (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
+      cascade_name = Cascade_name.of_string_exn (Keeper_meta_contract.cascade_name_of_meta meta);
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
@@ -186,7 +186,7 @@ let append_keeper_receipt
   Keeper_execution_receipt.append config receipt
 
 let append_keeper_decision_with_null_telemetry
-    (config : Coord.config) (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) =
+    (config : Coord.config) (meta : Keeper_meta_contract.keeper_meta) =
   Fs_compat.append_jsonl
     (Keeper_types_support.keeper_decision_log_path config meta.name)
     (`Assoc
@@ -199,7 +199,7 @@ let append_keeper_decision_with_null_telemetry
       ])
 
 let append_keeper_decision_terminal_reason
-    (config : Coord.config) (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) =
+    (config : Coord.config) (meta : Keeper_meta_contract.keeper_meta) =
   Fs_compat.append_jsonl
     (Keeper_types_support.keeper_decision_log_path config meta.name)
     (`Assoc
@@ -824,7 +824,7 @@ let test_goal_fsm_withholds_stalled_when_activity_is_metadata_only () =
   rewrite_goal_updated_at config ~goal_id:goal.id
     ~updated_at:"2026-04-01T00:00:00Z";
   let meta = make_keeper_meta ~name:"metadata-only-keeper" ~goal_id:goal.id in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
@@ -863,7 +863,7 @@ let test_goal_detail_surfaces_keeper_runtime_trust_and_blockers () =
     | Error msg -> fail msg
   in
   let meta = make_keeper_meta ~name:"goal-keeper" ~goal_id:goal.id in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt config meta;
@@ -910,7 +910,7 @@ let test_goal_detail_uses_receipt_disposition_for_required_tool_failure () =
     | Error msg -> fail msg
   in
   let meta = make_keeper_meta ~name:"tool-failure-keeper" ~goal_id:goal.id in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt ~reported_tools:[] ~observed_tools:[] ~canonical_tools:[]
@@ -944,7 +944,7 @@ let test_goal_tree_tolerates_null_decision_telemetry () =
     | Error msg -> fail msg
   in
   let meta = make_keeper_meta ~name:"null-telemetry-keeper" ~goal_id:goal.id in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_decision_with_null_telemetry config meta;
@@ -983,12 +983,12 @@ let test_goal_detail_does_not_promote_synthetic_blocker_over_receipt () =
         {
           base.runtime with
           last_blocker =
-            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
-                    ~detail:"turn timed out" Masc_mcp.Keeper_meta_contract.Turn_timeout);
+            Some (Keeper_meta_contract.blocker_info_of_class
+                    ~detail:"turn timed out" Keeper_meta_contract.Turn_timeout);
         };
     }
   in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt config meta;
@@ -1025,7 +1025,7 @@ let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
     | Error msg -> fail msg
   in
   let meta = make_keeper_meta ~name:"newer-blocker-keeper" ~goal_id:goal.id in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt config meta;
@@ -1042,13 +1042,13 @@ let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
               last_turn_ts = Unix.gettimeofday () +. 60.0;
             };
           last_blocker =
-            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+            Some (Keeper_meta_contract.blocker_info_of_class
                     ~detail:"Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}"
-                    Masc_mcp.Keeper_meta_contract.Turn_timeout);
+                    Keeper_meta_contract.Turn_timeout);
         };
     }
   in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config blocked_meta with
+  (match Keeper_meta_store.write_meta ~force:true config blocked_meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
@@ -1091,7 +1091,7 @@ let test_goal_detail_keeps_decision_terminal_reason_over_newer_blocker () =
   let meta =
     make_keeper_meta ~name:"decision-over-blocker-keeper" ~goal_id:goal.id
   in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt config meta;
@@ -1109,13 +1109,13 @@ let test_goal_detail_keeps_decision_terminal_reason_over_newer_blocker () =
               last_turn_ts = Unix.gettimeofday () +. 60.0;
             };
           last_blocker =
-            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+            Some (Keeper_meta_contract.blocker_info_of_class
                     ~detail:"Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}"
-                    Masc_mcp.Keeper_meta_contract.Turn_timeout);
+                    Keeper_meta_contract.Turn_timeout);
         };
     }
   in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config blocked_meta with
+  (match Keeper_meta_store.write_meta ~force:true config blocked_meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
@@ -1145,7 +1145,7 @@ let test_goal_detail_derives_attention_from_receipt_disposition () =
     | Error msg -> fail msg
   in
   let meta = make_keeper_meta ~name:"receipt-disposition-keeper" ~goal_id:goal.id in
-  (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  (match Keeper_meta_store.write_meta ~force:true config meta with
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt

@@ -10,9 +10,27 @@ let select_shell_json
     | None -> Server_timing.create ()
   in
   if light
-  then
-    Server_dashboard_http_core.dashboard_shell_http_json
-      ?clock ?request ~timing:timing_obj ~light config
+  then (
+    (* RFC-0204 section 8.3 ("A"): serve the published light projection
+       wait-free.  Mirrors the non-light branch below but reads
+       [snap.shell_light]; falls back to the (offloaded, timeout-guarded)
+       recompute only before the first snapshot publish. *)
+    match Dashboard_snapshot.current () with
+    | Some snap ->
+      let shell =
+        Server_timing.measure
+          timing_obj
+          (Server_timing.Custom "snapshot_read")
+          (fun () -> snap.shell_light)
+      in
+      (match request with
+       | None -> shell
+       | Some request ->
+         Server_dashboard_http_core.dashboard_shell_with_request_auth_json
+           ~request config shell)
+    | None ->
+      Server_dashboard_http_core.dashboard_shell_http_json
+        ?clock ?request ~timing:timing_obj ~light config)
   else (
     match Dashboard_snapshot.current () with
     | Some snap ->

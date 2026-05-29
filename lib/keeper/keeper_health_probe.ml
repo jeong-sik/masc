@@ -11,7 +11,7 @@ type health_status =
 
 type runtime_pressure_class =
   | Client_capacity_full
-  | Tier_admission_full
+  | Cascade_admission_full
   | Provider_capacity
   | Provider_dns_failure
   | Provider_timeout
@@ -23,7 +23,7 @@ type runtime_pressure_class =
 
 let runtime_pressure_class_to_string = function
   | Client_capacity_full -> "client_capacity_full"
-  | Tier_admission_full -> "admission_full"
+  | Cascade_admission_full -> "admission_full"
   | Provider_capacity -> "provider_capacity"
   | Provider_dns_failure -> "provider_dns_failure"
   | Provider_timeout -> "provider_timeout"
@@ -37,7 +37,7 @@ let runtime_pressure_class_to_string = function
 let runtime_pressure_class_of_label label =
   match label |> String.trim |> String.lowercase_ascii with
   | "client_capacity_full" | "client_capacity" -> Some Client_capacity_full
-  | "admission_full" | "admission_capacity" -> Some Tier_admission_full
+  | "admission_full" | "admission_capacity" -> Some Cascade_admission_full
   | "provider_capacity" | "provider_capacity_full" | "capacity_backpressure" ->
     Some Provider_capacity
   | "provider_dns_failure" | "provider_dns" -> Some Provider_dns_failure
@@ -72,7 +72,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
     || contains "inflight_capacity_full"
     || Option.is_some cascade_name
     || contains "admission="
-  then Tier_admission_full
+  then Cascade_admission_full
   else if
     contains "capacity_backpressure"
     || contains "capacity exhausted"

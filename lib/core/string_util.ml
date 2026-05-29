@@ -195,6 +195,13 @@ let was_truncated = function
   | Untouched _ -> false
   | Truncated _ -> true
 
+let utf8_prefix ~max_bytes s =
+  if max_bytes <= 0 then ""
+  else
+    let len = String.length s in
+    if len <= max_bytes then s
+    else String.sub s 0 (utf8_char_boundary s max_bytes)
+
 let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v
@@ -208,6 +215,10 @@ let option_trim = function
   | Some s ->
     let v = String.trim s in
     if v = "" then None else Some v
+
+let strip_trailing_cr s =
+  let len = String.length s in
+  if len > 0 && s.[len - 1] = '\r' then String.sub s 0 (len - 1) else s
 
 (* XML 1.0 entity escape.  Order matters: [&] first so that the
    ampersands introduced by the other replacements are not

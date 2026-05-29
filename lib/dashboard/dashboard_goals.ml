@@ -1,7 +1,6 @@
 (** Dashboard Goals — goal tree with explicit task linkage, health badges,
     and goal-first detail evidence. *)
 
-open Yojson.Safe.Util
 
 
 
@@ -15,7 +14,7 @@ include Dashboard_goals_types
 let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
   let labels = [ ("goal_id", goal.id) ] in
   let measured, pct =
-    match attainment |> member "attainment_pct" |> to_int_option with
+    match Json_util.get_int attainment "attainment_pct" with
     | Some pct -> (1.0, float_of_int pct)
     | None -> (0.0, 0.0)
   in
@@ -139,7 +138,7 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
     requests;
   List.iter
     (fun json ->
-      match json |> member "goal_id" |> to_string_option with
+      match Json_util.get_string json "goal_id" with
       | Some goal_id ->
           let existing =
             Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]

@@ -536,8 +536,8 @@ let tool_usage_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> []
   | Some entry ->
-    StringMap.fold (fun n (e : tool_call_entry) acc -> (n, e) :: acc) entry.tool_usage []
-    |> List.sort (fun (_, (a : tool_call_entry)) (_, (b : tool_call_entry)) -> Int.compare b.count a.count)
+    StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
+    |> List.sort (fun (_, a) (_, b) -> Int.compare b.Keeper_types.count a.Keeper_types.count)
 ;;
 
 (* Lookup API (find_by_name / find_by_agent_name / find_by_id /

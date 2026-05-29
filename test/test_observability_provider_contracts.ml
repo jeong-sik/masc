@@ -171,17 +171,6 @@ let test_resolve_primary_max_context_uses_first_available_label () =
     (Masc_mcp.Cascade_runtime.For_testing.resolve_primary_max_context_in_registry
        registry labels)
 
-let test_labels_require_local_discovery () =
-  check bool "llama labels refresh local discovery" true
-    (Masc_mcp.Cascade_runtime.labels_require_local_discovery
-       [ "llama:auto"; "provider_k:auto" ]);
-  check bool "mixed non-local labels skip refresh" false
-    (Masc_mcp.Cascade_runtime.labels_require_local_discovery
-       [ "provider_k:auto"; "agent_llm_a:auto" ]);
-  check bool "malformed labels skip refresh" false
-    (Masc_mcp.Cascade_runtime.labels_require_local_discovery
-       [ "default"; "provider_k:auto" ])
-
 let test_cascade_model_resolve_unregistered_default_provenance () =
   let resolved =
     Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "provider_d"
@@ -327,8 +316,6 @@ let () =
           test_case "max context of label" `Quick test_max_context_of_label;
           test_case "effective discovered ctx floor" `Quick
             test_effective_discovered_ctx;
-          test_case "local discovery label detection" `Quick
-            test_labels_require_local_discovery;
           test_case "cascade unregistered default provenance" `Quick
             test_cascade_model_resolve_unregistered_default_provenance;
           test_case "cascade env default provenance" `Quick

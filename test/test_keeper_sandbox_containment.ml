@@ -51,11 +51,11 @@ let make_meta ~name ~sandbox =
         ("trace_id", `String "test-trace-containment");
         ("policy_voice_enabled", `Bool false);
         ( "tool_access",
-          Masc_mcp.Keeper_meta_contract.tool_access_to_json
-            (Masc_mcp.Keeper_meta_contract.Preset
-               { preset = Masc_mcp.Keeper_meta_contract.Full; also_allow = [] }) );
+          Keeper_meta_tool_access.tool_access_to_json
+            (Keeper_meta_tool_access.Preset
+               { preset = Keeper_meta_tool_access.Full; also_allow = [] }) );
         ("sandbox_profile",
-         `String (Masc_mcp.Keeper_types_profile.sandbox_profile_to_string sandbox));
+         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox));
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -67,7 +67,7 @@ let make_meta ~name ~sandbox =
 let test_legacy_keeper_always_allowed () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"alice" ~sandbox:Masc_mcp.Keeper_types_profile.Local in
+  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
     "Local keeper bypasses containment"
@@ -79,7 +79,7 @@ let test_legacy_keeper_always_allowed () =
 let test_docker_keeper_blocks_outside () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Masc_mcp.Keeper_types_profile.Docker in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let outside = "/etc/passwd" in
   match
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target:outside
@@ -97,7 +97,7 @@ let test_docker_keeper_blocks_outside () =
 let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Masc_mcp.Keeper_types_profile.Docker in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let bundle = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let inside = Filename.concat bundle "mind/scratch.md" in
   Alcotest.(check bool) "playground-internal path is allowed"
@@ -109,7 +109,7 @@ let test_docker_keeper_allows_inside_playground () =
 let test_docker_git_creds_contained () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"poe" ~sandbox:Masc_mcp.Keeper_types_profile.Docker in
+  let meta = make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let outside = "/etc/passwd" in
   Alcotest.(check bool) "Docker is also subject to containment"
     true
@@ -120,7 +120,7 @@ let test_docker_git_creds_contained () =
 let test_path_just_outside_playground_blocked () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Masc_mcp.Keeper_types_profile.Docker in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   (* Sibling directory with a name that LOOKS like a prefix of the playground
      path; must still be blocked (prevents the classic prefix-without-slash
      containment bypass). *)

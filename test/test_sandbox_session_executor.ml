@@ -28,7 +28,7 @@ let sample_plan ?(turn_id = 7) ?(meta_name = "alice") () =
       ~container_root:"/keeper/alice"
       ~base_path:"/srv/masc"
       ~container_kind:"turn"
-      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
       ~host_root:"/var/masc/alice"
       ~uid:1234
       ~gid:5678

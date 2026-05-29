@@ -134,9 +134,6 @@ val take : int -> 'a list -> 'a list
 (** Trim, drop empty, and dedup a list of strings (ASCII compare order). *)
 val unique_non_empty : string list -> string list
 
-(** [clamp ~min_v ~max_v v] clips [v] into the closed interval [[min_v, max_v]]. *)
-val clamp : min_v:'a -> max_v:'a -> 'a -> 'a
-
 val salience_to_string : salience -> string
 
 (** [preview ?max_len text] collapses newlines to spaces and truncates to

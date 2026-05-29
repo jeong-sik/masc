@@ -19,7 +19,7 @@ let test_no_ceiling_passes_through () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.test_a")
+      ~cascade_name:(cascade "cascade.test_a")
       ~source:"cascade_config"
       ~ceiling:None
       16384
@@ -30,7 +30,7 @@ let test_ceiling_above_request_passes_through () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.test_b")
+      ~cascade_name:(cascade "cascade.test_b")
       ~source:"cascade_config"
       ~ceiling:(Some 32000)
       16384
@@ -41,7 +41,7 @@ let test_ceiling_at_request_passes_through () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.test_c")
+      ~cascade_name:(cascade "cascade.test_c")
       ~source:"cascade_config"
       ~ceiling:(Some 16384)
       16384
@@ -52,7 +52,7 @@ let test_ceiling_below_request_clamps () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.provider_k-coding-with-spark")
+      ~cascade_name:(cascade "cascade.provider_k-coding-with-spark")
       ~source:"cascade_config"
       ~ceiling:(Some 8192)
       16384
@@ -65,7 +65,7 @@ let test_fallback_source_clamps () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.test_d")
+      ~cascade_name:(cascade "cascade.test_d")
       ~source:"fallback"
       ~ceiling:(Some 8192)
       16384
@@ -76,7 +76,7 @@ let test_caller_override_source_clamps () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.test_override")
+      ~cascade_name:(cascade "cascade.test_override")
       ~source:"caller_override"
       ~ceiling:(Some 8192)
       16384
@@ -87,7 +87,7 @@ let test_zero_ceiling_treated_as_no_ceiling () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.test_e")
+      ~cascade_name:(cascade "cascade.test_e")
       ~source:"cascade_config"
       ~ceiling:(Some 0)
       16384
@@ -98,7 +98,7 @@ let test_negative_ceiling_treated_as_no_ceiling () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.test_f")
+      ~cascade_name:(cascade "cascade.test_f")
       ~source:"cascade_config"
       ~ceiling:(Some (-1))
       16384
@@ -107,7 +107,7 @@ let test_negative_ceiling_treated_as_no_ceiling () =
 
 let test_warn_dedup_per_tuple () =
   reset ();
-  let name = cascade "tier-group.test_g" in
+  let name = cascade "cascade.test_g" in
   let first =
     Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"cascade_config" ~max_tokens:16384 ~ceiling:8192
@@ -121,7 +121,7 @@ let test_warn_dedup_per_tuple () =
 
 let test_warn_emits_distinct_source () =
   reset ();
-  let name = cascade "tier-group.test_h" in
+  let name = cascade "cascade.test_h" in
   let cfg =
     Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"cascade_config" ~max_tokens:16384 ~ceiling:8192
@@ -135,7 +135,7 @@ let test_warn_emits_distinct_source () =
 
 let test_warn_emits_distinct_caller_override_source () =
   reset ();
-  let name = cascade "tier-group.test_i" in
+  let name = cascade "cascade.test_i" in
   let cfg =
     Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"cascade_config" ~max_tokens:16384 ~ceiling:8192

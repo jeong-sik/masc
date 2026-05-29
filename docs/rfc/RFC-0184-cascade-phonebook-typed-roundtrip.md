@@ -48,7 +48,7 @@ The right interface is either:
 
 ## 2. Proposal sketch
 
-This RFC is **deferred**. RFC-0181 (Cascade SSOT skeleton, PR #18697 OPEN) is mid-review and its Q1~Q5 architect decisions cover capability granularity, tier-group semantics, and routing policy — the boundary RFC-0184 sits on top of. Locking a typed-roundtrip design before RFC-0181 commits to a capability schema risks doing the work twice.
+This RFC is **deferred**. RFC-0181 (Cascade SSOT skeleton, PR #18697 OPEN) is mid-review and its Q1~Q5 architect decisions cover capability granularity, cascade semantics, and routing policy — the boundary RFC-0184 sits on top of. Locking a typed-roundtrip design before RFC-0181 commits to a capability schema risks doing the work twice.
 
 Sketch of the proposed direction (subject to RFC-0181 outcome):
 
@@ -63,7 +63,7 @@ Recommendation pending RFC-0181 decision: **A** if RFC-0181 introduces new typed
 ## 3. Out of scope
 
 - Vendor name restoration (option B) requires legal/IP review of the RFC-0172/0173 purge rationale — not in scope here.
-- `cascade.toml` per-tier-group / per-provider field renames (covered by RFC-0181 §Q3-Q5).
+- `cascade.toml` per-cascade / per-provider field renames (covered by RFC-0181 §Q3-Q5).
 - Runtime config migration from `<MASC_BASE>/.masc/config/cascade.toml` to a versioned schema (separate RFC if A is picked).
 
 ## 4. Verification plan (when activated)

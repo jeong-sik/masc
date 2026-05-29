@@ -389,40 +389,10 @@ let local_discovery_refresh_for_test : (string list -> bool) option Atomic.t =
   Atomic.make None
 ;;
 
-let ensure_local_discovery_ready ?refresh (labels : string list) : (unit, string) result =
-  let refresh_for_test = Atomic.get local_discovery_refresh_for_test in
-  let refresh =
-    match refresh with
-    | Some f -> f
-    | None ->
-      (match refresh_for_test with
-       | Some f -> f
-       | None -> fun labels -> Cascade_runtime.refresh_local_discovery_if_possible labels)
-  in
-  let should_refresh =
-    match refresh_for_test with
-    | Some _ -> true
-    | None -> Cascade_runtime.labels_require_local_discovery labels
-  in
-  if not should_refresh
-  then Ok ()
-  else (
-    try
-      if refresh labels
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "local discovery refresh required for labels [%s] but refresh failed"
-             (String.concat ", " labels))
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Error
-        (Printf.sprintf
-           "local discovery refresh raised for labels [%s]: %s"
-           (String.concat ", " labels)
-           (Printexc.to_string exn)))
+(* Local discovery disabled: tier-based local/non-local classification
+   no longer exists. All providers are treated uniformly. *)
+let ensure_local_discovery_ready ?refresh:_ (_labels : string list) : (unit, string) result =
+  Ok ()
 ;;
 
 module For_testing = struct

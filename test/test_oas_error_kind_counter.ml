@@ -89,7 +89,7 @@ let test_capacity_backpressure_kind () =
            cascade_name = typed_cascade_name cascade_name;
            source = OWN.Client_capacity;
            detail = "client capacity key provider_k is full";
-           retry_after_sec = None;
+           retry_after = Masc_mcp.Cascade_internal_error.No_retry_hint;
          })
   in
   Alcotest.(check (float 0.0001))

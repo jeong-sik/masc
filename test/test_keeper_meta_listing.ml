@@ -72,14 +72,14 @@ tools-support = true
 
 [custom.mock]
 
-[tier.primary]
+[cascade.primary]
 members = ["custom.mock"]
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary"]
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 |}
 
 let write_keeper_toml_exn ?autoboot_enabled config ~name =
@@ -144,7 +144,7 @@ let write_persona_profile_exn config ~name =
        ])
 
 let write_corrupt_keeper_meta_exn config ~name =
-  write_file (Masc_mcp.Keeper_types_profile.keeper_meta_path config name) "{not-json"
+  write_file (Keeper_types_profile.keeper_meta_path config name) "{not-json"
 
 let write_keeper_meta_exn ?(autoboot_enabled = true)
     ?(social_model = "bdi_speech_v1")
@@ -176,12 +176,12 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+  match Keeper_meta_store.write_meta ~force:true config meta with
   | Ok () -> ()
   | Error e -> fail ("write_meta failed: " ^ e)
 
 let register_keeper_offline_exn config ~name =
-  match Masc_mcp.Keeper_meta_store.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Ok (Some meta) ->
       ignore
         (Keeper_registry.register_offline ~base_path:config.base_path name meta)
@@ -258,7 +258,7 @@ let test_read_meta_resolved_rejects_meta_aliases () =
       write_keeper_meta_exn config ~name:"alpha-beta" ~trace_id:"trace-alpha";
       List.iter
         (fun alias ->
-          match Masc_mcp.Keeper_meta_store.read_meta_resolved config alias with
+          match Keeper_meta_store.read_meta_resolved config alias with
           | Ok None -> ()
           | Error e -> fail ("read_meta_resolved failed: " ^ e)
           | Ok (Some (resolved_name, _)) ->
@@ -296,10 +296,10 @@ let test_keeper_listing_ignores_sidecar_json_files () =
         Filename.concat (Keeper_fs.keeper_dir config) "sangsu.dataset.json"
       in
       write_json dataset_path (`Assoc [ ("kind", `String "dataset") ]);
-      let names = Masc_mcp.Keeper_meta_store.keeper_names config in
+      let names = Keeper_meta_store.keeper_names config in
       check (list string) "keeper_names filters sidecars"
         [ "dot.name"; "sangsu" ] names;
-      let keepalive_names = Masc_mcp.Keeper_meta_store.keepalive_keeper_names config in
+      let keepalive_names = Keeper_meta_store.keepalive_keeper_names config in
       check (list string) "keepalive_keeper_names filters sidecars"
         [ "dot.name"; "sangsu" ] keepalive_names;
       let ctx = keeper_ctx env sw config "operator" in
@@ -420,7 +420,7 @@ let test_bootable_keeper_names_use_declarative_autoboot_true_over_stale_meta () 
       let bootable_names = Keeper_runtime.bootable_keeper_names config in
       check bool "declarative autoboot true restores bootable keeper" true
         (List.mem "verifier" bootable_names);
-      let keepalive_names = Masc_mcp.Keeper_meta_store.keepalive_keeper_names config in
+      let keepalive_names = Keeper_meta_store.keepalive_keeper_names config in
       check bool "declarative autoboot true restores keepalive keeper" true
         (List.mem "verifier" keepalive_names);
       let exclusions =
@@ -502,7 +502,7 @@ let test_declarative_autoboot_disabled_skips_boot_without_meta () =
       let bootable_names = Keeper_runtime.bootable_keeper_names config in
       check bool "bootable list excludes declarative autoboot-disabled keeper" false
         (List.mem "sangsu" bootable_names);
-      let keepalive_names = Masc_mcp.Keeper_meta_store.keepalive_keeper_names config in
+      let keepalive_names = Keeper_meta_store.keepalive_keeper_names config in
       check bool "keepalive list excludes declarative autoboot-disabled keeper" false
         (List.mem "sangsu" keepalive_names))
 
@@ -537,7 +537,7 @@ let test_autoboot_policy_resync_from_declarative_toml () =
       | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
       | Ok updated ->
           check bool "autoboot_enabled resynced from TOML" false
-            updated.Masc_mcp.Keeper_meta_contract.autoboot_enabled)
+            updated.Keeper_meta_contract.autoboot_enabled)
 
 let test_keeper_up_uses_toml_autoboot_default () =
   Eio_main.run @@ fun env ->
@@ -571,7 +571,7 @@ let test_keeper_up_uses_toml_autoboot_default () =
         | None -> fail "expected masc_keeper_up dispatch"
       in
       check bool "keeper_up ok" true ok;
-      match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
+      match Keeper_meta_store.read_meta config keeper_name with
       | Ok (Some meta) ->
           check bool "autoboot_enabled defaulted from TOML" false
             meta.autoboot_enabled
@@ -648,7 +648,7 @@ also_allow = ["masc_tasks", "masc_transition"]
         | Ok meta -> meta
         | Error e -> fail ("meta_of_json failed: " ^ e)
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config stale_meta with
+      (match Keeper_meta_store.write_meta ~force:true config stale_meta with
        | Ok () -> ()
        | Error e -> fail ("write_meta failed: " ^ e));
       let ctx = keeper_ctx env sw config "operator" in
@@ -661,7 +661,7 @@ also_allow = ["masc_tasks", "masc_transition"]
         | None -> fail "expected masc_keeper_up dispatch"
       in
       check bool "keeper_up update ok" true ok;
-      match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
+      match Keeper_meta_store.read_meta config keeper_name with
       | Ok (Some meta) ->
           check string "goal resynced" "fresh goal" meta.goal;
           check string "short_goal resynced" "fresh short" meta.short_goal;
@@ -679,13 +679,13 @@ also_allow = ["masc_tasks", "masc_transition"]
             (option string)
             "tool preset resynced"
             (Some "delivery")
-            (Masc_mcp.Keeper_meta_contract.tool_access_preset meta.tool_access
-             |> Option.map Masc_mcp.Keeper_meta_contract.tool_preset_to_string);
+            (Keeper_meta_tool_access.tool_access_preset meta.tool_access
+             |> Option.map Keeper_meta_tool_access.tool_preset_to_string);
           check
             (list string)
             "tool allowlist resynced"
             [ "masc_tasks"; "masc_transition" ]
-            (Masc_mcp.Keeper_meta_contract.tool_access_also_allowlist meta.tool_access);
+            (Keeper_meta_tool_access.tool_access_also_allowlist meta.tool_access);
           check
             (option (float 0.0001))
             "per provider timeout resynced"
@@ -801,7 +801,7 @@ let test_keeper_persona_audit_reports_durable_live_persona_keeper () =
       write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
-      (match Masc_mcp.Keeper_meta_store.read_meta config "analyst" with
+      (match Keeper_meta_store.read_meta config "analyst" with
        | Ok (Some meta) ->
            ignore
              (Keeper_registry.register ~base_path:config.base_path "analyst"
@@ -949,7 +949,7 @@ let test_keeper_persona_audit_flags_stale_active_goal_ids () =
       write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
-      (match Masc_mcp.Keeper_meta_store.read_meta config "analyst" with
+      (match Keeper_meta_store.read_meta config "analyst" with
        | Ok (Some meta) ->
            ignore
              (Keeper_registry.register ~base_path:config.base_path "analyst"

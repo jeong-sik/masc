@@ -15,16 +15,16 @@ open Masc_mcp
 let make_meta
       ?(name = "test-keeper")
       ?(policy_voice_enabled = false)
-      ?(preset = Masc_mcp.Keeper_meta_contract.Full)
+      ?(preset = Keeper_meta_tool_access.Full)
       ?(also_allow = [])
       ?tool_access
       ()
-  : Masc_mcp.Keeper_meta_contract.keeper_meta
+  : Keeper_meta_contract.keeper_meta
   =
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Masc_mcp.Keeper_meta_contract.Preset { preset; also_allow }
+    | None -> Keeper_meta_tool_access.Preset { preset; also_allow }
   in
   let json =
     `Assoc
@@ -32,7 +32,7 @@ let make_meta
       ; "agent_name", `String name
       ; "trace_id", `String "test-trace-exposure"
       ; "policy_voice_enabled", `Bool policy_voice_enabled
-      ; "tool_access", Masc_mcp.Keeper_meta_contract.tool_access_to_json tool_access
+      ; "tool_access", Keeper_meta_tool_access.tool_access_to_json tool_access
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -135,7 +135,7 @@ let voice_tools =
 
 let test_voice_policy_enabled_exposes_voice_tools () =
   let meta =
-    make_meta ~policy_voice_enabled:true ~preset:Masc_mcp.Keeper_meta_contract.Delivery ()
+    make_meta ~policy_voice_enabled:true ~preset:Keeper_meta_tool_access.Delivery ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   List.iter
@@ -145,7 +145,7 @@ let test_voice_policy_enabled_exposes_voice_tools () =
 
 let test_voice_policy_disabled_hides_voice_tools () =
   let meta =
-    make_meta ~policy_voice_enabled:false ~preset:Masc_mcp.Keeper_meta_contract.Social ()
+    make_meta ~policy_voice_enabled:false ~preset:Keeper_meta_tool_access.Social ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   List.iter
@@ -154,7 +154,7 @@ let test_voice_policy_disabled_hides_voice_tools () =
 ;;
 
 let test_custom_empty_blocks_all_tools () =
-  let meta = make_meta ~tool_access:(Masc_mcp.Keeper_meta_contract.Custom []) () in
+  let meta = make_meta ~tool_access:(Keeper_meta_tool_access.Custom []) () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check int "custom empty blocks every tool" 0 (List.length tools)
 ;;
@@ -164,7 +164,7 @@ let test_custom_unknown_tool_names_are_dropped () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_meta_contract.Custom [ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
+        (Keeper_meta_tool_access.Custom [ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
       ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -178,43 +178,43 @@ let test_custom_unknown_tool_names_are_dropped () =
    ============================================================ *)
 
 let test_delivery_preset_has_search_files_access () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Delivery () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
 ;;
 
 let test_full_preset_includes_tool_edit_file () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Full () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Full () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
 let test_delivery_preset_includes_tool_edit_file () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Delivery () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
 let test_research_preset_includes_tool_edit_file () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Research () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Research () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
 let test_minimal_preset_excludes_tool_edit_file () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Minimal () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Minimal () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "no tool_edit_file" false (has_tool "tool_edit_file" tools)
 ;;
 
 let test_minimal_preset_has_web_search () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Minimal () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Minimal () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has masc_web_search" true (has_tool "masc_web_search" tools)
 ;;
 
 let test_minimal_preset_has_approval_pending () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Minimal () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Minimal () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let schema_names =
     Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
@@ -248,9 +248,9 @@ let test_minimal_preset_has_approval_pending () =
 ;;
 
 let test_all_presets_have_approval_pending () =
-  Masc_mcp.Keeper_meta_contract.all_tool_presets
+  Keeper_meta_tool_access.all_tool_presets
   |> List.iter (fun preset ->
-    let label = Masc_mcp.Keeper_meta_contract.tool_preset_to_string preset in
+    let label = Keeper_meta_tool_access.tool_preset_to_string preset in
     let meta = make_meta ~preset () in
     let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     let schema_names =
@@ -270,7 +270,7 @@ let test_all_presets_have_approval_pending () =
 ;;
 
 let test_feature_catalog_required_tools_reachable_by_full_keeper () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Full () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Full () in
   let schema_names =
     Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
@@ -286,7 +286,7 @@ let test_feature_catalog_required_tools_reachable_by_full_keeper () =
 ;;
 
 let test_delivery_preset_has_tool_execute () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Delivery () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_execute" true (has_tool "tool_execute" tools);
   check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
@@ -311,8 +311,8 @@ let test_legacy_pr_schemas_removed () =
    ============================================================ *)
 
 let test_presets_have_different_tool_count () =
-  let minimal = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Minimal () in
-  let full = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Full () in
+  let minimal = make_meta ~preset:Keeper_meta_tool_access.Minimal () in
+  let full = make_meta ~preset:Keeper_meta_tool_access.Full () in
   let minimal_tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names minimal in
   let full_tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names full in
   check
@@ -323,14 +323,14 @@ let test_presets_have_different_tool_count () =
 ;;
 
 let test_messaging_preset_has_board_tools () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Messaging () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Messaging () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_board_get" true (has_tool "keeper_board_get" tools);
   check bool "has keeper_board_post" true (has_tool "keeper_board_post" tools)
 ;;
 
 let test_research_preset_has_read_tools () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Research () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Research () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   (* keeper_read removed: dead alias with no schema, tool_read_file is the actual tool *)
   check bool "has tool_read_file" true (has_tool "tool_read_file" tools);
@@ -399,7 +399,7 @@ let test_fallback_floor_has_no_implicit_repo_tools () =
 ;;
 
 let test_core_coordination_presets_have_task_lifecycle_tools () =
-  [ "social", Masc_mcp.Keeper_meta_contract.Social; "messaging", Masc_mcp.Keeper_meta_contract.Messaging ]
+  [ "social", Keeper_meta_tool_access.Social; "messaging", Keeper_meta_tool_access.Messaging ]
   |> List.iter (fun (label, preset) ->
     let meta = make_meta ~preset () in
     let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -416,7 +416,7 @@ let test_core_coordination_presets_have_task_lifecycle_tools () =
 ;;
 
 let test_delivery_preset_has_coordination_tools () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Delivery () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true (has_tool "keeper_tasks_list" tools);
   check bool "has keeper_task_claim" true (has_tool "keeper_task_claim" tools);
@@ -446,7 +446,7 @@ let test_delivery_preset_has_coordination_tools () =
 
 let test_verifier_identity_uses_verdict_only_task_surface () =
   let assert_verifier_surface name =
-    let meta = make_meta ~name ~preset:Masc_mcp.Keeper_meta_contract.Full () in
+    let meta = make_meta ~name ~preset:Keeper_meta_tool_access.Full () in
     let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     check bool (name ^ " can list tasks") true (has_tool "keeper_tasks_list" tools);
     check bool (name ^ " can transition verdicts") true (has_tool "masc_transition" tools);
@@ -464,7 +464,7 @@ let test_verifier_identity_uses_verdict_only_task_surface () =
 
 (* Governance tool schemas are no longer registered. *)
 let test_messaging_preset_has_no_legacy_governance_tools () =
-  let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Messaging () in
+  let meta = make_meta ~preset:Keeper_meta_tool_access.Messaging () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "governance status removed" false (has_tool "masc_governance_status" tools);
   check bool "petition submit removed" false (has_tool "masc_petition_submit" tools)
@@ -484,8 +484,8 @@ let test_research_plus_also_allow_combined () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_meta_contract.Preset
-           { preset = Masc_mcp.Keeper_meta_contract.Research
+        (Keeper_meta_tool_access.Preset
+           { preset = Keeper_meta_tool_access.Research
            ; also_allow = [ "keeper_board_get"; "keeper_board_post" ]
            })
       ()
@@ -1461,7 +1461,7 @@ let () =
             | Some hint -> check bool "hint non-empty" true (String.length hint > 0)
             | None -> fail "masc_web_search should have a hint")
         ; test_case "all allowed tools have hints" `Quick (fun () ->
-            let meta = make_meta ~preset:Masc_mcp.Keeper_meta_contract.Messaging () in
+            let meta = make_meta ~preset:Keeper_meta_tool_access.Messaging () in
             let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
             let missing =
               List.filter (fun name -> Keeper_tool_policy.tool_hint_of name = None) tools
@@ -1488,7 +1488,7 @@ let () =
               `Assoc [ "kind", `String "custom"; "tools", `String "masc_status" ]
             in
             let outer = `Assoc [ "tool_access", json ] in
-            match Masc_mcp.Keeper_meta_contract.tool_access_of_meta_json outer with
+            match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Error msg ->
               check
                 bool
@@ -1510,7 +1510,7 @@ let () =
                 ]
             in
             let outer = `Assoc [ "tool_access", json ] in
-            match Masc_mcp.Keeper_meta_contract.tool_access_of_meta_json outer with
+            match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Ok (Custom tools) ->
               check bool "has masc_status" true (List.mem "masc_status" tools);
               check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
@@ -1519,13 +1519,13 @@ let () =
         ; test_case "null tools field returns error" `Quick (fun () ->
             let json = `Assoc [ "kind", `String "custom"; "tools", `Null ] in
             let outer = `Assoc [ "tool_access", json ] in
-            match Masc_mcp.Keeper_meta_contract.tool_access_of_meta_json outer with
+            match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Error _ -> ()
             | Ok _ -> fail "expected Error for null tools field")
         ; test_case "integer tools field returns error" `Quick (fun () ->
             let json = `Assoc [ "kind", `String "custom"; "tools", `Int 42 ] in
             let outer = `Assoc [ "tool_access", json ] in
-            match Masc_mcp.Keeper_meta_contract.tool_access_of_meta_json outer with
+            match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Error _ -> ()
             | Ok _ -> fail "expected Error for integer tools field")
         ; test_case "non-string tool member returns error" `Quick (fun () ->
@@ -1536,7 +1536,7 @@ let () =
                 ]
             in
             let outer = `Assoc [ "tool_access", json ] in
-            match Masc_mcp.Keeper_meta_contract.tool_access_of_meta_json outer with
+            match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Error _ -> ()
             | Ok _ -> fail "expected Error for non-string tools member")
         ] )

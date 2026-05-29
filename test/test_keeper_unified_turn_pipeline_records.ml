@@ -185,7 +185,7 @@ let test_provider_attempt_records_manifest_decision_contract () =
 
 let test_rotation_attempt_builder_records_retry_decision () =
   let retry : EC.degraded_retry =
-    { next_cascade = "tier.tool_required_fallback"
+    { next_cascade = "cascade.tool_required_fallback"
     ; fallback_reason = EC.Required_tool_contract_violation
     }
   in
@@ -196,7 +196,7 @@ let test_rotation_attempt_builder_records_retry_decision () =
       ~slot_release_at_phase:Receipt.Retry_scheduled
       ~productive_phase_elapsed_ms:1234
       ~retry_phase_elapsed_ms:56
-      ~from_cascade:(Cascade_name.of_string_exn "tier.default")
+      ~from_cascade:(Cascade_name.of_string_exn "cascade.default")
       ~retry
       ~outcome:Receipt.Rotation_retry_scheduled
       err
@@ -204,12 +204,12 @@ let test_rotation_attempt_builder_records_retry_decision () =
   check
     string
     "from cascade"
-    "tier.default"
+    "cascade.default"
     (Cascade_name.to_string attempt.from_cascade);
   check
     string
     "to cascade"
-    "tier.tool_required_fallback"
+    "cascade.tool_required_fallback"
     (Cascade_name.to_string attempt.to_cascade);
   check
     string
@@ -254,7 +254,7 @@ let test_receipt_degraded_retry_cascade_requalifies_bare_name () =
   with
   | None -> fail "expected bare degraded retry cascade to be re-qualified"
   | Some cascade ->
-    check string "bare name re-qualified" "tier.local_llama" (Cascade_name.to_string cascade)
+    check string "bare name re-qualified" "cascade.local_llama" (Cascade_name.to_string cascade)
 ;;
 
 let () =

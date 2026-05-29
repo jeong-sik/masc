@@ -493,7 +493,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                      in
                      let preview =
                        if String.length content > 200 then
-                         utf8_safe_prefix_bytes content ~max_bytes:200 ^ "..."
+                         String_util.utf8_prefix ~max_bytes:200 content ^ "..."
                        else content
                      in
                      let item =

@@ -1,15 +1,35 @@
 ---
 rfc: "0151"
 title: "4-metric monotone-decrease ratchet for code-smell metrics"
-status: Implemented
+status: Withdrawn
 created: 2026-05-20
-updated: 2026-05-22
+updated: 2026-05-29
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0126"]
 implementation_prs: [16929, 17316, 17336]
 ---
+
+> **Withdrawn 2026-05-29** — the 4-metric monotone ratchet was removed
+> because its maintenance cost exceeded its signal value. The
+> `godfile_loc_1000plus` metric grew on natural code/test expansion
+> (shell-ir GADT coverage, #19283→#19387), and every increase required a
+> paired baseline regenerate PR (#19231, #19433). The recurring
+> baseline-drift false-fails blocked every open PR until a regenerate PR
+> landed — the ratchet became a coordination tax rather than a guard.
+>
+> Removed: `scripts/code-smell/measure.sh`,
+> `scripts/lint/godfile-size-regression.sh`, `ci/code-smell-baseline.json`,
+> and the `Godfile size` job in `.github/workflows/fundamental-check.yml`.
+>
+> Trade-off (accepted): `catch_all_arms` and `contains_substring_defs` had
+> no enforcement other than this ratchet, so they are no longer tracked by
+> an automated gate. They are now handled at PR review per the CLAUDE.md
+> workaround-rejection bar and RFC-0088. `ignore_no_comment` remains
+> partially covered by the `ignore-without-comment-new` diff job.
+> `godfile-size-regression.sh`'s absolute new-file cap shared the same CI
+> job and was removed with it.
 
 # RFC-0151 — 4-metric monotone-decrease ratchet for code-smell metrics
 

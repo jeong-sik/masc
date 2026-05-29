@@ -41,16 +41,16 @@ let rec mkdir_p path =
 let write_persisted_meta_file config meta =
   let dir = Filename.concat (Coord.masc_root_dir config) "keepers" in
   mkdir_p dir;
-  let path = Filename.concat dir (meta.Masc_mcp.Keeper_meta_contract.name ^ ".json") in
-  write_file path (Yojson.Safe.pretty_to_string (Masc_mcp.Keeper_meta_json.meta_to_json meta));
+  let path = Filename.concat dir (meta.Keeper_meta_contract.name ^ ".json") in
+  write_file path (Yojson.Safe.pretty_to_string (Keeper_meta_json.meta_to_json meta));
   path
 
 let seed_persisted_meta config meta =
   let path = write_persisted_meta_file config meta in
   Fs_compat.clear_fs ();
-  match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
+  match Keeper_meta_store.read_meta_file_path path with
   | Ok (Some _) -> (
-      match Masc_mcp.Keeper_meta_store.read_meta config meta.Masc_mcp.Keeper_meta_contract.name with
+      match Keeper_meta_store.read_meta config meta.Keeper_meta_contract.name with
       | Ok (Some _) -> ()
       | Ok None -> fail ("persisted meta fixture not found via read_meta: " ^ path)
       | Error e -> fail ("persisted meta fixture read_meta failed: " ^ e))
@@ -97,14 +97,14 @@ tools-support = true
 
 [custom.mock]
 
-[tier.primary]
+[cascade.primary]
 members = ["custom.mock"]
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary"]
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 |};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
@@ -162,7 +162,7 @@ instructions = "TOML instructions"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check string "goal" "TOML goal" updated.Masc_mcp.Keeper_meta_contract.goal;
+      check string "goal" "TOML goal" updated.Keeper_meta_contract.goal;
       check string "short_goal" "TOML short goal" updated.short_goal;
       check string "mid_goal" "TOML mid goal" updated.mid_goal;
       check string "long_goal" "TOML long goal" updated.long_goal;
@@ -172,7 +172,7 @@ instructions = "TOML instructions"
       check string "instructions" "TOML instructions" updated.instructions
 
 (* test_policy_resync removed: RFC-0164 deletion roadmap dropped
-   [policy_voice_enabled] from Masc_mcp.Keeper_meta_contract.keeper_meta. The test
+   [policy_voice_enabled] from Keeper_meta_contract.keeper_meta. The test
    keyed its TOML-overwrites-stale-JSON assertion on that field
    exclusively, so once the field went away the test no longer had
    a policy field to drive the assertion. test_sandbox_policy_resync
@@ -215,9 +215,9 @@ network_mode = "none"
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check string "sandbox_profile" "docker"
-        (Masc_mcp.Keeper_types_profile.sandbox_profile_to_string updated.sandbox_profile);
+        (Keeper_types_profile_sandbox.sandbox_profile_to_string updated.sandbox_profile);
       check string "network_mode" "none"
-        (Masc_mcp.Keeper_types_profile.network_mode_to_string updated.network_mode)
+        (Keeper_types_profile_sandbox.network_mode_to_string updated.network_mode)
 
 let test_keeper_up_create_uses_profile_default_sandbox_policy () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -266,12 +266,12 @@ network_mode = "inherit"
         | Some result -> fail ("keeper_up failed: " ^ Tool_result.message result)
         | None -> fail "missing keeper_up dispatch"
       in
-      match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
+      match Keeper_meta_store.read_meta config keeper_name with
       | Ok (Some meta) ->
           check string "sandbox_profile from defaults" "docker"
-            (Masc_mcp.Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile);
+            (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile);
           check string "network_mode from defaults" "inherit"
-            (Masc_mcp.Keeper_types_profile.network_mode_to_string meta.network_mode)
+            (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
       | Ok None -> fail "keeper meta missing after keeper_up"
       | Error e -> fail ("read_meta failed: " ^ e))
 
@@ -324,8 +324,8 @@ also_allow = ["tool_execute", "tool_search_files"]
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       let preset =
-        match Masc_mcp.Keeper_meta_contract.tool_access_preset updated.Masc_mcp.Keeper_meta_contract.tool_access with
-        | Some preset -> Masc_mcp.Keeper_meta_contract.tool_preset_to_string preset
+        match Keeper_meta_tool_access.tool_access_preset updated.Keeper_meta_contract.tool_access with
+        | Some preset -> Keeper_meta_tool_access.tool_preset_to_string preset
         | None -> fail "expected preset-based tool_access"
       in
       check string "tool_preset" "social" preset;
@@ -333,7 +333,7 @@ also_allow = ["tool_execute", "tool_search_files"]
         (list string)
         "tool_also_allow"
         [ "tool_execute"; "tool_search_files" ]
-        (Masc_mcp.Keeper_meta_contract.tool_access_also_allowlist updated.tool_access);
+        (Keeper_meta_tool_access.tool_access_also_allowlist updated.tool_access);
       check
         (list string)
         "allowed_paths"
@@ -389,11 +389,11 @@ preset = "social"
   let persisted_path = write_persisted_meta_file config initial_meta in
   Fs_compat.clear_fs ();
   check bool "persisted meta fixture exists" true (Sys.file_exists persisted_path);
-  (match Masc_mcp.Keeper_meta_store.read_meta_file_path persisted_path with
+  (match Keeper_meta_store.read_meta_file_path persisted_path with
   | Ok (Some _) -> ()
   | Ok None -> fail "persisted meta fixture was not readable"
   | Error e -> fail ("persisted meta fixture read failed: " ^ e));
-  (match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
+  (match Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some _) -> ()
   | Ok None -> fail ("persisted meta fixture not found via read_meta: " ^ persisted_path)
   | Error e -> fail ("persisted meta fixture read_meta failed: " ^ e));
@@ -404,7 +404,7 @@ preset = "social"
         (option string)
         "tool_preset_source resynced from TOML"
         (Some "toml")
-        updated.Masc_mcp.Keeper_meta_contract.tool_preset_source
+        updated.Keeper_meta_contract.tool_preset_source
 
 let test_persona_no_longer_drives_tool_preset_source () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -463,11 +463,11 @@ persona_name = "%s"
   let persisted_path = write_persisted_meta_file config initial_meta in
   Fs_compat.clear_fs ();
   check bool "persisted meta fixture exists" true (Sys.file_exists persisted_path);
-  (match Masc_mcp.Keeper_meta_store.read_meta_file_path persisted_path with
+  (match Keeper_meta_store.read_meta_file_path persisted_path with
   | Ok (Some _) -> ()
   | Ok None -> fail "persisted meta fixture was not readable"
   | Error e -> fail ("persisted meta fixture read failed: " ^ e));
-  (match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
+  (match Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some _) -> ()
   | Ok None -> fail ("persisted meta fixture not found via read_meta: " ^ persisted_path)
   | Error e -> fail ("persisted meta fixture read_meta failed: " ^ e));
@@ -478,7 +478,7 @@ persona_name = "%s"
         (option string)
         "persona does not drive tool_preset_source"
         None
-        updated.Masc_mcp.Keeper_meta_contract.tool_preset_source
+        updated.Keeper_meta_contract.tool_preset_source
 
 (** Test: explicit empty allowed_paths in TOML clears stale runtime JSON values. *)
 let test_allowed_paths_explicit_empty_clears_runtime () =
@@ -616,13 +616,13 @@ allowed_paths = ["workspace/example/project"]
         (option string)
         "custom access keeps no preset"
         None
-        (Masc_mcp.Keeper_meta_contract.tool_access_preset updated.Masc_mcp.Keeper_meta_contract.tool_access
-         |> Option.map Masc_mcp.Keeper_meta_contract.tool_preset_to_string);
+        (Keeper_meta_tool_access.tool_access_preset updated.Keeper_meta_contract.tool_access
+         |> Option.map Keeper_meta_tool_access.tool_preset_to_string);
       check
         (option (list string))
         "custom allowlist preserved"
         (Some [ "keeper_board_get"; "masc_status" ])
-        (Masc_mcp.Keeper_meta_contract.tool_access_custom_allowlist updated.tool_access);
+        (Keeper_meta_tool_access.tool_access_custom_allowlist updated.tool_access);
       check
         (list string)
         "allowed_paths"
@@ -714,8 +714,8 @@ preset = "delivery"
         (option string)
         "tool_preset from toml overlay"
         (Some "delivery")
-      (Masc_mcp.Keeper_meta_contract.tool_access_preset updated.tool_access
-         |> Option.map Masc_mcp.Keeper_meta_contract.tool_preset_to_string);
+      (Keeper_meta_tool_access.tool_access_preset updated.tool_access
+         |> Option.map Keeper_meta_tool_access.tool_preset_to_string);
       check
         (option string)
         "tool_preset_source from toml overlay"
@@ -761,7 +761,7 @@ per_provider_timeout = 45
         (option (float 0.0001))
         "integer TOML timeout updates runtime"
         (Some 45.0)
-        updated.Masc_mcp.Keeper_meta_contract.per_provider_timeout_s
+        updated.Keeper_meta_contract.per_provider_timeout_s
 
 let test_toml_invalid_per_provider_timeout_clears_stale_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -799,7 +799,7 @@ per_provider_timeout = 0
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check (option (float 0.0001)) "invalid TOML clears stale timeout"
-        None updated.Masc_mcp.Keeper_meta_contract.per_provider_timeout_s
+        None updated.Keeper_meta_contract.per_provider_timeout_s
 
 let test_persona_invalid_per_provider_timeout_clears_stale_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -851,7 +851,7 @@ persona_name = "%s"
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check (option (float 0.0001)) "invalid persona clears stale timeout"
-        None updated.Masc_mcp.Keeper_meta_contract.per_provider_timeout_s
+        None updated.Keeper_meta_contract.per_provider_timeout_s
 
 let test_meta_of_json_invalid_per_provider_timeout_is_ignored () =
   match
@@ -867,7 +867,7 @@ let test_meta_of_json_invalid_per_provider_timeout_is_ignored () =
   | Error e -> fail ("meta_of_json failed: " ^ e)
   | Ok meta ->
       check (option (float 0.0001)) "invalid persisted meta timeout ignored"
-        None meta.Masc_mcp.Keeper_meta_contract.per_provider_timeout_s
+        None meta.Keeper_meta_contract.per_provider_timeout_s
 
 (** Test: fields absent from TOML (None) preserve runtime JSON values. *)
 let test_none_preserves_runtime () =
@@ -908,7 +908,7 @@ goal = "minimal TOML"
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       (* goal was in TOML → overwritten *)
-      check string "goal overwritten" "minimal TOML" updated.Masc_mcp.Keeper_meta_contract.goal;
+      check string "goal overwritten" "minimal TOML" updated.Keeper_meta_contract.goal;
       (* will was NOT in TOML → preserved from runtime *)
       check string "will preserved" "runtime will" updated.will;
       (* instructions was NOT in TOML → preserved from runtime *)
@@ -955,9 +955,9 @@ preset = "social"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check string "goal" "TOML goal" updated.Masc_mcp.Keeper_meta_contract.goal;
+      check string "goal" "TOML goal" updated.Keeper_meta_contract.goal;
       check string "cascade_name reset to keeper default"
-        ((Masc_mcp.Keeper_config.default_cascade_name ())) (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta updated)
+        ((Keeper_config.default_cascade_name ())) (Keeper_meta_contract.cascade_name_of_meta updated)
 
 let test_social_model_resynced_from_declarative_defaults () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -995,7 +995,7 @@ social_model = "magentic_ledger_v1"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check string "goal resynced from TOML" "TOML goal" updated.Masc_mcp.Keeper_meta_contract.goal;
+      check string "goal resynced from TOML" "TOML goal" updated.Keeper_meta_contract.goal;
       check string "social_model resynced from TOML" "magentic_ledger_v1"
         updated.social_model
 
@@ -1035,7 +1035,7 @@ cascade_name = "missing_profile"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Ok updated ->
       failf "expected unknown cascade_name to be rejected, got %s"
-        (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta updated)
+        (Keeper_meta_contract.cascade_name_of_meta updated)
   | Error detail ->
       check bool "points at profile.cascade_name" true
         (contains_substring detail "profile.cascade_name");

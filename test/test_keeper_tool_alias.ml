@@ -577,12 +577,12 @@ let test_execution_receipt_descriptor_summary_projects_descriptors () =
         ; missing_required_tools = []
         ; materialized_tools = [ "tool_read_file"; "tool_execute"; "keeper_time_now" ]
         }
-    ; sandbox_kind = Masc_mcp.Keeper_types_profile.Local
+    ; sandbox_kind = Masc_mcp.Keeper_types_profile_sandbox.Local
     ; sandbox_root = None
-    ; network_mode = Masc_mcp.Keeper_types_profile.Network_none
+    ; network_mode = Masc_mcp.Keeper_types_profile_sandbox.Network_none
     ; approval_profile = Some "manual"
     ; approval_profile_derived = false
-    ; cascade_name = Cascade_name.of_string_exn "tier.test"
+    ; cascade_name = Cascade_name.of_string_exn "cascade.test"
     ; cascade_selected_model = None
     ; cascade_attempt_count = 0
     ; cascade_fallback_applied = false

@@ -4,32 +4,9 @@
     stays in [Keeper_meta_json] so canonical-key derivation can use the public
     facade without creating a cycle. *)
 
-open Keeper_meta_json_scrub
-open Keeper_types_profile_sandbox
-open Keeper_meta_tool_access
+open Keeper_types_profile
 open Keeper_meta_contract
-
-let validate_name = Keeper_config_text.validate_name
-let normalize_goal_horizon_text = Keeper_config_text.normalize_goal_horizon_text
-let resolve_goal_horizons = Keeper_config_text.resolve_goal_horizons
-let normalize_goal_horizon_opt = Keeper_config_text.normalize_goal_horizon_opt
-let dedupe_keep_order = Json_util.dedupe_keep_order
-let default_room_signal_prompt_enabled = Keeper_config_text.default_room_signal_prompt_enabled
-let room_seq_map_of_json = Keeper_types_profile.room_seq_map_of_json
-let default_proactive_enabled = Keeper_config_text.default_proactive_enabled
-let default_proactive_idle_sec = Keeper_config_text.default_proactive_idle_sec
-let default_proactive_cooldown_sec = Keeper_config_text.default_proactive_cooldown_sec
-let normalize_proactive_idle_sec = Keeper_config.normalize_proactive_idle_sec
-let normalize_proactive_cooldown_sec = Keeper_config.normalize_proactive_cooldown_sec
-let keeper_compaction_policy_from_env = Keeper_config.keeper_compaction_policy_from_env
-let default_compaction_profile = Keeper_config.default_compaction_profile
-let canonical_compaction_profile = Keeper_config.canonical_compaction_profile
-let normalize_compaction_ratio_gate = Keeper_config.normalize_compaction_ratio_gate
-let normalize_compaction_message_gate = Keeper_config.normalize_compaction_message_gate
-let normalize_compaction_token_gate = Keeper_config.normalize_compaction_token_gate
-let keeper_continuity_compaction_cooldown_sec = Keeper_config.keeper_continuity_compaction_cooldown_sec
-let normalize_continuity_compaction_cooldown_sec = Keeper_config.normalize_continuity_compaction_cooldown_sec
-let normalize_per_provider_timeout_json_field = Keeper_types_profile.normalize_per_provider_timeout_json_field
+open Keeper_meta_json_scrub
 
 type parsed_keeper_identity =
   { pk_name : string

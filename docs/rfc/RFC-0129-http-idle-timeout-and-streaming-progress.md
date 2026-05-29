@@ -92,7 +92,7 @@ effective_timeout_sec              = min(adaptive, retry_reserved_cap)
 
 The receipt rotation distribution today is
 **strict_tool_candidates → provider-k-spark : 9** versus
-**provider-k-spark → strict_tool_candidates : 5**. Both tier-groups hit the
+**provider-k-spark → strict_tool_candidates : 5**. Both cascades hit the
 same cap because they share members (Provider-K-5-1, agent-code-spark, ollama)
 and route through the same cap chain.
 

@@ -25,7 +25,7 @@ val default_generation_language : string
 val default_generation_cascade_name : string
 val default_temperature : float
 val default_max_tokens : int
-val default_proactive_enabled : bool
+val default_generation_proactive_enabled : bool
 
 (** {1 JSON helpers} *)
 

@@ -84,7 +84,7 @@ let test_all_workspace_rejects_external () =
 (* ── violation_kind round-trip ─────────────────────────────────── *)
 
 let test_violation_kind_round_trip () =
-  let all_kinds = [ Me.Mutating_in_diagnose; Me.External_in_draft; Me.Scope_violation ] in
+  let all_kinds = [ Me.Mutating_in_diagnose; Me.External_in_draft ] in
   List.iter
     (fun kind ->
        let json = Me.violation_kind_to_yojson kind in

@@ -639,7 +639,7 @@ let test_soft_rate_limit_records_fingerprint () =
   let t = H.create () in
   H.record_soft_rate_limited t ~provider_key:"agent_llm_a-cli"
     ~error_kind:(kind "http_429")
-    ~error_reason:"rate limit exceeded for tier" ();
+    ~error_reason:"rate limit exceeded for cascade" ();
   let info = info_or_fail t ~provider_key:"agent_llm_a-cli" in
   match info.top_fingerprints with
   | [ (fp, count) ] ->

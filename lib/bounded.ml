@@ -392,8 +392,11 @@ let result_to_json result =
 
 (** Parse retry config from JSON *)
 let retry_config_of_json json =
-  let open Yojson.Safe.Util in
-  let retry = json |> member "retry" in
+  let retry =
+    match Json_util.assoc_member_opt "retry" json with
+    | None | Some `Null -> `Null
+    | Some v -> v
+  in
   if retry = `Null then
     default_retry_config
   else
@@ -413,17 +416,11 @@ let constraints_of_json json =
   if json = `Null then
     default_constraints
   else
-    let open Yojson.Safe.Util in
-    let get_int_opt key = Safe_ops.json_int_opt key json in
-    let get_float_opt key =
-      try Some (json |> member key |> to_float)
-      with Yojson.Safe.Util.Type_error _ -> None
-    in
     {
-      max_turns = get_int_opt "max_turns";
-      max_tokens = get_int_opt "max_tokens";
-      max_cost_usd = get_float_opt "max_cost_usd";
-      max_time_seconds = get_float_opt "max_time_seconds";
+      max_turns = Safe_ops.json_int_opt "max_turns" json;
+      max_tokens = Safe_ops.json_int_opt "max_tokens" json;
+      max_cost_usd = Json_util.get_float json "max_cost_usd";
+      max_time_seconds = Json_util.get_float json "max_time_seconds";
       hard_max_iterations =
         Safe_ops.json_int ~default:default_constraints.hard_max_iterations "hard_max_iterations" json;
       retry = retry_config_of_json json;
@@ -431,28 +428,45 @@ let constraints_of_json json =
 
 (** Parse goal from JSON *)
 let goal_of_json json =
-  let open Yojson.Safe.Util in
-  let path = json |> member "path" |> to_string in
-  let cond = json |> member "condition" in
+  let path = Json_util.get_string json "path" |> Option.value ~default:"" in
+  let cond =
+    match Json_util.assoc_member_opt "condition" json with
+    | None | Some `Null -> `Null
+    | Some v -> v
+  in
+  let safe_member key v =
+    match Json_util.assoc_member_opt key v with
+    | Some v -> v
+    | None -> `Null
+  in
+  let get_float_or key v =
+    Json_util.get_float v key |> Option.value ~default:0.0
+  in
   let condition =
-    if member "eq" cond <> `Null then
-      Eq (member "eq" cond)
-    else if member "neq" cond <> `Null then
-      Neq (member "neq" cond)
-    else if member "lt" cond <> `Null then
-      Lt (member "lt" cond |> to_float)
-    else if member "lte" cond <> `Null then
-      Lte (member "lte" cond |> to_float)
-    else if member "gt" cond <> `Null then
-      Gt (member "gt" cond |> to_float)
-    else if member "gte" cond <> `Null then
-      Gte (member "gte" cond |> to_float)
-    else if member "between" cond <> `Null then
-      match member "between" cond |> to_list with
-      | low :: high :: _ -> Between (low |> to_float, high |> to_float)
-      | _ -> invalid_arg "Bounded.rule_of_yojson: 'between' array must have at least 2 elements"
-    else if member "in" cond <> `Null then
-      In (member "in" cond |> to_list)
+    if Json_util.assoc_member_opt "eq" cond <> None then
+      Eq (safe_member "eq" cond)
+    else if Json_util.assoc_member_opt "neq" cond <> None then
+      Neq (safe_member "neq" cond)
+    else if Json_util.assoc_member_opt "lt" cond <> None then
+      Lt (get_float_or "lt" cond)
+    else if Json_util.assoc_member_opt "lte" cond <> None then
+      Lte (get_float_or "lte" cond)
+    else if Json_util.assoc_member_opt "gt" cond <> None then
+      Gt (get_float_or "gt" cond)
+    else if Json_util.assoc_member_opt "gte" cond <> None then
+      Gte (get_float_or "gte" cond)
+    else if Json_util.assoc_member_opt "between" cond <> None then
+      let to_float_raw = function
+        | `Float f -> f
+        | `Int i -> float_of_int i
+        | _ -> 0.0
+      in
+      (match safe_member "between" cond with
+       | `List (low :: high :: _) ->
+         Between (to_float_raw low, to_float_raw high)
+       | _ -> invalid_arg "Bounded.rule_of_yojson: 'between' array must have at least 2 elements")
+    else if Json_util.assoc_member_opt "in" cond <> None then
+      In (match safe_member "in" cond with `List l -> l | v -> [v])
     else
       Eq (`Bool true)  (* Default: look for truthy value *)
   in

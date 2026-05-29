@@ -1,6 +1,6 @@
 (** Cascade_name.t unit tests.
 
-    Post-#19327 (tier/tier-group purge): Cascade_name is a plain string
+    Post-#19327 (tier/cascade purge): Cascade_name is a plain string
     alias.  Prefix enforcement removed; [`Invalid_prefix] retained in the
     variant for source compatibility but no longer emitted. *)
 

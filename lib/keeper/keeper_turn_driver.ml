@@ -701,6 +701,13 @@ let run_named
       |> append
     | _ -> ()
   in
+  let turn_deadline =
+    match Eio_context.get_clock_opt () with
+    | Some clock ->
+        let turn_budget = Keeper_runtime_resolved.turn_timeout_sec () in
+        Some (Cascade_deadline.of_seconds_from_now ~clock turn_budget)
+    | None -> None
+  in
   let try_cascade_ctx : Keeper_turn_driver_try_cascade.try_cascade_ctx = {
     cascade_name;
     error_cascade_name;
@@ -732,6 +739,7 @@ let run_named
     filter_provider_health_fail_open;
     record_provider_health_error;
     wait_timeout_sec;
+    turn_deadline;
   } in
   let try_cascade
         ?(on_success = fun ~provider_key:_ -> ())

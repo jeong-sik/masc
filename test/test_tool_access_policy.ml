@@ -472,7 +472,7 @@ let test_diff_in_policy_deny () =
 (* 3-Layer Tool Gate tests                                           *)
 (* ================================================================ *)
 
-let make_gate_test_meta ?(name = "test-gate") () : Masc_mcp.Keeper_meta_contract.keeper_meta =
+let make_gate_test_meta ?(name = "test-gate") () : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-gate")]) with

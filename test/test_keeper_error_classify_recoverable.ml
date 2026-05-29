@@ -17,15 +17,16 @@
 
 open Alcotest
 module KEC = Masc_mcp.Keeper_error_classify
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_meta_contract
 module Retry = Llm_provider.Retry
 
-(* #19327 tier-group purge: Cascade_name is now a plain string alias. *)
+(* #19327 cascade purge: Cascade_name is now a plain string alias. *)
 let cascade_name raw = Cascade_name.of_string_exn (String.trim raw)
 ;;
 
-let test_cascade = cascade_name "tier.test_cascade"
+let test_cascade = cascade_name "cascade.test_cascade"
 
 let make_cascade_exhausted reason =
   Owne.sdk_error_of_masc_internal_error
@@ -40,7 +41,7 @@ let make_capacity_backpressure ?(source = Owne.Client_capacity)
          cascade_name = test_cascade;
          source;
          detail;
-         retry_after_sec = None;
+         retry_after = Masc_mcp.Cascade_internal_error.No_retry_hint;
        })
 
 let make_no_tool_capable () =
@@ -59,7 +60,7 @@ let make_accept_rejected () =
        { scope = "test"; model = None; reason = "no body" })
 
 let test_other_detail_generic_recoverable () =
-  let err = make_cascade_exhausted (Masc_mcp.Keeper_meta_contract.Other_detail "transport unavailable") in
+  let err = make_cascade_exhausted (Keeper_meta_contract.Other_detail "transport unavailable") in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Other_detail (non-quota) -> cascade_exhausted"
@@ -71,7 +72,7 @@ let test_other_detail_generic_recoverable () =
 let test_slot_full_other_detail_maps_to_capacity_backpressure () =
   let err =
     make_cascade_exhausted
-      (Masc_mcp.Keeper_meta_contract.Other_detail "slot full, cascading to next provider")
+      (Keeper_meta_contract.Other_detail "slot full, cascading to next provider")
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
@@ -115,7 +116,7 @@ let test_provider_capacity_backpressure_is_capacity_backpressure () =
     fail "Provider CapacityExhausted should be recoverable as capacity"
 
 let test_all_providers_failed_recoverable () =
-  let err = make_cascade_exhausted Masc_mcp.Keeper_meta_contract.All_providers_failed in
+  let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "All_providers_failed -> cascade_exhausted"
@@ -125,7 +126,7 @@ let test_all_providers_failed_recoverable () =
     fail "Cascade_exhausted with All_providers_failed should be recoverable"
 
 let test_no_providers_available_recoverable () =
-  let err = make_cascade_exhausted KT.No_providers_available in
+  let err = make_cascade_exhausted Keeper_meta_contract.No_providers_available in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "No_providers_available -> cascade_exhausted"
@@ -136,7 +137,7 @@ let test_no_providers_available_recoverable () =
 
 let test_candidates_filtered_specific_reason () =
   (* Specific reasons must keep their existing labels. *)
-  let err = make_cascade_exhausted KT.Candidates_filtered_after_cycles in
+  let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Candidates_filtered keeps specific label"
@@ -146,7 +147,7 @@ let test_candidates_filtered_specific_reason () =
     fail "Candidates_filtered should be recoverable"
 
 let test_max_turns_specific_reason () =
-  let err = make_cascade_exhausted KT.Max_turns_exceeded in
+  let err = make_cascade_exhausted Keeper_meta_contract.Max_turns_exceeded in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Max_turns keeps specific label" "max_turns" (KEC.degraded_retry_reason_to_string reason)
@@ -179,8 +180,8 @@ let test_accept_rejected_non_recoverable () =
    the keeper loops forever without auto-pause. *)
 let test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted () =
   let cases =
-    [ (KT.Candidates_filtered_after_cycles, "Candidates_filtered_after_cycles")
-    ; (KT.Max_turns_exceeded, "Max_turns_exceeded")
+    [ (Keeper_meta_contract.Candidates_filtered_after_cycles, "Candidates_filtered_after_cycles")
+    ; (Keeper_meta_contract.Max_turns_exceeded, "Max_turns_exceeded")
     ]
   in
   List.iter (fun (reason, label) ->
@@ -194,7 +195,7 @@ let test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted () =
     ) cases
 
 let test_catalog_rotation_preserves_order_without_base_injection () =
-  let err = make_cascade_exhausted Masc_mcp.Keeper_meta_contract.All_providers_failed in
+  let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
   match
     KEC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:[ "catalog_first"; "base_only" ]
@@ -210,32 +211,32 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Expected catalog-ordered degraded retry"
 
-let test_rotation_skips_direct_tier_after_attempted_tier_group () =
-  let err = make_cascade_exhausted KT.Candidates_filtered_after_cycles in
+let test_rotation_skips_direct_tier_after_attempted_cascade () =
+  let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match
     KEC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:
-        [ "tier.strict_tool_candidates"; "tier-group.provider_k-coding-with-spark" ]
-      ~base_cascade:"tier-group.strict_tool_candidates"
-      ~effective_cascade:"tier-group.strict_tool_candidates"
+        [ "cascade.strict_tool_candidates"; "cascade.provider_k-coding-with-spark" ]
+      ~base_cascade:"cascade.strict_tool_candidates"
+      ~effective_cascade:"cascade.strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "tier-group.strict_tool_candidates" ]
+      ~attempted_cascades:[ "cascade.strict_tool_candidates" ]
       err
   with
   | Some retry ->
     check
       string
-      "skip direct tier duplicate"
-      "tier-group.provider_k-coding-with-spark"
+      "skip direct cascade duplicate"
+      "cascade.provider_k-coding-with-spark"
       retry.next_cascade
-  | None -> fail "Expected rotation to skip duplicate direct tier candidate"
+  | None -> fail "Expected rotation to skip duplicate direct cascade candidate"
 
 let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
   let err =
     Owne.sdk_error_of_masc_internal_error
       (Owne.Resumable_cli_session
          {
-           cascade_name = cascade_name "tier.strict_tool_candidates";
+           cascade_name = cascade_name "cascade.strict_tool_candidates";
            detail =
              "CLI JSON-stream transport reported a resumable session (exit 75). \
               Resumable session available via -r.";
@@ -264,7 +265,7 @@ let test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted ()
     Owne.sdk_error_of_masc_internal_error
       (Owne.Resumable_cli_session
          {
-           cascade_name = cascade_name "tier.strict_tool_candidates";
+           cascade_name = cascade_name "cascade.strict_tool_candidates";
            detail =
              "CLI JSON-stream transport reported a resumable session (exit 75). \
               Resumable session available via -r.";
@@ -371,7 +372,7 @@ let test_server_error_524_is_transient_network_error_and_cascade_rotation () =
 let test_wrapped_524_is_capacity_backpressure () =
   let err =
     make_cascade_exhausted
-      (Masc_mcp.Keeper_meta_contract.Other_detail
+      (Keeper_meta_contract.Other_detail
          "all tiers failed (last runtime=runtime, error=Server error 524: error \
           code: 524)")
   in
@@ -467,18 +468,18 @@ let test_rotation_finds_next_cascade_for_auth_error () =
 
 (* ---- Bare-name requalification tests (cascade-name-prefix-mismatch fix) ---- *)
 
-(* #19327 tier-group purge: test_normalized_cascade_name_requalifies_bare_tier_name
+(* #19327 cascade purge: test_normalized_cascade_name_requalifies_bare_tier_name
    removed.  It asserted bare "strict_tool_candidates" was rewritten to
-   "tier.strict_tool_candidates" using the prefix canonical form, which is
+   "cascade.strict_tool_candidates" using the prefix canonical form, which is
    no longer the semantics of [normalized_cascade_name]. *)
 
 let test_normalized_cascade_name_passes_through_already_qualified () =
   let catalog_names = [ "strict_tool_candidates"; "primary" ] in
   let result =
-    KEC.normalized_cascade_name ~catalog_names "tier.strict_tool_candidates"
+    KEC.normalized_cascade_name ~catalog_names "cascade.strict_tool_candidates"
   in
   check string "already-qualified passes through"
-    "tier.strict_tool_candidates" result
+    "cascade.strict_tool_candidates" result
 
 let test_normalized_cascade_name_preserves_config_special_names () =
   let catalog_names = [] in
@@ -550,8 +551,8 @@ let () =
         [
           test_case "catalog order is not prefixed by base cascade" `Quick
             test_catalog_rotation_preserves_order_without_base_injection;
-          test_case "skips direct tier after attempted tier-group" `Quick
-            test_rotation_skips_direct_tier_after_attempted_tier_group;
+          test_case "skips direct cascade after attempted cascade" `Quick
+            test_rotation_skips_direct_tier_after_attempted_cascade;
           test_case "required-tool rotation prefers tool route before fallback hint" `Quick
             test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint;
           test_case "required-tool rotation keeps fallback hint after tool route" `Quick
@@ -563,7 +564,7 @@ let () =
         ] );
       ( "normalized_cascade_name_bare_requalify",
         [
-          (* #19327: "bare tier name requalified with prefix" test removed. *)
+          (* #19327: "bare cascade name requalified with prefix" test removed. *)
           test_case "already-qualified name passes through" `Quick
             test_normalized_cascade_name_passes_through_already_qualified;
           test_case "config special names preserved" `Quick

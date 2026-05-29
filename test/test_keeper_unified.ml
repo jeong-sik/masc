@@ -1,6 +1,7 @@
 module Types = Masc_domain
 open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module KHL = Masc_mcp.Keeper_heartbeat_loop
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
@@ -28,7 +29,7 @@ module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_types_support = Masc_mcp.Keeper_types_support
 
-(* #19327 tier-group purge: Cascade_name is a plain string alias. *)
+(* #19327 cascade purge: Cascade_name is a plain string alias. *)
 let oas_error_cascade_name raw =
   Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw
   |> Cascade_name.of_string_exn
@@ -1829,7 +1830,7 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
 let test_provider_cooldown_blocks_bootstrap_turn () =
   let meta =
     { (Masc_mcp.Keeper_meta_contract.set_cascade_name
-         Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
+         Masc_mcp.(Keeper_config.default_cascade_name ())
          minimal_meta)
       with
       proactive = { enabled = true; idle_sec = 300; cooldown_sec = 1800 }
@@ -2023,7 +2024,7 @@ let test_provider_cooldown_blocks_min_interval_turn () =
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
     let meta =
       { (Masc_mcp.Keeper_meta_contract.set_cascade_name
-           Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
+           Masc_mcp.(Keeper_config.default_cascade_name ())
            minimal_meta)
         with
         proactive = { enabled = true; idle_sec = 0; cooldown_sec = 600 }
@@ -6344,8 +6345,8 @@ let structured_cascade_max_turns_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
     (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
        { cascade_name =
-           oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
-       ; reason = Masc_mcp.Keeper_meta_contract.Max_turns_exceeded
+           oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+       ; reason = Keeper_meta_contract.Max_turns_exceeded
        })
 ;;
 
@@ -6863,7 +6864,7 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
 let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () =
   let rotation =
     UT.fail_open_rotation_cascades_from_catalog
-      ~excluded_targets:[ "tier.ollama_cloud_primary" ]
+      ~excluded_targets:[ "cascade.ollama_cloud_primary" ]
       ~catalog_names:
         [
           KC.default_cascade_name ();
@@ -7905,7 +7906,7 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
+             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
          ; reason = Masc_mcp.Keeper_meta_contract.All_providers_failed
          })
   in
@@ -7964,8 +7965,8 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
-         ; reason = Masc_mcp.Keeper_meta_contract.Candidates_filtered_after_cycles
+             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+         ; reason = Keeper_meta_contract.Candidates_filtered_after_cycles
          })
   in
   check
@@ -9300,9 +9301,9 @@ let test_social_model_previous_state_of_meta_restores_runtime_fields () =
         ; last_current_intention = "recover_tool_route"
         ; last_blocker =
             Some
-              (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+              (Keeper_meta_contract.blocker_info_of_class
                  ~detail:"tool route unavailable"
-                 (Masc_mcp.Keeper_meta_contract.Cascade_exhausted Masc_mcp.Keeper_meta_contract.No_tool_capable))
+                 (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable))
         ; last_need = "operator guidance"
         }
     }
@@ -9640,9 +9641,9 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
         ; last_current_intention = "recover_tool_route"
         ; last_blocker =
             Some
-              (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+              (Keeper_meta_contract.blocker_info_of_class
                  ~detail:"tool route unavailable"
-                 (Masc_mcp.Keeper_meta_contract.Cascade_exhausted Masc_mcp.Keeper_meta_contract.No_tool_capable))
+                 (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable))
         ; last_need = "operator guidance"
         }
     }

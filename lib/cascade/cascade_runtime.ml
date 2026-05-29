@@ -36,33 +36,6 @@ let local_model_label model_id =
   | Some provider_id -> provider_id ^ ":" ^ model_id
   | None -> "auto"
 
-let provider_name_requires_local_discovery provider_name =
-  match Cascade_config_provider_binding.runtime_binding_of_label provider_name with
-  | Some binding -> binding_is_local_runtime binding
-  | None -> false
-
-let provider_name_is_local_or_custom provider_name =
-  let normalized = String.trim provider_name |> String.lowercase_ascii in
-  String.equal normalized "custom"
-  || provider_name_requires_local_discovery provider_name
-
-let is_local_only_cascade name =
-  let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
-  let pattern = "local" in
-  let plen = String.length pattern in
-  let slen = String.length lc in
-  let rec loop i =
-    if i > slen - plen then false
-    else if String.sub lc i plen = pattern then true
-    else loop (i + 1)
-  in
-  loop 0
-
-let is_local_label label =
-  match provider_name_of_label label with
-  | Some pname -> provider_name_is_local_or_custom pname
-  | None -> false
-
 let is_typed_declarative_label_provider = function
   | "openai_compat" -> true
   | _ -> false
@@ -78,106 +51,19 @@ let default_model_strings ~cascade_name =
   let cascade_name =
     cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
   in
-  let all_labels =
-    match Provider_runtime_projection.preferred_execution_model_labels () with
-    | [] ->
-      (* No preferred execution label is configured. Surface so dashboards can
-         alert on missing execution-lane config. *)
-      Cascade_metrics.on_default_label_fallback
-        ~cascade:cascade_name ~reason:"no_execution_labels";
-      [ Provider_runtime_projection.default_local_fallback_label () ]
-    | labels -> labels
-  in
-  if is_local_only_cascade cascade_name then
-    match List.filter is_local_label all_labels with
-    | [] ->
-      (* Local-only cascade but the resolved label set has no local
-         scheme — operator routed local traffic at a cascade with
-         only remote providers.  Iter 25 counter. *)
-      Cascade_metrics.on_default_label_fallback
-        ~cascade:cascade_name ~reason:"local_cascade_no_local";
-      [ Provider_runtime_projection.default_local_fallback_label () ]
-    | local -> local
-  else
-    all_labels
+  match Provider_runtime_projection.preferred_execution_model_labels () with
+  | [] ->
+    (* No preferred execution label is configured. Surface so dashboards can
+       alert on missing execution-lane config. *)
+    Cascade_metrics.on_default_label_fallback
+      ~cascade:cascade_name ~reason:"no_execution_labels";
+    [ Provider_runtime_projection.default_local_fallback_label () ]
+  | labels -> labels
 
-let labels_require_local_discovery (labels : string list) : bool =
-  List.exists
-    (fun label ->
-      match provider_name_of_label label with
-      | Some pname -> provider_name_requires_local_discovery pname
-      | None -> false)
-    labels
-
-(* RFC-0037 §4.3: surface partial Eio_context as a loud, warn-once
-   diagnostic instead of a silent skip.  The Provider_registry public
-   API on this module's downstream (Llm_provider) requires both [sw]
-   and [net] to probe — there is no register-without-probe path — so
-   we cannot register a fallback endpoint here.  What we *can* do is
-   tell the operator exactly why local discovery did not run, so they
-   can fix their bootstrap (typically: ensure [Eio_context] is
-   populated before the first cascade attempt that requires
-   discovery). *)
-let local_discovery_warned = Atomic.make false
-
-let warn_partial_eio_context_once ~sw_some ~net_some =
-  (* Iter 39: counter ticks on EVERY hit (independent of the
-     WARN-once dedup), so a caller-side regression that keeps
-     hitting this path after the first log line stays observable
-     via the metric. *)
-  Cascade_metrics.on_partial_eio_context ();
-  if not (Atomic.exchange local_discovery_warned true) then
-    Log.warn ~ctx:"CascadeRuntime"
-      "Local discovery skipped: Eio_context partial (sw=%b net=%b). \
-       Local providers (ollama, llama.cpp) will not be auto-discovered. \
-       Ensure Eio_context.set_switch and set_net run before the first \
-       cascade attempt that requires local discovery. (RFC-0037 §4.3)"
-      sw_some net_some
-
-let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
-  if not (labels_require_local_discovery labels) then false
-  else
-    let sw =
-      match sw with Some value -> Some value | None -> Eio_context.get_switch_opt ()
-    in
-    let net =
-      match net with Some value -> Some value | None -> Eio_context.get_net_opt ()
-    in
-    match sw, net with
-    | Some sw, Some net ->
-        let before = Llm_provider.Provider_registry.discovered_max_context () in
-        (try
-           ignore
-             (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ());
-           let after = Llm_provider.Provider_registry.discovered_max_context () in
-           (match before, after with
-            | Some prev, Some next when prev <> next ->
-                Log.info ~ctx:"CascadeRuntime"
-                  "refreshed local runtime context: %d -> %d" prev next
-            | None, Some next ->
-                Log.info ~ctx:"CascadeRuntime"
-                  "refreshed local runtime context: unset -> %d" next
-            | Some _, Some _ -> ()
-            | Some _, None | None, None -> ());
-           true
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-             (* Iter 40: counter ticks alongside the WARN log so the
-                swallow rate is alertable.  Previously the exception
-                arm logged once per occurrence (no dedup) but had no
-                Prometheus surface — operators could only spot
-                regressions by tailing logs. *)
-             Cascade_metrics.on_discovery_refresh_exception ();
-             Log.warn ~ctx:"CascadeRuntime"
-               "local runtime discovery refresh failed: %s"
-               (Printexc.to_string exn);
-             false)
-    | _ ->
-        warn_partial_eio_context_once
-          ~sw_some:(Option.is_some sw)
-          ~net_some:(Option.is_some net);
-        false
+(* Local discovery removed: tier-based local/non-local classification
+   no longer exists. All providers are treated uniformly. *)
+let refresh_local_discovery_if_possible ?sw:_ ?net:_ (_labels : string list) : bool =
+  false
 
 let context_floor = 4_096
 
@@ -270,31 +156,10 @@ module For_testing = struct
     resolve_primary_max_context_in_registry
 end
 
-let labels_are_pure_local (labels : string list) : bool =
-  labels <> []
-  &&
-  List.for_all
-    (fun label ->
-      match provider_name_of_label label with
-      | Some pname -> provider_name_is_local_or_custom pname
-      | None -> false)
-    labels
-
 let clamp_context_for_pure_local_labels ~(labels : string list) ~(max_context : int)
     : int =
-  if labels_are_pure_local labels
-  then begin
-    let clamped = min max_context Env_config.ContextCompact.small_local_floor in
-    (* Iter 49: tick a counter when the clamp actually reduces the
-       window (max_context > floor).  Same family as DD-020
-       max_tokens_ceiling_violation: local context clamps remain
-       observable so operators can spot cascade.toml settings being
-       clipped on local-only cascades. *)
-    if clamped < max_context then
-      Cascade_metrics.on_local_context_clamped ();
-    clamped
-  end
-  else max_context
+  ignore labels;
+  max_context
 
 let model_id_of_label label =
   match String.index_opt label ':' with
@@ -359,7 +224,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
           match provider_name_of_label label with
           | None -> true
           | Some pname ->
-              if provider_name_is_local_or_custom pname || is_typed_declarative_label_provider pname
+              if is_typed_declarative_label_provider pname
               then true
               else
                 match Llm_provider.Provider_registry.find default_registry pname with
@@ -375,8 +240,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
             match provider_name_of_label label with
             | None -> None
             | Some pname ->
-                if provider_name_is_local_or_custom pname
-                   || is_typed_declarative_label_provider pname
+                if is_typed_declarative_label_provider pname
                 then None
                 else
                   match Llm_provider.Provider_registry.find default_registry pname with

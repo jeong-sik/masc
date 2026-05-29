@@ -105,7 +105,7 @@ let test_cascade_json_absent () =
   check bool "config/cascade.json absent" false (Sys.file_exists (config_path "cascade.json"))
 ;;
 
-(* #19327/#19340 tier-group purge: helpers [find_tier_group] / [find_tier] /
+(* #19327/#19340 cascade purge: helpers [find_cascade] / [find_tier] /
    [index_of] and the four tests that exercised them (ollama_cloud_stable,
    strict_tool_group, no_deprecated_profile_names, primary_priority_order)
    removed.  If equivalent invariants against the new direct-binding

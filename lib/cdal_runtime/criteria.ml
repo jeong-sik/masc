@@ -1,12 +1,3 @@
-type tool_access_json = Yojson.Safe.t
-
-let tool_access_json_to_yojson (j : tool_access_json) : Yojson.Safe.t = j
-let tool_access_json_of_yojson (j : Yojson.Safe.t) : (tool_access_json, string) result = Ok j
-let pp_tool_access_json fmt (j : tool_access_json) =
-  Format.pp_print_string fmt (Yojson.Safe.to_string j)
-let equal_tool_access_json (a : tool_access_json) (b : tool_access_json) =
-  Yojson.Safe.equal a b
-
 type goal_ref =
   { goal_id : string
   ; goal_title : string
@@ -17,12 +8,7 @@ type t =
   | Keeper_turn_capture_v1 of
       { keeper_name : string
       ; agent_name : string
-      ; sandbox_profile : string
-      ; sandbox_image : string option
       ; network_mode : string
-      ; tool_access : tool_access_json
-      ; tool_denylist : string list
-      ; allowed_paths : string list
       ; active_goal_ids : string list
       ; current_task_id : string option
       }
@@ -65,12 +51,7 @@ let to_yojson (t : t) : Yojson.Safe.t =
       [ "kind", `String "keeper_turn_capture_v1"
       ; "keeper_name", `String r.keeper_name
       ; "agent_name", `String r.agent_name
-      ; "sandbox_profile", `String r.sandbox_profile
       ; "network_mode", `String r.network_mode
-      ; "sandbox_image", Json_util.string_opt_to_json r.sandbox_image
-      ; "tool_access", r.tool_access
-      ; "tool_denylist", Json_util.json_string_list r.tool_denylist
-      ; "allowed_paths", Json_util.json_string_list r.allowed_paths
       ; "active_goal_ids", Json_util.json_string_list r.active_goal_ids
       ; "current_task_id_at_start", Json_util.string_opt_to_json r.current_task_id
       ]
@@ -137,22 +118,8 @@ let decode_keeper_turn_capture_v1 pairs =
   let* keeper_name = as_string keeper_name in
   let* agent_name = require pairs "agent_name" in
   let* agent_name = as_string agent_name in
-  let* sandbox_profile = require pairs "sandbox_profile" in
-  let* sandbox_profile = as_string sandbox_profile in
-  let* sandbox_image = as_string_opt (optional pairs "sandbox_image") in
   let* network_mode = require pairs "network_mode" in
   let* network_mode = as_string network_mode in
-  let tool_access = optional pairs "tool_access" in
-  let* tool_denylist =
-    match assoc_lookup pairs "tool_denylist" with
-    | None -> Ok []
-    | Some v -> as_string_list v
-  in
-  let* allowed_paths =
-    match assoc_lookup pairs "allowed_paths" with
-    | None -> Ok []
-    | Some v -> as_string_list v
-  in
   let* active_goal_ids =
     match assoc_lookup pairs "active_goal_ids" with
     | None -> Ok []
@@ -165,12 +132,7 @@ let decode_keeper_turn_capture_v1 pairs =
     (Keeper_turn_capture_v1
        { keeper_name
        ; agent_name
-       ; sandbox_profile
-       ; sandbox_image
        ; network_mode
-       ; tool_access
-       ; tool_denylist
-       ; allowed_paths
        ; active_goal_ids
        ; current_task_id
        })

@@ -338,10 +338,10 @@ let cascade_toml ?(route_target = "default") ?(extra_route_targets = [])
   let profile_toml ~valid name =
     Printf.sprintf
       {|
-[tier.%s]
+[cascade.%s]
 members = [%S]
 
-[tier-group.%s]
+[cascade.%s]
 tiers = [%S]
 |}
       name
@@ -356,7 +356,7 @@ tiers = [%S]
             (Printf.sprintf "assignable_%d" (index + 1), target))
          extra_route_targets
     |> List.map (fun (route_name, target) ->
-           Printf.sprintf "[routes.%s]\ntarget = \"tier-group.%s\"\n" route_name target)
+           Printf.sprintf "[routes.%s]\ntarget = \"cascade.%s\"\n" route_name target)
     |> String.concat "\n"
   in
   Printf.sprintf
@@ -650,7 +650,7 @@ let write_and_register_keeper
     ?current_task_id
     ()
   =
-  Fs_compat.mkdir_p (Masc_mcp.Keeper_types_profile.keeper_dir config);
+  Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
   write_file
     (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
     (make_keeper_meta_json
@@ -684,7 +684,7 @@ let write_keeper_toml_fixture ~config_root ~keeper_name =
 let seed_auth_and_keeper ~base_path ~keeper_name =
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
-  Fs_compat.mkdir_p (Masc_mcp.Keeper_types_profile.keeper_dir config);
+  Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
   write_file
     (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
     (make_keeper_meta_json ~name:keeper_name ());
@@ -857,7 +857,7 @@ let append_execution_receipt
   let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
   let base_dir =
     Filename.concat
-      (Masc_mcp.Keeper_types_profile.keeper_dir config)
+      (Masc_mcp.Keeper_fs.keeper_dir config)
       (keeper_name ^ "/execution-receipts")
   in
   let month_dir = Filename.concat base_dir month in
@@ -1089,7 +1089,7 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
          {
            meta with
            continuity_summary = "stale continuity snapshot";
-           updated_at = Masc_domain.now_iso ();
+           updated_at = Masc_mcp.Keeper_meta_contract.now_iso ();
            runtime =
              {
                meta.runtime with
@@ -1291,7 +1291,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
     (Sys.file_exists agent_metrics_dir);
   check bool "keeper runtime directory removed" false
     (Sys.file_exists
-       (Filename.concat (Masc_mcp.Keeper_types_profile.keeper_dir config) keeper_name));
+       (Filename.concat (Masc_mcp.Keeper_fs.keeper_dir config) keeper_name));
   check bool "keeper session trace removed" false
     (Sys.file_exists
        (Masc_mcp.Keeper_types_support.keeper_session_dir config
@@ -1308,12 +1308,12 @@ let test_available_cascade_profiles_filter_invalid_catalog_entries () =
   check
     (list string)
     "assignable cascades exclude invalid presets"
-    [ "tier-group.good"; "tier.good" ]
+    [ "cascade.good"; "cascade.good" ]
     (Routes.available_cascade_profiles ());
   let invalid = Routes.invalid_cascade_profiles () in
   check bool "invalid preset is surfaced separately" true
-    (List.mem_assoc "tier.broken" invalid
-     || List.mem_assoc "tier-group.broken" invalid)
+    (List.mem_assoc "cascade.broken" invalid
+     || List.mem_assoc "cascade.broken" invalid)
 ;;
 
 let test_invalid_profile_projection_keeps_internal_names () =
@@ -1332,54 +1332,54 @@ tools-support = true
 
 [custom.mock]
 
-[tier.primary]
+[cascade.primary]
 members = ["missing_provider.fake"]
 
-[tier.good]
+[cascade.good]
 members = ["custom.mock"]
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["good"]
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 |}
       endpoint model_id
   in
   with_temp_config_root cascade_toml @@ fun config_root ->
   with_config_dir config_root @@ fun () ->
-  check bool "valid qualified tier-group remains assignable" true
-    (List.mem "tier-group.primary" (Routes.available_cascade_profiles ()));
+  check bool "valid qualified cascade remains assignable" true
+    (List.mem "cascade.primary" (Routes.available_cascade_profiles ()));
   check bool "legacy public alias is not exposed as assignable" false
     (List.mem "primary" (Routes.available_cascade_profiles ()));
   let invalid = Routes.invalid_cascade_profiles () in
   check bool "invalid tier keeps qualified name" true
-    (List.mem_assoc "tier.primary" invalid);
-  check bool "valid tier-group is not conflated with invalid tier" false
-    (List.mem_assoc "tier-group.primary" invalid)
+    (List.mem_assoc "cascade.primary" invalid);
+  check bool "valid cascade is not conflated with invalid tier" false
+    (List.mem_assoc "cascade.primary" invalid)
 ;;
 
 let test_invalid_assignment_matching_prefers_runtime_qualified_profile () =
   let invalid_tier =
     Masc_mcp.Dashboard_cascade.invalid_assignments_for_public_profiles
-      ~known_internal_profiles:[ "tier-group.primary"; "tier.primary" ]
-      ~invalid_profiles:[ "tier.primary", [ "tier is invalid" ] ]
+      ~known_internal_profiles:[ "cascade.primary"; "cascade.primary" ]
+      ~invalid_profiles:[ "cascade.primary", [ "tier is invalid" ] ]
       [ "primary" ]
   in
   check
     (list (pair string (list string)))
-    "valid preferred tier-group is not rejected by invalid tier"
+    "valid preferred cascade is not rejected by invalid tier"
     []
     invalid_tier;
   let invalid_group =
     Masc_mcp.Dashboard_cascade.invalid_assignments_for_public_profiles
-      ~known_internal_profiles:[ "tier-group.primary"; "tier.primary" ]
-      ~invalid_profiles:[ "tier-group.primary", [ "group is invalid" ] ]
+      ~known_internal_profiles:[ "cascade.primary"; "cascade.primary" ]
+      ~invalid_profiles:[ "cascade.primary", [ "group is invalid" ] ]
       [ "primary" ]
   in
   check
     (list (pair string (list string)))
-    "invalid preferred tier-group rejects public assignment"
+    "invalid preferred cascade rejects public assignment"
     [ "primary", [ "group is invalid" ] ]
     invalid_group
 ;;
@@ -1400,14 +1400,14 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   let profiles = profile_names list_result.body in
   let invalid_profiles = invalid_profile_names list_result.body in
   check bool "valid profile remains assignable" true
-    (List.mem "tier-group.good" profiles && List.mem "tier.good" profiles);
+    (List.mem "cascade.good" profiles && List.mem "cascade.good" profiles);
   check bool "legacy public alias omitted from assignable list" false
     (List.mem "good" profiles);
   check bool "invalid profile omitted from assignable list" false
-    (List.mem "tier.broken" profiles || List.mem "tier-group.broken" profiles);
+    (List.mem "cascade.broken" profiles || List.mem "cascade.broken" profiles);
   check bool "invalid profile is surfaced in payload" true
-    (List.mem "tier.broken" invalid_profiles
-     || List.mem "tier-group.broken" invalid_profiles);
+    (List.mem "cascade.broken" invalid_profiles
+     || List.mem "cascade.broken" invalid_profiles);
   let assign_public_alias_result =
     run_curl_post
       ~body:
@@ -1427,7 +1427,7 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
     run_curl_post
       ~body:
         (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"tier.broken"}|}
+           {|{"keeper":"%s","cascade_name":"cascade.broken"}|}
            keeper_name)
       ~token:admin_token
       ~port
@@ -1464,7 +1464,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   check string "dashboard starts with seeded meta cascade"
     Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
     (keeper_profile_cascade_name before.body keeper_name);
-  let candidate = cascade_profile_first_candidate before.body "tier-group.primary" in
+  let candidate = cascade_profile_first_candidate before.body "cascade.primary" in
   check bool "dashboard cascade config keeps candidate model label" true
     (contains_substr "custom:mock@" (candidate_string_field "model" candidate));
   check bool "dashboard cascade config keeps display model label" true
@@ -1476,7 +1476,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
     run_curl_post
       ~body:
         (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"tier.alternate"}|}
+           {|{"keeper":"%s","cascade_name":"cascade.alternate"}|}
            keeper_name)
       ~token:admin_token
       ~port
@@ -1493,13 +1493,13 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   in
   require_status "cascade config GET after assignment returns 200" 200 after;
   check string "dashboard projection reflects assigned cascade"
-    "tier.alternate"
+    "cascade.alternate"
     (keeper_profile_cascade_name after.body keeper_name);
   let keeper_toml_path =
     Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
   in
   check bool "persistent TOML cascade updated" true
-    (contains_substr {|cascade_name = "tier.alternate"|} (read_file keeper_toml_path))
+    (contains_substr {|cascade_name = "cascade.alternate"|} (read_file keeper_toml_path))
 ;;
 
 let test_execution_trust_route_surfaces_trust_summary_fields () =
@@ -1754,7 +1754,7 @@ let test_composite_runtime_attention_surfaces_fiber_stop () =
       let keeper_name = "stop_requested_demo" in
       let config = Masc_mcp.Coord.default_config base_path in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
-      Fs_compat.mkdir_p (Masc_mcp.Keeper_types_profile.keeper_dir config);
+      Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
       write_file
         (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
         (make_keeper_meta_json ~name:keeper_name ~paused:false ());
@@ -1809,7 +1809,7 @@ let test_composite_runtime_attention_ignores_previous_receipt_during_live_turn (
       let keeper_name = "live_turn_previous_receipt_demo" in
       let config = Masc_mcp.Coord.default_config base_path in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
-      Fs_compat.mkdir_p (Masc_mcp.Keeper_types_profile.keeper_dir config);
+      Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
       write_file
         (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
         (make_keeper_meta_json ~name:keeper_name ~paused:false ());

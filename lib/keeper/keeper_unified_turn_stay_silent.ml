@@ -34,7 +34,7 @@ let mark_loop_detected ~(config : Coord.config) (meta : Keeper_meta_contract.kee
   in
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path
-    meta.name
+    meta.Keeper_meta_contract.name
     (Some failure_reason);
   let stimulus =
     recovery_stimulus
@@ -80,7 +80,7 @@ let mark_loop_detected ~(config : Coord.config) (meta : Keeper_meta_contract.kee
 
 let clear_if_recovered ~(config : Coord.config) (meta : Keeper_meta_contract.keeper_meta) ~previous_streak ~was_latched =
   if was_latched then begin
-    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    match Keeper_registry.get ~base_path:config.base_path meta.Keeper_meta_contract.name with
     | Some { Keeper_registry.last_failure_reason =
                Some (Keeper_registry.Tool_required_unsatisfied { code; _ })
            ; _

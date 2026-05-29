@@ -1,6 +1,9 @@
 open Alcotest
 
 module R = Masc_mcp.Keeper_registry
+module Keeper_types_profile = Masc_mcp.Keeper_types_profile
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
+module Keeper_meta_store = Masc_mcp.Keeper_meta_store
 module Keeper_types = Masc_mcp.Keeper_types
 module Keepalive = Masc_mcp.Keeper_keepalive
 module KSM = Masc_mcp.Keeper_state_machine
@@ -1353,7 +1356,7 @@ let test_record_spawn_slot_denied_emits_metric () =
 
 let make_eio_keeper_context env sw base_path =
   let config = Masc_mcp.Coord.default_config base_path in
-  { Masc_mcp.Keeper_types_profile.config
+  { Keeper_types_profile.config
   ; agent_name = "operator"
   ; sw
   ; clock = Eio.Stdenv.clock env
@@ -1541,7 +1544,7 @@ let test_meta_write_sync_updates_registered_only () =
           Masc_mcp.Keeper_metrics.(to_string RegistryUpdateDropped)
           ~labels ()
       in
-      (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config (make_meta dormant_name) with
+      (match Keeper_meta_store.write_meta ~force:true config (make_meta dormant_name) with
        | Ok () -> ()
        | Error err -> fail ("write_meta dormant failed: " ^ err));
       let dropped_after =
@@ -1557,7 +1560,7 @@ let test_meta_write_sync_updates_registered_only () =
       let live_meta = make_meta live_name in
       ignore (R.register ~base_path live_name live_meta);
       let updated_meta = { live_meta with goal = "updated from disk write" } in
-      (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config updated_meta with
+      (match Keeper_meta_store.write_meta ~force:true config updated_meta with
        | Ok () -> ()
        | Error err -> fail ("write_meta live failed: " ^ err));
       match R.get ~base_path live_name with
@@ -1705,12 +1708,12 @@ let test_directive_pause_persists_meta () =
     (fun () ->
       let config = make_test_config base_dir in
       let meta = make_meta "dpersist" in
-      (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+      (match Keeper_meta_store.write_meta ~force:true config meta with
        | Ok () -> ()
        | Error err -> fail ("write_meta failed: " ^ err));
       ignore (R.register ~base_path:base_dir "dpersist" meta);
       KK.process_directive ~agent_name:"agent-dpersist" "pause";
-      match Masc_mcp.Keeper_meta_store.read_meta config "dpersist" with
+      match Keeper_meta_store.read_meta config "dpersist" with
       | Ok (Some persisted) ->
           check bool "paused persisted" true persisted.paused
       | Ok None -> fail "expected persisted meta"
@@ -1724,12 +1727,12 @@ let test_directive_claim_persists_meta () =
     (fun () ->
       let config = make_test_config base_dir in
       let meta = make_meta "dclaimpersist" in
-      (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
+      (match Keeper_meta_store.write_meta ~force:true config meta with
        | Ok () -> ()
        | Error err -> fail ("write_meta failed: " ^ err));
       ignore (R.register ~base_path:base_dir "dclaimpersist" meta);
       KK.process_directive ~agent_name:"agent-dclaimpersist" "claim:T-77";
-      match Masc_mcp.Keeper_meta_store.read_meta config "dclaimpersist" with
+      match Keeper_meta_store.read_meta config "dclaimpersist" with
       | Ok (Some persisted) ->
           (match persisted.current_task_id with
            | Some task_id ->
@@ -1810,8 +1813,8 @@ let test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in () =
         let config = make_test_config base_dir in
         let alpha = make_meta "alpha" in
         let beta = make_meta "beta" in
-        ignore (Masc_mcp.Keeper_meta_store.write_meta ~force:true config alpha);
-        ignore (Masc_mcp.Keeper_meta_store.write_meta ~force:true config beta);
+        ignore (Keeper_meta_store.write_meta ~force:true config alpha);
+        ignore (Keeper_meta_store.write_meta ~force:true config beta);
         let entry_a = R.register ~base_path:base_dir "alpha" alpha in
         let entry_b = R.register ~base_path:base_dir "beta" beta in
         let post =
@@ -1856,8 +1859,8 @@ let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
         let opted_in_base = make_meta "opted-in" in
         let opted_in = { opted_in_base with room_signal_prompt_enabled = true } in
         let defaulted = make_meta "defaulted" in
-        ignore (Masc_mcp.Keeper_meta_store.write_meta ~force:true config opted_in);
-        ignore (Masc_mcp.Keeper_meta_store.write_meta ~force:true config defaulted);
+        ignore (Keeper_meta_store.write_meta ~force:true config opted_in);
+        ignore (Keeper_meta_store.write_meta ~force:true config defaulted);
         let entry_a = R.register ~base_path:base_dir "opted-in" opted_in in
         let entry_b = R.register ~base_path:base_dir "defaulted" defaulted in
         let post =
@@ -1907,7 +1910,7 @@ let test_board_signal_explicit_mention_resumes_paused_keeper () =
         Masc_mcp.Board_dispatch.init_jsonl ();
         let config = make_test_config base_dir in
         let paused = { (make_meta "sleepy") with paused = true } in
-        (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config paused with
+        (match Keeper_meta_store.write_meta ~force:true config paused with
          | Ok () -> ()
          | Error err -> fail ("write_meta failed: " ^ err));
         let entry = R.register ~base_path:base_dir "sleepy" paused in
@@ -1938,7 +1941,7 @@ let test_board_signal_explicit_mention_resumes_paused_keeper () =
         check int "paused keeper queued board stimulus" 1
           (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:base_dir "sleepy"
            |> Keeper_event_queue.length);
-        (match Masc_mcp.Keeper_meta_store.read_meta config "sleepy" with
+        (match Keeper_meta_store.read_meta config "sleepy" with
          | Ok (Some persisted) ->
            check bool "paused meta resumed" false persisted.paused
          | Ok None -> fail "expected persisted meta"
@@ -1964,8 +1967,8 @@ let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
         let config = make_test_config base_dir in
         let participant = make_meta "participant" in
         let bystander = make_meta "bystander" in
-        ignore (Masc_mcp.Keeper_meta_store.write_meta ~force:true config participant);
-        ignore (Masc_mcp.Keeper_meta_store.write_meta ~force:true config bystander);
+        ignore (Keeper_meta_store.write_meta ~force:true config participant);
+        ignore (Keeper_meta_store.write_meta ~force:true config bystander);
         let entry_a = R.register ~base_path:base_dir "participant" participant in
         let entry_b = R.register ~base_path:base_dir "bystander" bystander in
         let post =

@@ -72,6 +72,10 @@ type try_cascade_ctx =
        [run_named] for per-attempt deadline composition. [None] =
        no deadline; legacy env amplifier behaviour. *)
     wait_timeout_sec : float option
+  ; (* RFC-0192 §2: turn-level absolute deadline. Composed with per-attempt
+       amplifier in [pp_timeout] so a candidate never receives more wall-clock
+       budget than remains in the turn. [None] = no turn deadline. *)
+    turn_deadline : Cascade_deadline.t option
   }
 
 (* Manifest ID helpers — pure functions taking manifest context. *)
@@ -465,7 +469,13 @@ let rec run
       run ~on_success ?resume_checkpoint ?per_provider_timeout_s
         ~pre_dispatch_required_tool_rejections_rev
         ~last_capacity_backpressure:
-          (Client_capacity, capacity_detail, retry_after_s)
+          ( Client_capacity
+          , capacity_detail
+          , (* a computed client-capacity cooldown is a real backoff, not a
+               blind synthetic default *)
+            (match retry_after_s with
+             | Some s -> Cascade_internal_error.Explicit s
+             | None -> Cascade_internal_error.No_retry_hint) )
         ctx rest last_err
     | (`No_client_capacity | `Acquired _) as capacity_slot ->
     let capacity_release =
@@ -481,7 +491,18 @@ let rec run
         ~configured_timeout_s:per_provider_timeout_s
         candidate
     in
-    let pp_timeout = timeout_resolution.timeout_s in
+    let pp_timeout =
+      match timeout_resolution.timeout_s, ctx.turn_deadline with
+      | Some amplifier, Some deadline ->
+          (match Eio_context.get_clock_opt () with
+           | Some clock ->
+               let budget =
+                 Cascade_deadline.composed_attempt_budget ~clock ~deadline ~amplifier
+               in
+               if budget > 0.0 then Some budget else Some 0.1
+           | None -> timeout_resolution.timeout_s)
+      | _ -> timeout_resolution.timeout_s
+    in
     let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
     let liveness_observer_attached =
       match liveness_mode with

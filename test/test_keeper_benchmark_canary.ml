@@ -1,6 +1,7 @@
 open Alcotest
 
 module KBC = Masc_mcp.Keeper_benchmark_canary
+module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
 module KML = Masc_mcp.Keeper_model_labels
 module KT = Masc_mcp.Keeper_meta_contract
 module TQB = Tool_call_quality_benchmark
@@ -56,7 +57,7 @@ let make_meta ?(name = "analyst") ?(models = []) () =
         ("models", `List (List.map (fun value -> `String value) models))
         :: base_fields
   in
-  match Masc_mcp.Keeper_meta_json.meta_of_json (`Assoc fields) with
+  match Keeper_meta_json_parse.meta_of_json (`Assoc fields) with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 

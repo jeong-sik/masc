@@ -29,7 +29,7 @@ module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_types_support = Masc_mcp.Keeper_types_support
 
-(* #19327 tier-group purge: Cascade_name is a plain string alias. *)
+(* #19327 cascade purge: Cascade_name is a plain string alias. *)
 let oas_error_cascade_name raw =
   Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw
   |> Cascade_name.of_string_exn
@@ -6864,7 +6864,7 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
 let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () =
   let rotation =
     UT.fail_open_rotation_cascades_from_catalog
-      ~excluded_targets:[ "tier.ollama_cloud_primary" ]
+      ~excluded_targets:[ "cascade.ollama_cloud_primary" ]
       ~catalog_names:
         [
           KC.default_cascade_name ();

@@ -19,22 +19,22 @@ let parse_routes_json src =
 let test_declarative_sub_table_form () =
   check (list bindings)
     "declarative sub-table routes decode by reading target"
-    [ "keeper_turn", "tier-group.primary"
-    ; "llm_rerank", "tier-group.scoring"
+    [ "keeper_turn", "cascade.primary"
+    ; "llm_rerank", "cascade.scoring"
     ]
     (parse_routes_json
        {|{"routes": {
-          "keeper_turn": {"target": "tier-group.primary"},
-          "llm_rerank": {"target": "tier-group.scoring"}
+          "keeper_turn": {"target": "cascade.primary"},
+          "llm_rerank": {"target": "cascade.scoring"}
         }}|})
 
 let test_string_form_is_dropped () =
   check (list bindings) "string route entries are ignored"
-    [ "modern", "tier-group.modern" ]
+    [ "modern", "cascade.modern" ]
     (parse_routes_json
        {|{"routes": {
           "old": "primary",
-          "modern": {"target": "tier-group.modern"}
+          "modern": {"target": "cascade.modern"}
         }}|})
 
 let test_empty_target_dropped () =

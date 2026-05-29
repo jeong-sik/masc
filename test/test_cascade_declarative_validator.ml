@@ -144,7 +144,7 @@ let test_r3_unknown_binding () =
       thinking_enabled = None;
       thinking_budget = None;
     }];
-    (* #19327: tier/tier_groups fields removed from cascade_config. *)
+    (* #19327: tier-group fields removed from cascade_config. *)
     routes = [];
     system_targets = [];
     profiles = [];
@@ -206,7 +206,7 @@ max-context = 200000
 is-default = true
 
 [routes.dead-end]
-target = "tier-group.nowhere"
+target = "cascade.nowhere"
 |} in
   let errs = validate_toml toml in
   has_rule "R7" errs

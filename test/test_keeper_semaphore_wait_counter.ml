@@ -239,7 +239,7 @@ let test_cascade_backpressure_decision () =
   let blocked_resilience : Masc_mcp.Keeper_cascade_resilience.cascade_resilience =
     {
       ok = false;
-      cascade_name = "tier-group.provider_k-coding-with-spark";
+      cascade_name = "cascade.provider_k-coding-with-spark";
       model_labels = [ "ollama.ollama-local-default.recovery" ];
       pure_local = true;
       fallback_cascade = None;
@@ -282,13 +282,13 @@ let test_cascade_backpressure_decision () =
      KHL.cascade_backpressure_decision
        ~cascade_resilience:(Some blocked_resilience)
        ~should_run_turn:true
-       ~cascade_name:"tier-group.provider_k-coding-with-spark"
+       ~cascade_name:"cascade.provider_k-coding-with-spark"
        ~cascade_status:Masc_mcp.Keeper_health_probe.Healthy
    with
    | KHL.Cascade_backpressured { cascade_name; reason } ->
      Alcotest.(check string)
        "resilience cascade name"
-       "tier-group.provider_k-coding-with-spark"
+       "cascade.provider_k-coding-with-spark"
        cascade_name;
      Alcotest.(check string)
        "resilience reason"

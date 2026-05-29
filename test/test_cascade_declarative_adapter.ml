@@ -703,8 +703,8 @@ let test_duplicate_routes () =
     ; aliases = []
     (* #19327: tier/tier_groups fields removed from cascade_config. *)
     ; routes =
-        [ { name = "dup"; target = "tier.primary" }
-        ; { name = "dup"; target = "tier.primary" }
+        [ { name = "dup"; target = "cascade.primary" }
+        ; { name = "dup"; target = "cascade.primary" }
         ]
     ; system_targets = []
     ; profiles = []

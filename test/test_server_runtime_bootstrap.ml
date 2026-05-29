@@ -445,11 +445,11 @@ tools-support = false
 [tier.invalid_local_lane]
 members = ["missing_provider.provider_h"]
 
-[tier-group.invalid_local_lane]
+[cascade.invalid_local_lane]
 tiers = ["invalid_local_lane"]
 
 [routes.keeper_turn]
-target = "tier-group.invalid_local_lane"
+target = "cascade.invalid_local_lane"
 |}
 
 let split_custom_model_spec spec =
@@ -485,17 +485,17 @@ tools-support = true
 [tier.primary_profile]
 members = ["custom.stable"]
 
-[tier-group.primary_profile]
+[cascade.primary_profile]
 tiers = ["primary_profile"]
 
 [tier.broken_profile]
 members = ["missing_provider.fake"]
 
-[tier-group.broken_profile]
+[cascade.broken_profile]
 tiers = ["broken_profile"]
 
 [routes.keeper_turn]
-target = "tier-group.primary_profile"
+target = "cascade.primary_profile"
 |}
        endpoint model_id)
 
@@ -520,17 +520,17 @@ tools-support = true
 [tier.primary_profile]
 members = ["missing_provider.fake"]
 
-[tier-group.primary_profile]
+[cascade.primary_profile]
 tiers = ["primary_profile"]
 
 [tier.secondary_profile]
 members = ["custom.stable"]
 
-[tier-group.secondary_profile]
+[cascade.secondary_profile]
 tiers = ["secondary_profile"]
 
 [routes.keeper_turn]
-target = "tier-group.primary_profile"
+target = "cascade.primary_profile"
 |}
        endpoint model_id)
 

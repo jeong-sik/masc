@@ -100,11 +100,11 @@ tools-support = true
 [tier.primary]
 members = ["custom.mock"]
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary"]
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 |};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();

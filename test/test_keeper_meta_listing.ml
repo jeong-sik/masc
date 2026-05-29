@@ -75,11 +75,11 @@ tools-support = true
 [tier.primary]
 members = ["custom.mock"]
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary"]
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 |}
 
 let write_keeper_toml_exn ?autoboot_enabled config ~name =

@@ -177,7 +177,7 @@ match Yojson.Safe.Util.member "reason" json with
 
 `_` swallows `` `Int _``, `` `Bool _``, `` `Assoc _``, `` `Null``, `` `List _``, every future variant Yojson adds. When an upstream provider changes the field shape (string → object with `{"detail": …}`), the call silently returns `None` — the cascade classification routes to `Unknown` and the user sees a generic "cascade exhausted" with no provider rejection detail.
 
-MEMORY `project_cascade_tier_group_misroute_2026_05_17` is a sibling incident: cascade.toml parsing silenced a partial-config bug. The catch-all extraction pattern in this file is the *runtime-side* sibling — provider responses silently lose detail.
+MEMORY `project_cascade_misroute_2026_05_17` is a sibling incident: cascade.toml parsing silenced a partial-config bug. The catch-all extraction pattern in this file is the *runtime-side* sibling — provider responses silently lose detail.
 
 ## 4. Proposal — phased
 
@@ -271,4 +271,4 @@ The variant has ~25 constructors; the audit will publish which are reachable fro
 
 - RFC-0085 — keeper bulk-promotion + godfile decomp track.
 - RFC-0088 — workaround rejection bar (catch-all is §3.5 anti-pattern).
-- MEMORY `project_cascade_tier_group_misroute_2026_05_17` — sibling silent-drop incident at config-parse boundary, root cause closed by RFC-0058 strict parsing (PR #16739 in flight at audit time).
+- MEMORY `project_cascade_misroute_2026_05_17` — sibling silent-drop incident at config-parse boundary, root cause closed by RFC-0058 strict parsing (PR #16739 in flight at audit time).

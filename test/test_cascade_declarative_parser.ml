@@ -132,7 +132,7 @@ let test_minimal_parse () =
   check int "models" 1 (List.length cfg.models);
   check int "bindings" 1 (List.length cfg.bindings);
   check int "aliases" 0 (List.length cfg.aliases);
-  (* #19327: tier/tier_groups fields removed from cascade_config. *)
+  (* #19327: tier-group fields removed from cascade_config. *)
   check int "routes" 0 (List.length cfg.routes);
   check int "system_targets" 0 (List.length cfg.system_targets)
 ;;
@@ -211,7 +211,7 @@ let test_layer4_aliases () =
 ;;
 
 
-(* #19327/#19340 tier-group purge: layer5_tiers, layer5_tier_groups,
+(* #19327/#19340 cascade purge: layer5_tiers, layer5_cascades,
    keeper_assignable_duplicate_keys_rejected removed. *)
 
 let test_routes () =
@@ -434,7 +434,7 @@ let test_api_format_of_protocol () =
 ;;
 
 
-(* #19327/#19340 tier-group purge: supported_config_strategies_parse,
+(* #19327/#19340 cascade purge: supported_config_strategies_parse,
    retired_config_strategies_rejected, cycle_policy, sticky_ttl_ms,
    scoring_params test groups removed.  All accessed cfg.tiers field or
    Priority_tier strategy variant that no longer exist. *)

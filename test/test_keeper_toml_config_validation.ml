@@ -357,22 +357,22 @@ keeper-assignable = false
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary", "backup"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.scoring]
+[cascade.scoring]
 tiers = ["scoring"]
 strategy = "priority_tier"
 fallback = false
 keeper-assignable = false
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 
 [routes.llm_rerank]
-target = "tier-group.scoring"
+target = "cascade.scoring"
 |}
 
 let with_temp_config_dir cascade_toml f =
@@ -572,22 +572,22 @@ members = ["ollama.qwen3"]
 strategy = "failover"
 keeper-assignable = true
 
-[tier-group.provider_k-coding-with-spark]
+[cascade.provider_k-coding-with-spark]
 tiers = ["provider_k-coding-primary"]
 strategy = "failover"
 
 [routes.keeper_turn]
-target = "tier-group.provider_k-coding-with-spark"
+target = "cascade.provider_k-coding-with-spark"
 
 [routes.provider_benchmark]
-target = "tier.ollama_cloud_primary"
+target = "cascade.ollama_cloud_primary"
 |}
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   check string "assignable concrete route target is preserved"
-    "tier.ollama_cloud_primary"
+    "cascade.ollama_cloud_primary"
     (Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-       ~config_path:cascade_path "tier.ollama_cloud_primary")
+       ~config_path:cascade_path "cascade.ollama_cloud_primary")
 
 let test_catalog_validator_surfaces_adapter_errors () =
   (* A binding on a Messages_api provider (protocol provider_a-http) cannot be

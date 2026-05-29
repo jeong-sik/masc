@@ -11,12 +11,12 @@ let setup_test () = R.reset_all_for_test ()
 (* Sample error strings that mirror the production message from the
    2026-05-18 system_log slice (P6 config drift). *)
 let drift_error =
-  "cascade_name 'tier-group.ollama_cloud_stable' is system-only \
+  "cascade_name 'cascade.ollama_cloud_stable' is system-only \
    (keeper_assignable=false); keepers must reference an assignable cascade"
 ;;
 
 let other_error =
-  "cascade_name 'tier-group.glm_strict' is system-only (keeper_assignable=false); \
+  "cascade_name 'cascade.glm_strict' is system-only (keeper_assignable=false); \
    keepers must reference an assignable cascade"
 ;;
 
@@ -210,10 +210,10 @@ let test_record_success_clears_state () =
 let test_digest_stable_under_whitespace_collapse () =
   setup_test ();
   let e1 =
-    "cascade_name 'tier-group.foo'  is   system-only  \
+    "cascade_name 'cascade.foo'  is   system-only  \
      (keeper_assignable=false)"
   in
-  let e2 = "cascade_name 'tier-group.foo' is system-only (keeper_assignable=false)" in
+  let e2 = "cascade_name 'cascade.foo' is system-only (keeper_assignable=false)" in
   let _ = R.record_failure ~keeper:"alpha" ~error:e1 ~toml_mtime:1.0 in
   let outcome = R.record_failure ~keeper:"alpha" ~error:e2 ~toml_mtime:1.0 in
   Alcotest.(check bool)

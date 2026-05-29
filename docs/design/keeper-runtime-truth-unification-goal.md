@@ -119,7 +119,7 @@ Implemented in this branch:
   temp config root. Its livelock priming uses the same next-turn id convention
   as the runtime.
 - Declarative cascade validation now accepts 5-layer `tier.*` and
-  `tier-group.*` profiles from the declarative snapshot, instead of requiring
+  `cascade.*` profiles from the declarative snapshot, instead of requiring
   legacy `<profile>_models` materialization for every route target.
 - `routes.*.target` values are preserved while the live catalog is not yet
   validated, instead of collapsing to a legacy alias that may not exist in the
@@ -195,7 +195,7 @@ Latest verification:
 - `opam exec -- ocamlformat --check lib/config_doctor.ml lib/config_doctor.mli test/test_config_doctor.ml`
 - `MASC_CONFIG_DIR=/Users/dancer/me/.masc/config MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false ./_build/default/bin/main_eio.exe doctor config --base-path /Users/dancer/me --json`
   (expected exit 1: live `keeper_turn` and `tool_required` both target
-  `tier-group.provider-k-coding-with-spark`, whose single candidate lacks the required tool
+  `cascade.provider-k-coding-with-spark`, whose single candidate lacks the required tool
   lane; doctor now reports `no_tool_capable_provider` risk before runtime
   dispatch)
 - `scripts/keeper-runtime-truth-gate.sh --self-test` (success fixture plus
@@ -253,7 +253,7 @@ Latest-main live evidence:
   `terminal_reason_code = no_tool_capable_provider`.
 - Current live `masc-mcp doctor config --base-path /Users/dancer/me --json`
   also reports `status = error` for the same route capability gap:
-  both `keeper_turn` and `tool_required` target `tier-group.provider-k-coding-with-spark`, and
+  both `keeper_turn` and `tool_required` target `cascade.provider-k-coding-with-spark`, and
   its single candidate is rejected for forced required-tool use with
   `runtime_mcp_caps_missing`.
 
@@ -513,7 +513,7 @@ Healthy parts:
   memory primitive, checkpoint primitive, and compaction machinery.
 - Boundary documentation already states that OAS must stay generic while MASC
   owns world/task/board/governance semantics.
-- The current declarative cascade route target (`tier-group.primary`) is now
+- The current declarative cascade route target (`cascade.primary`) is now
   accepted by the active catalog validator and broad keeper lifecycle tests.
 - The latest live-like run no longer hides queued `masc_keeper_msg` responses
   as successful turns; the harness waits for actual turn state.
@@ -575,7 +575,7 @@ It is acceptable to ship behind an operator-facing experimental gate if the
 goal is observability hardening. It is not yet acceptable as a final product
 runtime guarantee because the strongest live-like evidence on latest main now
 fails at route capability: the keeper message queues, but the active
-`tier-group.provider-k-coding-with-spark` route has no tool-capable provider for the keeper's
+`cascade.provider-k-coding-with-spark` route has no tool-capable provider for the keeper's
 materialized internal tool surface.
 
 Highest-risk gaps:
@@ -585,7 +585,7 @@ Highest-risk gaps:
    `no_tool_capable_provider`. The manifest now records
    `pre_dispatch_blocked`, and the receipt/turn terminal reason stays
    structured. `masc-mcp doctor config` now fails with the same diagnosis
-   before dispatch. Still open: configure `tier-group.provider-k-coding-with-spark` with a
+   before dispatch. Still open: configure `cascade.provider-k-coding-with-spark` with a
    concrete tool-capable provider for keeper-internal tools, or route these
    keeper turns to a provider lane that can materialize runtime MCP/inline
    tools.
@@ -623,7 +623,7 @@ Highest-risk gaps:
 8. Cascade naming gap: `test/test_keeper_unified.exe` is now green under
    `config/cascade.toml`, but the codebase still carries historical
    `default`/`local_only`/`local_recovery` aliases beside declarative
-   `tier.*` and `tier-group.*` profiles. This should be simplified before
+   `tier.*` and `cascade.*` profiles. This should be simplified before
    treating route semantics as final.
 
 ## Done Criteria
@@ -681,7 +681,7 @@ Prompt-to-artifact checklist:
    observability/reliability improvement. It is not yet a final product
   runtime guarantee because the latest-main live-like run failed with a
   structured route-capability error:
-   `no_tool_capable_provider` for `tier-group.provider-k-coding-with-spark` with no candidate
+   `no_tool_capable_provider` for `cascade.provider-k-coding-with-spark` with no candidate
    that materializes the required keeper tool support.
 
 Completion status: not complete as a full product-readiness goal. The immediate

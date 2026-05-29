@@ -65,7 +65,7 @@ let test_removed_keeper_cascade_alias_rejected () =
 
 let test_unknown_bare_cascade_name_rejected () =
   (* Bare cascade names are no longer accepted. Operators must use
-     canonical tier-group./tier./route. names. *)
+     canonical cascade./tier./route. names. *)
   let json =
     `Assoc
       [

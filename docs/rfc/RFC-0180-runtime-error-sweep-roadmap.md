@@ -33,7 +33,7 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 | α | `tool_execute sandbox_close/missing_sandbox` | 18 | `lib/types/masc_error.ml:179` IoError wrapper, literal `"missing_sandbox_clone"` 외부 runtime (agent SDK) emit |
 | β | `tool_execute executable=""` + 5-retry threshold-silence | 26 | `lib/keeper/agent_tool_execute_typed_input.ml:321,447-470` `check_exec` + retry threshold 5 |
 | γ | `tool_execute cwd_not_directory: playground/*` | 11 | `lib/keeper/agent_tool_execute_path.ml:26-40` + `keeper_failure_circuit_breaker.ml:100` |
-| δ | `cascade tier-group.glm-coding-with-spark exhausted` | 13 | `lib/keeper/keeper_turn_driver_try_cascade.ml:899` + `lib/cascade/provider_health.ml:88-106` |
+| δ | `cascade cascade.glm-coding-with-spark exhausted` | 13 | `lib/keeper/keeper_turn_driver_try_cascade.ml:899` + `lib/cascade/provider_health.ml:88-106` |
 | ε | retired PR-review helper reported closed PR state (ramarama) | 15 | `"pr_not_open"` literal 외부 MCP handler emit, board cache lag |
 | ζ | `tool_execute gh not in dev_full allowlist` | 7 | `lib/keeper/dev_exec_allowlist.ml` + `agent_tool_execute_typed_input.ml:40-44` mode dispatch |
 | η | `keeper_task_done anti-rationalization` | 6 | `lib/anti_rationalization.ml:504-600` — Issue #8688 이전 37/24h → 현재 6 = 정상 baseline |

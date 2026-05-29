@@ -367,7 +367,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("trace_id", `String "trace-paused-runtime-trust");
                 ("goal", `String "Expose paused keeper failure in summary");
                 ("short_goal", `String "Expose paused keeper failure in summary");
-                ("cascade_name", `String "tier-group.primary");
+                ("cascade_name", `String "cascade.primary");
               ])
         with
         | Ok meta ->

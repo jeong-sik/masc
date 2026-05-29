@@ -9,7 +9,7 @@ open Alcotest
 
 module AQ = Masc_mcp.Admission_queue
 
-(* #19327 tier-group purge: Cascade_name is a plain string alias now. *)
+(* #19327 cascade purge: Cascade_name is a plain string alias now. *)
 let cascade_name raw = Cascade_name.of_string_exn raw
 
 (* ============================================================

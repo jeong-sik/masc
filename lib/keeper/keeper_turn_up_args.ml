@@ -126,24 +126,14 @@ let parse_cascade_name_opt args =
       in
       if normalized = "" then Error "cascade_name must not be empty"
       else
-        let assignable = Keeper_cascade_profile.keeper_catalog_names () in
-        if List.mem normalized assignable then Ok (Some normalized)
-        else
-          let catalog = Keeper_cascade_profile.catalog_names () in
-          if List.mem normalized catalog then
-            Error
-              (Printf.sprintf
-                 "cascade_name '%s' is system-only (keeper_assignable=false); \
-                  choose a keeper-assignable cascade"
-                 raw)
-          else
-            match
-              Cascade_runtime.models_of_cascade_name_result
-                (Cascade_name.of_string_exn normalized)
-            with
-            | Ok _ -> Ok (Some normalized)
-            | Error detail ->
-                Error (Printf.sprintf "invalid cascade_name '%s': %s" raw detail)
+        (* keeper-assignable guardrail removed 2026-05-28 — validate existence only. *)
+        match
+          Cascade_runtime.models_of_cascade_name_result
+            (Cascade_name.of_string_exn normalized)
+        with
+        | Ok _ -> Ok (Some normalized)
+        | Error detail ->
+            Error (Printf.sprintf "invalid cascade_name '%s': %s" raw detail)
 
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback

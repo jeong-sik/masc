@@ -199,9 +199,8 @@ type catalog_metadata = {
 let public_name_of_target target =
   strip_declarative_profile_prefix (String.trim target)
 
-let profile_is_keeper_assignable = function
-  | Some false -> false
-  | None | Some true -> true
+(* keeper-assignable guardrail removed 2026-05-28 — all profiles are usable. *)
+let profile_is_keeper_assignable _ = true
 
 let json_assoc_member key json =
   match json with
@@ -430,31 +429,9 @@ let route_target_public_name ?config_path use =
   try Some (cascade_name_for_use ?config_path use |> public_name_of_target)
   with Failure _ -> None
 
+(* keeper-assignable guardrail removed 2026-05-28 — all cascade names pass through. *)
 let normalize_keeper_runtime_declared_name ?config_path raw =
-  let normalized = normalize_declared_name ?config_path raw in
-  let public_name = public_name_of_target normalized in
-  let explicitly_keeper_assignable =
-    (* RFC-0143 PR-2 — typed catalog query. *)
-    match catalog_metadata_query ?config_path () with
-    | Catalog_ok meta -> List.mem normalized meta.keeper_assignable_names
-    | Catalog_unavailable _ -> false
-  in
-  let keeper_route_targets =
-    keeper_runtime_route_uses
-    |> List.filter_map (route_target_public_name ?config_path)
-    |> List.sort_uniq String.compare
-  in
-  let non_keeper_route_targets =
-    Cascade_routes.all_logical_uses
-    |> List.filter (fun use -> not (is_keeper_runtime_route_use use))
-    |> List.filter_map (route_target_public_name ?config_path)
-    |> List.sort_uniq String.compare
-  in
-  if (not explicitly_keeper_assignable)
-     && List.mem public_name non_keeper_route_targets
-     && not (List.mem public_name keeper_route_targets)
-  then cascade_name_for_use ?config_path Keeper_turn
-  else normalized
+  normalize_declared_name ?config_path raw
 
 (* RFC-0149 §3.3 — "Parse, don't validate" reverse of the silent-fallback
   shape.  [resolve_live_with_catalog_result] returns [Ok cascade_name]

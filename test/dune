@@ -853,6 +853,7 @@
   test_board_karma_ledger
   test_task_dispatch
   test_coord_task_lifecycle
+  test_make_required_tools_predicate
   test_coord_task_verification_phase_e
   test_drift_guard_core
   test_verify_handoff_tool
@@ -1075,6 +1076,7 @@
   test_board_karma_ledger
   test_task_dispatch
   test_coord_task_lifecycle
+  test_make_required_tools_predicate
   test_coord_task_verification_phase_e
   test_drift_guard_core
   test_verify_handoff_tool
@@ -1792,6 +1794,8 @@
 (include stanzas/test_shutdown_flag.inc)
 
 (include stanzas/test_executable_not_allowlisted_hint.inc)
+
+(include stanzas/test_claim_outcome_typed.inc)
 
 (include stanzas/test_parse_outcome.inc)
 

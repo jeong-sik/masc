@@ -732,8 +732,8 @@ end
 (** {1 Cascade Saturation Signal (RFC-0153 Phase A.2)}
 
     Feature flag for typed [Cascade_saturation_signal.t] emission from
-    structured cascade/provider errors. The signal is consumed by Phase B
-    (tier admission semaphore) and Phase C (adaptive throttling).
+    structured cascade/provider errors. The signal is consumed by Phase C
+    (adaptive throttling).
 
     Default off. Phase A.2 emit is purely additive — it increments a new
     Prometheus counter ([masc_keeper_cascade_saturation_signal_total])

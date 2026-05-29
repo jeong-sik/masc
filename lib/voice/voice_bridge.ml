@@ -303,7 +303,7 @@ let extract_mcp_result json =
       Error (Option.value error ~default:"Unknown error"))
     else (
       (* Get content from result *)
-      let content = (match Json_util.assoc_member_opt "content" result with Some (`List l) -> l | _ -> []) in
+      let content = (match Option.bind result (fun r -> Json_util.assoc_member_opt "content" r) with Some (`List l) -> l | _ -> []) in
       match content with
       | [] -> Ok (`Assoc [])
       | first :: _ ->
@@ -312,7 +312,7 @@ let extract_mcp_result json =
          | Some t ->
            (try Ok (Yojson.Safe.from_string t) with
             | Yojson.Json_error _ -> Ok (`String t))
-         | None -> Ok result))
+         | None -> Ok (Option.value ~default:`Null result)))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))

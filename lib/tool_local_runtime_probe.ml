@@ -190,7 +190,7 @@ let ollama_loaded_models_of_ps_json json =
     match json with
     | `Assoc _ -> (
         match Json_util.assoc_member_opt "models" json with
-        | `List models -> models
+        | Some (`List models) -> models
         | _ -> [])
     | `List models -> models
     | _ -> []
@@ -214,9 +214,9 @@ let ollama_loaded_models_of_ps_json json =
 
 let prompt_eval_duration_ms_of_run_json json =
   match Json_util.assoc_member_opt "prompt_eval_duration_ms" json with
-  | `Float value -> Some value
-  | `Int value -> Some (Stdlib.Float.of_int value)
-  | `Intlit value -> Option.map Stdlib.Float.of_int (parse_int_opt value)
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (Stdlib.Float.of_int value)
+  | Some (`Intlit value) -> Option.map Stdlib.Float.of_int (parse_int_opt value)
   | _ -> None
 
 let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms json =

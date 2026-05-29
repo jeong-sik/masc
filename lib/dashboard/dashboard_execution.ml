@@ -343,7 +343,7 @@ let keeper_queue_severity keeper trust =
         | Some "alert" -> "bad"
         | Some ("blocked" | "pause") -> "warn"
         | _ ->
-          if Option.is_some (string_field_opt "runtime_blocker_class" keeper)
+          if Option.is_some (Json_util.assoc_string_opt "runtime_blocker_class" keeper)
           then "bad"
           else "warn"))
 ;;
@@ -361,12 +361,12 @@ let first_text values =
 let keeper_queue_summary keeper trust =
   let terminal = terminal_reason_json trust in
   first_text
-    [ string_field_opt "attention_reason" trust
-    ; string_field_opt "summary" terminal
-    ; string_field_opt "runtime_blocker_summary" keeper
-    ; string_field_opt "operator_disposition_reason" trust
-    ; string_field_opt "disposition_reason" trust
-    ; string_field_opt "latest_next_action" trust
+    [ Json_util.assoc_string_opt "attention_reason" trust
+    ; Json_util.assoc_string_opt "summary" terminal
+    ; Json_util.assoc_string_opt "runtime_blocker_summary" keeper
+    ; Json_util.assoc_string_opt "operator_disposition_reason" trust
+    ; Json_util.assoc_string_opt "disposition_reason" trust
+    ; Json_util.assoc_string_opt "latest_next_action" trust
     ; Some "keeper needs operator attention"
     ]
   |> Option.value ~default:"keeper needs operator attention"
@@ -376,12 +376,12 @@ let keeper_queue_last_seen keeper trust =
   let latest_causal = member_assoc "latest_causal_event" trust in
   let last_seen_at =
     latest_iso_timestamp
-      [ string_field_opt "ts" latest_causal
-      ; string_field_opt "observed_at" latest_causal
-      ; string_field_opt "last_autonomous_action_at" keeper
-      ; string_field_opt "last_heartbeat" keeper
-      ; string_field_opt "updated_at" keeper
-      ; string_field_opt "created_at" keeper
+      [ Json_util.assoc_string_opt "ts" latest_causal
+      ; Json_util.assoc_string_opt "observed_at" latest_causal
+      ; Json_util.assoc_string_opt "last_autonomous_action_at" keeper
+      ; Json_util.assoc_string_opt "last_heartbeat" keeper
+      ; Json_util.assoc_string_opt "updated_at" keeper
+      ; Json_util.assoc_string_opt "created_at" keeper
       ]
   in
   last_seen_at, Dashboard_utils.parse_iso_opt last_seen_at |> Option.value ~default:0.0
@@ -390,7 +390,7 @@ let keeper_queue_last_seen keeper trust =
 let build_keeper_execution_queue keepers =
   keepers
   |> List.filter_map (fun keeper ->
-    match string_field_opt "name" keeper with
+    match Json_util.assoc_string_opt "name" keeper with
     | None -> None
     | Some keeper_name ->
       let trust = keeper_runtime_trust_json keeper in
@@ -400,7 +400,7 @@ let build_keeper_execution_queue keepers =
         || terminal_reason_requires_attention trust
       in
       let runtime_blocked =
-        Option.is_some (string_field_opt "runtime_blocker_class" keeper)
+        Option.is_some (Json_util.assoc_string_opt "runtime_blocker_class" keeper)
       in
       if not (trust_needs_attention || runtime_blocked)
       then None
@@ -410,12 +410,12 @@ let build_keeper_execution_queue keepers =
         let last_seen_at, last_seen_ts = keeper_queue_last_seen keeper trust in
         let terminal_code = terminal_reason_code trust in
         let next_human_action =
-          match string_field_opt "next_human_action" trust with
+          match Json_util.assoc_string_opt "next_human_action" trust with
           | Some _ as value -> value
           | None ->
-            (match string_field_opt "latest_next_action" trust with
+            (match Json_util.assoc_string_opt "latest_next_action" trust with
              | Some _ as value -> value
-             | None -> terminal_reason_json trust |> string_field_opt "next_action")
+             | None -> terminal_reason_json trust |> Json_util.assoc_string_opt "next_action")
         in
         let intervene_handoff =
           handoff_json
@@ -726,7 +726,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let active_ops =
       List.filter
         (fun (op : operation_context) ->
-           let status = string_field_opt "status" op.json in
+           let status = Json_util.assoc_string_opt "status" op.json in
            status = Some "active" || status = Some "paused")
         operation_contexts
     in

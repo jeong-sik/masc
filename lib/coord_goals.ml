@@ -235,7 +235,7 @@ let parse_optional_policy args field =
   match Json_util.assoc_member_opt field args with
   | None | Some `Null -> Ok None
   | Some json when is_noop_verifier_policy_json json -> Ok None
-  | json ->
+  | Some json ->
     (match Goal_verification.goal_verifier_policy_of_yojson json with
      | Ok policy -> Ok (Some policy)
      | Error msg ->
@@ -254,7 +254,7 @@ let parse_optional_policy args field =
 let parse_optional_principal args field =
   match Json_util.assoc_member_opt field args with
   | None | Some `Null -> Ok None
-  | json ->
+  | Some json ->
     (match Goal_verification.goal_principal_of_yojson json with
      | Ok principal -> Ok (Some principal)
      | Error msg ->
@@ -358,7 +358,7 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
 let parse_optional_string_list args field =
   match Json_util.assoc_member_opt field args with
   | None | Some `Null -> Ok None
-  | `List values ->
+  | Some (`List values) ->
     (try Ok (Some (List.map Yojson.Safe.Util.to_string values)) with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _ ->

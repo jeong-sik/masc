@@ -45,7 +45,7 @@ let with_env name value f =
     f
 ;;
 
-let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
+let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc

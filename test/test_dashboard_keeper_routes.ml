@@ -638,7 +638,7 @@ let make_keeper_meta_json
            @ opt_bool "proactive_enabled" proactive_enabled
            @ opt_string "current_task_id" current_task_id))
   with
-  | Ok meta -> Masc_mcp.Keeper_types.meta_to_json meta |> Yojson.Safe.pretty_to_string
+  | Ok meta -> Masc_mcp.Keeper_meta_json.meta_to_json meta |> Yojson.Safe.pretty_to_string
   | Error err -> fail ("keeper meta fixture parse failed: " ^ err)
 ;;
 
@@ -650,9 +650,9 @@ let write_and_register_keeper
     ?current_task_id
     ()
   =
-  Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+  Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
   write_file
-    (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+    (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
     (make_keeper_meta_json
        ~name:keeper_name
        ~paused:false
@@ -660,7 +660,7 @@ let write_and_register_keeper
        ?proactive_enabled
        ?current_task_id
        ());
-  match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) ->
     ignore
       (Masc_mcp.Keeper_registry.register_offline
@@ -684,9 +684,9 @@ let write_keeper_toml_fixture ~config_root ~keeper_name =
 let seed_auth_and_keeper ~base_path ~keeper_name =
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
-  Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+  Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
   write_file
-    (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+    (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
     (make_keeper_meta_json ~name:keeper_name ());
   ignore
     (Masc_mcp.Auth.enable_auth
@@ -742,7 +742,7 @@ let append_execution_receipt
     ?ended_at
     config ~keeper_name =
   let meta =
-    match Masc_mcp.Keeper_types.read_meta config keeper_name with
+    match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> meta
     | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
     | Error err -> fail ("read_meta failed for receipt: " ^ err)
@@ -801,7 +801,7 @@ let append_execution_receipt
       approval_profile_derived = false;
       cascade_name =
         Cascade_name.of_string_exn
-          (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
+          (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied;
@@ -818,7 +818,7 @@ let append_execution_receipt
              {
                from_cascade =
                  Cascade_name.of_string_exn
-                   (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
+                   (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
                to_cascade =
                  Cascade_name.of_string_exn
                    retry_cascade;
@@ -857,7 +857,7 @@ let append_execution_receipt
   let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
   let base_dir =
     Filename.concat
-      (Masc_mcp.Keeper_types.keeper_dir config)
+      (Masc_mcp.Keeper_fs.keeper_dir config)
       (keeper_name ^ "/execution-receipts")
   in
   let month_dir = Filename.concat base_dir month in
@@ -1058,7 +1058,7 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     "boot route reaches lifecycle handler"
     true
     (contains_substr {|"action":"boot"|} boot_result.body);
-  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  (match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
    | Ok (Some meta) ->
        check bool "boot resumes paused keeper meta" false meta.paused
    | Ok None -> fail "keeper meta missing after boot route"
@@ -1083,13 +1083,13 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     "shutdown route reaches lifecycle handler"
     true
     (contains_substr {|"action":"shutdown"|} shutdown_result.body);
-  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  (match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
    | Ok (Some meta) ->
        let updated_meta =
          {
            meta with
            continuity_summary = "stale continuity snapshot";
-           updated_at = Masc_mcp.Keeper_types.now_iso ();
+           updated_at = Masc_mcp.Keeper_meta_contract.now_iso ();
            runtime =
              {
                meta.runtime with
@@ -1097,7 +1097,7 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
              };
          }
        in
-       (match Masc_mcp.Keeper_types.write_meta ~force:true config updated_meta with
+       (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config updated_meta with
         | Ok () -> ()
         | Error err -> fail ("failed to seed continuity summary: " ^ err))
    | Ok None -> fail "keeper meta missing before clear route"
@@ -1126,14 +1126,14 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     "clear route reports continuity cleanup"
     true
     (contains_substr {|"continuity_cleared":true|} clear_result.body);
-  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  (match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
    | Ok (Some meta) ->
        check string "clear resets continuity summary" "" meta.continuity_summary;
        check (float 0.0001) "clear resets continuity freshness" 0.0
          meta.runtime.last_continuity_update_ts
    | Ok None -> fail "keeper meta missing after clear route"
    | Error err -> fail ("failed to read keeper meta after clear: " ^ err));
-  match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) -> check bool "shutdown persists paused keeper meta" true meta.paused
   | Ok None -> fail "keeper meta missing after shutdown route"
   | Error err -> fail ("failed to read keeper meta after shutdown: " ^ err)
@@ -1165,7 +1165,7 @@ let test_keeper_directive_resume_updates_paused_meta () =
   require_status "execution GET returns 200 after directive" 200 execution_after_resume;
   check bool "execution reflects resumed keeper after directive" false
     (execution_keeper_paused execution_after_resume.body keeper_name);
-  match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) ->
       check bool "directive resume clears paused keeper meta" false meta.paused
   | Ok None -> fail "keeper meta missing after directive resume"
@@ -1237,7 +1237,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
     ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
   @@ fun ~port ~config ~admin_token ~keeper_name ->
   let meta =
-    match Masc_mcp.Keeper_types.read_meta config keeper_name with
+    match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> meta
     | Ok None -> fail "keeper meta missing before purge"
     | Error err -> fail ("failed to read keeper meta before purge: " ^ err)
@@ -1272,7 +1272,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
     (contains_substr {|"target_kind":"keeper"|} purge_result.body);
   check bool "keeper purge reports toml deletion" true
     (contains_substr {|"removed_keeper_toml":true|} purge_result.body);
-  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  (match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
    | Ok None -> ()
    | Ok (Some _) -> fail "keeper meta should be removed after purge"
    | Error err -> fail ("failed to read keeper meta after purge: " ^ err));
@@ -1291,7 +1291,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
     (Sys.file_exists agent_metrics_dir);
   check bool "keeper runtime directory removed" false
     (Sys.file_exists
-       (Filename.concat (Masc_mcp.Keeper_types.keeper_dir config) keeper_name));
+       (Filename.concat (Masc_mcp.Keeper_fs.keeper_dir config) keeper_name));
   check bool "keeper session trace removed" false
     (Sys.file_exists
        (Masc_mcp.Keeper_types_support.keeper_session_dir config
@@ -1754,12 +1754,12 @@ let test_composite_runtime_attention_surfaces_fiber_stop () =
       let keeper_name = "stop_requested_demo" in
       let config = Masc_mcp.Coord.default_config base_path in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
-      Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+      Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
       write_file
-        (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+        (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
         (make_keeper_meta_json ~name:keeper_name ~paused:false ());
       let meta =
-        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> fail "keeper meta missing for fiber-stop composite test"
         | Error err -> fail ("read_meta failed: " ^ err)
@@ -1809,12 +1809,12 @@ let test_composite_runtime_attention_ignores_previous_receipt_during_live_turn (
       let keeper_name = "live_turn_previous_receipt_demo" in
       let config = Masc_mcp.Coord.default_config base_path in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
-      Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+      Fs_compat.mkdir_p (Masc_mcp.Keeper_fs.keeper_dir config);
       write_file
-        (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+        (Masc_mcp.Keeper_types_profile.keeper_meta_path config keeper_name)
         (make_keeper_meta_json ~name:keeper_name ~paused:false ());
       let meta =
-        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> fail "keeper meta missing for live-turn receipt test"
         | Error err -> fail ("read_meta failed: " ^ err)

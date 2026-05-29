@@ -25,7 +25,7 @@ type keeper_case = {
 and fixture = {
   generic : Generic.fixture;
   config : Masc_mcp.Coord.config;
-  meta : Masc_mcp.Keeper_types.keeper_meta;
+  meta : Masc_mcp.Keeper_meta_contract.keeper_meta;
   ctx_snapshot : Masc_mcp.Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
 }
@@ -91,9 +91,9 @@ let make_meta ?(name = "keeper-tool-matrix") () =
           ("trace_id", `String "keeper-tool-matrix-trace");
           ("allowed_paths", `List [ `String "*" ]);
           ( "tool_access",
-            Masc_mcp.Keeper_types.tool_access_to_json
-              (Masc_mcp.Keeper_types.Preset
-                 { preset = Masc_mcp.Keeper_types.Full; also_allow = [] } ) );
+            Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+              (Masc_mcp.Keeper_meta_tool_access.Preset
+                 { preset = Masc_mcp.Keeper_meta_tool_access.Full; also_allow = [] } ) );
         ])
   with
   | Ok meta -> meta

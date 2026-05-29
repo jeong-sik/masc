@@ -2,6 +2,9 @@ open Alcotest
 open Masc_mcp
 
 module Coord = Masc_mcp.Coord
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
+module Keeper_meta_store = Masc_mcp.Keeper_meta_store
+module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
 module KT = Masc_mcp.Keeper_types
 module KTS = Masc_mcp.Keeper_types_support
 
@@ -45,7 +48,7 @@ let with_store f =
 
 let make_meta ?(name = "alpha") () =
   match
-    KT.meta_of_json
+    Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
           ("name", `String name);
@@ -105,8 +108,8 @@ let persist_keeper_with_proactive
                  | Some outcome -> outcome
                  | None ->
                    if proactive_count_total > 0
-                   then KT.Proactive_tool_use
-                   else KT.Proactive_never_started);
+                   then Keeper_meta_contract.Proactive_tool_use
+                   else Keeper_meta_contract.Proactive_never_started);
             };
           autonomous_action_count;
           autonomous_turn_count = autonomous_action_count;
@@ -115,7 +118,7 @@ let persist_keeper_with_proactive
         };
     }
   in
-  match KT.write_meta ~force:true config meta with
+  match Keeper_meta_store.write_meta ~force:true config meta with
   | Ok () -> meta
   | Error err -> fail ("write_meta failed: " ^ err)
 
@@ -561,7 +564,7 @@ let test_scheduled_proactive_meta_error_does_not_prove_success () =
   ignore
     (persist_keeper_with_proactive
        ~proactive_last_ts:(now -. 60.0)
-       ~proactive_last_outcome:KT.Proactive_error
+       ~proactive_last_outcome:Keeper_meta_contract.Proactive_error
        config ~proactive_enabled:true
        ~name:"alpha" ~total_turns:3 ~autonomous_action_count:2
        ~autonomous_tool_turn_count:2 ~board_reactive_turn_count:1

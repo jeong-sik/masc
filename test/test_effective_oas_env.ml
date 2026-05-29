@@ -20,6 +20,7 @@
 open Alcotest
 
 module KTP = Masc_mcp.Keeper_types_profile
+module Keeper_types_profile = Masc_mcp.Keeper_types_profile
 
 (* ── effective_oas_env tests ───────────────────────────────── *)
 

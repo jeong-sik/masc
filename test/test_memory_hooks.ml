@@ -11,6 +11,7 @@
 open Alcotest
 
 module Memory_oas_bridge = Masc_mcp.Memory_oas_bridge
+module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Memory_hooks = Masc_mcp.Memory_hooks
 module Runtime_manifest = Masc_mcp.Keeper_runtime_manifest
 module Keeper_execution_receipt = Masc_mcp.Keeper_execution_receipt
@@ -605,9 +606,9 @@ let test_execution_receipt_json_includes_memory_fields () =
         ; missing_required_tools = []
         ; materialized_tools = []
         }
-    ; sandbox_kind = Keeper_types.Local
+    ; sandbox_kind = Keeper_types_profile_sandbox.Local
     ; sandbox_root = None
-    ; network_mode = Keeper_types.Network_none
+    ; network_mode = Keeper_types_profile_sandbox.Network_none
     ; approval_profile = None
     ; approval_profile_derived = false
     ; cascade_name = Cascade_name.of_string_exn "test"
@@ -680,9 +681,9 @@ let test_execution_receipt_json_null_when_missing () =
         ; missing_required_tools = []
         ; materialized_tools = []
         }
-    ; sandbox_kind = Keeper_types.Local
+    ; sandbox_kind = Keeper_types_profile_sandbox.Local
     ; sandbox_root = None
-    ; network_mode = Keeper_types.Network_none
+    ; network_mode = Keeper_types_profile_sandbox.Network_none
     ; approval_profile = None
     ; approval_profile_derived = false
     ; cascade_name = Cascade_name.of_string_exn "test"

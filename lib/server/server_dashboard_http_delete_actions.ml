@@ -106,7 +106,7 @@ let resolve_keeper_purge_target config requested_name =
   let rec loop = function
     | [] -> None
     | candidate :: rest -> (
-      let candidate_meta_path = Keeper_meta_contract.keeper_meta_path config candidate in
+      let candidate_meta_path = Keeper_types_profile.keeper_meta_path config candidate in
       let candidate_toml_path = Config_dir_resolver.keeper_toml_path_opt candidate in
       match Keeper_meta_store.read_meta_resolved config candidate with
       | Ok (Some (resolved_name, meta)) ->
@@ -262,7 +262,7 @@ let purge_agent_filesystem_artifacts config agent_names =
 
 let purge_keeper_artifacts config requested_name
     ({ keeper_name; agent_name; trace_id; toml_path } : keeper_purge_target) =
-  let keeper_dir = Keeper_meta_store.keeper_dir config in
+  let keeper_dir = Keeper_fs.keeper_dir config in
   let keeper_runtime_dir = Filename.concat keeper_dir keeper_name in
   let cleanup_names =
     [ requested_name; keeper_name; agent_name ]
@@ -286,7 +286,7 @@ let purge_keeper_artifacts config requested_name
   List.iter
     (remove_path_if_exists ~context:"keeper_purge")
     [
-      Keeper_meta_contract.keeper_meta_path config keeper_name;
+      Keeper_types_profile.keeper_meta_path config keeper_name;
       Keeper_types_support.keeper_metrics_path config keeper_name;
       Keeper_types_support.keeper_memory_bank_path config keeper_name;
       Keeper_types_support.keeper_generation_index_path config keeper_name;

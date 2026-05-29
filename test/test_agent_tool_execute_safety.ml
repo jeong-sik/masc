@@ -7,6 +7,7 @@
     4. Empty commands are rejected *)
 
 module Coord = Masc_mcp.Coord
+module Keeper_meta_tool_access = Masc_mcp.Keeper_meta_tool_access
 module Exec_core = Masc_mcp.Exec_core
 module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
@@ -742,9 +743,9 @@ let make_write_enabled_meta name =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "write-enabled Execute test");
         ( "tool_access",
-          Keeper_types.tool_access_to_json
-            (Keeper_types.Preset
-               { preset = Keeper_types.Delivery; also_allow = [] }) );
+          Keeper_meta_tool_access.tool_access_to_json
+            (Keeper_meta_tool_access.Preset
+               { preset = Keeper_meta_tool_access.Delivery; also_allow = [] }) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

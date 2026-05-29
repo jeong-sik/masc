@@ -17,6 +17,7 @@
 
 open Alcotest
 module KEC = Masc_mcp.Keeper_error_classify
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
@@ -59,7 +60,7 @@ let make_accept_rejected () =
        { scope = "test"; model = None; reason = "no body" })
 
 let test_other_detail_generic_recoverable () =
-  let err = make_cascade_exhausted (KT.Other_detail "transport unavailable") in
+  let err = make_cascade_exhausted (Keeper_meta_contract.Other_detail "transport unavailable") in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Other_detail (non-quota) -> cascade_exhausted"
@@ -71,7 +72,7 @@ let test_other_detail_generic_recoverable () =
 let test_slot_full_other_detail_maps_to_capacity_backpressure () =
   let err =
     make_cascade_exhausted
-      (KT.Other_detail "slot full, cascading to next provider")
+      (Keeper_meta_contract.Other_detail "slot full, cascading to next provider")
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
@@ -115,7 +116,7 @@ let test_provider_capacity_backpressure_is_capacity_backpressure () =
     fail "Provider CapacityExhausted should be recoverable as capacity"
 
 let test_all_providers_failed_recoverable () =
-  let err = make_cascade_exhausted KT.All_providers_failed in
+  let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "All_providers_failed -> cascade_exhausted"
@@ -125,7 +126,7 @@ let test_all_providers_failed_recoverable () =
     fail "Cascade_exhausted with All_providers_failed should be recoverable"
 
 let test_no_providers_available_recoverable () =
-  let err = make_cascade_exhausted KT.No_providers_available in
+  let err = make_cascade_exhausted Keeper_meta_contract.No_providers_available in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "No_providers_available -> cascade_exhausted"
@@ -136,7 +137,7 @@ let test_no_providers_available_recoverable () =
 
 let test_candidates_filtered_specific_reason () =
   (* Specific reasons must keep their existing labels. *)
-  let err = make_cascade_exhausted KT.Candidates_filtered_after_cycles in
+  let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Candidates_filtered keeps specific label"
@@ -146,7 +147,7 @@ let test_candidates_filtered_specific_reason () =
     fail "Candidates_filtered should be recoverable"
 
 let test_max_turns_specific_reason () =
-  let err = make_cascade_exhausted KT.Max_turns_exceeded in
+  let err = make_cascade_exhausted Keeper_meta_contract.Max_turns_exceeded in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Max_turns keeps specific label" "max_turns" (KEC.degraded_retry_reason_to_string reason)
@@ -179,8 +180,8 @@ let test_accept_rejected_non_recoverable () =
    the keeper loops forever without auto-pause. *)
 let test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted () =
   let cases =
-    [ (KT.Candidates_filtered_after_cycles, "Candidates_filtered_after_cycles")
-    ; (KT.Max_turns_exceeded, "Max_turns_exceeded")
+    [ (Keeper_meta_contract.Candidates_filtered_after_cycles, "Candidates_filtered_after_cycles")
+    ; (Keeper_meta_contract.Max_turns_exceeded, "Max_turns_exceeded")
     ]
   in
   List.iter (fun (reason, label) ->
@@ -194,7 +195,7 @@ let test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted () =
     ) cases
 
 let test_catalog_rotation_preserves_order_without_base_injection () =
-  let err = make_cascade_exhausted KT.All_providers_failed in
+  let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
   match
     KEC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:[ "catalog_first"; "base_only" ]
@@ -211,7 +212,7 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
   | None -> fail "Expected catalog-ordered degraded retry"
 
 let test_rotation_skips_direct_tier_after_attempted_tier_group () =
-  let err = make_cascade_exhausted KT.Candidates_filtered_after_cycles in
+  let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match
     KEC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:
@@ -371,7 +372,7 @@ let test_server_error_524_is_transient_network_error_and_cascade_rotation () =
 let test_wrapped_524_is_capacity_backpressure () =
   let err =
     make_cascade_exhausted
-      (KT.Other_detail
+      (Keeper_meta_contract.Other_detail
          "all tiers failed (last runtime=runtime, error=Server error 524: error \
           code: 524)")
   in

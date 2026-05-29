@@ -35,7 +35,7 @@ let cleanup_dir path =
   in
   rm path
 
-let make_docker_meta ~name : Keeper_types.keeper_meta =
+let make_docker_meta ~name : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [
@@ -46,7 +46,7 @@ let make_docker_meta ~name : Keeper_types.keeper_meta =
         ("allowed_paths", `List [ `String "*" ]);
         ( "sandbox_profile"
         , `String
-            (Keeper_types.sandbox_profile_to_string Keeper_types.Docker) );
+            (Keeper_types_profile_sandbox.sandbox_profile_to_string Keeper_types_profile_sandbox.Docker) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

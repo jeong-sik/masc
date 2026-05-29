@@ -24,17 +24,17 @@ let ensure_wildcard_repo_mapping config keeper_name =
 
 let make_test_meta
       ?(name = "test-keeper")
-      ?(preset = Keeper_types.Full)
+      ?(preset = Keeper_meta_tool_access.Full)
       ?(also_allow = [])
       ?(allowed_paths = [ "*" ])
       ?tool_access
       ()
-  : Keeper_types.keeper_meta
+  : Keeper_meta_contract.keeper_meta
   =
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_types.Preset { preset; also_allow }
+    | None -> Keeper_meta_tool_access.Preset { preset; also_allow }
   in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -43,7 +43,7 @@ let make_test_meta
           ; "agent_name", `String name
           ; "trace_id", `String "test-trace-001"
           ; "allowed_paths", `List (List.map (fun path -> `String path) allowed_paths)
-          ; "tool_access", Keeper_types.tool_access_to_json tool_access
+          ; "tool_access", Keeper_meta_tool_access.tool_access_to_json tool_access
           ])
   with
   | Ok meta -> meta
@@ -168,7 +168,7 @@ let find_tool name tools =
 let find_read_tool tools = find_tool "Read" tools
 
 let read_repo_dir meta =
-  Filename.concat "repos" meta.Keeper_types.name
+  Filename.concat "repos" meta.Keeper_meta_contract.name
 ;;
 
 let read_path meta path = Filename.concat (read_repo_dir meta) path
@@ -181,7 +181,7 @@ let ensure_read_repo_dir config meta =
 ;;
 
 let make_registered_tools ~config ~meta ~ctx_snapshot () =
-  let keeper_name = meta.Keeper_types.name in
+  let keeper_name = meta.Keeper_meta_contract.name in
   ignore (Keeper_registry.register ~base_path:config.Coord.base_path keeper_name meta);
   ensure_wildcard_repo_mapping config keeper_name;
   Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot ()
@@ -904,11 +904,11 @@ let test_failure_tracking_is_independent_per_args () =
        | Ok _ -> fail "guardrail should block original failing args")
 ;;
 
-let make_research_meta ?tool_access () : Keeper_types.keeper_meta =
+let make_research_meta ?tool_access () : Keeper_meta_contract.keeper_meta =
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_types.Preset { preset = Keeper_types.Research; also_allow = [] }
+    | None -> Keeper_meta_tool_access.Preset { preset = Keeper_meta_tool_access.Research; also_allow = [] }
   in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -917,14 +917,14 @@ let make_research_meta ?tool_access () : Keeper_types.keeper_meta =
           ; "agent_name", `String "test-researcher"
           ; "trace_id", `String "test-trace-research"
           ; "soul_profile", `String "research"
-          ; "tool_access", Keeper_types.tool_access_to_json tool_access
+          ; "tool_access", Keeper_meta_tool_access.tool_access_to_json tool_access
           ])
   with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
 ;;
 
-let make_learned_meta () : Keeper_types.keeper_meta =
+let make_learned_meta () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -932,8 +932,8 @@ let make_learned_meta () : Keeper_types.keeper_meta =
           ; "agent_name", `String "test-learned"
           ; "trace_id", `String "test-trace-learned"
           ; ( "tool_access"
-            , Keeper_types.tool_access_to_json
-                (Keeper_types.Preset { preset = Keeper_types.Full; also_allow = [] }) )
+            , Keeper_meta_tool_access.tool_access_to_json
+                (Keeper_meta_tool_access.Preset { preset = Keeper_meta_tool_access.Full; also_allow = [] }) )
           ])
   with
   | Ok meta -> meta

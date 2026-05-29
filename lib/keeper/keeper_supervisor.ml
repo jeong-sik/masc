@@ -495,7 +495,7 @@ let sweep_and_recover (ctx : _ context) =
              && (not (paused_meta_requires_reconcile_recovery meta))
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
         ->
-        let path = Keeper_meta_contract.keeper_meta_path ctx.config name in
+        let path = Keeper_types_profile.keeper_meta_path ctx.config name in
         (try
            Sys.remove path;
            publish_lifecycle

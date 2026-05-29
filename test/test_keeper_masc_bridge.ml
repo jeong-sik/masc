@@ -95,13 +95,13 @@ let read_json_file path = Yojson.Safe.from_file path
 
 
 let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
-    ?(sandbox_profile = Masc_mcp.Keeper_types.Local) () =
+    ?(sandbox_profile = Masc_mcp.Keeper_types_profile_sandbox.Local) () =
   let tool_access =
     match tool_access with
     | Some access -> access
     | None ->
-        Masc_mcp.Keeper_types.Preset
-          { preset = Masc_mcp.Keeper_types.Full; also_allow = [] }
+        Masc_mcp.Keeper_meta_tool_access.Preset
+          { preset = Masc_mcp.Keeper_meta_tool_access.Full; also_allow = [] }
   in
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc
@@ -111,16 +111,16 @@ let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
         ("trace_id", `String (name ^ "-trace"));
         ( "sandbox_profile",
           `String
-            (Masc_mcp.Keeper_types.sandbox_profile_to_string sandbox_profile)
+            (Masc_mcp.Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
         );
-        ("tool_access", Masc_mcp.Keeper_types.tool_access_to_json tool_access);
+        ("tool_access", Masc_mcp.Keeper_meta_tool_access.tool_access_to_json tool_access);
         ("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist));
       ])
   with
   | Ok meta -> meta
   | Error e -> failwith e
 
-let with_registered_keeper ~config (meta : Masc_mcp.Keeper_types.keeper_meta) f =
+let with_registered_keeper ~config (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) f =
   let base_path = config.Coord.base_path in
   Masc_mcp.Keeper_registry.unregister ~base_path meta.name;
   ignore (Masc_mcp.Keeper_registry.register ~base_path meta.name meta);
@@ -149,7 +149,7 @@ let test_inject_stores_filtered_masc () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Custom
+        (Masc_mcp.Keeper_meta_tool_access.Custom
            [ "masc_status"; "masc_broadcast"; "masc_messages" ])
       ()
   in
@@ -181,8 +181,8 @@ let test_messaging_preset_exposes_board () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Preset
-           { preset = Masc_mcp.Keeper_types.Messaging; also_allow = [] })
+        (Masc_mcp.Keeper_meta_tool_access.Preset
+           { preset = Masc_mcp.Keeper_meta_tool_access.Messaging; also_allow = [] })
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
@@ -201,7 +201,7 @@ let test_custom_opens_specific_tools_only () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Custom
+        (Masc_mcp.Keeper_meta_tool_access.Custom
            [ "masc_status"; "masc_tasks"; "masc_join" ])
       ()
   in
@@ -221,7 +221,7 @@ let test_deny_overrides_allow () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Custom
+        (Masc_mcp.Keeper_meta_tool_access.Custom
            [ "masc_status"; "masc_tasks"; "masc_join" ])
       ~tool_denylist:[ "masc_tasks" ] ()
   in
@@ -234,7 +234,7 @@ let test_deny_overrides_allow () =
 let test_custom_empty_blocks_all () =
   prime_keeper_bridge ();
   let meta =
-    make_meta ~tool_access:(Masc_mcp.Keeper_types.Custom []) ()
+    make_meta ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom []) ()
   in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check int) "no tools" 0 (List.length names)
@@ -244,9 +244,9 @@ let test_preset_with_also_allow_opens_extra_tool () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Preset
+        (Masc_mcp.Keeper_meta_tool_access.Preset
            {
-             preset = Masc_mcp.Keeper_types.Minimal;
+             preset = Masc_mcp.Keeper_meta_tool_access.Minimal;
              also_allow = [ "masc_tasks" ];
            })
       ()
@@ -265,7 +265,7 @@ let test_custom_keeps_registered_inline_board_tool () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Custom
+        (Masc_mcp.Keeper_meta_tool_access.Custom
            [ "keeper_board_post"; "masc_who" ])
       ()
   in
@@ -289,7 +289,7 @@ let test_dashboard_tool_count_uses_schema_ssot () =
       let meta =
         make_meta
           ~tool_access:
-            (Masc_mcp.Keeper_types.Custom [ bridge_name ])
+            (Masc_mcp.Keeper_meta_tool_access.Custom [ bridge_name ])
           ()
       in
       let allowed = KET.keeper_allowed_tool_names meta in
@@ -354,7 +354,7 @@ let test_read_meta_file_rejects_legacy_tool_keys () =
             ("tool_also_allow", `List [ `String "masc_governance_status" ]);
             ("allowed_providers", `List [ `String "provider_k" ]);
           ]);
-      match Masc_mcp.Keeper_types.read_meta_file_path path with
+      match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
       | Ok _ -> Alcotest.fail "expected legacy tool policy rejection"
       | Error e ->
           Alcotest.(check string)
@@ -380,7 +380,7 @@ let test_read_meta_file_rejects_legacy_tool_access_kind () =
             ("trace_id", `String "legacy-unrestricted-trace");
             ("tool_access", `Assoc [ ("kind", `String "unrestricted") ]);
           ]);
-      match Masc_mcp.Keeper_types.read_meta_file_path path with
+      match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
       | Ok _ -> Alcotest.fail "expected legacy tool_access kind rejection"
       | Error e ->
           Alcotest.(check string)
@@ -403,7 +403,7 @@ let test_read_meta_file_defaults_missing_tool_access_without_rewrite () =
             ("sandbox_profile", `String "local");
             ("network_mode", `String "inherit");
           ]);
-      match Masc_mcp.Keeper_types.read_meta_file_path path with
+      match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
       | Error e -> Alcotest.fail e
       | Ok None -> Alcotest.fail "expected keeper meta"
       | Ok (Some meta) ->
@@ -451,9 +451,9 @@ let test_tool_access_preset_empty_json_preserved () =
     | Ok meta -> meta
     | Error e -> failwith e
   in
-  match meta.Masc_mcp.Keeper_types.tool_access with
-  | Masc_mcp.Keeper_types.Preset
-      { preset = Masc_mcp.Keeper_types.Delivery; also_allow } ->
+  match meta.Masc_mcp.Keeper_meta_contract.tool_access with
+  | Masc_mcp.Keeper_meta_tool_access.Preset
+      { preset = Masc_mcp.Keeper_meta_tool_access.Delivery; also_allow } ->
       Alcotest.(check int) "preset empty preserved" 0 (List.length also_allow)
   | _ -> Alcotest.fail "expected delivery preset with empty also_allow"
 
@@ -476,8 +476,8 @@ let test_tool_access_custom_empty_json_preserved () =
     | Ok meta -> meta
     | Error e -> failwith e
   in
-  match meta.Masc_mcp.Keeper_types.tool_access with
-  | Masc_mcp.Keeper_types.Custom names ->
+  match meta.Masc_mcp.Keeper_meta_contract.tool_access with
+  | Masc_mcp.Keeper_meta_tool_access.Custom names ->
       Alcotest.(check int) "custom empty preserved" 0 (List.length names)
   | _ -> Alcotest.fail "expected Custom []"
 
@@ -598,7 +598,7 @@ let test_allowlist_gates_shard_tools () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Custom
+        (Masc_mcp.Keeper_meta_tool_access.Custom
            [ "masc_status"; "masc_tasks" ])
       ()
   in
@@ -624,7 +624,7 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
       let config = Coord.default_config dir in
       let meta =
         make_meta
-          ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_approval_pending" ])
+          ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "masc_approval_pending" ])
           ()
       in
       with_registered_keeper ~config meta (fun () ->
@@ -660,8 +660,8 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
         let meta =
           make_meta
             ~name:"masc-improver"
-            ~sandbox_profile:Masc_mcp.Keeper_types.Docker
-            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_read_file" ])
+            ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
+            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_read_file" ])
             ()
         in
         with_registered_keeper ~config meta (fun () ->
@@ -719,8 +719,8 @@ let test_write_preflight_accepts_docker_container_repo_path () =
         let meta =
           make_meta
             ~name:"sangsu"
-            ~sandbox_profile:Masc_mcp.Keeper_types.Docker
-            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_edit_file" ])
+            ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
+            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_edit_file" ])
             ()
         in
         with_registered_keeper ~config meta (fun () ->
@@ -786,8 +786,8 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
         let meta =
           make_meta
             ~name:keeper_name
-            ~sandbox_profile:Masc_mcp.Keeper_types.Docker
-            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_edit_file" ])
+            ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
+            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_edit_file" ])
             ()
         in
         ignore (Masc_mcp.Keeper_registry.register ~base_path:dir keeper_name meta);
@@ -823,7 +823,7 @@ let test_schemas_match_names () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_types.Custom
+        (Masc_mcp.Keeper_meta_tool_access.Custom
            [ "masc_status"; "masc_join"; "masc_tasks" ])
       ()
   in

@@ -62,7 +62,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
      | Some tool_access ->
          [
            ( "tool_access",
-             Masc_mcp.Keeper_types.tool_access_to_json tool_access );
+             Masc_mcp.Keeper_meta_tool_access.tool_access_to_json tool_access );
          ]
      | None -> [])
   in
@@ -310,7 +310,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         (Some []) ctx.required_tools;
       check (option (list string)) "runtime mcp missing required tools empty"
         (Some []) ctx.missing_required_tools;
-      check (option string) "cascade profile" (Some (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
+      check (option string) "cascade profile" (Some (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta))
         ctx.cascade_profile)
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
@@ -333,7 +333,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-001"
-      ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_execute" ])
+      ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_execute" ])
       keeper_name
   in
   Fun.protect
@@ -455,7 +455,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (runtime_contract |> U.member "missing_required_tools" |> U.to_list
          |> List.length);
       check string "runtime contract cascade profile"
-        (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
+        (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta)
         (runtime_contract |> U.member "cascade_profile" |> U.to_string);
       let masc_root =
         Filename.concat base_path Common.masc_dirname
@@ -498,7 +498,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
          |> U.to_string);
       check string "trajectory runtime cascade profile"
-        (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
+        (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta)
         (trajectory_json |> U.member "runtime_contract"
          |> U.member "cascade_profile" |> U.to_string);
       check string "trajectory action tool" "tool_execute"

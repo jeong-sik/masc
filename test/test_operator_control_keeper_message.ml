@@ -176,7 +176,7 @@ let test_keeper_msg_auto_execution_session_bridge () =
               in
               Alcotest.(check bool) "keeper down ok" true ok;
               let meta_after_down =
-                match Masc_mcp.Keeper_types.read_meta config keeper_name with
+                match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
                 | Ok (Some meta) -> meta
                 | Ok None -> Alcotest.fail "keeper meta removed unexpectedly"
                 | Error err -> Alcotest.fail ("meta read after down failed: " ^ err)

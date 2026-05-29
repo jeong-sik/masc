@@ -1,6 +1,8 @@
 open Alcotest
 
 module ES = Masc_mcp.Keeper_status_runtime
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
+module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
 module Metrics = Masc_mcp.Keeper_status_metrics
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
@@ -20,7 +22,7 @@ let keeper_health_testable : KT.keeper_health Alcotest.testable =
 let make_meta ?(name = "keeper-exec-status-test")
     ?(trace_id = "trace-keeper-exec-status") () =
   match
-    KT.meta_of_json
+    Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
           ("name", `String name);
@@ -466,7 +468,7 @@ let test_diagnostic_ignores_stale_error_when_live_signal_is_newer () =
               base.runtime.proactive_rt with
               count_total = 5;
               last_ts = stale_error_ts;
-              last_outcome = KT.Proactive_error;
+              last_outcome = Keeper_meta_contract.Proactive_error;
               last_reason =
                 "unified:error:Timeout: Execution cancelled after 300.0s";
               last_preview = "Timeout: Execution cancelled after 300.0s";
@@ -497,8 +499,8 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:reason
-                    KT.Autonomous_slot_wait_timeout);
+            Some (Keeper_meta_contract.blocker_info_of_class ~detail:reason
+                    Keeper_meta_contract.Autonomous_slot_wait_timeout);
         };
     }
   in
@@ -535,8 +537,8 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:reason
-                    (KT.Cascade_exhausted KT.Connection_refused));
+            Some (Keeper_meta_contract.blocker_info_of_class ~detail:reason
+                    (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.Connection_refused));
         };
     }
   in
@@ -582,8 +584,8 @@ let test_runtime_surface_names_no_tool_provider_details () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:summary
-                    KT.No_tool_capable_provider);
+            Some (Keeper_meta_contract.blocker_info_of_class ~detail:summary
+                    (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable));
         };
     }
   in
@@ -618,9 +620,9 @@ let test_runtime_surface_routes_turn_timeout_to_runtime_action () =
               base.runtime with
               last_blocker =
                 Some
-                  (KT.blocker_info_of_class
+                  (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"Provider stream exceeded the keeper turn timeout."
-                     KT.Turn_timeout);
+                     Keeper_meta_contract.Turn_timeout);
             };
         }
       in
@@ -654,9 +656,9 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
               base.runtime with
               last_blocker =
                 Some
-                  (KT.blocker_info_of_class
+                  (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"Provider stream exceeded the keeper turn timeout."
-                     KT.Turn_timeout);
+                     Keeper_meta_contract.Turn_timeout);
             };
         }
       in
@@ -700,7 +702,7 @@ let test_status_bridge_does_not_fabricate_resumable_cli_session_blocker () =
     (option string)
     "resumable session is not a cascade blocker"
     None
-    (Option.map KT.blocker_class_to_string (KSB.blocker_class_of_sdk_error sdk_error))
+    (Option.map Keeper_meta_contract.blocker_class_to_string (KSB.blocker_class_of_sdk_error sdk_error))
 ;;
 
 let test_status_bridge_classifies_oas_agent_execution_timeout () =
@@ -728,7 +730,7 @@ let test_status_bridge_classifies_oas_agent_execution_timeout () =
          label
          (Some "oas_agent_execution_timeout")
          (Option.map
-            KT.blocker_class_to_string
+            Keeper_meta_contract.blocker_class_to_string
             (KSB.blocker_class_of_sdk_error sdk_error)))
     [ "structural api timeout", structural_api_timeout
     ; "typed agent execution timeout", typed_agent_timeout
@@ -743,10 +745,10 @@ let test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload () =
   let cascade_surface =
     KSB.runtime_blocker_surface_of_typed_class
       ~summary
-      (KT.Cascade_exhausted KT.No_providers_available)
+      (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_providers_available)
   in
   let no_tool_surface =
-    KSB.runtime_blocker_surface_of_typed_class ~summary (KT.Cascade_exhausted KT.No_tool_capable)
+    KSB.runtime_blocker_surface_of_typed_class ~summary (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable)
   in
   check string "cascade summary stays opaque" summary cascade_surface.summary;
   check string "no-tool summary stays opaque" summary no_tool_surface.summary;
@@ -799,8 +801,8 @@ let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker 
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:reason
-                    KT.Ambiguous_post_commit_timeout);
+            Some (Keeper_meta_contract.blocker_info_of_class ~detail:reason
+                    Keeper_meta_contract.Ambiguous_post_commit_timeout);
         };
     }
   in
@@ -839,7 +841,7 @@ let test_runtime_surface_suppresses_stale_proactive_timeout_reason () =
             {
               base.runtime.proactive_rt with
               last_ts = now_ts -. 600.0;
-              last_outcome = KT.Proactive_error;
+              last_outcome = Keeper_meta_contract.Proactive_error;
               last_reason =
                 "unified:error:Internal error: Turn wall-clock timeout after 3600s (MASC_KEEPER_TURN_TIMEOUT_SEC)";
               last_preview =
@@ -969,7 +971,7 @@ let test_runtime_surface_maps_registry_failure_reason_blockers () =
 
 let test_runtime_surface_exposes_cascade_attempt_facts () =
   KR.clear ();
-  let attempt : KT.cascade_attempt_record =
+  let attempt : Keeper_meta_contract.cascade_attempt_record =
     { provider_id = "runpod_mtp.qwen36-35b-a3b-mtp.keeper"
     ; http_status = Some 524
     ; outcome = `Failure "connection closed by peer"
@@ -978,7 +980,7 @@ let test_runtime_surface_exposes_cascade_attempt_facts () =
   in
   let base =
     make_meta ~name:"runtime-cascade-attempt-facts-test" ()
-    |> KT.set_cascade_name "tier-group.strict_tool_candidates"
+    |> Keeper_meta_contract.set_cascade_name "tier-group.strict_tool_candidates"
   in
   let meta =
     { base with
@@ -1098,9 +1100,9 @@ let test_runtime_surface_prefers_typed_blocker_over_progress_narrative () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class
+            Some (Keeper_meta_contract.blocker_info_of_class
                     ~detail:"turn wall-clock timeout exceeded"
-                    KT.Turn_timeout);
+                    Keeper_meta_contract.Turn_timeout);
         };
     }
   in

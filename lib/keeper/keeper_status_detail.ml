@@ -720,7 +720,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
 
          let json = `Assoc ([
            ("name", `String name);
-           ("meta", meta_to_json m);
+           ("meta", Keeper_meta_json.meta_to_json m);
            ("goal", `String m.goal);
            ("short_goal", `String m.short_goal);
            ("mid_goal", `String m.mid_goal);

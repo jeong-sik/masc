@@ -1,6 +1,7 @@
 open Alcotest
 
 module Harness = Masc_mcp.Dashboard_harness_health
+module Keeper_meta_store = Masc_mcp.Keeper_meta_store
 module Cal = Masc_mcp.Eval_calibration
 module AR = Masc_mcp.Anti_rationalization
 module Coord = Masc_mcp.Coord
@@ -55,7 +56,7 @@ let make_keeper_meta ?(name = "keeper-a") ?(trace_id = "trace-keeper-a") () =
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
 let write_keeper_meta config meta =
-  match Keeper_types.write_meta config meta with
+  match Keeper_meta_store.write_meta config meta with
   | Ok () -> ()
   | Error err -> Alcotest.fail ("write_meta failed: " ^ err)
 

@@ -526,7 +526,7 @@ let parse_models (toml : Otoml.t) : (cascade_model_spec list, parse_error list) 
 (* --- Reserved namespace detection --- *)
 
 let reserved_namespaces =
-  [ "providers"; "models"; "system"; "routes"; "profiles" ]
+  [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime" ]
 ;;
 
 let is_reserved (name : string) : bool = List.mem name reserved_namespaces

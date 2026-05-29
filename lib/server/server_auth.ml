@@ -278,11 +278,30 @@ let sanitize_dashboard_actor_name raw =
    (Ok None / Error err arms in [dashboard_actor_for_request]) onto a single
    helper. The message rendering and prometheus labels are owned by
    [Auth_error_kind] so the contract is round-tripped through a typed
-   record rather than two parallel inline format strings. *)
+   record rather than two parallel inline format strings.
+
+   Log dedup: a stale dashboard token triggers this path on *every* HTTP
+   request the browser makes.  Without a cooldown, 140+ identical WARN
+   lines/day accumulate for the same token hash prefix.  The Prometheus
+   counter is always incremented (metrics remain accurate); the log line
+   is emitted at most once per [warn_cooldown_sec] per token prefix. *)
+let warn_cooldown_sec = 300.0
+
+let stale_token_warn_log : (string, float) Hashtbl.t = Hashtbl.create 16
+
 let record_dashboard_actor_fallback
     (fb : Auth_error_kind.dashboard_actor_fallback) =
-  Log.Auth.warn "%s"
-    (Auth_error_kind.dashboard_actor_fallback_log_message fb);
+  let now = Time_compat.now () in
+  let should_log =
+    match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
+    | Some last_ts -> now -. last_ts >= warn_cooldown_sec
+    | None -> true
+  in
+  if should_log then begin
+    Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+    Log.Auth.warn "%s"
+      (Auth_error_kind.dashboard_actor_fallback_log_message fb)
+  end;
   Prometheus.inc_counter
     Prometheus.metric_silent_dashboard_actor_fallback
     ~labels:(Auth_error_kind.dashboard_actor_fallback_prometheus_labels fb)

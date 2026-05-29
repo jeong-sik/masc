@@ -1020,7 +1020,21 @@ let test_combined_short_flags () =
   in
   (match diff_qu with
    | W (Diff { unified = true; brief = true; _ }) -> ()
-   | w -> Alcotest.failf "diff -qu: expected unified+brief, got %a" pp w)
+   | w -> Alcotest.failf "diff -qu: expected unified+brief, got %a" pp w);
+  (* git commit -am "message" *)
+  let git_am =
+    of_simple { (base "git") with args = [ lit "commit"; lit "-am"; lit "Initial commit" ] }
+  in
+  (match git_am with
+   | W (Git_commit { message = "Initial commit"; amend = true; _ }) -> ()
+   | w -> Alcotest.failf "git commit -am: expected message+amend, got %a" pp w);
+  (* git commit -ma "message" *)
+  let git_ma =
+    of_simple { (base "git") with args = [ lit "commit"; lit "-ma"; lit "Fix bug" ] }
+  in
+  (match git_ma with
+   | W (Git_commit { message = "Fix bug"; amend = true; _ }) -> ()
+   | w -> Alcotest.failf "git commit -ma: expected message+amend, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

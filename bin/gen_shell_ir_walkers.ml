@@ -37,6 +37,11 @@ type ctor =
        The parameter is named [args].  For Git sub-commands [args] is
        the remainder after the sub-command has already been stripped.
        [None] for [Generic]. *)
+  ; no_expand_combined : bool
+    (* If true, skip [expand_combined_short_flags] pre-processing before
+       calling the parse body.  Use when the parser has its own combined-
+       flag handler that needs to see the original combined token (e.g.
+       [git commit -am MESSAGE] where [-am] must not be split). *)
   }
 
 (* Helper for the ~27 constructors that share the standard
@@ -79,6 +84,7 @@ let rec parse subcmd extra = function
 in
 parse None [] args|}
            name)
+  ; no_expand_combined = false
   }
 
 (* Order mirrors lib/exec/shell_ir_typed.{ml,mli} declaration order
@@ -145,6 +151,7 @@ let rec parse flags path = function
       | Some _ -> None)
 in
 parse [] None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Cat"
     ; anon_pattern = "Cat _"
@@ -170,6 +177,7 @@ parse [] None args|}
    | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cat { path = p }))
    | None -> None)
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Rg"
     ; anon_pattern = "Rg _"
@@ -214,6 +222,7 @@ let rec parse case_sensitive pattern path dd = function
          | Some _ -> None))
 in
 parse true None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_status"
     ; anon_pattern = "Git_status _"
@@ -241,6 +250,7 @@ let rec parse short = function
   | _ :: rest -> parse short rest
 in
 parse false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_clone"
     ; anon_pattern = "Git_clone _"
@@ -293,6 +303,7 @@ let rec parse depth branch repo dd = function
       | Some _ -> None)
 in
 parse None None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Curl"
     ; anon_pattern = "Curl _"
@@ -447,6 +458,7 @@ let rec parse method_ headers body url output_file follow_redirects insecure dd 
       | Some _ -> None)
 in
 parse `GET [] None None None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Rm"
     ; anon_pattern = "Rm _"
@@ -497,6 +509,7 @@ let rec parse recursive force paths = function
     else parse recursive force (arg :: paths) rest
 in
 parse false false [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Sudo"
     ; anon_pattern = "Sudo _"
@@ -518,6 +531,7 @@ parse false false [] args|}
           {|match args with
 | [] -> None
 | args -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sudo { target_argv = args }))|}
+    ; no_expand_combined = false
     }
   ; { name = "Find"
     ; anon_pattern = "Find _"
@@ -605,6 +619,7 @@ let rec parse name type_ maxdepth path = function
       | Some _ -> None)
 in
 parse None None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Head"
     ; anon_pattern = "Head _"
@@ -673,6 +688,7 @@ let rec parse lines path = function
       | Some _ -> None)
 in
 parse 10 None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tail"
     ; anon_pattern = "Tail _"
@@ -741,6 +757,7 @@ let rec parse lines path = function
       | Some _ -> None)
 in
 parse 10 None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Grep"
     ; anon_pattern = "Grep _"
@@ -825,6 +842,7 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
          | Some _ -> None))
 in
 parse false true false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Mkdir"
     ; anon_pattern = "Mkdir _"
@@ -871,6 +889,7 @@ let rec parse parents path = function
       | Some _ -> None)
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Wc"
     ; anon_pattern = "Wc _"
@@ -935,6 +954,7 @@ let rec parse mode path = function
       | Some _ -> None)
 in
 parse None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_diff"
     ; anon_pattern = "Git_diff _"
@@ -969,6 +989,7 @@ let rec parse stat cached paths = function
     else parse stat cached (arg :: paths) rest
 in
 parse false false [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_log"
     ; anon_pattern = "Git_log _"
@@ -1030,6 +1051,7 @@ let rec parse oneline max_count = function
     else parse oneline max_count rest
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_commit"
     ; anon_pattern = "Git_commit _"
@@ -1065,12 +1087,48 @@ let rec parse message amend = function
      | Some _ -> None)
   | "-a" :: rest | "--all" :: rest -> parse message amend rest
   | "--no-edit" :: rest -> parse message amend rest
+  (* Combined short flags: -am MESSAGE, -ma MESSAGE *)
+  | arg :: rest
+    when String.length arg >= 3
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.contains arg 'm'
+         && String.contains arg 'a' ->
+    let has_a = ref amend in
+    let msg_buf = Buffer.create 16 in
+    let m_seen = ref false in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'a' when !m_seen ->
+        (* 'a' after 'm' is a flag, not part of the message *)
+        has_a := true
+      | 'a' -> has_a := true
+      | 'm' -> m_seen := true
+      | c when !m_seen -> Buffer.add_char msg_buf c
+      | _ -> ()
+    done;
+    let msg_from_combined =
+      if Buffer.length msg_buf > 0 then Some (Buffer.contents msg_buf) else None
+    in
+    (match msg_from_combined with
+     | Some prefix ->
+       (* -m consumed the rest of this token; next arg is message continuation or standalone *)
+       (match rest with
+        | next :: rest' when String.length next > 0 && next.[0] <> '-' ->
+          parse (Some (prefix ^ " " ^ next)) !has_a rest'
+        | _ -> parse (Some prefix) !has_a rest)
+     | None ->
+       (* -m found but no inline text; next arg is the message *)
+       (match rest with
+        | m :: rest' -> parse (Some m) !has_a rest'
+        | _ -> None))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse message amend rest
     else parse message amend rest
 in
 parse None false args|}
+    ; no_expand_combined = true
     }
   ; { name = "Git_push"
     ; anon_pattern = "Git_push _"
@@ -1132,6 +1190,7 @@ let rec parse force force_with_lease set_upstream remote branch = function
          | Some _ -> parse force force_with_lease set_upstream remote branch rest))
 in
 parse false false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Git_pull"
     ; anon_pattern = "Git_pull _"
@@ -1173,6 +1232,7 @@ let rec parse rebase remote branch = function
          | Some _ -> parse rebase remote branch rest))
 in
 parse false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pwd"
     ; anon_pattern = "Pwd _"
@@ -1194,6 +1254,7 @@ parse false None None args|}
           {|match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pwd ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Echo"
     ; anon_pattern = "Echo _"
@@ -1213,6 +1274,7 @@ parse false None None args|}
     ; parse_body =
         Some
           {|Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Echo { args = args }))|}
+    ; no_expand_combined = false
     }
   ; { name = "Which"
     ; anon_pattern = "Which _"
@@ -1234,6 +1296,7 @@ parse false None None args|}
           {|match args with
 | [] -> None
 | names -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Which { names }))|}
+    ; no_expand_combined = false
     }
   ; { name = "Sort"
     ; anon_pattern = "Sort _"
@@ -1326,6 +1389,7 @@ let rec parse reverse numeric unique key file = function
       | Some _ -> None)
 in
 parse false false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Cut"
     ; anon_pattern = "Cut _"
@@ -1383,6 +1447,7 @@ let rec parse delimiter fields file = function
          | Some _ -> None))
 in
 parse None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tr"
     ; anon_pattern = "Tr _"
@@ -1454,6 +1519,7 @@ let rec parse delete squeeze set1 set2 = function
          | Some _ -> None))
 in
 parse false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Date"
     ; anon_pattern = "Date _"
@@ -1484,6 +1550,7 @@ let rec parse utc format = function
     else parse utc (Some arg) rest
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Env"
     ; anon_pattern = "Env _"
@@ -1506,6 +1573,7 @@ parse false None args|}
 match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Env ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Printenv"
     ; anon_pattern = "Printenv _"
@@ -1530,6 +1598,7 @@ match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = None }))
 | [ n ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printenv { name = Some n }))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Uniq"
     ; anon_pattern = "Uniq _"
@@ -1597,6 +1666,7 @@ let rec parse count duplicates unique skip_fields skip_chars file = function
     else parse count duplicates unique skip_fields skip_chars (Some arg) rest
 in
 parse false false false None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Basename"
     ; anon_pattern = "Basename _"
@@ -1630,6 +1700,7 @@ match args with
    | [ path; suffix ] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Basename { path; suffix = Some suffix }))
    | _ -> None)
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Dirname"
     ; anon_pattern = "Dirname _"
@@ -1656,6 +1727,7 @@ match args with
    | Some path -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dirname { path }))
    | None -> None)
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Test"
     ; anon_pattern = "Test _"
@@ -1679,6 +1751,7 @@ match args with
 | [] -> None
 | expression -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Test { expression }))
     |}
+    ; no_expand_combined = false
     }
   ; { name = "Stat"
     ; anon_pattern = "Stat _"
@@ -1727,6 +1800,7 @@ let rec parse format = function
     else Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Stat { format; path = arg }))
 in
 parse None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Hostname"
     ; anon_pattern = "Hostname _"
@@ -1756,6 +1830,7 @@ let rec parse short = function
     else parse short rest
 in
 parse false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Whoami"
     ; anon_pattern = "Whoami _"
@@ -1778,6 +1853,7 @@ parse false args|}
 match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Whoami ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Du"
     ; anon_pattern = "Du _"
@@ -1868,6 +1944,7 @@ let rec parse human_readable summary max_depth = function
                  })))
 in
 parse false false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Df"
     ; anon_pattern = "Df _"
@@ -1938,6 +2015,7 @@ let rec parse human_readable fs_type = function
                  { path = Some arg; human_readable; filesystem_type = fs_type })))
 in
 parse false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "File"
     ; anon_pattern = "File _"
@@ -1996,6 +2074,7 @@ let rec parse mime brief = function
            (Shell_ir_typed_types.File { path = arg; mime; brief }))
 in
 parse false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Printf"
     ; anon_pattern = "Printf _"
@@ -2024,6 +2103,7 @@ match args with
 | format :: rest ->
   Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Printf { format; args = rest }))
 |}
+    ; no_expand_combined = false
     }
   ; { name = "Uname"
     ; anon_pattern = "Uname _"
@@ -2085,6 +2165,7 @@ let rec parse all kn rel mach = function
     else parse all kn rel mach rest
 in
 parse false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ps"
     ; anon_pattern = "Ps _"
@@ -2142,6 +2223,7 @@ let rec parse all full user = function
     else parse all full user rest
 in
 parse false false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tty"
     ; anon_pattern = "Tty _"
@@ -2164,6 +2246,7 @@ parse false false None args|}
 match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tty ()))
 | _ -> None|}
+    ; no_expand_combined = false
     }
   ; { name = "Wget"
     ; anon_pattern = "Wget _"
@@ -2214,6 +2297,7 @@ let rec parse output continue_ ncc url dd = function
          | Some _ -> None))
 in
 parse None false false None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
@@ -2283,6 +2367,7 @@ let rec parse port id_file host user command dd = function
           { host = (match host with Some h -> h | None -> ""); user; command = Some cmd; port; identity_file = id_file })))
 in
 parse None None None None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Scp"
     ; anon_pattern = "Scp _"
@@ -2358,6 +2443,7 @@ let rec parse recursive port src dest = function
         | Some _ -> None)
 in
 parse false None None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tar"
     ; anon_pattern = "Tar _"
@@ -2481,6 +2567,7 @@ let rec parse action compression archive paths = function
     else parse action compression archive (arg :: paths) rest
 in
 parse None `None None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Make"
     ; anon_pattern = "Make _"
@@ -2533,6 +2620,7 @@ let rec parse jobs target dd = function
       | Some _ -> None)
 in
 parse None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Diff"
     ; anon_pattern = "Diff _"
@@ -2595,6 +2683,7 @@ let rec parse unified brief files = function
     else parse unified brief (files @ [ arg ]) rest
 in
 parse false false [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Sed"
     ; anon_pattern = "Sed _"
@@ -2650,6 +2739,7 @@ let rec parse in_place ext_re suppress expr file dd = function
         | Some _ -> None)
 in
 parse false false false None None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Rsync"
     ; anon_pattern = "Rsync _"
@@ -2751,6 +2841,7 @@ let rec parse flags archive delete dry_run compress src dst = function
            | Some _ -> None))
 in
 parse [] false false false false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Node"
     ; anon_pattern = "Node _"
@@ -2794,6 +2885,7 @@ let rec parse inline script extra = function
        else parse inline (Some arg) extra rest)
 in
 parse None None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Python"
     ; anon_pattern = "Python _"
@@ -2837,6 +2929,7 @@ let rec parse inline script extra = function
        else parse inline (Some arg) extra rest)
 in
 parse None None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Python3"
     ; anon_pattern = "Python3 _"
@@ -2880,6 +2973,7 @@ let rec parse inline script extra = function
        else parse inline (Some arg) extra rest)
 in
 parse None None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pip"
     ; anon_pattern = "Pip _"
@@ -2912,6 +3006,7 @@ let rec parse subcmd pkgs = function
      | Some _ -> parse subcmd (arg :: pkgs) rest)
 in
 parse None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Patch"
     ; anon_pattern = "Patch _"
@@ -2964,6 +3059,7 @@ let rec parse file patchfile strip reverse = function
       | Some _ -> None)
 in
 parse None None 0 false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Npm"
     ; anon_pattern = "Npm _"
@@ -3016,6 +3112,7 @@ let rec parse subcmd sd glb frc = function
        })))
 in
 parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Cargo"
     ; anon_pattern = "Cargo _"
@@ -3073,6 +3170,7 @@ let rec parse subcmd rel verb feat = function
         })))
 in
 parse None false false None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Go"
     ; anon_pattern = "Go _"
@@ -3121,6 +3219,7 @@ let rec parse subcmd v race = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Gh"
     ; anon_pattern = "Gh _"
@@ -3207,6 +3306,7 @@ let rec parse subcmd act draft squash del_branch body title rest = function
         | _ -> parse subcmd act draft squash del_branch body title (arg :: rest) args))
 in
 parse None None false false false None None [] args|}
+    ; no_expand_combined = false
     }
   ; { name = "Chmod"
     ; anon_pattern = "Chmod _"
@@ -3260,6 +3360,7 @@ let rec parse recursive mode path = function
          | Some _ -> None))
 in
 parse false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Chown"
     ; anon_pattern = "Chown _"
@@ -3313,6 +3414,7 @@ let rec parse recursive owner path = function
          | Some _ -> None))
 in
 parse false None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Docker"
     ; anon_pattern = "Docker _"
@@ -3365,6 +3467,7 @@ let rec parse subcmd rm priv det = function
        })))
 in
 parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Opam"
     ; anon_pattern = "Opam _"
@@ -3412,6 +3515,7 @@ parse None false false false args|}
          })))
   in
   parse None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Npx"
     ; anon_pattern = "Npx _"
@@ -3459,6 +3563,7 @@ parse None false false false args|}
          })))
   in
   parse None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Yarn"
     ; anon_pattern = "Yarn _"
@@ -3514,6 +3619,7 @@ let rec parse subcmd dev glb prod fl = function
        })))
 in
 parse None false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pnpm"
     ; anon_pattern = "Pnpm _"
@@ -3569,6 +3675,7 @@ let rec parse subcmd sd glb frc prod = function
        })))
 in
 parse None false false false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Uv"
     ; anon_pattern = "Uv _"
@@ -3618,6 +3725,7 @@ let rec parse subcmd nc sys = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Glab"
     ; anon_pattern = "Glab _"
@@ -3668,6 +3776,7 @@ let rec parse subcmd y f = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pytest"
     ; anon_pattern = "Pytest _"
@@ -3716,6 +3825,7 @@ let rec parse subcmd v x = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Terminal_notifier"
     ; anon_pattern = "Terminal_notifier _"
@@ -3751,6 +3861,7 @@ let rec parse title message = function
                        | Some _ -> None))
 in
 parse None None args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ruff"
     ; anon_pattern = "Ruff _"
@@ -3799,6 +3910,7 @@ let rec parse subcmd f s = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Pyright"
     ; anon_pattern = "Pyright _"
@@ -3845,6 +3957,7 @@ let rec parse subcmd st = function
        })))
 in
 parse None false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Tsc"
     ; anon_pattern = "Tsc _"
@@ -3893,6 +4006,7 @@ let rec parse subcmd nw w = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; subcommand_args_ctor ~name:"Ocamlfind" ~risk:"`Audited" ~sandbox:"`Host"
   ; { name = "Rustc"
@@ -3942,6 +4056,7 @@ let rec parse subcmd opt tst = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Gofmt"
     ; anon_pattern = "Gofmt _"
@@ -3990,6 +4105,7 @@ let rec parse subcmd w lf = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Gradle"
     ; anon_pattern = "Gradle _"
@@ -4038,6 +4154,7 @@ let rec parse subcmd nd p = function
        })))
 in
 parse None false false args|}
+    ; no_expand_combined = false
     }
   ; { name = "Ninja"
     ; anon_pattern = "Ninja _"
@@ -4102,6 +4219,7 @@ parse None false false args|}
           }))
   in
   parse None None args|}
+    ; no_expand_combined = false
     }
   ; subcommand_args_ctor ~name:"Java" ~risk:"`Audited" ~sandbox:"`Host"
   ; subcommand_args_ctor ~name:"Javac" ~risk:"`Audited" ~sandbox:"`Host"
@@ -4157,6 +4275,7 @@ parse None false false args|}
            args = collect [ arg ] rest })))
   in
   parse None false false false args|}
+    ; no_expand_combined = false
     }
   ; subcommand_args_ctor ~name:"Cmake" ~risk:"`Audited" ~sandbox:"`Host"
   ; subcommand_args_ctor ~name:"Dune_local_sh" ~risk:"`Audited" ~sandbox:"`Host"
@@ -4177,6 +4296,7 @@ parse None false false args|}
     ; to_simple_body = " simple"
     ; bin_variant = None
     ; parse_body = None
+    ; no_expand_combined = false
     }
   ]
 ;;
@@ -4302,7 +4422,7 @@ let emit_of_simple buf spec =
              then String.sub c.name 4 (String.length c.name - 4)
              else c.name
            in
-           Some (subcmd, c.name)
+           Some (subcmd, c.name, c.no_expand_combined)
          | _ -> None)
       spec
   in
@@ -4370,12 +4490,15 @@ let emit_of_simple buf spec =
   Buffer.add_string buf "        | Some Exec_program.Git ->\n";
   Buffer.add_string buf "          (match lit_argv with\n";
   List.iter
-    (fun (subcmd_name, ctor_name) ->
+    (fun (subcmd_name, ctor_name, no_expand) ->
        let parse_fn = Printf.sprintf "gen_parse_%s" ctor_name in
+       let arg_expr =
+         if no_expand then "rest" else "(expand_combined_short_flags rest)"
+       in
        Buffer.add_string
          buf
          (Printf.sprintf
-            "           | %S :: rest -> %s (expand_combined_short_flags rest)\n" subcmd_name parse_fn))
+            "           | %S :: rest -> %s %s\n" subcmd_name parse_fn arg_expr))
     git_entries;
   Buffer.add_string buf "           | _ -> None)\n";
   (* Non-Git entries with parse_body — auto-generated from spec.

@@ -10,6 +10,12 @@ type t = {
   generated_at : float;
   generation : int;
   shell : Yojson.Safe.t;
+  shell_light : Yojson.Safe.t;
+  (* RFC-0204 section 8.3 ("A"): the [~light] projection of the shell,
+     published alongside [shell] so a [shell?light=true] read serves it
+     wait-free instead of recomputing.  Light is a DIFFERENT shape from
+     [shell] (skips belief/tension evaluation, uses the light agent-count /
+     runtime projections), so it is stored separately rather than derived. *)
   tools : Yojson.Safe.t;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
@@ -47,6 +53,14 @@ let bootstrap ~(config : Coord.config) : t =
       Server_dashboard_http_core.dashboard_shell_payload_json config
     with exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap shell failed: %s"
+        (Printexc.to_string exn);
+      `Null
+  in
+  let shell_light =
+    try
+      Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
+    with exn ->
+      Log.Dashboard.warn "dashboard_snapshot bootstrap shell_light failed: %s"
         (Printexc.to_string exn);
       `Null
   in
@@ -91,6 +105,7 @@ let bootstrap ~(config : Coord.config) : t =
       generated_at = Unix.gettimeofday ();
       generation = next_generation ();
       shell;
+      shell_light;
       tools;
       namespace_truth;
       telemetry_summary;
@@ -136,8 +151,21 @@ let refresh_loop
   in
   let compute () =
     let shell =
+      (* [shell] intentionally omits [~light]: the snapshot publishes the FULL
+         shell.  Its non-light path uses Eio.Fiber.all, which is safe on the
+         Executor_pool worker domain this [compute] runs on -- each worker
+         opens its own Switch.run and forks the job as a fiber (eio
+         executor_pool.ml run_worker), so Fiber.all resolves against the
+         worker's context, not the main domain's.  Do not "fix" this to
+         [~light:true]; that would change [shell] to the light shape. *)
       safe "shell" (fun () ->
         Server_dashboard_http_core.dashboard_shell_payload_json config)
+    in
+    let shell_light =
+      (* RFC-0204 section 8.3 ("A"): publish the light projection too so
+         [shell?light=true] reads it wait-free. *)
+      safe "shell_light" (fun () ->
+        Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config)
     in
     let tools =
       safe "tools" (fun () ->
@@ -194,6 +222,7 @@ let refresh_loop
       generated_at = Unix.gettimeofday ();
       generation = next_generation ();
       shell;
+      shell_light;
       tools;
       namespace_truth;
       telemetry_summary;
@@ -232,7 +261,8 @@ let refresh_loop
 
 let publish_for_test t = Atomic.set slot (Some t)
 
-let make_for_test ~shell ~tools ~namespace_truth ~telemetry_summary
+let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
+      ~telemetry_summary
       ?(activity_events_default = `Null)
       ?(activity_graph_default = `Null)
       ?(activity_swimlane_default = `Null) () =
@@ -240,6 +270,7 @@ let make_for_test ~shell ~tools ~namespace_truth ~telemetry_summary
     generated_at = Unix.gettimeofday ();
     generation = next_generation ();
     shell;
+    shell_light;
     tools;
     namespace_truth;
     telemetry_summary;

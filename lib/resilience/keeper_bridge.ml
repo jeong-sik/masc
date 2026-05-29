@@ -79,7 +79,7 @@ let execution_outcome_to_json
         [
           ("outcome", `String "retry_exhausted");
           ("attempts", `Int attempts);
-          ( "last_error", Json_util.string_opt_to_json last_error );
+          ( "last_error", (match last_error with Some s -> `String s | None -> `Null) );
         ]
   | Recovery.RetryFatal { attempt; error } ->
       `Assoc
@@ -219,7 +219,7 @@ let apply_post_turn_resilience
                   ("error_detail", `String err);
                   ("now", `Float now);
                   ( "attempted_envelope_id",
-                    Json_util.string_opt_to_json attempted_envelope_id );
+                    (match attempted_envelope_id with Some s -> `String s | None -> `Null) );
                 ]
             in
             let envelope =
@@ -242,7 +242,7 @@ let apply_post_turn_resilience
             ("strategy_execution", strategy_execution_json);
             ("classified_at", `Float now);
             ( "audit_envelope_id",
-              Json_util.string_opt_to_json envelope_id );
+              (match envelope_id with Some s -> `String s | None -> `Null) );
           ]
       in
       let new_wc = upsert_resilience_meta working_context resilience_meta in

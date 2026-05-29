@@ -195,7 +195,7 @@ let keeper_meta_for_agent (ctx : context) =
        match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
        | Some entry -> Some entry.meta
        | None ->
-           match Keeper_types.read_meta ctx.config keeper_name with
+           match Keeper_meta_store.read_meta ctx.config keeper_name with
            | Ok (Some meta) -> Some meta
            | Ok None | Error _ -> None)
 
@@ -458,7 +458,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
    from the bare excluded_count. See PR body for the velvet-hammer
    misdiagnosis that motivated this surface. *)
 let active_goal_phases_for_agent ctx =
-  match Keeper_types.read_meta_resolved ctx.config ctx.agent_name with
+  match Keeper_meta_store.read_meta_resolved ctx.config ctx.agent_name with
   | Ok (Some (_, meta)) ->
       List.map
         (fun goal_id ->

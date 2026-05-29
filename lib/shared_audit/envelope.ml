@@ -39,7 +39,7 @@ let canonical_json t =
     "ts", `Float t.ts;
     "category", `String t.category;
     "payload", t.payload;
-    "prev_hash", Json_util.string_opt_to_json t.prev_hash;
+    "prev_hash", (match t.prev_hash with Some s -> `String s | None -> `Null);
   ] in
   Yojson.Safe.to_string (`Assoc fields)
 
@@ -55,7 +55,7 @@ let to_json t =
     "ts", `Float t.ts;
     "category", `String t.category;
     "payload", t.payload;
-    "prev_hash", Json_util.string_opt_to_json t.prev_hash;
+    "prev_hash", (match t.prev_hash with Some s -> `String s | None -> `Null);
   ]
 
 (* Local [kind_name] — [shared_audit] is a leaf library that cannot

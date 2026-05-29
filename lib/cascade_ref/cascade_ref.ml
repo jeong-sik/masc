@@ -120,7 +120,7 @@ let cascade_group_to_json (group : cascade_group) : Yojson.Safe.t =
     "name", `String group.name;
     "items", `List (List.map cascade_item_to_json group.items);
     "strategy", traversal_strategy_to_json group.strategy;
-    "fallback_group", Json_util.string_opt_to_json group.fallback_group;
+    "fallback_group", (match group.fallback_group with Some s -> `String s | None -> `Null);
   ]
 
 let cascade_group_of_json (json : Yojson.Safe.t) : cascade_group option =
@@ -180,7 +180,7 @@ let cascade_profile_of_json (json : Yojson.Safe.t) : cascade_profile option =
 let cascade_ref_to_json (ref_ : cascade_ref) : Yojson.Safe.t =
   `Assoc [
     "group", `String (Cascade_name.to_string ref_.group);
-    "item", Json_util.string_opt_to_json ref_.item;
+    "item", (match ref_.item with Some s -> `String s | None -> `Null);
   ]
 
 let cascade_ref_of_json (json : Yojson.Safe.t) : cascade_ref option =

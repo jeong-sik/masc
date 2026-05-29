@@ -9,7 +9,7 @@ let rec handle_done ~tool_name ~start_time ctx args =
   handle_transition ~tool_name ~start_time ctx
     (`Assoc
        [
-         ("task_id", Json_util.assoc_member_opt "task_id" args);
+         ("task_id", Json_util.assoc_member_opt "task_id" args |> Option.value ~default:`Null);
          ("action", `String "done");
          ("notes", `String notes);
        ])
@@ -649,7 +649,7 @@ let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
   let status =
-    match args |> Json_util.assoc_member_opt "status" with
+    match args |> Json_util.assoc_member_opt "status" |> Option.value ~default:`Null with
     | `String s when not (String.equal s "") -> Some s
     | _ -> None
   in

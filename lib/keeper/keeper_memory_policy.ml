@@ -34,7 +34,7 @@
     Sibling spec anchors deferred:
       - keeper_memory_bank.ml (open_short / provenanced semantics) *)
 
-open Keeper_types
+open Keeper_meta_contract
 
 (* Static patterns for [STATE] block detection, hoisted from
    [find_state_block].  [Re.compile] runs once at module load. *)
@@ -250,7 +250,7 @@ let split_state_items (s : string) : string list =
   |> String.split_on_char ';'
   |> List.map String.trim
   |> List.filter (fun x -> x <> "")
-  |> take 6
+  |> (fun xs -> List.filteri (fun i _ -> i < 6) xs)
 
 let strip_prefix_ci ~(prefix : string) (s : string) : string option =
   let s = String.trim s in
@@ -383,25 +383,25 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
         (fun () ->
            match snapshot.next_items with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "Next";
       maybe_line
         (fun () ->
            match snapshot.decisions with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "Decisions";
       maybe_line
         (fun () ->
            match snapshot.open_questions with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "OpenQuestions";
       maybe_line
         (fun () ->
            match snapshot.constraints with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "Constraints";
     ]
     |> List.filter_map (fun x -> x)

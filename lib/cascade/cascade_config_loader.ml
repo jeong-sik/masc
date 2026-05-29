@@ -422,7 +422,6 @@ type strategy_config =
   ; backoff_cap_ms : int option
   ; ollama_max_concurrent : int option
   ; cli_max_concurrent : int option
-  ; tiers : string list list option
   ; sticky_ttl_ms : int option
   ; (* ── Retired scoring parameter overrides (diagnostics only) ── *)
     latency_baseline_ms : float option
@@ -449,30 +448,6 @@ type strategy_config =
       When [None], falls back to env var, then default 4. *)
   }
 
-(* Read a [string list list] from a JSON [list of list of string].
-   Returns [None] when the key is missing or any element has the
-   wrong shape; tier configuration must be all-or-nothing to avoid
-   silent misroutes. *)
-let read_tiers_field json key =
-  match Option.value ~default:`Null (Json_util.assoc_member_opt key json) with
-  | `Null -> None
-  | `List outer ->
-    let parse_tier = function
-      | `List inner ->
-        let strs =
-          List.filter_map
-            (function
-              | `String s when String.trim s <> "" -> Some (String.trim s)
-              | _ -> None)
-            inner
-        in
-        if List.length strs = List.length inner && strs <> [] then Some strs else None
-      | _ -> None
-    in
-    let tiers = List.filter_map parse_tier outer in
-    if List.length tiers = List.length outer && tiers <> [] then Some tiers else None
-  | _ -> None
-;;
 
 let empty_strategy_config =
   { kind = None
@@ -481,7 +456,6 @@ let empty_strategy_config =
   ; backoff_cap_ms = None
   ; ollama_max_concurrent = None
   ; cli_max_concurrent = None
-  ; tiers = None
   ; sticky_ttl_ms = None
   ; latency_baseline_ms = None
   ; rate_limit_recency_window_s = None
@@ -509,7 +483,6 @@ let resolve_strategy_config_impl ~emit_telemetry ~config_path ~name =
     ; backoff_cap_ms = read_int_field json (name ^ "_backoff_cap_ms")
     ; ollama_max_concurrent = read_int_field json (name ^ "_ollama_max_concurrent")
     ; cli_max_concurrent = read_int_field json (name ^ "_cli_max_concurrent")
-    ; tiers = read_tiers_field json (name ^ "_tiers")
     ; sticky_ttl_ms = read_int_field json (name ^ "_sticky_ttl_ms")
     ; latency_baseline_ms = read_float_field json (name ^ "_latency_baseline_ms")
     ; rate_limit_recency_window_s =

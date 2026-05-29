@@ -553,7 +553,92 @@ let test_posix_end_of_options () =
   in
   (match cut with
    | W (Cut { fields = "1"; file = Some "-d:"; _ }) -> ()
-   | w -> Alcotest.failf "Cut --: expected fields=1 file=-d: (first positional after --), got %a" pp w)
+   | w -> Alcotest.failf "Cut --: expected fields=1 file=-d: (first positional after --), got %a" pp w);
+  (* Head: -- -logfile.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "-n"; lit "5"; lit "--"; lit "-logfile.txt" ] }
+  in
+  (match head with
+   | W (Head { path = "-logfile.txt"; lines = 5; _ }) -> ()
+   | w -> Alcotest.failf "Head --: expected path=-logfile.txt lines=5, got %a" pp w);
+  (* Tail: -- -myfile *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "-n"; lit "3"; lit "--"; lit "-myfile" ] }
+  in
+  (match tail with
+   | W (Tail { path = "-myfile"; lines = 3; _ }) -> ()
+   | w -> Alcotest.failf "Tail --: expected path=-myfile lines=3, got %a" pp w);
+  (* Rm: -- -myfile.txt file.txt (both after -- are paths) *)
+  let rm =
+    of_simple { (base "rm") with args = [ lit "-r"; lit "-f"; lit "--"; lit "-myfile.txt"; lit "file.txt" ] }
+  in
+  (match rm with
+   | W (Rm { paths; recursive = true; force = true; _ }) when paths = [ "-myfile.txt"; "file.txt" ] -> ()
+   | w -> Alcotest.failf "Rm --: expected paths=[-myfile.txt; file.txt], got %a" pp w);
+  (* Wc: -- -l-file *)
+  let wc =
+    of_simple { (base "wc") with args = [ lit "-l"; lit "--"; lit "-l-file" ] }
+  in
+  (match wc with
+   | W (Wc { path = "-l-file"; mode = Some `Lines; _ }) -> ()
+   | w -> Alcotest.failf "Wc --: expected path=-l-file mode=Lines, got %a" pp w);
+  (* Stat: -- -myfile *)
+  let stat =
+    of_simple { (base "stat") with args = [ lit "--"; lit "-myfile" ] }
+  in
+  (match stat with
+   | W (Stat { path = "-myfile"; format = None; _ }) -> ()
+   | w -> Alcotest.failf "Stat --: expected path=-myfile, got %a" pp w);
+  (* Du: -- -mydir *)
+  let du =
+    of_simple { (base "du") with args = [ lit "-h"; lit "--"; lit "-mydir" ] }
+  in
+  (match du with
+   | W (Du { path = Some "-mydir"; human_readable = true; _ }) -> ()
+   | w -> Alcotest.failf "Du --: expected path=-mydir human_readable=true, got %a" pp w);
+  (* Df: -- -mypath *)
+  let df =
+    of_simple { (base "df") with args = [ lit "-h"; lit "--"; lit "-mypath" ] }
+  in
+  (match df with
+   | W (Df { path = Some "-mypath"; human_readable = true; _ }) -> ()
+   | w -> Alcotest.failf "Df --: expected path=-mypath human_readable=true, got %a" pp w)
+;;
+
+(* --lines=N form for Head and Tail *)
+let test_lines_equals_form () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Head: --lines=25 file.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "--lines=25"; lit "file.txt" ] }
+  in
+  (match head with
+   | W (Head { path = "file.txt"; lines = 25; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines=25: expected lines=25, got %a" pp w);
+  (* Tail: --lines=7 /var/log/syslog *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "--lines=7"; lit "/var/log/syslog" ] }
+  in
+  (match tail with
+   | W (Tail { path = "/var/log/syslog"; lines = 7; _ }) -> ()
+   | w -> Alcotest.failf "Tail --lines=7: expected lines=7, got %a" pp w);
+  (* Head: --lines=0 (edge case) *)
+  let head0 =
+    of_simple { (base "head") with args = [ lit "--lines=0"; lit "f" ] }
+  in
+  (match head0 with
+   | W (Head { lines = 0; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines=0: expected lines=0, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
@@ -666,6 +751,7 @@ let () =
         ; Alcotest.test_case "bin variant dispatch" `Quick test_bin_variant_dispatch
         ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
+        ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

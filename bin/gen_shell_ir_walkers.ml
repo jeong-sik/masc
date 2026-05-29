@@ -438,6 +438,10 @@ let rec parse recursive force paths = function
      | _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rm { paths = List.rev paths; recursive; force })))
   | "-r" :: rest | "-R" :: rest | "--recursive" :: rest -> parse true force paths rest
   | "-f" :: rest | "--force" :: rest -> parse recursive true paths rest
+  (* POSIX end-of-options: all remaining are paths *)
+  | "--" :: rest ->
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Rm { paths = List.rev paths @ remaining; recursive; force }))
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse recursive force paths rest
@@ -593,6 +597,19 @@ let rec parse lines path = function
               (String.sub arg 1 (String.length arg - 1)) ->
     let l = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse l path rest
+  (* --lines=N form *)
+  | arg :: rest
+    when String.length arg > 8
+         && String.sub arg 0 8 = "--lines=" ->
+    let n_str = String.sub arg 8 (String.length arg - 8) in
+    (match int_of_string_opt n_str with
+     | Some l -> parse l path rest
+     | None -> parse lines path rest)
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Head { path = p; lines }))
+     | None -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse lines path rest
@@ -648,6 +665,19 @@ let rec parse lines path = function
               (String.sub arg 1 (String.length arg - 1)) ->
     let l = int_of_string (String.sub arg 1 (String.length arg - 1)) in
     parse l path rest
+  (* --lines=N form *)
+  | arg :: rest
+    when String.length arg > 8
+         && String.sub arg 0 8 = "--lines=" ->
+    let n_str = String.sub arg 8 (String.length arg - 8) in
+    (match int_of_string_opt n_str with
+     | Some l -> parse l path rest
+     | None -> parse lines path rest)
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tail { path = p; lines }))
+     | None -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse lines path rest
@@ -810,6 +840,11 @@ let rec parse mode path = function
   | "-l" :: rest | "--lines" :: rest -> parse (Some `Lines) path rest
   | "-w" :: rest | "--words" :: rest -> parse (Some `Words) path rest
   | "-c" :: rest | "--bytes" :: rest | "--chars" :: rest -> parse (Some `Chars) path rest
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wc { path = p; mode }))
+     | None -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse mode path rest
@@ -1515,6 +1550,11 @@ let rec parse format = function
   | "-c" :: c :: rest ->
     (* -c format (GNU stat) *)
     parse (Some c) rest
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    (match List.find_opt (fun a -> String.length a > 0) rest with
+     | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Stat { format; path = p }))
+     | None -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse format rest
@@ -1618,6 +1658,20 @@ let rec parse human_readable summary max_depth = function
     (match int_of_string_opt n with
      | Some d -> parse human_readable summary (Some d) rest
      | None -> None)
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | p :: _ ->
+       Some
+         (Shell_ir_typed_types.W
+            (Shell_ir_typed_types.Du
+               { path = Some p; human_readable; summary; max_depth }))
+     | [] ->
+       Some
+         (Shell_ir_typed_types.W
+            (Shell_ir_typed_types.Du
+               { path = None; human_readable; summary; max_depth })))
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ "--max-depth"; n ] ->
@@ -1679,6 +1733,20 @@ let rec parse human_readable fs_type = function
             { path = None; human_readable; filesystem_type = fs_type }))
   | "-h" :: rest -> parse true fs_type rest
   | "-t" :: t :: rest -> parse human_readable (Some t) rest
+  (* POSIX end-of-options: next non-empty arg is the path *)
+  | "--" :: rest ->
+    let remaining = List.filter (fun a -> String.length a > 0) rest in
+    (match remaining with
+     | p :: _ ->
+       Some
+         (Shell_ir_typed_types.W
+            (Shell_ir_typed_types.Df
+               { path = Some p; human_readable; filesystem_type = fs_type }))
+     | [] ->
+       Some
+         (Shell_ir_typed_types.W
+            (Shell_ir_typed_types.Df
+               { path = None; human_readable; filesystem_type = fs_type })))
   | arg :: rest ->
     (match String.split_on_char '=' arg with
      | [ "--type"; t ] -> parse human_readable (Some t) rest

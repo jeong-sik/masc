@@ -105,7 +105,7 @@ describe('OperationsPanel', () => {
     const labels = Array.from(buttons).map(b => b.textContent?.trim())
     expect(labels).toContain('All')
     expect(labels).toContain('Intervene')
-    expect(labels).toContain('Governance')
+    expect(labels).toContain('Approvals')
     expect(labels).toContain('Surfaces')
     expect(labels).toContain('Inspector')
   })
@@ -128,7 +128,7 @@ describe('OperationsPanel', () => {
     await flushUi()
 
     const buttons = container.querySelectorAll('button[type="button"]')
-    const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'Governance')
+    const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'Approvals')
     expect(governanceBtn?.getAttribute('aria-selected')).toBe('true')
 
     const defaultBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'All')

@@ -16,7 +16,7 @@ const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'surfaces', 'ins
 const VIEW_CHIPS: { key: OpsView; label: string }[] = [
   { key: 'default', label: 'All' },
   { key: 'ops', label: 'Intervene' },
-  { key: 'governance', label: 'Governance' },
+  { key: 'governance', label: 'Approvals' },
   { key: 'surfaces', label: 'Surfaces' },
   { key: 'inspector', label: 'Inspector' },
 ]

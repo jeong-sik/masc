@@ -25,11 +25,6 @@ type t =
 [@@deriving yojson { strict = false }]
 
 let iso8601_of_unix = Masc_domain.iso8601_of_unix_seconds
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
-;;
 
 let rec find_git_root dir =
   let git_marker = Filename.concat dir ".git" in

@@ -137,8 +137,6 @@ let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
 
-let now_iso () = Masc_domain.now_iso ()
-
 let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 
 let cache_ttl_sec () =
@@ -676,7 +674,7 @@ let compute_judgments
       let response = result.Cascade_runner.response in
       try
         let raw_text = Agent_sdk_response.text_of_response response in
-        let generated_at = now_iso () in
+        let generated_at = Masc_domain.now_iso () in
         let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
         (* #9880: keep the internal fallback/counter for empty OAS model
            metadata, but do not project concrete model names into MASC-owned

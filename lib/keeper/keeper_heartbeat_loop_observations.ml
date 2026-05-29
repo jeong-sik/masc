@@ -193,7 +193,7 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
       ( Keeper_turn_driver.Cascade_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.No_tool_capable_provider _
+
       | Keeper_turn_driver.Accept_rejected _
       | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Admission_queue_rejected _
@@ -238,7 +238,7 @@ let provider_timeout_policy_decision
       ( Keeper_turn_driver.Cascade_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.No_tool_capable_provider _
+
       | Keeper_turn_driver.Accept_rejected _
       | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Admission_queue_rejected _

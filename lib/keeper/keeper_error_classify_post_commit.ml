@@ -41,7 +41,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* All other MASC-internal classifications are unambiguous failures. *)
   | Some (Keeper_turn_driver.Cascade_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
+
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)

@@ -560,15 +560,14 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
 let test_runtime_surface_names_no_tool_provider_details () =
   KR.clear ();
   let payload =
-    OWN.No_tool_capable_provider
-      {
-        cascade_name = Cascade_name.of_string_exn "tool_required";
-        configured_labels = [ "agent_code"; "provider_c" ];
-        required_tool_names = [ "tool_execute"; "tool_search_files" ];
-        provider_rejections =
-          [
-            { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };
-          ];
+    OWN.Cascade_exhausted
+      { cascade_name = Cascade_name.of_string_exn "tool_required"
+      ; reason = Keeper_meta_contract.No_tool_capable (Some
+          { configured_labels = [ "agent_code"; "provider_c" ]
+          ; required_tool_names = [ "tool_execute"; "tool_search_files" ]
+          ; provider_rejections =
+              [ ("agent_code", "codex_keeper_bound_actor_required") ]
+          })
       }
   in
   let summary =
@@ -585,7 +584,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
           base.runtime with
           last_blocker =
             Some (Keeper_meta_contract.blocker_info_of_class ~detail:summary
-                    (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable));
+                    (Keeper_meta_contract.Cascade_exhausted (Keeper_meta_contract.No_tool_capable None)));
         };
     }
   in
@@ -748,7 +747,7 @@ let test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload () =
       (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_providers_available)
   in
   let no_tool_surface =
-    KSB.runtime_blocker_surface_of_typed_class ~summary (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable)
+    KSB.runtime_blocker_surface_of_typed_class ~summary (Keeper_meta_contract.Cascade_exhausted (Keeper_meta_contract.No_tool_capable None))
   in
   check string "cascade summary stays opaque" summary cascade_surface.summary;
   check string "no-tool summary stays opaque" summary no_tool_surface.summary;

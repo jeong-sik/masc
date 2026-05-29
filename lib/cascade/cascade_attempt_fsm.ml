@@ -90,7 +90,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
             ; message = detail
             }))
   | Some (Cascade_error_classify.Cascade_exhausted _)
-  | Some (Cascade_error_classify.No_tool_capable_provider _)
+
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
   | Some (Cascade_error_classify.Admission_queue_rejected _)
@@ -795,7 +795,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Capacity_backpressure _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
-  | Some (Cascade_error_classify.No_tool_capable_provider _)
+
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
   | Some (Cascade_error_classify.Admission_queue_rejected _)

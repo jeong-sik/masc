@@ -82,6 +82,17 @@ type proactive_runtime =
 
 (* ── Structured blocker classification ──────────────────────── *)
 
+(** Telemetry detail for [No_tool_capable] cascade exhaustion.
+    Carried from the former standalone [No_tool_capable_provider]
+    variant of [masc_internal_error] after reclassification into
+    [cascade_exhaustion_reason]. *)
+type no_tool_capable_detail =
+  { configured_labels : string list
+  ; required_tool_names : string list
+  ; provider_rejections : (string * string) list
+      (** [(provider_label, reason)] pairs *)
+  }
+
 type cascade_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -106,11 +117,13 @@ type cascade_exhaustion_reason =
         and triggering the harsher [Cascade_exhausted { retryable = false }]
         failure policy.  This variant enables the softer
         [Soft_fail_turn + Provider_cooldown] path. *)
-  | No_tool_capable
+  | No_tool_capable of no_tool_capable_detail option
     (** Cascade exhausted because no configured provider can satisfy the
         required tool set.  Previously a standalone [blocker_class] variant;
         reclassified here because the cascade rotation filtered all candidates
-        before dispatch — a semantic subset of cascade exhaustion. *)
+        before dispatch — a semantic subset of cascade exhaustion.
+        The optional detail carries telemetry from the former
+        [No_tool_capable_provider] variant of [masc_internal_error]. *)
   | Other_detail of string
 
 type blocker_class =
@@ -161,7 +174,7 @@ type blocker_class =
   | Sdk_input_required
 
 let blocker_class_to_string = function
-  | Cascade_exhausted No_tool_capable -> "cascade_exhausted_no_tool_capable"
+  | Cascade_exhausted (No_tool_capable _) -> "cascade_exhausted_no_tool_capable"
   | Cascade_exhausted _ -> "cascade_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
@@ -190,7 +203,7 @@ let blocker_class_to_string = function
 ;;
 
 let blocker_class_of_serialized_string = function
-  | "cascade_exhausted_no_tool_capable" -> Some (Cascade_exhausted No_tool_capable)
+  | "cascade_exhausted_no_tool_capable" -> Some (Cascade_exhausted (No_tool_capable None))
   | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
@@ -235,7 +248,7 @@ let cascade_exhaustion_summary = function
     "Cascade exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
   | Capacity_exhausted ->
     "Cascade exhausted; all providers reported capacity backpressure."
-  | No_tool_capable ->
+  | No_tool_capable _ ->
     "Cascade exhausted; no configured provider can satisfy the required tool set."
   | Other_detail _ ->
     "Cascade exhausted; inspect cascade attempts for the dominant root cause."
@@ -279,7 +292,20 @@ let cascade_exhaustion_reason_to_json = function
   | Structural_attempt_timeout { detail } ->
     `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
   | Capacity_exhausted -> `String "capacity_exhausted"
-  | No_tool_capable -> `String "no_tool_capable"
+  | No_tool_capable None -> `String "no_tool_capable"
+  | No_tool_capable (Some { configured_labels; required_tool_names; provider_rejections }) ->
+    let rejections_json =
+      List.map
+        (fun (label, reason) ->
+           `Assoc [ "label", `String label; "reason", `String reason ])
+        provider_rejections
+    in
+    `Assoc
+      [ "tag", `String "no_tool_capable"
+      ; "configured_labels", Json_util.json_string_list configured_labels
+      ; "required_tool_names", Json_util.json_string_list required_tool_names
+      ; "provider_rejections", `List rejections_json
+      ]
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 ;;
 
@@ -291,7 +317,7 @@ let cascade_exhaustion_reason_of_json = function
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
   | `String "max_turns_exceeded" -> Some Max_turns_exceeded
   | `String "capacity_exhausted" -> Some Capacity_exhausted
-  | `String "no_tool_capable" -> Some No_tool_capable
+  | `String "no_tool_capable" -> Some (No_tool_capable None)
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
      | Some (`String "structural_attempt_timeout") ->
@@ -302,6 +328,31 @@ let cascade_exhaustion_reason_of_json = function
        (match List.assoc_opt "message" fields with
         | Some (`String msg) -> Some (Other_detail msg)
         | _ -> None)
+     | Some (`String "no_tool_capable") ->
+       let configured_labels =
+         match List.assoc_opt "configured_labels" fields with
+         | Some (`List xs) -> List.filter_map (function `String s -> Some s | _ -> None) xs
+         | _ -> []
+       in
+       let required_tool_names =
+         match List.assoc_opt "required_tool_names" fields with
+         | Some (`List xs) -> List.filter_map (function `String s -> Some s | _ -> None) xs
+         | _ -> []
+       in
+       let provider_rejections =
+         match List.assoc_opt "provider_rejections" fields with
+         | Some (`List xs) ->
+           List.filter_map
+             (function
+               | `Assoc rf ->
+                 (match List.assoc_opt "label" rf, List.assoc_opt "reason" rf with
+                  | Some (`String label), Some (`String reason) -> Some (label, reason)
+                  | _ -> None)
+               | _ -> None)
+             xs
+         | _ -> []
+       in
+       Some (No_tool_capable (Some { configured_labels; required_tool_names; provider_rejections }))
      | _ -> None)
   | _ -> None
 ;;

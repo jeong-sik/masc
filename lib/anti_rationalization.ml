@@ -786,7 +786,7 @@ let review
                  (closed in PR #14716): a guard whose default direction
                  is [false] must not absorb new error classes silently. *)
               match Keeper_turn_driver.classify_masc_internal_error err with
-              | Some (Keeper_turn_driver.No_tool_capable_provider _) -> true
+              | Some (Keeper_turn_driver.Cascade_exhausted { reason = Keeper_meta_contract.No_tool_capable _; _ }) -> true
               | Some
                   ( Keeper_turn_driver.Cascade_exhausted _
                   | Keeper_turn_driver.Capacity_backpressure _

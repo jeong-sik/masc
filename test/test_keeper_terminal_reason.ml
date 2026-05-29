@@ -560,13 +560,15 @@ let test_structured_turn_wall_clock_timeout () =
 let test_structured_no_tool_capable_provider () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-      (Masc_mcp.Keeper_turn_driver.No_tool_capable_provider
+      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
              Cascade_name.of_string_exn
                "cascade.provider_k-coding-with-spark"
-         ; configured_labels = [ "provider_k:provider_k-5.1" ]
-         ; required_tool_names = [ "keeper_tool_search" ]
-         ; provider_rejections = []
+         ; reason = Masc_mcp.Keeper_meta_contract.No_tool_capable (Some
+             { configured_labels = [ "provider_k:provider_k-5.1" ]
+             ; required_tool_names = [ "keeper_tool_search" ]
+             ; provider_rejections = []
+             })
          })
   in
   let terminal = KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err in

@@ -46,12 +46,13 @@ let make_capacity_backpressure ?(source = Owne.Client_capacity)
 
 let make_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.No_tool_capable_provider
-       {
-         cascade_name = test_cascade;
-         configured_labels = [];
-         required_tool_names = [];
-         provider_rejections = [];
+    (Owne.Cascade_exhausted
+       { cascade_name = test_cascade
+       ; reason = Keeper_meta_contract.No_tool_capable (Some
+           { configured_labels = []
+           ; required_tool_names = []
+           ; provider_rejections = []
+           })
        })
 
 let make_accept_rejected () =
@@ -160,7 +161,7 @@ let test_no_tool_capable_non_recoverable () =
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     fail
-      (Printf.sprintf "No_tool_capable_provider should stay None, got %s"
+      (Printf.sprintf "No_tool_capable (inside Cascade_exhausted) should stay None, got %s"
          (KEC.degraded_retry_reason_to_string reason))
   | None -> ()
 

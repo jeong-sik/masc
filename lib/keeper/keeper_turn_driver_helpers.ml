@@ -125,15 +125,24 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
         | [] -> Json_util.dedupe_keep_order runtime_manifest_required_tool_names
         | names -> names
       in
+      let rejections =
+        required_lane_provider_rejections @ pre_dispatch_provider_rejections
+      in
+      let detail : Keeper_meta_contract.no_tool_capable_detail =
+        { configured_labels
+        ; required_tool_names
+        ; provider_rejections =
+            List.map
+              (fun (r : Cascade_error_classify.provider_rejection) ->
+                 (r.provider_label, r.reason))
+              rejections
+        }
+      in
       Some
-        (Cascade_error_classify.No_tool_capable_provider
+        (Cascade_error_classify.Cascade_exhausted
            {
              cascade_name;
-             configured_labels;
-             required_tool_names;
-             provider_rejections =
-               required_lane_provider_rejections
-               @ pre_dispatch_provider_rejections;
+             reason = Keeper_meta_contract.No_tool_capable (Some detail);
            })
 
 type empty_candidate_classification =

@@ -1,7 +1,8 @@
 (** test_keeper_noop_backoff — Verify noop cycle classification and
-    that No_tool_capable_provider does NOT count toward proactive backoff.
+    that No_tool_capable (inside Cascade_exhausted) does NOT count
+    toward proactive backoff.
 
-    The exclusion was introduced because No_tool_capable_provider is a
+    The exclusion was introduced because No_tool_capable is a
     configuration/capability mismatch (not transient), and counting it
     caused 59 spurious keeper fiber kills per day (#18315, #18317). *)
 

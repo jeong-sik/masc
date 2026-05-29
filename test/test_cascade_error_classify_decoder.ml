@@ -173,8 +173,11 @@ let test_sdk_internal_nested_prefix_roundtrip () =
   in
   match Classify.classify_masc_internal_error err with
   | Some
-      (Classify.No_tool_capable_provider
-         { cascade_name; required_tool_names; provider_rejections; _ }) ->
+      (Classify.Cascade_exhausted
+         { cascade_name
+         ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
+         ; _
+         }) ->
     Alcotest.(check string)
       "cascade name preserved"
       "cascade.tools"
@@ -182,14 +185,14 @@ let test_sdk_internal_nested_prefix_roundtrip () =
     Alcotest.(check (list string))
       "required tools preserved"
       [ "masc_tool" ]
-      required_tool_names;
+      detail.required_tool_names;
     Alcotest.(check int)
       "provider rejection count"
       1
-      (List.length provider_rejections)
+      (List.length detail.provider_rejections)
   | decoded ->
     Alcotest.failf
-      "expected nested No_tool_capable_provider, got %a"
+      "expected Cascade_exhausted (No_tool_capable), got %a"
       pp_internal_error
       decoded
 

@@ -43,12 +43,13 @@ let mk_cascade_exhausted () =
 
 let mk_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.No_tool_capable_provider
-       {
-         cascade_name = cascade_name "test";
-         configured_labels = [];
-         required_tool_names = [];
-         provider_rejections = [];
+    (Owne.Cascade_exhausted
+       { cascade_name = cascade_name "test"
+       ; reason = Keeper_meta_contract.No_tool_capable (Some
+           { configured_labels = []
+           ; required_tool_names = []
+           ; provider_rejections = []
+           })
        })
 
 let mk_accept_rejected () =
@@ -65,7 +66,7 @@ let mk_resumable_cli_session () =
 let test_pause_fires_on_cascade_exhausted_variants () =
   check bool "Cascade_exhausted -> pause" true
     (EC.is_cascade_exhausted_error (mk_cascade_exhausted ()));
-  check bool "No_tool_capable_provider -> pause" true
+  check bool "No_tool_capable (inside Cascade_exhausted) -> pause" true
     (EC.is_cascade_exhausted_error (mk_no_tool_capable ()));
   check bool "Accept_rejected -> pause" true
     (EC.is_cascade_exhausted_error (mk_accept_rejected ()));

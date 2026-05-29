@@ -177,7 +177,7 @@ let cascade_reason_is_structural_attempt_timeout
   | Keeper_meta_contract.Candidates_filtered_after_cycles
   | Keeper_meta_contract.Max_turns_exceeded
   | Keeper_meta_contract.Capacity_exhausted
-  | Keeper_meta_contract.No_tool_capable
+  | Keeper_meta_contract.No_tool_capable _
   | Keeper_meta_contract.Other_detail _ -> false
 
 let degraded_retry_bypasses_slot_phase_guard
@@ -196,7 +196,7 @@ let degraded_retry_bypasses_slot_phase_guard
       ( Keeper_turn_driver.Cascade_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.No_tool_capable_provider _
+
       | Keeper_turn_driver.Accept_rejected _
       | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Admission_queue_rejected _

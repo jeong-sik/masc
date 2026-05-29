@@ -210,16 +210,16 @@ let read_recent_audit ~limit =
         else rows |> drop_left (total - limit) |> List.rev)
 
 let string_member json key =
-  json |> U.member key |> U.to_string_option |> Option.value ~default:""
+  Json_util.get_string json key |> Option.value ~default:""
 
 let int_member json key =
-  json |> U.member key |> U.to_int_option |> Option.value ~default:0
+  Json_util.get_int json key |> Option.value ~default:0
 
 let bool_member json key =
-  json |> U.member key |> U.to_bool_option |> Option.value ~default:false
+  Json_util.get_bool json key |> Option.value ~default:false
 
 let bool_option_member json key =
-  json |> U.member key |> U.to_bool_option
+  Json_util.get_bool json key
 
 let stale_of_updated_at updated_at =
   match Gate_time_util.parse_iso8601_opt updated_at with
@@ -278,7 +278,7 @@ let status_json ?(audit_limit = 10) () =
       ("messages_processed", `Int (status_field "messages_processed" int_member 0));
       ("messages_failed", `Int (status_field "messages_failed" int_member 0));
       ("cursor_rowid", `Int (status_field "cursor_rowid" int_member 0));
-      ("poll_interval_sec", `Float (status_field "poll_interval_sec" (fun j k -> j |> U.member k |> U.to_float_option |> Option.value ~default:2.0) 2.0));
+      ("poll_interval_sec", `Float (status_field "poll_interval_sec" (fun j k -> Json_util.get_float j k |> Option.value ~default:2.0) 2.0));
       ("gate_base_url", `String (status_field "gate_base_url" string_member ""));
       ( "gate_healthy",
         Option.value ~default:`Null

@@ -224,6 +224,26 @@ module Ring = struct
     file_current_date := date;
     file_base_dir := dir
 
+  (* Atomic rotate: open the new sink first, swap only on success. The
+     previous [close_sink (); open_sink ()] pair left [file_channel := None]
+     if [open_out_gen] raised (e.g. EMFILE, transient FS race), and never
+     re-attempted; the file-channel stayed [None] for the rest of the
+     process's life and every subsequent emit silently fell through the
+     [None] arm of [write_to_sink]. Observed on 2026-05-25 (rotation-time
+     stop after 18h) and 2026-05-29 (25 min after midnight UTC rotation):
+     [system_log_*.jsonl] ended at [00:25:09Z] while [/private/tmp/masc-server.log]
+     continued for hours from the same process. Atomic swap + a no-throw
+     [protect] guard turns an [open_out_gen] failure into a logged warning
+     plus retained old channel, instead of permanent silent loss. *)
+  let try_open_channel dir =
+    ensure_dir dir;
+    let date = date_string () in
+    let path = log_file_path dir date in
+    protect ~default:None (fun () ->
+      Some
+        ( open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path
+        , date ))
+
   (* RFC-0079: typed encoder. Exhaustive match on [level] / [source] means
      adding a new variant fails to compile here until the wire format is
      extended deliberately. The wire shape (field set + key order) is the
@@ -269,8 +289,22 @@ module Ring = struct
         | None -> true
       in
       if needs_reopen then begin
-        close_sink ();
-        open_sink !file_base_dir
+        match try_open_channel !file_base_dir with
+        | Some (new_oc, date) ->
+            (match !file_channel with
+             | Some old_oc -> close_out_noerr old_oc
+             | None -> ());
+            file_channel := Some new_oc;
+            file_current_date := date
+        | None ->
+            (* open_out_gen raised. Keep the existing channel (if any)
+               so emits continue landing in the previous day's file
+               until the next rotation attempt succeeds. *)
+            Printf.eprintf
+              "[%s] [WARN] [Log] file-sink rotate failed (target %s); \
+               retaining previous channel\n%!"
+              (timestamp ())
+              (log_file_path !file_base_dir today)
       end
     end
 
@@ -306,10 +340,29 @@ module Ring = struct
     Fun.protect
       ~finally:(fun () -> Stdlib.Mutex.unlock sink_mutex)
       (fun () ->
+        (* Self-heal: if a prior rotate left [file_channel = None]
+           (open failure) but the base dir is still configured, try
+           to reopen now. Bounded: at most one attempt per write, no
+           backoff loop. Failure is silent here because [rotate_if_needed]
+           already emitted the WARN; logging again per emit would spam. *)
+        if !file_channel = None && !file_base_dir <> "" then begin
+          match try_open_channel !file_base_dir with
+          | Some (oc, date) ->
+              file_channel := Some oc;
+              file_current_date := date
+          | None -> ()
+        end;
         match !file_channel with
         | Some oc ->
             let line = Yojson.Safe.to_string entry_json ^ "\n" in
-            output_string oc line;
+            (try output_string oc line
+             with exn ->
+               Printf.eprintf
+                 "[%s] [ERROR] [Log] file-sink write failed: %s; \
+                  dropping channel for next-emit re-open\n%!"
+                 (timestamp ())
+                 (Printexc.to_string exn);
+               close_sink ());
             protect ~default:() (fun () -> flush oc)
         | None -> ())
 

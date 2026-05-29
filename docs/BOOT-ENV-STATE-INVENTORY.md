@@ -354,10 +354,14 @@ Current host note:
 
 Notes:
 
-- Discord connector runtime files are shared between the gate server and the
-  Discord bot. When the bot uses relative paths, resolve them against the same
-  `MASC_BASE_PATH` as the server. Operational setup and verification steps live
-  in `sidecars/discord-bot/README.md`.
+- Discord connector runtime files (`.gate/runtime/discord/status.json`,
+  `bindings.json`, `binding_audit.jsonl`) are now read and written by the
+  in-process gateway (`lib/server/server_discord_in_process_gateway.{ml,mli}`
+  + `lib/gate/channel_gate_discord_state.{ml,mli}`) after RFC-0203 §Phase 3
+  (#19393) deleted the external `sidecars/discord-bot/`. Path resolution is
+  unchanged; the consumer just moved into the same server process. Operator
+  setup: set `DISCORD_BOT_TOKEN` in the server's env and restart. See
+  `docs/CONNECTOR-CONFIG-SCHEMA.md` §Discord.
 - All voice paths resolve relative to `MASC_BASE_PATH/.masc/`.
   `voice_config.json` is discovered at `<runtime_root>/voice_config.json`
   where `<runtime_root>` = `MASC_BASE_PATH/.masc/`.

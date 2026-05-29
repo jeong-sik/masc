@@ -9,7 +9,6 @@
     record + the [human_duration] helper. Re-included by
     [Dashboard_goals_types] so the public surface is unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
 
 let goal_phase_to_health = function
@@ -90,12 +89,13 @@ let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalle
 
 let approval_matches_goal goal_id approval_json =
   let goal_ids =
-    approval_json |> member "goal_ids" |> to_list
-    |> List.filter_map to_string_option
+    match m approval_json "goal_ids" with
+    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> []
   in
   List.mem goal_id goal_ids
   ||
-  match approval_json |> member "goal_id" |> to_string_option with
+  match Json_util.get_string approval_json "goal_id" with
   | Some pending_goal_id -> String.equal pending_goal_id goal_id
   | None -> false
 

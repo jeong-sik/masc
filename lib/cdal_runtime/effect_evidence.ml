@@ -171,17 +171,6 @@ let to_json t =
     ]
 ;;
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-;;
-
 let assoc_field name fields =
   match List.assoc_opt name fields with
   | Some v -> Ok v
@@ -194,7 +183,7 @@ let int_field name fields =
   | Ok other ->
     Error
       (Printf.sprintf "field %s must be an int (received %s)" name
-         (json_kind_name other))
+         (Json_util.kind_name other))
   | Error _ as err -> err
 ;;
 
@@ -204,7 +193,7 @@ let string_field name fields =
   | Ok other ->
     Error
       (Printf.sprintf "field %s must be a string (received %s)" name
-         (json_kind_name other))
+         (Json_util.kind_name other))
   | Error _ as err -> err
 ;;
 
@@ -215,7 +204,7 @@ let float_field name fields =
   | Ok other ->
     Error
       (Printf.sprintf "field %s must be a number (received %s)" name
-         (json_kind_name other))
+         (Json_util.kind_name other))
   | Error _ as err -> err
 ;;
 
@@ -226,7 +215,7 @@ let option_string_field name fields =
   | Some other ->
     Error
       (Printf.sprintf "field %s must be a string or null (received %s)" name
-         (json_kind_name other))
+         (Json_util.kind_name other))
 ;;
 
 let option_float_field name fields =
@@ -237,7 +226,7 @@ let option_float_field name fields =
   | Some other ->
     Error
       (Printf.sprintf "field %s must be a number or null (received %s)" name
-         (json_kind_name other))
+         (Json_util.kind_name other))
 ;;
 
 let option_int_field name fields =
@@ -247,7 +236,7 @@ let option_int_field name fields =
   | Some other ->
     Error
       (Printf.sprintf "field %s must be an int or null (received %s)" name
-         (json_kind_name other))
+         (Json_util.kind_name other))
 ;;
 
 open Result_syntax
@@ -304,5 +293,5 @@ let of_json = function
   | other ->
     Error
       (Printf.sprintf "effect evidence must be a JSON object (received %s)"
-         (json_kind_name other))
+         (Json_util.kind_name other))
 ;;

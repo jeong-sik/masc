@@ -6,17 +6,6 @@ type tool_effect_class =
   | External_effect
   | Shell_dynamic
 
-(* Kind-name helper for parse-error diagnostics.  [lib/cdal_runtime/] is
-   intentionally decoupled from [masc_core] (RFC-OAS-011 producer-side
-   isolation), so [Json_util.kind_name] is not reachable without breaking
-   the leaf-isolation invariant.  The sibling [Effect_evidence] module
-   in this same sub-library already exposes a [json_kind_name : Yojson.Safe.t
-   -> string] (line ~178); reuse it instead of inlining a second copy,
-   to keep the sub-library to a single SSOT for this diagnostic surface.
-   A yojson-only micro-leaf library (lib/shared_types/json_kind.ml,
-   noted in PR #16915) would lift this further once available. *)
-let json_kind_name = Effect_evidence.json_kind_name
-
 type violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
@@ -44,7 +33,7 @@ let violation_kind_of_yojson = function
     Error
       (Printf.sprintf
          "violation_kind_of_yojson: expected JSON string (kind=%s)"
-         (json_kind_name other))
+         (Json_util.kind_name other))
 ;;
 
 type violation =
@@ -94,13 +83,13 @@ let violation_of_yojson = function
        let float_field_status name =
          match List.assoc_opt name fields with
          | Some (`Float _) -> "ok"
-         | Some other -> Printf.sprintf "wrong-kind=%s" (json_kind_name other)
+         | Some other -> Printf.sprintf "wrong-kind=%s" (Json_util.kind_name other)
          | None -> "missing"
        in
        let string_field_status name =
          match List.assoc_opt name fields with
          | Some (`String _) -> "ok"
-         | Some other -> Printf.sprintf "wrong-kind=%s" (json_kind_name other)
+         | Some other -> Printf.sprintf "wrong-kind=%s" (Json_util.kind_name other)
          | None -> "missing"
        in
        let presence_status name =
@@ -124,7 +113,7 @@ let violation_of_yojson = function
     Error
       (Printf.sprintf
          "violation_of_yojson: expected JSON object (kind=%s)"
-         (json_kind_name other))
+         (Json_util.kind_name other))
 ;;
 
 type token_snapshot =

@@ -5,28 +5,7 @@
     annotations bound to file + line ranges, plus code regions extracted
     from Keeper tool_calls. *)
 
-(* Local kind-name helper for parse-error diagnostics.  [lib/ide/] does
-   not depend on [masc_core], so we inline the kind-name discrimination
-   rather than import [Json_util.kind_name] (RFC-0056 leaf-isolation
-   invariant).  The cases below mirror the closed set of
-   [Yojson.Safe.t] variants — exhaustive by construction. *)
-let json_kind_name = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-;;
 
-(* Local option serializer — [lib/ide/] does not depend on [masc_core] (RFC-0056
-   leaf-isolation invariant), so we inline rather than import [Json_util]. *)
-let string_opt_to_json = function
-  | None -> `Null
-  | Some s -> `String s
-;;
 
 type annotation_kind =
   | Comment
@@ -112,38 +91,19 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
     ; "keeper_id", `String a.keeper_id
     ; "kind", `String (annotation_kind_to_string a.kind)
     ; "content", `String a.content
-    ; "goal_id", string_opt_to_json a.goal_id
-    ; "task_id", string_opt_to_json a.task_id
-    ; "board_post_id", string_opt_to_json a.board_post_id
-    ; "comment_id", string_opt_to_json a.comment_id
-    ; "pr_id", string_opt_to_json a.pr_id
-    ; "git_ref", string_opt_to_json a.git_ref
-    ; "log_id", string_opt_to_json a.log_id
-    ; "session_id", string_opt_to_json a.session_id
-    ; "operation_id", string_opt_to_json a.operation_id
-    ; "worker_run_id", string_opt_to_json a.worker_run_id
+    ; "goal_id", Json_util.string_opt_to_json a.goal_id
+    ; "task_id", Json_util.string_opt_to_json a.task_id
+    ; "board_post_id", Json_util.string_opt_to_json a.board_post_id
+    ; "comment_id", Json_util.string_opt_to_json a.comment_id
+    ; "pr_id", Json_util.string_opt_to_json a.pr_id
+    ; "git_ref", Json_util.string_opt_to_json a.git_ref
+    ; "log_id", Json_util.string_opt_to_json a.log_id
+    ; "session_id", Json_util.string_opt_to_json a.session_id
+    ; "operation_id", Json_util.string_opt_to_json a.operation_id
+    ; "worker_run_id", Json_util.string_opt_to_json a.worker_run_id
     ; "created_at_ms", `Intlit (Int64.to_string a.created_at_ms)
     ; "updated_at_ms", `Intlit (Int64.to_string a.updated_at_ms)
     ]
-;;
-
-(* Local kind diagnostic — masc_ide is RFC-0056 yojson-only leaf, so the
-   canonical [Json_util.kind_name] in masc_core is not reachable without
-   breaking dep isolation.  Name [kind_label] (not [json_kind_name])
-   slips the no-inline-json-kind-name lint regex while preserving the
-   same total mapping.  RFC pile is now 7 inline copies — RFC candidate
-   noted in PR #16915 body (lib/shared_types/json_kind.ml) for promoting
-   to a yojson-only micro-leaf library shared across these isolation
-   boundaries. *)
-let kind_label : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "int"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
 ;;
 
 let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
@@ -209,7 +169,7 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
     Error
       (Printf.sprintf
          "Expected JSON object for annotation, got %s"
-         (kind_label other))
+         (Json_util.kind_name other))
 ;;
 
 let region_to_json (r : code_region) : Yojson.Safe.t =
@@ -295,5 +255,5 @@ let region_of_json (json : Yojson.Safe.t) : (code_region, string) result =
     Error
       (Printf.sprintf
          "Expected JSON object for code_region, got %s"
-         (kind_label other))
+         (Json_util.kind_name other))
 ;;

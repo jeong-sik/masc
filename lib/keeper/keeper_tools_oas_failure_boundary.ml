@@ -5,28 +5,13 @@ type t =
       Keeper_tool_deterministic_error.classification option
   }
 
-let json_field_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> Some value
-     | _ -> None)
-  | _ -> None
-;;
-
-let json_field_bool ~default key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`Bool value) -> value
-     | _ -> default)
-  | _ -> default
-;;
 
 let failure_class_of_json json =
-  if json_field_bool ~default:false "ok" json
+  if Json_util.get_bool json "ok" |> Option.value ~default:false
   then None
   else
     Option.bind
-      (json_field_string_opt "failure_class" json)
+      (Json_util.get_string json "failure_class")
       Tool_result.tool_failure_class_of_string
 ;;
 

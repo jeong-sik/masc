@@ -61,12 +61,12 @@ let of_json (json : Yojson.Safe.t) : t option =
                 let get_int key =
                   match List.assoc_opt key exc_fields with
                   | Some (`Int n) -> n
-                  | _ -> 0
+                  | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> 0
                 in
                 let get_bool key =
                   match List.assoc_opt key exc_fields with
                   | Some (`Bool b) -> b
-                  | _ -> false
+                  | None | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false
                 in
                 Some
                   (No_progress
@@ -79,22 +79,22 @@ let of_json (json : Yojson.Safe.t) : t option =
                            ; all_goals_excluded = get_bool "all_goals_excluded"
                            }
                      })
-              | _ -> None)
+              | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None)
            | Some (`String "Resource_conflict") ->
              (match List.assoc_opt "resource" reason_fields with
               | Some (`String resource) ->
                 Some (No_progress { reason = Resource_conflict { resource } })
-              | _ -> None)
+              | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
            | Some (`String "No_work_available") ->
              Some (No_progress { reason = No_work_available })
-           | _ -> None)
-        | _ -> None)
+           | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None)
      | Some (`String "Error") ->
        (match List.assoc_opt "reason" fields with
         | Some (`String reason) -> Some (Error { reason })
-        | _ -> None)
-     | _ -> None)
-  | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let strip_from_json (json : Yojson.Safe.t) : Yojson.Safe.t =

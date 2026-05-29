@@ -269,7 +269,7 @@ let tool_called_detail_from_fields fields =
       match detail with
       | `Assoc _ -> Some detail
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
 
 let tool_called_event_detail json =
   match string_field "source" json, json with

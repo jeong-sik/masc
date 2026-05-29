@@ -125,8 +125,8 @@ let extract_uri params =
      | Some (`Assoc doc) ->
        (match List.assoc_opt "uri" doc with
         | Some (`String uri) -> Some uri
-        | _ -> None)
-     | _ -> None)
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
@@ -237,7 +237,7 @@ let extract_id fields =
   match List.assoc_opt "id" fields with
   | Some (`Int n) -> Some (Id_int n)
   | Some (`String s) -> Some (Id_string s)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
 ;;
 
 (** Extract line (0-based) from LSP position params. *)
@@ -248,8 +248,8 @@ let extract_line params =
      | Some (`Assoc pos) ->
        (match List.assoc_opt "line" pos with
         | Some (`Int n) -> Some n
-        | _ -> None)
-     | _ -> None)
+        | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None)
   | _ -> None
 ;;
 
@@ -433,7 +433,7 @@ let handle_diagnostic cs params id =
            let existing =
              match List.assoc_opt "items" rfields with
              | Some (`List diags) -> diags
-             | _ -> []
+             | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
            in
            let merged =
              Lsp_overlay_provider.diagnostics
@@ -503,7 +503,7 @@ let dispatch_message cs msg =
       let method_opt =
         match List.assoc_opt "method" fields with
         | Some (`String m) -> Some m
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let params = List.assoc_opt "params" fields |> Option.value ~default:`Null in
       let id = extract_id fields in
@@ -515,7 +515,7 @@ let dispatch_message cs msg =
            | `Assoc pf ->
              (match List.assoc_opt "rootUri" pf with
               | Some (`String u) -> u
-              | _ -> cs.base_path)
+              | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> cs.base_path)
            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> cs.base_path
          in
          let root = workspace_root_for_initialize ~base_path:cs.base_path root_uri in

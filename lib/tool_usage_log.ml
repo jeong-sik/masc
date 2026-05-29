@@ -72,7 +72,7 @@ let numeric_ts_field fields name =
   match List.assoc_opt name fields with
   | Some (`Float ts) -> Some ts
   | Some (`Int ts) -> Some (Float.of_int ts)
-  | _ -> None
+  | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
 
 let ts_of_record = function
   | `Assoc fields -> (
@@ -87,7 +87,7 @@ let ts_of_record = function
               | None -> (
                   match List.assoc_opt "ts_iso" fields with
                   | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
-                  | _ -> None))))
+                  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None))))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let latest_ts_of_entries entries =
@@ -278,7 +278,7 @@ let extract_caller (result : Tool_result.result) : string option =
   | `Assoc fields ->
       (match List.assoc_opt "agent_name" fields with
        | Some (`String s) -> Some s
-       | _ -> None)
+       | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 (* Log only handled System_internal dispatches. Non-handled outcomes are

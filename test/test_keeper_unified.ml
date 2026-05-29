@@ -50,6 +50,53 @@ let tool_required_cascade_name () =
     Masc_mcp.Keeper_cascade_profile.Tool_required
 ;;
 
+let keeper_turn_cascade_name () =
+  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
+    Masc_mcp.Keeper_cascade_profile.Keeper_turn
+;;
+
+let normalize_keeper_runtime_declared_name raw =
+  Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name raw
+;;
+
+(* After tier removal a keeper whose declared name is a legacy "tier-group.*"/
+   "tier.*" value (neither a logical-use route nor a catalog member) must still
+   resolve to the Keeper_turn route, not pass the dead name through to capability
+   resolution (which crash-loops the keeper with no_tool_capable_provider). *)
+let test_keeper_runtime_declared_name_substitutes_unresolvable_with_keeper_turn () =
+  let expected = keeper_turn_cascade_name () in
+  check
+    string
+    "legacy tier-group.* declared name resolves to keeper_turn route"
+    expected
+    (normalize_keeper_runtime_declared_name "tier-group.glm-coding-with-spark");
+  check
+    string
+    "legacy tier.* declared name resolves to keeper_turn route"
+    expected
+    (normalize_keeper_runtime_declared_name "tier.local_llama");
+  check
+    string
+    "blank declared name resolves to keeper_turn route"
+    expected
+    (normalize_keeper_runtime_declared_name "")
+;;
+
+(* A declared name that is already a logical-use route must keep resolving
+   through that route — the narrowing only substitutes unresolvable names. *)
+let test_keeper_runtime_declared_name_preserves_logical_use_route () =
+  check
+    string
+    "logical-use keeper_turn resolves to the keeper_turn route target"
+    (keeper_turn_cascade_name ())
+    (normalize_keeper_runtime_declared_name "keeper_turn");
+  check
+    string
+    "logical-use tool_required resolves to the tool_required route target"
+    (tool_required_cascade_name ())
+    (normalize_keeper_runtime_declared_name "tool_required")
+;;
+
 let safe_lane_cascade_name = Masc_mcp.Cascade_capability_profile.safe_lane_cascade_name
 
 let has_prompt_root path =
@@ -11898,6 +11945,14 @@ let () =
             "resolved catalog without assignable candidates falls back"
             `Quick
             test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candidates
+        ; test_case
+            "keeper runtime declared name substitutes unresolvable with keeper_turn"
+            `Quick
+            test_keeper_runtime_declared_name_substitutes_unresolvable_with_keeper_turn
+        ; test_case
+            "keeper runtime declared name preserves logical-use route"
+            `Quick
+            test_keeper_runtime_declared_name_preserves_logical_use_route
         ] )
     ; ( "tool_classification"
       , [ test_case

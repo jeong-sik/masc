@@ -408,9 +408,32 @@ let route_target_public_name ?config_path use =
   try Some (cascade_name_for_use ?config_path use |> public_name_of_target)
   with Failure _ -> None
 
-(* keeper-assignable guardrail removed 2026-05-28 — all cascade names pass through. *)
+(* keeper-assignable guardrail removed 2026-05-28, then re-narrowed 2026-05-29:
+   a keeper runtime turn must resolve to a real route target. After tier-group
+   removal (#19436/#19439) legacy "tier-group.*"/"tier.*" declared names are
+   neither logical-use routes nor catalog members, so [normalize_declared_name]
+   passes them through verbatim; the unresolved name then fails capability
+   resolution at dispatch (no_tool_capable_provider) and crash-loops the keeper.
+   An unresolvable declared name is substituted with the [Keeper_turn] route —
+   the logical route a keeper turn runs on — and the substitution is recorded
+   (RFC-0038 L4 I-Intent: substitution must be visible, not silent).
+   This is the keeper-runtime narrowing only; [normalize_declared_name] keeps
+   verbatim passthrough for non-runtime callers. *)
 let normalize_keeper_runtime_declared_name ?config_path raw =
-  normalize_declared_name ?config_path raw
+  let trimmed = String.trim raw in
+  match logical_use_of_string_opt trimmed with
+  | Some _ -> normalize_declared_name ?config_path raw
+  | None ->
+      (match
+         canonical_member_of_lookup_catalog
+           ~catalog:(catalog_lookup_names ?config_path ())
+           trimmed
+       with
+       | Some canonical -> canonical
+       | None ->
+           Cascade_metrics.on_route_resolve_fallback
+             ~reason:"keeper_runtime_declared_name_unresolved";
+           cascade_name_for_use ?config_path Keeper_turn)
 
 (* RFC-0149 §3.3 — "Parse, don't validate" reverse of the silent-fallback
   shape.  [resolve_live_with_catalog_result] returns [Ok cascade_name]

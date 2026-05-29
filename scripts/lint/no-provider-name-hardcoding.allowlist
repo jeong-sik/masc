@@ -4,9 +4,8 @@
 #
 # Format: path:line:literal
 lib/cascade/cascade_runtime.ml:37:auto
-lib/cascade/cascade_runtime.ml:46:custom
-lib/cascade/cascade_runtime.ml:67:openai_compat
-lib/cascade/cascade_runtime.ml:321:auto
+lib/cascade/cascade_runtime.ml:40:openai_compat
+lib/cascade/cascade_runtime.ml:186:auto
 lib/provider_runtime_projection.ml:108:auto
 lib/provider_runtime_projection.ml:206:auto
 lib/provider_runtime_projection.ml:254:openrouter

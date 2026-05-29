@@ -466,6 +466,10 @@ let resolve_bot_token () =
   | Some t when t <> "" -> Some t
   | _ -> None
 
+(* TEL-OK: telemetry is emitted by the caller [Tool_discord_dispatch.handler]
+   which lives in the main [masc_mcp] library with full Log/Metrics access.
+   This gate-layer function returns [Result.t] so the caller can instrument
+   both success and error paths with proper failure_class. *)
 let send_message ~channel_id ~content =
   let channel_id = String.trim channel_id in
   if channel_id = "" then

@@ -232,8 +232,8 @@ module Http_client = struct
         in
         try
           let json = Yojson.Safe.from_string body in
-          match Json_util.assoc_member_opt "error" json with
-          | Some (`Assoc fields) -> (
+          match Yojson.Safe.Util.member "error" json with
+          | `Assoc fields -> (
               match List.assoc_opt "message" fields with
               | Some (`String msg) -> msg
               | _ ->

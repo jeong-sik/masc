@@ -557,6 +557,11 @@ let rec parse name type_ maxdepth path = function
     (match int_of_string_opt d with
      | Some n -> parse name type_ (Some n) path rest
      | None -> parse name type_ maxdepth path rest)
+  | arg :: rest
+    when String.length arg > 10 && String.sub arg 0 10 = "-maxdepth=" ->
+    (match int_of_string_opt (String.sub arg 10 (String.length arg - 10)) with
+     | Some n -> parse name type_ (Some n) path rest
+     | None -> parse name type_ maxdepth path rest)
   | "-exec" :: rest | "-ok" :: rest
   | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ maxdepth path (skip_exec rest)
   (* POSIX end-of-options: treat all remaining as path *)
@@ -887,6 +892,22 @@ let rec parse mode path = function
     (match List.find_opt (fun a -> String.length a > 0) rest with
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wc { path = p; mode }))
      | None -> None)
+  (* Combined short flags: -lw, -wc, -lc, etc. (last wins for mutually exclusive mode) *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'l' || c = 'w' || c = 'c')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let mode' = ref mode in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'l' -> mode' := Some `Lines
+      | 'w' -> mode' := Some `Words
+      | 'c' -> mode' := Some `Chars
+      | _ -> ()
+    done;
+    parse !mode' path rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse mode path rest
@@ -1373,6 +1394,21 @@ let rec parse delete squeeze set1 set2 = function
         | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tr { set1 = s1; set2 = Some s2; delete; squeeze }))
         | Some _ -> None)
      | _ -> None)
+  (* Combined short flags: -ds, -sd, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'd' || c = 's')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let delete' = ref delete and squeeze' = ref squeeze in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'd' -> delete' := true
+      | 's' -> squeeze' := true
+      | _ -> ()
+    done;
+    parse !delete' !squeeze' set1 set2 rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse delete squeeze set1 set2 rest
@@ -1506,6 +1542,22 @@ let rec parse count duplicates unique skip_fields skip_chars file = function
     (match List.find_opt (fun a -> String.length a > 0) rest with
      | Some f -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file = Some f }))
      | None -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Uniq { count; duplicates; unique; skip_fields; skip_chars; file })))
+  (* Combined short flags: -cd, -cu, -dc, -du, -uc, -ud, etc. *)
+  | arg :: rest
+    when String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'c' || c = 'd' || c = 'u')
+              (String.sub arg 1 (String.length arg - 1)) ->
+    let count' = ref count and duplicates' = ref duplicates and unique' = ref unique in
+    for j = 1 to String.length arg - 1 do
+      match arg.[j] with
+      | 'c' -> count' := true
+      | 'd' -> duplicates' := true
+      | 'u' -> unique' := true
+      | _ -> ()
+    done;
+    parse !count' !duplicates' !unique' skip_fields skip_chars file rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse count duplicates unique skip_fields skip_chars file rest

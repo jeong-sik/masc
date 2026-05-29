@@ -510,7 +510,15 @@ let test_flag_equals_parsing () =
   (match sort with
    | W (Sort { numeric = true; key = Some 3; file = Some "file.txt"; _ }) -> ()
    | w ->
-     Alcotest.failf "Sort --key=3: expected key=3, got %a" pp w)
+     Alcotest.failf "Sort --key=3: expected key=3, got %a" pp w);
+  (* Find: -maxdepth=3 *)
+  let find_md =
+    of_simple { (base "find") with args = [ lit "/tmp"; lit "-maxdepth=3"; lit "-name"; lit "*.ml" ] }
+  in
+  (match find_md with
+   | W (Find { path = "/tmp"; name = Some "*.ml"; maxdepth = Some 3; _ }) -> ()
+   | w ->
+     Alcotest.failf "Find -maxdepth=3: expected maxdepth=3, got %a" pp w)
 ;;
 
 (* POSIX -- end-of-options handling *)
@@ -802,7 +810,70 @@ let test_combined_short_flags () =
   in
   (match du_sh with
    | W (Du { path = Some "/tmp"; human_readable = true; summary = true; _ }) -> ()
-   | w -> Alcotest.failf "du -sh: expected human_readable+summary, got %a" pp w)
+   | w -> Alcotest.failf "du -sh: expected human_readable+summary, got %a" pp w);
+  (* wc -lw file.txt (combined: last wins for mutually exclusive mode) *)
+  let wc_lw =
+    of_simple { (base "wc") with args = [ lit "-lw"; lit "file.txt" ] }
+  in
+  (match wc_lw with
+   | W (Wc { path = "file.txt"; mode = Some `Words; _ }) -> ()
+   | w -> Alcotest.failf "wc -lw: expected mode=Words (last wins), got %a" pp w);
+  (* wc -lc file.txt *)
+  let wc_lc =
+    of_simple { (base "wc") with args = [ lit "-lc"; lit "file.txt" ] }
+  in
+  (match wc_lc with
+   | W (Wc { path = "file.txt"; mode = Some `Chars; _ }) -> ()
+   | w -> Alcotest.failf "wc -lc: expected mode=Chars (last wins), got %a" pp w);
+  (* wc -lwc file.txt *)
+  let wc_lwc =
+    of_simple { (base "wc") with args = [ lit "-lwc"; lit "file.txt" ] }
+  in
+  (match wc_lwc with
+   | W (Wc { path = "file.txt"; mode = Some `Chars; _ }) -> ()
+   | w -> Alcotest.failf "wc -lwc: expected mode=Chars (last wins), got %a" pp w);
+  (* tr -ds 'a-z' 'A-Z' *)
+  let tr_ds =
+    of_simple { (base "tr") with args = [ lit "-ds"; lit "a-z"; lit "A-Z" ] }
+  in
+  (match tr_ds with
+   | W (Tr { set1 = "a-z"; set2 = Some "A-Z"; delete = true; squeeze = true; _ }) -> ()
+   | w -> Alcotest.failf "tr -ds: expected delete+squeeze, got %a" pp w);
+  (* tr -sd 'a-z' *)
+  let tr_sd =
+    of_simple { (base "tr") with args = [ lit "-sd"; lit "a-z" ] }
+  in
+  (match tr_sd with
+   | W (Tr { set1 = "a-z"; set2 = None; delete = true; squeeze = true; _ }) -> ()
+   | w -> Alcotest.failf "tr -sd: expected delete+squeeze, got %a" pp w);
+  (* uniq -cd file.txt *)
+  let uniq_cd =
+    of_simple { (base "uniq") with args = [ lit "-cd"; lit "file.txt" ] }
+  in
+  (match uniq_cd with
+   | W (Uniq { count = true; duplicates = true; unique = false; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -cd: expected count+duplicates, got %a" pp w);
+  (* uniq -cu file.txt *)
+  let uniq_cu =
+    of_simple { (base "uniq") with args = [ lit "-cu"; lit "file.txt" ] }
+  in
+  (match uniq_cu with
+   | W (Uniq { count = true; duplicates = false; unique = true; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -cu: expected count+unique, got %a" pp w);
+  (* uniq -dc file.txt *)
+  let uniq_dc =
+    of_simple { (base "uniq") with args = [ lit "-dc"; lit "file.txt" ] }
+  in
+  (match uniq_dc with
+   | W (Uniq { count = true; duplicates = true; unique = false; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -dc: expected duplicates+count, got %a" pp w);
+  (* uniq -duc file.txt (all three) *)
+  let uniq_duc =
+    of_simple { (base "uniq") with args = [ lit "-duc"; lit "file.txt" ] }
+  in
+  (match uniq_duc with
+   | W (Uniq { count = true; duplicates = true; unique = true; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -duc: expected all three, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

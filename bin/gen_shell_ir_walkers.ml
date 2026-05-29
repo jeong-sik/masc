@@ -2351,6 +2351,14 @@ let rec parse port id_file host user command dd = function
     (match int_of_string_opt p_str with
      | Some p -> parse (Some p) id_file host user command dd rest
      | None -> parse port id_file host user command dd rest)
+  (* Combined form: -p22 *)
+  | arg :: rest
+    when not dd && String.length arg > 2
+         && arg.[0] = '-' && arg.[1] = 'p'
+         && String.for_all (fun c -> c >= '0' && c <= '9')
+              (String.sub arg 2 (String.length arg - 2)) ->
+    let p = int_of_string (String.sub arg 2 (String.length arg - 2)) in
+    parse (Some p) id_file host user command dd rest
   | "-i" :: f :: rest when not dd -> parse port (Some f) host user command dd rest
   | "-o" :: _ :: rest when not dd -> parse port id_file host user command dd rest
   | "-L" :: _ :: rest when not dd -> parse port id_file host user command dd rest

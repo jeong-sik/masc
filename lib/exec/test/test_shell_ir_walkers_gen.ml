@@ -773,6 +773,13 @@ let test_posix_end_of_options () =
   (match ssh with
    | W (Ssh { host = "-host"; command = Some "echo hello"; _ }) -> ()
    | w -> Alcotest.failf "Ssh --: expected host=-host command=echo hello, got %a" pp w);
+  (* Ssh: -p22 user@host (combined port form) *)
+  let ssh_p22 =
+    of_simple { (base "ssh") with args = [ lit "-p22"; lit "user@host"; lit "uptime" ] }
+  in
+  (match ssh_p22 with
+   | W (Ssh { host = "host"; user = Some "user"; port = Some 22; command = Some "uptime"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh -p22: expected port=22, got %a" pp w);
   (* Sed: -- s/a/b/ -file.txt *)
   let sed =
     of_simple { (base "sed") with args = [ lit "-n"; lit "--"; lit "s/a/b/"; lit "-file.txt" ] }

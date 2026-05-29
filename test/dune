@@ -1795,6 +1795,8 @@
 
 (include stanzas/test_claim_outcome_typed.inc)
 
+(include stanzas/test_execute_timeout_schema_widen.inc)
+
 (include stanzas/test_parse_outcome.inc)
 
 (include stanzas/test_pr_open_script.inc)

@@ -78,7 +78,7 @@ PREAPPROVED=(
   # Debug format string inside Printf.sprintf — internal observability
   # (real provider identity, not boundary redaction). The model field
   # above it is already routed via Boundary_redaction.
-  "lib/keeper/keeper_turn_driver_wrappers.ml:95"
+  "lib/keeper/keeper_turn_driver_wrappers.ml:94"
 )
 
 violations_tmp="$(mktemp -t rfc0132-pr3.violations.XXXXXX)"

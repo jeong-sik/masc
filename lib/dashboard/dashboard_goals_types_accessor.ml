@@ -8,7 +8,7 @@
     Facade [Dashboard_goals_types] re-includes this module so existing
     callers keep using [Dashboard_goals.task_is_done], etc. unchanged. *)
 
-open Yojson.Safe.Util
+let m json key = Option.value ~default:`Null (Json_util.assoc_member_opt key json)
 
 type tree_node = {
   goal : Goal_store.goal;
@@ -94,87 +94,79 @@ let link_source_of_values values =
   | [ source ] -> source
   | _ -> "mixed"
 let receipt_error_kind json =
-  match json |> member "error" with
-  | `Assoc _ as error -> error |> member "kind" |> to_string_option
+  match m json "error" with
+  | `Assoc _ as error -> Json_util.get_string error "kind"
   | _ -> None
 
 let receipt_error_message json =
-  match json |> member "error" with
-  | `Assoc _ as error -> error |> member "message" |> to_string_option
+  match m json "error" with
+  | `Assoc _ as error -> Json_util.get_string error "message"
   | _ -> None
 
 let receipt_sandbox_kind json =
-  json |> member "sandbox" |> member "kind" |> to_string_option
+  Json_util.get_string (m json "sandbox") "kind"
 
 let receipt_approval_profile json =
-  json |> member "approval" |> member "profile" |> to_string_option
+  Json_util.get_string (m json "approval") "profile"
 
 let receipt_cascade_name json =
-  json |> member "cascade" |> member "name" |> to_string_option
+  Json_util.get_string (m json "cascade") "name"
 
 let receipt_cascade_outcome json =
-  json |> member "cascade" |> member "outcome" |> to_string_option
+  Json_util.get_string (m json "cascade") "outcome"
 
 let receipt_cascade_fallback_applied json =
-  json |> member "cascade" |> member "fallback_applied" |> to_bool_option
+  Json_util.get_bool (m json "cascade") "fallback_applied"
   |> Option.value ~default:false
 
-let receipt_outcome json =
-  json |> member "outcome" |> to_string_option
+let receipt_outcome json = Json_util.get_string json "outcome"
 
-let receipt_started_at json =
-  json |> member "started_at" |> to_string_option
+let receipt_started_at json = Json_util.get_string json "started_at"
 
-let receipt_ended_at json =
-  json |> member "ended_at" |> to_string_option
+let receipt_ended_at json = Json_util.get_string json "ended_at"
 
-let receipt_turn_count json =
-  json |> member "turn_count" |> to_int_option
+let receipt_turn_count json = Json_util.get_int json "turn_count"
 
-let trust_disposition json =
-  json |> member "disposition" |> to_string_option
+let trust_disposition json = Json_util.get_string json "disposition"
 
-let trust_disposition_reason json =
-  json |> member "disposition_reason" |> to_string_option
+let trust_disposition_reason json = Json_util.get_string json "disposition_reason"
 
-let trust_attention_reason json =
-  json |> member "attention_reason" |> to_string_option
+let trust_attention_reason json = Json_util.get_string json "attention_reason"
 
 let trust_needs_attention json =
-  json |> member "needs_attention" |> to_bool_option
+  Json_util.get_bool json "needs_attention"
   |> Option.value ~default:false
 
 let trust_snapshot_unavailable json =
   String.equal
-    (json |> member "disposition_reason" |> to_string_option
+    (Json_util.get_string json "disposition_reason"
      |> Option.value ~default:"")
     "runtime_trust_snapshot_unavailable"
 
-let trust_turn_id json =
-  json |> member "turn_id" |> to_int_option
+let trust_turn_id json = Json_util.get_int json "turn_id"
 
 let trust_latest_event json =
-  match json |> member "latest_causal_event" with
+  match m json "latest_causal_event" with
   | `Assoc _ as event -> Some event
   | _ -> None
 
 let trust_latest_event_ts json =
   Option.bind (trust_latest_event json) (fun event ->
-      event |> member "ts" |> to_string_option )
+      Json_util.get_string event "ts")
 
 let trust_latest_event_ts_unix json =
   Option.bind (trust_latest_event json) (fun event ->
-      event |> member "ts_unix" |> to_float_option )
+      Json_util.get_float event "ts_unix")
 
 let trust_sandbox_risk json =
   String.equal
-    (json |> member "disposition_reason" |> to_string_option
+    (Json_util.get_string json "disposition_reason"
      |> Option.value ~default:"")
     "sandbox_violation"
 
 let trust_cascade_risk json =
   String.equal
-    (json |> member "disposition_reason" |> to_string_option
+    (Json_util.get_string json "disposition_reason"
      |> Option.value ~default:"")
     "cascade_exhausted"
 

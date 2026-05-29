@@ -393,7 +393,7 @@ let handle_answer_request body =
     let answer_ice =
       match Json_util.assoc_member_opt "ice_candidates" json with
       | None | Some `Null -> []
-      | Some candidates -> Yojson.Safe.Util.to_list candidates |> List.map Yojson.Safe.to_string
+      | Some candidates -> (match candidates with `List l -> l | _ -> []) |> List.map Yojson.Safe.to_string
     in
     ignore answer_ice;
     match accept_offer ~offer_id ~answerer_agent:answerer with

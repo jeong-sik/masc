@@ -359,7 +359,7 @@ let parse_optional_string_list args field =
   match Json_util.assoc_member_opt field args with
   | None | Some `Null -> Ok None
   | Some (`List values) ->
-    (try Ok (Some (List.map Yojson.Safe.Util.to_string values)) with
+    (try Ok (Some (List.map (function `String s -> s | _ -> "") values)) with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _ ->
        Error

@@ -267,7 +267,7 @@ let goal_verification_vote_of_yojson = function
                 match Json_util.assoc_member_opt "evidence_refs" json with
                 | Some `Null -> Ok []
                 | Some (`List values) -> (
-                    try Ok (List.map Yojson.Safe.Util.to_string values)
+                    try Ok (List.map (function `String s -> s | _ -> "") values)
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | _ ->
@@ -282,7 +282,7 @@ let goal_verification_vote_of_yojson = function
                   {
                     principal;
                     decision;
-                    note = Option.map Yojson.Safe.Util.to_string (Json_util.assoc_member_opt "note" json) ;
+                    note = (match Json_util.assoc_member_opt "note" json with Some (`String s) -> Some s | _ -> None) ;
                     evidence_refs;
                     submitted_at;
                   })
@@ -362,7 +362,7 @@ let goal_verification_request_of_yojson = function
                     votes;
                     status;
                     created_at;
-                    resolved_at = Option.map Yojson.Safe.Util.to_string (Json_util.assoc_member_opt "resolved_at" json) ;
+                    resolved_at = (match Json_util.assoc_member_opt "resolved_at" json with Some (`String s) -> Some s | _ -> None) ;
                   })
                 votes
           | _ ->

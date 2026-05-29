@@ -78,7 +78,7 @@ let list_field json key =
 let string_list_field json key =
   let* items = list_field json key in
   Ok (items
-      |> List.filter_map Yojson.Safe.Util.to_string_option
+      |> List.filter_map (function `String s -> Some s | _ -> None)
       |> normalize_string_list)
 
 let parse_json_check json =

@@ -62,7 +62,7 @@ tools-support = true
 is-default = true
 max-concurrent = 1
 
-[tier.primary_profile]
+[cascade.primary_profile]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
@@ -316,7 +316,7 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.provider_k-coding-primary]
+[cascade.provider_k-coding-primary]
 members = ["cli_tool_a.agent_code-spark"]
 strategy = "failover"
 
@@ -408,7 +408,7 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.provider_k-coding-primary]
+[cascade.provider_k-coding-primary]
 members = ["provider_k-coding.provider_k-5-1"]
 strategy = "failover"
 
@@ -490,7 +490,7 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.agent_code-primary]
+[cascade.agent_code-primary]
 members = ["cli_tool_a.agent_code-spark"]
 strategy = "failover"
 

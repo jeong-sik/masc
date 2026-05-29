@@ -86,7 +86,7 @@ streaming = true
 is-default = true
 max-concurrent = 1
 
-[tier.primary]
+[cascade.primary]
 members = ["ollama.provider_h"]
 strategy = "failover"
 

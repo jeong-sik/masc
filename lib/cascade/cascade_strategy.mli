@@ -159,7 +159,7 @@ val order_candidates :
     against the same saturated key.
 
     This function is pure and must not perform IO.  [cycle] is accepted
-    for call-site stability but no longer selects a tier (failover is
+    for call-site stability but no longer selects a cascade (failover is
     cycle-independent; health and capacity signals are re-read each
     cycle). *)
 

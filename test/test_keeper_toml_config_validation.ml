@@ -344,15 +344,15 @@ max-concurrent = 1
 [ollama.qwen3-small]
 max-concurrent = 1
 
-[tier.primary]
+[cascade.primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier.backup]
+[cascade.backup]
 members = ["ollama.qwen3-small"]
 strategy = "failover"
 
-[tier.scoring]
+[cascade.scoring]
 keeper-assignable = false
 members = ["ollama.qwen3"]
 strategy = "failover"
@@ -563,11 +563,11 @@ tools-support = true
 [ollama.qwen3]
 max-concurrent = 1
 
-[tier.provider_k-coding-primary]
+[cascade.provider_k-coding-primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier.ollama_cloud_primary]
+[cascade.ollama_cloud_primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 keeper-assignable = true
@@ -593,7 +593,7 @@ let test_catalog_validator_surfaces_adapter_errors () =
   (* A binding on a Messages_api provider (protocol provider_a-http) cannot be
      materialized: provider_kind_for_http_provider returns None for Messages_api,
      so resolve_binding_config emits a [Binding_resolution_failed] adapter error.
-     (This replaced the legacy [tier.X] member-resolution trigger.) *)
+     (This replaced the legacy [cascade.X] member-resolution trigger.) *)
   let cascade_toml =
     {|
 [providers.provider_a]
@@ -708,7 +708,7 @@ tools-support = true
 let test_runtime_validation_rejects_declarative_adapter_errors () =
   (* A binding on a Messages_api provider (protocol provider_a-http) yields a
      [Binding_resolution_failed] adapter error (provider_kind None) that runtime
-     validation rejects. (Replaced the legacy [tier.X] member-resolution trigger.) *)
+     validation rejects. (Replaced the legacy [cascade.X] member-resolution trigger.) *)
   let cascade_toml =
     {|
 [providers.provider_a]

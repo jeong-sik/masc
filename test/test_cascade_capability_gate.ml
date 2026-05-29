@@ -108,7 +108,7 @@ let with_temp_cascade_toml body f =
 let test_cascade_output_cap_not_context_window () =
   (* RFC-0058: ceilings resolve a concrete binding/alias key (route/profile
      ceiling resolution was removed with the tier concept). The narrowest
-     member of the former [tier.primary] is the [remote.long] binding. *)
+     member of the former [cascade.primary] is the [remote.long] binding. *)
   let cascade_name = Cascade_name.of_string_exn "remote.long" in
   with_temp_cascade_toml
     {|
@@ -142,7 +142,7 @@ target = "remote.long"
 
 let test_public_cap_helper_clamps_caller_override_to_cascade_ceiling () =
   (* RFC-0058: ceiling resolves the concrete [remote.narrow] binding key
-     (former sole member of [tier.primary]). *)
+     (former sole member of [cascade.primary]). *)
   let cascade_name = Cascade_name.of_string_exn "remote.narrow" in
   with_temp_cascade_toml
     {|
@@ -183,7 +183,7 @@ target = "remote.narrow"
 
 let test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling () =
   (* RFC-0058: ceilings resolve a concrete member key. The narrowest former
-     [tier.strict_tool_candidates] member is the provider_c alias, whose model
+     [cascade.strict_tool_candidates] member is the provider_c alias, whose model
      capability (16384) caps the alias [max-output] (64000). *)
   let cascade_name =
     Cascade_name.of_string_exn "cli_tool_c.provider_c-cli-coding.tool_candidate"

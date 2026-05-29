@@ -442,7 +442,7 @@ api-name = "qwen3.6:35b-a3b-mlx-bf16"
 max-context = 32768
 tools-support = false
 
-[tier.invalid_local_lane]
+[cascade.invalid_local_lane]
 members = ["missing_provider.provider_h"]
 
 [cascade.invalid_local_lane]
@@ -482,13 +482,13 @@ tools-support = true
 
 [custom.stable]
 
-[tier.primary_profile]
+[cascade.primary_profile]
 members = ["custom.stable"]
 
 [cascade.primary_profile]
 tiers = ["primary_profile"]
 
-[tier.broken_profile]
+[cascade.broken_profile]
 members = ["missing_provider.fake"]
 
 [cascade.broken_profile]
@@ -517,13 +517,13 @@ tools-support = true
 
 [custom.stable]
 
-[tier.primary_profile]
+[cascade.primary_profile]
 members = ["missing_provider.fake"]
 
 [cascade.primary_profile]
 tiers = ["primary_profile"]
 
-[tier.secondary_profile]
+[cascade.secondary_profile]
 members = ["custom.stable"]
 
 [cascade.secondary_profile]

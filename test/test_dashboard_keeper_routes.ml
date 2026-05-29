@@ -338,7 +338,7 @@ let cascade_toml ?(route_target = "default") ?(extra_route_targets = [])
   let profile_toml ~valid name =
     Printf.sprintf
       {|
-[tier.%s]
+[cascade.%s]
 members = [%S]
 
 [cascade.%s]
@@ -1332,10 +1332,10 @@ tools-support = true
 
 [custom.mock]
 
-[tier.primary]
+[cascade.primary]
 members = ["missing_provider.fake"]
 
-[tier.good]
+[cascade.good]
 members = ["custom.mock"]
 
 [cascade.primary]

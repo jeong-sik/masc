@@ -67,7 +67,7 @@ type weighted_entry = {
 }
 
 (** Deprecated logical route keys must not be treated as concrete catalog
-    profiles. Qualified names such as ["tier.local_only"] are checked by their
+    profiles. Qualified names such as ["cascade.local_only"] are checked by their
     raw profile suffix. *)
 val is_deprecated_logical_profile_name : string -> bool
 

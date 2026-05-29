@@ -70,7 +70,7 @@ type partial_load_result = {
 (** Result of a partial catalog load. [snapshot] always contains the
     subset of profiles whose internal cross-references resolved
     successfully. [errors] lists per-entry failures (unresolved
-    provider/model/binding/tier). [errors = []] is the all-clean case.
+    provider/model/binding). [errors = []] is the all-clean case.
 
     Surfacing both fields at the same time lets downstream callers (notably
     keeper toml validation) accept the valid subset while logging the

@@ -725,7 +725,7 @@ let run
         ~total_duration_ms:run_total_duration_ms
         ~status:(Dashboard_oas_bridge.Error { transient = false })
         error_response;
-      (* Demoted from WARN to DEBUG (task-239): this fires once per tier,
+      (* Demoted from WARN to DEBUG (task-239): this fires once per cascade,
          but a cascade caller (Keeper_turn_driver.run_named) retries on the
          next provider.  Emitting WARN/ERROR here creates noise on
          recovered cascades.  The cascade layer logs [cascade-fallback] at

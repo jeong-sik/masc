@@ -152,7 +152,7 @@ val sdk_error_capacity_backpressure_source :
   Cascade_error_classify.capacity_backpressure_source option
 (** [Some source] when the error classifies as a MASC-internal
     [Capacity_backpressure].  Callers use this to keep provider-owned
-    capacity failures separate from client/tier/cascade-slot backpressure
+    capacity failures separate from client/cascade-slot backpressure
     when projecting provider health. *)
 
 val sdk_error_capacity_backpressure_retry_hint :

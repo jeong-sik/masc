@@ -226,10 +226,10 @@ let test_rotation_skips_direct_tier_after_attempted_cascade () =
   | Some retry ->
     check
       string
-      "skip direct tier duplicate"
+      "skip direct cascade duplicate"
       "cascade.provider_k-coding-with-spark"
       retry.next_cascade
-  | None -> fail "Expected rotation to skip duplicate direct tier candidate"
+  | None -> fail "Expected rotation to skip duplicate direct cascade candidate"
 
 let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
   let err =
@@ -551,7 +551,7 @@ let () =
         [
           test_case "catalog order is not prefixed by base cascade" `Quick
             test_catalog_rotation_preserves_order_without_base_injection;
-          test_case "skips direct tier after attempted cascade" `Quick
+          test_case "skips direct cascade after attempted cascade" `Quick
             test_rotation_skips_direct_tier_after_attempted_cascade;
           test_case "required-tool rotation prefers tool route before fallback hint" `Quick
             test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint;
@@ -564,7 +564,7 @@ let () =
         ] );
       ( "normalized_cascade_name_bare_requalify",
         [
-          (* #19327: "bare tier name requalified with prefix" test removed. *)
+          (* #19327: "bare cascade name requalified with prefix" test removed. *)
           test_case "already-qualified name passes through" `Quick
             test_normalized_cascade_name_passes_through_already_qualified;
           test_case "config special names preserved" `Quick

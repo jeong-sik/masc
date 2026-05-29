@@ -2,7 +2,7 @@
 
     [require_tool_use] completion-contract violations are deterministic
     provider/model behavior and already have typed handling. They should remain
-    visible, but not inflate the operator ERROR stream when every cascade tier
+    visible, but not inflate the operator ERROR stream when every cascade
     returns the same contract violation. *)
 
 open Alcotest

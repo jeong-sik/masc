@@ -72,7 +72,7 @@ tools-support = true
 
 [custom.mock]
 
-[tier.primary]
+[cascade.primary]
 members = ["custom.mock"]
 
 [cascade.primary]

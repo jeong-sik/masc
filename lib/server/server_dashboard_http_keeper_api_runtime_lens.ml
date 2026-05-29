@@ -152,40 +152,37 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ( "missing_required_tools",
                     Json_util.json_string_list missing_required_tools );
                   ( "turn_lane",
-                    json_string_opt
-                      (json_string_member_opt "turn_lane" tool_decision) );
+                    Json_util.string_opt_to_json
+                      (Json_util.get_string tool_decision "turn_lane") );
                   ( "tool_surface_class",
-                    json_string_opt
-                      (json_string_member_opt "tool_surface_class"
-                         tool_decision) );
+                    Json_util.string_opt_to_json
+                      (Json_util.get_string tool_decision
+                         "tool_surface_class") );
                   ( "tool_requirement",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (first_string_opt
                          [
-                           json_string_member_opt "tool_requirement"
-                             tool_decision;
-                           json_string_member_opt "tool_requirement"
-                             lane_decision;
+                           Json_util.get_string tool_decision
+                             "tool_requirement";
+                           Json_util.get_string lane_decision
+                             "tool_requirement";
                          ]) );
                   ( "visible_tool_count",
                     Json_util.int_opt_to_json
                       (first_int_opt
                          [
-                           json_int_member_opt "visible_tool_count"
-                             tool_decision;
-                           json_int_member_opt "effective_tool_count"
-                             lane_decision;
+                           Json_util.get_int tool_decision "visible_tool_count";
+                           Json_util.get_int lane_decision "effective_tool_count";
                          ]) );
                   ( "tool_gate_enabled",
                     match
-                      json_bool_member_opt "tool_gate_enabled" tool_decision
+                      Json_util.get_bool tool_decision "tool_gate_enabled"
                     with
                     | Some value -> `Bool value
                     | None -> `Null );
                   ( "tool_surface_fallback_used",
                     match
-                      json_bool_member_opt "tool_surface_fallback_used"
-                        tool_decision
+                      Json_util.get_bool tool_decision "tool_surface_fallback_used"
                     with
                     | Some value -> `Bool value
                     | None -> `Null );
@@ -195,19 +192,17 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
               `Assoc
                 [
                   ("resolved", `Bool has_provider_lane);
-                  ("status", json_string_opt provider_lane_status);
+                  ("status", Json_util.string_opt_to_json provider_lane_status);
                   ( "resolved_lane",
-                    json_string_opt
-                      (json_string_member_opt "resolved_lane" lane_decision)
+                    Json_util.string_opt_to_json
+                      (Json_util.get_string lane_decision "resolved_lane")
                   );
                   ( "effective_tool_count",
                     Json_util.int_opt_to_json
-                      (json_int_member_opt "effective_tool_count"
-                         lane_decision) );
+                      (Json_util.get_int lane_decision "effective_tool_count") );
                   ( "runtime_mcp_policy_present",
                     match
-                      json_bool_member_opt "runtime_mcp_policy_present"
-                        lane_decision
+                      Json_util.get_bool lane_decision "runtime_mcp_policy_present"
                     with
                     | Some value -> `Bool value
                     | None -> `Null );
@@ -243,7 +238,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ("started_count", `Int scan.provider_started_count);
                   ("finished_count", `Int scan.provider_finished_count);
                   ( "terminal_status",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (Option.map
                          (fun row -> row.Keeper_runtime_manifest.status)
                          scan.provider_terminal_row) );

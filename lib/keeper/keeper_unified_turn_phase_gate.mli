@@ -13,7 +13,7 @@ type phase_gate_outcome =
         caller may proceed to cascade routing. The carried [phase_opt]
         is the same value the gate observed in the registry, so the
         caller's cascade routing dispatches on the gate's view. *)
-  | Phase_gate_terminal_ok of Keeper_types.keeper_meta
+  | Phase_gate_terminal_ok of Keeper_meta_contract.keeper_meta
     (** Cooperative early-exit: supervisor stop, or non-executable
         phase. [run_keeper_cycle] returns [Ok meta] with [meta]
         unchanged. *)
@@ -23,7 +23,7 @@ type phase_gate_outcome =
 
 val decide_and_record
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> generation:int
   -> keeper_turn_id:int
   -> append_phase_gate_decision:

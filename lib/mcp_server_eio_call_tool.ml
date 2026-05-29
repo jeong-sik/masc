@@ -189,7 +189,7 @@ let runtime_mcp_current_task_required_tools
       |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
       |> Option.map Coord.task_required_tools
       |> Option.value ~default:[]
-      |> Keeper_types.dedupe_keep_order
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let runtime_mcp_keeper_log_context_of_entry
     ?mcp_session_id
@@ -247,20 +247,20 @@ let runtime_mcp_keeper_log_context_of_entry
     task_id = Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id;
     goal_ids;
     sandbox_profile =
-      Some (Keeper_types.sandbox_profile_to_string entry.meta.sandbox_profile);
+      Some (Keeper_types_profile_sandbox.sandbox_profile_to_string entry.meta.sandbox_profile);
     sandbox_root =
       Some (Keeper_sandbox.host_root_abs_of_meta ~config entry.meta);
     allowed_paths =
       Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
     network_mode =
-      Some (Keeper_types.network_mode_to_string entry.meta.network_mode);
+      Some (Keeper_types_profile_sandbox.network_mode_to_string entry.meta.network_mode);
     approval_mode = keeper_oas_context.gemini_approval_mode;
     tool_surface_class =
       Some (runtime_mcp_tool_surface_class allowed_tool_names);
     visible_tool_count = Some (List.length allowed_tool_names);
     required_tools = Some required_tools;
     missing_required_tools = Some missing_required_tools;
-    cascade_profile = Some (Keeper_types.cascade_name_of_meta entry.meta);
+    cascade_profile = Some (Keeper_meta_contract.cascade_name_of_meta entry.meta);
   }
 
 let runtime_mcp_keeper_error_preview message =

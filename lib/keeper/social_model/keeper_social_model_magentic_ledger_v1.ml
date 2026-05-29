@@ -6,6 +6,8 @@
     narration. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module Types = Keeper_social_model_types
 module Protocol = Keeper_social_model_protocol

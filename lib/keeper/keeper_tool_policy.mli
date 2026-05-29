@@ -7,6 +7,8 @@
     @since v2.200.0 *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module StringSet : Set.S with type elt = string
 

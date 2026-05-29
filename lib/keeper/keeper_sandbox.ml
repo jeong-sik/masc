@@ -26,8 +26,8 @@ type t =
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let backend_of_profile = function
-  | Keeper_types.Local -> Local
-  | Keeper_types.Docker -> Docker
+  | Keeper_types_profile_sandbox.Local -> Local
+  | Keeper_types_profile_sandbox.Docker -> Docker
 
 let backend_to_string = function
   | Local -> "local"
@@ -68,14 +68,14 @@ let host_root_abs_of_config_agent ~config ~agent_name =
     ~base_path:config.Coord.base_path
     ~agent_name
 
-let host_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) =
+let host_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   host_root_rel_of_profile meta.sandbox_profile meta.name
 
 let host_root_abs_of_backend ~(config : Coord.config) ~(backend : backend) name =
   Filename.concat config.base_path (host_root_rel_of_backend ~backend name)
 
 let host_root_abs_of_meta ~(config : Coord.config)
-    (meta : Keeper_types.keeper_meta) =
+    (meta : Keeper_meta_contract.keeper_meta) =
   Filename.concat config.base_path (host_root_rel_of_meta ~meta)
 
 let container_root name =
@@ -106,18 +106,18 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
           raw_path
 
 let keeper_visible_root_abs_of_meta ~(config : Coord.config)
-    (meta : Keeper_types.keeper_meta) =
+    (meta : Keeper_meta_contract.keeper_meta) =
   match backend_of_profile meta.sandbox_profile with
   | Local -> host_root_abs_of_meta ~config meta
   | Docker -> container_root meta.name
 
-let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
+let of_meta ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
   let backend = backend_of_profile meta.sandbox_profile in
   { keeper_name = meta.name
   ; sandbox_id = sandbox_id_of_name meta.name
   ; backend
-  ; sandbox_profile = Keeper_types.sandbox_profile_to_string meta.sandbox_profile
-  ; network_mode = Keeper_types.network_mode_to_string meta.network_mode
+  ; sandbox_profile = Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile
+  ; network_mode = Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode
   ; host_root_rel = host_root_rel_of_meta ~meta
   ; host_root_abs = host_root_abs_of_meta ~config meta
   ; container_root =
@@ -130,10 +130,10 @@ let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
   ; task_overlay_pattern = "repos/<repo>/.worktrees/<keeper>-<task_id>"
   }
 
-let allowed_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) : string =
+let allowed_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string =
   host_root_rel_of_meta ~meta
 
-let allowed_path_roots_of_meta ~(meta : Keeper_types.keeper_meta) : string list =
+let allowed_path_roots_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string list =
   [ allowed_root_rel_of_meta ~meta ]
 
 let keeper_visible_root_abs (t : t) : string =

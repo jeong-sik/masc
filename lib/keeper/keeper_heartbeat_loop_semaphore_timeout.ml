@@ -4,6 +4,8 @@
     legacy heartbeat path. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 module Observations = Keeper_heartbeat_loop_observations
 
 (* Re-export the kind constructors so the body below can write
@@ -18,10 +20,10 @@ let semaphore_wait_timeout_blocker_class
       (timeout : Keeper_turn_slot.semaphore_wait_timeout)
   =
   match timeout.timeout_phase with
-  | Keeper_turn_slot.Autonomous_queue_head -> Keeper_types.Admission_queue_wait_timeout
-  | Keeper_turn_slot.Autonomous_slot -> Keeper_types.Autonomous_slot_wait_timeout
+  | Keeper_turn_slot.Autonomous_queue_head -> Keeper_meta_contract.Admission_queue_wait_timeout
+  | Keeper_turn_slot.Autonomous_slot -> Keeper_meta_contract.Autonomous_slot_wait_timeout
   | Keeper_turn_slot.Reactive_slot | Keeper_turn_slot.Turn_slot ->
-    Keeper_types.Turn_timeout_after_queue_wait
+    Keeper_meta_contract.Turn_timeout_after_queue_wait
 ;;
 
 let semaphore_wait_timeout_diagnostics
@@ -113,7 +115,7 @@ let handle_semaphore_wait_timeout
       ; "channel", Keeper_world_observation.channel_to_string turn_decision.channel
       ]
     ();
-  Keeper_types.map_runtime
+  Keeper_meta_contract.map_runtime
     (fun rt ->
        { rt with
          last_blocker =

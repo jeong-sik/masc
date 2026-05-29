@@ -4,4 +4,4 @@
     proof and effect evidence for the turn without adding an extra review
     gate or tightening the keeper's already-configured tool policy. *)
 val of_keeper_meta :
-  Keeper_types.keeper_meta -> Masc_mcp_cdal_runtime.Risk_contract.t option
+  Keeper_meta_contract.keeper_meta -> Masc_mcp_cdal_runtime.Risk_contract.t option

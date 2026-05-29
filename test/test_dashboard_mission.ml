@@ -417,9 +417,9 @@ let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
             ("agent_name", `String name);
             ("trace_id", `String ("trace-" ^ name));
             ( "tool_access",
-              Lib.Keeper_types.tool_access_to_json
-                (Lib.Keeper_types.Preset
-                   { preset = Lib.Keeper_types.Minimal; also_allow }) );
+              Lib.Keeper_meta_tool_access.tool_access_to_json
+                (Lib.Keeper_meta_tool_access.Preset
+                   { preset = Lib.Keeper_meta_tool_access.Minimal; also_allow }) );
           ])
     with
     | Ok meta -> meta

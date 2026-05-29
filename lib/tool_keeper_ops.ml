@@ -8,12 +8,15 @@ module Float = Stdlib.Float
 (** Tool_keeper facade.  MCP entrypoints stay stable while keeper internals live in dedicated keeper modules. Tool_keeper owns only runtime wrappers and dispatch. *)
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_runtime
 module Turn = Keeper_turn
 module Status = Keeper_status
 module Persona = Keeper_persona
 module Persona_audit = Tool_keeper_persona_audit
-type 'a context = 'a Keeper_types.context = {
+type 'a context = 'a Keeper_types_profile.context = {
   config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
@@ -21,8 +24,8 @@ type 'a context = 'a Keeper_types.context = {
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
 }
-type tool_result = Keeper_types.tool_result
-let schemas = Keeper_types.schemas
+type tool_result = Keeper_types_profile.tool_result
+let schemas = Keeper_types_profile.schemas
 type text_cache = {
   key : string option;
   value : string option;
@@ -116,7 +119,7 @@ let maybe_reseed_keeper_identity_config ~(config : Coord.config) (meta : keeper_
              "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
              meta.name new_trace_id_raw err)
     | Ok new_trace_id ->
-        let base_dir = Keeper_types.session_base_dir config in
+        let base_dir = Keeper_types_profile.session_base_dir config in
         let _session =
           Keeper_context_runtime.create_session ~session_id:new_trace_id_raw
             ~base_dir
@@ -124,13 +127,13 @@ let maybe_reseed_keeper_identity_config ~(config : Coord.config) (meta : keeper_
         let updated_meta =
           { meta with
             agent_name = expected_agent_name;
-            updated_at = Keeper_types.now_iso ();
+            updated_at = Keeper_meta_contract.now_iso ();
             runtime = { meta.runtime with
               trace_id = new_trace_id;
               trace_history = Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
               generation = meta.runtime.generation + 1 } }
         in
-        (match Keeper_types.write_meta ~force:true config updated_meta with
+        (match Keeper_meta_store.write_meta ~force:true config updated_meta with
          | Ok () ->
              Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
              Ok
@@ -290,7 +293,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
-            ("cascade_name", `String (Keeper_types.cascade_name_of_meta meta));
+            ("cascade_name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]
           @ Keeper_status_bridge.social_model_resolution_fields_json meta
@@ -408,7 +411,7 @@ let keeper_up_body
       ?proc_mgr
       ?net
       args : tool_result =
-  let keeper_ctx : _ Keeper_types.context =
+  let keeper_ctx : _ Keeper_types_profile.context =
     { config; agent_name; sw; clock; proc_mgr; net }
   in
   with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)
@@ -451,7 +454,7 @@ let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
 (* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor
-   projection.  Constructs a fresh [Keeper_types.context] from the
+   projection.  Constructs a fresh [Keeper_types_profile.context] from the
    threaded Eio resources and delegates to the existing [Turn.preflight_*]
    / [Turn.handle_keeper_msg] handlers. *)
 let keeper_msg_body
@@ -462,7 +465,7 @@ let keeper_msg_body
       ?proc_mgr
       ?net
       args : tool_result =
-  let keeper_ctx : _ Keeper_types.context =
+  let keeper_ctx : _ Keeper_types_profile.context =
     { config; agent_name; sw; clock; proc_mgr; net }
   in
   match resolve_keeper_name_config ~config args with

@@ -489,3 +489,48 @@ let unbind ~channel_id ~actor_name =
         | Sys_error msg ->
             rollback_bindings original_bindings;
             Error msg
+
+(* ---------------------------------------------------------------- *)
+(* In-process gateway support — replaces sidecars/discord-bot/      *)
+(* ---------------------------------------------------------------- *)
+
+let keeper_for_channel ~channel_id =
+  let normalized = String.trim channel_id in
+  if String.equal normalized "" then None
+  else
+    let candidates =
+      try read_bindings ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> []
+    in
+    List.find_map
+      (fun (b : binding) ->
+        if String.equal b.channel_id normalized then Some b.keeper_name
+        else None)
+      candidates
+
+type send_error =
+  | Missing_token
+  | Rest_error of Discord_rest_client.error
+
+let pp_send_error fmt = function
+  | Missing_token ->
+    Format.fprintf fmt "DISCORD_BOT_TOKEN is unset or empty"
+  | Rest_error e ->
+    Format.fprintf fmt "discord rest error: %a" Discord_rest_client.pp_error e
+
+let bot_token_opt () =
+  match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
+  | None -> None
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then None else Some trimmed
+
+let send_message ~channel_id ~content =
+  match bot_token_opt () with
+  | None -> Error Missing_token
+  | Some token ->
+    (match Discord_rest_client.send_message ~token ~channel_id ~content with
+     | Ok id -> Ok id
+     | Error e -> Error (Rest_error e))

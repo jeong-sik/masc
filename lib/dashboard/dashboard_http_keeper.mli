@@ -77,14 +77,14 @@ val execution_trust_dashboard_json : Coord.config -> Yojson.Safe.t
 
 val keeper_cost_aggregates_json :
   config:Coord.config ->
-  keepers:Keeper_types.keeper_meta list ->
+  keepers:Keeper_meta_contract.keeper_meta list ->
   window_minutes:int ->
   Yojson.Safe.t
 (** Renders per-keeper cost and latency aggregates for the provider dashboard. *)
 
 val keeper_decisions_json :
   config:Coord.config ->
-  keepers:Keeper_types.keeper_meta list ->
+  keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
   Yojson.Safe.t
@@ -92,7 +92,7 @@ val keeper_decisions_json :
 
 val keeper_decisions_log_json :
   config:Coord.config ->
-  keepers:Keeper_types.keeper_meta list ->
+  keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
   Yojson.Safe.t
@@ -100,7 +100,7 @@ val keeper_decisions_log_json :
 
 val keeper_memory_log_json :
   config:Coord.config ->
-  keepers:Keeper_types.keeper_meta list ->
+  keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
   Yojson.Safe.t
@@ -115,7 +115,7 @@ val keeper_config_json :
 (** Returns the keeper's effective configuration JSON
     (resolved model, allowed tools, runtime limits,
     cascade settings).  Pairs with a status tag —
-    [`Not_found] when [Keeper_types.read_meta] fails or
+    [`Not_found] when [Keeper_meta_store.read_meta] fails or
     returns [None], [`OK] otherwise.  The handler avoids
     [bootstrap_runtime] mutations to keep the HTTP
     request path off the keeper-meta mutex (#3335). *)

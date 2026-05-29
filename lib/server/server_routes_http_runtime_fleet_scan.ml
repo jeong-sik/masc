@@ -27,24 +27,24 @@ let json_string_opt = function
   | Some value -> `String value
   | None -> `Null
 
-let effective_autoboot_enabled name (meta : Keeper_types.keeper_meta) =
+let effective_autoboot_enabled name (meta : Keeper_meta_contract.keeper_meta) =
   match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
   | Some value -> value
   | None -> meta.autoboot_enabled
 
-let blocker_class_string (info : Keeper_types.blocker_info option) =
-  Option.map (fun (info : Keeper_types.blocker_info) ->
+let blocker_class_string (info : Keeper_meta_contract.blocker_info option) =
+  Option.map (fun (info : Keeper_meta_contract.blocker_info) ->
     Keeper_meta_contract.blocker_class_to_string info.klass) info
 
-let blocker_detail (info : Keeper_types.blocker_info option) =
-  Option.map (fun (info : Keeper_types.blocker_info) -> info.detail) info
+let blocker_detail (info : Keeper_meta_contract.blocker_info option) =
+  Option.map (fun (info : Keeper_meta_contract.blocker_info) -> info.detail) info
 
-let pause_elapsed_sec now (meta : Keeper_types.keeper_meta) =
+let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
   | Some _ | None -> None
 
-let pause_kind (meta : Keeper_types.keeper_meta) =
+let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
   if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
     "reconcile_gated"
   else
@@ -52,13 +52,13 @@ let pause_kind (meta : Keeper_types.keeper_meta) =
     | Some _ -> "auto_recoverable"
     | None -> "operator_paused"
 
-let pause_auto_resume_source (meta : Keeper_types.keeper_meta) =
+let pause_auto_resume_source (meta : Keeper_meta_contract.keeper_meta) =
   match meta.auto_resume_after_sec with
   | Some _ -> Some "explicit"
   | None -> None
 
 let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
-    (meta : Keeper_types.keeper_meta) =
+    (meta : Keeper_meta_contract.keeper_meta) =
   let elapsed = pause_elapsed_sec now meta in
   let remaining =
     match (meta.auto_resume_after_sec, elapsed) with
@@ -79,7 +79,7 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     ("auto_resume_remaining_sec", json_float_opt remaining);
     ( "last_blocker"
     , match last_blocker with
-      | Some info -> Keeper_types.blocker_info_to_json info
+      | Some info -> Keeper_meta_contract.blocker_info_to_json info
       | None -> `Null );
     ( "missing_pause_root_cause",
       `Bool
@@ -96,10 +96,10 @@ let running_paused_keeper_names () =
 let durable_paused_keeper_scan ?(include_details = true) config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
   |> List.fold_left
        (fun acc name ->
-         match Keeper_types.read_meta config name with
+         match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) when meta.paused ->
              let autoboot_enabled = effective_autoboot_enabled name meta in
              {
@@ -206,9 +206,9 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
      paused, autoboot, and bootable scans on the hot path. *)
   (* NDT-OK: request-boundary wall clock only for dashboard pause-age display. *)
   let now = Unix.gettimeofday () in
-  let configured_names = Keeper_types.configured_keeper_names config in
+  let configured_names = Keeper_meta_store.configured_keeper_names config in
   let all_names =
-    sorted_unique_strings (configured_names @ Keeper_types.keeper_names config)
+    sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
   in
   let is_configured name = List.exists (String.equal name) configured_names in
   let scan =
@@ -229,7 +229,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
              if is_configured name then { acc with bootable_names = name :: acc.bootable_names }
              else acc
            in
-           match Keeper_types.read_meta config name with
+           match Keeper_meta_store.read_meta config name with
            | Ok (Some meta) ->
              let autoboot_enabled = effective_autoboot_enabled name meta in
              let acc = if autoboot_enabled then add_autoboot acc meta.name else acc in
@@ -315,10 +315,10 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
   }
 
 let autoboot_enabled_keeper_scan config =
-  sorted_unique_strings (Keeper_types.configured_keeper_names config @ Keeper_types.keeper_names config)
+  sorted_unique_strings (Keeper_meta_store.configured_keeper_names config @ Keeper_meta_store.keeper_names config)
   |> List.fold_left
        (fun acc name ->
-         match Keeper_types.read_meta config name with
+         match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) ->
              if effective_autoboot_enabled name meta then
                { acc with autoboot_names = meta.name :: acc.autoboot_names }

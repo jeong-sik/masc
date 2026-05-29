@@ -10,6 +10,8 @@
     do not need updating. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 
 (* ================================================================ *)
@@ -384,8 +386,8 @@ let room_ids_for_meta _config (_meta : keeper_meta) : string list =
 
 let keeper_room_capabilities (meta : keeper_meta) =
   let preset_cap =
-    match Keeper_types.tool_access_preset meta.tool_access with
-    | Some p -> [ "preset:" ^ Keeper_types.tool_preset_to_string p ]
+    match Keeper_meta_contract.tool_access_preset meta.tool_access with
+    | Some p -> [ "preset:" ^ Keeper_meta_contract.tool_preset_to_string p ]
     | None -> []
   in
   [ "keeper" ] @ preset_cap

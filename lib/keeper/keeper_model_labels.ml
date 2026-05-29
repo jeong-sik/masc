@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let configured_model_labels_of_meta (m : keeper_meta) : string list =
   (* Runtime dispatch must be cascade-catalog authoritative.  Persisted

@@ -46,19 +46,19 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
     `Assoc
       [
         ("label", `String "운영 권고");
-        ("reason", Yojson.Safe.Util.member "reason" top_action);
+        ("reason", Option.value ~default:`Null (Json_util.assoc_member_opt "reason" top_action));
         ("source", `String "operator");
         ("provenance", `String provenance);
         ("target_kind", `String "action");
-        ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+        ("target_id", Option.value ~default:`Null (Json_util.assoc_member_opt "target_id" top_action));
         ("suggested_tab", `String "intervene");
         ("suggested_surface", `Null);
         ( "suggested_params",
           `Assoc
             [
-              ("action_type", Yojson.Safe.Util.member "action_type" top_action);
-              ("target_type", Yojson.Safe.Util.member "target_type" top_action);
-              ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+              ("action_type", Option.value ~default:`Null (Json_util.assoc_member_opt "action_type" top_action));
+              ("target_type", Option.value ~default:`Null (Json_util.assoc_member_opt "target_type" top_action));
+              ("target_id", Option.value ~default:`Null (Json_util.assoc_member_opt "target_id" top_action));
             ] );
       ]
   in
@@ -286,14 +286,14 @@ let derived_operator_digest_json (config : Coord.config) _execution_json
     ]
 
 let execution_top_queue execution_json =
-  match Yojson.Safe.Util.member "execution_queue" execution_json with
-  | `List (head :: _) -> head
+  match Json_util.assoc_member_opt "execution_queue" execution_json with
+  | Some (`List (head :: _)) -> head
   | _ -> `Null
 
 let execution_summary_json execution_json =
   let execution_queue =
-    match Yojson.Safe.Util.member "execution_queue" execution_json with
-    | `List items -> items
+    match Json_util.assoc_member_opt "execution_queue" execution_json with
+    | Some (`List items) -> items
     | _ -> []
   in
   let execution_operation_briefs =
@@ -308,8 +308,8 @@ let execution_summary_json execution_json =
   let execution_keepers = json_list_field "keepers" execution_json |> take_n 20 in
   let has_text key json = json_string_field_opt key json |> Option.is_some in
   let existing = json_assoc_field "summary" execution_json in
-  match Yojson.Safe.Util.member "blocked_sessions" existing with
-  | `Int _ | `Intlit _ -> existing
+  match Json_util.assoc_member_opt "blocked_sessions" existing with
+  | Some (`Int _ | `Intlit _) -> existing
   | _ ->
       `Assoc
         [
@@ -857,8 +857,8 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
       ("shell_arbitration_allowed", `Bool false);
       ("live_total_runtimes", `Int runtime_count);
       ("live_keepers", `Int live_keepers);
-      ("configured_keepers", json_int_opt configured_keepers_count);
-      ("configured_minus_live_keepers", json_int_opt configured_minus_live);
+      ("configured_keepers", Json_util.int_opt_to_json configured_keepers_count);
+      ("configured_minus_live_keepers", Json_util.int_opt_to_json configured_minus_live);
       ( "count_roles",
         `Assoc
           [
@@ -898,7 +898,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
   let command_summary = namespace_truth_command_summary_json command_summary_json in
   let shell_counts = json_assoc_field "counts" shell_json in
   let configured_keepers =
-    Yojson.Safe.Util.member "configured_keepers" shell_json
+    Option.value ~default:`Null (Json_util.assoc_member_opt "configured_keepers" shell_json)
   in
   let runtime_count =
     json_int_field "total_runtimes" shell_counts
@@ -950,7 +950,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
       ( "operator",
         `Assoc
           [
-            ("health", Yojson.Safe.Util.member "health" operator_digest_json);
+            ("health", Option.value ~default:`Null (Json_util.assoc_member_opt "health" operator_digest_json));
             ("attention_summary", json_assoc_field "attention_summary" operator_digest_json);
             ( "recommendation_summary",
               json_assoc_field "recommendation_summary" operator_digest_json );

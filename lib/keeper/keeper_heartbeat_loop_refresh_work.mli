@@ -1,8 +1,8 @@
 (** Work-as-heartbeat refresher for keeper heartbeat loop state. *)
 
 val refresh_work_as_heartbeat :
-  ctx:_ Keeper_types.context ->
-  meta_after_proactive:Keeper_types.keeper_meta ->
+  ctx:_ Keeper_types_profile.context ->
+  meta_after_proactive:Keeper_meta_contract.keeper_meta ->
   proactive_warmup_elapsed:bool ->
   work_as_hb:(unit -> bool) ->
   last_successful_heartbeat_ts:float ref ->

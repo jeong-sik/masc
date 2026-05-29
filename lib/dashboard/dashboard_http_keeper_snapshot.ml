@@ -72,13 +72,13 @@ let latest_tool_call_json name =
 
 let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
-  match Keeper_types.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Error msg ->
       (`Not_found, `Assoc [ ("error", `String msg) ])
   | Ok None ->
       (`Not_found,
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
-  | Ok (Some (m : Keeper_types.keeper_meta)) ->
+  | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
       let metrics = recent_keeper_metric_jsons config name in
       let latest_social =
         sort_by_latest_ts metrics
@@ -100,7 +100,7 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
                  let trimmed = String.trim info.detail in
                  let label =
                    if trimmed = "" then
-                     Keeper_types.blocker_class_to_string info.klass
+                     Keeper_meta_contract.blocker_class_to_string info.klass
                    else trimmed
                  in
                  Some ("blocked: " ^ label)
@@ -143,13 +143,13 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
     Returns (http_status, json). *)
 let keeper_config_json (config : Coord.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
-  match Keeper_types.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Error msg ->
       (`Not_found, `Assoc [ ("error", `String msg) ])
   | Ok None ->
       (`Not_found,
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
-  | Ok (Some (m : Keeper_types.keeper_meta)) ->
+  | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
       let defaults = Keeper_types_profile.load_keeper_profile_defaults m.name in
@@ -244,7 +244,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("effective_system_prompt", `String effective_system_prompt);
         ]
       in
-      let cascade_name = Keeper_types.cascade_name_of_meta m in
+      let cascade_name = Keeper_meta_contract.cascade_name_of_meta m in
       (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the
@@ -371,7 +371,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           List.length (Agent_tool_dispatch_runtime.keeper_masc_tool_names m)
         in
         `Assoc [
-          ("tool_access", Keeper_types.tool_access_to_json m.tool_access);
+          ("tool_access", Keeper_meta_contract.tool_access_to_json m.tool_access);
           ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
           ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
           ("active_masc_tool_count", `Int masc_tool_count);
@@ -386,7 +386,7 @@ let keeper_config_json (config : Coord.config) (name : string)
         | None -> None
       in
       let effective_sandbox_image =
-        if m.sandbox_profile = Keeper_types.Docker
+        if m.sandbox_profile = Keeper_types_profile_sandbox.Docker
         then Some (Env_config_sandbox.Runtime.docker_image ())
         else None
       in
@@ -452,8 +452,8 @@ let keeper_config_json (config : Coord.config) (name : string)
        `Assoc [
          ("name", `String m.name);
          ("active_goal_ids", active_goal_ids_json);
-         ("sandbox_profile", `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
-         ("network_mode", `String (Keeper_types.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
+         ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("sandbox_preflight",
            Json_util.option_to_yojson Fun.id sandbox_preflight);
          ("effective_sandbox_image",

@@ -11,6 +11,7 @@ module Types = Masc_domain
     Pure synchronous tests — no Eio or network required. *)
 
 module Agent_tool_dispatch_runtime = Masc_mcp.Agent_tool_dispatch_runtime
+module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Tool_shard = Masc_mcp.Tool_shard
 module Tool_catalog = Masc_mcp.Tool_catalog
@@ -28,7 +29,7 @@ let make_meta
     ?(policy_voice_enabled = false)
     
     ()
-  : Keeper_types.keeper_meta =
+  : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [
       ("name", `String name);

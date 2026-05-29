@@ -21,8 +21,8 @@
 open Server_dashboard_http_keeper_api_types
 
 let receipt_row_matches ?turn_id keeper_name trace_id json =
-  let keeper_matches = json_string_member_opt "keeper_name" json = Some keeper_name in
-  let trace_matches = json_string_member_opt "trace_id" json = Some trace_id in
+  let keeper_matches = Json_util.get_string json "keeper_name" = Some keeper_name in
+  let trace_matches = Json_util.get_string json "trace_id" = Some trace_id in
   let turn_matches =
     match turn_id with
     | None -> false

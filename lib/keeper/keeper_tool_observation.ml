@@ -76,7 +76,7 @@ let final_keeper_tool_names
   let allowed_tool_names =
     allowed_tool_names
     |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   let allowed = Hashtbl.create (List.length allowed_tool_names) in
   List.iter (fun tool_name -> Hashtbl.replace allowed tool_name ()) allowed_tool_names;
@@ -126,7 +126,7 @@ let unexpected_tool_names ~(allowed_tool_names : string list) ~(tool_names : str
   let allowed_tool_names =
     allowed_tool_names
     |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   let allowed = Hashtbl.create (List.length allowed_tool_names) in
   let seen = Hashtbl.create (List.length tool_names) in

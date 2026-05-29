@@ -42,7 +42,7 @@ type t =
   ; mounts : string list
   ; identity_files : (string * string) list
   ; env_overrides : (string * string) list
-  ; network_mode : Keeper_types.network_mode
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; user : (int * int) option
   ; ulimits : ulimit list
   ; read_only_rootfs : bool
@@ -66,7 +66,7 @@ type t =
 let deterministic_labels ~base_path ~meta_name ~container_kind ~network_mode ~ttl_sec =
   let open Keeper_sandbox_runtime in
   let network_label =
-    sanitize_label_value (Keeper_types.network_mode_to_string network_mode)
+    sanitize_label_value (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
   in
   let base =
     [ sandbox_component_label_key, sandbox_component_label_value

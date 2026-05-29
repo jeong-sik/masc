@@ -106,6 +106,10 @@ let with_temp_cascade_toml body f =
     f
 
 let test_cascade_output_cap_not_context_window () =
+  (* RFC-0058: ceilings resolve a concrete binding/alias key (route/profile
+     ceiling resolution was removed with the tier concept). The narrowest
+     member of the former [tier.primary] is the [remote.long] binding. *)
+  let cascade_name = Cascade_name.of_string_exn "remote.long" in
   with_temp_cascade_toml
     {|
 [providers.remote]
@@ -123,11 +127,11 @@ max-output-tokens = 8192
 [remote.long]
 max-concurrent = 1
 
-[tier.primary]
-members = ["remote.long"]
+[profiles.primary]
+provider_filter = "remote"
 
 [routes.keeper_turn]
-target = "tier.primary"
+target = "remote.long"
 |}
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
@@ -137,6 +141,9 @@ target = "tier.primary"
       |> check_ok "above output ceiling clamped" 8192)
 
 let test_public_cap_helper_clamps_caller_override_to_cascade_ceiling () =
+  (* RFC-0058: ceiling resolves the concrete [remote.narrow] binding key
+     (former sole member of [tier.primary]). *)
+  let cascade_name = Cascade_name.of_string_exn "remote.narrow" in
   with_temp_cascade_toml
     {|
 [providers.remote]
@@ -154,11 +161,11 @@ max-output-tokens = 8192
 [remote.narrow]
 max-concurrent = 1
 
-[tier.primary]
-members = ["remote.narrow"]
+[profiles.primary]
+provider_filter = "remote"
 
 [routes.keeper_turn]
-target = "tier.primary"
+target = "remote.narrow"
 |}
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
@@ -175,6 +182,12 @@ target = "tier.primary"
       |> check_ok "capped caller override accepted" 8192)
 
 let test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling () =
+  (* RFC-0058: ceilings resolve a concrete member key. The narrowest former
+     [tier.strict_tool_candidates] member is the provider_c alias, whose model
+     capability (16384) caps the alias [max-output] (64000). *)
+  let cascade_name =
+    Cascade_name.of_string_exn "cli_tool_c.provider_c-cli-coding.tool_candidate"
+  in
   with_temp_cascade_toml
     {|
 [providers.cli_tool_d]
@@ -217,16 +230,11 @@ temperature = 0.2
 max-output = 64000
 temperature = 0.2
 
-[tier.strict_tool_candidates]
-members = ["cli_tool_d.agent_llm_a-auto.tool_candidate", "cli_tool_c.provider_c-cli-coding.tool_candidate"]
-strategy = "failover"
-
-[tier-group.strict_tool_candidates]
-tiers = ["strict_tool_candidates"]
-strategy = "failover"
+[profiles.strict_tool_candidates]
+provider_filter = "cli_tool_c"
 
 [routes.keeper_turn]
-target = "tier-group.strict_tool_candidates"
+target = "cli_tool_c.provider_c-cli-coding.tool_candidate"
 |}
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
@@ -282,6 +290,12 @@ let test_auto_max_tokens_clamp_warning_dedupes_by_tuple () =
        ~ceiling:8192)
 
 let test_resolve_provider_derived_max_tokens_matches_failover_ceiling () =
+  (* RFC-0058: ceilings resolve a concrete member key. The narrowest member
+     of the former [tier-group.strict_tool_candidates] (spanning two tiers) is
+     the ollama recovery alias, whose model capability is 8192. *)
+  let cascade_name =
+    Cascade_name.of_string_exn "ollama.local-recovery.recovery"
+  in
   with_temp_cascade_toml
     {|
 [providers.cli_tool_d]
@@ -343,20 +357,14 @@ temperature = 0.2
 max-output = 8192
 temperature = 0.2
 
-[tier.strict_tool_candidates]
-members = ["cli_tool_d.agent_llm_a-auto.tool_candidate", "cli_tool_c.provider_c-cli-coding.tool_candidate"]
-strategy = "failover"
+[profiles.strict_tool_candidates]
+provider_filter = "cli_tool_c"
 
-[tier.recovery]
-members = ["ollama.local-recovery.recovery"]
-strategy = "failover"
-
-[tier-group.strict_tool_candidates]
-tiers = ["strict_tool_candidates", "recovery"]
-strategy = "failover"
+[profiles.recovery]
+provider_filter = "ollama"
 
 [routes.keeper_turn]
-target = "tier-group.strict_tool_candidates"
+target = "ollama.local-recovery.recovery"
 |}
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
@@ -374,7 +382,7 @@ target = "tier-group.strict_tool_candidates"
 let test_resolve_tier_group_max_tokens_uses_model_capability_ceiling () =
   let cascade_name =
     Cascade_name.of_string_exn
-      "tier-group.strict_tool_candidates"
+      "runpod_mtp.qwen36-mtp.keeper"
   in
   with_temp_cascade_toml
     {|
@@ -417,16 +425,11 @@ is-default = true
 max-output = 16384
 temperature = 0.3
 
-[tier.strict_tool_candidates]
-members = ["runpod_mtp.qwen36-mtp.keeper", "provider_k-coding.provider_k-turbo.keeper"]
-strategy = "failover"
-
-[tier-group.strict_tool_candidates]
-tiers = ["strict_tool_candidates"]
-strategy = "failover"
+[profiles.strict_tool_candidates]
+provider_filter = "runpod_mtp"
 
 [routes.keeper_turn]
-target = "tier-group.strict_tool_candidates"
+target = "runpod_mtp.qwen36-mtp.keeper"
 |}
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in

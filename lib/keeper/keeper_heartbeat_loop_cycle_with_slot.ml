@@ -33,6 +33,9 @@
     ([Keeper_heartbeat_loop_in_turn_pulse], [Observations]). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 

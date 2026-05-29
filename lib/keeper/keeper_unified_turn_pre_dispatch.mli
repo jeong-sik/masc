@@ -13,7 +13,7 @@
     caller does not need to thread a callback through. *)
 
 val build_cascade_execution
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> cascade_name:Cascade_name.t
   -> ( Keeper_turn_cascade_budget.cascade_execution

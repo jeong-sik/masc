@@ -190,7 +190,7 @@ let required_tool_satisfaction_for_required_names
   let required_tool_names =
     required_tool_names
     |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types.dedupe_keep_order
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
   if List.mem tool_name required_tool_names
@@ -214,7 +214,7 @@ let parse_tool_csv text =
   |> String.split_on_char ','
   |> List.map String.trim
   |> List.filter (fun tool -> tool <> "")
-  |> Keeper_types.dedupe_keep_order
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
 let satisfying_tools_from_contract_violation_reason reason =

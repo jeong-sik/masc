@@ -815,8 +815,8 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
 
    1. snapshot published + light=false  -> return [snap.shell]
    2. snapshot empty + light=false      -> fall back to compute path
-   3. snapshot published + light=true   -> ignore snapshot, fall back
-                                           (one-sprint compatibility) *)
+   3. snapshot published + light=true   -> return [snap.shell_light]
+                                           (RFC-0204 section 8.3 "A") *)
 
 let test_shell_snapshot_wire_returns_snapshot_when_published () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -864,13 +864,17 @@ let test_shell_snapshot_wire_falls_back_when_empty () =
     (paths_of snapshot_json <> `Null
      && paths_of snapshot_json = paths_of direct_json)
 
-let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
+let test_shell_snapshot_wire_light_reads_shell_light () =
+  (* RFC-0204 section 8.3 ("A"): light=true now serves the published light
+     projection [snap.shell_light], not the full [snap.shell] and not a
+     recompute. *)
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "wire_sentinel", `String "snapshot-path" ] in
+  let full = `Assoc [ "wire_sentinel", `String "full-shell" ] in
+  let light = `Assoc [ "wire_sentinel", `String "light-shell" ] in
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
-       ~shell:sentinel ~tools:`Null
+       ~shell:full ~shell_light:light ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Lib.Server_timing.create () in
   let json =
@@ -878,10 +882,15 @@ let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
       ~timing ~light:true config
   in
   let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "light=true returns the published shell_light projection"
+    "light-shell"
+    (json |> member "wire_sentinel" |> to_string);
+  let header = Lib.Server_timing.to_header_value timing in
   Alcotest.(check bool)
-    "light=true must NOT return the snapshot sentinel"
+    "Server-Timing records snapshot_read on light hit"
     true
-    (json |> member "wire_sentinel" = `Null);
+    (let re = Re.compile (Re.Perl.re "snapshot_read") in Re.execp re header);
   Lib.Dashboard_snapshot.reset_for_test ()
 
 let test_dashboard_shell_light_includes_runtime_health_ssot () =
@@ -1115,8 +1124,8 @@ let () =
             test_shell_snapshot_wire_returns_snapshot_when_published;
           test_case "RFC-0138 shell wire falls back when snapshot empty" `Quick
             test_shell_snapshot_wire_falls_back_when_empty;
-          test_case "RFC-0138 shell wire light variant bypasses snapshot" `Quick
-            test_shell_snapshot_wire_light_variant_bypasses_snapshot;
+          test_case "RFC-0204 shell wire light reads shell_light" `Quick
+            test_shell_snapshot_wire_light_reads_shell_light;
           test_case "light shell carries runtime health SSOT" `Quick
             test_dashboard_shell_light_includes_runtime_health_ssot;
           test_case "light shell counts agents from summary fields" `Quick

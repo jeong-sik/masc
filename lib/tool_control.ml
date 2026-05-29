@@ -30,7 +30,7 @@ type context = {
 (* Handlers *)
 
 let keeper_pause_status_json ctx =
-  let names = Keeper_types.keeper_names ctx.config in
+  let names = Keeper_meta_store.keeper_names ctx.config in
   (* Triple accumulator folded over [names].  All three lists are kept in
      reverse-prepend order during the fold; downstream consumers
      ([List.rev], [List.rev_map]) restore the natural order. *)
@@ -38,7 +38,7 @@ let keeper_pause_status_json ctx =
     List.fold_left
       (fun (errs, by_meta, by_phase) name ->
         let by_meta, errs =
-          match Keeper_types.read_meta ctx.config name with
+          match Keeper_meta_store.read_meta ctx.config name with
           | Ok (Some meta) when meta.paused -> (meta.name :: by_meta, errs)
           | Ok _ -> (by_meta, errs)
           | Error err -> (by_meta, (name, err) :: errs)
@@ -55,7 +55,7 @@ let keeper_pause_status_json ctx =
   let meta_paused_names = List.rev paused_by_meta_rev in
   let phase_paused_names = List.rev paused_by_phase_rev in
   let paused_names =
-    Keeper_types.dedupe_keep_order (meta_paused_names @ phase_paused_names)
+    Keeper_types_profile_toml_normalizers.dedupe_keep_order (meta_paused_names @ phase_paused_names)
   in
   `Assoc
     [

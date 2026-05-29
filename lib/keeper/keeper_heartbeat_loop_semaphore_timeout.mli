@@ -16,7 +16,7 @@ val record_semaphore_wait_observation
 
 val semaphore_wait_timeout_blocker_class
   :  Keeper_turn_slot.semaphore_wait_timeout
-  -> Keeper_types.blocker_class
+  -> Keeper_meta_contract.blocker_class
 
 val semaphore_wait_timeout_diagnostics
   :  cascade_name:string
@@ -24,8 +24,8 @@ val semaphore_wait_timeout_diagnostics
   -> string * string
 
 val handle_semaphore_wait_timeout
-  :  ctx:'a Keeper_types.context
-  -> meta_after_triage:Keeper_types.keeper_meta
+  :  ctx:'a Keeper_types_profile.context
+  -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> Keeper_turn_slot.semaphore_wait_timeout
-  -> Keeper_types.keeper_meta
+  -> Keeper_meta_contract.keeper_meta

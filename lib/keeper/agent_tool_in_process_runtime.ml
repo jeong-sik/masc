@@ -7,6 +7,8 @@
     [success_tool_result]/[failure_tool_result] forces. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let handle_time_now ~args:_ =
   let now_unix = Time_compat.now () in

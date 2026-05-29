@@ -18,16 +18,6 @@ let candidate_key_of_cfg (cfg : Llm_provider.Provider_config.t) =
       cfg.headers,
       cfg.supports_tool_choice_override )
 
-type tiered_provider = {
-  provider_cfg : Llm_provider.Provider_config.t;
-  admission_key : string;
-}
-
-let direct_candidate_providers (profile : profile_snapshot) =
-  List.map
-    (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
-    profile.candidates
-
 let direct_candidates_ordered_by_entries
     (profile : profile_snapshot)
     (ordered_entries : Cascade_config_loader.weighted_entry list) =
@@ -74,68 +64,6 @@ let direct_candidate_providers_ordered_by_entries
     (ordered_entries : Cascade_config_loader.weighted_entry list) =
   direct_candidates_ordered_by_entries profile ordered_entries
   |> List.map (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
-
-let tier_bucket_id (profile : profile_snapshot) tier_index =
-  let tiers = profile.strategy.Cascade_strategy.tiers in
-  if List.length tiers <= 1
-  then profile.name
-  else Printf.sprintf "%s.tier-%d" profile.name tier_index
-
-let admission_key_queues_by_health_key (profile : profile_snapshot) =
-  let tiers = profile.strategy.Cascade_strategy.tiers in
-  let index : (string, string Queue.t) Hashtbl.t = Hashtbl.create 8 in
-  if List.length tiers > 1
-  then
-    List.iteri
-      (fun tier_index health_keys ->
-         let admission_key = tier_bucket_id profile tier_index in
-         List.iter
-           (fun health_key ->
-              let queue =
-                match Hashtbl.find_opt index health_key with
-                | Some queue -> queue
-                | None ->
-                    let queue = Queue.create () in
-                    Hashtbl.add index health_key queue;
-                    queue
-              in
-              Queue.add admission_key queue)
-           health_keys)
-      tiers;
-  index
-
-let admission_key_for_candidate
-    (profile : profile_snapshot)
-    tier_index
-    (candidate : candidate_runtime) =
-  let health_key =
-    Cascade_config_provider_binding.provider_health_key_of_config candidate.provider_cfg
-  in
-  match Hashtbl.find_opt tier_index health_key with
-  | Some queue when not (Queue.is_empty queue) -> Queue.pop queue
-  | _ -> profile.name
-
-let tiered_provider_of_candidate
-    profile
-    tier_index
-    (candidate : candidate_runtime)
-    : tiered_provider =
-  {
-    provider_cfg = candidate.provider_cfg;
-    admission_key = admission_key_for_candidate profile tier_index candidate;
-  }
-
-let tiered_providers_of_ordered_entries ~(profile : profile_snapshot)
-    ~cascade_name:_
-    (ordered_entries : Cascade_config_loader.weighted_entry list) =
-  let tier_index = admission_key_queues_by_health_key profile in
-  direct_candidates_ordered_by_entries profile ordered_entries
-  |> List.map (tiered_provider_of_candidate profile tier_index)
-
-let provider_configs_of_ordered_entries ~(profile : profile_snapshot)
-    ~cascade_name:_
-    (ordered_entries : Cascade_config_loader.weighted_entry list) =
-  direct_candidate_providers_ordered_by_entries profile ordered_entries
 
 let candidates_with_overrides_of_ordered_entries ~(profile : profile_snapshot)
     ~cascade_name:_
@@ -280,7 +208,6 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
 
 type secondary_resolution = {
   providers : Llm_provider.Provider_config.t list;
-  tiered_providers : tiered_provider list;
   secondary_resolver :
     int ->
     Llm_provider.Provider_config.t ->
@@ -319,18 +246,10 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
           ~cascade:normalized profile.weighted_entries
       in
       let parsed_pairs =
-        let direct_pairs =
-          tiered_providers_of_ordered_entries ~profile
-            ~cascade_name:normalized ordered_entries
-          |> List.map (fun tiered -> (tiered, None))
-        in
-        direct_pairs
+        direct_candidate_providers_ordered_by_entries profile ordered_entries
+        |> List.map (fun cfg -> (cfg, None))
       in
-      let primaries =
-        List.map
-          (fun (tiered, _) -> tiered.provider_cfg)
-          parsed_pairs
-      in
+      let primaries = List.map fst parsed_pairs in
       (match
          Cascade_config.apply_provider_filter_strict ~provider_filter
            ~label:normalized primaries
@@ -347,7 +266,7 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
          let filtered_pairs =
            parsed_pairs
            |> List.filter (fun (primary, _) ->
-                  provider_filter_allows primary.provider_cfg)
+                  provider_filter_allows primary)
            |> List.map (fun (primary, secondary) ->
                   let secondary =
                     match secondary with
@@ -356,12 +275,7 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
                   in
                   (primary, secondary))
          in
-         let tiered_providers = List.map fst filtered_pairs in
-         let providers =
-           List.map
-             (fun tiered -> tiered.provider_cfg)
-             tiered_providers
-         in
+         let providers = List.map fst filtered_pairs in
          if providers = [] then (
            Cascade_metrics.on_resolve_failure ~cascade:normalized
              ~reason:"no_callable_providers";
@@ -378,12 +292,12 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
              else
                let indexed_primary, secondary = slots.(provider_index) in
                if
-                 candidate_key_of_cfg indexed_primary.provider_cfg
+                 candidate_key_of_cfg indexed_primary
                  = candidate_key_of_cfg primary
                then secondary
                else None
            in
-           Ok { providers; tiered_providers; secondary_resolver })
+           Ok { providers; secondary_resolver })
 
 (* Deprecated compatibility hook for RFC-0027 PR-9b dual-track resolution.
    Declarative cascade execution now carries typed [Provider_config]

@@ -10,7 +10,7 @@
 val preset_of_defaults_warn :
   call_site:string ->
   defaults_tool_preset:string option ->
-  Keeper_types.tool_preset option
+  Keeper_meta_contract.tool_preset option
 (** [preset_of_defaults_warn ~call_site ~defaults_tool_preset] parses the
     string from [profile_defaults.tool_preset]. Returns [None] when:
     - [defaults_tool_preset] is [None] (no config value supplied), or

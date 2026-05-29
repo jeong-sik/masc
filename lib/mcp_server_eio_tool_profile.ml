@@ -371,26 +371,24 @@ let strict_assoc_params params =
            (Json_util.kind_name other))
 
 let cursor_param payload =
-  let open Yojson.Safe.Util in
-  match payload |> member "cursor" with
-  | `Null -> Ok None
-  | `String value ->
+  match Json_util.assoc_member_opt "cursor" payload with
+  | None -> Ok None
+  | Some (`String value) ->
       let trimmed = String.trim value in
       if trimmed = "" then
         Error "Invalid params: cursor must not be empty"
       else
         Ok (Some trimmed)
-  | other ->
+  | Some other ->
       Error
         (Printf.sprintf "Invalid params: cursor must be a string (received %s)"
            (Json_util.kind_name other))
 
 let bool_param payload key =
-  let open Yojson.Safe.Util in
-  match payload |> member key with
-  | `Null -> Ok false
-  | `Bool value -> Ok value
-  | other ->
+  match Json_util.assoc_member_opt key payload with
+  | None -> Ok false
+  | Some (`Bool value) -> Ok value
+  | Some other ->
       Error
         (Printf.sprintf "Invalid params: %s must be a boolean (received %s)"
            key (Json_util.kind_name other))
@@ -453,16 +451,15 @@ let cursor_only_params params =
            (Json_util.kind_name other))
 
 let validate_optional_meta payload =
-  match Yojson.Safe.Util.member "_meta" payload with
-  | `Null
-  | `Assoc _ -> Ok ()
-  | other ->
+  match Json_util.assoc_member_opt "_meta" payload with
+  | None
+  | Some (`Assoc _) -> Ok ()
+  | Some other ->
       Error
         (Printf.sprintf "Invalid params: _meta must be an object (received %s)"
            (Json_util.kind_name other))
 
 let requested_tool_list_params params =
-  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed =
     [ "_meta"; "names"; "include_hidden"; "include_usage"; "cursor" ]
@@ -480,9 +477,9 @@ let requested_tool_list_params params =
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
     let* names =
-      match payload |> member "names" with
-      | `Null -> Ok None
-      | `List items ->
+      match Json_util.assoc_member_opt "names" payload with
+      | None -> Ok None
+      | Some (`List items) ->
           items
           |> List.fold_left
                (fun acc item ->
@@ -497,7 +494,7 @@ let requested_tool_list_params params =
                           (Json_util.kind_name bad)))
                (Ok [])
           |> Result.map (fun names -> Some (List.rev names))
-      | other ->
+      | Some other ->
           Error
             (Printf.sprintf
                "Invalid params: names must be an array of strings (received %s)"
@@ -515,7 +512,6 @@ let requested_tool_list_params params =
       }
 
 let parse_cursor_only_params params =
-  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed = [ "_meta"; "cursor" ] in
   let unknown =
@@ -530,10 +526,10 @@ let parse_cursor_only_params params =
   else
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
-    match payload |> member "cursor" with
-    | `Null -> Ok { cursor = None }
-    | `String cursor -> Ok { cursor = Some cursor }
-    | other ->
+    match Json_util.assoc_member_opt "cursor" payload with
+    | None -> Ok { cursor = None }
+    | Some (`String cursor) -> Ok { cursor = Some cursor }
+    | Some other ->
         Error
           (Printf.sprintf
              "Invalid params: cursor must be a string (received %s)"

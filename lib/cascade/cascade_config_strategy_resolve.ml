@@ -1,4 +1,4 @@
-(** Cascade strategy + priority-tier + concurrency resolution.
+(** Cascade strategy + concurrency resolution.
 
     Extracted from [cascade_config.ml]. *)
 
@@ -80,7 +80,7 @@ let resolve_strategy ?config_path ~name () =
     ignore cfg.server_error_recency_window_s;
     ignore cfg.server_error_decay_base;
     ignore cfg.server_error_skip_after;
-    { Cascade_strategy.kind = parsed_kind; cycle; tiers = [] }
+    { Cascade_strategy.kind = parsed_kind; cycle }
 
 let resolve_ollama_max_concurrent ?config_path ~name () =
   match config_path with

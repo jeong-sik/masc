@@ -1,9 +1,9 @@
 ---
 title: In-process Discord connector
 rfc: "0203"
-status: Draft
+status: Implemented (Phase 3 cutover landed 2026-05-29)
 created: 2026-05-28
-updated: 2026-05-28
+updated: 2026-05-29
 author: vincent
 related: ["0088"]
 ---
@@ -11,6 +11,27 @@ related: ["0088"]
 # RFC-0203 — In-process Discord connector
 
 OCaml Gateway client replaces `sidecars/discord-bot/`. One tool out, push in.
+
+> **Phase 3 cutover note (2026-05-29).** Phase 1 (#19355) and Phase 2
+> REST/state (#19362) landed as planned. Phase 2 dual-run
+> (observation counters, JSONL audit, MCP tool surface PR drafts)
+> was *closed unmerged* — single-operator deployment made the
+> cross-path numeric diff over-engineered and the dual-run window
+> redundant. Phase 3 shipped as a single PR that wires the
+> in-process gateway directly into server bootstrap and deletes
+> `sidecars/discord-bot/` in the same commit. The
+> `MASC_DISCORD_BUILTIN` toggle was removed (legacy purge — there
+> is no fallback to switch back to). The `discord_send_message` MCP
+> tool surface was *not* shipped: outbound replies go through the
+> internal `Channel_gate_discord_state.send_message` OCaml function
+> called from the gateway's response handler; no keeper-facing
+> tool is needed for that path. If a keeper later needs to
+> *initiate* a Discord post (e.g. a board push) expose
+> `send_message` as a Hidden tool
+> (`Tool_catalog.Hidden + allow_direct_call_when_hidden`) at that
+> time. The activity-polling `board.posted`/`board.commented`
+> auto-push that the sidecar performed (separate from
+> request-response) is dropped; re-add as a follow-up if needed.
 
 ## Why
 

@@ -110,28 +110,14 @@ temperature = 0.1
 keep-alive = "5m"
 num-ctx = 32768
 
-[tier.rerank]
-keeper-assignable = false
-members = ["agent_llm_a-code.haiku.for-scoring"]
-strategy = "failover"
+[profiles.primary]
+provider_filter = "agent_llm_a-code"
 
-[tier.primary]
-members = ["agent_llm_a-code.sonnet", "agent_llm_a-code.haiku"]
-strategy = "failover"
-max-concurrent = 5
-
-[tier.local]
-members = ["ollama.qwen3-8b"]
-strategy = "failover"
-
-[tier-group.primary]
-tiers = ["primary", "local"]
-strategy = "priority_tier"
-fallback = true
-keeper-assignable = true
+[profiles.local]
+provider_filter = "ollama"
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "agent_llm_a-code.haiku"
 
 [system.governance]
 target = "agent_llm_a-code.haiku.for-governance"
@@ -234,7 +220,7 @@ let test_routes () =
   match
     List.find_opt (fun (r : cascade_route) -> r.name = "keeper_turn") cfg.routes
   with
-  | Some r -> check string "route target" "tier-group.primary" r.target
+  | Some r -> check string "route target" "agent_llm_a-code.haiku" r.target
   | None -> failwith "missing keeper_turn route"
 ;;
 
@@ -305,18 +291,6 @@ tools-support = true
   in
   let errs = is_error (parse_string toml) in
   has_error_at "models.bad-model.max-context" errs
-;;
-
-let test_unknown_strategy () =
-  let toml =
-    {|
-[tier.bad-strategy]
-members = ["x"]
-strategy = "nonexistent_strategy"
-|}
-  in
-  let errs = is_error (parse_string toml) in
-  has_error_at "tier.bad-strategy.strategy" errs
 ;;
 
 let test_invalid_toml_syntax () =
@@ -1255,7 +1229,6 @@ let () =
         ; test_case "missing transport" `Quick test_missing_transport
         ; test_case "both transports" `Quick test_both_transport
         ; test_case "missing max-context" `Quick test_missing_max_context
-        ; test_case "unknown strategy" `Quick test_unknown_strategy
         ; test_case "invalid TOML syntax" `Quick test_invalid_toml_syntax
         ; test_case "empty TOML" `Quick test_empty_toml
         ; test_case

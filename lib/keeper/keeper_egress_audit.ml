@@ -39,12 +39,12 @@ type audit_status =
 type result = {
   agent_name : string;
   keeper_name : string;
-  sandbox_profile : Keeper_types.sandbox_profile;
+  sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile;
   status : audit_status;
 }
 
 let host_direct_egress_path ~(config : Coord.config)
-    ~(meta : Keeper_types.keeper_meta) =
+    ~(meta : Keeper_meta_contract.keeper_meta) =
   (* The pre-Leak-11 location used by host (Local) keepers and by the
      external setup script that seeded executor's file at the wrong
      branch.  We compute it explicitly so the audit can detect a
@@ -54,14 +54,14 @@ let host_direct_egress_path ~(config : Coord.config)
        (Filename.concat ".masc/playground" meta.name))
     "egress.json"
 
-let audit_one ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
+let audit_one ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) =
   let expected = Keeper_sandbox_runner.egress_policy_path ~config ~meta in
   let status =
     match meta.sandbox_profile with
-    | Keeper_types.Local ->
+    | Keeper_types_profile_sandbox.Local ->
         if Sys.file_exists expected then Ok_present
         else Missing_at_expected { expected_path = expected }
-    | Keeper_types.Docker ->
+    | Keeper_types_profile_sandbox.Docker ->
         if Sys.file_exists expected then Ok_present
         else
           let orphan = host_direct_egress_path ~config ~meta in
@@ -76,7 +76,7 @@ let audit_one ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
     status;
   }
 
-let audit_all ~(config : Coord.config) ~(metas : Keeper_types.keeper_meta list)
+let audit_all ~(config : Coord.config) ~(metas : Keeper_meta_contract.keeper_meta list)
     =
   List.map (fun meta -> audit_one ~config ~meta) metas
 
@@ -84,7 +84,7 @@ let audit_all ~(config : Coord.config) ~(metas : Keeper_types.keeper_meta list)
     operators can locate drifted keepers from the system log without
     reaching for Prometheus. *)
 let format_log_line (r : result) =
-  let profile = Keeper_types.sandbox_profile_to_string r.sandbox_profile in
+  let profile = Keeper_types_profile_sandbox.sandbox_profile_to_string r.sandbox_profile in
   match r.status with
   | Ok_present ->
       Printf.sprintf "[egress_audit:ok] keeper=%s profile=%s" r.keeper_name
@@ -123,7 +123,7 @@ let format_missing_summary_line results =
            "[egress_audit:missing_summary] count=%d keepers=%s expected=%s"
            (List.length entries) keepers expected)
 
-let inactive_missing_reason (meta : Keeper_types.keeper_meta) =
+let inactive_missing_reason (meta : Keeper_meta_contract.keeper_meta) =
   if meta.paused then Some "paused"
   else if not meta.autoboot_enabled then Some "autoboot_disabled"
   else None

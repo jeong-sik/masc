@@ -33,7 +33,7 @@ type tree_node = {
 (** Per-goal projection node returned by [build_forest]. *)
 
 type goal_detail_keeper = {
-  meta : Keeper_types.keeper_meta;
+  meta : Keeper_meta_contract.keeper_meta;
   latest_receipt : Yojson.Safe.t option;
   runtime_trust : Yojson.Safe.t;
 }
@@ -188,10 +188,10 @@ val tree_badges :
 
 val approval_matches_goal : string -> Yojson.Safe.t -> bool
 
-val keeper_name_matches_meta : Keeper_types.keeper_meta list -> string -> bool
+val keeper_name_matches_meta : Keeper_meta_contract.keeper_meta list -> string -> bool
 
 val keeper_name_of_assignee :
-  Keeper_types.keeper_meta list -> string -> string option
+  Keeper_meta_contract.keeper_meta list -> string -> string option
 
 val goal_fsm_state_kind : Goal_phase.t -> string
 
@@ -271,7 +271,7 @@ val goal_policy_nodes :
     empty. Reads wall-clock for [ts] / [observed_at]. *)
 val runtime_blocker_event_from_meta :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t option
 
 (** {1 Runtime trust fallback projection from execution receipt} *)
@@ -281,7 +281,7 @@ val runtime_blocker_event_from_meta :
     [Keeper_runtime_trust_snapshot.snapshot_json] is unavailable. *)
 val runtime_trust_from_receipt_fallback :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t ->
   Yojson.Safe.t
 
@@ -303,7 +303,7 @@ type build_context = {
   now_ts : float;
   all_tasks : Masc_domain.task list;
   pending_approvals : Yojson.Safe.t list;
-  keeper_metas : Keeper_types.keeper_meta list;
+  keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
 }

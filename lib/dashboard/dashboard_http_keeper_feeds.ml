@@ -11,7 +11,7 @@ open Dashboard_http_keeper_types
     /api/v1/models/metrics) and per-agent spend (required by preview). *)
 let keeper_cost_aggregates_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ~(window_minutes : int)
   : Yojson.Safe.t =
   let now_ts = Unix.gettimeofday () in
@@ -19,7 +19,7 @@ let keeper_cost_aggregates_json
   let start_ts = now_ts -. window_sec in
   let keeper_items =
     List.map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
         let all_metrics_lines =
           let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
@@ -135,7 +135,7 @@ let keeper_cost_aggregates_json
     original schema variants. *)
 let keeper_decisions_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
@@ -143,7 +143,7 @@ let keeper_decisions_json
   let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
@@ -159,19 +159,19 @@ let keeper_decisions_json
               try
                 let json = Yojson.Safe.from_string line in
                 let ts =
-                  match Yojson.Safe.Util.member "ts_unix" json with
-                  | `Float f -> f
-                  | `Int i -> float_of_int i
+                  match Json_util.assoc_member_opt "ts_unix" json with
+                  | Some (`Float f) -> f
+                  | Some (`Int i) -> float_of_int i
                   | _ -> 0.0
                 in
                 let event_type =
-                  match Yojson.Safe.Util.member "event" json with
-                  | `String s -> s
+                  match Json_util.assoc_member_opt "event" json with
+                  | Some (`String s) -> s
                   | _ -> "turn"
                 in
                 let keeper_name =
-                  match Yojson.Safe.Util.member "keeper_name" json with
-                  | `String s -> s
+                  match Json_util.assoc_member_opt "keeper_name" json with
+                  | Some (`String s) -> s
                   | _ -> m.name
                 in
                 Some (ts, json, event_type, keeper_name)
@@ -190,7 +190,7 @@ let keeper_decisions_json
   let items =
     List.map
       (fun (_ts, json, event_type, keeper_name) ->
-        let m = Yojson.Safe.Util.member in
+        let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
         let string_member_opt key source =
           match m key source with
           | `String s ->
@@ -313,7 +313,7 @@ let keeper_decisions_json
 
 let keeper_decisions_log_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
@@ -321,7 +321,7 @@ let keeper_decisions_log_json
   let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
@@ -337,14 +337,14 @@ let keeper_decisions_log_json
               try
                 let json = Yojson.Safe.from_string line in
                 let str key =
-                  match Yojson.Safe.Util.member key json with
-                  | `String s -> s
+                  match Json_util.assoc_member_opt key json with
+                  | Some (`String s) -> s
                   | _ -> ""
                 in
                 let ts_unix =
-                  match Yojson.Safe.Util.member "ts_unix" json with
-                  | `Float f -> f
-                  | `Int i -> float_of_int i
+                  match Json_util.assoc_member_opt "ts_unix" json with
+                  | Some (`Float f) -> f
+                  | Some (`Int i) -> float_of_int i
                   | _ -> 0.0
                 in
                 let keeper_name =
@@ -372,9 +372,9 @@ let keeper_decisions_log_json
                 let terminal_reason_code = terminal_reason_code_of_decision_json json in
                 let duration_ms =
                   let number key =
-                    match Yojson.Safe.Util.member key json with
-                    | `Float value -> Some value
-                    | `Int value -> Some (float_of_int value)
+                    match Json_util.assoc_member_opt key json with
+                    | Some (`Float value) -> Some value
+                    | Some (`Int value) -> Some (float_of_int value)
                     | _ -> None
                   in
                   match number "duration_ms" with
@@ -400,11 +400,11 @@ let keeper_decisions_log_json
                 in
                 let summary = String.concat " \xc2\xb7 " summary_parts in
                 let evidence_refs =
-                  let refs = json_string_list_member "evidence_refs" json in
+                  let refs = Json_util.get_string_list json "evidence_refs" in
                   let refs =
                     if refs <> []
                     then refs
-                    else json_string_list_member "raw_evidence_refs" json
+                    else Json_util.get_string_list json "raw_evidence_refs"
                   in
                   List.map (fun value -> `String value) refs
                 in
@@ -450,7 +450,7 @@ let keeper_decisions_log_json
 
 let keeper_memory_log_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
@@ -458,7 +458,7 @@ let keeper_memory_log_json
   let per_keeper_limit = limit * 2 in
   let all_entries =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_memory_bank_path config m.name in
         if not (Fs_compat.file_exists path)
         then []

@@ -16,10 +16,13 @@ let test_unknown_sidecar_returns_none () =
   (check (option string)) "unknown" None (Doctor_dispatch.sidecar_dir "xyz");
   (check (option string)) "empty" None (Doctor_dispatch.sidecar_dir "")
 
-let test_discord_mapping () =
+(* RFC-0203 Phase 3: discord is no longer an external sidecar.
+   The "discord" name must explicitly map to [None] so callers don't
+   wander into a non-existent [sidecars/discord-bot/] directory. *)
+let test_discord_is_no_longer_a_sidecar () =
   (check (option string))
-    "discord"
-    (Some "sidecars/discord-bot")
+    "discord => None (in-process gateway)"
+    None
     (Doctor_dispatch.sidecar_dir "discord")
 
 let test_cli_mapping () =
@@ -73,7 +76,10 @@ let () =
             "unknown sidecar returns None"
             `Quick
             test_unknown_sidecar_returns_none
-        ; test_case "discord maps to discord-bot" `Quick test_discord_mapping
+        ; test_case
+            "discord no longer a sidecar (in-process)"
+            `Quick
+            test_discord_is_no_longer_a_sidecar
         ; test_case "cli maps to cli-connector" `Quick test_cli_mapping
         ] )
     ; ( "summary"

@@ -5,6 +5,8 @@
     keeper lifecycle state owned here. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
 let broadcast_lifecycle_events ~(name : string)

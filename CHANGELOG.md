@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Added
+- RFC-0203 Phase 3: in-process Discord gateway
+  (`Server_discord_in_process_gateway`) replaces the deleted Python
+  sidecar at `sidecars/discord-bot/`. `DISCORD_BOT_TOKEN` env var now
+  activates the in-process WSS gateway at server boot; inbound
+  messages are routed to keepers via the existing
+  `Channel_gate.handle_inbound` entry point and replies are pushed
+  back through the new `Channel_gate_discord_state.send_message`.
+  `MASC_DISCORD_TRIGGER_POLICY` controls the inbound filter
+  (`mention_only` default, `user_only:<id>`, `all`). The `board.posted`
+  /`board.commented` activity-polling auto-push (previously done by
+  the sidecar) is dropped — re-add as a follow-up if needed.
+
+### Removed
+- RFC-0203 Phase 3: `sidecars/discord-bot/` (Python connector, ~5000
+  LoC) deleted. `Doctor_dispatch.known_sidecars` no longer lists
+  "discord" — the doctor dispatcher only manages remaining external
+  sidecars (slack/telegram/imessage/cli). The Channel Gate HTTP
+  routes (`/api/v1/gate/message` etc.) remain unchanged and continue
+  to serve the other external connectors.
+
 ## [0.19.35] - 2026-05-27
 
 ### Added

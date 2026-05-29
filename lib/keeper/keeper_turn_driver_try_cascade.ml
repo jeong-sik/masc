@@ -119,7 +119,7 @@ let record_cascade_attempt ctx candidate ?http_status ~outcome () =
     if String.equal (String.trim ctx.keeper_name) ""
     then ()
     else
-      let record : Keeper_types.cascade_attempt_record =
+      let record : Keeper_meta_contract.cascade_attempt_record =
         { provider_id = Cascade_runtime_candidate.provider_label candidate
         ; http_status
         ; outcome
@@ -171,36 +171,36 @@ let rec run
             (List.rev pre_dispatch_required_tool_rejections_rev)
       | Some _, _ | _, Some _ -> None
     in
-    let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
+    let reason : Keeper_meta_contract.cascade_exhaustion_reason = match last_err with
       | Some (Llm_provider.Http_client.NetworkError { message; kind }) ->
           if kind = Llm_provider.Http_client.Connection_refused
              || String_util.contains_substring_ci message "connection refused" then
-            Keeper_types.Connection_refused
+            Keeper_meta_contract.Connection_refused
           else if kind = Llm_provider.Http_client.Dns_failure then
-            Keeper_types.Dns_failure
+            Keeper_meta_contract.Dns_failure
           else
-            Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+            Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.TimeoutError _) ->
-          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.HttpError _) ->
-          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.AcceptRejected _) ->
-          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.CliTransportRequired _) ->
-          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.ProviderTerminal
           { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
-          Keeper_types.Max_turns_exceeded
+          Keeper_meta_contract.Max_turns_exceeded
       | Some (Llm_provider.Http_client.ProviderTerminal
           { kind = Llm_provider.Http_client.Other _; _ }) ->
-          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.ProviderFailure
           { kind = Llm_provider.Http_client.Capacity_exhausted _; _ }) ->
-          Keeper_types.Capacity_exhausted
+          Keeper_meta_contract.Capacity_exhausted
       | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
           let message = Cascade_fsm.to_user_message (Some err) in
-          Keeper_types.Other_detail message
-      | None -> Keeper_types.No_providers_available
+          Keeper_meta_contract.Other_detail message
+      | None -> Keeper_meta_contract.No_providers_available
     in
     let observation =
       Cascade_observation.cascade_observation_with_metrics
@@ -465,7 +465,13 @@ let rec run
       run ~on_success ?resume_checkpoint ?per_provider_timeout_s
         ~pre_dispatch_required_tool_rejections_rev
         ~last_capacity_backpressure:
-          (Client_capacity, capacity_detail, retry_after_s)
+          ( Client_capacity
+          , capacity_detail
+          , (* a computed client-capacity cooldown is a real backoff, not a
+               blind synthetic default *)
+            (match retry_after_s with
+             | Some s -> Cascade_internal_error.Explicit s
+             | None -> Cascade_internal_error.No_retry_hint) )
         ctx rest last_err
     | (`No_client_capacity | `Acquired _) as capacity_slot ->
     let capacity_release =

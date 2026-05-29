@@ -17,7 +17,7 @@
     explicit field ownership per writer, or a minimal CRDT with
     per-field LWW where the "W" is the declared owner. *)
 
-type t = latest:Keeper_types.keeper_meta -> caller:Keeper_types.keeper_meta -> Keeper_types.keeper_meta
+type t = latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta
 
 val caller_wins : t
 (** Take every field from the caller except [meta_version], which

@@ -23,7 +23,7 @@ let seed_keeper_meta (ctx : Tool_control.context) name ~paused =
     | Ok meta -> { meta with paused }
     | Error err -> failwith ("meta fixture failed: " ^ err)
   in
-  match Keeper_types.write_meta ctx.config meta with
+  match Keeper_meta_store.write_meta ctx.config meta with
   | Ok () -> ()
   | Error err -> failwith ("meta write failed: " ^ err)
 

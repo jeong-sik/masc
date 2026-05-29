@@ -5,6 +5,8 @@
    read-backend, path-resolution, and host Shell IR details. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 open Keeper_workspace_ops_setup
 

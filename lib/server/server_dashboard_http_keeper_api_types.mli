@@ -76,17 +76,6 @@ val extract_keeper_name_for_post : string -> string -> string
 (** [extract_keeper_name_for_post path suffix]: variant used by the
     POST dispatcher. *)
 
-(** {1 Internal JSON / list helpers}
-
-    Pure Yojson member extractors + a small list utility, used across
-    keeper_dashboard_http_keeper_api.ml's many response-builder helpers.
-    Exposed here so the godfile keeps referencing them through include. *)
-
-val json_string_member_opt : string -> Yojson.Safe.t -> string option
-val json_string_list_member : string -> Yojson.Safe.t -> string list
-val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
-val json_string_value_opt : Yojson.Safe.t -> string option
-
 val manifest_row_matches :
   ?turn_id:int ->
   string ->

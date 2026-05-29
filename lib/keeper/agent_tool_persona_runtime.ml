@@ -2,6 +2,8 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 
 let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =

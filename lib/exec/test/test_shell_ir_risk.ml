@@ -270,6 +270,80 @@ let test_s7_stamp_invariant () =
          (Risk.string_of_risk_class reclassified_risk))
     stamp_invariant_cases
 
+(* --- typed-GADT escalation: word-list gaps the type closes ---------
+
+   These cases are R0 under the word-list alone (the head token was
+   "sudo"/"su"/"mkfs", so the "rm"/"git push" arms never fired and the
+   command name was not in the write list). The typed GADT path
+   escalates them. Proves [risk_of_typed] adds safety, not just parity. *)
+
+let test_typed_escalation_closes_wordlist_gaps () =
+  (* word-list baseline is R0 for each (gap), so any escalation here is
+     attributable to the typed path. *)
+  let assert_floor_is_r0 words =
+    Alcotest.(check string)
+      (Printf.sprintf "word-list floor R0 for [%s]" (String.concat " " words))
+      "R0"
+      (Risk.string_of_risk_class (Risk.classify_words words))
+  in
+  (* sudo: privilege escalation -> Destructive_protected *)
+  assert_floor_is_r0 [ "sudo"; "rm"; "-rf"; "/" ];
+  let sudo = simple_ir "sudo" [ "rm"; "-rf"; "/" ] in
+  Alcotest.(check bool)
+    "sudo -> Destructive_protected"
+    true
+    (Risk.is_destructive (Risk.classify (Risk.undecided sudo)));
+  (* su: root shell -> R2 *)
+  assert_floor_is_r0 [ "su"; "-"; "root" ];
+  let su = simple_ir "su" [ "-"; "root" ] in
+  Alcotest.(check bool)
+    "su -> R2"
+    true
+    (Risk.is_r2 (Risk.classify (Risk.undecided su)));
+  (* mkfs: filesystem create -> R2 *)
+  assert_floor_is_r0 [ "mkfs"; "/dev/sda1" ];
+  let mkfs = simple_ir "mkfs" [ "/dev/sda1" ] in
+  Alcotest.(check bool)
+    "mkfs -> R2"
+    true
+    (Risk.is_r2 (Risk.classify (Risk.undecided mkfs)))
+
+(* --- monotone-safe invariant: classify >= word-list floor ----------
+
+   Structural guard: [classify] takes the stricter of the typed opinion
+   and the word-list floor, so its verdict is never below the floor.
+   Fails loudly if the floor is ever removed without a type that
+   subsumes it. *)
+
+let test_monotone_floor_invariant () =
+  let rank = function
+    | Masc_exec.Shell_ir_risk.R0_Read -> 0
+    | R1_Reversible_mutation -> 1
+    | R2_Irreversible -> 2
+    | Destructive_protected -> 3
+  in
+  let corpus =
+    [ ("ls", []); ("cat", [ "f" ]); ("git", [ "commit"; "-m"; "x" ]);
+      ("git", [ "push"; "--force"; "origin"; "main" ]); ("rm", [ "-rf"; "d" ]);
+      ("sudo", [ "apt"; "install" ]); ("gh", [ "api"; "-XDELETE"; "/x" ]);
+      ("gh", [ "repo"; "delete"; "o/r" ]); ("curl", [ "https://x" ]);
+      ("mkdir", [ "-p"; "d" ]); ("npm", [ "install" ]); ("npm", [ "test" ]);
+      ("dd", [ "if=/dev/zero"; "of=/dev/sda" ]); ("mkfs", [ "/dev/sda1" ]) ]
+  in
+  List.iter
+    (fun (b, a) ->
+       let ir = simple_ir b a in
+       let full = (Risk.classify (Risk.undecided ir)).Risk.risk in
+       let floor = Risk.classify_words (b :: a) in
+       Alcotest.(check bool)
+         (Printf.sprintf "%s %s: classify=%s >= floor=%s" b
+            (String.concat " " a)
+            (Risk.string_of_risk_class full)
+            (Risk.string_of_risk_class floor))
+         true
+         (rank full >= rank floor))
+    corpus
+
 (* --- test runner --- *)
 
 let () =
@@ -290,4 +364,6 @@ let () =
   test_classify_repo_hosting_cli_read_only_prefixes_equivalence ();
   test_classify_unknown_read ();
   test_s7_stamp_invariant ();
-  print_endline "test_shell_ir_risk: 16/16 passed"
+  test_typed_escalation_closes_wordlist_gaps ();
+  test_monotone_floor_invariant ();
+  print_endline "test_shell_ir_risk: 18/18 passed"

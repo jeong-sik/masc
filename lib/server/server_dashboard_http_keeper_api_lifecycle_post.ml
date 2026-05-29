@@ -63,7 +63,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       match Keeper_registry_lookup.find_by_name name with
       | Some entry -> Some entry.meta.agent_name
       | None -> (
-          match Keeper_types.read_meta config name with
+          match Keeper_meta_store.read_meta config name with
           | Ok (Some meta) -> Some meta.agent_name
           | Ok None -> None
           | Error err ->
@@ -73,18 +73,18 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               None)
     in
     let persist_keeper_paused_state paused =
-      match Keeper_types.read_meta config name with
+      match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when Bool.equal meta.paused paused -> ()
       | Ok (Some meta) ->
           let updated_meta =
             {
               meta with
               paused;
-              updated_at = Keeper_types.now_iso ();
+              updated_at = Keeper_meta_contract.now_iso ();
             }
           in
           (match
-             Keeper_types.write_meta_with_merge
+             Keeper_meta_store.write_meta_with_merge
                ~merge:Keeper_meta_merge.caller_wins config updated_meta
            with
            | Ok () -> ()
@@ -121,7 +121,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             ()
     in
     let resume_booted_keeper_if_needed () =
-      match Keeper_types.read_meta config name with
+      match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when meta.paused ->
           persist_keeper_paused_state false;
           (match resolve_keeper_agent_name () with
@@ -227,8 +227,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
            refresh_keeper_execution_surfaces ~config ~name "started";
            let detail =
              match Keeper_registry.get ~base_path:config.base_path name with
-             | Some latest -> Keeper_types.meta_to_json latest.meta
-             | None -> Keeper_types.meta_to_json entry.meta
+             | Some latest -> Keeper_meta_json.meta_to_json latest.meta
+             | None -> Keeper_meta_json.meta_to_json entry.meta
            in
            log_lifecycle_result "already_live";
            Http.Response.json_value ~compress:true ~request:req

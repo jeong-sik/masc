@@ -1,18 +1,18 @@
 (** Keeper_persona — persona list and persona-backed keeper creation handlers. *)
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 val handle_persona_list :
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 val handle_persona_schema :
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 val handle_persona_generate :
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 val handle_persona_save :
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** RFC-0182 §3.1 — ctx-free entry points for the persona dispatch
     ref.  [Tool_keeper] registers these into [Persona_dispatch_ref]
@@ -27,4 +27,4 @@ val persona_save_handler : Yojson.Safe.t -> tool_result
     that returns a preview without invoking [handle_keeper_up]. Applies
     per-persona shard configuration after successful creation. *)
 val handle_keeper_create_from_persona :
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

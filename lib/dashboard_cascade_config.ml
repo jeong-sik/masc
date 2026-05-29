@@ -229,7 +229,7 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
   `Assoc
     (keeper_profile_fields
        ~keeper:entry.name
-       ~cascade_name:(Keeper_types.cascade_name_of_meta entry.meta))
+       ~cascade_name:(Keeper_meta_contract.cascade_name_of_meta entry.meta))
 ;;
 
 let invalid_profiles_of_config_path = function
@@ -347,7 +347,7 @@ let config_json ?base_path () =
       let names, _ =
         List.fold_left
           (fun (acc, seen) (e : Keeper_registry.registry_entry) ->
-             add_profile_name (acc, seen) (Keeper_types.cascade_name_of_meta e.meta))
+             add_profile_name (acc, seen) (Keeper_meta_contract.cascade_name_of_meta e.meta))
           (acc_after_catalog, seen_after_catalog)
           keeper_entries
       in

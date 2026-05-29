@@ -141,25 +141,27 @@ let float_or_default default = function
   | _ -> default
 
 let require_string ~ctx ~field json =
-  match Yojson.Safe.Util.member field json |> trim_nonempty_json with
+  match Json_util.get_string_nonempty json field with
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s.%s is required" ctx field)
 
 let require_object ~ctx ~field json =
-  match Yojson.Safe.Util.member field json with
-  | `Assoc _ as obj -> Ok obj
-  | other ->
+  match Json_util.get_object json field with
+  | Some obj -> Ok obj
+  | None ->
+      let raw = Option.value ~default:`Null (Json_util.assoc_member_opt field json) in
       Error
         (Printf.sprintf "%s.%s must be object, got %s: %s" ctx field
-           (Json_util.kind_name other) (Json_util.excerpt other))
+           (Json_util.kind_name raw) (Json_util.excerpt raw))
 
 let require_list ~ctx ~field json =
-  match Yojson.Safe.Util.member field json with
-  | `List items -> Ok items
-  | other ->
+  match Json_util.get_array json field with
+  | Some (`List items) -> Ok items
+  | _ ->
+      let raw = Option.value ~default:`Null (Json_util.assoc_member_opt field json) in
       Error
         (Printf.sprintf "%s.%s must be array, got %s: %s" ctx field
-           (Json_util.kind_name other) (Json_util.excerpt other))
+           (Json_util.kind_name raw) (Json_util.excerpt raw))
 
 let endpoint_kind_of_string = function
   | "openai_compat" -> Ok Openai_compat
@@ -181,17 +183,15 @@ let parse_endpoint ~ctx json =
   let* id = require_string ~ctx ~field:"id" json in
   let* kind_raw = require_string ~ctx ~field:"kind" json in
   let* kind = endpoint_kind_of_string kind_raw in
-  let base_url = Yojson.Safe.Util.member "base_url" json |> trim_nonempty_json in
-  let mcp_url = Yojson.Safe.Util.member "mcp_url" json |> trim_nonempty_json in
-  let health_url = Yojson.Safe.Util.member "health_url" json |> trim_nonempty_json in
-  let api_key_env = Yojson.Safe.Util.member "api_key_env" json |> trim_nonempty_json in
+  let base_url = Json_util.get_string_nonempty json "base_url" in
+  let mcp_url = Json_util.get_string_nonempty json "mcp_url" in
+  let health_url = Json_util.get_string_nonempty json "health_url" in
+  let api_key_env = Json_util.get_string_nonempty json "api_key_env" in
   let enabled =
-    Yojson.Safe.Util.member "enabled" json |> bool_or_default true
+    Option.value ~default:true (Json_util.get_bool json "enabled")
   in
-  let timeout_seconds =
-    Yojson.Safe.Util.member "timeout_seconds" json |> float_opt
-  in
-  let max_retries = Yojson.Safe.Util.member "max_retries" json |> int_opt in
+  let timeout_seconds = Json_util.get_float json "timeout_seconds" in
+  let max_retries = Json_util.get_int json "max_retries" in
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
@@ -230,8 +230,8 @@ let rec parse_endpoints ~ctx acc = function
       | Error _ as error -> error)
 
 let parse_agent_voices json =
-  match Yojson.Safe.Util.member "agent_voices" json with
-  | `Assoc pairs ->
+  match Json_util.assoc_member_opt "agent_voices" json with
+  | Some (`Assoc pairs) ->
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | (agent_id, value) :: rest -> (
@@ -244,8 +244,8 @@ let parse_agent_voices json =
                      "tts.agent_voices.%s must be a non-empty string" agent_id) )
       in
       loop [] pairs
-  | `Null -> Ok []
-  | other ->
+  | None | Some `Null -> Ok []
+  | Some other ->
       Error
         (Printf.sprintf "tts.agent_voices must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
@@ -256,11 +256,10 @@ let parse_voice_tuning ~ctx json =
       Ok
         {
           stability =
-            Yojson.Safe.Util.member "stability" json |> float_or_default 0.5;
+            Option.value ~default:0.5 (Json_util.get_float json "stability");
           similarity_boost =
-            Yojson.Safe.Util.member "similarity_boost" json
-            |> float_or_default 0.75;
-          style = Yojson.Safe.Util.member "style" json |> float_or_default 0.0;
+            Option.value ~default:0.75 (Json_util.get_float json "similarity_boost");
+          style = Option.value ~default:0.0 (Json_util.get_float json "style");
         }
   | `Null ->
       Ok { stability = 0.5; similarity_boost = 0.75; style = 0.0 }
@@ -270,8 +269,8 @@ let parse_voice_tuning ~ctx json =
            (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_agent_voice_settings json =
-  match Yojson.Safe.Util.member "agent_voice_settings" json with
-  | `Assoc pairs ->
+  match Json_util.assoc_member_opt "agent_voice_settings" json with
+  | Some (`Assoc pairs) ->
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | (agent_id, tuning_json) :: rest -> (
@@ -280,8 +279,8 @@ let parse_agent_voice_settings json =
             | Error _ as err -> err)
       in
       loop [] pairs
-  | `Null -> Ok []
-  | other ->
+  | None | Some `Null -> Ok []
+  | Some other ->
       Error
         (Printf.sprintf "tts.agent_voice_settings must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
@@ -293,7 +292,7 @@ let parse_tts json =
   let* default_voice = require_string ~ctx:"tts" ~field:"default_voice" tts_json in
   let* default_voice_settings =
     parse_voice_tuning ~ctx:"tts.default_voice_settings"
-      (Yojson.Safe.Util.member "default_voice_settings" tts_json)
+      (Option.value ~default:`Null (Json_util.assoc_member_opt "default_voice_settings" tts_json))
   in
   let* agent_voices = parse_agent_voices tts_json in
   let* agent_voice_settings =
@@ -332,20 +331,19 @@ let parse_session json =
     Ok { endpoints }
 
 let parse_local_playback json =
-  match Yojson.Safe.Util.member "local_playback" json with
-  | `Assoc local_json ->
-      let local_json = `Assoc local_json in
+  match Json_util.assoc_member_opt "local_playback" json with
+  | Some (`Assoc _ as local_json) ->
       let enabled =
-        Yojson.Safe.Util.member "enabled" local_json |> bool_or_default false
+        Option.value ~default:false (Json_util.get_bool local_json "enabled")
       in
       let agents =
-        match Yojson.Safe.Util.member "agents" local_json with
-        | `List values -> List.filter_map trim_nonempty_json values
+        match Json_util.assoc_member_opt "agents" local_json with
+        | Some (`List values) -> List.filter_map trim_nonempty_json values
         | _ -> []
       in
       Ok { enabled; agents }
-  | `Null -> Ok { enabled = false; agents = [] }
-  | other ->
+  | None | Some `Null -> Ok { enabled = false; agents = [] }
+  | Some other ->
       Error
         (Printf.sprintf "root.local_playback must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))

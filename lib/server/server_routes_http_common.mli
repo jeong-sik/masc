@@ -176,3 +176,18 @@ val host_header_has_forbidden_authority_chars :
   string -> bool
 val parse_host_port :
   string option -> string -> int -> string * int
+
+(** [respond_cached_read ~request ~reqd ~cache_key ~ttl compute] wraps a
+    dashboard read [compute] in the SWR cache and the shared Executor_pool,
+    then writes the JSON response. Collapses parallel read bursts to one
+    compute per [ttl] and runs heavy compute (subprocess / store query /
+    large JSON) off the main HTTP domain so it does not head-of-line-block
+    other requests. [compress] defaults to [true]. *)
+val respond_cached_read :
+  ?compress:bool ->
+  request:Httpun.Request.t ->
+  reqd:Httpun.Reqd.t ->
+  cache_key:string ->
+  ttl:float ->
+  (unit -> Yojson.Safe.t) ->
+  unit

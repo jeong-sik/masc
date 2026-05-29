@@ -294,16 +294,16 @@ let build_session_contexts seeds operation_contexts : session_context list =
                [
                  ("session_id", `String seed.session_id);
                  ("goal", `String seed.goal);
-                 ("namespace", json_string_option seed.namespace);
+                 ("namespace", Json_util.string_opt_to_json seed.namespace);
                  ("status", `String seed.status);
                  ("health", `String seed.health);
                  ( "member_names",
                    `List (List.map (fun value -> `String value) seed.member_names) );
-                 ("linked_operation_id", json_string_option linked_operation_id);
-                 ("linked_detachment_id", json_string_option linked_detachment_id);
-                 ("runtime_blocker", json_string_option seed.runtime_blocker);
-                 ("worker_gap_summary", json_string_option seed.worker_gap_summary);
-                 ("last_activity_at", json_string_option seed.last_activity_at);
+                 ("linked_operation_id", Json_util.string_opt_to_json linked_operation_id);
+                 ("linked_detachment_id", Json_util.string_opt_to_json linked_detachment_id);
+                 ("runtime_blocker", Json_util.string_opt_to_json seed.runtime_blocker);
+                 ("worker_gap_summary", Json_util.string_opt_to_json seed.worker_gap_summary);
+                 ("last_activity_at", Json_util.string_opt_to_json seed.last_activity_at);
                  ("last_activity_summary", `String seed.last_activity_summary);
                  ("communication_summary", `String seed.communication_summary);
                  ("active_count", `Int seed.active_count);
@@ -400,7 +400,7 @@ let build_execution_queue session_contexts operation_contexts =
                      | None -> member_assoc "objective" operation.json );
                    ("target_type", `String "operation");
                    ("target_id", `String operation.operation_id);
-                   ("linked_session_id", json_string_option operation.linked_session_id);
+                   ("linked_session_id", Json_util.string_opt_to_json operation.linked_session_id);
                    ("linked_operation_id", `String operation.operation_id);
                    ("last_seen_at", member_assoc "updated_at" operation.json);
                    ("top_handoff", member_assoc "top_handoff" operation.json);

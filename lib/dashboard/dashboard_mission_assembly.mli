@@ -27,7 +27,7 @@
     [identity_digest], [action_identity],
     [matched_internal_action_keys],
     [operation_badge_json], [severity_rank],
-    [option_to_json] / [json_string_option] /
+    [option_to_json] / [Json_util.string_opt_to_json] /
     [string_list_json] envelope helpers,
     [parse_iso_opt] / [trim_to_option],
     [take]). *)

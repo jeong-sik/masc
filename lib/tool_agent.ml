@@ -122,9 +122,8 @@ let handle_agent_update ?(tool_name = "masc_agent_update") ?(start_time = 0.0) c
   =
   let status = get_string_opt args "status" in
   let capabilities =
-    match Yojson.Safe.Util.member "capabilities" args with
-    | `Null -> None
-    | `List _ -> Some (get_string_list args "capabilities")
+    match Json_util.assoc_member_opt "capabilities" args with
+    | Some (`List _) -> Some (get_string_list args "capabilities")
     | _ -> None
   in
   result_to_response ~tool_name ~start_time

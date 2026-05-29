@@ -110,8 +110,17 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/branches" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = Dashboard_branches.json ~config:state.Mcp_server.room_config in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         (* /branches spawns `git -C <repo> branch` via Exec_gate. Cache +
+            offload (respond_cached_read) so a parallel dashboard burst
+            collapses to one git spawn per realtime TTL and the spawn runs on
+            an Executor_pool domain instead of blocking the main HTTP domain. *)
+         let cache_key =
+           Printf.sprintf "branches:%s"
+             state.Mcp_server.room_config.base_path
+         in
+         respond_cached_read ~request:req ~reqd ~cache_key
+           ~ttl:realtime_cache_ttl_s (fun () ->
+             Dashboard_branches.json ~config:state.Mcp_server.room_config)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/rooms" (fun request reqd ->
        with_public_read handle_dashboard_rooms request reqd)

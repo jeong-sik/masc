@@ -41,7 +41,7 @@ val submit
   -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> base_path:string
-  -> f:(unit -> Keeper_types.tool_result)
+  -> f:(unit -> Keeper_types_profile.tool_result)
   -> keeper_name:string
   -> unit
   -> string

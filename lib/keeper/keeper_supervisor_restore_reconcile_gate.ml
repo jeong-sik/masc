@@ -14,6 +14,8 @@
     [Reconcile_gate_rejected], and leaves the keeper paused. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 module Startup_helpers = Keeper_supervisor_startup_helpers
 module Resume_reconcile_gate = Keeper_supervisor_resume_reconcile_gate
 

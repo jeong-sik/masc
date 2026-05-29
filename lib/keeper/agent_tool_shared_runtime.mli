@@ -31,7 +31,7 @@ val actionable_path_action_for_class
     and routes to [actionable_path_action_for_class]. *)
 val actionable_path_error
   :  op:string
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> error:string
   -> string
@@ -53,26 +53,26 @@ val missing_file_error_json
 val assoc_override_string : string -> string -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Re-export of [Keeper_alerting_path.effective_allowed_paths]. *)
-val keeper_effective_allowed_paths : meta:Keeper_types.keeper_meta -> string list
+val keeper_effective_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Re-export of [Keeper_alerting_path.effective_write_allowed_paths]. *)
-val keeper_effective_write_allowed_paths : meta:Keeper_types.keeper_meta -> string list
+val keeper_effective_write_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Sandbox playground root for [meta]; ensures the bundle dirs
     exist as a side effect. *)
 val keeper_playground_root
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
 val keeper_default_write_root
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
 val keeper_default_read_root
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
 val project_relative_host_path : config:Coord.config -> string -> string option
@@ -84,12 +84,12 @@ val safe_is_dir : string -> bool
     [repos/] lane. *)
 val keeper_sandbox_repo_names
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string list
 
 (** [true] iff [raw] is a relative path that lies under one of the
     keeper's relative allowed_paths roots. *)
-val relative_path_targets_allowed_root : meta:Keeper_types.keeper_meta -> string -> bool
+val relative_path_targets_allowed_root : meta:Keeper_meta_contract.keeper_meta -> string -> bool
 
 (** [true] iff [raw] starts with [mind] or [repos] (the canonical
     sandbox lanes for keeper-relative paths). *)
@@ -97,14 +97,14 @@ val is_playground_lane_relative_path : string -> bool
 
 (** [true] iff [raw] is a relative path whose first segment looks
     like a repo name (not a sandbox lane / project root marker). *)
-val repo_relative_path_candidate : meta:Keeper_types.keeper_meta -> string -> bool
+val repo_relative_path_candidate : meta:Keeper_meta_contract.keeper_meta -> string -> bool
 
 (** Rewrite a repo-relative path to its sandbox-clone absolute
     form. Returns [Ok None] when no rewrite applies, [Ok (Some _)]
     on a successful rewrite, [Error _] on ambiguity. *)
 val rewrite_single_repo_relative_path
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string
   -> (string option, string) result
 
@@ -113,7 +113,7 @@ val rewrite_single_repo_relative_path
     Applies single-repo rewrite, then resolves. *)
 val playground_relative_unless_allowed_root
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string
   -> (string, string) result
 
@@ -121,7 +121,7 @@ val playground_relative_unless_allowed_root
     boundary check via [Keeper_alerting_path.resolve_keeper_target_path]. *)
 val resolve_keeper_path
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> (string, string) result
 
@@ -130,11 +130,11 @@ val resolve_keeper_path
     (with missing-leaf fallback search). *)
 val resolve_keeper_read_path
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> (string, string) result
 
-val keeper_agent_sender : meta:Keeper_types.keeper_meta -> string
+val keeper_agent_sender : meta:Keeper_meta_contract.keeper_meta -> string
 
 (** Clamp [args.limit] to [1..200] (default 40) for read-only
     shell commands. *)
@@ -175,15 +175,15 @@ val tag_dispatch_fn
 val find_registry_meta
   :  keeper_name:string
   -> source_layer:string
-  -> Keeper_types.keeper_meta option
+  -> Keeper_meta_contract.keeper_meta option
 
 val with_registry_meta
   :  keeper_name:string
   -> source_layer:string
-  -> (Keeper_types.keeper_meta -> string)
+  -> (Keeper_meta_contract.keeper_meta -> string)
   -> string
 
 (** Render the keeper-tools-list JSON envelope: tool names grouped
     by category (board / voice / coordination / shell / fs / memory
     / core). *)
-val keeper_tools_list_json : meta:Keeper_types.keeper_meta -> string
+val keeper_tools_list_json : meta:Keeper_meta_contract.keeper_meta -> string

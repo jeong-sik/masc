@@ -9,9 +9,6 @@ type signal_ctx = {
   cascade_name : Cascade_name.t;
 }
 
-let signal_cascade_name ctx =
-  Cascade_name.to_string ctx.cascade_name
-
 type cycle_policy = {
   max_cycles : int;
   backoff_base_ms : int;
@@ -37,29 +34,25 @@ let backoff_ms policy ~cycle =
 
 type kind =
   | Failover [@tla.symbol "failover"]
-  | Priority_tier [@tla.symbol "priority_tier"]
 [@@deriving tla]
 
 let kind_to_string = function
   | Failover -> "failover"
-  | Priority_tier -> "priority_tier"
 
-(* Issue #8603: SSOT helpers — replace hard-coded list in [parse_kind]'s
-   Error arm so adding an 8th constructor updates the operator-visible
-   error message automatically. Same Variant SSOT shape as #8486 /
-   #8467 / #8592 / #8601. *)
+(* Issue #8603: SSOT helpers — the [parse_kind] Error arm lists
+   [valid_kind_strings] (derived from [all_kinds]) so adding a second
+   constructor updates the operator-visible error message automatically.
+   Same Variant SSOT shape as #8486 / #8467 / #8592 / #8601. *)
 let all_kinds = [
   Failover;
-  Priority_tier;
 ]
 
 let valid_kind_strings = List.map kind_to_string all_kinds
 
-let config_kind_strings = [ "failover"; "priority_tier" ]
+let config_kind_strings = [ "failover" ]
 
 let parse_kind = function
   | "failover" -> Ok Failover
-  | "priority_tier" -> Ok Priority_tier
   | other ->
     Error (Printf.sprintf
              "unknown cascade strategy %S (expected one of: %s)"
@@ -77,13 +70,11 @@ let parse_config_kind raw =
 type t = {
   kind : kind;
   cycle : cycle_policy;
-  tiers : string list list;
 }
 
 let failover = {
   kind = Failover;
   cycle = default_cycle_policy;
-  tiers = [];
 }
 
 type 'a adapter = {
@@ -92,14 +83,6 @@ type 'a adapter = {
 }
 
 (* ── Filters ────────────────────────────────────────────────────── *)
-
-let has_capacity ctx ~url =
-  match ctx.capacity url with
-  | None -> true                          (* unknown → fail-open *)
-  | Some info -> info.Cascade_throttle.process_available > 0
-
-let filter_capacity adapter ctx cands =
-  List.filter (fun c -> has_capacity ctx ~url:(adapter.capacity_key c)) cands
 
 let key_is_full ctx key =
   match ctx.capacity key with
@@ -126,82 +109,13 @@ let filter_cooldown adapter ctx cands =
               ~provider_key:(adapter.health_key c)))
     cands
 
-(* ── Priority tier ──────────────────────────────────────────────── *)
-
-(* Pick the tier for [cycle], clamped to the last tier when [cycle]
-   exceeds [length tiers - 1].  Returns [[]] when [tiers] is empty
-   (no usable configuration → starvation guard handled at caller). *)
-let tier_for_cycle tiers ~cycle =
-  match tiers with
-  | [] -> []
-  | _ ->
-    let n = List.length tiers in
-    let idx = if cycle >= n then n - 1 else max 0 cycle in
-    match List.nth_opt tiers idx with
-    | Some tier -> tier
-    | None -> []
-
-let priority_tier_order adapter ctx ~tiers ~cycle cands =
-  let allowed = tier_for_cycle tiers ~cycle in
-  match allowed with
-  | [] -> []
-  | _ ->
-    (* Materialise [allowed] as a Hashtbl once so the per-candidate
-       membership check is O(1); prior shape did [List.mem health_key
-       allowed] per candidate, i.e. O(C x A) per ordering call. *)
-    let allowed_set = Hashtbl.create (List.length allowed) in
-    List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
-    let in_tier c = Hashtbl.mem allowed_set (adapter.health_key c) in
-    let tier_cands = List.filter in_tier cands in
-    (* Starvation guard: if every tier candidate reports capacity=0, fall
-       through with the unfiltered tier list so at least one call is
-       attempted and the real upstream error (rate limit, auth) surfaces
-       instead of silently exhausting the cascade. *)
-    let with_capacity = filter_capacity adapter ctx tier_cands in
-    if with_capacity = [] then (
-      Cascade_metrics.on_strategy_starvation_guard
-        ~cascade:(signal_cascade_name ctx)
-        ~strategy:"priority_tier";
-      dedupe_full_capacity_keys adapter ctx tier_cands)
-    else with_capacity
-
 (* ── Public ordering ────────────────────────────────────────────── *)
 
-let order_candidates t ~adapter ~ctx ~cycle cands =
+let order_candidates t ~adapter ~ctx ~cycle:_ cands =
   match t.kind with
   | Failover ->
     filter_cooldown adapter ctx cands
     |> dedupe_full_capacity_keys adapter ctx
-  | Priority_tier ->
-    priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
-
-(* p50 latency band thresholds (milliseconds).  Each band maps to a
-   latency_score multiplier: <=instant → 1.0, <=fast → 0.8,
-   <=moderate → 0.6, <=slow → 0.4, <=degraded → 0.2, else → 0.1.
-   Overlaps with p95 bands in {!Cascade_health_tracker} but p50
-   tolerances are tighter (median vs tail). *)
-let p50_latency_instant_ms = 1000.0
-let p50_latency_fast_ms = 3000.0
-let p50_latency_moderate_ms = 5000.0
-let p50_latency_slow_ms = 15000.0
-let p50_latency_degraded_ms = 30000.0
-
-let latency_score_of_p50_ms = function
-  | ms when (not (Float.is_finite ms)) || ms <= 0.0 -> 1.0
-  | ms when ms <= p50_latency_instant_ms -> 1.0
-  | ms when ms <= p50_latency_fast_ms -> 0.8
-  | ms when ms <= p50_latency_moderate_ms -> 0.6
-  | ms when ms <= p50_latency_slow_ms -> 0.4
-  | ms when ms <= p50_latency_degraded_ms -> 0.2
-  | _ -> 0.1
-
-let latency_score_for_provider health ~provider_key =
-  match Cascade_health_tracker.provider_info health ~provider_key with
-  | None -> 1.0
-  | Some info ->
-    (match info.Cascade_health_tracker.p50_latency_ms with
-     | None -> 1.0
-     | Some p50 -> latency_score_of_p50_ms p50)
 
 (* ── Stateful hooks ─────────────────────────────────────────────── *)
 

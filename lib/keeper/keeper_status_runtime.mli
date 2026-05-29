@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string

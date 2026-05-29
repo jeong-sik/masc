@@ -1,7 +1,7 @@
 (** Hook accumulator + immutable outputs for OAS Agent.run callbacks. *)
 
 type hook_accumulator =
-  { mutable meta : Keeper_types.keeper_meta
+  { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : Keeper_agent_result.tool_call_detail list
   ; mutable current_turn : int
   ; mutable completion_contract : Keeper_tool_completion_contract.completion_contract
@@ -18,7 +18,7 @@ type hook_accumulator =
   }
 
 type hook_outputs =
-  { out_meta : Keeper_types.keeper_meta
+  { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : Keeper_agent_result.tool_call_detail list
   ; out_completion_contract : Keeper_tool_completion_contract.completion_contract
   ; out_required_tool_use_seen : bool

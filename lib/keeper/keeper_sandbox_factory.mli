@@ -24,9 +24,9 @@
 type t
 
 val create :
-  ?default_network_override:Keeper_types.network_mode ->
+  ?default_network_override:Keeper_types_profile_sandbox.network_mode ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   ?turn_id:int ->
   unit ->
   t

@@ -8,7 +8,7 @@ let metadata_gap_json ~kind ~summary ~scope_type ~scope_id ~severity =
       ("kind", `String kind);
       ("summary", `String summary);
       ("scope_type", `String scope_type);
-      ("scope_id", option_string_json scope_id);
+      ("scope_id", Json_util.string_opt_to_json scope_id);
       ("severity", `String severity);
     ]
 

@@ -198,14 +198,14 @@ let run ?(config = default_config) (room_config : Coord.config) : sweep_result =
     |> Array.iter (fun entry ->
       if Filename.check_suffix entry ".json" then begin
         let name = Filename.chop_suffix entry ".json" in
-        match Keeper_types.read_meta room_config name with
+        match Keeper_meta_store.read_meta room_config name with
         | Ok (Some meta) when meta.active_goal_ids <> [] ->
           let pruned_ids, removed =
             prune_active_goal_ids ~valid_goal_ids:valid_ids meta.active_goal_ids
           in
           if removed > 0 then begin
             let updated = { meta with active_goal_ids = pruned_ids } in
-            match Keeper_types.write_meta room_config updated with
+            match Keeper_meta_store.write_meta room_config updated with
             | Ok () ->
                 total_orphans := !total_orphans + removed
             | Error e ->

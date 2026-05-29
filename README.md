@@ -299,7 +299,7 @@ External 채널 어댑터의 경계는 Channel Gate:
 - write/traffic: `/api/v1/gate/message`
 - read/descriptor: `/api/v1/gate/connectors`
 - per-channel metrics: `/api/v1/gate/status`
-- Discord 봇 셋업: [sidecars/discord-bot/README.md](sidecars/discord-bot/README.md)
+- Discord: in-process gateway. `DISCORD_BOT_TOKEN` 환경변수만 설정하면 서버 부팅 시 자동으로 Discord Gateway WSS 에 연결되고 inbound 메시지를 keeper room 으로 라우팅합니다. 별도 sidecar 프로세스 없음 (`sidecars/discord-bot/` 은 RFC-0203 §Phase 3 에서 삭제됨). 트리거 정책은 `MASC_DISCORD_TRIGGER_POLICY` (`mention_only` 기본, `user_only:<id>`, `all`) 로 조정.
 
 ## IDE Surface
 

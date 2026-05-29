@@ -9,7 +9,7 @@
 
 open Keeper_tools_oas
 
-let task_state_hint ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : string =
+let task_state_hint ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) : string =
   match meta.current_task_id with
   | None -> "No task currently assigned. Use masc_claim_next or masc_tasks to find one."
   | Some tid ->
@@ -27,7 +27,7 @@ let task_state_hint ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) 
 
 let make_tool_bundle
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?on_tool_called
@@ -209,7 +209,7 @@ let make_tool_bundle
 
 let make_tools
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?on_tool_called

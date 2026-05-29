@@ -5,10 +5,10 @@
    credential sync, and shared token rotation. *)
 
 let keeper_egress_inactive_missing_reason
-    ~(metas : Keeper_types.keeper_meta list)
+    ~(metas : Keeper_meta_contract.keeper_meta list)
     (r : Keeper_egress_audit.result) =
   metas
-  |> List.find_opt (fun (meta : Keeper_types.keeper_meta) ->
+  |> List.find_opt (fun (meta : Keeper_meta_contract.keeper_meta) ->
     String.equal meta.name r.keeper_name)
   |> function
   | Some meta -> Keeper_egress_audit.inactive_missing_reason meta
@@ -29,7 +29,7 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
         Sys.readdir keepers_dir
         |> Array.to_list
         |> List.filter_map (fun name ->
-            match Keeper_types.read_meta config name with
+            match Keeper_meta_store.read_meta config name with
             | Ok (Some meta) -> Some meta
             | Ok None -> None
             | Error err ->

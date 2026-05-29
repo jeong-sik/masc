@@ -41,7 +41,7 @@ type owned_active_task =
   }
 
 let owned_active_tasks_for_meta ~(config : Coord.config)
-    ~(meta : Keeper_types.keeper_meta) =
+    ~(meta : Keeper_meta_contract.keeper_meta) =
   let names = resolved_agent_names ~config ~agent_name:meta.agent_name in
   let matches assignee = List.mem assignee names in
   try
@@ -79,12 +79,12 @@ let active_status_rank = function
   | Masc_domain.Done _
   | Masc_domain.Cancelled _ -> 2
 
-let current_task_rank (meta : Keeper_types.keeper_meta) task_id =
+let current_task_rank (meta : Keeper_meta_contract.keeper_meta) task_id =
   match meta.current_task_id with
   | Some current when Keeper_id.Task_id.equal current task_id -> 0
   | Some _ | None -> 1
 
-let compare_owned_active_task ~(meta : Keeper_types.keeper_meta) a b =
+let compare_owned_active_task ~(meta : Keeper_meta_contract.keeper_meta) a b =
   let cmp = compare (current_task_rank meta a.task_id) (current_task_rank meta b.task_id) in
   if cmp <> 0
   then cmp
@@ -106,7 +106,7 @@ let compare_owned_active_task ~(meta : Keeper_types.keeper_meta) a b =
             (Keeper_id.Task_id.to_string b.task_id))))
 
 let owned_active_task_id_for_meta ~(config : Coord.config)
-    ~(meta : Keeper_types.keeper_meta) =
+    ~(meta : Keeper_meta_contract.keeper_meta) =
   match owned_active_tasks_for_meta ~config ~meta with
   | [ { task_id; _ } ] -> Some task_id
   | [] -> None
@@ -115,8 +115,8 @@ let owned_active_task_id_for_meta ~(config : Coord.config)
      | selected :: _ -> Some selected.task_id
      | [] -> None)
 
-let merge_current_task_id ~(latest : Keeper_types.keeper_meta)
-    ~(caller : Keeper_types.keeper_meta) =
+let merge_current_task_id ~(latest : Keeper_meta_contract.keeper_meta)
+    ~(caller : Keeper_meta_contract.keeper_meta) =
   {
     latest with
     current_task_id = caller.current_task_id;
@@ -124,7 +124,7 @@ let merge_current_task_id ~(latest : Keeper_types.keeper_meta)
   }
 
 let sync_current_task_id_from_backlog ~(config : Coord.config)
-    (meta : Keeper_types.keeper_meta) =
+    (meta : Keeper_meta_contract.keeper_meta) =
   let desired = owned_active_task_id_for_meta ~config ~meta in
   let equal =
     match meta.current_task_id, desired with
@@ -139,7 +139,7 @@ let sync_current_task_id_from_backlog ~(config : Coord.config)
     in
     Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
     (match
-       Keeper_types.write_meta_with_merge
+       Keeper_meta_store.write_meta_with_merge
          ~merge:merge_current_task_id config updated_meta
      with
      | Ok () -> ()
@@ -197,12 +197,12 @@ let sync_current_task_id_for_agent_name ~(config : Coord.config) ~agent_name =
   in
   match entry with
   | Some entry ->
-    ignore (sync_current_task_id_from_backlog ~config entry.meta : Keeper_types.keeper_meta)
+    ignore (sync_current_task_id_from_backlog ~config entry.meta : Keeper_meta_contract.keeper_meta)
   | None ->
     candidates
     |> List.find_map (fun name ->
-         match Keeper_types.read_meta config name with
+         match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) -> Some meta
          | Ok None | Error _ -> None)
     |> Option.iter (fun meta ->
-         ignore (sync_current_task_id_from_backlog ~config meta : Keeper_types.keeper_meta))
+         ignore (sync_current_task_id_from_backlog ~config meta : Keeper_meta_contract.keeper_meta))

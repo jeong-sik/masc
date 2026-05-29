@@ -8,6 +8,8 @@
    Extracted from keeper_unified_turn.ml (L328-499) during the god-file split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type phase_buffer_liveness_decision =
   | Keep_effective_cascade of string

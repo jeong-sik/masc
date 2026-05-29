@@ -115,7 +115,7 @@ let keeper_attention_severity ~reason ~runtime_blocker_class =
   | _, Some _ -> Sev_bad
   | _ -> Sev_warn
 
-let keeper_attention_summary ~(meta : Keeper_types.keeper_meta) ~reason
+let keeper_attention_summary ~(meta : Keeper_meta_contract.keeper_meta) ~reason
     ~runtime_blocker_summary =
   match reason, runtime_blocker_summary with
   | Some reason, Some summary ->
@@ -126,7 +126,7 @@ let keeper_attention_summary ~(meta : Keeper_types.keeper_meta) ~reason
       Printf.sprintf "%s needs operator attention (%s)" meta.name summary
   | None, None -> Printf.sprintf "%s needs operator attention" meta.name
 
-let keeper_attention_projection config (meta : Keeper_types.keeper_meta) =
+let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
   let attention_fields = Keeper_status_bridge.attention_fields_json config meta in
   if not (assoc_bool_field ~default:false "needs_attention" attention_fields)
   then None
@@ -183,17 +183,17 @@ let keeper_attention_projection config (meta : Keeper_types.keeper_meta) =
             [
               ("source", `String "operator_digest");
               ("keeper", `String meta.name);
-              ("reason", string_option_to_json reason);
-              ("next_human_action", string_option_to_json next_human_action);
+              ("reason", Json_util.string_opt_to_json reason);
+              ("next_human_action", Json_util.string_opt_to_json next_human_action);
             ];
       }
     in
     Some (attention_item, recommended_action)
 
 let keeper_attention_projection_items config =
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
   |> List.filter_map (fun name ->
-    match Keeper_types.read_meta config name with
+    match Keeper_meta_store.read_meta config name with
     | Ok (Some meta) -> keeper_attention_projection config meta
     | Ok None | Error _ -> None)
 
@@ -216,7 +216,7 @@ let room_state_json config =
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
-        ("pause_reason", string_option_to_json state.pause_reason);
+        ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
       ]
 
 let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers

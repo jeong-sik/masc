@@ -462,7 +462,7 @@ let timing_guard ~(tool_start_time : float ref)
 (** User-supplied custom guard. Short-circuits via [Override] when
     the caller's callback returns [Some reason_text]. *)
 let custom_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(guard : tool_name:string -> input:Yojson.Safe.t -> string option)
   : Agent_sdk.Hooks.hooks =
@@ -471,7 +471,7 @@ let custom_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       (match guard ~tool_name ~input with
        | Some reason ->
          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
@@ -502,7 +502,7 @@ let custom_guard
     "same operation, different targets" pattern (e.g. reading 20
     board posts one by one). *)
 let streak_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(state : streak_state)
     ~(threshold : int)
@@ -512,7 +512,7 @@ let streak_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       let prev_name, prev_count = state.entry in
       let new_count =
         if prev_name = tool_name then prev_count + 1 else 1
@@ -555,7 +555,7 @@ let streak_guard
 (** Keeper deny list. Block administrative / destructive tools that
     should only be invoked by operators or controlled workflows. *)
 let deny_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(denied : string list)
   : Agent_sdk.Hooks.hooks =
@@ -564,7 +564,7 @@ let deny_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       if List.mem tool_name denied then begin
         let reason_text = "tool is on the keeper deny list" in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
@@ -598,7 +598,7 @@ let deny_guard
 (** Cost budget gate: reject when the running cost meets or exceeds
     [limit]. No-op when [max_cost_usd] is [None]. *)
 let cost_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(max_cost_usd : float option)
   : Agent_sdk.Hooks.hooks =
@@ -607,7 +607,7 @@ let cost_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       (match max_cost_usd with
        | Some limit when accumulated_cost_usd >= limit ->
          let reason_text =
@@ -646,7 +646,7 @@ let cost_guard
     Only applies when [enabled] is [true] and descriptor/catalog capability
     lookup flags the observed tool name as destructive. *)
 let destructive_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(enabled : bool)
   : Agent_sdk.Hooks.hooks =
@@ -664,7 +664,7 @@ let destructive_guard
         Agent_sdk.Hooks.Continue
       else
         let t0 = Time_compat.now () in
-        let keeper_name = (!meta_ref).Keeper_types.name in
+        let keeper_name = (!meta_ref).name in
         let cmd = extract_command_from_input input in
         (match Eval_gate.detect_destructive cmd with
          | None -> Agent_sdk.Hooks.Continue
@@ -704,7 +704,7 @@ let destructive_guard
     confirm threshold. Relies on an approval callback wired into the
     agent Builder to resolve the decision. *)
 let governance_approval_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
   : Agent_sdk.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
@@ -712,7 +712,7 @@ let governance_approval_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       let governance_level = Env_config_core.governance_level () in
       let risk = Governance_pipeline.assess_risk ~tool_name ~input in
       let needs_approval =
@@ -750,7 +750,7 @@ let governance_approval_guard
       timing -> custom -> streak -> deny -> cost -> destructive ->
       governance_approval *)
 let build_chain
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(tool_start_time : float ref)
     ~(streak_state : streak_state)
     ~(streak_threshold : int)

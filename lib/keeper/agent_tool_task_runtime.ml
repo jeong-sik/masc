@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
@@ -337,7 +339,7 @@ let sync_keeper_meta_current_task
     in
     Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
     (match
-       write_meta_with_merge ~merge:merge_current_task_id config updated_meta
+       Keeper_meta_store.write_meta_with_merge ~merge:merge_current_task_id config updated_meta
      with
      | Ok () -> ()
      | Error msg ->

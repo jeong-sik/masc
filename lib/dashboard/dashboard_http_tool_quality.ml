@@ -37,8 +37,8 @@ let normalize_failure_text (text : string) : string =
   | None -> trimmed
 
 let classify_process_status (json : Yojson.Safe.t) : string option =
-  match Yojson.Safe.Util.member "status" json with
-  | `Assoc _ as status ->
+  match Json_util.assoc_member_opt "status" json with
+  | Some (`Assoc _ as status) ->
     let kind = Safe_ops.json_string_opt "kind" status |> Option.value ~default:"unknown" in
     let op = Safe_ops.json_string_opt "op" json |> Option.value ~default:"tool" in
     begin match kind with
@@ -78,7 +78,7 @@ let classify_failure_output (output : string) : string =
       let failure_class =
         Safe_ops.json_string_opt "failure_class" j |> Option.map String.trim
       in
-      let diagnosis = Yojson.Safe.Util.member "diagnosis" j in
+      let diagnosis = Option.value ~default:`Null (Json_util.assoc_member_opt "diagnosis" j) in
       let diagnosis_rule =
         Safe_ops.json_string_opt "rule_id" diagnosis |> Option.map String.trim
       in
@@ -125,7 +125,7 @@ let cascade_bucket_key record =
   match Safe_ops.json_string_opt "cascade_profile" record with
   | Some value when String.trim value <> "" -> value
   | _ ->
-    let runtime_contract = Yojson.Safe.Util.member "runtime_contract" record in
+    let runtime_contract = Option.value ~default:`Null (Json_util.assoc_member_opt "runtime_contract" record) in
     (match Safe_ops.json_string_opt "cascade_profile" runtime_contract with
      | Some value when String.trim value <> "" -> value
      | _ -> "runtime")

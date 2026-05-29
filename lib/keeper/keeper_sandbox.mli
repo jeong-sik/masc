@@ -58,21 +58,21 @@ val host_root_abs_of_config_agent :
 (** [host_root_rel_of_profile sandbox_profile name] returns the
     backend-scoped relative sandbox root for the given profile/name. *)
 val host_root_rel_of_profile :
-  Keeper_types.sandbox_profile ->
+  Keeper_types_profile_sandbox.sandbox_profile ->
   string ->
   string
 
 (** [host_root_rel_of_meta ~meta] returns the backend-scoped relative
     sandbox root for [meta]. *)
 val host_root_rel_of_meta :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string
 
 (** [host_root_abs_of_meta ~config meta] returns the absolute
     backend-scoped sandbox root for [meta]. *)
 val host_root_abs_of_meta :
   config:Coord.config ->
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   string
 
 (** [container_root name] returns the in-container path used by the
@@ -101,7 +101,7 @@ val host_path_of_visible_path :
     exist there. *)
 val keeper_visible_root_abs_of_meta :
   config:Coord.config ->
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   string
 
 (** {1 Construction} *)
@@ -110,7 +110,7 @@ val keeper_visible_root_abs_of_meta :
     keeper meta entry. Backend is chosen from [meta.sandbox_profile]. *)
 val of_meta :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   t
 
 (** {1 Access control hints} *)
@@ -118,12 +118,12 @@ val of_meta :
 (** Relative roots that tools may touch inside [meta]'s backend-scoped
     sandbox. Currently a single-element list. *)
 val allowed_path_roots_of_meta :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string list
 
 (** Single backend-scoped relative root for [meta]. *)
 val allowed_root_rel_of_meta :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string
 
 (** [keeper_visible_root_abs t] is the absolute path the keeper LLM

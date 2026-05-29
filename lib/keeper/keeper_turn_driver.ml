@@ -123,16 +123,15 @@ let run_named
   in
   (match
      ( named_resolution.configured_labels_result,
-       named_resolution.candidate_cfgs_result,
-       named_resolution.tiered_providers_result )
+       named_resolution.candidate_cfgs_result )
    with
-   | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
+   | Error detail, _ | _, Error detail ->
        Log.Misc.error "cascade %s: %s" cascade_name detail;
        Error (cascade_catalog_error_to_sdk_error detail)
-   | Ok configured_labels, Ok candidate_cfgs, Ok tiered_providers ->
+   | Ok configured_labels, Ok candidate_cfgs ->
   let original_candidate_cfgs = candidate_cfgs in
   let original_candidates =
-    runtime_candidates_of_providers tiered_providers original_candidate_cfgs
+    runtime_candidates_of_providers original_candidate_cfgs
   in
   let required_capability_profile =
     Keeper_cascade_profile.required_capability_profile_of_cascade_name cascade_name
@@ -153,7 +152,7 @@ let run_named
   let original_candidate_count = List.length original_candidate_cfgs in
   let tool_filtered_candidate_count = List.length tool_filtered_candidate_cfgs in
   let tool_filtered_candidates =
-    runtime_candidates_of_providers tiered_providers tool_filtered_candidate_cfgs
+    runtime_candidates_of_providers tool_filtered_candidate_cfgs
   in
   let required_lane_filtered_candidates, required_lane_provider_rejections =
     match runtime_manifest_required_tool_names with
@@ -504,7 +503,7 @@ let run_named
           Cascade_exhausted
             {
               cascade_name = error_cascade_name;
-              reason = Keeper_types.No_providers_available;
+              reason = Keeper_meta_contract.No_providers_available;
             }
       in
       (match runtime_manifest_context, runtime_manifest_append with
@@ -807,7 +806,7 @@ let run_named
          (Cascade_exhausted
             {
               cascade_name = error_cascade_name;
-              reason = Keeper_types.Candidates_filtered_after_cycles;
+              reason = Keeper_meta_contract.Candidates_filtered_after_cycles;
             }))
   in
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =

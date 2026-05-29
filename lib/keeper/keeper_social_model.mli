@@ -63,9 +63,9 @@ type accountability_claim = {
 val speech_act_to_string : speech_act -> string
 val delivery_surface_to_string : delivery_surface -> string
 val delivery_surface_view_of_meta :
-  Keeper_types.keeper_meta -> delivery_surface option
+  Keeper_meta_contract.keeper_meta -> delivery_surface option
 val delivery_surface_view_source_of_meta :
-  Keeper_types.keeper_meta -> string option
+  Keeper_meta_contract.keeper_meta -> string option
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
 val all_model_ids : model_id list
@@ -74,12 +74,12 @@ val is_known_social_model : string -> bool
 val fallback_social_model : string -> string option
 val normalize_social_model : string -> string
 val transition_reason_to_string : transition_reason -> string
-val previous_state_of_meta : Keeper_types.keeper_meta -> social_state option
+val previous_state_of_meta : Keeper_meta_contract.keeper_meta -> social_state option
 val extract_accountability_claim :
   Keeper_agent_run.run_result -> accountability_claim option
 
 val derive_failure_state :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   previous_state:social_state option ->
   is_auto_recoverable:bool ->
@@ -88,7 +88,7 @@ val derive_failure_state :
   social_state * transition_reason
 
 val apply_to_result :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   previous_state:social_state option ->
   Keeper_agent_run.run_result ->

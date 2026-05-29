@@ -104,8 +104,8 @@ let runtime_lens_text_contains text needle =
   string_contains ~needle text
 
 let runtime_lens_call_has_docker_proof json output_opt text =
-  json_string_member_opt "sandbox_profile" json = Some "docker"
-  || json_string_member_opt "sandbox_profile" (tool_call_runtime_contract json)
+  Json_util.get_string json "sandbox_profile" = Some "docker"
+  || Json_util.get_string (tool_call_runtime_contract json) "sandbox_profile"
      = Some "docker"
   || runtime_lens_text_contains text "\"sandbox_profile\":\"docker\""
   || runtime_lens_text_contains text "\"via\":\"docker\""
@@ -143,7 +143,7 @@ let runtime_lens_call_has_repo_cli_identity output_opt text =
 
 let runtime_lens_collect_profile acc json =
   let add_from table field source =
-    match json_string_member_opt field source with
+    match Json_util.get_string source field with
     | Some value -> runtime_lens_set_add table value
     | None -> ()
   in
@@ -155,9 +155,9 @@ let runtime_lens_collect_profile acc json =
 let runtime_lens_accumulate_tool_proof acc json =
   acc.matched_tool_call_count <- acc.matched_tool_call_count + 1;
   runtime_lens_update_latest_ts acc json;
-  let tool = Option.value (json_string_member_opt "tool" json) ~default:"unknown_tool" in
+  let tool = Option.value (Json_util.get_string json "tool") ~default:"unknown_tool" in
   runtime_lens_set_add acc.tools tool;
-  if json_bool_member_opt "success" json = Some true then (
+  if Json_util.get_bool json "success" = Some true then (
     acc.successful_tool_call_count <- acc.successful_tool_call_count + 1;
     runtime_lens_set_add acc.successful_tools tool)
   else (

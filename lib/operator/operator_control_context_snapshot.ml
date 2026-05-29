@@ -8,7 +8,7 @@
    RFC threads the budget through, these call sites become real computations
    again. *)
 
-let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
+let compute_context_ratio (meta : Keeper_meta_contract.keeper_meta) : float option =
   let _ = meta in
   None
 ;;
@@ -84,7 +84,7 @@ let latest_keeper_context_snapshot_from_files config keeper_name =
      | [] -> None)
 ;;
 
-let fallback_keeper_context_snapshot (meta : Keeper_types.keeper_meta) =
+let fallback_keeper_context_snapshot (meta : Keeper_meta_contract.keeper_meta) =
   (* context_max / context_source stay [None] because the provider-side budget
      is not yet plumbed through meta (see top-of-file note). *)
   { context_ratio = compute_context_ratio meta
@@ -97,7 +97,7 @@ let fallback_keeper_context_snapshot (meta : Keeper_types.keeper_meta) =
   }
 ;;
 
-let keeper_context_snapshot_of_meta config (meta : Keeper_types.keeper_meta) =
+let keeper_context_snapshot_of_meta config (meta : Keeper_meta_contract.keeper_meta) =
   match latest_keeper_context_snapshot_from_files config meta.name with
   | Some snapshot -> snapshot
   | None -> fallback_keeper_context_snapshot meta
@@ -117,6 +117,6 @@ let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
         (fun value -> `Int value)
         snapshot.context_max )
   ; ( "context_source"
-    , Operator_pending_confirm.string_option_to_json snapshot.context_source )
+    , Json_util.string_opt_to_json snapshot.context_source )
   ]
 ;;

@@ -33,24 +33,38 @@ env  >  runtime TOML  >  field defaults
 
 ## Per-sidecar required/unique fields
 
-### Discord (`sidecars/discord-bot/src/config.py`)
+### Discord (in-process gateway — RFC-0203 §Phase 3)
 
-| Field | Env alias | Type | Required | Notes |
-|---|---|---|---|---|
-| `discord_bot_token` | `DISCORD_BOT_TOKEN` | str | **yes** | Developer Portal → Bot → Reset Token. |
-| `discord_keeper_map` | `DISCORD_KEEPER_MAP` | JSON str | no (default `{}`) | `{"<channel_id>": "<keeper_name>"}` — startup-only mapping; runtime edits go through `/api/v1/gate/connector/bind`. |
-| `discord_admin_role_id` | `DISCORD_ADMIN_ROLE_ID` | str | no | role allowed to use admin commands. |
-| `discord_binding_audit_path` | `DISCORD_BINDING_AUDIT_PATH` | path | no | append-only audit log (JSONL). |
-| `discord_names_path` | `DISCORD_NAMES_PATH` | path | no | guild/channel id→name side-map, written every `STATUS_HEARTBEAT_SEC`. |
-| `status_heartbeat_sec` | `STATUS_HEARTBEAT_SEC` | int | no (10) | |
-| `gate_max_retries` | `GATE_MAX_RETRIES` | int | no (2) | Discord-only; others have no retry knob. |
+The Discord connector runs **inside the server process**, not as an
+external sidecar (`sidecars/discord-bot/` was deleted in #19393).
+Module: `lib/server/server_discord_in_process_gateway.{ml,mli}` plus
+the gate-state extension in `lib/gate/channel_gate_discord_state.{ml,mli}`.
+
+| Env var | Required | Notes |
+|---|---|---|
+| `DISCORD_BOT_TOKEN` | **yes** | Developer Portal → Bot → Reset Token. Read at every `send_message` call, so token rotation does not require a server restart. If unset the gateway logs a warning and skips startup; the rest of the server boots normally. |
+| `MASC_DISCORD_TRIGGER_POLICY` | no (default `mention_only`) | One of `mention_only`, `user_only:<discord_user_id>`, `all`. Closed sum; unknown values fall back to `mention_only`. |
+
+Channel→keeper bindings live where they always did:
+`Channel_gate_discord_state.bind` / `unbind` write to
+`.gate/runtime/discord/bindings.json` (overridable via
+`MASC_DISCORD_BINDING_STORE_PATH`). The HTTP routes
+`/api/v1/gate/connector/bind?name=discord` and
+`/api/v1/gate/connector/unbind?name=discord` remain functional and
+are how the dashboard mutates bindings.
+
+The pre-cutover env vars `DISCORD_KEEPER_MAP`, `DISCORD_ADMIN_ROLE_ID`,
+`DISCORD_BINDING_AUDIT_PATH`, `DISCORD_NAMES_PATH`,
+`STATUS_HEARTBEAT_SEC`, `GATE_MAX_RETRIES` were sidecar-only and
+no longer apply.
 
 Discord-specific setup (cannot be driven from dashboard — operator must do):
 
 1. https://discord.com/developers/applications → New Application.
-2. Bot tab → Reset Token → paste into dashboard field.
-3. Bot tab → enable **Message Content Intent**.
+2. Bot tab → Reset Token → paste into shell env as `DISCORD_BOT_TOKEN`.
+3. Bot tab → enable **Message Content Intent** (required for `GUILD_MESSAGES`/`MESSAGE_CONTENT` intents).
 4. OAuth2 URL Generator → `bot` scope, permissions: Send Messages, Embed Links, Read Message History → invite.
+5. Restart the server so the new token is picked up at the next gateway connect.
 
 ### iMessage (`sidecars/imessage-bot/src/config.py`)
 

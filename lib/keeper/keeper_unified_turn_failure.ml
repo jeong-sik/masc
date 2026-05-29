@@ -4,8 +4,8 @@ module EC = Keeper_error_classify
 
 let record_failure_and_maybe_escalate
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
-      ~(updated_meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(updated_meta : Keeper_meta_contract.keeper_meta)
       ~is_auto_recoverable
       ~err
       ~error_text

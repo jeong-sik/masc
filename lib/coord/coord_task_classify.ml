@@ -281,7 +281,13 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
           ; "required_tools", `List (List.map (fun name -> `String name) required_tools)
           ; "ts", `String (now_iso ())
           ]);
-    Ok ()
+    Error
+      (Masc_domain.Task
+         (Masc_domain.Task_error.InvalidState
+            (Printf.sprintf
+               "Workflow rejected: task %s requires tool(s) but %s has no registered tool surface"
+               task.id
+               agent_name)))
   | _ :: _, Some allowed ->
     let missing = missing_required_tools ~allowed required_tools in
     if missing = []

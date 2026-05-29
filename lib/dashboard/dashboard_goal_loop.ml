@@ -40,7 +40,7 @@ let fallback_status_json ~overall_status ~source ~reason =
   `Assoc
     [
       ("schema_version", `Int 1);
-      ("generated_at", `String (Keeper_types.now_iso ()));
+      ("generated_at", `String (Keeper_meta_contract.now_iso ()));
       ("loop_iteration", `String "unknown");
       ("overall_status", `String overall_status);
       ( "phases",

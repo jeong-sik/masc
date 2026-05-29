@@ -2,7 +2,7 @@
 
 val append_decision_record :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
   ?semaphore_wait_ms:int ->

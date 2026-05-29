@@ -586,6 +586,82 @@ let test_policy_all_emits_messages_and_reactions () =
     (has_emit_event react_effects)
 
 (* ---------------------------------------------------------------- *)
+(* RFC-0203 Phase 3 follow-up — self-skip guard. Bot-authored events *)
+(* are suppressed regardless of trigger policy so a misconfigured   *)
+(* User_only:<bot_id> or All policy can't loop the bot into itself. *)
+(* ---------------------------------------------------------------- *)
+
+let test_self_message_suppressed_under_all_policy () =
+  let m = connected_with_policy ~policy:S.All ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"SELF1" ~channel_id:"C1" ~author_id:"BOT" ~content:"echo"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:7))
+  in
+  check bool
+    "bot's own message suppressed even under All policy"
+    false (has_emit_event effects)
+
+let test_self_message_suppressed_when_user_only_targets_bot_id () =
+  (* Operator footgun: pasted bot's own id as the user_only target.
+     Without the self-skip guard this would loop. *)
+  let m =
+    connected_with_policy
+      ~policy:(S.User_only "BOT") ~bot_user_id:"BOT"
+  in
+  let payload =
+    message_create_payload
+      ~id:"SELF2" ~channel_id:"C1" ~author_id:"BOT" ~content:"loop?"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:8))
+  in
+  check bool
+    "self-message suppressed even when User_only id collides with bot_user_id"
+    false (has_emit_event effects)
+
+let test_self_reaction_suppressed_under_all_policy () =
+  let m = connected_with_policy ~policy:S.All ~bot_user_id:"BOT" in
+  let payload =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"SELF1" ~user_id:"BOT" ~emoji_name:"✅"
+      ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload ~seq:9))
+  in
+  check bool
+    "bot's own reaction suppressed even under All policy"
+    false (has_emit_event effects)
+
+let test_non_self_message_still_emitted_under_all () =
+  (* Regression guard: self-skip must not break the non-self path. *)
+  let m = connected_with_policy ~policy:S.All ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"OTHER1" ~channel_id:"C1" ~author_id:"VINCENT" ~content:"hi"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:10))
+  in
+  check bool
+    "non-self message still emits under All policy"
+    true (has_emit_event effects)
+
+(* ---------------------------------------------------------------- *)
 (* Phase 1.4 — reconnect / resume arms                              *)
 (* ---------------------------------------------------------------- *)
 
@@ -868,6 +944,17 @@ let () =
             `Quick test_policy_user_only_reaction_matching_reactor_passes
         ; test_case "all + any message + any reaction => both Emit_event"
             `Quick test_policy_all_emits_messages_and_reactions
+        ] )
+    ; ( "self-skip guard"
+      , [ test_case "self message suppressed under All" `Quick
+            test_self_message_suppressed_under_all_policy
+        ; test_case "self message suppressed when User_only id == bot id"
+            `Quick
+            test_self_message_suppressed_when_user_only_targets_bot_id
+        ; test_case "self reaction suppressed under All" `Quick
+            test_self_reaction_suppressed_under_all_policy
+        ; test_case "non-self message still emits under All (regression)"
+            `Quick test_non_self_message_still_emitted_under_all
         ] )
     ; ( "reconnect / resume"
       , [ test_case

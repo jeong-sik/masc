@@ -4,9 +4,12 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_keepalive
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in

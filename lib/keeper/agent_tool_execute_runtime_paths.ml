@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let replace_all_substrings ~needle ~replacement text =
   let needle_len = String.length needle in

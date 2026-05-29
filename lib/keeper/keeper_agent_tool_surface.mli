@@ -266,20 +266,20 @@ val preferred_tool_choice_for_required_tool_names :
 (** Find the active task ID a keeper currently owns. *)
 val owned_active_task_id_for_meta :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
 
 (** Field-level merge for [write_meta_with_merge]. *)
 val merge_current_task_id :
-  latest:Keeper_types.keeper_meta ->
-  caller:Keeper_types.keeper_meta ->
-  Keeper_types.keeper_meta
+  latest:Keeper_meta_contract.keeper_meta ->
+  caller:Keeper_meta_contract.keeper_meta ->
+  Keeper_meta_contract.keeper_meta
 
 (** Reconcile [meta.current_task_id] with the backlog. *)
 val sync_current_task_id_from_backlog :
   config:Coord.config ->
-  Keeper_types.keeper_meta ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta ->
+  Keeper_meta_contract.keeper_meta
 
 (** Best-effort reconciliation for callers that only know an agent name.
     No-ops for non-keeper agents. *)

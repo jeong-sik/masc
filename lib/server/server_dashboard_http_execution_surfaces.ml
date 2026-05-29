@@ -494,9 +494,9 @@ let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
 ;;
 
 let running_keeper_names (config : Coord.config) =
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
   |> List.filter_map (fun name ->
-    match Keeper_types.read_meta config name with
+    match Keeper_meta_store.read_meta config name with
     | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->
       Some name
     | _ -> None)

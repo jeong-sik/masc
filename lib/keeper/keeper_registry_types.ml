@@ -4,6 +4,8 @@
     See keeper_registry_types.mli for rationale and contract. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 module StringMap = Set_util.StringMap
 
 (* Failure reason types and kill-class re-exports extracted to

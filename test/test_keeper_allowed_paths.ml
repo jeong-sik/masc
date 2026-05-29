@@ -1,6 +1,8 @@
 open Alcotest
 
 module KAP = Masc_mcp.Keeper_alerting_path
+module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
+module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module KT = Masc_mcp.Keeper_types
 module KTU = Masc_mcp.Keeper_turn_up_args
 let make_meta ?(allowed_paths = []) ~name () =
@@ -16,7 +18,7 @@ let make_meta ?(allowed_paths = []) ~name () =
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
-  match KT.meta_of_json json with
+  match Keeper_meta_json_parse.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
@@ -104,8 +106,8 @@ let test_validate_rejects_star_wildcard () =
         ~config
         ~keeper_name:"keeper"
         ~repo_cli_identity:None
-        ~sandbox_profile:KT.Local
-        ~network_mode:KT.Network_inherit
+        ~sandbox_profile:Keeper_types_profile_sandbox.Local
+        ~network_mode:Keeper_types_profile_sandbox.Network_inherit
         ~allowed_paths:["*"]
     with
     | Ok () -> fail "expected wildcard rejection"
@@ -121,8 +123,8 @@ let test_validate_local_rejects_network_none () =
         ~config
         ~keeper_name:"keeper"
         ~repo_cli_identity:None
-        ~sandbox_profile:KT.Local
-        ~network_mode:KT.Network_none
+        ~sandbox_profile:Keeper_types_profile_sandbox.Local
+        ~network_mode:Keeper_types_profile_sandbox.Network_none
         ~allowed_paths:[]
     with
     | Ok () -> fail "expected local network_mode rejection"
@@ -135,7 +137,7 @@ let test_validate_docker_allows_private_root_paths () =
   with_temp_config (fun config ->
     let allowed =
       [
-        Masc_mcp.Keeper_turn_up_args.private_workspace_root_rel ~sandbox_profile:KT.Docker
+        Masc_mcp.Keeper_turn_up_args.private_workspace_root_rel ~sandbox_profile:Keeper_types_profile_sandbox.Docker
           "keeper";
       ]
     in
@@ -144,8 +146,8 @@ let test_validate_docker_allows_private_root_paths () =
         ~config
         ~keeper_name:"keeper"
         ~repo_cli_identity:None
-        ~sandbox_profile:KT.Docker
-        ~network_mode:KT.Network_none
+        ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+        ~network_mode:Keeper_types_profile_sandbox.Network_none
         ~allowed_paths:allowed
     with
     | Ok () -> ()
@@ -158,8 +160,8 @@ let test_validate_docker_rejects_paths_outside_private_root () =
         ~config
         ~keeper_name:"keeper"
         ~repo_cli_identity:None
-        ~sandbox_profile:KT.Docker
-        ~network_mode:KT.Network_inherit
+        ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+        ~network_mode:Keeper_types_profile_sandbox.Network_inherit
         ~allowed_paths:["workspace/outside"]
     with
     | Ok () -> fail "expected docker path rejection"

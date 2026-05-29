@@ -131,7 +131,6 @@ class AutoFix:
 |------|--------|-----------|
 | OCaml 서버 | `masc-mcp doctor config` — 베이스 경로 / 활성 config root | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
 | OCaml 서버 | `masc-mcp doctor auth` — auth mode / admin bearer readiness / role mismatch / Agent-Code MCP bearer env + config pipeline | 운영 중 (`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`) |
-| Discord sidecar | `masc-mcp doctor sidecar discord` ↔ `python -m src doctor` | 운영 중 |
 | Slack sidecar | `masc-mcp doctor sidecar slack` ↔ `python -m src doctor` | 운영 중 |
 | Telegram sidecar | `masc-mcp doctor sidecar telegram` ↔ `python -m src doctor` | 운영 중 |
 | iMessage sidecar | `masc-mcp doctor sidecar imessage` ↔ `python -m src doctor` | 운영 중 |
@@ -151,7 +150,8 @@ masc-mcp doctor sidecar <name> --json
 masc-mcp doctor all                 # config + 5 sidecar 연쇄 실행 + aggregate 요약
 ```
 
-지원 sidecar 이름: `discord`, `slack`, `telegram`, `imessage`, `cli`.
+지원 sidecar 이름: `slack`, `telegram`, `imessage`, `cli`.
+Discord 는 RFC-0203 §Phase 3 이후 in-process gateway 라 sidecar dispatch 대상 아님.
 
 `doctor all` 은 현재 `config + registered sidecars` aggregate 만 포함한다.
 `auth` 는 로컬 operator 증상(`cannot CanAdmin`, dev-token bootstrap, worker/admin role drift)

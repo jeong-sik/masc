@@ -4,6 +4,8 @@
     [Keeper_registry_setup] (godfile decomp). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_registry_setup
 
@@ -535,7 +537,7 @@ let tool_usage_of ~base_path name =
   | None -> []
   | Some entry ->
     StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
-    |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+    |> List.sort (fun (_, a) (_, b) -> Int.compare b.Keeper_types.count a.Keeper_types.count)
 ;;
 
 (* Lookup API (find_by_name / find_by_agent_name / find_by_id /

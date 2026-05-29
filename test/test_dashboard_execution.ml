@@ -467,7 +467,7 @@ let append_execution_receipt
     ?(required_tool_candidates = [])
     config ~keeper_name =
   let meta =
-    match Lib.Keeper_types.read_meta config keeper_name with
+    match Lib.Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> meta
     | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
     | Error err -> fail ("read_meta failed for receipt: " ^ err)
@@ -517,7 +517,7 @@ let append_execution_receipt
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =
-        Cascade_name.of_string_exn (Lib.Keeper_types.cascade_name_of_meta meta);
+        Cascade_name.of_string_exn (Lib.Keeper_meta_contract.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
@@ -569,7 +569,7 @@ let append_execution_receipt
   let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
   let base_dir =
     Filename.concat
-      (Lib.Keeper_types.keeper_dir config)
+      (Lib.Keeper_fs.keeper_dir config)
       (keeper_name ^ "/execution-receipts")
   in
   let month_dir = Filename.concat base_dir month in

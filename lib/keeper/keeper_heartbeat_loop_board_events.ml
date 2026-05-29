@@ -9,6 +9,8 @@
     (phase="board_count_query") and treated as zero pending events. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let collect_keepalive_board_events
       ~(ctx : _ context)

@@ -116,7 +116,7 @@ let run
      Log.Keeper.warn
        "keeper:%s cascade=%s compaction failed: %s"
        meta.name
-       (Keeper_types.cascade_name_of_meta meta)
+       (Keeper_meta_contract.cascade_name_of_meta meta)
        (Printexc.to_string exn));
 
   (* Post-turn quality metrics — goal alignment + memory recall.

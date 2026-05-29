@@ -32,9 +32,9 @@ let review_decision_to_yojson (entry : review_decision) =
       ("reason", `String entry.reason);
       ("at", `String entry.at);
       ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
+      ("target_id", Json_util.string_opt_to_json entry.target_id);
       ( "recommended_action_type",
-        string_option_to_json entry.recommended_action_type );
+        Json_util.string_opt_to_json entry.recommended_action_type );
     ]
 
 let review_decision_of_yojson json =

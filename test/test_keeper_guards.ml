@@ -18,15 +18,15 @@ module P = Masc_mcp.Prometheus
 (* ----------------------------------------------------------------- *)
 
 (** Build a minimal keeper_meta ref for guards that only read [name]. *)
-let make_meta_ref (name : string) : Masc_mcp.Keeper_types.keeper_meta ref =
+let make_meta_ref (name : string) : Masc_mcp.Keeper_meta_contract.keeper_meta ref =
   let json : Yojson.Safe.t = `Assoc [
     ("name", `String name);
     ("agent_name", `String name);
     ("trace_id", `String "keeper-guards-test");
     ("tool_access",
-      Masc_mcp.Keeper_types.tool_access_to_json
-        (Masc_mcp.Keeper_types.Preset
-           { preset = Masc_mcp.Keeper_types.Full; also_allow = [] }));
+      Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+        (Masc_mcp.Keeper_meta_tool_access.Preset
+           { preset = Masc_mcp.Keeper_meta_tool_access.Full; also_allow = [] }));
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> ref meta

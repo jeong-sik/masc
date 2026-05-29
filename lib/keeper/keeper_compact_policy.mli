@@ -49,7 +49,7 @@ val decide_compaction
 
 (** Project [meta] to its [(ratio_gate, message_gate, token_gate)]
     tuple. *)
-val compaction_policy_of_keeper : Keeper_types.keeper_meta -> float * int * int
+val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
 
 (** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the compaction
     gates and either returns [ctx] unchanged or applies the OAS
@@ -60,7 +60,7 @@ val compaction_policy_of_keeper : Keeper_types.keeper_meta -> float * int * int
     - [Some trigger] when compaction was applied, [None] otherwise;
     - a typed decision tag describing the gate outcome. *)
 val compact_if_needed_typed
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> now_ts:float
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context
@@ -72,7 +72,7 @@ val compact_if_needed_typed
     in the second position is the human-readable rendering of the
     {!Compaction_trigger.t} (via {!Compaction_trigger.to_human}). *)
 val compact_if_needed
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> now_ts:float
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context * string option * string

@@ -34,7 +34,25 @@ val classify : undecided t -> decided decided_ir
 (** Run the unified risk classifier over the wrapped IR.
     Uses [Exec_policy_mutation_classifier] for bash operations,
     then repo-hosting CLI subcommand tables for ["gh"] command operations,
-    defaulting to R0. *)
+    defaulting to R0.
+
+    [Simple] commands are lowered to the [Shell_ir_typed] GADT and
+    classified by [risk_of_typed]; [Pipeline]s and the [Generic] escape
+    hatch fall back to the word-list classifier [classify_words]. *)
+
+val risk_of_typed : Shell_ir_typed.wrapped -> risk_class
+(** Risk opinion implied by the typed command shape alone (RFC-0160 §S1)
+    — the first decision path that reads the [Shell_ir_typed] GADT.
+    Exhaustive over [Shell_ir_typed_types.command]: a new constructor
+    forces a compile error here. [classify] combines this with
+    [classify_words] by taking the stricter of the two, so [Gh]/[Generic]
+    may return a lower opinion here than the word-list floor supplies. *)
+
+val classify_words : string list -> risk_class
+(** Word-list risk classifier — the pre-GADT decision path, retained as
+    the safety floor in [classify] for [Generic]/[Pipeline] and for
+    risk-bearing tokens the typed model does not yet capture (gh
+    -X METHOD / graphql body). *)
 
 val is_write_operation : string list -> bool
 (** [true] when the flattened word list indicates a write-level operation:

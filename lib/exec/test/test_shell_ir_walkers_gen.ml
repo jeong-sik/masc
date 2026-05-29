@@ -447,6 +447,19 @@ let test_flag_equals_parsing () =
    | W (Curl { method_ = `POST; body = Some "hello"; url = "http://x"; _ }) -> ()
    | w ->
      Alcotest.failf "Curl --flag=value: expected POST+body, got %a" pp w);
+  (* Curl: --header=Content-Type:application/json *)
+  let curl_h =
+    of_simple
+      { (base "curl") with
+        args =
+          [ lit "--header=Content-Type:application/json"; lit "-X"; lit "POST"; lit "http://x" ]
+      }
+  in
+  (match curl_h with
+   | W (Curl { headers = Some [ ("Content-Type", "application/json") ]; method_ = `POST; _ }) ->
+     ()
+   | w ->
+     Alcotest.failf "Curl --header=value: expected header parsed, got %a" pp w);
   (* Git_log: --max-count=5 *)
   let gl =
     of_simple { (base "git") with args = [ lit "log"; lit "--max-count=5"; lit "--oneline" ] }
@@ -510,7 +523,15 @@ let test_flag_equals_parsing () =
   (match sort with
    | W (Sort { numeric = true; key = Some 3; file = Some "file.txt"; _ }) -> ()
    | w ->
-     Alcotest.failf "Sort --key=3: expected key=3, got %a" pp w)
+     Alcotest.failf "Sort --key=3: expected key=3, got %a" pp w);
+  (* Find: -maxdepth=3 *)
+  let find_md =
+    of_simple { (base "find") with args = [ lit "/tmp"; lit "-maxdepth=3"; lit "-name"; lit "*.ml" ] }
+  in
+  (match find_md with
+   | W (Find { path = "/tmp"; name = Some "*.ml"; maxdepth = Some 3; _ }) -> ()
+   | w ->
+     Alcotest.failf "Find -maxdepth=3: expected maxdepth=3, got %a" pp w)
 ;;
 
 (* POSIX -- end-of-options handling *)
@@ -540,6 +561,55 @@ let test_posix_end_of_options () =
   (match grep with
    | W (Grep { pattern = "pattern"; path = Some "-file"; recursive = true; _ }) -> ()
    | w -> Alcotest.failf "Grep --: expected pattern+path, got %a" pp w);
+  (* Grep: -e -dashed-pattern (explicit pattern flag) *)
+  let grep_e =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "-e"; lit "-dashed-pattern"; lit "." ] }
+  in
+  (match grep_e with
+   | W (Grep { pattern = "-dashed-pattern"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep -e: expected pattern=-dashed-pattern, got %a" pp w);
+  (* Grep: --color=auto pattern file (--flag=VALUE form skipped) *)
+  let grep_color =
+    of_simple { (base "grep") with args = [ lit "--color=auto"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_color with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --color=auto: expected pattern=path, got %a" pp w);
+  (* Grep: -elongpattern file (combined -ePATTERN form, length>4 so no expansion) *)
+  let grep_epat =
+    of_simple { (base "grep") with args = [ lit "-elongpattern"; lit "file" ] }
+  in
+  (match grep_epat with
+   | W (Grep { pattern = "longpattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -ePATTERN: expected pattern=longpattern, got %a" pp w);
+  (* Grep: --include=*.ml pattern dir (--flag=VALUE form skipped, = present) *)
+  let grep_include_eq =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--include=*.ml"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_include_eq with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --include=VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: --include *.ml pattern dir (two-token value-consuming flag) *)
+  let grep_include_2tok =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--include"; lit "*.ml"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_include_2tok with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --include VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: --exclude *.log pattern dir (two-token value-consuming flag) *)
+  let grep_exclude =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--exclude"; lit "*.log"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_exclude with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --exclude VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: --exclude-dir .git pattern dir (two-token value-consuming flag) *)
+  let grep_excludedir =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--exclude-dir"; lit ".git"; lit "pattern"; lit "dir" ] }
+  in
+  (match grep_excludedir with
+   | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --exclude-dir VALUE: expected pattern=path, got %a" pp w);
   (* Find: -- /tmp -name "*.ml" *)
   let find =
     of_simple { (base "find") with args = [ lit "--"; lit "/tmp"; lit "-name"; lit "*.ml" ] }
@@ -602,7 +672,198 @@ let test_posix_end_of_options () =
   in
   (match df with
    | W (Df { path = Some "-mypath"; human_readable = true; _ }) -> ()
-   | w -> Alcotest.failf "Df --: expected path=-mypath human_readable=true, got %a" pp w)
+   | w -> Alcotest.failf "Df --: expected path=-mypath human_readable=true, got %a" pp w);
+  (* Cat: -- -myfile.txt *)
+  let cat =
+    of_simple { (base "cat") with args = [ lit "--"; lit "-myfile.txt" ] }
+  in
+  (match cat with
+   | W (Cat { path = "-myfile.txt" }) -> ()
+   | w -> Alcotest.failf "Cat --: expected path=-myfile.txt, got %a" pp w);
+  (* Ls: -la -- -hidden-dir *)
+  let ls =
+    of_simple { (base "ls") with args = [ lit "-la"; lit "--"; lit "-hidden-dir" ] }
+  in
+  (match ls with
+   | W (Ls { path = Some "-hidden-dir"; flags; _ }) ->
+     if not (List.mem `Long flags && List.mem `All flags)
+     then Alcotest.failf "Ls --: expected Long+All flags, got %a" pp ls
+   | w -> Alcotest.failf "Ls --: expected path=-hidden-dir, got %a" pp w);
+  (* Tr: -- 'a-z' 'A-Z' *)
+  let tr =
+    of_simple { (base "tr") with args = [ lit "-s"; lit "--"; lit "a-z"; lit "A-Z" ] }
+  in
+  (match tr with
+   | W (Tr { set1 = "a-z"; set2 = Some "A-Z"; squeeze = true; _ }) -> ()
+   | w -> Alcotest.failf "Tr --: expected set1=a-z set2=A-Z squeeze=true, got %a" pp w);
+  (* File: -- -myfile *)
+  let file =
+    of_simple { (base "file") with args = [ lit "--"; lit "-myfile" ] }
+  in
+  (match file with
+   | W (File { path = "-myfile"; _ }) -> ()
+   | w -> Alcotest.failf "File --: expected path=-myfile, got %a" pp w);
+  (* Diff: -- -file1.txt -file2.txt *)
+  let diff =
+    of_simple { (base "diff") with args = [ lit "-u"; lit "--"; lit "-file1.txt"; lit "-file2.txt" ] }
+  in
+  (match diff with
+   | W (Diff { file1 = "-file1.txt"; file2 = "-file2.txt"; unified = true; _ }) -> ()
+   | w -> Alcotest.failf "Diff --: expected file1=-file1.txt file2=-file2.txt unified=true, got %a" pp w);
+  (* Chmod: -- 755 -myfile *)
+  let chmod =
+    of_simple { (base "chmod") with args = [ lit "-R"; lit "--"; lit "755"; lit "-myfile" ] }
+  in
+  (match chmod with
+   | W (Chmod { mode = "755"; path = "-myfile"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Chmod --: expected mode=755 path=-myfile recursive=true, got %a" pp w);
+  (* Chown: -- user -myfile *)
+  let chown =
+    of_simple { (base "chown") with args = [ lit "-R"; lit "--"; lit "user"; lit "-myfile" ] }
+  in
+  (match chown with
+   | W (Chown { owner = "user"; path = "-myfile"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Chown --: expected owner=user path=-myfile recursive=true, got %a" pp w);
+  (* Mkdir: -- -newdir *)
+  let mkdir =
+    of_simple { (base "mkdir") with args = [ lit "-p"; lit "--"; lit "-newdir" ] }
+  in
+  (match mkdir with
+   | W (Mkdir { path = "-newdir"; parents = true; _ }) -> ()
+   | w -> Alcotest.failf "Mkdir --: expected path=-newdir parents=true, got %a" pp w);
+  (* Basename: -- -file.txt .txt *)
+  let basename =
+    of_simple { (base "basename") with args = [ lit "--"; lit "-file.txt"; lit ".txt" ] }
+  in
+  (match basename with
+   | W (Basename { path = "-file.txt"; suffix = Some ".txt"; _ }) -> ()
+   | w -> Alcotest.failf "Basename --: expected path=-file.txt suffix=.txt, got %a" pp w);
+  (* Dirname: -- -path/to/file *)
+  let dirname =
+    of_simple { (base "dirname") with args = [ lit "--"; lit "-path/to/file" ] }
+  in
+  (match dirname with
+   | W (Dirname { path = "-path/to/file"; _ }) -> ()
+   | w -> Alcotest.failf "Dirname --: expected path=-path/to/file, got %a" pp w);
+  (* Uniq: -c -- -duplicates.txt *)
+  let uniq =
+    of_simple { (base "uniq") with args = [ lit "-c"; lit "--"; lit "-duplicates.txt" ] }
+  in
+  (match uniq with
+   | W (Uniq { count = true; file = Some "-duplicates.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Uniq --: expected count=true file=-duplicates.txt, got %a" pp w);
+  (* Tar: -czf archive.tar.gz -- file1.txt file2.txt *)
+  let tar =
+    of_simple { (base "tar") with args = [ lit "-czf"; lit "archive.tar.gz"; lit "--"; lit "file1.txt"; lit "file2.txt" ] }
+  in
+  (match tar with
+   | W (Tar { action = `Create; compression = `Gzip; archive = "archive.tar.gz"; paths = [ "file1.txt"; "file2.txt" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --: expected Create Gzip archive.tar.gz paths=[file1.txt;file2.txt], got %a" pp w);
+  (* Tar: -x --file=archive.tar (equal-sign form) *)
+  let tar_file_eq =
+    of_simple { (base "tar") with args = [ lit "-x"; lit "--file=archive.tar" ] }
+  in
+  (match tar_file_eq with
+   | W (Tar { action = `Extract; archive = "archive.tar"; compression = `None; _ }) -> ()
+   | w -> Alcotest.failf "Tar --file=: expected Extract archive.tar, got %a" pp w);
+  (* Tar: -cfarchive.tar.gz --gzip src (combined -cf + --gzip long form) *)
+  let tar_gzip_long =
+    of_simple { (base "tar") with args = [ lit "-cfarchive.tar.gz"; lit "--gzip"; lit "src" ] }
+  in
+  (match tar_gzip_long with
+   | W (Tar { action = `Create; compression = `Gzip; archive = "archive.tar.gz"; paths = [ "src" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --gzip: expected Create Gzip archive.tar.gz, got %a" pp w);
+  (* Tar: -x --file archive.tar (two-token --file form) *)
+  let tar_file_two =
+    of_simple { (base "tar") with args = [ lit "-x"; lit "--file"; lit "archive.tar" ] }
+  in
+  (match tar_file_two with
+   | W (Tar { action = `Extract; archive = "archive.tar"; _ }) -> ()
+   | w -> Alcotest.failf "Tar --file: expected Extract archive.tar, got %a" pp w);
+  (* Make: -- install *)
+  let make =
+    of_simple { (base "make") with args = [ lit "--"; lit "install" ] }
+  in
+  (match make with
+   | W (Make { target = Some "install"; _ }) -> ()
+   | w -> Alcotest.failf "Make --: expected target=Some install, got %a" pp w);
+  (* Make: -- -target (dash-prefixed positional after --) *)
+  let make_dash =
+    of_simple { (base "make") with args = [ lit "-j"; lit "4"; lit "--"; lit "-target" ] }
+  in
+  (match make_dash with
+   | W (Make { target = Some "-target"; jobs = Some 4; _ }) -> ()
+   | w -> Alcotest.failf "Make -- -target: expected target=-target jobs=4, got %a" pp w);
+  (* Wget: -- https://example.com/file *)
+  let wget =
+    of_simple { (base "wget") with args = [ lit "--"; lit "https://example.com/file" ] }
+  in
+  (match wget with
+   | W (Wget { url = "https://example.com/file"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --: expected url=https://example.com/file, got %a" pp w);
+  (* Wget: -O out -- -file.txt (dash-prefixed positional after --) *)
+  let wget_dash =
+    of_simple { (base "wget") with args = [ lit "-O"; lit "out"; lit "--"; lit "-file.txt" ] }
+  in
+  (match wget_dash with
+   | W (Wget { url = "-file.txt"; output = Some "out"; _ }) -> ()
+   | w -> Alcotest.failf "Wget -- -file: expected url=-file.txt output=out, got %a" pp w);
+  (* Scp: -- -src/file -dest/file *)
+  let scp =
+    of_simple { (base "scp") with args = [ lit "-r"; lit "--"; lit "-src/file"; lit "-dest/file" ] }
+  in
+  (match scp with
+   | W (Scp { source = "-src/file"; dest = "-dest/file"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Scp --: expected source=-src/file dest=-dest/file recursive=true, got %a" pp w);
+  (* Scp: -P2222 src dst (combined port form) *)
+  let scp_p =
+    of_simple { (base "scp") with args = [ lit "-P2222"; lit "src"; lit "dst" ] }
+  in
+  (match scp_p with
+   | W (Scp { source = "src"; dest = "dst"; port = Some 2222; _ }) -> ()
+   | w -> Alcotest.failf "Scp -P2222: expected port=2222, got %a" pp w);
+  (* Ssh: -- -host echo hello *)
+  let ssh =
+    of_simple { (base "ssh") with args = [ lit "--"; lit "-host"; lit "echo"; lit "hello" ] }
+  in
+  (match ssh with
+   | W (Ssh { host = "-host"; command = Some "echo hello"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh --: expected host=-host command=echo hello, got %a" pp w);
+  (* Ssh: -p22 user@host (combined port form) *)
+  let ssh_p22 =
+    of_simple { (base "ssh") with args = [ lit "-p22"; lit "user@host"; lit "uptime" ] }
+  in
+  (match ssh_p22 with
+   | W (Ssh { host = "host"; user = Some "user"; port = Some 22; command = Some "uptime"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh -p22: expected port=22, got %a" pp w);
+  (* Sed: -- s/a/b/ -file.txt *)
+  let sed =
+    of_simple { (base "sed") with args = [ lit "-n"; lit "--"; lit "s/a/b/"; lit "-file.txt" ] }
+  in
+  (match sed with
+   | W (Sed { expression = "s/a/b/"; file = "-file.txt"; suppress_output = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed --: expected expr=s/a/b/ file=-file.txt suppress=true, got %a" pp w);
+  (* Rg: -i -- pattern -file.txt *)
+  let rg =
+    of_simple { (base "rg") with args = [ lit "-i"; lit "--"; lit "pattern"; lit "-file.txt" ] }
+  in
+  (match rg with
+   | W (Rg { pattern = "pattern"; path = Some "-file.txt"; case_sensitive = false; _ }) -> ()
+   | w -> Alcotest.failf "Rg --: expected pattern=path path=-file.txt case_sensitive=false, got %a" pp w);
+  (* Git_clone: --depth 1 -- -repo-name *)
+  let git_clone =
+    of_simple { (base "git") with args = [ lit "clone"; lit "--depth"; lit "1"; lit "--"; lit "-repo-name" ] }
+  in
+  (match git_clone with
+   | W (Git_clone { repo = "-repo-name"; depth = Some 1; _ }) -> ()
+   | w -> Alcotest.failf "Git_clone --: expected repo=-repo-name depth=1, got %a" pp w);
+  (* Curl: -L -- -url-path *)
+  let curl =
+    of_simple { (base "curl") with args = [ lit "-L"; lit "--"; lit "-url-path" ] }
+  in
+  (match curl with
+   | W (Curl { url = "-url-path"; follow_redirects = true; _ }) -> ()
+   | w -> Alcotest.failf "Curl --: expected url=-url-path follow_redirects=true, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)
@@ -639,6 +900,281 @@ let test_lines_equals_form () =
   (match head0 with
    | W (Head { lines = 0; _ }) -> ()
    | w -> Alcotest.failf "Head --lines=0: expected lines=0, got %a" pp w)
+;;
+
+(* --jobs=N and --jobs VALUE form for Make and Ninja *)
+let test_jobs_equals_form () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Make: --jobs=8 target *)
+  let make =
+    of_simple { (base "make") with args = [ lit "--jobs=8"; lit "all" ] }
+  in
+  (match make with
+   | W (Make { target = Some "all"; jobs = Some 8; _ }) -> ()
+   | w -> Alcotest.failf "Make --jobs=8: expected jobs=8, got %a" pp w);
+  (* Make: --jobs 4 target *)
+  let make2 =
+    of_simple { (base "make") with args = [ lit "--jobs"; lit "4"; lit "test" ] }
+  in
+  (match make2 with
+   | W (Make { target = Some "test"; jobs = Some 4; _ }) -> ()
+   | w -> Alcotest.failf "Make --jobs 4: expected jobs=4, got %a" pp w);
+  (* Ninja: --jobs=16 subcommand *)
+  let ninja =
+    of_simple { (base "ninja") with args = [ lit "--jobs=16"; lit "build" ] }
+  in
+  (match ninja with
+   | W (Ninja { subcommand = "build"; jobs = Some 16; _ }) -> ()
+   | w -> Alcotest.failf "Ninja --jobs=16: expected jobs=16, got %a" pp w);
+  (* Ninja: --jobs 2 subcommand *)
+  let ninja2 =
+    of_simple { (base "ninja") with args = [ lit "--jobs"; lit "2"; lit "test" ] }
+  in
+  (match ninja2 with
+   | W (Ninja { subcommand = "test"; jobs = Some 2; _ }) -> ()
+   | w -> Alcotest.failf "Ninja --jobs 2: expected jobs=2, got %a" pp w)
+;;
+
+(* Combined short-flag parsing: -rf → -r + -f *)
+let test_combined_short_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* rm -rf dir/ *)
+  let rm_rf =
+    of_simple { (base "rm") with args = [ lit "-rf"; lit "dir/" ] }
+  in
+  (match rm_rf with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -rf: expected recursive+force, got %a" pp w);
+  (* rm -fr dir/ *)
+  let rm_fr =
+    of_simple { (base "rm") with args = [ lit "-fr"; lit "dir/" ] }
+  in
+  (match rm_fr with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -fr: expected recursive+force, got %a" pp w);
+  (* rm -rfr dir/ (redundant r) *)
+  let rm_rfr =
+    of_simple { (base "rm") with args = [ lit "-rfr"; lit "dir/" ] }
+  in
+  (match rm_rfr with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -rfr: expected recursive+force, got %a" pp w);
+  (* rm -R dir/ (uppercase R = recursive) *)
+  let rm_R =
+    of_simple { (base "rm") with args = [ lit "-R"; lit "dir/" ] }
+  in
+  (match rm_R with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = false; _ }) -> ()
+   | w -> Alcotest.failf "rm -R: expected recursive only, got %a" pp w);
+  (* rm -f file.txt (single flag, no combine needed) *)
+  let rm_f =
+    of_simple { (base "rm") with args = [ lit "-f"; lit "file.txt" ] }
+  in
+  (match rm_f with
+   | W (Rm { paths = [ "file.txt" ]; recursive = false; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -f: expected force only, got %a" pp w);
+  (* rm -rf -f dir/ (combined + separate) *)
+  let rm_rf_f =
+    of_simple { (base "rm") with args = [ lit "-rf"; lit "-f"; lit "dir/" ] }
+  in
+  (match rm_rf_f with
+   | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
+   | w -> Alcotest.failf "rm -rf -f: expected recursive+force, got %a" pp w);
+  (* sort -rn file.txt *)
+  let sort_rn =
+    of_simple { (base "sort") with args = [ lit "-rn"; lit "file.txt" ] }
+  in
+  (match sort_rn with
+   | W (Sort { reverse = true; numeric = true; unique = false; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "sort -rn: expected reverse+numeric, got %a" pp w);
+  (* sort -rnu file.txt *)
+  let sort_rnu =
+    of_simple { (base "sort") with args = [ lit "-rnu"; lit "file.txt" ] }
+  in
+  (match sort_rnu with
+   | W (Sort { reverse = true; numeric = true; unique = true; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "sort -rnu: expected all three, got %a" pp w);
+  (* du -hs /tmp *)
+  let du_hs =
+    of_simple { (base "du") with args = [ lit "-hs"; lit "/tmp" ] }
+  in
+  (match du_hs with
+   | W (Du { path = Some "/tmp"; human_readable = true; summary = true; _ }) -> ()
+   | w -> Alcotest.failf "du -hs: expected human_readable+summary, got %a" pp w);
+  (* du -sh /tmp *)
+  let du_sh =
+    of_simple { (base "du") with args = [ lit "-sh"; lit "/tmp" ] }
+  in
+  (match du_sh with
+   | W (Du { path = Some "/tmp"; human_readable = true; summary = true; _ }) -> ()
+   | w -> Alcotest.failf "du -sh: expected human_readable+summary, got %a" pp w);
+  (* wc -lw file.txt (combined: last wins for mutually exclusive mode) *)
+  let wc_lw =
+    of_simple { (base "wc") with args = [ lit "-lw"; lit "file.txt" ] }
+  in
+  (match wc_lw with
+   | W (Wc { path = "file.txt"; mode = Some `Words; _ }) -> ()
+   | w -> Alcotest.failf "wc -lw: expected mode=Words (last wins), got %a" pp w);
+  (* wc -lc file.txt *)
+  let wc_lc =
+    of_simple { (base "wc") with args = [ lit "-lc"; lit "file.txt" ] }
+  in
+  (match wc_lc with
+   | W (Wc { path = "file.txt"; mode = Some `Chars; _ }) -> ()
+   | w -> Alcotest.failf "wc -lc: expected mode=Chars (last wins), got %a" pp w);
+  (* wc -lwc file.txt *)
+  let wc_lwc =
+    of_simple { (base "wc") with args = [ lit "-lwc"; lit "file.txt" ] }
+  in
+  (match wc_lwc with
+   | W (Wc { path = "file.txt"; mode = Some `Chars; _ }) -> ()
+   | w -> Alcotest.failf "wc -lwc: expected mode=Chars (last wins), got %a" pp w);
+  (* tr -ds 'a-z' 'A-Z' *)
+  let tr_ds =
+    of_simple { (base "tr") with args = [ lit "-ds"; lit "a-z"; lit "A-Z" ] }
+  in
+  (match tr_ds with
+   | W (Tr { set1 = "a-z"; set2 = Some "A-Z"; delete = true; squeeze = true; _ }) -> ()
+   | w -> Alcotest.failf "tr -ds: expected delete+squeeze, got %a" pp w);
+  (* tr -sd 'a-z' *)
+  let tr_sd =
+    of_simple { (base "tr") with args = [ lit "-sd"; lit "a-z" ] }
+  in
+  (match tr_sd with
+   | W (Tr { set1 = "a-z"; set2 = None; delete = true; squeeze = true; _ }) -> ()
+   | w -> Alcotest.failf "tr -sd: expected delete+squeeze, got %a" pp w);
+  (* uniq -cd file.txt *)
+  let uniq_cd =
+    of_simple { (base "uniq") with args = [ lit "-cd"; lit "file.txt" ] }
+  in
+  (match uniq_cd with
+   | W (Uniq { count = true; duplicates = true; unique = false; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -cd: expected count+duplicates, got %a" pp w);
+  (* uniq -cu file.txt *)
+  let uniq_cu =
+    of_simple { (base "uniq") with args = [ lit "-cu"; lit "file.txt" ] }
+  in
+  (match uniq_cu with
+   | W (Uniq { count = true; duplicates = false; unique = true; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -cu: expected count+unique, got %a" pp w);
+  (* uniq -dc file.txt *)
+  let uniq_dc =
+    of_simple { (base "uniq") with args = [ lit "-dc"; lit "file.txt" ] }
+  in
+  (match uniq_dc with
+   | W (Uniq { count = true; duplicates = true; unique = false; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -dc: expected duplicates+count, got %a" pp w);
+  (* uniq -duc file.txt (all three) *)
+  let uniq_duc =
+    of_simple { (base "uniq") with args = [ lit "-duc"; lit "file.txt" ] }
+  in
+  (match uniq_duc with
+   | W (Uniq { count = true; duplicates = true; unique = true; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "uniq -duc: expected all three, got %a" pp w);
+  (* rsync -az src dst *)
+  let rsync_az =
+    of_simple { (base "rsync") with args = [ lit "-az"; lit "src/"; lit "dst/" ] }
+  in
+  (match rsync_az with
+   | W (Rsync { archive = true; compress = true; dry_run = false; _ }) -> ()
+   | w -> Alcotest.failf "rsync -az: expected archive+compress, got %a" pp w);
+  (* rsync -anz src dst *)
+  let rsync_anz =
+    of_simple { (base "rsync") with args = [ lit "-anz"; lit "src/"; lit "dst/" ] }
+  in
+  (match rsync_anz with
+   | W (Rsync { archive = true; dry_run = true; compress = true; _ }) -> ()
+   | w -> Alcotest.failf "rsync -anz: expected archive+dry_run+compress, got %a" pp w);
+  (* curl -Lk url *)
+  let curl_lk =
+    of_simple { (base "curl") with args = [ lit "-Lk"; lit "https://example.com" ] }
+  in
+  (match curl_lk with
+   | W (Curl { follow_redirects = true; insecure = true; _ }) -> ()
+   | w -> Alcotest.failf "curl -Lk: expected follow_redirects+insecure, got %a" pp w);
+  (* curl -kL url *)
+  let curl_kl =
+    of_simple { (base "curl") with args = [ lit "-kL"; lit "https://example.com" ] }
+  in
+  (match curl_kl with
+   | W (Curl { follow_redirects = true; insecure = true; _ }) -> ()
+   | w -> Alcotest.failf "curl -kL: expected follow_redirects+insecure, got %a" pp w);
+  (* git push -fu origin main *)
+  let git_fu =
+    of_simple { (base "git") with args = [ lit "push"; lit "-fu"; lit "origin"; lit "main" ] }
+  in
+  (match git_fu with
+   | W (Git_push { force = true; set_upstream = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push -fu: expected force+set_upstream, got %a" pp w);
+  (* git push -uf origin main *)
+  let git_uf =
+    of_simple { (base "git") with args = [ lit "push"; lit "-uf"; lit "origin"; lit "main" ] }
+  in
+  (match git_uf with
+   | W (Git_push { force = true; set_upstream = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push -uf: expected force+set_upstream, got %a" pp w);
+  (* scp -rCv src dst *)
+  let scp_rcv =
+    of_simple { (base "scp") with args = [ lit "-rCv"; lit "src"; lit "dst" ] }
+  in
+  (match scp_rcv with
+   | W (Scp { recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "scp -rCv: expected recursive, got %a" pp w);
+  (* scp -Cvr src dst *)
+  let scp_cvr =
+    of_simple { (base "scp") with args = [ lit "-Cvr"; lit "src"; lit "dst" ] }
+  in
+  (match scp_cvr with
+   | W (Scp { recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "scp -Cvr: expected recursive, got %a" pp w);
+  (* diff -uq file1 file2 *)
+  let diff_uq =
+    of_simple { (base "diff") with args = [ lit "-uq"; lit "a.txt"; lit "b.txt" ] }
+  in
+  (match diff_uq with
+   | W (Diff { unified = true; brief = true; _ }) -> ()
+   | w -> Alcotest.failf "diff -uq: expected unified+brief, got %a" pp w);
+  (* diff -qu file1 file2 *)
+  let diff_qu =
+    of_simple { (base "diff") with args = [ lit "-qu"; lit "a.txt"; lit "b.txt" ] }
+  in
+  (match diff_qu with
+   | W (Diff { unified = true; brief = true; _ }) -> ()
+   | w -> Alcotest.failf "diff -qu: expected unified+brief, got %a" pp w);
+  (* git commit -am "message" *)
+  let git_am =
+    of_simple { (base "git") with args = [ lit "commit"; lit "-am"; lit "Initial commit" ] }
+  in
+  (match git_am with
+   | W (Git_commit { message = "Initial commit"; amend = true; _ }) -> ()
+   | w -> Alcotest.failf "git commit -am: expected message+amend, got %a" pp w);
+  (* git commit -ma "message" *)
+  let git_ma =
+    of_simple { (base "git") with args = [ lit "commit"; lit "-ma"; lit "Fix bug" ] }
+  in
+  (match git_ma with
+   | W (Git_commit { message = "Fix bug"; amend = true; _ }) -> ()
+   | w -> Alcotest.failf "git commit -ma: expected message+amend, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
@@ -752,6 +1288,8 @@ let () =
         ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
         ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
         ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
+        ; Alcotest.test_case "--jobs=N form" `Quick test_jobs_equals_form
+        ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

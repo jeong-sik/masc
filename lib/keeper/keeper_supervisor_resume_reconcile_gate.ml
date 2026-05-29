@@ -10,6 +10,9 @@
     via the injected [~supervise_keepalive] callback. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 let resume_keeper_after_reconcile_gate
       ~(supervise_keepalive : proactive_warmup_sec:int -> _ context -> keeper_meta -> unit)

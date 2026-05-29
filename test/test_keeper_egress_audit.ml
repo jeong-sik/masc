@@ -5,6 +5,7 @@
     hook would emit in production. *)
 
 module Coord = Masc_mcp.Coord
+module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_egress_audit = Masc_mcp.Keeper_egress_audit
 
@@ -23,7 +24,7 @@ let make_meta ?(paused = false) ?(autoboot_enabled = true) ~name ~sandbox () =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "egress audit test");
         ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
+          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
         ("paused", `Bool paused);
         ("autoboot_enabled", `Bool autoboot_enabled);
       ]
@@ -56,7 +57,7 @@ let write_egress_at path =
 
 let test_docker_ok_when_expected_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
+  let meta = make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let expected = Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta in
   write_egress_at expected;
   let r = Keeper_egress_audit.audit_one ~config ~meta in
@@ -66,7 +67,7 @@ let test_docker_ok_when_expected_present () =
 
 let test_docker_stale_orphan_when_only_host_direct_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker () in
+  let meta = make_meta ~name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let host_direct =
     Keeper_egress_audit.host_direct_egress_path ~config ~meta
   in
@@ -89,7 +90,7 @@ let test_docker_stale_orphan_when_only_host_direct_present () =
 
 let test_docker_missing_when_neither_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"verifier" ~sandbox:Keeper_types.Docker () in
+  let meta = make_meta ~name:"verifier" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let r = Keeper_egress_audit.audit_one ~config ~meta in
   match r.status with
   | Keeper_egress_audit.Missing_at_expected _ -> ()
@@ -99,7 +100,7 @@ let test_docker_missing_when_neither_present () =
 
 let test_local_ok_when_expected_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"ramarama" ~sandbox:Keeper_types.Local () in
+  let meta = make_meta ~name:"ramarama" ~sandbox:Keeper_types_profile_sandbox.Local () in
   let expected = Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta in
   write_egress_at expected;
   let r = Keeper_egress_audit.audit_one ~config ~meta in
@@ -113,7 +114,7 @@ let test_local_missing_does_not_check_orphan () =
      [Missing_at_expected]. *)
   let config = make_config () in
   let meta =
-    make_meta ~name:"velvet-hammer" ~sandbox:Keeper_types.Local ()
+    make_meta ~name:"velvet-hammer" ~sandbox:Keeper_types_profile_sandbox.Local ()
   in
   let r = Keeper_egress_audit.audit_one ~config ~meta in
   match r.status with
@@ -124,16 +125,16 @@ let test_local_missing_does_not_check_orphan () =
 
 let test_audit_all_partitions_correctly () =
   let config = make_config () in
-  let m_ok = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
+  let m_ok = make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   write_egress_at
     (Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta:m_ok);
   let m_stale =
-    make_meta ~name:"executor" ~sandbox:Keeper_types.Docker ()
+    make_meta ~name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker ()
   in
   write_egress_at
     (Keeper_egress_audit.host_direct_egress_path ~config ~meta:m_stale);
   let m_missing =
-    make_meta ~name:"verifier" ~sandbox:Keeper_types.Docker ()
+    make_meta ~name:"verifier" ~sandbox:Keeper_types_profile_sandbox.Docker ()
   in
   let results =
     Keeper_egress_audit.audit_all ~config
@@ -162,7 +163,7 @@ let contains_substring haystack needle =
 
 let test_format_log_line_tags () =
   let config = make_config () in
-  let m = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
+  let m = make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let r_missing = Keeper_egress_audit.audit_one ~config ~meta:m in
   Alcotest.(check bool)
     "missing line tagged [egress_audit:missing]" true
@@ -179,9 +180,9 @@ let test_format_log_line_tags () =
 let test_missing_summary_line () =
   let config = make_config () in
   let analyst =
-    make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker ()
+    make_meta ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Docker ()
   in
-  let base = make_meta ~name:"base" ~sandbox:Keeper_types.Docker () in
+  let base = make_meta ~name:"base" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let results =
     [
       Keeper_egress_audit.audit_one ~config ~meta:base;
@@ -212,17 +213,17 @@ let test_inactive_missing_reason () =
   in
   Alcotest.(check string)
     "active keeper has no suppression reason" ""
-    (reason (make_meta ~name:"active" ~sandbox:Keeper_types.Local ()));
+    (reason (make_meta ~name:"active" ~sandbox:Keeper_types_profile_sandbox.Local ()));
   Alcotest.(check string)
     "paused suppresses missing egress warning" "paused"
     (reason
-       (make_meta ~paused:true ~name:"paused" ~sandbox:Keeper_types.Local ()));
+       (make_meta ~paused:true ~name:"paused" ~sandbox:Keeper_types_profile_sandbox.Local ()));
   Alcotest.(check string)
     "autoboot disabled suppresses missing egress warning"
     "autoboot_disabled"
     (reason
        (make_meta ~autoboot_enabled:false ~name:"disabled"
-          ~sandbox:Keeper_types.Local ()))
+          ~sandbox:Keeper_types_profile_sandbox.Local ()))
 
 let () =
   Alcotest.run "Keeper Egress Audit"

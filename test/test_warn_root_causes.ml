@@ -42,7 +42,7 @@ let require_write_ok label = function
   | Ok () -> ()
   | Error msg -> failf "%s: %s" label msg
 
-let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
+let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-warn")]) with
@@ -53,7 +53,7 @@ let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
     public names (via descriptor registry) + core_always_tools.
     RFC-0179 moved core_discovery_tools to public names while
     keeper_allowed_tool_names still returns internal names. *)
-let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
+let build_allowed_exec_set (meta : Keeper_meta_contract.keeper_meta) =
   let allowed_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
   (* Map internal names to public names via descriptor registry *)
@@ -71,7 +71,7 @@ let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
     (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
 (** Filter core_discovery_tools by preset (the fix). *)
-let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
+let filter_core_by_preset (meta : Keeper_meta_contract.keeper_meta) =
   let allowed_set = build_allowed_exec_set meta in
   List.filter
     (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
@@ -85,15 +85,15 @@ let write_only_tools = [ "Edit" ]
 let shell_bridge_tools = [ "Execute" ]
 
 let privileged_presets =
-  [ Keeper_types.Delivery; Keeper_types.Delivery; Keeper_types.Full ]
+  [ Keeper_meta_tool_access.Delivery; Keeper_meta_tool_access.Delivery; Keeper_meta_tool_access.Full ]
 
 let unprivileged_presets =
   [
-    Keeper_types.Minimal;
-    Keeper_types.Social;
-    Keeper_types.Messaging;
-    Keeper_types.Dispatch;
-    Keeper_types.Research;
+    Keeper_meta_tool_access.Minimal;
+    Keeper_meta_tool_access.Social;
+    Keeper_meta_tool_access.Messaging;
+    Keeper_meta_tool_access.Dispatch;
+    Keeper_meta_tool_access.Research;
   ]
 
 let test_privileged_preset_write_gates () =

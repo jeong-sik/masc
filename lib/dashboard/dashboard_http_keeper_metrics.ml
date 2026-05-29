@@ -198,7 +198,7 @@ let create_keeper_24h_bucket_stats () : keeper_24h_bucket_stats =
   }
 
 let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key j) in
   let has_int = function
     | `Int _ -> true
     | _ -> false
@@ -207,10 +207,10 @@ let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
     | `Float _ | `Int _ -> true
     | _ -> false
   in
-  has_ratio (member "context_ratio" j)
-  && has_int (member "context_tokens" j)
-  && has_int (member "context_max" j)
-  && has_int (member "message_count" j)
+  has_ratio (m "context_ratio")
+  && has_int (m "context_tokens")
+  && has_int (m "context_max")
+  && has_int (m "message_count")
 
 let keeper_metrics_24h_json
     ~(metrics_lines : string list)
@@ -249,7 +249,7 @@ let keeper_metrics_24h_json
           if channel = "scheduled_autonomous" || channel = "proactive" then begin
             incr proactive_points;
             b.proactive_points <- b.proactive_points + 1;
-            let proactive_obj = Yojson.Safe.Util.member "proactive" j in
+            let proactive_obj = Option.value ~default:`Null (Json_util.assoc_member_opt "proactive" j) in
             let fallback_applied =
               Safe_ops.json_bool ~default:false "fallback_applied" proactive_obj
             in
@@ -407,7 +407,7 @@ let keeper_history_summary_json
     |> List.sort (fun (ka, va) (kb, vb) ->
          let c = compare vb va in
          if c <> 0 then c else String.compare ka kb)
-    |> Keeper_types.take 5
+    |> Keeper_types_profile.take 5
     |> List.map (fun (k, v) ->
          `Assoc [("keeper", `String k); ("count", `Int v)])
     |> fun xs -> `List xs
@@ -424,7 +424,7 @@ let top_counts_json
   |> List.sort (fun (ka, va) (kb, vb) ->
        let c = compare vb va in
        if c <> 0 then c else String.compare ka kb)
-  |> Keeper_types.take limit
+  |> Keeper_types_profile.take limit
   |> List.map (fun (k, v) ->
        `Assoc [ (name_key, `String k); ("count", `Int v) ])
 

@@ -5,6 +5,8 @@
     evaluation, post-turn memory, and result construction. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_agent_result
 
 let finalize
@@ -125,7 +127,7 @@ let finalize
          Log.Keeper.error
            "keeper:%s cascade=%s OAS checkpoint save failed: %s"
            meta.name
-           (Keeper_types.cascade_name_of_meta meta)
+           (Keeper_meta_contract.cascade_name_of_meta meta)
            e;
          Prometheus.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
@@ -139,7 +141,7 @@ let finalize
       Log.Keeper.error
         "keeper:%s cascade=%s missing OAS checkpoint after run"
         meta.name
-        (Keeper_types.cascade_name_of_meta meta);
+        (Keeper_meta_contract.cascade_name_of_meta meta);
       Prometheus.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", meta.name; "site", "missing" ]

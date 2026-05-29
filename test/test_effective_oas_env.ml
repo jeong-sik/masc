@@ -1,6 +1,6 @@
 (** test_effective_oas_env — Provider_f CLI MCP auto-enable verification.
 
-    Pins three invariants of [Keeper_types_profile.effective_oas_env]:
+    Pins three invariants of [Masc_mcp.Keeper_types_profile.effective_oas_env]:
 
     1. Default injection: when no OAS_GEMINI_* env vars are set,
        [OAS_GEMINI_ALLOWED_MCP] is injected with value "masc".

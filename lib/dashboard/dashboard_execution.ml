@@ -2,6 +2,8 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
+let string_field_opt = Json_util.assoc_string_opt
+
 let room_status_json (config : Coord.config) : Yojson.Safe.t =
   let room_state_opt =
     if Coord.is_initialized config then Some (Coord.read_state config) else None

@@ -5,6 +5,7 @@
     keeps writes constrained to the resolved personas root. *)
 
 open Tool_args
+open Keeper_types_profile
 module Archetypes = Keeper_persona_authoring_contract
 
 type save_result =

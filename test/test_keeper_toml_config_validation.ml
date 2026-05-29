@@ -1,7 +1,7 @@
 open Alcotest
 
 module KTP = Masc_mcp.Keeper_types_profile
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 module KPolicy = Masc_mcp.Keeper_tool_policy
 module TaskPayloads = Masc_mcp.Tool_task_payloads
 
@@ -107,7 +107,7 @@ let test_committed_keepers_are_pr_work_capable () =
              match defaults.tool_preset with
              | None -> fail (Printf.sprintf "%s: tool_access.preset is required" file)
              | Some raw ->
-                 (match KT.tool_preset_of_string raw with
+                 (match Masc_mcp.Keeper_meta_contract.tool_preset_of_string raw with
                   | Some preset -> preset
                   | None -> fail (Printf.sprintf "%s: unknown preset %S" file raw))
            in
@@ -190,7 +190,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
       let preset =
         match defaults.tool_preset with
         | Some raw -> (
-            match KT.tool_preset_of_string raw with
+            match Masc_mcp.Keeper_meta_contract.tool_preset_of_string raw with
             | Some preset -> preset
             | None -> fail (Printf.sprintf "unknown verifier preset %S" raw))
         | None -> fail "verifier tool_access.preset is required"

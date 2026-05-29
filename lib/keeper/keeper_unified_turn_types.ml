@@ -110,6 +110,7 @@ let cascade_exhaustion_reason_code
   | Keeper_meta_contract.Structural_attempt_timeout _ ->
     "cascade_exhausted_structural_attempt_timeout"
   | Keeper_meta_contract.Capacity_exhausted -> "cascade_exhausted_capacity_exhausted"
+  | Keeper_meta_contract.No_tool_capable -> "cascade_exhausted_no_tool_capable"
   | Keeper_meta_contract.Other_detail detail -> cascade_exhaustion_detail_code detail
 ;;
 

@@ -45,7 +45,7 @@ let test_oversized_will_emits_one_warning () =
   check string "field is will" "will"
     (Keeper_personality_io.field_to_string w.field);
   check int "observed bytes" (String.length nick0cave_will) w.observed_bytes;
-  check int "cap bytes" Keeper_config.prompt_render_max_bytes w.cap_bytes
+  check int "cap bytes" Masc_mcp.Keeper_config.prompt_render_max_bytes w.cap_bytes
 
 let test_two_oversized_fields_emit_two_warnings () =
   let p = make ~will:nick0cave_will ~desires:nick0cave_desires () in

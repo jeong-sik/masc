@@ -3,6 +3,9 @@
     Split from {!Server_dashboard_http_keeper_api}; these summaries read
     keeper tool-call and config state but do not assemble HTTP responses. *)
 
+let json_string_member_opt key json = Json_util.get_string json key
+let json_int_member_opt key json = Json_util.get_int json key
+
 open Server_dashboard_http_keeper_api_types
 
 let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =

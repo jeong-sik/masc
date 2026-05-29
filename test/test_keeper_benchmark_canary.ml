@@ -2,7 +2,7 @@ open Alcotest
 
 module KBC = Masc_mcp.Keeper_benchmark_canary
 module KML = Masc_mcp.Keeper_model_labels
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 module TQB = Tool_call_quality_benchmark
 
 let with_env name value_opt f =
@@ -43,7 +43,7 @@ let make_meta ?(name = "analyst") ?(models = []) () =
       ("name", `String name);
       ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
       ("trace_id", `String "trace-keeper-benchmark-canary");
-      ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+      ("cascade_name", `String Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()));
       ("last_model_used", `String "");
       ("sandbox_profile", `String "local");
       ("network_mode", `String "none");
@@ -56,7 +56,7 @@ let make_meta ?(name = "analyst") ?(models = []) () =
         ("models", `List (List.map (fun value -> `String value) models))
         :: base_fields
   in
-  match KT.meta_of_json (`Assoc fields) with
+  match Masc_mcp.Keeper_meta_json.meta_of_json (`Assoc fields) with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 

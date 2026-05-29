@@ -464,7 +464,7 @@ let test_keeper_dispatch_coverage () =
 module Keeper_types_profile = Masc_mcp.Keeper_types_profile
 
 let test_empty_defaults_shards_none () =
-  let d = Keeper_types_profile.empty_keeper_profile_defaults in
+  let d = Masc_mcp.Keeper_types_profile.empty_keeper_profile_defaults in
   Alcotest.(check bool) "shards is None" true (d.shards = None)
 
 let test_set_agent_shards_from_persona () =

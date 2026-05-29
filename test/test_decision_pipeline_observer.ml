@@ -2,7 +2,7 @@ open Alcotest
 
 module Reg = Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
-module KTypes = Masc_mcp.Keeper_types
+module KTypes = Masc_mcp.Keeper_meta_contract
 module KSM = Masc_mcp.Keeper_state_machine
 
 let read_file path =
@@ -118,7 +118,7 @@ let make_obs_meta name =
         ("sandbox_profile", `String "local");
       ]
   in
-  match KTypes.meta_of_json json with
+  match Masc_mcp.Keeper_meta_json.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
 

@@ -321,7 +321,7 @@ let test_observation_economic_modes () =
 
 (* ---------- Unified Prompt tests ---------- *)
 
-let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
+let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ "name", `String name
@@ -334,7 +334,7 @@ let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 ;;
 
-let minimal_meta : Masc_mcp.Keeper_types.keeper_meta = make_meta "test-keeper"
+let minimal_meta : Masc_mcp.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
 let minimal_policy_meta =
   { minimal_meta with tool_access = Preset { preset = Minimal; also_allow = [] } }
@@ -1275,7 +1275,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 
 let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown () =
   let default_meta =
-    Masc_mcp.Keeper_types.set_cascade_name
+    Masc_mcp.Keeper_meta_contract.set_cascade_name
       (Masc_mcp.Keeper_config.default_cascade_name ())
       minimal_meta
   in
@@ -1296,7 +1296,7 @@ let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown
   in
   check int "healthy provider leaves backlog unblocked" 0 healthy;
   let fail_open_meta =
-    Masc_mcp.Keeper_types.set_cascade_name "scoring" minimal_meta
+    Masc_mcp.Keeper_meta_contract.set_cascade_name "scoring" minimal_meta
   in
   let fail_open_blocked =
     WO.provider_capacity_blocked_task_count
@@ -1310,7 +1310,7 @@ let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown
 
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
-    { (Masc_mcp.Keeper_types.set_cascade_name "scoring" minimal_meta) with
+    { (Masc_mcp.Keeper_meta_contract.set_cascade_name "scoring" minimal_meta) with
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -1828,8 +1828,8 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
 
 let test_provider_cooldown_blocks_bootstrap_turn () =
   let meta =
-    { (Masc_mcp.Keeper_types.set_cascade_name
-         Masc_mcp.(Keeper_config.default_cascade_name ())
+    { (Masc_mcp.Keeper_meta_contract.set_cascade_name
+         Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
          minimal_meta)
       with
       proactive = { enabled = true; idle_sec = 300; cooldown_sec = 1800 }
@@ -2022,8 +2022,8 @@ let test_min_interval_never_fires_for_bootstrap () =
 let test_provider_cooldown_blocks_min_interval_turn () =
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
     let meta =
-      { (Masc_mcp.Keeper_types.set_cascade_name
-           Masc_mcp.(Keeper_config.default_cascade_name ())
+      { (Masc_mcp.Keeper_meta_contract.set_cascade_name
+           Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
            minimal_meta)
         with
         proactive = { enabled = true; idle_sec = 0; cooldown_sec = 600 }
@@ -3561,7 +3561,7 @@ let test_metrics_text_response () =
     "proactive outcome text"
     true
     (updated.runtime.proactive_rt.last_outcome
-     = Masc_mcp.Keeper_types.Proactive_text_response);
+     = Masc_mcp.Keeper_meta_contract.Proactive_text_response);
   check
     int
     "no autonomous action"
@@ -3632,7 +3632,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~output_tok:50
       ~cascade_observation:
         { Masc_mcp.Cascade_observation.cascade_name =
-            oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+            oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
         ; strategy = Some "round_robin"
         ; configured_labels = [ "llama:auto" ]
         ; candidate_models = [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ]
@@ -3720,7 +3720,7 @@ let test_metrics_tool_response () =
     bool
     "proactive outcome tool"
     true
-    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_tool_use);
+    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_tool_use);
   check
     int
     "autonomous_action +2"
@@ -3759,7 +3759,7 @@ let test_metrics_noop_response () =
     bool
     "proactive outcome silent"
     true
-    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_silent);
+    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_silent);
   check
     int
     "autonomous unchanged"
@@ -3919,7 +3919,7 @@ let test_metrics_validated_evidence_counts_as_visible () =
     bool
     "validated evidence outcome is tool_use"
     true
-    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_tool_use);
+    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_tool_use);
   check
     string
     "validated evidence preview"
@@ -3996,7 +3996,7 @@ let test_metrics_failed_validation_does_not_count_as_visible () =
     bool
     "outcome is silent"
     true
-    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_silent)
+    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_silent)
 ;;
 
 let test_metrics_file_write_evidence_counts_as_visible () =
@@ -4041,7 +4041,7 @@ let test_metrics_file_write_evidence_counts_as_visible () =
     bool
     "file write evidence outcome is tool_use"
     true
-    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_tool_use);
+    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_tool_use);
   check
     string
     "file write evidence preview"
@@ -4089,7 +4089,7 @@ let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
     bool
     "heartbeat-only outcome stays silent"
     true
-    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_silent);
+    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_silent);
   check
     int
     "autonomous action unchanged"
@@ -4237,7 +4237,7 @@ let test_meta_migration_does_not_infer_visible_proactive_fields () =
       bool
       "legacy outcome unknown"
       true
-      (meta.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_unknown)
+      (meta.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_unknown)
 ;;
 
 let test_append_metrics_snapshot_includes_cascade_observation () =
@@ -4284,7 +4284,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ; cascade_observation =
              Some
                { Masc_mcp.Cascade_observation.cascade_name =
-                   oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+                   oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
                ; strategy = Some "round_robin"
                ; configured_labels = [ "llama:auto" ]
                ; candidate_models =
@@ -4393,7 +4393,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
        check
          string
          "cascade name persisted"
-         Masc_mcp.(Keeper_config.default_cascade_name ())
+         Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
          Yojson.Safe.Util.(json |> member "cascade" |> member "cascade_name" |> to_string);
        check
          bool
@@ -5716,7 +5716,7 @@ let test_run_keeper_cycle_livelock_block_returns_error () =
               (contains_substring
                  Yojson.Safe.Util.(receipt |> member "terminal_reason_code" |> to_string)
                  "turn_livelock:attempts_exhausted"));
-         (match Masc_mcp.Keeper_types.read_meta config meta.name with
+         (match Masc_mcp.Keeper_meta_store.read_meta config meta.name with
           | Ok (Some persisted) ->
             check bool "livelock persists paused keeper" true persisted.paused;
             check
@@ -5730,7 +5730,7 @@ let test_run_keeper_cycle_livelock_block_returns_error () =
                  string
                  "livelock blocker class"
                  "turn_livelock_blocked"
-                 (Masc_mcp.Keeper_types.blocker_class_to_string blocker.klass);
+                 (Masc_mcp.Keeper_meta_contract.blocker_class_to_string blocker.klass);
                check
                  bool
                  "livelock blocker detail"
@@ -5799,7 +5799,7 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
          ~run_meta:meta
          ~run_generation:meta.runtime.generation
          ~cascade_name:
-           (oas_error_cascade_name (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
+           (oas_error_cascade_name (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta))
          ~keeper_turn_id:meta.runtime.usage.total_turns
          ();
        let supervisor_request_after =
@@ -6175,7 +6175,7 @@ let test_keeper_msg_async_failure_surface () =
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
        let meta = make_meta keeper_name in
-       (match Masc_mcp.Keeper_types.write_meta ~force:true config meta with
+       (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
         | Ok () -> ()
         | Error err -> fail ("write_meta failed: " ^ err));
        let ctx : _ Masc_mcp.Tool_keeper.context =
@@ -6344,8 +6344,8 @@ let structured_cascade_max_turns_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
     (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
        { cascade_name =
-           oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
-       ; reason = Keeper_types.Max_turns_exceeded
+           oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
+       ; reason = Masc_mcp.Keeper_meta_contract.Max_turns_exceeded
        })
 ;;
 
@@ -6998,7 +6998,7 @@ let test_metrics_failure_response () =
     bool
     "proactive outcome error"
     true
-    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_types.Proactive_error);
+    (updated.runtime.proactive_rt.last_outcome = Masc_mcp.Keeper_meta_contract.Proactive_error);
   check
     bool
     "failure reason tagged"
@@ -7905,8 +7905,8 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
-         ; reason = Masc_mcp.Keeper_types.All_providers_failed
+             oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
+         ; reason = Masc_mcp.Keeper_meta_contract.All_providers_failed
          })
   in
   check
@@ -7964,8 +7964,8 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
-         ; reason = Keeper_types.Candidates_filtered_after_cycles
+             oas_error_cascade_name Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
+         ; reason = Masc_mcp.Keeper_meta_contract.Candidates_filtered_after_cycles
          })
   in
   check
@@ -8735,7 +8735,7 @@ let test_metrics_mixed_response () =
     "proactive outcome mixed"
     true
     (updated.runtime.proactive_rt.last_outcome
-     = Masc_mcp.Keeper_types.Proactive_mixed_response);
+     = Masc_mcp.Keeper_meta_contract.Proactive_mixed_response);
   check
     int
     "autonomous +1"
@@ -9300,9 +9300,9 @@ let test_social_model_previous_state_of_meta_restores_runtime_fields () =
         ; last_current_intention = "recover_tool_route"
         ; last_blocker =
             Some
-              (Keeper_types.blocker_info_of_class
+              (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
                  ~detail:"tool route unavailable"
-                 Keeper_types.No_tool_capable_provider)
+                 (Masc_mcp.Keeper_meta_contract.Cascade_exhausted Masc_mcp.Keeper_meta_contract.No_tool_capable))
         ; last_need = "operator guidance"
         }
     }
@@ -9640,9 +9640,9 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
         ; last_current_intention = "recover_tool_route"
         ; last_blocker =
             Some
-              (Keeper_types.blocker_info_of_class
+              (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
                  ~detail:"tool route unavailable"
-                 Keeper_types.No_tool_capable_provider)
+                 (Masc_mcp.Keeper_meta_contract.Cascade_exhausted Masc_mcp.Keeper_meta_contract.No_tool_capable))
         ; last_need = "operator guidance"
         }
     }

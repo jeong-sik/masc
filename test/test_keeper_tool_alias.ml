@@ -577,9 +577,9 @@ let test_execution_receipt_descriptor_summary_projects_descriptors () =
         ; missing_required_tools = []
         ; materialized_tools = [ "tool_read_file"; "tool_execute"; "keeper_time_now" ]
         }
-    ; sandbox_kind = Masc_mcp.Keeper_types.Local
+    ; sandbox_kind = Masc_mcp.Keeper_types_profile.Local
     ; sandbox_root = None
-    ; network_mode = Masc_mcp.Keeper_types.Network_none
+    ; network_mode = Masc_mcp.Keeper_types_profile.Network_none
     ; approval_profile = Some "manual"
     ; approval_profile_derived = false
     ; cascade_name = Cascade_name.of_string_exn "tier.test"

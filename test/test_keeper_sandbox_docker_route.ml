@@ -164,8 +164,8 @@ let make_meta ?preset ~name ~sandbox () =
     | Some preset ->
         [
           ( "tool_access",
-            Keeper_types.tool_access_to_json
-              (Keeper_types.Preset { preset; also_allow = [] }) );
+            Masc_mcp.Keeper_meta_contract.tool_access_to_json
+              (Masc_mcp.Keeper_meta_contract.Preset { preset; also_allow = [] }) );
         ]
   in
   let json =
@@ -177,7 +177,7 @@ let make_meta ?preset ~name ~sandbox () =
          ("goal", `String "shell docker route test");
          ("allowed_paths", `List [ `String "*" ]);
          ( "sandbox_profile",
-           `String (Keeper_types.sandbox_profile_to_string sandbox) );
+           `String (Masc_mcp.Keeper_types_profile.sandbox_profile_to_string sandbox) );
        ]
       @ tool_access_fields)
   in
@@ -238,8 +238,8 @@ let setup_two_docker_keepers f =
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let meta_a = make_meta ~name:"keeper-a" ~sandbox:Keeper_types.Docker () in
-  let meta_b = make_meta ~name:"keeper-b" ~sandbox:Keeper_types.Docker () in
+  let meta_a = make_meta ~name:"keeper-a" ~sandbox:Masc_mcp.Keeper_types_profile.Docker () in
+  let meta_b = make_meta ~name:"keeper-b" ~sandbox:Masc_mcp.Keeper_types_profile.Docker () in
   let playground_a = Keeper_sandbox.host_root_abs_of_meta ~config meta_a in
   let playground_b = Keeper_sandbox.host_root_abs_of_meta ~config meta_b in
   ensure_dir playground_a;
@@ -475,13 +475,13 @@ let assert_docker_route_fires ~config ~meta ~playground =
 
 let test_readonly_ops_route_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   assert_docker_route_fires ~config ~meta ~playground
 
 let test_cat_legacy_keeper_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Local
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Local
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "mind/x" in
   ensure_dir (Filename.dirname host_path);
@@ -595,7 +595,7 @@ exit 0\n"
 let test_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "mind/demo.txt" in
   ensure_dir (Filename.dirname host_path);
@@ -618,7 +618,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
     (parse_field raw "matches" |> Json.to_list |> List.length)
 
 let test_unknown_workspace_op_is_unsupported_before_docker () =
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground:_ ->
   let raw =
     Agent_tool_command_runtime.handle_tool_search_files
@@ -639,7 +639,7 @@ let test_unknown_workspace_op_is_unsupported_before_docker () =
     (parse_string_field raw "op")
 
 let test_turn_sandbox_file_write_uses_host_bind_mount () =
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
   let target = Filename.concat playground "nested/result.txt" in
@@ -764,7 +764,7 @@ let check_typed_validation_error needle raw =
     (response_mentions raw "error" needle)
 
 let test_execute_typed_env_wrapper_target_rejected () =
-  setup ~sandbox:Keeper_types.Local
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Local
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
@@ -777,7 +777,7 @@ let test_execute_typed_env_wrapper_target_rejected () =
   |> check_typed_validation_error "executable \"id\" not in readonly allowlist"
 
 let test_execute_typed_single_stage_pipeline_rejected () =
-  setup ~sandbox:Keeper_types.Local
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Local
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
@@ -791,7 +791,7 @@ let test_execute_typed_single_stage_pipeline_rejected () =
 
 let test_execute_typed_pipeline_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
@@ -811,7 +811,7 @@ let test_execute_typed_pipeline_falls_back_to_local_playground () =
     (parse_string_field raw "sandbox_fallback")
 
 let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
-  setup ~sandbox:Keeper_types.Local
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Local
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
@@ -830,7 +830,7 @@ let test_execute_typed_pipeline_uses_turn_sandbox_docker_runner () =
   else
     with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" image
     @@ fun () ->
-    setup ~sandbox:Keeper_types.Docker
+    setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
     @@ fun ~config ~meta ~playground ->
     let factory = Keeper_sandbox_factory.create ~config ~meta () in
     Fun.protect
@@ -852,7 +852,7 @@ let test_execute_typed_pipeline_uses_turn_sandbox_docker_runner () =
 
 let test_execute_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
@@ -871,7 +871,7 @@ let test_execute_routes_through_docker () =
 
 let test_execute_legacy_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Local
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Local
   @@ fun ~config ~meta ~playground ->
   let outside_cwd = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
@@ -963,7 +963,7 @@ exit 2\n"
 
 let test_execute_git_creds_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -985,7 +985,7 @@ let test_execute_git_creds_routes_through_docker () =
 let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1028,7 +1028,7 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
 let test_execute_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -1061,7 +1061,7 @@ let test_execute_git_creds_missing_bundle_is_structured_blocker () =
 let test_execute_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1082,7 +1082,7 @@ let test_execute_git_c_option_missing_dir_blocks_before_docker () =
 let test_execute_missing_playground_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let mount_source =
@@ -1101,7 +1101,7 @@ let test_execute_missing_playground_blocks_before_docker () =
       ~timeout_sec:5.0
       ~cmd:"pwd"
       ~git_creds_enabled:false
-      ~network_mode:Keeper_types.Network_inherit
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_inherit
     with
     | Ok _ -> Alcotest.fail "expected missing playground to block before docker"
     | Error err -> err
@@ -1123,7 +1123,7 @@ let test_execute_missing_playground_blocks_before_docker () =
 let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1156,7 +1156,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
 let test_execute_git_push_requires_write_preset_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   ensure_repo_cli_identity_bundle ~config Masc_mcp.Repo_cli_credentials.root_repo_cli_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1189,7 +1189,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
 let test_execute_git_push_routes_through_git_creds_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1223,7 +1223,7 @@ let test_execute_git_push_routes_through_git_creds_docker () =
 
 let test_tool_search_files_repo_review_is_unsupported () =
   with_tool_policy_config @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
     Agent_tool_command_runtime.handle_tool_search_files
@@ -1254,7 +1254,7 @@ let docker_run_line log_path =
 
 let test_docker_shell_missing_image_fails_before_run () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1270,7 +1270,7 @@ let test_docker_shell_missing_image_fails_before_run () =
       ~timeout_sec:5.0
       ~cmd:"pwd"
       ~git_creds_enabled:false
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
   with
   | Ok _ -> Alcotest.fail "expected missing image preflight error"
   | Error msg ->
@@ -1286,7 +1286,7 @@ let test_docker_shell_missing_image_fails_before_run () =
 
 let test_execute_missing_image_falls_back_to_local_playground () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1319,7 +1319,7 @@ let test_execute_missing_image_falls_back_to_local_playground () =
 
 let test_execute_outside_playground_rejects_before_image_preflight () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground:_ ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let cwd = Filename.concat config.Coord.base_path "outside-playground" in
@@ -1355,7 +1355,7 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
 
 let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let masc_root =
     Filename.concat config.Coord.base_path Common.masc_dirname
@@ -1379,7 +1379,7 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
       ~timeout_sec:5.0
       ~cmd:"pwd"
       ~git_creds_enabled:false
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
   with
   | Error msg -> Alcotest.failf "expected fake docker run, got %s" msg
   | Ok result ->
@@ -1424,7 +1424,7 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
     Alcotest.(check bool) "auth state not mounted" false
       (contains_substring line "/.masc/auth/")
 
-let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playground
+let run_git_creds_docker_shell ~config ~(meta : Masc_mcp.Keeper_meta_contract.keeper_meta) ~playground
     ~log_path =
   seed_default_mapping_if_missing ~config ~keeper_name:meta.name;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1446,7 +1446,7 @@ let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playg
     Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config ~meta ~cwd:playground ~timeout_sec:5.0
       ~cmd:"git status" ~git_creds_enabled:true
-      ~network_mode:Keeper_types.Network_inherit
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_inherit
   with
   | Error msg ->
       Alcotest.failf "expected fake docker git-creds run, got %s" msg
@@ -1464,7 +1464,7 @@ let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playg
       docker_run_line log_path
 
 let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let cwd, error =
     resolve_sandbox_root_git_cwd_string ~config ~meta
@@ -1482,7 +1482,7 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
       (contains_substring msg "cwd=\"repos/<repo>\"")
 
 let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -1499,7 +1499,7 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   Alcotest.(check string) "auto cwd selects the only repo" repo cwd
 
 let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
   let repo_a = Filename.concat repos "alpha" in
@@ -1527,7 +1527,7 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
       (contains_substring msg "alpha, beta")
 
 let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
   let repo_a = Filename.concat repos "grpc-direct" in
@@ -1596,7 +1596,7 @@ let test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics () =
 
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   Config_dir_resolver.reset ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
@@ -1617,7 +1617,7 @@ let test_git_creds_skips_missing_ssh_auth_sock () =
 
 let test_git_creds_inherit_network_omits_invalid_network_flag () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
@@ -1628,7 +1628,7 @@ let test_git_creds_inherit_network_omits_invalid_network_flag () =
 
 let test_git_creds_mounts_numeric_user_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
@@ -1663,7 +1663,7 @@ let test_git_creds_mounts_numeric_user_identity () =
 
 let test_git_creds_respects_keeper_alias_identity_mode () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   with_repo_cli_identity_toml ~config ~keeper_name:meta.name
     ~repo_cli_identity:"anyang-keepers" ~git_identity_mode:"keeper_alias"
@@ -1681,7 +1681,7 @@ let test_git_creds_respects_keeper_alias_identity_mode () =
 
 let test_git_creds_uses_configured_identity_mode () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   with_repo_cli_identity_toml ~config ~keeper_name:meta.name
     ~repo_cli_identity:"anyang-keepers" ~git_identity_mode:"repo_cli_identity"
@@ -1713,7 +1713,7 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     Masc_mcp.Repo_cli_credentials.repo_cli_config_dir_of_bundle
       (Masc_mcp.Repo_cli_credentials.bundle_root config ~repo_cli_identity:id)
   in
-  let run_for ~(meta : Keeper_types.keeper_meta) ~playground ~repo_cli_identity
+  let run_for ~(meta : Masc_mcp.Keeper_meta_contract.keeper_meta) ~playground ~repo_cli_identity
       ~other_identity ~log_name =
     with_repo_cli_identity_toml ~config ~keeper_name:meta.name
       ~repo_cli_identity ~git_identity_mode:"repo_cli_identity"
@@ -1779,7 +1779,7 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
 let test_execute_fake_docker_executes () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
@@ -1799,7 +1799,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1826,7 +1826,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
 let test_execute_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let lib =
     Filename.concat
@@ -1860,7 +1860,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
 let test_execute_blocks_file_redirect_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1888,7 +1888,7 @@ let test_execute_blocks_file_redirect_before_docker () =
 let test_execute_repo_checks_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1918,7 +1918,7 @@ let test_execute_repo_checks_routes_through_docker () =
 let test_execute_search_pipeline_exposes_structured_recovery_plan () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
+  setup_with_preset ~sandbox:Masc_mcp.Keeper_types_profile.Docker ~preset:Masc_mcp.Keeper_meta_contract.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1943,7 +1943,7 @@ let test_execute_search_pipeline_exposes_structured_recovery_plan () =
 let test_execute_rewrites_host_path_command_for_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
+  setup ~sandbox:Masc_mcp.Keeper_types_profile.Docker
   @@ fun ~config ~meta ~playground ->
   let container_root = Keeper_sandbox.container_root meta.name in
   ensure_dir (Filename.concat (Filename.concat playground "repos") "masc-mcp");

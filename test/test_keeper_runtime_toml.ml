@@ -72,7 +72,7 @@ let test_missing_file_keeps_cost_gate_disabled_by_default () =
   | Ok _ ->
     check (option (float 0.0001)) "cost gate disabled by default"
       None
-      (Keeper_config.keeper_tool_cost_max_usd ())
+      (Masc_mcp.Keeper_config.keeper_tool_cost_max_usd ())
 
 let test_applies_autonomous_max_turns () =
   let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
@@ -402,7 +402,7 @@ let test_load_and_apply_records_disabled_turn_cost_override () =
       (Config_boot_overrides.get_opt "MASC_KEEPER_TOOL_COST_MAX_USD");
     check (option (float 0.0001)) "cost gate disabled"
       None
-      (Keeper_config.keeper_tool_cost_max_usd ())
+      (Masc_mcp.Keeper_config.keeper_tool_cost_max_usd ())
 
 let with_env name value f =
   let prev = Sys.getenv_opt name in

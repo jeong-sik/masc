@@ -83,14 +83,10 @@
  keeper_types_profile_persona
  keeper_types_profile_oas_env
  keeper_types_profile_defaults
- keeper_types_profile
  keeper_meta_tool_access
- keeper_meta_contract
  keeper_personality_io
  keeper_meta_json_parse
- keeper_meta_json
  keeper_types_support
- keeper_meta_store
 
  server_dashboard_http_cache
  server_dashboard_surface

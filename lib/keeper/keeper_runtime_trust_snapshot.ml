@@ -466,7 +466,7 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
       ("pending_first", pending_first_json pending_approvals);
     ]
 
-let execution_summary_json ~meta ~latest_receipt =
+let execution_summary_json ~(meta : keeper_meta) ~latest_receipt =
   let sandbox_kind =
     match latest_receipt with
     | Some receipt ->

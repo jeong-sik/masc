@@ -23,7 +23,7 @@ open Alcotest
 
 module Coord = Masc_mcp.Coord
 module KR = Masc_mcp.Keeper_runtime
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 module Reg = Masc_mcp.Keeper_registry
 
 let rec rm_rf path =
@@ -84,7 +84,7 @@ let make_meta ?(paused = false) ?auto_resume_after_sec ?updated_at name =
       ; ("network_mode", `String "inherit")
       ]
   in
-  match KT.meta_of_json json with
+  match Masc_mcp.Keeper_meta_json.meta_of_json json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta ->
     { meta with
@@ -94,7 +94,7 @@ let make_meta ?(paused = false) ?auto_resume_after_sec ?updated_at name =
     }
 
 let write_meta_exn config meta =
-  match KT.write_meta config meta with
+  match Masc_mcp.Keeper_meta_store.write_meta config meta with
   | Ok () -> ()
   | Error err -> fail ("write_meta failed: " ^ err)
 
@@ -210,7 +210,7 @@ let test_turn_timeout_pause_without_explicit_policy_does_not_start_sweep () =
   with_temp_masc_dir ~keeper_names:[ "timeout-due" ] (fun config ->
     let now = Unix.time () in
     let timeout_blocker =
-      KT.blocker_info_of_class ~detail:"turn_timeout" KT.Turn_timeout
+      Masc_mcp.Keeper_meta_contract.blocker_info_of_class ~detail:"turn_timeout" Masc_mcp.Keeper_meta_contract.Turn_timeout
     in
     let meta =
       { (make_meta

@@ -5,7 +5,7 @@ module KCP = Masc_mcp.Keeper_compact_policy
 module KCC = Masc_mcp.Keeper_context_core
 module KAR = Masc_mcp.Keeper_agent_run
 module KMP = Masc_mcp.Keeper_memory_policy
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 module KR = Masc_mcp.Keeper_registry
 module KST = Masc_mcp.Keeper_state_machine
 module KCB = Masc_mcp.Keeper_turn_cascade_budget
@@ -127,13 +127,13 @@ let has_tool_use_id ~tool_use_id msgs =
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json.meta_of_json
       (`Assoc
         [
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("cascade_name", `String Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "llama:auto");
           ("sandbox_profile", `String "local");
           ("network_mode", `String "inherit");
@@ -160,7 +160,7 @@ let build_dense_context ~turns ~max_tokens ~state_reply =
   KEC.append ctx (Agent_sdk.Types.assistant_msg state_reply)
   |> KEC.sync_oas_context
 
-let save_checkpoint ~base_dir ~(meta : KT.keeper_meta) ~ctx =
+let save_checkpoint ~base_dir ~(meta : Masc_mcp.Keeper_meta_contract.keeper_meta) ~ctx =
   let session =
     KEC.create_session ~session_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
   in
@@ -1031,7 +1031,7 @@ let test_post_turn_resilience_runtime_executor_pauses_handoff () =
             };
         }
       in
-      (match KT.write_meta config meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail ("write_meta failed: " ^ err));
       ignore (KR.register ~base_path:config.base_path meta.name meta);

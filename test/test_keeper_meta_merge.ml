@@ -20,7 +20,7 @@ let assert_eq_list ~msg expected got =
       (Printf.sprintf "%s: expected=[%s] got=[%s]" msg
          (String.concat ";" expected) (String.concat ";" got))
 
-let make_meta name : Keeper_types.keeper_meta =
+let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
   let json = `Assoc [
     ("name", `String name);
     ("trace_id", `String ("test-trace-" ^ name));

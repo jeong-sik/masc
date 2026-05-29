@@ -5,6 +5,8 @@
     smaller private modules. *)
 
 include Keeper_meta_json_scrub
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in

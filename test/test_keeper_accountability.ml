@@ -31,7 +31,7 @@ let iso_of_unix ts =
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent") ()
-    : Keeper_types.keeper_meta =
+    : Masc_mcp.Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
           (`Assoc
              [
@@ -39,9 +39,9 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
                ("agent_name", `String agent_name);
                ("trace_id", `String "test-trace-accountability");
                ( "tool_access",
-                 Keeper_types.tool_access_to_json
-                   (Keeper_types.Preset
-                      { preset = Keeper_types.Full; also_allow = [] }) );
+                 Masc_mcp.Keeper_meta_contract.tool_access_to_json
+                   (Masc_mcp.Keeper_meta_contract.Preset
+                      { preset = Masc_mcp.Keeper_meta_contract.Full; also_allow = [] }) );
              ])
   with
   | Ok meta -> meta

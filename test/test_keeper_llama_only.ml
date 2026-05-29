@@ -1,7 +1,7 @@
 open Alcotest
 
 module KEC = Masc_mcp.Keeper_context_runtime
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 
 let restore_env name = function
   | Some value -> Unix.putenv name value
@@ -60,13 +60,13 @@ let labels_for_turn meta =
 let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
   let base =
     match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json.meta_of_json
       (`Assoc
         [
           ("name", `String "keeper-llama-only-test");
           ("agent_name", `String "keeper-llama-only-test");
           ("trace_id", `String "trace-keeper-llama-only");
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("cascade_name", `String Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()));
           ("last_model_used", `String last_model_used);
           ("sandbox_profile", `String "local");
           ("network_mode", `String "none");
@@ -111,7 +111,7 @@ let test_legacy_explicit_models_do_not_override_cascade_resolution () =
 
 let test_meta_of_json_rejects_legacy_models () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json.meta_of_json
       (`Assoc
         [
           ("name", `String "keeper-llama-only-test");

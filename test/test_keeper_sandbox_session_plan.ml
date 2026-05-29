@@ -19,7 +19,7 @@ let plan () =
       ~container_root:"/keeper/alice"
       ~base_path:"/srv/masc"
       ~container_kind:"turn"
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
       ~host_root:"/var/masc/alice"
       ~uid:1234
       ~gid:5678
@@ -45,7 +45,7 @@ let test_invalid_meta_name () =
       ~container_root:"/r"
       ~base_path:"/b"
       ~container_kind:"turn"
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
       ~host_root:"/h"
       ~uid:1
       ~gid:1
@@ -65,7 +65,7 @@ let test_invalid_host_root () =
       ~container_root:"/r"
       ~base_path:"/b"
       ~container_kind:"turn"
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
       ~host_root:""
       ~uid:1
       ~gid:1
@@ -125,7 +125,7 @@ let test_env_overrides_extra () =
       ~container_root:"/r"
       ~base_path:"/b"
       ~container_kind:"turn"
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
       ~host_root:"/h"
       ~uid:1
       ~gid:1
@@ -178,7 +178,7 @@ let test_labels_ttl_sec () =
       ~container_root:"/r"
       ~base_path:"/b"
       ~container_kind:"turn"
-      ~network_mode:Keeper_types.Network_none
+      ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
       ~host_root:"/h"
       ~uid:1
       ~gid:1

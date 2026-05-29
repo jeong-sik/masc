@@ -6,7 +6,7 @@
    #10061 introduced [personality_text_equal] with [String.trim] only.
    That captured the trailing-newline case but missed the larger drift:
    when persisted will/needs/desires exceed
-   [Keeper_config.prompt_render_max_bytes] (320), the read path
+   [Masc_mcp.Keeper_config.prompt_render_max_bytes] (320), the read path
    normalises to ~319 bytes, while reconcile's [target_will] keeps the
    raw value (~357 bytes for nick0cave).  Trim-only compare flagged
    that 38-byte gap as drift on every reconcile tick (~2880 redundant

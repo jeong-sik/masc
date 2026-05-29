@@ -4,6 +4,13 @@
     their public API while durable meta storage is separated from the
     compatibility facade. *)
 
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_meta_json_scrub
+
+let meta_of_json = Keeper_meta_json.meta_of_json
+let meta_to_json = Keeper_meta_json.meta_to_json
+let warn_unknown_keeper_meta_keys = Keeper_meta_json.warn_unknown_keeper_meta_keys
 
 let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
@@ -94,7 +101,7 @@ let declarative_autoboot_enabled_by_default name =
   | Some true | None -> true
 ;;
 
-let effective_autoboot_enabled name meta =
+let effective_autoboot_enabled name (meta : keeper_meta) =
   match (load_keeper_profile_defaults name).autoboot_enabled with
   | Some value -> value
   | None -> meta.autoboot_enabled

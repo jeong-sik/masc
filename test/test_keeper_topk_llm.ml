@@ -559,9 +559,9 @@ let test_tool_surface_truncation_dedupes_essential_tools () =
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
-    false (Keeper_config.keeper_llm_rerank_enabled ());
+    false (Masc_mcp.Keeper_config.keeper_llm_rerank_enabled ());
   (* Default cascade name *)
-  let cascade = Keeper_config.keeper_llm_rerank_cascade () in
+  let cascade = Masc_mcp.Keeper_config.keeper_llm_rerank_cascade () in
   Alcotest.(check string) "default cascade name"
     "route.llm_rerank" cascade
 

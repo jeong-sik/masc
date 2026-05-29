@@ -352,7 +352,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       | None -> false)
   in
   let total = keeper_count enabled in
-  let has_recent_meta_evidence meta =
+  let has_recent_meta_evidence (meta : Keeper_meta_contract.keeper_meta) =
     meta.runtime.proactive_rt.count_total > 0
     && timestamp_within_window ?window_hours ~now
          meta.runtime.proactive_rt.last_ts

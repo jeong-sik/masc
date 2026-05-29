@@ -5,17 +5,17 @@ let () =
   let seed = Yojson.Safe.from_string {|
 {"name": "test-keeper", "agent_name": "test-agent", "trace_id": "trace-001"}
 |} in
-  let result = Keeper_types.meta_of_json seed in
+  let result = Masc_mcp.Keeper_meta_json.meta_of_json seed in
   match result with
   | Error msg ->
     Printf.printf "FAIL test1: meta_of_json: %s\n" msg; exit 1
   | Ok meta ->
-    let json = Keeper_types.meta_to_json meta in
+    let json = Masc_mcp.Keeper_meta_json.meta_to_json meta in
     (match json with
      | `Assoc fields ->
        let keys = List.map fst fields in
        Printf.printf "test1: seed round-trip OK (%d keys)\n" (List.length keys);
-       let config_keys = Keeper_types.config_field_names in
+       let config_keys = Masc_mcp.Keeper_meta_json_scrub.config_field_names in
        let leaked = List.filter (fun k -> List.mem k config_keys) keys in
        if leaked <> [] then begin
          Printf.printf "FAIL test1: config keys leaked: %s\n" (String.concat ", " leaked);
@@ -32,7 +32,7 @@ let () =
  "compaction_profile": "balanced",
  "total_turns": 42, "total_input_tokens": 1000}
 |} in
-  (match Keeper_types.meta_of_json existing with
+  (match Masc_mcp.Keeper_meta_json.meta_of_json existing with
    | Error msg ->
      Printf.printf "FAIL test2: legacy JSON parse: %s\n" msg; exit 1
    | Ok meta ->
@@ -49,12 +49,12 @@ let () =
  "sandbox_profile": "docker", "network_mode": "inherit",
  "total_turns": 100}
 |} in
-  (match Keeper_types.meta_of_json existing with
+  (match Masc_mcp.Keeper_meta_json.meta_of_json existing with
    | Ok meta ->
-     (match Keeper_types.meta_to_json meta with
+     (match Masc_mcp.Keeper_meta_json.meta_to_json meta with
       | `Assoc fields ->
         let keys = List.map fst fields in
-        let config_keys = Keeper_types.config_field_names in
+        let config_keys = Masc_mcp.Keeper_meta_json_scrub.config_field_names in
         let leaked = List.filter (fun k -> List.mem k config_keys) keys in
         if leaked <> [] then begin
           Printf.printf "FAIL test3: config keys in output: %s\n" (String.concat ", " leaked);

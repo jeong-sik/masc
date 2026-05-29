@@ -27,7 +27,7 @@ let target_keys =
   ]
 
 let test_canonical_includes_post_pr11594_keys () =
-  let canonical = Keeper_meta_json.canonical_keeper_meta_key_names in
+  let canonical = Masc_mcp.Keeper_meta_json.canonical_keeper_meta_key_names in
   List.iter
     (fun key ->
       Alcotest.(check bool)
@@ -44,8 +44,8 @@ let test_canonical_disjoint_from_fallback_when_seed_parses () =
      from [meta_to_json], not from [fallback_canonical_keeper_meta_key_names].
      The static fallback is missing post-PR-11594 keys; if our canonical list
      equals it byte-for-byte we are silently in fallback mode. *)
-  let canonical = Keeper_meta_json.canonical_keeper_meta_key_names in
-  let fallback = Keeper_meta_json.fallback_canonical_keeper_meta_key_names in
+  let canonical = Masc_mcp.Keeper_meta_json.canonical_keeper_meta_key_names in
+  let fallback = Masc_mcp.Keeper_meta_json.fallback_canonical_keeper_meta_key_names in
   Alcotest.(check bool)
     "canonical list differs from fallback (seed parse must succeed)"
     true
@@ -62,10 +62,10 @@ let test_meta_to_json_redacts_last_model_used () =
       ; "last_model_used", `String "openai:gpt-5.4"
       ]
   in
-  match Keeper_meta_json.meta_of_json json with
+  match Masc_mcp.Keeper_meta_json.meta_of_json json with
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
   | Ok meta ->
-    let emitted = Keeper_meta_json.meta_to_json meta in
+    let emitted = Masc_mcp.Keeper_meta_json.meta_to_json meta in
     let last_model_used =
       match emitted with
       | `Assoc fields -> (

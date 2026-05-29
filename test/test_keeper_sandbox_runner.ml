@@ -20,7 +20,7 @@ let cleanup_dir path =
   in
   rm path
 
-let make_meta ~sandbox : Keeper_types.keeper_meta =
+let make_meta ~sandbox : Masc_mcp.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ "name", `String "runner-test"
@@ -29,7 +29,7 @@ let make_meta ~sandbox : Keeper_types.keeper_meta =
       ; "goal", `String "sandbox runner boundary"
       ; "allowed_paths", `List [ `String "*" ]
       ; ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) )
+          `String (Masc_mcp.Keeper_types_profile.sandbox_profile_to_string sandbox) )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -46,7 +46,7 @@ module Fake_backend = struct
     "/fake/egress.json"
 
   let effective_sandbox_profile ~meta:_ =
-    Keeper_types.Docker, Keeper_types.Network_none
+    Masc_mcp.Keeper_types_profile.Docker, Masc_mcp.Keeper_types_profile.Network_none
 
   let ensure_runtime ~timeout_sec:_ =
     Ok [ "--fake-seccomp" ]
@@ -62,7 +62,7 @@ module Fake_backend = struct
     { status = Unix.WEXITED status
     ; output
     ; image = "fake-image"
-    ; network_label = Keeper_types.network_mode_to_string network_mode
+    ; network_label = Masc_mcp.Keeper_types_profile.network_mode_to_string network_mode
     ; cwd
     ; semantic_status = None
     ; semantic_ok = status = 0
@@ -97,7 +97,7 @@ let with_fixture f =
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        let config = Coord.default_config base in
-       let meta = make_meta ~sandbox:Keeper_types.Docker in
+       let meta = make_meta ~sandbox:Masc_mcp.Keeper_types_profile.Docker in
        f ~config ~meta)
 
 let test_functor_delegates_user_shell () =
@@ -106,7 +106,7 @@ let test_functor_delegates_user_shell () =
       match
         Runner.run_shell_command_with_status ~config ~meta ~cwd:"/work"
           ~timeout_sec:5.0 ~cmd:"git status" ~git_creds_enabled:false
-          ~network_mode:Keeper_types.Network_none
+          ~network_mode:Masc_mcp.Keeper_types_profile.Network_none
       with
       | Error e -> Alcotest.fail e
       | Ok result ->
@@ -123,7 +123,7 @@ let test_functor_delegates_trusted_tool () =
       match
         Runner.run_trusted_shell_command_with_status ~config ~meta ~cwd:"/work"
           ~timeout_sec:5.0 ~cmd:"gh pr view" ~git_creds_enabled:true
-          ~network_mode:Keeper_types.Network_inherit
+          ~network_mode:Masc_mcp.Keeper_types_profile.Network_inherit
       with
       | Error e -> Alcotest.fail e
       | Ok result ->
@@ -141,8 +141,8 @@ let test_uses_backend_respects_profile () =
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        let config = Coord.default_config base in
-       let docker_meta = make_meta ~sandbox:Keeper_types.Docker in
-       let local_meta = make_meta ~sandbox:Keeper_types.Local in
+       let docker_meta = make_meta ~sandbox:Masc_mcp.Keeper_types_profile.Docker in
+       let local_meta = make_meta ~sandbox:Masc_mcp.Keeper_types_profile.Local in
        let docker_cwd =
          Keeper_sandbox.host_root_abs_of_meta ~config docker_meta
        in
@@ -168,7 +168,7 @@ let test_local_route_does_not_force_backend_cwd () =
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        let config = Coord.default_config base in
-       let meta = make_meta ~sandbox:Keeper_types.Local in
+       let meta = make_meta ~sandbox:Masc_mcp.Keeper_types_profile.Local in
        let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        let result =
          Keeper_sandbox_runner.run_command_with_status
@@ -186,7 +186,7 @@ let test_local_route_does_not_force_backend_cwd () =
              ; cwd = (fun () -> failwith "backend cwd evaluated on host route")
              ; command_text = "true"
              ; git_creds_enabled = false
-             ; network_mode = Keeper_types.Network_none
+             ; network_mode = Masc_mcp.Keeper_types_profile.Network_none
              ; trust = Keeper_sandbox_runner.User_shell
              }
        in

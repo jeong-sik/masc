@@ -792,7 +792,7 @@ let test_keeper_paths_use_cluster_root () =
   with_temp_dir "startup-cluster" (fun dir ->
       with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
           let config = Coord.default_config dir in
-          let keeper_dir = Keeper_types.keeper_dir config in
+          let keeper_dir = Masc_mcp.Keeper_types_profile.keeper_dir config in
           let expected_root =
             Filename.concat
               (Filename.concat (Filename.concat dir Common.masc_dirname) "clusters")
@@ -901,12 +901,12 @@ let make_keeper_meta_json ?(name = "sangsu")
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("goal", `String ("goal-" ^ name));
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("cascade_name", `String Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
         ])
   with
-  | Ok meta -> Keeper_types.meta_to_json meta |> Yojson.Safe.pretty_to_string
+  | Ok meta -> Masc_mcp.Keeper_meta_json.meta_to_json meta |> Yojson.Safe.pretty_to_string
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
 let make_keeper_meta ?(paused = false) ?(name = "sangsu")
@@ -920,7 +920,7 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("goal", `String ("goal-" ^ name));
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("cascade_name", `String Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
         ])
@@ -934,26 +934,26 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
 let write_keeper_meta_exn config meta =
-  match Keeper_types.write_meta config meta with
+  match Masc_mcp.Keeper_meta_store.write_meta config meta with
   | Ok () -> ()
   | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
 
 let with_running_keeper_metas config metas f =
   let base_path = config.Coord.base_path in
   List.iter
-    (fun (meta : Keeper_types.keeper_meta) ->
+    (fun (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) ->
       Keeper_registry.unregister ~base_path meta.name;
       ignore (Keeper_registry.register ~base_path meta.name meta))
     metas;
   Fun.protect
     ~finally:(fun () ->
       List.iter
-        (fun (meta : Keeper_types.keeper_meta) ->
+        (fun (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) ->
           Keeper_registry.unregister ~base_path meta.name)
         metas)
     f
 
-let mark_keeper_failing config (meta : Keeper_types.keeper_meta) =
+let mark_keeper_failing config (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) =
   match
     Keeper_registry.dispatch_event
       ~base_path:config.Coord.base_path
@@ -1158,9 +1158,9 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
               { (make_keeper_meta ()).runtime with
                 last_blocker =
                   Some
-                    (Keeper_types.blocker_info_of_class
+                    (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
                        ~detail:"turn_timeout"
-                       Keeper_types.Turn_timeout);
+                       Masc_mcp.Keeper_meta_contract.Turn_timeout);
               };
           }
         in
@@ -1571,7 +1571,7 @@ let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
         (make_keeper_meta_json ~name:"other" ~trace_id:"trace-other-live" ());
       Server_runtime_bootstrap.migrate_legacy_dirs state;
       let read_meta_exn path =
-        match Keeper_types.read_meta_file_path path with
+        match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.failf "missing keeper meta at %s" path
         | Error err -> Alcotest.failf "failed to read keeper meta %s: %s" path err
@@ -1609,7 +1609,7 @@ let test_migrate_resident_keeper_dirs_keeps_fresher_current_meta () =
       Server_runtime_bootstrap.migrate_legacy_dirs state;
       let current_meta =
         match
-          Keeper_types.read_meta_file_path
+          Masc_mcp.Keeper_meta_store.read_meta_file_path
             (Filename.concat keepers_dir "sangsu.json")
         with
         | Ok (Some meta) -> meta
@@ -1658,14 +1658,14 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
       Alcotest.(check bool) "legacy keeper meta promoted during blocking bootstrap"
         true
         (Sys.file_exists
-           (Filename.concat (Keeper_types.keeper_dir state.Mcp_server.room_config)
+           (Filename.concat (Masc_mcp.Keeper_types_profile.keeper_dir state.Mcp_server.room_config)
               "sangsu.json"));
       Alcotest.(check bool) "legacy dir removed before later startup readers" false
         (Sys.file_exists legacy_dir);
       Alcotest.(check bool) "legacy traces stay deferred to lazy startup" true
         (Sys.file_exists legacy_trace_dir);
       let keepalive =
-        Keeper_types.keepalive_keeper_names state.Mcp_server.room_config
+        Masc_mcp.Keeper_meta_store.keepalive_keeper_names state.Mcp_server.room_config
       in
       Alcotest.(check (list string))
         "autoboot sees promoted keepers on first scan"

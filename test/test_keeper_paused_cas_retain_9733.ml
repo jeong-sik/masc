@@ -79,7 +79,7 @@ let test_overflow_pause_marks_auto_resumable () =
     let config = Coord.default_config base_dir in
     ignore (Coord.init config ~agent_name:(Some "operator"));
     let meta = make_meta ~name:"overflow-auto-resume-9733" in
-    (match Keeper_types.write_meta ~force:true config meta with
+    (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
      | Ok () -> ()
      | Error e -> fail ("seed failed: " ^ e));
     ignore (Keeper_registry.register ~base_path:base_dir meta.name meta);
@@ -94,7 +94,7 @@ let test_overflow_pause_marks_auto_resumable () =
       "overflow pause gets initial auto_resume_after_sec"
       paused.auto_resume_after_sec;
     let persisted =
-      match Keeper_types.read_meta config meta.name with
+      match Masc_mcp.Keeper_meta_store.read_meta config meta.name with
       | Ok (Some m) -> m
       | Ok None -> fail "expected persisted meta"
       | Error e -> fail ("read_meta failed: " ^ e)
@@ -112,7 +112,7 @@ let test_sync_pause_auto_resume_flag_sets_backoff () =
     let config = Coord.default_config base_dir in
     ignore (Coord.init config ~agent_name:(Some "operator"));
     let meta = make_meta ~name:"sync-auto-resume-9733" in
-    (match Keeper_types.write_meta ~force:true config meta with
+    (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
      | Ok () -> ()
      | Error e -> fail ("seed failed: " ^ e));
     ignore (Keeper_registry.register ~base_path:base_dir meta.name meta);
@@ -149,11 +149,11 @@ let test_pause_caller_wins_heartbeat_disk_wins () =
       let m = make_meta ~name:"pause-race-9733" in
       { m with paused = false; joined_room_ids = ["r1"] }
     in
-    (match Keeper_types.write_meta ~force:true config m0 with
+    (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed failed: " ^ e));
     let overflow_view =
-      match Keeper_types.read_meta config "pause-race-9733" with
+      match Masc_mcp.Keeper_meta_store.read_meta config "pause-race-9733" with
       | Ok (Some m) -> m
       | _ -> fail "seed read failed"
     in
@@ -161,7 +161,7 @@ let test_pause_caller_wins_heartbeat_disk_wins () =
     let heartbeat_payload =
       { overflow_view with joined_room_ids = ["r1"; "r2"] }
     in
-    (match Keeper_types.write_meta config heartbeat_payload with
+    (match Masc_mcp.Keeper_meta_store.write_meta config heartbeat_payload with
      | Ok () -> ()
      | Error e -> fail ("heartbeat write failed: " ^ e));
     (* Overflow fiber writes pause with a stale version (the one
@@ -173,13 +173,13 @@ let test_pause_caller_wins_heartbeat_disk_wins () =
        [joined_room_ids = [r1; r2]]. *)
     let pause_payload = { overflow_view with paused = true } in
     (match
-       Keeper_types.write_meta_with_merge
+       Masc_mcp.Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
          config pause_payload
      with
      | Ok () -> ()
      | Error e -> fail ("pause merged write failed: " ^ e));
-    let final = match Keeper_types.read_meta config "pause-race-9733" with
+    let final = match Masc_mcp.Keeper_meta_store.read_meta config "pause-race-9733" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
@@ -206,29 +206,29 @@ let test_resume_caller_wins_heartbeat_disk_wins () =
       let m = make_meta ~name:"resume-race-9733" in
       { m with paused = true; joined_room_ids = ["r1"] }
     in
-    (match Keeper_types.write_meta ~force:true config m0 with
+    (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed failed: " ^ e));
     let resume_view =
-      match Keeper_types.read_meta config "resume-race-9733" with
+      match Masc_mcp.Keeper_meta_store.read_meta config "resume-race-9733" with
       | Ok (Some m) -> m
       | _ -> fail "seed read failed"
     in
     let heartbeat_payload =
       { resume_view with joined_room_ids = ["r1"; "r3"] }
     in
-    (match Keeper_types.write_meta config heartbeat_payload with
+    (match Masc_mcp.Keeper_meta_store.write_meta config heartbeat_payload with
      | Ok () -> ()
      | Error e -> fail ("heartbeat failed: " ^ e));
     let resume_payload = { resume_view with paused = false } in
     (match
-       Keeper_types.write_meta_with_merge
+       Masc_mcp.Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
          config resume_payload
      with
      | Ok () -> ()
      | Error e -> fail ("resume merged write failed: " ^ e));
-    let final = match Keeper_types.read_meta config "resume-race-9733" with
+    let final = match Masc_mcp.Keeper_meta_store.read_meta config "resume-race-9733" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
@@ -254,7 +254,7 @@ let test_pause_sync_sets_auto_resume_backoff () =
         let m = make_meta ~name:"auto-resume-pause-152" in
         { m with paused = false; auto_resume_after_sec = None }
       in
-      (match Keeper_types.write_meta ~force:true config m0 with
+      (match Masc_mcp.Keeper_meta_store.write_meta ~force:true config m0 with
        | Ok () -> ()
        | Error e -> fail ("seed failed: " ^ e));
       ignore (Keeper_registry.register ~base_path:base_dir m0.name m0);
@@ -277,7 +277,7 @@ let test_pause_sync_sets_auto_resume_backoff () =
       in
       check bool "auto resume delay is positive" true (pause_delay > 0.0);
       let persisted =
-        match Keeper_types.read_meta config m0.name with
+        match Masc_mcp.Keeper_meta_store.read_meta config m0.name with
         | Ok (Some m) -> m
         | Ok None -> fail "persisted meta missing"
         | Error e -> fail ("persisted read failed: " ^ e)

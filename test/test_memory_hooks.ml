@@ -605,9 +605,9 @@ let test_execution_receipt_json_includes_memory_fields () =
         ; missing_required_tools = []
         ; materialized_tools = []
         }
-    ; sandbox_kind = Keeper_types.Local
+    ; sandbox_kind = Masc_mcp.Keeper_types_profile.Local
     ; sandbox_root = None
-    ; network_mode = Keeper_types.Network_none
+    ; network_mode = Masc_mcp.Keeper_types_profile.Network_none
     ; approval_profile = None
     ; approval_profile_derived = false
     ; cascade_name = Cascade_name.of_string_exn "test"
@@ -680,9 +680,9 @@ let test_execution_receipt_json_null_when_missing () =
         ; missing_required_tools = []
         ; materialized_tools = []
         }
-    ; sandbox_kind = Keeper_types.Local
+    ; sandbox_kind = Masc_mcp.Keeper_types_profile.Local
     ; sandbox_root = None
-    ; network_mode = Keeper_types.Network_none
+    ; network_mode = Masc_mcp.Keeper_types_profile.Network_none
     ; approval_profile = None
     ; approval_profile_derived = false
     ; cascade_name = Cascade_name.of_string_exn "test"

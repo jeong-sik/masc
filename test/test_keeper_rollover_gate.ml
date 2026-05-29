@@ -6,7 +6,7 @@
 open Alcotest
 
 module KR = Masc_mcp.Keeper_context_runtime
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 
 let decision_testable =
   let pp fmt = function
@@ -27,7 +27,7 @@ let decision_testable =
 let overflow_class_is_recognized () =
   check bool "Sdk_token_budget_exceeded → overflow"
     true
-    (KR.blocker_class_indicates_overflow KT.Sdk_token_budget_exceeded)
+    (KR.blocker_class_indicates_overflow Masc_mcp.Keeper_meta_contract.Sdk_token_budget_exceeded)
 
 let non_overflow_classes_are_not_matched () =
   (* Exhaustive: every variant other than [Sdk_token_budget_exceeded] is
@@ -36,7 +36,7 @@ let non_overflow_classes_are_not_matched () =
      — the catch-all is intentionally omitted. *)
   let cases : KT.blocker_class list = [
     KT.Cascade_exhausted KT.No_providers_available;
-    KT.Cascade_exhausted KT.All_providers_failed;
+    KT.Cascade_exhausted Masc_mcp.Keeper_meta_contract.All_providers_failed;
     KT.Cascade_exhausted KT.Max_turns_exceeded;
     KT.Capacity_backpressure;
     KT.Ambiguous_post_commit_timeout;
@@ -44,12 +44,12 @@ let non_overflow_classes_are_not_matched () =
     KT.Oas_agent_execution_timeout;
     KT.Autonomous_slot_wait_timeout;
     KT.Admission_queue_wait_timeout;
-    KT.Turn_timeout_after_queue_wait;
-    KT.Turn_timeout;
-    KT.Turn_timeout;
+    Masc_mcp.Keeper_meta_contract.Turn_timeout_after_queue_wait;
+    Masc_mcp.Keeper_meta_contract.Turn_timeout;
+    Masc_mcp.Keeper_meta_contract.Turn_timeout;
     KT.Turn_livelock_blocked;
     KT.Completion_contract_violation;
-    KT.No_tool_capable_provider;
+    KT.Cascade_exhausted KT.No_tool_capable;
     KT.Fiber_unresolved;
     KT.Stale_turn_timeout;
     KT.Stale_fleet_batch;
@@ -66,7 +66,7 @@ let non_overflow_classes_are_not_matched () =
     (fun klass ->
       check bool
         (Printf.sprintf "non-overflow class: %s"
-           (KT.blocker_class_to_string klass))
+           (Masc_mcp.Keeper_meta_contract.blocker_class_to_string klass))
         false
         (KR.blocker_class_indicates_overflow klass))
     cases
@@ -75,7 +75,7 @@ let non_overflow_classes_are_not_matched () =
    intentionally redacted to placeholder text — the gate semantics depend
    only on [klass]. *)
 let overflow_info : KT.blocker_info =
-  { klass = KT.Sdk_token_budget_exceeded; detail = "<opaque-detail>" }
+  { klass = Masc_mcp.Keeper_meta_contract.Sdk_token_budget_exceeded; detail = "<opaque-detail>" }
 
 let non_overflow_info : KT.blocker_info =
   { klass = KT.Sdk_max_turns_exceeded; detail = "<opaque-detail>" }

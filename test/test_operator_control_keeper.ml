@@ -65,7 +65,7 @@ let count_log_lines_with_prefix log prefix =
   |> List.length
 
 let read_keeper_meta_exn config keeper_name =
-  match Keeper_types.read_meta config keeper_name with
+  match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) -> meta
   | Ok None -> Alcotest.fail ("keeper meta missing: " ^ keeper_name)
   | Error err -> Alcotest.fail ("keeper meta read failed: " ^ err)
@@ -74,14 +74,14 @@ let seed_keeper_meta_exn config keeper_name ~goal =
   let trace_id = "trace-" ^ keeper_name in
   let meta =
     match
-      Keeper_types.meta_of_json
+      Masc_mcp.Keeper_meta_json.meta_of_json
         (`Assoc
           [
             ("name", `String keeper_name);
             ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
             ("trace_id", `String trace_id);
             ("goal", `String goal);
-            ("cascade_name", `String (Keeper_config.default_cascade_name ()));
+            ("cascade_name", `String (Masc_mcp.Keeper_config.default_cascade_name ()));
             ("sandbox_profile", `String "local");
             ("network_mode", `String "inherit");
           ])
@@ -89,7 +89,7 @@ let seed_keeper_meta_exn config keeper_name ~goal =
     | Ok meta -> meta
     | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
   in
-  (match Keeper_types.write_meta config meta with
+  (match Masc_mcp.Keeper_meta_store.write_meta config meta with
    | Ok () -> ()
    | Error err -> Alcotest.fail ("keeper meta seed failed: " ^ err));
   read_keeper_meta_exn config keeper_name
@@ -111,7 +111,7 @@ let with_fake_docker script f =
 let update_keeper_sandbox_mode config keeper_name ~sandbox_profile ~network_mode =
   let meta = read_keeper_meta_exn config keeper_name in
   match
-    Keeper_types.write_meta config
+    Masc_mcp.Keeper_meta_store.write_meta config
       { meta with sandbox_profile; network_mode }
   with
   | Ok () -> ()
@@ -121,8 +121,8 @@ let drift_keeper_identity config keeper_name ~agent_name =
   let meta = read_keeper_meta_exn config keeper_name in
   let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   match
-    Keeper_types.write_meta ~force:true config
-      { meta with agent_name; updated_at = Keeper_types.now_iso () }
+    Masc_mcp.Keeper_meta_store.write_meta ~force:true config
+      { meta with agent_name; updated_at = Masc_mcp.Keeper_meta_contract.now_iso () }
   with
   | Ok () -> previous_trace_id
   | Error err -> Alcotest.fail ("keeper identity drift write failed: " ^ err)
@@ -429,8 +429,8 @@ let test_keeper_sandbox_status_clarifies_visible_container_gap () =
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       update_keeper_sandbox_mode config keeper_name
-        ~sandbox_profile:Keeper_types.Docker
-        ~network_mode:Keeper_types.Network_inherit;
+        ~sandbox_profile:Masc_mcp.Keeper_types_profile.Docker
+        ~network_mode:Masc_mcp.Keeper_types_profile.Network_inherit;
       Keeper_status_detail.invalidate_status_cache_for keeper_name;
       let state_dir = Filename.concat base_dir "fake-docker" in
       let state_file = Filename.concat state_dir "containers.tsv" in
@@ -774,8 +774,8 @@ let test_keeper_sandbox_status_fleet_reuses_docker_preflight () =
           in
           Alcotest.(check bool) ("keeper up ok: " ^ keeper_name) true ok;
           update_keeper_sandbox_mode config keeper_name
-            ~sandbox_profile:Keeper_types.Docker
-            ~network_mode:Keeper_types.Network_none)
+            ~sandbox_profile:Masc_mcp.Keeper_types_profile.Docker
+            ~network_mode:Masc_mcp.Keeper_types_profile.Network_none)
         keeper_names;
       let state_dir = Filename.concat base_dir "fake-docker" in
       let state_file = Filename.concat state_dir "containers.tsv" in
@@ -853,8 +853,8 @@ let test_keeper_status_detail_reuses_docker_preflight_cache () =
           in
           Alcotest.(check bool) ("keeper up ok: " ^ keeper_name) true ok;
           update_keeper_sandbox_mode config keeper_name
-            ~sandbox_profile:Keeper_types.Docker
-            ~network_mode:Keeper_types.Network_none)
+            ~sandbox_profile:Masc_mcp.Keeper_types_profile.Docker
+            ~network_mode:Masc_mcp.Keeper_types_profile.Network_none)
         keeper_names;
       let state_dir = Filename.concat base_dir "fake-docker" in
       let state_file = Filename.concat state_dir "containers.tsv" in
@@ -936,8 +936,8 @@ let test_keeper_sandbox_start_status_stop_with_fake_docker () =
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       update_keeper_sandbox_mode config keeper_name
-        ~sandbox_profile:Keeper_types.Docker
-        ~network_mode:Keeper_types.Network_none;
+        ~sandbox_profile:Masc_mcp.Keeper_types_profile.Docker
+        ~network_mode:Masc_mcp.Keeper_types_profile.Network_none;
       Keeper_status_detail.invalidate_status_cache_for keeper_name;
       with_fake_docker fake_docker_managed_sandbox_script @@ fun () ->
       (match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
@@ -1165,8 +1165,8 @@ let test_keeper_turn_sandbox_factory_reuses_playground_runtime () =
         | Ok m ->
             {
               m with
-              sandbox_profile = Keeper_types.Docker;
-              network_mode = Keeper_types.Network_none;
+              sandbox_profile = Masc_mcp.Keeper_types_profile.Docker;
+              network_mode = Masc_mcp.Keeper_types_profile.Network_none;
             }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
@@ -1414,7 +1414,7 @@ let test_keeper_up_resumes_auto_paused_keeper () =
         seed_keeper_meta_exn config keeper_name ~goal:"Resume a paused keeper"
       in
       let blocker_text =
-        Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout
+        Masc_mcp.Keeper_meta_contract.blocker_class_to_string Masc_mcp.Keeper_meta_contract.Turn_timeout
       in
       let paused_meta =
         {
@@ -1425,12 +1425,12 @@ let test_keeper_up_resumes_auto_paused_keeper () =
             {
               meta.runtime with
               last_blocker =
-                Some (Keeper_types.blocker_info_of_class
-                        ~detail:blocker_text Keeper_types.Turn_timeout);
+                Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+                        ~detail:blocker_text Masc_mcp.Keeper_meta_contract.Turn_timeout);
             };
         }
       in
-      (match Keeper_types.write_meta config paused_meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
       ignore
@@ -1511,13 +1511,13 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
                  the typed class is the only authoritative source — set it
                  directly. *)
               last_blocker =
-                Some (Keeper_types.blocker_info_of_class
+                Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
                         ~detail:blocker_text
-                        Keeper_types.Ambiguous_post_commit_timeout);
+                        Masc_mcp.Keeper_meta_contract.Ambiguous_post_commit_timeout);
             };
         }
       in
-      (match Keeper_types.write_meta config paused_meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
       let ok, body =
@@ -1579,7 +1579,7 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
         seed_keeper_meta_exn config keeper_name ~goal:"Stay paused behind approval"
       in
       let blocker_text =
-        Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout
+        Masc_mcp.Keeper_meta_contract.blocker_class_to_string Masc_mcp.Keeper_meta_contract.Turn_timeout
       in
       let paused_meta =
         {
@@ -1590,12 +1590,12 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
             {
               meta.runtime with
               last_blocker =
-                Some (Keeper_types.blocker_info_of_class
-                        ~detail:blocker_text Keeper_types.Turn_timeout);
+                Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
+                        ~detail:blocker_text Masc_mcp.Keeper_meta_contract.Turn_timeout);
             };
         }
       in
-      (match Keeper_types.write_meta config paused_meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
       pending_id :=
@@ -2044,7 +2044,7 @@ let test_keeper_status_exposes_model_observability () =
             ( "cascade",
               `Assoc
                 [
-                  ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+                  ("cascade_name", `String Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()));
                   ( "configured_labels",
                     `List [ `String "llama:auto"; `String "provider_k:auto" ] );
                   ( "candidate_models",
@@ -2095,7 +2095,7 @@ let test_keeper_status_exposes_model_observability () =
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
         ("cascade name surfaced\n" ^ status_dump)
-        (Some Masc_mcp.(Keeper_config.default_cascade_name ()))
+        (Some Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()))
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "recent turn observation true" true
         (observability |> member "recent_turn_observation" |> to_bool);
@@ -2188,7 +2188,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "keeper meta missing after up"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
@@ -2237,7 +2237,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
         ("current cascade name wins over stale metrics\n" ^ status_dump)
-        (Some (Keeper_types.cascade_name_of_meta meta))
+        (Some (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta))
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "stale observation ignored" false
         (observability |> member "recent_turn_observation" |> to_bool);
@@ -2304,7 +2304,7 @@ let test_keeper_down_does_not_resolve_agent_name_alias () =
       Alcotest.(check bool) "keeper down remains idempotent for absent alias" true ok;
       Alcotest.(check bool) "down reports alias absent" true
         (contains_substring body ("keeper already absent: " ^ keeper_agent_name));
-      match Masc_mcp.Keeper_types.read_meta config keeper_name with
+      match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
       | Ok (Some meta) ->
           Alcotest.(check bool) "canonical keeper not paused via alias" false
             meta.paused
@@ -2667,13 +2667,13 @@ let test_keeper_down_only_pauses_current_base_path () =
       Alcotest.(check string) "down returns scoped keeper name" keeper_name
         Yojson.Safe.Util.(down_json |> member "name" |> to_string);
       let meta_a =
-        match Masc_mcp.Keeper_types.read_meta config_a keeper_name with
+        match Masc_mcp.Keeper_meta_store.read_meta config_a keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "keeper meta missing in base path A"
         | Error err -> Alcotest.fail ("meta read failed in base path A: " ^ err)
       in
       let meta_b =
-        match Masc_mcp.Keeper_types.read_meta config_b keeper_name with
+        match Masc_mcp.Keeper_meta_store.read_meta config_b keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "keeper meta missing in base path B"
         | Error err -> Alcotest.fail ("meta read failed in base path B: " ^ err)
@@ -2761,7 +2761,7 @@ proactive_enabled = true
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       let meta =
-        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "keeper meta missing"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
@@ -2778,13 +2778,13 @@ proactive_enabled = true
         | Ok parsed -> parsed
         | Error err ->
             Alcotest.fail
-              ("active_goal_ids parse failed: " ^ Keeper_types.tool_result_body err)
+              ("active_goal_ids parse failed: " ^ Tool_result.message err)
       in
       let result =
         Keeper_turn_up_update.update_keeper keeper_ctx parsed_goal_update meta
       in
-      let ok = Keeper_types.tool_result_success result in
-      let msg = Keeper_types.tool_result_body result in
+      let ok = Tool_result.is_success result in
+      let msg = Tool_result.message result in
       Alcotest.(check bool) ("active_goal_ids update ok: " ^ msg) true ok;
       let meta = read_keeper_meta_exn config keeper_name in
       let parsed_bad_goal_update =
@@ -2799,13 +2799,13 @@ proactive_enabled = true
         | Ok parsed -> parsed
         | Error err ->
             Alcotest.fail
-              ("bad active_goal_ids parse failed: " ^ Keeper_types.tool_result_body err)
+              ("bad active_goal_ids parse failed: " ^ Tool_result.message err)
       in
       let result =
         Keeper_turn_up_update.update_keeper keeper_ctx parsed_bad_goal_update meta
       in
-      let ok = Keeper_types.tool_result_success result in
-      let msg = Keeper_types.tool_result_body result in
+      let ok = Tool_result.is_success result in
+      let msg = Tool_result.message result in
       Alcotest.(check bool) "unknown active goal rejected" false ok;
       Alcotest.(check bool) "unknown active goal names surfaced" true
         (contains_substring msg "goal-missing");
@@ -2841,7 +2841,7 @@ proactive_enabled = true
         }
       in
       (match
-         Masc_mcp.Keeper_types.write_meta_with_merge
+         Masc_mcp.Keeper_meta_store.write_meta_with_merge
            ~merge:Masc_mcp.Keeper_meta_merge.caller_wins config mutated
        with
       | Ok () -> ()
@@ -2874,17 +2874,17 @@ proactive_enabled = true
       Alcotest.(check string) "default source kind" "toml"
         (json |> member "sources" |> member "default_source_kind" |> to_string);
       Alcotest.(check string) "selected cascade name"
-        Masc_mcp.(Keeper_config.default_cascade_name ())
+        Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
         (json |> member "execution" |> member "selected_cascade_name"
        |> to_string);
       Alcotest.(check string) "selected cascade canonical"
-        Masc_mcp.(Keeper_config.default_cascade_name ())
+        Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
         (json |> member "execution" |> member "selected_cascade_canonical"
        |> to_string);
       let expected_default_models =
         Masc_mcp.Cascade_runtime.models_of_cascade_name
           (Cascade_name.of_string_exn
-             Masc_mcp.(Keeper_config.default_cascade_name ()))
+             Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()))
       in
       Alcotest.(check (list string)) "selected cascade models use default profile"
         expected_default_models
@@ -2982,7 +2982,7 @@ proactive_enabled = true
           updated_at = Masc_domain.now_iso ();
         }
       in
-      (match Masc_mcp.Keeper_types.write_meta config zero_latency_meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config zero_latency_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail ("zero latency meta write failed: " ^ err));
       let zero_status, zero_json =
@@ -3015,18 +3015,18 @@ proactive_enabled = true
       Alcotest.(check bool) "effective system prompt includes world block" true
         (contains_substring effective_system_prompt "<world>");
       let stale_base =
-        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "keeper meta missing before stale write"
         | Error err ->
             Alcotest.fail ("keeper meta reload failed before stale write: " ^ err)
       in
       let stale_meta =
-        { (Keeper_types.set_cascade_name "vendor_mix_balanced" stale_base) with
+        { (Masc_mcp.Keeper_meta_contract.set_cascade_name "vendor_mix_balanced" stale_base) with
           updated_at = Masc_domain.now_iso ();
         }
       in
-      (match Masc_mcp.Keeper_types.write_meta config stale_meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config stale_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail ("stale meta write failed: " ^ err));
       let stale_status, stale_json =
@@ -3038,7 +3038,7 @@ proactive_enabled = true
         (stale_json |> member "execution" |> member "selected_cascade_name"
        |> to_string);
       Alcotest.(check string) "stale cascade falls back to live default"
-        Masc_mcp.(Keeper_config.default_cascade_name ())
+        Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ())
         (stale_json |> member "execution" |> member "selected_cascade_canonical"
        |> to_string);
       Alcotest.(check (list string)) "stale cascade models use live default"
@@ -3104,16 +3104,16 @@ let test_keeper_config_uses_backend_scoped_private_workspace_root () =
       in
       let local_rel =
         Masc_mcp.Keeper_sandbox.host_root_rel_of_profile
-          Keeper_types.Local keeper_name
+          Masc_mcp.Keeper_types_profile.Local keeper_name
       in
       assert_config_root "local" local_rel (Filename.concat base_dir local_rel);
       update_keeper_sandbox_mode config keeper_name
-        ~sandbox_profile:Keeper_types.Docker
-        ~network_mode:Keeper_types.Network_none;
+        ~sandbox_profile:Masc_mcp.Keeper_types_profile.Docker
+        ~network_mode:Masc_mcp.Keeper_types_profile.Network_none;
       Keeper_status_detail.invalidate_status_cache_for keeper_name;
       let docker_rel =
         Masc_mcp.Keeper_sandbox.host_root_rel_of_profile
-          Keeper_types.Docker keeper_name
+          Masc_mcp.Keeper_types_profile.Docker keeper_name
       in
       let docker_abs = Filename.concat base_dir docker_rel in
       assert_config_root "docker" docker_rel docker_abs;

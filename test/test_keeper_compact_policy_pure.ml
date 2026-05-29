@@ -71,10 +71,10 @@ let test_tool_heavy_threshold_positive () =
   Alcotest.(check bool)
     "default_tool_heavy_msg_threshold > 0"
     true
-    (Keeper_config.default_tool_heavy_msg_threshold > 0)
+    (Masc_mcp.Keeper_config.default_tool_heavy_msg_threshold > 0)
 
 let test_tool_heavy_floor_in_range () =
-  let v = Keeper_config.default_tool_heavy_ratio_floor in
+  let v = Masc_mcp.Keeper_config.default_tool_heavy_ratio_floor in
   Alcotest.(check bool)
     "default_tool_heavy_ratio_floor is a meaningful ratio [0,1]"
     true
@@ -91,9 +91,9 @@ let decide
     ?(token_gate = 0)
     ?(cooldown_sec = 60)
     ?(tool_heavy_msg_threshold =
-      Keeper_config.default_tool_heavy_msg_threshold)
+      Masc_mcp.Keeper_config.default_tool_heavy_msg_threshold)
     ?(tool_heavy_ratio_floor =
-      Keeper_config.default_tool_heavy_ratio_floor)
+      Masc_mcp.Keeper_config.default_tool_heavy_ratio_floor)
     ?(last_continuity_update_ts = 0.0)
     ?(last_proactive_ts = 0.0)
     ?(now_ts = 100.0)
@@ -157,8 +157,8 @@ let test_decide_emergency_bypasses_cooldown () =
 let test_decide_tool_heavy_bypasses_cooldown () =
   match
     decide
-      ~ratio:(Keeper_config.default_tool_heavy_ratio_floor +. 0.01)
-      ~msg_count:(Keeper_config.default_tool_heavy_msg_threshold + 1)
+      ~ratio:(Masc_mcp.Keeper_config.default_tool_heavy_ratio_floor +. 0.01)
+      ~msg_count:(Masc_mcp.Keeper_config.default_tool_heavy_msg_threshold + 1)
       ~ratio_gate:0.99
       ~message_gate:0
       ~token_gate:0

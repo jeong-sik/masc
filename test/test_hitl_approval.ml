@@ -11,7 +11,7 @@ module Types = Masc_domain
 
 module GP = Masc_mcp.Governance_pipeline
 module AQ = Masc_mcp.Keeper_approval_queue
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 module SDH = Masc_mcp.Server_dashboard_http
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 
@@ -24,7 +24,7 @@ let temp_dir () =
   dir
 
 let meta_from_json json =
-  match KT.meta_of_json json with
+  match Masc_mcp.Keeper_meta_json.meta_of_json json with
   | Ok m -> m
   | Error e -> Alcotest.fail ("meta parse failed: " ^ e)
 

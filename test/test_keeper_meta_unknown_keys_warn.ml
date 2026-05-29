@@ -27,11 +27,11 @@ let canonical_only_meta_json () =
   `Assoc
     (List.map
        (fun key -> (key, placeholder))
-       Keeper_meta_json.canonical_keeper_meta_key_names)
+       Masc_mcp.Keeper_meta_json.canonical_keeper_meta_key_names)
 
 let test_no_counter_tick_when_all_keys_canonical () =
   let before = counter_total () in
-  Keeper_meta_json.warn_unknown_keeper_meta_keys
+  Masc_mcp.Keeper_meta_json.warn_unknown_keeper_meta_keys
     ~path:"/test/canonical-only.json"
     (canonical_only_meta_json ());
   let after = counter_total () in
@@ -45,7 +45,7 @@ let test_no_counter_tick_when_all_keys_canonical () =
 let test_counter_ticks_on_genuine_unknown_key () =
   (* Sanity: the warn path still fires when a real unknown key is present. *)
   let before = counter_total () in
-  Keeper_meta_json.warn_unknown_keeper_meta_keys
+  Masc_mcp.Keeper_meta_json.warn_unknown_keeper_meta_keys
     ~path:"/test/has-unknown.json"
     (`Assoc
       [ ("name", `String "x")
@@ -79,7 +79,7 @@ let test_progress_updated_line_failure_is_observable () =
       Prometheus.metric_total
         Masc_mcp.Keeper_metrics.(to_string ProgressUpdatedLineFailures)
     in
-    Keeper_meta_store.refresh_progress_updated_line config keeper_name;
+    Masc_mcp.Keeper_meta_store.refresh_progress_updated_line config keeper_name;
     let after =
       Prometheus.metric_total
         Masc_mcp.Keeper_metrics.(to_string ProgressUpdatedLineFailures)

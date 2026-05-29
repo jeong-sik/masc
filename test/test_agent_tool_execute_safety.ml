@@ -742,9 +742,9 @@ let make_write_enabled_meta name =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "write-enabled Execute test");
         ( "tool_access",
-          Keeper_types.tool_access_to_json
-            (Keeper_types.Preset
-               { preset = Keeper_types.Delivery; also_allow = [] }) );
+          Masc_mcp.Keeper_meta_contract.tool_access_to_json
+            (Masc_mcp.Keeper_meta_contract.Preset
+               { preset = Masc_mcp.Keeper_meta_contract.Delivery; also_allow = [] }) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

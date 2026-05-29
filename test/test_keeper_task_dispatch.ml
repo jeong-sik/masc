@@ -6,7 +6,7 @@ module CT = Cdal_types
 open Alcotest
 open Masc_mcp
 
-let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
+let make_test_meta ?(name = "test-keeper") () : Masc_mcp.Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -24,7 +24,7 @@ let make_goal_scoped_meta goal_ids =
 ;;
 
 let make_meta_with_tools tools =
-  { (make_test_meta ()) with tool_access = Keeper_types.Custom tools }
+  { (make_test_meta ()) with tool_access = Masc_mcp.Keeper_meta_contract.Custom tools }
 ;;
 
 let make_ctx_work () = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
@@ -401,7 +401,7 @@ let claimed_task_for_agent config agent_name =
 ;;
 
 let check_no_task_claimed config meta =
-  match claimed_task_for_agent config meta.Keeper_types.agent_name with
+  match claimed_task_for_agent config meta.Masc_mcp.Keeper_meta_contract.agent_name with
   | None -> ()
   | Some task ->
     fail
@@ -432,19 +432,19 @@ let check_active_goal_scope_no_fallback json ~goal_id =
 ;;
 
 let with_registered_keeper config meta f =
-  Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Keeper_types.name;
+  Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Masc_mcp.Keeper_meta_contract.name;
   ignore
     (Keeper_registry.register_offline
        ~base_path:config.Coord.base_path
-       meta.Keeper_types.name
+       meta.Masc_mcp.Keeper_meta_contract.name
        meta);
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Keeper_types.name)
+      Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Masc_mcp.Keeper_meta_contract.name)
     f
 ;;
 
-let current_task_id_string (meta : Keeper_types.keeper_meta) =
+let current_task_id_string (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id
 ;;
 
@@ -582,7 +582,7 @@ let test_claim_syncs_keeper_current_task_id () =
         (Some task_id)
         (current_task_id_string registry_meta);
       let persisted_meta =
-        match Keeper_types.read_meta config meta.name with
+        match Masc_mcp.Keeper_meta_store.read_meta config meta.name with
         | Ok (Some meta) -> meta
         | Ok None -> fail "expected persisted keeper meta"
         | Error msg -> fail msg
@@ -628,7 +628,7 @@ let test_release_clears_keeper_current_task_id () =
         None
         (current_task_id_string registry_meta);
       let persisted_meta =
-        match Keeper_types.read_meta config meta.name with
+        match Masc_mcp.Keeper_meta_store.read_meta config meta.name with
         | Ok (Some meta) -> meta
         | Ok None -> fail "expected persisted keeper meta"
         | Error msg -> fail msg
@@ -726,7 +726,7 @@ let test_stale_current_task_id_is_cleared_from_backlog () =
     in
     let meta = { (make_test_meta ()) with current_task_id = Some task_id } in
     with_registered_keeper config meta (fun () ->
-      (match Keeper_types.write_meta config meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error msg -> fail msg);
       let synced =
@@ -752,7 +752,7 @@ let test_run_context_uses_reconciled_current_task_id () =
       }
     in
     with_registered_keeper config meta (fun () ->
-      (match Keeper_types.write_meta config meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error msg -> fail msg);
       let ctx =
@@ -763,7 +763,7 @@ let test_run_context_uses_reconciled_current_task_id () =
           ~max_context:4000
           ~cascade_name:
             (Cascade_name.of_string_exn
-               (Keeper_config.default_cascade_name ()))
+               (Masc_mcp.Keeper_config.default_cascade_name ()))
           ~generation:meta.runtime.generation
           ()
       in
@@ -810,7 +810,7 @@ let test_multiple_active_tasks_selects_deterministic_current_task () =
         ~task_status:
           (Masc_domain.Claimed
              { assignee = meta.agent_name; claimed_at = "2026-05-02T00:01:00Z" });
-      (match Keeper_types.write_meta config meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error msg -> fail msg);
       let high_priority_task = task_by_title config "Newer high priority" in
@@ -863,7 +863,7 @@ let test_multiple_active_tasks_preserves_existing_current_task () =
              ; claimed_at = "2026-05-02T00:01:00Z"
              });
       let meta = { base_meta with current_task_id = Some sticky_task_id } in
-      (match Keeper_types.write_meta config meta with
+      (match Masc_mcp.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error msg -> fail msg);
       let synced =
@@ -2224,7 +2224,7 @@ let test_submit_for_verification_transitions_task () =
                   "expected awaiting_verification, got %s"
                   (Masc_domain.string_of_task_status status)));
           let persisted_meta =
-            match Keeper_types.read_meta config meta.name with
+            match Masc_mcp.Keeper_meta_store.read_meta config meta.name with
             | Ok (Some meta) -> meta
             | Ok None -> fail "expected persisted keeper meta"
             | Error msg -> fail msg

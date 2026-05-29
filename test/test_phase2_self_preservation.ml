@@ -4,7 +4,7 @@
 open Alcotest
 
 module R = Masc_mcp.Keeper_registry
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 module KSM = Masc_mcp.Keeper_state_machine
 module Cfg = Env_config
 

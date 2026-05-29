@@ -20,7 +20,7 @@ module TS = Masc_mcp.Tool_shard
 module KTP = Masc_mcp.Keeper_tool_policy
 module Reg = Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
-module KTypes = Masc_mcp.Keeper_types
+module KTypes = Masc_mcp.Keeper_meta_contract
 module YU = Yojson.Safe.Util
 
 (* ── E1: NEL Invariant ──────────────────────────────── *)
@@ -242,7 +242,7 @@ let make_obs_meta name =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  match KTypes.meta_of_json json with
+  match Masc_mcp.Keeper_meta_json.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
 

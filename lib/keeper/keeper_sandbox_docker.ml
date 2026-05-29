@@ -205,7 +205,7 @@ let docker_result_pair = function
    This minimum applies only to the [docker run] path, not to
    [docker exec] against a warm container. *)
 
-let resolve_sandbox_image meta =
+let resolve_sandbox_image (meta : keeper_meta) =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
   | _ -> Env_config_sandbox.Runtime.docker_image ()

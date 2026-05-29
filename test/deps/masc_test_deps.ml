@@ -27,7 +27,7 @@ let init_keeper_tool_registry () =
 
 (** Test fixture parser for [keeper_meta] JSON.
 
-    The production parser at [Masc_mcp.Keeper_types.meta_of_json] requires
+    The production parser at [Masc_mcp.Keeper_meta_json.meta_of_json] requires
     explicit [sandbox_profile] / [network_mode] fields (see fail-loud change
     in keeper_meta_json_parse.ml). Test fixtures historically built minimal
     [`Assoc] payloads that omitted those fields and depended on the silent
@@ -53,7 +53,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     | `Assoc fields -> `Assoc (augment fields)
     | other -> other
   in
-  Masc_mcp.Keeper_types.meta_of_json json'
+  Masc_mcp.Keeper_meta_json.meta_of_json json'
 
 (** Walk up the directory tree from [Sys.getcwd()] until
     [config/tool_policy.toml] is found, then return that directory.

@@ -2,7 +2,7 @@ open Alcotest
 open Masc_mcp
 
 module Coord = Masc_mcp.Coord
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 module KTS = Masc_mcp.Keeper_types_support
 
 let counter = ref 0
@@ -45,13 +45,13 @@ let with_store f =
 
 let make_meta ?(name = "alpha") () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json.meta_of_json
       (`Assoc
         [
           ("name", `String name);
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("cascade_name", `String (Keeper_config.default_cascade_name ()));
+          ("cascade_name", `String (Masc_mcp.Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "openai:gpt-5.4");
           ("sandbox_profile", `String "local");
           ("network_mode", `String "none");
@@ -115,7 +115,7 @@ let persist_keeper_with_proactive
         };
     }
   in
-  match KT.write_meta ~force:true config meta with
+  match Masc_mcp.Keeper_meta_store.write_meta ~force:true config meta with
   | Ok () -> meta
   | Error err -> fail ("write_meta failed: " ^ err)
 

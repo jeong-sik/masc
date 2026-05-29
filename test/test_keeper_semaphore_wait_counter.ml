@@ -11,7 +11,7 @@
 
 module KHL = Masc_mcp.Keeper_heartbeat_loop
 module KTS = Masc_mcp.Keeper_turn_slot
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
 
 let counter_for ~keeper ~channel =
   Masc_mcp.Prometheus.metric_value_or_zero
@@ -375,7 +375,7 @@ let test_queue_head_timeout_diagnostic_names_fifo_blocker () =
   Alcotest.(check string)
     "queue head maps to admission queue blocker"
     "admission_queue_wait_timeout"
-    (KT.blocker_class_to_string blocker_class);
+    (Masc_mcp.Keeper_meta_contract.blocker_class_to_string blocker_class);
   let persisted, log_diagnostic =
     KHL.semaphore_wait_timeout_diagnostics ~cascade_name:"queue-cascade" timeout
   in
@@ -407,7 +407,7 @@ let test_autonomous_slot_timeout_keeps_holder_diagnostic () =
   Alcotest.(check string)
     "slot timeout maps to autonomous slot blocker"
     "autonomous_slot_wait_timeout"
-    (KT.blocker_class_to_string blocker_class);
+    (Masc_mcp.Keeper_meta_contract.blocker_class_to_string blocker_class);
   let _persisted, log_diagnostic =
     KHL.semaphore_wait_timeout_diagnostics ~cascade_name:"slot-cascade" timeout
   in

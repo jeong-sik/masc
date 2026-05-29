@@ -48,9 +48,9 @@ let test_oversized_ascii_truncates_to_exact_cap () =
   let p = make ~will:(String.make 357 'a') () in
   let r =
     Keeper_personality_io.to_prompt_form
-      ~max_bytes:Keeper_config.prompt_render_max_bytes p
+      ~max_bytes:Masc_mcp.Keeper_config.prompt_render_max_bytes p
   in
-  check int "byte length = cap" Keeper_config.prompt_render_max_bytes
+  check int "byte length = cap" Masc_mcp.Keeper_config.prompt_render_max_bytes
     (String.length r.will)
 
 let test_truncate_per_field_independent () =
@@ -69,7 +69,7 @@ let test_truncate_per_field_independent () =
 (* --------------------------------------------------------------------- *)
 
 let test_matches_normalize_self_model_text_for_each_field () =
-  let cap = Keeper_config.prompt_render_max_bytes in
+  let cap = Masc_mcp.Keeper_config.prompt_render_max_bytes in
   let inputs =
     [
       "  ascii_short  ";
@@ -81,7 +81,7 @@ let test_matches_normalize_self_model_text_for_each_field () =
   List.iter
     (fun raw ->
       let via_helper =
-        Keeper_config.normalize_self_model_text ~max_bytes:cap raw
+        Masc_mcp.Keeper_config.normalize_self_model_text ~max_bytes:cap raw
       in
       let p = make ~will:raw () in
       let r = Keeper_personality_io.to_prompt_form ~max_bytes:cap p in

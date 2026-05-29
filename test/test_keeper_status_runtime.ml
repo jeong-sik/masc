@@ -4,7 +4,8 @@ module ES = Masc_mcp.Keeper_status_runtime
 module Metrics = Masc_mcp.Keeper_status_metrics
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
-module KT = Masc_mcp.Keeper_types
+module KT = Masc_mcp.Keeper_meta_contract
+module KTypes = Masc_mcp.Keeper_types
 module KFS = Masc_mcp.Keeper_fs
 module KMP = Masc_mcp.Keeper_memory_policy
 module KTS = Masc_mcp.Keeper_types_support
@@ -12,7 +13,7 @@ module Coord = Masc_mcp.Coord
 module OWN = Masc_mcp.Keeper_turn_driver
 module Prom = Masc_mcp.Prometheus
 
-let keeper_health_testable : KT.keeper_health Alcotest.testable =
+let keeper_health_testable : KTypes.keeper_health Alcotest.testable =
   Alcotest.testable
     (fun fmt h -> Format.pp_print_string fmt (ES.keeper_health_to_string h))
     (=)
@@ -20,13 +21,13 @@ let keeper_health_testable : KT.keeper_health Alcotest.testable =
 let make_meta ?(name = "keeper-exec-status-test")
     ?(trace_id = "trace-keeper-exec-status") () =
   match
-    KT.meta_of_json
+    Masc_mcp.Keeper_meta_json.meta_of_json
       (`Assoc
         [
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("cascade_name", `String Masc_mcp.(Masc_mcp.Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "llama:auto");
           ("sandbox_profile", `String "local");
           ("network_mode", `String "inherit");
@@ -340,9 +341,9 @@ let test_health_keepalive_running_overrides_stale_last_seen () =
   in
   (* keepalive is running and last_seen has not exceeded 2x the max keepalive interval *)
   check bool "keepalive running + last_seen at boundary is NOT stale"
-    true (health <> KT.KH_stale);
+    true (health <> KTypes.KH_stale);
   check bool "keepalive running + last_seen at boundary is NOT offline"
-    true (health <> KT.KH_offline)
+    true (health <> KTypes.KH_offline)
 
 let test_health_keepalive_stuck_secondary_timeout () =
   let meta = make_meta () in
@@ -352,7 +353,7 @@ let test_health_keepalive_stuck_secondary_timeout () =
     ES.keeper_health_state ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check keeper_health_testable "keepalive running but last_seen > 2x interval → stale (stuck fiber)" KT.KH_stale health
+  check keeper_health_testable "keepalive running but last_seen > 2x interval → stale (stuck fiber)" KTypes.KH_stale health
 
 let test_health_keepalive_below_secondary_timeout () =
   let meta = make_meta () in
@@ -363,7 +364,7 @@ let test_health_keepalive_below_secondary_timeout () =
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
   check bool "keepalive running + last_seen just below 2x interval is NOT stale"
-    true (health <> KT.KH_stale)
+    true (health <> KTypes.KH_stale)
 
 let test_health_keepalive_stuck_respects_interval () =
   let meta = make_meta () in
@@ -373,7 +374,7 @@ let test_health_keepalive_stuck_respects_interval () =
     ES.keeper_health_state ~keepalive_interval_s:30.0 ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check keeper_health_testable "keepalive running + last_seen > 2x configured interval → stale" KT.KH_stale health
+  check keeper_health_testable "keepalive running + last_seen > 2x configured interval → stale" KTypes.KH_stale health
 
 let test_health_keepalive_not_running_respects_stale_last_seen () =
   let meta = make_meta () in
@@ -382,7 +383,7 @@ let test_health_keepalive_not_running_respects_stale_last_seen () =
     ES.keeper_health_state ~meta ~keepalive_running:false
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check keeper_health_testable "no keepalive + stale last_seen → stale" KT.KH_stale health
+  check keeper_health_testable "no keepalive + stale last_seen → stale" KTypes.KH_stale health
 
 let test_health_zombie_overrides_keepalive () =
   let meta = make_meta () in
@@ -391,7 +392,7 @@ let test_health_zombie_overrides_keepalive () =
     ES.keeper_health_state ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check keeper_health_testable "zombie overrides keepalive" KT.KH_stale health
+  check keeper_health_testable "zombie overrides keepalive" KTypes.KH_stale health
 
 let test_health_keepalive_running_fresh_is_healthy () =
   let meta =
@@ -407,7 +408,7 @@ let test_health_keepalive_running_fresh_is_healthy () =
     ES.keeper_health_state ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check keeper_health_testable "keepalive + fresh + turns → healthy" KT.KH_healthy health
+  check keeper_health_testable "keepalive + fresh + turns → healthy" KTypes.KH_healthy health
 
 let test_health_keepalive_running_recent_live_signal_avoids_idle () =
   let now_ts = Time_compat.now () in
@@ -433,7 +434,7 @@ let test_health_keepalive_running_recent_live_signal_avoids_idle () =
       ~agent_status ~quiet_reason:None ~now_ts ()
   in
   check keeper_health_testable "fresh live signal keeps keeper healthy despite stale last turn"
-    KT.KH_healthy health
+    KTypes.KH_healthy health
 
 let test_health_keepalive_not_running_not_stale_is_offline () =
   let meta = make_meta () in
@@ -442,7 +443,7 @@ let test_health_keepalive_not_running_not_stale_is_offline () =
     ES.keeper_health_state ~meta ~keepalive_running:false
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check keeper_health_testable "no keepalive + not stale → offline" KT.KH_offline health
+  check keeper_health_testable "no keepalive + not stale → offline" KTypes.KH_offline health
 
 let test_diagnostic_ignores_stale_error_when_live_signal_is_newer () =
   let now_ts = Time_compat.now () in
@@ -497,7 +498,7 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:reason
+            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class ~detail:reason
                     KT.Autonomous_slot_wait_timeout);
         };
     }
@@ -535,7 +536,7 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:reason
+            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class ~detail:reason
                     (KT.Cascade_exhausted KT.Connection_refused));
         };
     }
@@ -582,8 +583,8 @@ let test_runtime_surface_names_no_tool_provider_details () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:summary
-                    KT.No_tool_capable_provider);
+            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class ~detail:summary
+                    (KT.Cascade_exhausted KT.No_tool_capable));
         };
     }
   in
@@ -618,9 +619,9 @@ let test_runtime_surface_routes_turn_timeout_to_runtime_action () =
               base.runtime with
               last_blocker =
                 Some
-                  (KT.blocker_info_of_class
+                  (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
                      ~detail:"Provider stream exceeded the keeper turn timeout."
-                     KT.Turn_timeout);
+                     Masc_mcp.Keeper_meta_contract.Turn_timeout);
             };
         }
       in
@@ -654,9 +655,9 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
               base.runtime with
               last_blocker =
                 Some
-                  (KT.blocker_info_of_class
+                  (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
                      ~detail:"Provider stream exceeded the keeper turn timeout."
-                     KT.Turn_timeout);
+                     Masc_mcp.Keeper_meta_contract.Turn_timeout);
             };
         }
       in
@@ -700,7 +701,7 @@ let test_status_bridge_does_not_fabricate_resumable_cli_session_blocker () =
     (option string)
     "resumable session is not a cascade blocker"
     None
-    (Option.map KT.blocker_class_to_string (KSB.blocker_class_of_sdk_error sdk_error))
+    (Option.map Masc_mcp.Keeper_meta_contract.blocker_class_to_string (KSB.blocker_class_of_sdk_error sdk_error))
 ;;
 
 let test_status_bridge_classifies_oas_agent_execution_timeout () =
@@ -728,7 +729,7 @@ let test_status_bridge_classifies_oas_agent_execution_timeout () =
          label
          (Some "oas_agent_execution_timeout")
          (Option.map
-            KT.blocker_class_to_string
+            Masc_mcp.Keeper_meta_contract.blocker_class_to_string
             (KSB.blocker_class_of_sdk_error sdk_error)))
     [ "structural api timeout", structural_api_timeout
     ; "typed agent execution timeout", typed_agent_timeout
@@ -799,7 +800,7 @@ let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker 
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class ~detail:reason
+            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class ~detail:reason
                     KT.Ambiguous_post_commit_timeout);
         };
     }
@@ -1098,9 +1099,9 @@ let test_runtime_surface_prefers_typed_blocker_over_progress_narrative () =
         {
           base.runtime with
           last_blocker =
-            Some (KT.blocker_info_of_class
+            Some (Masc_mcp.Keeper_meta_contract.blocker_info_of_class
                     ~detail:"turn wall-clock timeout exceeded"
-                    KT.Turn_timeout);
+                    Masc_mcp.Keeper_meta_contract.Turn_timeout);
         };
     }
   in
@@ -1192,7 +1193,7 @@ let test_runtime_surface_omits_model_display_labels () =
    unknown strings. The previous catch-all silently mapped typos to
    KH_offline, masking drift between dashboard producers and consumers. *)
 let test_parser_roundtrip_all_constructors () =
-  let all : KT.keeper_health list =
+  let all : KTypes.keeper_health list =
     [ KH_healthy; KH_idle; KH_offline; KH_stale;
       KH_degraded; KH_zombie; KH_dead ]
   in

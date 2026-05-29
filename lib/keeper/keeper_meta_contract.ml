@@ -4,6 +4,7 @@
     their public API while the type-heavy contract is separated from JSON
     parsing and store I/O. *)
 
+open Keeper_types_profile
 include Keeper_meta_tool_access
 
 (* -- Policy types (remain in keeper_meta top-level) -- *)

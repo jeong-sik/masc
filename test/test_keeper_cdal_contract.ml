@@ -16,7 +16,7 @@ let make_meta ?(name = "cdal-keeper") ?current_task_id () =
     ; "network_mode", `String "none"
     ; "allowed_paths", `List [ `String "/workspace/project" ]
     ; "active_goal_ids", `List [ `String "goal-cdal" ]
-    ; "tool_access", Keeper_types.tool_access_to_json (Keeper_types.Custom [ "tool_execute" ])
+    ; "tool_access", Masc_mcp.Keeper_meta_contract.tool_access_to_json (Masc_mcp.Keeper_meta_contract.Custom [ "tool_execute" ])
     ]
   in
   let fields =

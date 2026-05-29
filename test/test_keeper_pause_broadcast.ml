@@ -97,9 +97,9 @@ let mk_receipt
         ~required_tool_candidates
         ~missing_required_tools
         ()
-  ; sandbox_kind = Masc_mcp.Keeper_types.Local
+  ; sandbox_kind = Masc_mcp.Keeper_types_profile.Local
   ; sandbox_root = None
-  ; network_mode = Masc_mcp.Keeper_types.Network_none
+  ; network_mode = Masc_mcp.Keeper_types_profile.Network_none
   ; approval_profile = None
   ; approval_profile_derived = false
   ; cascade_name = Cascade_name.of_string_exn "tier-group.default"

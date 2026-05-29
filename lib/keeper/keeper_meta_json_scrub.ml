@@ -3,6 +3,8 @@
     Kept below the codec/parser facade so persisted runtime JSON can be
     normalized before strict [keeper_meta] decoding. *)
 
+open Keeper_config
+
 
 (* Config fields owned by TOML only.  Never written to JSON; scrubbed
    from existing JSON on first write.  The parser still accepts them

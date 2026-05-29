@@ -467,7 +467,7 @@ let append_execution_receipt
     ?(required_tool_candidates = [])
     config ~keeper_name =
   let meta =
-    match Lib.Keeper_types.read_meta config keeper_name with
+    match Masc_mcp.Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> meta
     | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
     | Error err -> fail ("read_meta failed for receipt: " ^ err)
@@ -517,7 +517,7 @@ let append_execution_receipt
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =
-        Cascade_name.of_string_exn (Lib.Keeper_types.cascade_name_of_meta meta);
+        Cascade_name.of_string_exn (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
@@ -526,17 +526,17 @@ let append_execution_receipt
       degraded_retry_cascade =
         Some
           (Cascade_name.of_string_exn
-             Lib.Keeper_config.phase_recovery_cascade_name);
+             Masc_mcp.Keeper_config.phase_recovery_cascade_name);
       fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
       cascade_rotation_attempts =
         [
           {
             from_cascade =
               Cascade_name.of_string_exn
-                Lib.(Keeper_config.default_cascade_name ());
+                Lib.(Masc_mcp.Keeper_config.default_cascade_name ());
             to_cascade =
               Cascade_name.of_string_exn
-                Lib.Keeper_config.phase_recovery_cascade_name;
+                Masc_mcp.Keeper_config.phase_recovery_cascade_name;
             reason = Lib.Keeper_error_classify.Turn_timeout;
             outcome = Lib.Keeper_execution_receipt.Rotation_retry_scheduled;
             slot_release_at_phase =
@@ -569,7 +569,7 @@ let append_execution_receipt
   let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
   let base_dir =
     Filename.concat
-      (Lib.Keeper_types.keeper_dir config)
+      (Masc_mcp.Keeper_types_profile.keeper_dir config)
       (keeper_name ^ "/execution-receipts")
   in
   let month_dir = Filename.concat base_dir month in
@@ -703,10 +703,10 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check bool "diagnostic next action surfaced" true
               (row |> member "diagnostic" |> member "next_action_path" <> `Null);
             check string "raw cascade surfaced on execution keeper row"
-              Lib.(Keeper_config.default_cascade_name ())
+              Lib.(Masc_mcp.Keeper_config.default_cascade_name ())
               (row |> member "cascade_name" |> to_string);
             check string "canonical cascade surfaced on execution keeper row"
-              Lib.(Keeper_config.default_cascade_name ())
+              Lib.(Masc_mcp.Keeper_config.default_cascade_name ())
               (row |> member "cascade_canonical" |> to_string);
             check bool "primary model omitted on execution keeper row" true
               (row |> member "primary_model" = `Null);
@@ -862,7 +862,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_applied" |> to_bool);
             check (option string) "execution trust row preserves degraded retry lane"
-              (Some Lib.Keeper_config.phase_recovery_cascade_name)
+              (Some Masc_mcp.Keeper_config.phase_recovery_cascade_name)
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_cascade" |> to_string_option);
             check (option string) "execution trust row preserves fallback reason"
@@ -870,7 +870,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "fallback_reason" |> to_string_option);
             check string "execution trust row preserves rotation target"
-              Lib.Keeper_config.phase_recovery_cascade_name
+              Masc_mcp.Keeper_config.phase_recovery_cascade_name
               (trust_row |> member "trust" |> member "cascade"
              |> member "rotation_attempts" |> to_list |> List.hd
              |> member "to_cascade" |> to_string);

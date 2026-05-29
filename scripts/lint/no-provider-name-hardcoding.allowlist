@@ -1,12 +1,16 @@
-# Existing provider/model identity debt in the OAS-owned provider migration
-# boundary. Keep this list shrinking; do not add entries without linking to a
-# catalog/runtime-binding replacement task.
+# Provider/model identity debt ceiling per file (path:max_count).
 #
-# Format: path:line:literal
-lib/cascade/cascade_runtime.ml:37:auto
-lib/cascade/cascade_runtime.ml:46:custom
-lib/cascade/cascade_runtime.ml:67:openai_compat
-lib/cascade/cascade_runtime.ml:321:auto
-lib/provider_runtime_projection.ml:108:auto
-lib/provider_runtime_projection.ml:206:auto
-lib/provider_runtime_projection.ml:254:openrouter
+# Ratchet: per-file literal counts may only DECREASE. When you remove a literal,
+# lower the ceiling here in the same PR to lock the gain (the linter prints a
+# RATCHET DOWN advisory to remind you). Adding a literal (count above ceiling)
+# fails the gate.
+#
+# Counts are position-independent: moving code within a scanned file does not
+# change the count, so unrelated refactors never trip this gate. Do not raise a
+# ceiling without linking a catalog/runtime-binding replacement task.
+#
+# Scanned files are defined by SCAN_FILES in no-provider-name-hardcoding.sh.
+# Both files are slated for removal/migration by the cascade->Runtime work
+# (lib/cascade/cascade_runtime.ml in B4); the ceilings drop to 0 then.
+lib/cascade/cascade_runtime.ml:4
+lib/provider_runtime_projection.ml:3

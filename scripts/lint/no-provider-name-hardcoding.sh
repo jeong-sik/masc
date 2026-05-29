@@ -8,9 +8,16 @@
 # docs/PROVIDER-ADAPTER-REMOVAL-PLAN.md is the provider-runtime/cascade bridge
 # learning concrete provider identity after Provider_adapter was removed.
 #
-# Allowlist entries are exact `path:line:literal` keys.  They are a debt ledger:
-# line drift or deletion makes the entry stale and must be cleaned up in the
-# same PR.
+# Ratchet model: per-file literal COUNT ceilings (path:max_count).  Counts are
+# position-independent, so moving code within a file never trips the gate.
+#   - current > ceiling  -> fail (drift up: a new literal was added)
+#   - current < ceiling  -> pass + advisory (lower the ceiling in this PR)
+#   - current == ceiling -> pass
+#
+# Why count-based: the previous `path:line:literal` ledger broke on every code
+# move.  A literal shifting one line read as new+stale at once, so any unrelated
+# refactor in the scanned files turned this gate red and buried real drift in
+# noise.  See the cascade->Runtime migration churn (2026-05).
 
 set -euo pipefail
 
@@ -31,7 +38,7 @@ case "${1:---fail}" in
     ;;
 esac
 
-for tool in rg sed sort mktemp comm; do
+for tool in rg sed grep; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "[no-provider-name-hardcoding] required tool missing: $tool" >&2
     exit 2
@@ -47,66 +54,55 @@ SCAN_FILES=(
 
 LITERAL_PATTERN='"(claude|codex|gemini|llama|llama\.cpp|llamacpp|openrouter|openai_compat|ollama|custom|auto)"'
 
-current_tmp="$(mktemp -t provider-name-hardcoding.current.XXXXXX)"
-allow_tmp="$(mktemp -t provider-name-hardcoding.allow.XXXXXX)"
-new_tmp="$(mktemp -t provider-name-hardcoding.new.XXXXXX)"
-stale_tmp="$(mktemp -t provider-name-hardcoding.stale.XXXXXX)"
-trap 'rm -f "$current_tmp" "$allow_tmp" "$new_tmp" "$stale_tmp"' EXIT
+# Read the per-file ceiling from the allowlist ledger (path:max_count).
+# Missing entry => ceiling 0 (any literal in a newly-scanned file is drift up).
+ceiling_for() {
+  local file="$1" escaped value
+  escaped="${file//./\\.}"
+  value="$(sed -E 's/#.*//' "$ALLOWLIST" 2>/dev/null \
+    | grep -E "^${escaped}:" \
+    | head -1 \
+    | sed -E 's/^[^:]+:[[:space:]]*([0-9]+).*/\1/')"
+  [[ "$value" =~ ^[0-9]+$ ]] && printf '%s' "$value" || printf '0'
+}
 
+fail=0
+print_keys=""
+
+printf "%-44s %8s %8s\n" "file" "current" "ceiling"
+echo "----------------------------------------------------------------"
 for file in "${SCAN_FILES[@]}"; do
-  [[ -f "$file" ]] || continue
-  while IFS=: read -r path line content; do
-    [[ -n "${path:-}" && -n "${line:-}" ]] || continue
-    while IFS= read -r literal; do
-      [[ -n "$literal" ]] || continue
-      printf '%s:%s:%s\n' "$path" "$line" "$literal"
-    done < <(printf '%s\n' "$content" | rg -o --replace '$1' "$LITERAL_PATTERN" || true)
-  done < <(rg --with-filename --no-heading --line-number --color=never "$LITERAL_PATTERN" "$file" || true)
-done | sort -u >"$current_tmp"
+  if [[ -f "$file" ]]; then
+    current="$(rg -o "$LITERAL_PATTERN" "$file" 2>/dev/null | grep -c . || true)"
+  else
+    current=0
+  fi
+  ceiling="$(ceiling_for "$file")"
+  printf "%-44s %8s %8s\n" "$file" "$current" "$ceiling"
 
-if [[ -f "$ALLOWLIST" ]]; then
-  sed -E 's/#.*//; s/[[:space:]]//g; /^$/d' "$ALLOWLIST" | sort -u >"$allow_tmp"
-else
-  : >"$allow_tmp"
-fi
+  if (( current > ceiling )); then
+    echo "[no-provider-name-hardcoding] DRIFT UP: $file has $current provider/model literals (ceiling $ceiling)." >&2
+    echo "  A new provider/model name literal was hardcoded. Route truth through runtime bindings, or" >&2
+    echo "  if intentional debt, raise the ceiling in $ALLOWLIST with a replacement-task link." >&2
+    fail=1
+  elif (( current < ceiling )); then
+    echo "[no-provider-name-hardcoding] RATCHET DOWN available: $file now $current (ceiling $ceiling)." >&2
+    echo "  A literal was removed. Lower the ceiling in $ALLOWLIST in this PR to lock the gain (advisory)." >&2
+  fi
 
-comm -13 "$allow_tmp" "$current_tmp" >"$new_tmp"
-comm -23 "$allow_tmp" "$current_tmp" >"$stale_tmp"
-
-current_count="$(wc -l <"$current_tmp" | tr -d ' ')"
-allow_count="$(wc -l <"$allow_tmp" | tr -d ' ')"
-new_count="$(wc -l <"$new_tmp" | tr -d ' ')"
-stale_count="$(wc -l <"$stale_tmp" | tr -d ' ')"
-
-printf "%-36s %8s\n" "metric" "count"
-echo "------------------------------------------------"
-printf "%-36s %8s\n" "provider_name_literals_current" "$current_count"
-printf "%-36s %8s\n" "provider_name_allowlist_entries" "$allow_count"
-printf "%-36s %8s\n" "provider_name_new_literals" "$new_count"
-printf "%-36s %8s\n" "provider_name_stale_allowlist" "$stale_count"
+  if [[ "$MODE" = "--print" && -f "$file" ]]; then
+    print_keys+="$(rg --line-number -o "$LITERAL_PATTERN" "$file" 2>/dev/null | sed "s#^#  - $file:#" || true)"$'\n'
+  fi
+done
 
 if [[ "$MODE" = "--print" ]]; then
   echo
-  echo "[no-provider-name-hardcoding] current keys:"
-  sed 's/^/  - /' "$current_tmp"
+  echo "[no-provider-name-hardcoding] current literals:"
+  printf '%s' "$print_keys" | sed '/^$/d'
   exit 0
 fi
 
-if [[ -s "$new_tmp" ]]; then
-  echo
-  echo "[no-provider-name-hardcoding] DRIFT UP: new provider/model literals in runtime boundary" >&2
-  sed 's/^/  - /' "$new_tmp" >&2
-  echo "  Route provider/model truth through OAS runtime bindings or a MASC-local policy overlay." >&2
-fi
-
-if [[ -s "$stale_tmp" ]]; then
-  echo
-  echo "[no-provider-name-hardcoding] STALE allowlist entries" >&2
-  sed 's/^/  - /' "$stale_tmp" >&2
-  echo "  Remove stale entries when a literal is deleted or moved." >&2
-fi
-
-if [[ -s "$new_tmp" || -s "$stale_tmp" ]]; then
+if (( fail != 0 )); then
   exit 1
 fi
 

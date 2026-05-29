@@ -28,8 +28,8 @@ let masc_path_blocked
     let candidates =
       List.filter_map
         (fun key ->
-           match Yojson.Safe.Util.member key args with
-           | `String p when String.trim p <> "" -> Some p
+           match Json_util.assoc_member_opt key args with
+           | Some (`String p) when String.trim p <> "" -> Some p
            | _ -> None)
         [ "path"; "file_path"; "target_path" ]
     in

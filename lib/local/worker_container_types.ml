@@ -140,7 +140,7 @@ let normalize_mcp_body ~request_id body =
 
 let extract_tool_text json =
   match (match Json_util.assoc_member_opt "result" json with Some x -> Json_util.assoc_member_opt "content" x | None -> None) with
-  | `List (`Assoc fields :: _) -> (
+  | Some (`List (`Assoc fields :: _)) -> (
       match List.assoc_opt "text" fields with
       | Some (`String s) -> s
       | _ -> Yojson.Safe.to_string json)
@@ -286,7 +286,7 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
   | Ok json ->
       let is_error =
         match (match Json_util.assoc_member_opt "result" json with Some x -> Json_util.assoc_member_opt "isError" x | None -> None) with
-        | `Bool b -> b
+        | Some (`Bool b) -> b
         | _ -> false
       in
       Ok { text = extract_tool_text json; is_error }

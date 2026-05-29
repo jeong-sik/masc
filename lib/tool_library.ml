@@ -218,8 +218,8 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 
 let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
   let include_candidates =
-    match Yojson.Safe.Util.member "include_candidates" args with
-    | `Bool b -> b
+    match Json_util.assoc_member_opt "include_candidates" args with
+    | Some (`Bool b) -> b
     | _ -> false
   in
   let docs = list_documents ~include_candidates () in

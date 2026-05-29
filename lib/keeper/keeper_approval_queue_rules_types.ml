@@ -123,14 +123,14 @@ let string_opt_of_json = function
    unexpected internal contract break) will now propagate to the
    caller instead of being silently coerced to [None]. *)
 let string_opt_member key json =
-  match Yojson.Safe.Util.member key json with
-  | exception Yojson.Safe.Util.Type_error _ -> None
-  | value -> string_opt_of_json value
+  match Json_util.assoc_member_opt key json with
+  | Some value -> string_opt_of_json value
+  | None -> None
 ;;
 
 let bool_member key json ~default =
-  match Yojson.Safe.Util.member key json with
-  | `Bool value -> value
+  match Json_util.assoc_member_opt key json with
+  | Some (`Bool value) -> value
   | _ -> default
 ;;
 

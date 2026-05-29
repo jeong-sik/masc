@@ -222,14 +222,14 @@ let prompt_eval_duration_ms_of_run_json json =
 let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms json =
   let duration_ms key = int_member json key |> ns_to_ms in
   let response =
-    match Json_util.assoc_member_opt "response" json  with
+    match Json_util.get_string json "response" with
     | Some value ->
         let preview = value |> collapse_preview |> truncate_text in
         Some preview
     | None -> None
   in
   let response_chars =
-    match Json_util.assoc_member_opt "response" json  with
+    match Json_util.get_string json "response" with
     | Some value -> Some (String.length value)
     | None -> None
   in
@@ -251,7 +251,7 @@ let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms jso
     eval_duration_ms;
     generation_tokens_per_second =
       tok_per_second ~count:eval_count ~duration_ms:eval_duration_ms;
-    done_flag = Json_util.assoc_member_opt "done" json ;
+    done_flag = Json_util.get_bool json "done" ;
     done_reason = string_member json "done_reason";
     thinking_present =
       (match Json_util.assoc_member_opt "thinking" json with

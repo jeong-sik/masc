@@ -130,7 +130,12 @@ let latest_json_in_receipt_dir base_dir =
 ;;
 
 let json_member_path path json =
-  List.fold_left (fun current key -> Yojson.Safe.Util.member key current) json path
+  List.fold_left
+    (fun current key ->
+       match Json_util.assoc_member_opt key current with
+       | Some v -> v
+       | None -> `Null)
+    json path
 ;;
 
 let json_raw_string_path path json =

@@ -69,8 +69,8 @@ let runtime_status_json ?(include_models = true) () =
     else
       runtime_json
       |> List.concat_map (fun json ->
-             match Yojson.Safe.Util.member "models" json with
-             | `List items ->
+             match Json_util.assoc_member_opt "models" json with
+             | Some (`List items) ->
                  List.filter_map
                    (fun item -> Yojson.Safe.Util.to_string_option item)
                    items

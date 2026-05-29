@@ -41,11 +41,11 @@ let parse_tool_usage_json (json : Yojson.Safe.t) : tool_stat list =
   match Json_util.assoc_member_opt "tools" json with
   | Some (`List items) ->
     List.filter_map (fun item ->
-      match Json_util.assoc_member_opt "tool" item  with
+      match Json_util.get_string item "tool" with
       | Some name ->
-        let count = Json_util.assoc_member_opt "count" item  |> Option.value ~default:0 in
-        let successes = Json_util.assoc_member_opt "successes" item  |> Option.value ~default:0 in
-        let failures = Json_util.assoc_member_opt "failures" item  |> Option.value ~default:0 in
+        let count = Json_util.get_int item "count" |> Option.value ~default:0 in
+        let successes = Json_util.get_int item "successes" |> Option.value ~default:0 in
+        let failures = Json_util.get_int item "failures" |> Option.value ~default:0 in
         Some { name; count; successes; failures }
       | None -> None
     ) items

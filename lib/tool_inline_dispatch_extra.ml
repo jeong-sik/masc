@@ -52,8 +52,8 @@ let extract_board_post_id (message : string) =
           Yojson.Safe.from_string
             (String.sub message idx (String.length message - idx))
         in
-        match Yojson.Safe.Util.member "id" json with
-        | `String id when not (String.equal (String.trim id) "") -> Some id
+        match Json_util.assoc_member_opt "id" json with
+        | Some (`String id) when not (String.equal (String.trim id) "") -> Some id
         | _ -> None
       with
       | Invalid_argument _

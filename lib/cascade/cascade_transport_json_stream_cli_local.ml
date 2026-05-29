@@ -164,9 +164,9 @@ let tool_result_of_json json =
     let content_json = json |> Json_util.assoc_member_opt "content" in
     let content, parsed_json =
       match content_json with
-      | `String text -> text, Agent_sdk.Types.try_parse_json text
-      | `Null -> "", None
-      | other -> Yojson.Safe.to_string other, Some other
+      | Some (`String text) -> text, Agent_sdk.Types.try_parse_json text
+      | Some `Null | None -> "", None
+      | Some other -> Yojson.Safe.to_string other, Some other
     in
     Some
       (Agent_sdk.Types.ToolResult
@@ -183,7 +183,7 @@ let blocks_of_output_line line =
     let json = parse_json_line line in
     match Json_util.get_string json "role" with
     | Some "assistant" ->
-      let content = blocks_of_message_content (Json_util.assoc_member_opt "content" json) in
+      let content = blocks_of_message_content (Json_util.assoc_member_opt "content" json |> Option.value ~default:`Null) in
       let tool_uses_result =
         match Json_util.assoc_member_opt "tool_calls" json with
         | Some (`List calls) -> tool_uses_of_json calls
@@ -196,7 +196,7 @@ let blocks_of_output_line line =
        | None -> Ok [])
     | _ -> Ok []
   with
-  | Yojson.Json_error _ | Type_error _ -> Ok []
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Ok []
 ;;
 
 let response_id_of_lines lines =
@@ -210,7 +210,7 @@ let response_id_of_lines lines =
          | Some id when String.trim id <> "" -> Some id
          | _ -> None)
     with
-    | Yojson.Json_error _ | Type_error _ -> None
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
   in
   List.find_map find_id lines |> Option.value ~default:"cli-json-stream"
 ;;
@@ -223,7 +223,7 @@ let response_model_of_lines ~model_id lines =
       | Some model when String.trim model <> "" -> Some model
       | _ -> None
     with
-    | Yojson.Json_error _ | Type_error _ -> None
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
   in
   List.find_map find_model lines |> Option.value ~default:model_id
 ;;

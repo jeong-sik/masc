@@ -680,8 +680,8 @@ let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
   let present =
     keeper_legacy_model_arg_names
     |> List.filter (fun key ->
-      match Yojson.Safe.Util.member key args with
-      | `Null -> false
+      match Json_util.assoc_member_opt key args with
+      | Some `Null -> false
       | _ -> true)
   in
   match present with

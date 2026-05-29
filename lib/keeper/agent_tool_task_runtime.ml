@@ -102,9 +102,9 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
 ;;
 
 let parse_task_contract_arg args =
-  match Yojson.Safe.Util.member "contract" args with
-  | `Null -> Ok None
-  | (`Assoc _ as json) -> (
+  match Json_util.assoc_member_opt "contract" args with
+  | Some `Null -> Ok None
+  | Some (`Assoc _ as json) -> (
       match Masc_domain.task_contract_of_yojson json with
       | Ok contract -> Ok (Some contract)
       | Error message ->

@@ -299,8 +299,8 @@ let ensure_ready ~(config : Coord.config) ~(meta : keeper_meta) ~repo_name () :
       inspect ~config ~meta ~repo_name ()
     in
     let state =
-      match Yojson.Safe.Util.member "state" probe with
-      | `String s -> s
+      match Json_util.assoc_member_opt "state" probe with
+      | Some (`String s) -> s
       | _ -> "unknown"
     in
     match state with
@@ -338,8 +338,8 @@ let ensure_ready ~(config : Coord.config) ~(meta : keeper_meta) ~repo_name () :
                   (* Verify post-clone state *)
                   let post = inspect ~config ~meta ~repo_name () in
                   let post_state =
-                    match Yojson.Safe.Util.member "state" post with
-                    | `String s -> s
+                    match Json_util.assoc_member_opt "state" post with
+                    | Some (`String s) -> s
                     | _ -> "unknown"
                   in
                   if post_state = "ready" then Ok ()

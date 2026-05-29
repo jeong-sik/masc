@@ -182,8 +182,8 @@ let parse_manifest json =
           generated_at = Safe_ops.json_string ~default:"" "generated_at" json;
           source_summary_path = Safe_ops.json_string_opt "source_summary_path" json;
           recommendations =
-            (match Yojson.Safe.Util.member "recommendations" json with
-             | `List items -> items
+            (match Json_util.assoc_member_opt "recommendations" json with
+             | Some (`List items) -> items
              | _ -> [])
             |> List.filter_map parse_recommendation;
         }

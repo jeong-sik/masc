@@ -40,7 +40,7 @@ let per_runtime_breakdown_to_yojson counts =
   |> Hashtbl.to_seq_values
   |> List.of_seq
   |> List.sort (fun a b ->
-         String.compare (Yojson.Safe.Util.member "runtime_id" a |> Yojson.Safe.Util.to_string) (Yojson.Safe.Util.member "runtime_id" b |> Yojson.Safe.Util.to_string))
+         String.compare (Yojson.Safe.Util.to_string (match Json_util.assoc_member_opt "runtime_id" a with Some v -> v | None -> `Null)) (Yojson.Safe.Util.to_string (match Json_util.assoc_member_opt "runtime_id" b with Some v -> v | None -> `Null)))
 
 let update_runtime_breakdown counts ~runtime_id ~(sample : bench_sample) =
   let prev =

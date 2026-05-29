@@ -64,9 +64,9 @@ let parse_response json =
   match json with
   | `Assoc _ ->
     (match Json_util.assoc_member_opt "object" json with
-     | `String "list" ->
+     | Some (`String "list") ->
        (match Json_util.assoc_member_opt "data" json with
-        | `List items when List.length items > 0 ->
+        | Some (`List items) when List.length items > 0 ->
           Some
             { Cascade_throttle.total = 1
             ; process_active = 0

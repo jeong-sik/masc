@@ -32,8 +32,8 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
   match
     List.rev parsed
     |> List.find_opt (fun json ->
-      match Yojson.Safe.Util.member "cascade" json with
-      | `Assoc _ -> true
+      match Json_util.assoc_member_opt "cascade" json with
+      | Some (`Assoc _) -> true
       | _ -> false)
   with
   | Some json -> Some json
@@ -74,25 +74,25 @@ let attempt_summary_json latest_cascade =
         ]
   | Some cascade ->
       let attempts_observed =
-        match Yojson.Safe.Util.member "attempts" cascade with
-        | `List attempts -> List.length attempts
+        match Json_util.assoc_member_opt "attempts" cascade with
+        | Some (`List attempts) -> List.length attempts
         | _ -> 0
       in
       let selected_index =
-        match Yojson.Safe.Util.member "selected_index" cascade with
-        | `Int value -> Some value
-        | `Intlit value -> int_of_string_opt value
+        match Json_util.assoc_member_opt "selected_index" cascade with
+        | Some (`Int value) -> Some value
+        | Some (`Intlit value) -> int_of_string_opt value
         | _ -> None
       in
       let fallback_hops =
-        match Yojson.Safe.Util.member "fallback_hops" cascade with
-        | `Int value -> Some value
-        | `Intlit value -> int_of_string_opt value
+        match Json_util.assoc_member_opt "fallback_hops" cascade with
+        | Some (`Int value) -> Some value
+        | Some (`Intlit value) -> int_of_string_opt value
         | _ -> None
       in
       let fallback_applied =
-        match Yojson.Safe.Util.member "fallback_applied" cascade with
-        | `Bool value -> value
+        match Json_util.assoc_member_opt "fallback_applied" cascade with
+        | Some (`Bool value) -> value
         | _ -> false
       in
       let selected_position = Option.map (fun idx -> idx + 1) selected_index in
@@ -127,8 +127,8 @@ let latest_cascade_for_current_config ~current_cascade_name latest_metrics =
   let latest_cascade =
     match latest_metrics with
     | Some metrics ->
-        (match Yojson.Safe.Util.member "cascade" metrics with
-         | `Assoc _ as cascade -> Some cascade
+        (match Json_util.assoc_member_opt "cascade" metrics with
+         | Some (`Assoc _ as cascade) -> Some cascade
          | _ -> None)
     | None -> None
   in

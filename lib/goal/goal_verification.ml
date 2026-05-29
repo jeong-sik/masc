@@ -50,7 +50,7 @@ let goal_principal_of_yojson = function
                 {
                   kind;
                   id;
-                  display_name = Json_util.assoc_member_opt "display_name" json ;
+                  display_name = Json_util.get_string json "display_name" ;
                 }
           | Some (`String _) -> Error "goal_principal_of_yojson: id must be non-empty"
           | other ->
@@ -103,11 +103,11 @@ let goal_verifier_policy_to_yojson (policy : goal_verifier_policy) =
 
 let goal_verifier_policy_of_yojson = function
   | `Assoc _ as json -> (
-      match inherit_mode_of_yojson (Json_util.assoc_member_opt "inherit_mode" json) with
+      match inherit_mode_of_yojson (Json_util.assoc_member_opt "inherit_mode" json |> Option.value ~default:`Null) with
       | Error msg -> Error msg
       | Ok inherit_mode -> (
           match Json_util.assoc_member_opt "principals" json with
-          | `List values -> (
+          | Some (`List values) -> (
               let rec collect acc = function
                 | [] -> Ok (List.rev acc)
                 | raw :: rest -> (
@@ -120,12 +120,12 @@ let goal_verifier_policy_of_yojson = function
               | Ok principals ->
                   let required_verdicts =
                     match Json_util.assoc_member_opt "required_verdicts" json with
-                    | `Null -> Ok None
-                    | `Int n -> Ok (Some n)
+                    | Some `Null -> Ok None
+                    | Some (`Int n) -> Ok (Some n)
                     | other ->
                         Error
                           ( "goal_verifier_policy_of_yojson: invalid required_verdicts "
-                          ^ Yojson.Safe.to_string other )
+                          ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
                   in
                   Result.map
                     (fun required_verdicts ->
@@ -134,7 +134,7 @@ let goal_verifier_policy_of_yojson = function
           | other ->
               Error
                 ( "goal_verifier_policy_of_yojson: invalid principals "
-                ^ Yojson.Safe.to_string other )))
+                ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )))
   | json ->
       Error ("goal_verifier_policy_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -206,8 +206,8 @@ let policy_snapshot_to_yojson (snapshot : policy_snapshot) =
 let policy_snapshot_of_yojson = function
   | `Assoc _ as json -> (
       let parse_principal_list field =
-        match member field json with
-        | `List values ->
+        match Json_util.assoc_member_opt field json with
+        | Some (`List values) ->
             let rec collect acc = function
               | [] -> Ok (List.rev acc)
               | raw :: rest -> (
@@ -219,17 +219,17 @@ let policy_snapshot_of_yojson = function
         | other ->
             Error
               (Printf.sprintf "policy_snapshot_of_yojson: invalid %s %s" field
-                 (Yojson.Safe.to_string other))
+                 (Yojson.Safe.to_string (Option.value ~default:`Null other)))
       in
       match parse_principal_list "principals", parse_principal_list "eligible_principals" with
       | Ok principals, Ok eligible_principals -> (
           match Json_util.assoc_member_opt "required_verdicts" json with
-          | `Int required_verdicts ->
+          | Some (`Int required_verdicts) ->
               Ok { principals; eligible_principals; required_verdicts }
           | other ->
               Error
                 ( "policy_snapshot_of_yojson: invalid required_verdicts "
-                ^ Yojson.Safe.to_string other ))
+                ^ Yojson.Safe.to_string (Option.value ~default:`Null other) ))
       | Error msg, _
       | _, Error msg ->
           Error msg)
@@ -257,17 +257,17 @@ let goal_verification_vote_to_yojson (vote : goal_verification_vote) =
 let goal_verification_vote_of_yojson = function
   | `Assoc _ as json -> (
       match
-        goal_principal_of_yojson (Json_util.assoc_member_opt "principal" json),
-        vote_decision_of_yojson (Json_util.assoc_member_opt "decision" json)
+        goal_principal_of_yojson (Json_util.assoc_member_opt "principal" json |> Option.value ~default:`Null),
+        vote_decision_of_yojson (Json_util.assoc_member_opt "decision" json |> Option.value ~default:`Null)
       with
       | Ok principal, Ok decision -> (
           match Json_util.assoc_member_opt "submitted_at" json with
-          | `String submitted_at ->
+          | Some (`String submitted_at) ->
               let evidence_refs =
                 match Json_util.assoc_member_opt "evidence_refs" json with
-                | `Null -> Ok []
-                | `List values -> (
-                    try Ok (List.map to_string values)
+                | Some `Null -> Ok []
+                | Some (`List values) -> (
+                    try Ok (List.map Yojson.Safe.Util.to_string values)
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | _ ->
@@ -275,14 +275,14 @@ let goal_verification_vote_of_yojson = function
                 | other ->
                     Error
                       ( "goal_verification_vote_of_yojson: invalid evidence_refs "
-                      ^ Yojson.Safe.to_string other )
+                      ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
               in
               Result.map
                 (fun evidence_refs ->
                   {
                     principal;
                     decision;
-                    note = Json_util.assoc_member_opt "note" json ;
+                    note = Option.map Yojson.Safe.Util.to_string (Json_util.assoc_member_opt "note" json) ;
                     evidence_refs;
                     submitted_at;
                   })
@@ -290,7 +290,7 @@ let goal_verification_vote_of_yojson = function
           | other ->
               Error
                 ( "goal_verification_vote_of_yojson: invalid submitted_at "
-                ^ Yojson.Safe.to_string other ))
+                ^ Yojson.Safe.to_string (Option.value ~default:`Null other) ))
       | Error msg, _
       | _, Error msg ->
           Error msg)
@@ -326,18 +326,18 @@ let goal_verification_request_to_yojson (request : goal_verification_request) =
 let goal_verification_request_of_yojson = function
   | `Assoc _ as json -> (
       match
-        Goal_phase.of_yojson (Json_util.assoc_member_opt "target_phase" json),
-        goal_principal_of_yojson (Json_util.assoc_member_opt "requested_by" json),
-        policy_snapshot_of_yojson (Json_util.assoc_member_opt "policy_snapshot" json),
-        request_status_of_yojson (Json_util.assoc_member_opt "status" json)
+        Goal_phase.of_yojson (Json_util.assoc_member_opt "target_phase" json |> Option.value ~default:`Null),
+        goal_principal_of_yojson (Json_util.assoc_member_opt "requested_by" json |> Option.value ~default:`Null),
+        policy_snapshot_of_yojson (Json_util.assoc_member_opt "policy_snapshot" json |> Option.value ~default:`Null),
+        request_status_of_yojson (Json_util.assoc_member_opt "status" json |> Option.value ~default:`Null)
       with
       | Ok target_phase, Ok requested_by, Ok policy_snapshot, Ok status -> (
           match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "goal_id" json, Json_util.assoc_member_opt "created_at" json with
-          | `String id, `String goal_id, `String created_at ->
+          | Some (`String id), Some (`String goal_id), Some (`String created_at) ->
               let votes =
                 match Json_util.assoc_member_opt "votes" json with
-                | `Null -> Ok []
-                | `List rows ->
+                | Some `Null -> Ok []
+                | Some (`List rows) ->
                     let rec collect acc = function
                       | [] -> Ok (List.rev acc)
                       | row :: rest -> (
@@ -349,7 +349,7 @@ let goal_verification_request_of_yojson = function
                 | other ->
                     Error
                       ( "goal_verification_request_of_yojson: invalid votes "
-                      ^ Yojson.Safe.to_string other )
+                      ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
               in
               Result.map
                 (fun votes ->
@@ -362,7 +362,7 @@ let goal_verification_request_of_yojson = function
                     votes;
                     status;
                     created_at;
-                    resolved_at = Json_util.assoc_member_opt "resolved_at" json ;
+                    resolved_at = Option.map Yojson.Safe.Util.to_string (Json_util.assoc_member_opt "resolved_at" json) ;
                   })
                 votes
           | _ ->
@@ -398,7 +398,7 @@ let state_to_yojson (state : state) =
 let state_of_yojson = function
   | `Assoc _ as json -> (
       match Json_util.assoc_member_opt "version" json, Json_util.assoc_member_opt "updated_at" json, Json_util.assoc_member_opt "requests" json with
-      | `Int version, `String updated_at, `List requests_json ->
+      | Some (`Int version), Some (`String updated_at), Some (`List requests_json) ->
           let rec collect acc = function
             | [] -> Ok (List.rev acc)
             | row :: rest -> (

@@ -122,7 +122,7 @@ let of_yojson json =
         runtime_name = Json_util.get_string json "runtime_name";
         evidence_refs =
           (match json |> Json_util.assoc_member_opt "evidence_refs" with
-          | Some (`List items) -> List.filter_map to_string_option items
+          | Some (`List items) -> List.filter_map Yojson.Safe.Util.to_string_option items
           | _ -> []);
         recommended_action =
           (match json |> Json_util.assoc_member_opt "recommended_action" with
@@ -130,7 +130,7 @@ let of_yojson json =
           | _ -> None);
         supersedes =
           (match json |> Json_util.assoc_member_opt "supersedes" with
-          | Some (`List items) -> List.filter_map to_string_option items
+          | Some (`List items) -> List.filter_map Yojson.Safe.Util.to_string_option items
           | _ -> []);
         fallback_used =
           Json_util.get_bool json "fallback_used"
@@ -139,7 +139,7 @@ let of_yojson json =
           Json_util.get_bool json "disagreement_with_truth"
           |> Option.value ~default:false;
       }
-  with Type_error (msg, _) | Failure msg -> Error msg
+  with Yojson.Safe.Util.Type_error (msg, _) | Failure msg -> Error msg
 
 let generated_at_unix value =
   value.generated_at_unix

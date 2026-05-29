@@ -65,7 +65,7 @@ let member_opt key = function
   | _ -> None
 
 let required_string_field json key =
-  match Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_string_option with
+  match Json_util.get_string json key with
   | Some value when not (String.equal (String.trim value) "") -> Ok value
   | _ -> errorf "missing required string field %s" key
 

@@ -124,11 +124,11 @@ type declared_type =
 let parse_declared_type json : declared_type option =
   match json with
   | `Assoc _ ->
-    (match Yojson.Safe.Util.member "type" json with
-     | `String "string" -> Some `String
-     | `String "integer" -> Some `Integer
-     | `String "number" -> Some `Number
-     | `String "boolean" -> Some `Boolean
+    (match Json_util.assoc_member_opt "type" json with
+     | Some (`String "string") -> Some `String
+     | Some (`String "integer") -> Some `Integer
+     | Some (`String "number") -> Some `Number
+     | Some (`String "boolean") -> Some `Boolean
      | _ -> None)
   | _ -> None
 ;;
@@ -139,8 +139,8 @@ let schema_field_types ?base_path id : (string * declared_type) list =
   | Ok json_str ->
     (match Yojson.Safe.from_string json_str with
      | j ->
-       (match Yojson.Safe.Util.member "properties" j with
-        | `Assoc assoc ->
+       (match Json_util.assoc_member_opt "properties" j with
+        | Some (`Assoc assoc) ->
           List.filter_map
             (fun (k, v) -> Option.map (fun typ -> k, typ) (parse_declared_type v))
             assoc

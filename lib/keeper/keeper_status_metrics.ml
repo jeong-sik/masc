@@ -490,18 +490,18 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
     empty_metrics_summary lines
 
 let json_int_opt_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `Int value -> Some value
-  | `Intlit raw -> (int_of_string_opt (raw))
-  | `Float value -> Some (int_of_float value)
+  match Json_util.assoc_member_opt key json with
+  | Some (`Int value) -> Some value
+  | Some (`Intlit raw) -> (int_of_string_opt (raw))
+  | Some (`Float value) -> Some (int_of_float value)
   | _ -> None
 
 let action_source_opt_member json =
   match Safe_ops.json_string_opt "action_source" json with
   | Some _ as value -> value
   | None -> (
-      match Yojson.Safe.Util.member "deliberation_execution" json with
-      | `Assoc _ as nested ->
+      match Json_util.assoc_member_opt "deliberation_execution" json with
+      | Some (`Assoc _ as nested) ->
           Safe_ops.json_string_opt "action_source" nested
       | _ -> None)
 

@@ -106,7 +106,7 @@ let parse_state_line line =
        in
        let summary =
          match json |> Json_util.assoc_member_opt "summary" with
-         | `String s -> s
+         | Some (`String s) -> s
          | _ -> ""
        in
        match level, parse_iso8601_opt ts_str with

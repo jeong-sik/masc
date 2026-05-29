@@ -110,8 +110,8 @@ let one_line_preview_for_log text =
 let failure_class_of_tool_error_json json =
   let direct = Safe_ops.json_string_opt "failure_class" json in
   let nested =
-    match Yojson.Safe.Util.member "detail" json with
-    | `Assoc _ as detail -> Safe_ops.json_string_opt "failure_class" detail
+    match Json_util.assoc_member_opt "detail" json with
+    | Some (`Assoc _ as detail) -> Safe_ops.json_string_opt "failure_class" detail
     | _ -> None
   in
   match direct with

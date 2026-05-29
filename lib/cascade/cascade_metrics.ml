@@ -394,6 +394,13 @@ let on_strategy_starvation_guard ~cascade ~strategy =
     ~labels:[ ("cascade", cascade); ("strategy", strategy) ]
     ()
 
+let metric_capacity_probe = "masc_cascade_capacity_probe_result_total"
+
+let on_capacity_probe ~url ~source =
+  Prometheus.inc_counter metric_capacity_probe
+    ~labels:[ ("url", url); ("source", source) ]
+    ()
+
 (* [Cascade_runtime.default_model_strings] has two arms that fall
    back to the provider-adapter default-local fallback label when the
    normal cascade.toml-derived label resolution can't produce

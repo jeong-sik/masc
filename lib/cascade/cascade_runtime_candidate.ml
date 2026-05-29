@@ -466,9 +466,12 @@ let register_http_probe_capable ~max_concurrent candidate =
         Cascade_client_capacity.register ~url ~max_concurrent;
       (match candidate.provider_cfg.kind with
        | Llm_provider.Provider_config.Ollama ->
-           Cascade_http_probe.register_url ~url
+           Cascade_http_probe.register_url ~url ()
        | _ ->
-           Cascade_openai_probe.register_url ~url)
+           Cascade_http_probe.register_url
+             ~mode:(Cascade_http_probe.Generic { endpoint_path = "/v1/models" })
+             ~url
+             ())
 
 let strategy_adapter : t Cascade_strategy.adapter =
   { health_key; capacity_key }

@@ -235,7 +235,7 @@ let test_keeper_wire_enabled_rejects_at_capacity () =
   (match result with
    | Ok () -> Alcotest.fail "expected tier admission rejection"
    | Error (S.Inflight_capacity_full { admission_key; max_inflight }) ->
-       check string "tier id echoed" "keeper-turn" admission_key;
+       check string "admission_key echoed" "keeper-turn" admission_key;
        int_check "max inflight echoed" 1 max_inflight
    | Error _ -> Alcotest.fail "wrong saturation signal");
   A.release t ~admission_key:"keeper-turn"

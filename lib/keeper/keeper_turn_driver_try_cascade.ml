@@ -374,10 +374,30 @@ let rec run
           Cascade_health_tracker.global ~provider_key:key)
     in
     if capacity_constrained then (
+      let provider_label = Cascade_runtime_candidate.provider_label candidate in
+      let provider_key =
+        match Cascade_runtime_candidate.health_keys candidate with
+        | key :: _ -> key
+        | [] -> provider_label
+      in
+      let skip_reason =
+        Cascade_candidate_skip_reason.Capacity_constrained { provider_key }
+      in
       Log.Misc.info
-        "cascade %s: pre-admission skip provider=%s reason=capacity_constrained"
+        "cascade %s: pre-admission skip provider=%s reason=%s"
         ctx.cascade_name
-        (Cascade_runtime_candidate.provider_label candidate);
+        provider_label
+        (Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
+      ctx.emit_runtime_manifest
+        ~status:"blocked"
+        ~decision:
+          (`Assoc
+             [ "blocker", `String (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+             ; "provider", `String provider_label
+             ; "provider_key", `String provider_key
+             ; "provider_attempt_started", `Bool false
+             ])
+        Keeper_runtime_manifest.Pre_dispatch_blocked;
       run ~on_success ?resume_checkpoint ?per_provider_timeout_s
         ~pre_dispatch_required_tool_rejections_rev
         ?last_capacity_source ?last_capacity_backpressure ctx rest last_err)
@@ -393,10 +413,26 @@ let rec run
     in
     if should_skip_health_cooldown then (
       match health_cooldown with
-      | Some (_blocked_health_key, msg) ->
+      | Some (blocked_health_key, msg) ->
+          let skip_reason =
+            Cascade_candidate_skip_reason.Health_cooldown_active
+              { provider_key = blocked_health_key; cooldown_reason = msg }
+          in
           Log.Misc.debug
-            "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
-            ctx.cascade_name runtime_candidate_label runtime_candidate_label msg;
+            "cascade %s: skipping %s (provider_key=%s reason=%s cooldown: %s)"
+            ctx.cascade_name runtime_candidate_label runtime_candidate_label
+            (Cascade_candidate_skip_reason.to_manifest_tag skip_reason) msg;
+          ctx.emit_runtime_manifest
+            ~status:"blocked"
+            ~decision:
+              (`Assoc
+                 [ "blocker", `String (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+                 ; "provider", `String runtime_candidate_label
+                 ; "provider_key", `String blocked_health_key
+                 ; "cooldown_reason", `String msg
+                 ; "provider_attempt_started", `Bool false
+                 ])
+            Keeper_runtime_manifest.Pre_dispatch_blocked;
           run ~on_success ?resume_checkpoint ?per_provider_timeout_s
             ~pre_dispatch_required_tool_rejections_rev
             ?last_capacity_source ?last_capacity_backpressure ctx rest last_err
@@ -416,12 +452,16 @@ let rec run
     let attempt_index = max 1 (ctx.candidate_count - List.length rest) in
     match Keeper_turn_driver_cascade_health.acquire_client_capacity_slot candidate with
     | `Full (capacity_key, retry_after_s) ->
+      let skip_reason =
+        Cascade_candidate_skip_reason.Capacity_full
+          { capacity_key; capacity_kind = `Client; retry_after_sec = retry_after_s }
+      in
       emit_capacity_blocked_manifest ctx ~capacity_key;
       record_cascade_attempt ctx candidate ~outcome:(`Failure "client_capacity_full") ();
       Cascade_observation.record_fallback_event ctx.capture
         ~from_model:runtime_candidate_label
         ~to_model:runtime_candidate_label
-        ~reason:"client_capacity_full";
+        ~reason:(Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
       Log.Misc.info
         "[cascade-fallback] cascade %s: %s skipped because client capacity \
          key %s is full, trying next"
@@ -719,6 +759,13 @@ let rec run
     match attempt_with_admission with
     | Error signal ->
       Keeper_turn_driver_admission.release_client_capacity_quietly capacity_release;
+      let skip_reason =
+        Cascade_candidate_skip_reason.Capacity_full
+          { capacity_key = admission_key
+          ; capacity_kind = `Admission
+          ; retry_after_sec = Some Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec
+          }
+      in
       emit_admission_blocked_manifest ctx signal;
       Keeper_turn_driver_admission.emit_cascade_admission_signal_metric
         ~cascade_name:ctx.cascade_name signal;
@@ -726,7 +773,7 @@ let rec run
       Cascade_observation.record_fallback_event ctx.capture
         ~from_model:runtime_candidate_label
         ~to_model:runtime_candidate_label
-        ~reason:"admission_full";
+        ~reason:(Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
       Log.Misc.info
         "[cascade-fallback] cascade %s: %s skipped because admission \
          %s is full, trying next"
@@ -808,11 +855,26 @@ let rec run
                  on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
                  Ok result
        | Cascade_fsm.Try_next { last_err = new_err } ->
+         let skip_reason =
+           Cascade_candidate_skip_reason.Accept_rejected { reason }
+         in
          record_candidate_health_rejected candidate ~reason;
          Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next"
-           ctx.cascade_name runtime_candidate_label reason;
+           ctx.cascade_name runtime_candidate_label
+           (Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
          Cascade_observation.record_fallback_event ctx.capture
-           ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label ~reason;
+           ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
+           ~reason:(Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
+         ctx.emit_runtime_manifest
+           ~status:"blocked"
+           ~decision:
+             (`Assoc
+                [ "blocker", `String (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+                ; "provider", `String runtime_candidate_label
+                ; "reason", `String reason
+                ; "provider_attempt_started", `Bool true
+                ])
+           Keeper_runtime_manifest.Pre_dispatch_blocked;
          run
            ~pre_dispatch_required_tool_rejections_rev
            ?resume_checkpoint

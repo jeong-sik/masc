@@ -596,19 +596,13 @@ let resolve_named_providers ?provider_filter
       []
 
 type local_capacity = {
-  total : int;
-  process_active : int;
   process_available : int;
-  process_queue_length : int;
   all_discovered : bool;
   endpoints_found : int;
 }
 
 let empty_capacity = {
-  total = 0;
-  process_active = 0;
   process_available = 0;
-  process_queue_length = 0;
   all_discovered = true;
   endpoints_found = 0;
 }
@@ -674,12 +668,8 @@ let local_capacity_for_selections ~sw ~net selections =
     | _ ->
       List.fold_left
         (fun acc (info : Cascade_throttle.capacity_info) ->
-           { total = acc.total + info.total
-           ; process_active = acc.process_active + info.process_active
-           ; process_available =
+           { process_available =
                acc.process_available + info.process_available
-           ; process_queue_length =
-               acc.process_queue_length + info.process_queue_length
            ; all_discovered =
                acc.all_discovered
                &&

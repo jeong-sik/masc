@@ -59,10 +59,10 @@ let pp fmt = function
       branch
       (Format.pp_print_option Format.pp_print_int)
       depth
-  | W (Curl { url; method_; headers; body }) ->
+  | W (Curl { url; method_; headers; body; output_file; follow_redirects; insecure }) ->
     Format.fprintf
       fmt
-      "Curl(url=%s, method=%s, headers=%a, body=%a)"
+      "Curl(url=%s, method=%s, headers=%a, body=%a, output=%a, follow=%b, insecure=%b)"
       url
       (match method_ with
        | `GET -> "GET"
@@ -74,6 +74,10 @@ let pp fmt = function
       headers
       (Format.pp_print_option Format.pp_print_string)
       body
+      (Format.pp_print_option Format.pp_print_string)
+      output_file
+      follow_redirects
+      insecure
   | W (Rm { paths; recursive; force }) ->
     Format.fprintf
       fmt
@@ -90,29 +94,32 @@ let pp fmt = function
          ~pp_sep:(fun fmt () -> Format.fprintf fmt " ")
          Format.pp_print_string)
       target_argv
-  | W (Find { path; name; type_ }) ->
+  | W (Find { path; name; type_; maxdepth }) ->
     Format.fprintf
       fmt
-      "Find(path=%s, name=%a, type_=%a)"
+      "Find(path=%s, name=%a, type_=%a, maxdepth=%a)"
       path
       (Format.pp_print_option Format.pp_print_string)
       name
       (Format.pp_print_option (fun fmt t ->
          Format.pp_print_string fmt (match t with `File -> "f" | `Dir -> "d")))
       type_
+      (Format.pp_print_option Format.pp_print_int)
+      maxdepth
   | W (Head { path; lines }) ->
     Format.fprintf fmt "Head(path=%s, lines=%d)" path lines
   | W (Tail { path; lines }) ->
     Format.fprintf fmt "Tail(path=%s, lines=%d)" path lines
-  | W (Grep { pattern; path; recursive; case_sensitive }) ->
+  | W (Grep { pattern; path; recursive; case_sensitive; files_with_matches }) ->
     Format.fprintf
       fmt
-      "Grep(pattern=%s, path=%a, recursive=%b, case_sensitive=%b)"
+      "Grep(pattern=%s, path=%a, recursive=%b, case_sensitive=%b, files_with_matches=%b)"
       pattern
       (Format.pp_print_option Format.pp_print_string)
       path
       recursive
       case_sensitive
+      files_with_matches
   | W (Mkdir { path; parents }) ->
     Format.fprintf fmt "Mkdir(path=%s, parents=%b)" path parents
   | W (Wc { path; mode }) ->
@@ -221,13 +228,17 @@ let pp fmt = function
       "Printenv(name=%a)"
       (Format.pp_print_option Format.pp_print_string)
       name
-  | W (Uniq { count; duplicates; unique; file }) ->
+  | W (Uniq { count; duplicates; unique; skip_fields; skip_chars; file }) ->
     Format.fprintf
       fmt
-      "Uniq(count=%b, duplicates=%b, unique=%b, file=%a)"
+      "Uniq(count=%b, duplicates=%b, unique=%b, skip_f=%a, skip_s=%a, file=%a)"
       count
       duplicates
       unique
+      (Format.pp_print_option Format.pp_print_int)
+      skip_fields
+      (Format.pp_print_option Format.pp_print_int)
+      skip_chars
       (Format.pp_print_option Format.pp_print_string)
       file
   | W (Basename { path; suffix }) ->
@@ -303,24 +314,31 @@ let pp fmt = function
       (Format.pp_print_option Format.pp_print_string)
       user
   | W (Tty ()) -> Format.fprintf fmt "Tty"
-  | W (Wget { url; output }) ->
+  | W (Wget { url; output; continue_; no_check_certificate }) ->
     Format.fprintf
       fmt
-      "Wget(url=%s, output=%a)"
+      "Wget(url=%s, output=%a, continue=%b, no_check_cert=%b)"
       url
       (Format.pp_print_option Format.pp_print_string)
       output
-  | W (Ssh { host; user; command }) ->
+      continue_
+      no_check_certificate
+  | W (Ssh { host; user; command; port; identity_file }) ->
     Format.fprintf
       fmt
-      "Ssh(host=%s, user=%a, command=%a)"
+      "Ssh(host=%s, user=%a, command=%a, port=%a, id=%a)"
       host
       (Format.pp_print_option Format.pp_print_string)
       user
       (Format.pp_print_option Format.pp_print_string)
       command
-  | W (Scp { source; dest; recursive }) ->
-    Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b)" source dest recursive
+      (Format.pp_print_option Format.pp_print_int)
+      port
+      (Format.pp_print_option Format.pp_print_string)
+      identity_file
+  | W (Scp { source; dest; recursive; port }) ->
+    Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b, port=%a)" source dest recursive
+      (Format.pp_print_option Format.pp_print_int) port
   | W (Tar { action; archive; paths; compression }) ->
     Format.fprintf
       fmt
@@ -343,22 +361,26 @@ let pp fmt = function
       target
       (Format.pp_print_option Format.pp_print_int)
       jobs
-  | W (Diff { file1; file2; unified }) ->
-    Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b)" file1 file2 unified
-  | W (Sed { expression; file; in_place }) ->
-    Format.fprintf fmt "Sed(expression=%s, file=%s, in_place=%b)" expression file in_place
-  | W (Rsync { source; dest; flags }) ->
-    Format.fprintf fmt "Rsync(source=%s, dest=%s, flags=%a)" source dest
+  | W (Diff { file1; file2; unified; brief }) ->
+    Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b, brief=%b)" file1 file2 unified brief
+  | W (Sed { expression; file; in_place; extended_regex; suppress_output }) ->
+    Format.fprintf fmt "Sed(expression=%s, file=%s, in_place=%b, ext_re=%b, suppress=%b)" expression file in_place extended_regex suppress_output
+  | W (Rsync { source; dest; archive; delete; dry_run; compress; flags }) ->
+    Format.fprintf fmt "Rsync(source=%s, dest=%s, archive=%b, delete=%b, dry_run=%b, compress=%b, flags=%a)" source dest
+      archive delete dry_run compress
       (Format.pp_print_list Format.pp_print_string) flags
-  | W (Node { script; args }) ->
-    Format.fprintf fmt "Node(script=%s, args=%a)" script
+  | W (Node { script; args; inline }) ->
+    Format.fprintf fmt "Node(script=%s, args=%a, inline=%a)" script
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Python { script; args }) ->
-    Format.fprintf fmt "Python(script=%s, args=%a)" script
+      (Format.pp_print_option Format.pp_print_string) inline
+  | W (Python { script; args; inline }) ->
+    Format.fprintf fmt "Python(script=%s, args=%a, inline=%a)" script
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Python3 { script; args }) ->
-    Format.fprintf fmt "Python3(script=%s, args=%a)" script
+      (Format.pp_print_option Format.pp_print_string) inline
+  | W (Python3 { script; args; inline }) ->
+    Format.fprintf fmt "Python3(script=%s, args=%a, inline=%a)" script
       (Format.pp_print_list Format.pp_print_string) args
+      (Format.pp_print_option Format.pp_print_string) inline
   | W (Pip { subcommand; packages }) ->
     Format.fprintf fmt "Pip(subcommand=%s, packages=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) packages
@@ -378,10 +400,10 @@ let pp fmt = function
   | W (Gh { subcommand; args }) ->
     Format.fprintf fmt "Gh(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Chmod { mode; path }) ->
-    Format.fprintf fmt "Chmod(mode=%s, path=%s)" mode path
-  | W (Chown { owner; path }) ->
-    Format.fprintf fmt "Chown(owner=%s, path=%s)" owner path
+  | W (Chmod { mode; path; recursive }) ->
+    Format.fprintf fmt "Chmod(mode=%s, path=%s, recursive=%b)" mode path recursive
+  | W (Chown { owner; path; recursive }) ->
+    Format.fprintf fmt "Chown(owner=%s, path=%s, recursive=%b)" owner path recursive
   | W (Docker { subcommand; args }) ->
     Format.fprintf fmt "Docker(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args

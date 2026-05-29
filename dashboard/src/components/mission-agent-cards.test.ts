@@ -140,7 +140,7 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.',
+      '일시정지 원인 · 여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.',
     )
   })
 

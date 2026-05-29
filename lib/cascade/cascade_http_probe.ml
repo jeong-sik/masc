@@ -1,16 +1,19 @@
 (** See cascade_http_probe.mli for documentation. *)
 
-(* ── Explicit URL registry (replaces substring scan inside this module) ───
-   Probes only fire against URLs that callers have explicitly registered,
-   eliminating the [:11434] substring heuristic's false positives. The
-   default ollama URL is registered at module load to preserve
-   out-of-the-box behaviour for the canonical local deployment. *)
-let registered_urls : (string, unit) Hashtbl.t = Hashtbl.create 4
+(* ── Probe mode ─────────────────────────────────────────────── *)
+
+type probe_mode =
+  | Ollama
+  | Generic of { endpoint_path : string }
+
+(* ── Explicit URL registry ──────────────────────────────────── *)
+
+let registered_urls : (string, probe_mode) Hashtbl.t = Hashtbl.create 4
 let registry_mutex = Eio.Mutex.create ()
 
-let register_url ~url =
+let register_url ?(mode = Ollama) ~url () =
   Eio.Mutex.use_rw ~protect:false registry_mutex (fun () ->
-    Hashtbl.replace registered_urls url ())
+    Hashtbl.replace registered_urls url mode)
 ;;
 
 let is_registered ~url =
@@ -26,7 +29,7 @@ let registry_clear () =
     Hashtbl.clear registered_urls)
 ;;
 
-let () = register_url ~url:Masc_network_defaults.ollama_default_url
+let () = register_url ~url:Masc_network_defaults.ollama_default_url ()
 
 (* ── Cache ──────────────────────────────────────────────────── *)
 
@@ -36,10 +39,6 @@ type cache_entry =
   }
 
 let cache_ttl_s = 2.0
-(* Short TTL: ollama state changes whenever any client (this MASC,
-   another keeper, dashboard) runs inference.  Treating a 30s-old
-   cache hit as authoritative is worse than missing the
-   optimisation. *)
 
 let cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
 let cache_mutex = Eio.Mutex.create ()
@@ -68,59 +67,36 @@ let store_capacity ~url ~capacity ~now =
     Hashtbl.replace cache url { capacity; recorded_at = now })
 ;;
 
-(* ── JSON parser ────────────────────────────────────────────── *)
+(* ── JSON parsers ───────────────────────────────────────────── *)
 
-(* Ollama [/api/ps] response shape (from
-   https://github.com/ollama/ollama/blob/main/docs/api.md):
-   {
-     "models": [
-       { "name": "qwen3-coder:30b", "size_vram": ..., ... },
-       ...
-     ]
-   }
-
-   We only care about [models].length: each loaded model occupies
-   one "active" slot under the assumption that
-   [OLLAMA_NUM_PARALLEL=1] (the ollama default).  Users running
-   parallel mode can override [total] via the optional argument
-   so [process_available] is still meaningful. *)
-let parse_response ?(total = 1) json =
+let parse_ollama_response ?(total = 1) json =
   let open Yojson.Safe.Util in
   match json with
   | `Assoc _ ->
     (match member "models" json with
      | `List items ->
-       let process_active = List.length items in
-       let process_available = max 0 (total - process_active) in
+       let process_available = max 0 (total - List.length items) in
        Some
-         { Cascade_throttle.total
-         ; process_active
-         ; process_available
-         ; process_queue_length = 0
+         { Cascade_throttle.process_available
          ; source = Llm_provider.Provider_throttle.Discovered
          }
      | _ -> None)
   | _ -> None
 ;;
 
+let parse_generic_response _json = Some 1
+
 (* ── HTTP probe ─────────────────────────────────────────────── *)
 
-(* Build [<base_url>/api/ps], normalising the trailing slash. *)
-let probe_endpoint_of base_url =
+let probe_endpoint_of ~endpoint_path base_url =
   let stripped =
     if String.ends_with ~suffix:"/" base_url
     then String.sub base_url 0 (String.length base_url - 1)
     else base_url
   in
-  stripped ^ Masc_network_defaults.ollama_api_ps_path
+  stripped ^ endpoint_path
 ;;
 
-(* Probe HTTP timeout.
-
-   0.5s suits a fast box serving small models; a box loading a large
-   model shares the same lock as [/api/ps] and can briefly exceed
-   this. Caller may override via the optional [?timeout_s] argument
-   when a longer ceiling is needed. *)
 let probe_timeout_default_s = 0.5
 
 let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
@@ -135,7 +111,21 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
     | Some n -> n
     | None -> now_default ()
   in
-  let endpoint = probe_endpoint_of url in
+  let mode =
+    Eio.Mutex.use_ro registry_mutex (fun () ->
+      Hashtbl.find_opt registered_urls url)
+  in
+  let mode =
+    match mode with
+    | Some m -> m
+    | None -> Generic { endpoint_path = "/v1/models" }
+  in
+  let endpoint_path =
+    match mode with
+    | Ollama -> Masc_network_defaults.ollama_api_ps_path
+    | Generic { endpoint_path } -> endpoint_path
+  in
+  let endpoint = probe_endpoint_of ~endpoint_path url in
   match
     Masc_http_client.get_sync
       ?clock
@@ -145,31 +135,11 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
       ()
   with
   | Error message ->
-    (* Distinguish HTTP-side failure modes (timeout / connection refused /
-       DNS / TLS) at the probe boundary. Previously [Error _ -> None]
-       collapsed every transport failure into "endpoint down", and the
-       0.5s [probe_timeout_default_s] hit was indistinguishable from an
-       actual unreachable host. Operators tuning the timeout ceiling or
-       restarting the box need this signal.
-
-       Log-only for now — the existing
-       [metric_cascade_http_probe_json_parse_failures] counter is
-       semantically scoped to body-parse failures, so mixing transport
-       errors there would dirty its label cardinality. A dedicated
-       [cascade_http_probe_transport_failures] metric is a follow-up
-       once the structural fix lands. *)
     Log.Cascade.warn
       "[cascade-http-probe] probe transport failure at %s: %s"
       endpoint message;
     None
   | Ok (status, body) when status = 200 ->
-    (* Iter 29 (V07 follow-up): make malformed JSON probe responses
-       visible. Previously the [exception _ -> None] catch-all returned
-       [None] without log or counter, masking "endpoint up but emitting
-       bad JSON" as "endpoint down". Behavior preserved — we still
-       return [None]; the counter + warn exist so the two failure modes
-       can be told apart in production. [Eio.Cancel.Cancelled] is
-       re-raised so cancellation semantics are preserved. *)
     let body_preview =
       String.sub body 0 (min 200 (String.length body))
     in
@@ -181,7 +151,19 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
     in
     (match parsed with
      | Ok json ->
-       (match parse_response json with
+       let available_opt =
+         match mode with
+         | Ollama -> parse_ollama_response json
+         | Generic _ ->
+           (match parse_generic_response json with
+            | Some n ->
+              Some
+                { Cascade_throttle.process_available = n
+                ; source = Llm_provider.Provider_throttle.Discovered
+                }
+            | None -> None)
+       in
+       (match available_opt with
         | None -> None
         | Some cap ->
           store_capacity ~url ~capacity:cap ~now;
@@ -195,7 +177,7 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
          Keeper_metrics.(to_string CascadeHttpProbeJsonParseFailures)
          ~labels:
            [ ("error_kind", "yojson_parse_error")
-           ; ("probe_kind", "ollama_api_ps")
+           ; ("probe_kind", "http")
            ]
          ();
        None
@@ -207,7 +189,7 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
        Prometheus.inc_counter
          Keeper_metrics.(to_string CascadeHttpProbeJsonParseFailures)
          ~labels:
-           [ ("error_kind", "other"); ("probe_kind", "ollama_api_ps") ]
+           [ ("error_kind", "other"); ("probe_kind", "http") ]
          ();
        None)
   | Ok _ -> None
@@ -233,10 +215,6 @@ let refresh_many ~sw ~net ?timeout_s urls =
 
 (* ── Probe adapter ───────────────────────────────────────────── *)
 
-(* Wraps this module's functions as a first-class [Probe] for
-   {!Cascade_capacity_probe}.  The module structurally satisfies
-   [Cascade_capacity_probe.Probe] without an explicit annotation,
-   avoiding a circular dependency between the two compilation units. *)
 module Http_probe = struct
   let can_probe ~url = is_registered ~url
 

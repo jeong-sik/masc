@@ -65,9 +65,9 @@ let test_hook_failure_does_not_block_claim () =
   match
     Coord.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" ()
   with
-  | Ok msg ->
+  | Ok outcome ->
     check bool "claim succeeded despite hook failure" true
-      (Astring.String.is_infix ~affix:"claimed" msg);
+      (Astring.String.is_infix ~affix:"claimed" outcome.message);
     check (float 0.001) "claim failure metric incremented"
       (before +. 1.0)
       (failure_metric_value ~site:"claim_task" ~agent_name:"agent_llm_a")

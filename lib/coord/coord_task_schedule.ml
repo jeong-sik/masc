@@ -74,10 +74,13 @@ let build_allowed_set = Coord_task_receipts.build_allowed_set
 let make_required_tools_predicate ?agent_tool_names () =
   match agent_tool_names with
   | None ->
-    (* Without an explicit surface, the surface is open: all required
-         tools are considered allowed.  Empty [required] also short-
-         circuits to [true] below. *)
-    fun _required_tools -> true
+    (* Without an explicit tool surface, we cannot verify the keeper
+       possesses the required tools.  Reject tasks with non-empty
+       [required_tools] to prevent routing loops where a keeper
+       claims a task it cannot execute (tool_surface_mismatch at
+       setup time, then re-claims the same task indefinitely).
+       Tasks with empty [required_tools] remain claimable. *)
+    fun required_tools -> required_tools = []
   | Some allowed ->
     let allowed_set = build_allowed_set allowed in
     fun required_tools ->

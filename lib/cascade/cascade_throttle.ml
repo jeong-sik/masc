@@ -75,10 +75,7 @@ let length () = String_map.cardinal (Atomic.get throttle_table)
 (* ── Capacity Query ────────────────────────────────────── *)
 
 type capacity_info = {
-  total : int;
-  process_active : int;
   process_available : int;
-  process_queue_length : int;
   source : Llm_provider.Provider_throttle.capacity_source;
 }
 
@@ -89,9 +86,6 @@ let capacity url =
     let snap = Llm_provider.Provider_throttle.snapshot t in
     Some
       {
-        total = snap.max_slots;
-        process_active = snap.active;
         process_available = snap.available;
-        process_queue_length = snap.queue_length;
         source = Llm_provider.Provider_throttle.source t;
       }

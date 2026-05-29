@@ -328,8 +328,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                     let resolved =
                       Cascade_runtime.resolve_max_cascade_context cascade_models
                     in
-                    Cascade_runtime.clamp_context_for_pure_local_labels
-                      ~labels:cascade_models ~max_context:resolved
+                    resolved
               in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in

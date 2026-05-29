@@ -337,10 +337,7 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
     : max_context_resolution =
   let min_keeper_context = Keeper_config.min_keeper_context_tokens in
   let clamp resolved =
-    let local_clamped =
-      Cascade_runtime.clamp_context_for_pure_local_labels
-        ~labels ~max_context:resolved
-    in
+    let local_clamped = resolved in
     max min_keeper_context local_clamped
   in
   let primary_budget =

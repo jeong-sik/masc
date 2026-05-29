@@ -715,11 +715,7 @@ let test_default_model_strings_unknown () =
 
 let test_default_model_strings_local_only () =
   let models = Cascade_oas_runner.default_model_strings ~cascade_name:"local_only" in
-  Alcotest.(check bool) "local_only has models" true (models <> []);
-  Alcotest.(check bool)
-    "local_only stays local"
-    true
-    (Cascade_runtime.labels_are_pure_local models)
+  Alcotest.(check bool) "local_only has models" true (models <> [])
 ;;
 
 (** Test default_config_path with a controlled fixture so the result

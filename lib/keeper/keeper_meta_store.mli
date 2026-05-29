@@ -4,6 +4,10 @@
     keep their public API while durable meta storage is separated
     from the compatibility facade. *)
 
+(* Canonical [keeper_meta] type home. The RFC-0205 #19399 facade cleanup
+   removed the open that previously brought these names into scope, leaving
+   the bare references below unbound. *)
+open Keeper_meta_contract
 
 (** Hook invoked after each successful [write_meta] /
     [write_meta_with_merge]. Reset by the runtime to keep

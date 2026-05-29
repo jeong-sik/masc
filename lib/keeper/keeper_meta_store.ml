@@ -4,6 +4,10 @@
     their public API while durable meta storage is separated from the
     compatibility facade. *)
 
+(* Canonical [keeper_meta] type home. The RFC-0205 #19399 facade cleanup
+   removed the open that previously brought these names into scope, leaving
+   the bare references below unbound. *)
+open Keeper_meta_contract
 
 let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
@@ -20,7 +24,7 @@ let read_meta_file_path path : (keeper_meta option, string) result =
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
-      let json, _scrubbed = scrub_persisted_keeper_meta_json ~path json in
+      let json, _scrubbed = Keeper_meta_json_scrub.scrub_persisted_keeper_meta_json ~path json in
       warn_unknown_keeper_meta_keys ~path json;
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)

@@ -4,6 +4,15 @@
     stays in [Keeper_meta_json] so canonical-key derivation can
     use the public facade without creating a cycle. *)
 
+(* RFC-0205 #19399 removed [open Keeper_types_profile] / [open Keeper_meta_contract]
+   from the implementation and replaced them with [open Keeper_types_profile_sandbox],
+   but left this interface without the matching opens, leaving the policy-slice field
+   types unbound. Mirror the implementation's open context so the signature resolves
+   the same names. *)
+open Keeper_meta_json_scrub
+open Keeper_types_profile_sandbox
+open Keeper_meta_tool_access
+open Keeper_meta_contract
 
 (** Parsed identity slice of a persisted keeper meta. *)
 type parsed_keeper_identity =

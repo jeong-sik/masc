@@ -472,7 +472,7 @@ let execution_summary_json ~meta ~latest_receipt =
     | Some receipt ->
         receipt |> json_member "sandbox"
         |> json_string_opt_member "kind"
-    | None -> Some (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
+    | None -> Some (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.Keeper_meta_contract.sandbox_profile)
   in
   let network_mode =
     match latest_receipt with

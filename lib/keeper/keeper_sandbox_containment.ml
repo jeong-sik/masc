@@ -17,7 +17,7 @@ let is_hardened_profile = function
   | Keeper_types_profile_sandbox.Local -> false
 
 let check_target ~operation ~config ~meta ~target =
-  if not (is_hardened_profile meta.Keeper_types_profile_sandbox.sandbox_profile) then
+  if not (is_hardened_profile meta.Keeper_meta_contract.sandbox_profile) then
     Ok ()
   else
     let playground = playground_root_abs ~config ~meta in

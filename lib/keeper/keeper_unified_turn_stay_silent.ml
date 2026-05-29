@@ -34,7 +34,7 @@ let mark_loop_detected ~(config : Coord.config) meta ~streak ~threshold =
   in
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path
-    meta.name
+    meta.Keeper_meta_contract.name
     (Some failure_reason);
   let stimulus =
     recovery_stimulus

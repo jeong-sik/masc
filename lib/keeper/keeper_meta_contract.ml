@@ -124,6 +124,7 @@ type blocker_class =
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
+  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
@@ -172,6 +173,7 @@ let blocker_class_to_string = function
   | Turn_timeout -> "turn_timeout"
   | Turn_livelock_blocked -> "turn_livelock_blocked"
   | Completion_contract_violation -> "completion_contract_violation"
+  | No_tool_capable_provider -> "no_tool_capable_provider"
   | Stay_silent_loop -> "stay_silent_loop"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
@@ -201,6 +203,7 @@ let blocker_class_of_serialized_string = function
   | "turn_timeout" -> Some Turn_timeout
   | "turn_livelock_blocked" -> Some Turn_livelock_blocked
   | "completion_contract_violation" -> Some Completion_contract_violation
+  | "no_tool_capable_provider" -> Some No_tool_capable_provider
   | "stay_silent_loop" -> Some Stay_silent_loop
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
@@ -252,6 +255,7 @@ let blocker_class_continue_gate = function
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
+  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
@@ -508,9 +512,9 @@ type keeper_meta =
   ; desires : string
   ; instructions : string
   ; (* -- Policy -- *)
-    sandbox_profile : sandbox_profile
+    sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
-  ; network_mode : network_mode
+  ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
   ; tool_access : tool_access
   ; tool_preset_source : string option

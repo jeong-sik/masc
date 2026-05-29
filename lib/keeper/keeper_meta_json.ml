@@ -6,7 +6,7 @@
 
 include Keeper_meta_json_scrub
 
-let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
+let meta_to_json (m : Keeper_meta_contract.keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
   (* Config/personality/policy fields are TOML-only; JSON persists
      runtime state exclusively.  See [config_field_names] for the

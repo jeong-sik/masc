@@ -6,6 +6,8 @@
 
 open Keeper_meta_json_scrub
 open Keeper_types_profile_sandbox
+open Keeper_meta_tool_access
+open Keeper_meta_contract
 
 type parsed_keeper_identity =
   { pk_name : string
@@ -75,7 +77,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
   | Error e -> Error ("keeper meta parse error: " ^ e)
   | Ok pk_trace_id ->
     let pk_trace_history =
-      Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
+      Safe_ops.json_string_list "trace_history" json |> List.filter Keeper_config.validate_name
     in
     let pk_goal =
       Safe_ops.json_string ~default:"" "goal" json |> normalize_goal_horizon_text

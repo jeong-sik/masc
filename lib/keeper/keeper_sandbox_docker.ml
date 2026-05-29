@@ -206,7 +206,7 @@ let docker_result_pair = function
    [docker exec] against a warm container. *)
 
 let resolve_sandbox_image meta =
-  match meta.sandbox_image with
+  match meta.Keeper_meta_contract.sandbox_image with
   | Some img when String.trim img <> "" -> img
   | _ -> Env_config_sandbox.Runtime.docker_image ()
 ;;

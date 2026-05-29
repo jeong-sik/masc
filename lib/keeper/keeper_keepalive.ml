@@ -97,7 +97,7 @@ let persist_directive_meta_update
          | latest_path :: _ -> latest_path
          | [] -> default_path))
   in
-  match Keeper_fs.save_json_atomic persisted_path (meta_to_json updated_meta) with
+  match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
   | Ok () ->
     Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
   | Error msg ->

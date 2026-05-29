@@ -875,12 +875,7 @@ let totals_of_karma_ledger events =
         "ts_iso": "YYYY-MM-DDTHH:MM:SSZ" }
     v} *)
 let karma_event_to_yojson (e : karma_event) : Yojson.Safe.t =
-  let tm = Unix.gmtime e.ts in
-  let ts_iso =
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-  in
+  let ts_iso = Masc_domain.iso8601_of_unix_seconds e.ts in
   `Assoc [
     ("recipient",   `String e.recipient);
     ("voter",       `String e.voter);

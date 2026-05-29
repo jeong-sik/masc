@@ -30,11 +30,7 @@ let key_tool_error_count = "session:tool_error_count"
 (* ================================================================ *)
 
 let iso8601_of_float (t : float) : string =
-  let open Unix in
-  let tm = gmtime t in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
+  Masc_domain.iso8601_of_unix_seconds t
 
 (* ================================================================ *)
 (* Injector factory                                                  *)

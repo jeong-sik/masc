@@ -186,7 +186,7 @@ let read_recent_audit ~limit =
         else rows |> drop_left (total - limit) |> List.rev)
 
 let string_member json key =
-  Json_util.get_string json key |> Option.value ~default:""
+  Json_util.get_string_with_default json ~key ~default:""
 
 let int_member json key =
   Json_util.get_int json key |> Option.value ~default:0

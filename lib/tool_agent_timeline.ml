@@ -528,13 +528,7 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
         Float.round (diff /. 60.0)
     | _ -> 0.0
   in
-  let since_iso =
-    let tm = Unix.gmtime cutoff in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900)
-      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-      tm.Unix.tm_sec
-  in
+  let since_iso = Masc_domain.iso8601_of_unix_seconds cutoff in
   let now_iso = Masc_domain.now_iso () in
   `Assoc
     [

@@ -185,12 +185,3 @@ let keeper_fleet_runtime_resolution_light_fields () =
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
-let cdal_health_json () =
-  try Cdal_runtime_health.snapshot_json () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-      Tool_args.error_assoc
-        [
-          ("component", `String "cdal");
-          ("error", `String (Printexc.to_string exn));
-        ]

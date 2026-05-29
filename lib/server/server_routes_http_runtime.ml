@@ -313,9 +313,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
         | None ->
           keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ())
   in
-  let cdal_health_json =
-    compute_section ~name:"cdal" ?section_timings_ref cdal_health_json
-  in
   Tool_args.ok_assoc [
     ("server", `String "masc-mcp");
     ("version", `String build.release_version);
@@ -354,7 +351,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
        but ops still need a quick count without scraping /metrics. List names
        so an operator can correlate with the structured blocker cause. *)
     (key_paused_keepers, paused_keepers_json);
-    ("cdal", cdal_health_json);
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",

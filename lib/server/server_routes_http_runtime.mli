@@ -98,10 +98,6 @@ val agent_card_json : Httpun.Request.t -> Yojson.Safe.t
 
 (** {1 Runtime subsystem helpers} *)
 
-val cdal_health_json : unit -> Yojson.Safe.t
-(** [cdal_health_json ()] returns the CDAL health projection reused by
-    runtime-info routes and the full health response. *)
-
 (** {1 Health endpoints} *)
 
 val health_path_diagnostics :
@@ -232,11 +228,6 @@ module For_testing : sig
   val full_health_refresh_timing : unit -> float * float * float
   (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
 end
-
-val cdal_health_json : unit -> Yojson.Safe.t
-(** [cdal_health_json ()] returns the CDAL writer/proof-store/task-scope
-    projection used by [/health?full=1] and dashboard runtime-resolution
-    surfaces. *)
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list
 (** [keeper_fleet_runtime_resolution_fields ()] returns the health/fleet

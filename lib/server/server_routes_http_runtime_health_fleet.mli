@@ -34,5 +34,3 @@ val keeper_fleet_runtime_resolution_fields :
 
 val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list
-
-val cdal_health_json : unit -> Yojson.Safe.t

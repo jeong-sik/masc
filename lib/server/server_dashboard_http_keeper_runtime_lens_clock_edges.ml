@@ -204,13 +204,13 @@ let clock_edge_json ~idx ~provider_attempt_index row =
   let event_bus_event_count =
     match event with
     | Keeper_runtime_manifest.Event_bus_correlated ->
-      json_int_member_opt "event_count" decision
+      Json_util.get_int decision "event_count"
     | _ -> None
   in
   let event_bus_payload_kinds =
     match event with
     | Keeper_runtime_manifest.Event_bus_correlated ->
-      Json_util.json_string_list_member "payload_kinds" decision
+      Json_util.get_string_list decision "payload_kinds"
     | _ -> []
   in
   `Assoc
@@ -274,8 +274,8 @@ let clock_edge_json ~idx ~provider_attempt_index row =
     ]
 
 let edge_string key edge = json_string_member_opt key edge
-let edge_int key edge = json_int_member_opt key edge
-let edge_string_list key edge = Json_util.json_string_list_member key edge
+let edge_int key edge = Json_util.get_int edge key
+let edge_string_list key edge = Json_util.get_string_list edge key
 
 let clock_edge_jsons scan =
   let provider_attempt_index = ref 0 in

@@ -25,7 +25,8 @@ let default_generation_cascade_name =
     Keeper_cascade_profile.Persona_generation
 let default_temperature = 0.7
 let default_max_tokens = 2500
-let default_proactive_enabled = false
+let default_generation_proactive_enabled = false
+let string_list_to_json = Json_util.json_string_list
 
 let option_field name value =
   match value with

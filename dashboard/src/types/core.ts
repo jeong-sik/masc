@@ -7,6 +7,21 @@ export interface RefreshOptions {
   light?: boolean
 }
 
+// --- Shared signal / evidence primitives (SSOT) ---
+// Mission and execution domains extend these with domain-specific values.
+
+/** Core signal truth values shared across mission and execution domains. */
+export type SignalTruthCore = 'live' | 'stale'
+/** Mission-domain signal truth (extends core with archived, unknown). */
+export type MissionSignalTruth = SignalTruthCore | 'archived' | 'unknown'
+/** Execution-domain signal truth (extends core with absent). */
+export type ExecutionSignalTruth = SignalTruthCore | 'absent'
+
+/** Core evidence source values shared across domains. */
+export type EvidenceSourceCore = 'message' | 'presence' | 'none'
+/** Mission-domain evidence source (extends core with session). */
+export type MissionEvidenceSource = EvidenceSourceCore | 'session'
+
 // --- Core entities ---
 
 export interface Agent {

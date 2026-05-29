@@ -8,8 +8,6 @@ type plan_error =
    values. Kept as named constants (CLAUDE.md §Magic Number 금지). *)
 let default_image = "ubuntu:22.04"
 let default_execution_timeout_sec = 30.0
-let default_hash_algo = Keeper_hash_algo.SHA_256
-
 type t =
   { container_name : Keeper_container_name.t
   ; image : string
@@ -25,7 +23,7 @@ let of_request ~turn_id ~attempt ~meta_name ~command_argv =
   else
     let container_name =
       Keeper_container_name.derive
-        ~algo:default_hash_algo
+        ~algo:Keeper_hash_algo.default
         ~turn_id
         ~attempt
         ~suffix:meta_name

@@ -67,7 +67,7 @@ include Keeper_config
 let short_preview ?(max_len = 220) (s : string) : string =
   let s = String.trim s in
   if String.length s <= max_len then s
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
+  else String_util.utf8_prefix ~max_bytes:max_len s ^ "..."
 
 let take = List.take
 

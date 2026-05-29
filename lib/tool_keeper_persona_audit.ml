@@ -322,7 +322,7 @@ let item ~(config : Coord.config) requested_name =
 
 let summary items =
   let issue_list item =
-    match Yojson.Safe.Util.member "issues" item with
+    match Option.value ~default:(`Null) (Json_util.assoc_member_opt "issues" item) with
     | `List issues ->
         List.filter_map
           (function
@@ -338,19 +338,19 @@ let summary items =
   let count_issue issue = count (has_issue issue) in
   let count_bool_field field =
     count (fun item ->
-        match Yojson.Safe.Util.member field item with
+        match Option.value ~default:(`Null) (Json_util.assoc_member_opt field item) with
         | `Bool true -> true
         | _ -> false)
   in
   let count_autoboot_disabled =
     count (fun item ->
-        match Yojson.Safe.Util.member "autoboot_enabled" item with
+        match Option.value ~default:(`Null) (Json_util.assoc_member_opt "autoboot_enabled" item) with
         | `Bool false -> true
         | _ -> false)
   in
   let ok_count =
     count (fun item ->
-        match Yojson.Safe.Util.member "ok" item with
+        match Option.value ~default:(`Null) (Json_util.assoc_member_opt "ok" item) with
         | `Bool true -> true
         | _ -> false)
   in
@@ -392,7 +392,7 @@ let handle ~(config : Coord.config) args : tool_result =
       else
         List.filter
           (fun item ->
-            match Yojson.Safe.Util.member "ok" item with
+            match Option.value ~default:(`Null) (Json_util.assoc_member_opt "ok" item) with
             | `Bool true -> false
             | _ -> true)
           audited_items

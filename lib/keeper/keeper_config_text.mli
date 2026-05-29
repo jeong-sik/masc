@@ -50,8 +50,6 @@ val reject_removed_keeper_msg_input_keys :
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
 
-val utf8_safe_prefix_bytes : string -> max_bytes:int -> string
-
 val utf8_repair_string : string -> string
 
 (* ── Self-model / goal-horizon text normalization ───────────── *)

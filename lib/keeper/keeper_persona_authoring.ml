@@ -31,9 +31,7 @@ let assoc_set key value fields = (key, value) :: assoc_without key fields
 
 ;;
 
-let assoc_get key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
+let assoc_get = Json_util.assoc_member_opt
 ;;
 
 let assoc_keys = function
@@ -862,7 +860,7 @@ let handle_persona_generate ctx args =
              |> Option.value ~default:Archetypes.default_max_tokens
            in
            let proactive_enabled =
-             get_bool args "proactive_enabled" Archetypes.default_proactive_enabled
+             get_bool args "proactive_enabled" Archetypes.default_generation_proactive_enabled
            in
            let language =
              get_string args "language" Archetypes.default_generation_language

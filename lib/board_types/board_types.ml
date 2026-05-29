@@ -31,6 +31,10 @@ type board_error =
 
 (** {1 Safe ID Module - Parse Don't Validate} *)
 
+(* Shared regex for alphanumeric ID validation (Post_id, Board_id, Sub_board_id).
+   Single [Re.compile] DFA build instead of 3 identical copies. *)
+let alphanumeric_id_re = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+
 module Post_id : sig
   type t
   val of_string : string -> (t, board_error) result
@@ -40,7 +44,7 @@ end = struct
   type t = string
 
   (* Only alphanumeric, dash, underscore. Max 64 chars. *)
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  let valid_pattern = alphanumeric_id_re
 
   let of_string s =
     let s = String.trim s in
@@ -61,7 +65,7 @@ module Comment_id : sig
 end = struct
   type t = string
 
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  let valid_pattern = alphanumeric_id_re
 
   let of_string s =
     let s = String.trim s in
@@ -195,7 +199,7 @@ module Sub_board_id : sig
 end = struct
   type t = string
 
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  let valid_pattern = alphanumeric_id_re
 
   let of_string s =
     let s = String.trim s in

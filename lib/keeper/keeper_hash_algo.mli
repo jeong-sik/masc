@@ -19,6 +19,10 @@ type t =
   | SHA_512
 [@@deriving show, eq]
 
+(** [default] is the default hash algorithm used by sandbox plan
+    derivation. *)
+val default : t
+
 (** [all] is the canonical enumeration of the variant. Use for
     property tests and config emission; the compiler does not enforce
     completeness of this list — callers that depend on completeness

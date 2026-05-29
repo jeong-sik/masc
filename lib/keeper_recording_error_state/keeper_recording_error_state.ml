@@ -31,6 +31,7 @@ type error_kind =
   | Cascade_resolution_failure
   | Unknown_phase_transition
   | Auth_token_mismatch
+  | Shutdown_artifact
   | Other
 
 let error_kind_to_string = function
@@ -43,6 +44,7 @@ let error_kind_to_string = function
   | Cascade_resolution_failure -> "cascade_resolution_failure"
   | Unknown_phase_transition -> "unknown_phase_transition"
   | Auth_token_mismatch -> "auth_token_mismatch"
+  | Shutdown_artifact -> "shutdown_artifact"
   | Other -> "other"
 ;;
 
@@ -60,6 +62,7 @@ let error_kind_of_string raw =
   | "cascade_resolution_failure" -> Some Cascade_resolution_failure
   | "unknown_phase_transition" -> Some Unknown_phase_transition
   | "auth_token_mismatch" -> Some Auth_token_mismatch
+  | "shutdown_artifact" -> Some Shutdown_artifact
   | "other" -> Some Other
   | _ -> None
 ;;
@@ -74,6 +77,7 @@ let all_error_kinds =
   ; Cascade_resolution_failure
   ; Unknown_phase_transition
   ; Auth_token_mismatch
+  ; Shutdown_artifact
   ; Other
   ]
 ;;
@@ -98,7 +102,9 @@ let classify_error (err : string) : error_kind =
       go 0)
   in
   let contains needle = contains_in err needle in
-  if contains "sandbox docker"
+  if contains "shutdown"
+  then Shutdown_artifact
+  else if contains "sandbox docker"
   then Sandbox_docker
   else if contains "stale_turn_timeout"
   then Stale_turn_timeout

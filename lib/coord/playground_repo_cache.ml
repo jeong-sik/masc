@@ -83,7 +83,7 @@ let update
       let existing =
         try
           let json = Yojson.Safe.from_file cache_path in
-          match Yojson.Safe.Util.member "repos" json with
+          match Option.value ~default:(`Null) (Json_util.assoc_member_opt "repos" json) with
           | `List repos -> repos
           | _ -> []
         with
@@ -99,7 +99,7 @@ let update
         entry
         :: List.filter
              (fun repo ->
-               match Yojson.Safe.Util.member "name" repo with
+               match Option.value ~default:(`Null) (Json_util.assoc_member_opt "name" repo) with
                | `String name -> not (String.equal name repo_name)
                | _ -> true)
              existing

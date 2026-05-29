@@ -5,6 +5,7 @@ type t =
   | SHA_512
 [@@deriving show, eq]
 
+let default = SHA_256
 let all = [ SHA_256; SHA_512 ]
 
 let to_string = function

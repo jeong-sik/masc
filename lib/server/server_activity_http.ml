@@ -9,8 +9,6 @@ type deps = {
   get_session_id_any : Httpun.Request.t -> string option;
 }
 
-let clamp ~min_v ~max_v value = max min_v (min max_v value)
-
 let split_csv raw =
   raw
   |> String.split_on_char ','
@@ -95,7 +93,7 @@ let events_http_json ~deps ~state request =
   in
   let limit =
     deps.int_query_param request "limit" ~default:200
-    |> clamp ~min_v:1 ~max_v:1000
+    |> Server_utils.clamp ~min_v:1 ~max_v:1000
   in
   let is_default_query = kinds = [] && after_seq = 0 in
   let snapshot_hit =
@@ -135,11 +133,11 @@ let graph_http_json ~deps ~state request =
   let kinds = kind_filters deps request in
   let limit =
     deps.int_query_param request "limit" ~default:500
-    |> clamp ~min_v:50 ~max_v:2000
+    |> Server_utils.clamp ~min_v:50 ~max_v:2000
   in
   let timeline_limit =
     deps.int_query_param request "timeline_limit" ~default:80
-    |> clamp ~min_v:10 ~max_v:200
+    |> Server_utils.clamp ~min_v:10 ~max_v:200
   in
   let since_raw =
     deps.query_param request "since" |> Option.value ~default:""
@@ -181,7 +179,7 @@ let swimlane_http_json ~deps ~state request =
 
   let limit =
     deps.int_query_param request "limit" ~default:500
-    |> clamp ~min_v:1 ~max_v:2000
+    |> Server_utils.clamp ~min_v:1 ~max_v:2000
   in
   let since_raw =
     deps.query_param request "since" |> Option.value ~default:""
@@ -265,7 +263,7 @@ let handle_stream ~deps ~state request reqd =
   let kinds = kind_filters deps request in
   let replay_limit =
     deps.int_query_param request "limit" ~default:500
-    |> clamp ~min_v:1 ~max_v:1000
+    |> Server_utils.clamp ~min_v:1 ~max_v:1000
   in
   let after_seq =
     max (last_event_id request)

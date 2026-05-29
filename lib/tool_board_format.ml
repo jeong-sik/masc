@@ -413,7 +413,7 @@ let assoc_replace key value fields =
 
 let judgment_arg args =
   let value_of key =
-    match Yojson.Safe.Util.member key args with
+    match Option.value ~default:(`Null) (Json_util.assoc_member_opt key args) with
     | `Null -> None
     | `String value when String.equal (String.trim value) "" -> None
     | `String _ as value -> Some value
@@ -436,7 +436,7 @@ let judgment_arg args =
 
 let normalize_board_post_meta args =
   let base_fields =
-    match Yojson.Safe.Util.member "meta" args with
+    match Option.value ~default:(`Null) (Json_util.assoc_member_opt "meta" args) with
     | `Assoc fields -> fields
     | `Null -> []
     | other ->
@@ -488,7 +488,7 @@ let source_entries_arg args =
        | _ -> None)
     | _ -> None
   in
-  match Yojson.Safe.Util.member "sources" args with
+  match Option.value ~default:(`Null) (Json_util.assoc_member_opt "sources" args) with
   | `List values ->
     (match List.filter_map source_entry values with
      | [] -> None

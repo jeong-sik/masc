@@ -70,30 +70,7 @@ let truncate_text ~(max_len : int) (s : string) : string =
   | String_util.Untouched _ -> s
   | String_util.Truncated { prefix; suffix; _ } -> prefix ^ suffix
 
-(* ASCII case-insensitive substring containment, byte-wise.
-
-   Empty needle returns [false] here (differs from the
-   [contains_casefold] convention elsewhere — preserved). *)
-let contains_ci (haystack : string) (needle : string) : bool =
-  let nlen = String.length needle in
-  let hlen = String.length haystack in
-  if nlen = 0 then false
-  else if nlen > hlen then false
-  else
-    let rec match_at i j =
-      if j = nlen then true
-      else if Char.lowercase_ascii (String.unsafe_get haystack (i + j))
-            <> Char.lowercase_ascii (String.unsafe_get needle j)
-      then false
-      else match_at i (j + 1)
-    in
-    let last = hlen - nlen in
-    let rec loop i =
-      if i > last then false
-      else if match_at i 0 then true
-      else loop (i + 1)
-    in
-    loop 0
+let contains_ci = String_util.contains_substring_ci
 
 (* Static replacement patterns hoisted to module load.
    [proactive_preview_similarity_stats] funnels into
@@ -139,18 +116,6 @@ let jaccard_similarity_text (a : string) (b : string) : float =
     let union = na + nb - inter in
     if union <= 0 then 0.0 else float_of_int inter /. float_of_int union
 
-let take_last (n : int) (xs : 'a list) : 'a list =
-  let n = max 0 n in
-  let len = List.length xs in
-  let drop = max 0 (len - n) in
-  let rec drop_n k ys =
-    if k <= 0 then ys
-    else
-      match ys with
-      | [] -> []
-      | _ :: tl -> drop_n (k - 1) tl
-  in
-  drop_n drop xs
 
 let proactive_preview_similarity_stats
     ?(window = 8)
@@ -160,7 +125,7 @@ let proactive_preview_similarity_stats
     previews
     |> List.map String.trim
     |> List.filter (fun s -> s <> "")
-    |> take_last window
+    |> List_util.take_last window
   in
   let sample_count = List.length previews in
   let rec pairwise acc = function

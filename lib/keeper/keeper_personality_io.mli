@@ -132,7 +132,7 @@ val to_prompt_form :
   max_bytes:int -> raw_personality -> raw_personality
 (** [to_prompt_form ~max_bytes p] returns a copy of [p] with each
     field trimmed and then truncated to [max_bytes] using
-    [Keeper_config.utf8_safe_prefix_bytes] (UTF-8 boundary safe).
+    [String_util.utf8_prefix] (UTF-8 boundary safe).
     This is the only place in the harness where data is shortened —
     parse / coerce / compare all preserve raw bytes. Callers are
     responsible for fallback defaults when a field is empty after

@@ -218,7 +218,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
         in
         let receipts =
           read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
-          |> take_last limit
+          |> List_util.take_last limit
         in
         let selected_turn_id = selected_keeper_turn_id ?turn_id manifest_scan in
         let selected_terminal_event_present =

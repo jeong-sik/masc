@@ -247,7 +247,7 @@ let percentile_opt (arr : float array) p =
 (* Single-pass [List.length (List.filter pred xs)] equivalent — drops
    the intermediate list allocation. Hot in per-window aggregation
    loops below where [entries] reaches thousands. *)
-let count_if pred xs = List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs
+let count_if = List_util.count_if
 
 (* O(min(n, length xs)) prefix take.  Replaces the
    [if List.length xs > n then List.filteri (fun i _ -> i < n) xs else xs]

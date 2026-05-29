@@ -111,12 +111,6 @@ let configured_provider_log provider_id cfg =
     | Some log -> Some (provider, log)
     | None -> None)
 
-let strip_trailing_cr line =
-  let len = String.length line in
-  if len > 0 && Char.equal line.[len - 1] '\r'
-  then String.sub line 0 (len - 1)
-  else line
-
 let drop_first = function
   | [] -> []
   | _ :: rest -> rest
@@ -153,7 +147,7 @@ let read_provider_log_tail ~path ~lines ~max_bytes =
         |> String.split_on_char '\n'
         |> (fun parts -> if start > 0 then drop_first parts else parts)
         |> drop_trailing_empty
-        |> List.map strip_trailing_cr
+        |> List.map String_util.strip_trailing_cr
         |> tail_list ~limit:lines
       in
       List.mapi

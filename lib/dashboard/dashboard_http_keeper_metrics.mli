@@ -8,7 +8,7 @@
     builder.
 
     Internal: 14 helpers stay private — token / similarity / text
-    helpers ([utf8_safe_prefix_bytes], [truncate_text],
+    helpers ([String_util.utf8_prefix], [truncate_text],
     [contains_ci], 2 normalize regexes,
     [normalize_similarity_text], [token_set_of_text],
     [jaccard_similarity_text], [take_last]),

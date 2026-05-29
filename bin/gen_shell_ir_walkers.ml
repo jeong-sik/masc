@@ -265,12 +265,7 @@ let rec parse case_sensitive pattern path dd = function
     parse case_sensitive pattern path dd rest
   (* Eq-form value flags: --flag=VALUE *)
   | arg :: rest
-    when not dd
-         && (let s = arg in
-             String.length s > 2 && s.[0] = '-'
-             && (match String.index_opt s '=' with
-                 | Some i -> List.mem (String.sub s 0 i) rg_value_flags
-                 | None -> false)) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg rg_value_flags ->
     parse case_sensitive pattern path dd rest
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
@@ -670,11 +665,7 @@ let rec parse name type_ maxdepth path = function
      | None -> parse name type_ maxdepth path rest)
   (* Eq-form value flags: -flag=VALUE — extract prefix and skip *)
   | arg :: rest
-    when (let s = arg in
-          String.length s > 2 && s.[0] = '-'
-          && (match String.index_opt s '=' with
-              | Some i -> List.mem (String.sub s 0 i) value_flags
-              | None -> false)) ->
+    when Shell_ir_typed_types.is_eq_form_flag arg value_flags ->
     parse name type_ maxdepth path rest
   | "-exec" :: rest | "-ok" :: rest
   | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ maxdepth path (skip_exec rest)
@@ -1174,11 +1165,7 @@ let rec parse oneline max_count = function
     parse oneline max_count rest
   (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
-    when (let s = arg in
-          String.length s > 2 && s.[0] = '-'
-          && (match String.index_opt s '=' with
-              | Some i -> List.mem (String.sub s 0 i) git_log_value_flags_no_eq
-              | None -> false)) ->
+    when Shell_ir_typed_types.is_eq_form_flag arg git_log_value_flags_no_eq ->
     parse oneline max_count rest
   | "--" :: rest -> parse oneline max_count rest
   | arg :: rest ->
@@ -1318,11 +1305,7 @@ let rec parse force force_with_lease set_upstream remote branch = function
     parse force force_with_lease set_upstream remote branch rest
   (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
-    when (let s = arg in
-          String.length s > 2 && s.[0] = '-'
-          && (match String.index_opt s '=' with
-              | Some i -> List.mem (String.sub s 0 i) git_push_value_flags_no_eq
-              | None -> false)) ->
+    when Shell_ir_typed_types.is_eq_form_flag arg git_push_value_flags_no_eq ->
     parse force force_with_lease set_upstream remote branch rest
   | "--tags" :: rest | "--mirror" :: rest | "--prune" :: rest
   | "--follow-tags" :: rest | "--atomic" :: rest | "--quiet" :: rest
@@ -1418,11 +1401,7 @@ let rec parse rebase remote branch = function
     parse rebase remote branch rest
   (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
-    when (let s = arg in
-          String.length s > 2 && s.[0] = '-'
-          && (match String.index_opt s '=' with
-              | Some i -> List.mem (String.sub s 0 i) git_pull_value_flags_no_eq
-              | None -> false)) ->
+    when Shell_ir_typed_types.is_eq_form_flag arg git_pull_value_flags_no_eq ->
     parse rebase remote branch rest
   (* boolean flags: specific exact-match arms *)
   | "--rebase" :: rest -> parse true remote branch rest
@@ -3652,12 +3631,7 @@ let rec parse subcmd v race dd = function
     parse subcmd v race dd rest
   (* Eq-form value flags: --flag=VALUE *)
   | arg :: rest
-    when not dd
-         && (let s = arg in
-             String.length s > 2 && s.[0] = '-'
-             && (match String.index_opt s '=' with
-                 | Some i -> List.mem (String.sub s 0 i) go_value_flags
-                 | None -> false)) ->
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg go_value_flags ->
     parse subcmd v race dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd v race true rest
@@ -4705,11 +4679,8 @@ let rec parse subcmd opt tst dd = function
     parse subcmd opt tst dd (_val :: rest)
   | arg :: rest
     when not dd
-         && (let s = arg in
-             String.length s > 2 && String.sub s 0 2 = "--"
-             && (match String.index_opt s '=' with
-                 | Some i -> List.mem (String.sub s 0 i) [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "--sysroot"; "--print" ]
-                 | None -> false)) ->
+         && Shell_ir_typed_types.is_eq_form_flag arg
+              [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "--sysroot"; "--print" ] ->
     parse subcmd opt tst dd rest
   | "--" :: rest -> parse subcmd opt tst true rest
   | arg :: rest ->
@@ -4767,11 +4738,7 @@ let rec parse subcmd w lf dd = function
   (* Eq-form value flags: -flag=VALUE *)
   | arg :: rest
     when not dd
-         && (let s = arg in
-             String.length s > 2 && s.[0] = '-'
-             && (match String.index_opt s '=' with
-                 | Some i -> List.mem (String.sub s 0 i) [ "-tabs"; "-tabwidth"; "-comments" ]
-                 | None -> false)) ->
+         && Shell_ir_typed_types.is_eq_form_flag arg [ "-tabs"; "-tabwidth"; "-comments" ] ->
     parse subcmd w lf dd rest
   | "--" :: rest -> parse subcmd w lf true rest
   | arg :: rest ->

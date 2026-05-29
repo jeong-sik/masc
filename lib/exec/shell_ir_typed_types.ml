@@ -558,3 +558,13 @@ and (_, _, _, _) command =
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command
+
+(** [is_eq_form_flag arg flags] returns [true] if [arg] is an eq-form
+    value flag (e.g., "--flag=VALUE") whose prefix before '=' is in [flags].
+    Handles both --flag=VALUE and -flag=VALUE forms. *)
+let is_eq_form_flag (arg : string) (flags : string list) : bool =
+  String.length arg > 2
+  && arg.[0] = '-'
+  && (match String.index_opt arg '=' with
+      | Some i -> List.mem (String.sub arg 0 i) flags
+      | None -> false)

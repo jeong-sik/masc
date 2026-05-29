@@ -47,7 +47,6 @@ depends: [
   "httpun-eio" {>= "0.2"}
   "httpun-ws" {>= "0.2"}
   "httpun-ws-eio" {>= "0.2"}
-  "websocket" {>= "2.17"}
   "bigstringaf" {>= "0.10"}
   "eio" {>= "1.0"}
   "eio_main" {>= "1.0"}

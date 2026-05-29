@@ -464,6 +464,22 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
     Hashtbl.replace bindings_by_key key b)
     cfg.bindings;
 
+  (* Synthesize bindings from route targets when no explicit bindings exist.
+     Routes reference targets as "provider_id.model_id"; split and create
+     synthetic bindings so the pre-resolve loop can populate resolved_configs. *)
+  if Hashtbl.length bindings_by_key = 0 then
+    List.iter (fun (r : cascade_route) ->
+      match String.split_on_char '.' r.target with
+      | [ provider_id; model_id ] ->
+        let key = Printf.sprintf "%s.%s" provider_id model_id in
+        if not (Hashtbl.mem bindings_by_key key) then
+          Hashtbl.replace bindings_by_key key
+            { provider_id; model_id; is_default = false
+            ; max_concurrent = 0; price_input = None; price_output = None
+            ; keep_alive = None; num_ctx = None }
+      | _ -> ())
+      cfg.routes;
+
   let aliases_by_key = Hashtbl.create 16 in
   List.iter (fun (a : cascade_alias) ->
     let key = Printf.sprintf "%s.%s.%s" a.provider_id a.model_id a.name in
@@ -473,13 +489,12 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
   (* Resolved configs cache (member key → provider_config_with_override) *)
   let resolved_configs = Hashtbl.create 32 in
 
-  (* Pre-resolve all bindings so aliases can reference them *)
-  List.iter (fun (b : cascade_binding) ->
-    let key = Printf.sprintf "%s.%s" b.provider_id b.model_id in
+  (* Pre-resolve all bindings (including synthesized from routes) *)
+  Hashtbl.iter (fun key (b : cascade_binding) ->
     match resolve_binding_config cfg b errors with
     | Some config -> Hashtbl.replace resolved_configs key config
     | None -> ())
-    cfg.bindings;
+    bindings_by_key;
 
   (* Build adapted profiles from declared profiles *)
   let matching_bindings_for_profile (p : cascade_profile) =

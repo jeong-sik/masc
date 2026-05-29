@@ -1,4 +1,4 @@
-# RFC-0205 Project identity is "masc", not "masc-mcp"
+# RFC-0206 Project identity is "masc", not "masc-mcp"
 
 | | |
 |---|---|

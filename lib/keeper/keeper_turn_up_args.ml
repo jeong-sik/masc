@@ -50,10 +50,6 @@ let normalize_tool_name_list names =
   |> List.filter (fun name -> name <> "")
   |> dedupe_keep_order
 
-let json_assoc_member_opt key (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
 
 let json_non_null_member_present key (json : Yojson.Safe.t) =
   match json with
@@ -64,7 +60,7 @@ let json_non_null_member_present key (json : Yojson.Safe.t) =
   | _ -> false
 
 let parse_present_tool_name_list_opt args key =
-  match json_assoc_member_opt key args with
+  match Json_util.assoc_member_opt key args with
   | None -> Ok None
   | Some (`List items) ->
       let rec collect acc index = function
@@ -83,7 +79,7 @@ let parse_present_tool_name_list_opt args key =
            (Json_util.kind_name other))
 
 let parse_present_string_list_opt args key =
-  match json_assoc_member_opt key args with
+  match Json_util.assoc_member_opt key args with
   | None -> Ok None
   | Some (`List items) ->
       let rec collect acc index = function
@@ -102,7 +98,7 @@ let parse_present_string_list_opt args key =
            (Json_util.kind_name other))
 
 let parse_enum_string_opt args key of_string ~allowed_values =
-  match json_assoc_member_opt key args with
+  match Json_util.assoc_member_opt key args with
   | None -> Ok None
   | Some (`String raw) -> (
       match of_string raw with
@@ -141,7 +137,7 @@ let resolve_tool_name_list ~preferred ~fallback =
   |> normalize_tool_name_list
 
 let reject_legacy_tool_access_kind access_json =
-  match json_assoc_member_opt "kind" access_json with
+  match Json_util.assoc_member_opt "kind" access_json with
   | Some (`String ("restricted" | "unrestricted")) ->
       Error
         "tool_access.kind must be \"preset\" or \"custom\"; legacy kinds \"restricted\" and \"unrestricted\" are not supported for this endpoint"
@@ -161,7 +157,7 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
          (String.concat ", " removed_tool_policy_keys))
   else
     let tool_access_opt =
-      match json_assoc_member_opt "tool_access" args with
+      match Json_util.assoc_member_opt "tool_access" args with
       | Some ((`Assoc _) as access_json) -> (
           match reject_legacy_tool_access_kind access_json with
           | Error msg -> Error msg

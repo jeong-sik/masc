@@ -1951,7 +1951,55 @@ let test_batch15_value_consuming_flags () =
   in
   (match w_ninja_c_eq with
    | W (Ninja { subcommand = "all"; _ }) -> ()
-   | w -> Alcotest.failf "Ninja -C=build: expected sub=all, got %a" pp w)
+   | w -> Alcotest.failf "Ninja -C=build: expected sub=all, got %a" pp w);
+  (* Rg: --type=py — eq-form value flag consumed, pattern extracted *)
+  let w_rg_type_eq =
+    of_simple
+      { (base "rg") with args = [ lit "--type=py"; lit "TODO"; lit "src/" ] }
+  in
+  (match w_rg_type_eq with
+   | W (Rg { pattern = "TODO"; path = Some "src/"; case_sensitive = true; _ }) -> ()
+   | w -> Alcotest.failf "Rg --type=py: expected pat=TODO path=src/, got %a" pp w);
+  (* Rg: --max-depth=3 pattern — eq-form flag consumed *)
+  let w_rg_depth_eq =
+    of_simple
+      { (base "rg") with args = [ lit "--max-depth=3"; lit "FIXME" ] }
+  in
+  (match w_rg_depth_eq with
+   | W (Rg { pattern = "FIXME"; path = None; _ }) -> ()
+   | w -> Alcotest.failf "Rg --max-depth=3: expected pat=FIXME, got %a" pp w);
+  (* Rg: -C5 pattern — single-dash eq-form not supported (no =), treated as flag+value *)
+  let w_rg_short_c =
+    of_simple
+      { (base "rg") with args = [ lit "-C"; lit "5"; lit "TODO" ] }
+  in
+  (match w_rg_short_c with
+   | W (Rg { pattern = "TODO"; path = None; _ }) -> ()
+   | w -> Alcotest.failf "Rg -C 5: expected pat=TODO, got %a" pp w);
+  (* Find: -name=*.ml — eq-form for explicit -name handler not supported, treated as path *)
+  let w_find_name_eq =
+    of_simple
+      { (base "find") with args = [ lit "."; lit "-name=*.ml" ] }
+  in
+  (match w_find_name_eq with
+   | W (Find { path = "."; name = None; _ }) -> ()
+   | w -> Alcotest.failf "Find -name=*.ml: expected name=None (eq not parsed), got %a" pp w);
+  (* Find: -perm=644 — eq-form value flag consumed *)
+  let w_find_perm_eq =
+    of_simple
+      { (base "find") with args = [ lit "/tmp"; lit "-perm=644"; lit "-name"; lit "*.log" ] }
+  in
+  (match w_find_perm_eq with
+   | W (Find { path = "/tmp"; name = Some "*.log"; _ }) -> ()
+   | w -> Alcotest.failf "Find -perm=644: expected name=*.log, got %a" pp w);
+  (* Find: -mtime=7 -type=f — eq-form for -mtime consumed *)
+  let w_find_mtime_eq =
+    of_simple
+      { (base "find") with args = [ lit "."; lit "-mtime=7"; lit "-type"; lit "f" ] }
+  in
+  (match w_find_mtime_eq with
+   | W (Find { path = "."; type_ = Some `File; _ }) -> ()
+   | w -> Alcotest.failf "Find -mtime=7: expected type=File, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

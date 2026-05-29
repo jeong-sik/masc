@@ -260,8 +260,17 @@ let rec parse case_sensitive pattern path dd = function
      | None -> None)
   | "-i" :: rest | "--ignore-case" :: rest when not dd -> parse false pattern path dd rest
   | "--" :: rest -> parse case_sensitive pattern path true rest
-  (* value-consuming flags: skip flag + its value *)
+  (* value-consuming flags: skip flag + its value (space-separated) *)
   | flag :: _ :: rest when not dd && List.mem flag rg_value_flags ->
+    parse case_sensitive pattern path dd rest
+  (* Eq-form value flags: --flag=VALUE *)
+  | arg :: rest
+    when not dd
+         && (let s = arg in
+             String.length s > 2 && s.[0] = '-'
+             && (match String.index_opt s '=' with
+                 | Some i -> List.mem (String.sub s 0 i) rg_value_flags
+                 | None -> false)) ->
     parse case_sensitive pattern path dd rest
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
@@ -659,6 +668,14 @@ let rec parse name type_ maxdepth path = function
     (match int_of_string_opt (String.sub arg 10 (String.length arg - 10)) with
      | Some n -> parse name type_ (Some n) path rest
      | None -> parse name type_ maxdepth path rest)
+  (* Eq-form value flags: -flag=VALUE — extract prefix and skip *)
+  | arg :: rest
+    when (let s = arg in
+          String.length s > 2 && s.[0] = '-'
+          && (match String.index_opt s '=' with
+              | Some i -> List.mem (String.sub s 0 i) value_flags
+              | None -> false)) ->
+    parse name type_ maxdepth path rest
   | "-exec" :: rest | "-ok" :: rest
   | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ maxdepth path (skip_exec rest)
   (* POSIX end-of-options: treat all remaining as path *)

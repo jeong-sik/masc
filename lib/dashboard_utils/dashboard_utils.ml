@@ -30,24 +30,24 @@ let string_list_of_json json =
       |> List.filter_map (function
              | `String value -> String_util.trim_to_option value
              | _ -> None)
-  | _ -> []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
 
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
-  | _ -> `Null
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Null
 
 let int_field ?(default = 0) key json =
   match member_assoc key json with
   | `Int v -> v
   | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
   | `Float v -> int_of_float v
-  | _ -> default
+  | `Null | `Bool _ | `String _ | `Assoc _ | `List _ -> default
 
 let string_field ?(default = "") key json =
   match member_assoc key json with
   | `String v -> v
-  | _ -> default
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> default
 
 let list_field key json =
   match member_assoc key json with

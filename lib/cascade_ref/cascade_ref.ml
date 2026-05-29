@@ -101,12 +101,12 @@ let cascade_item_of_json (json : Yojson.Safe.t) : cascade_item option =
       let find_str key =
         match List.assoc_opt key fields with
         | Some (`String s) -> Some s
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let find_int key =
         match List.assoc_opt key fields with
         | Some (`Int n) -> Some n
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
       in
       (match find_str "id", find_str "provider", find_str "model",
             find_int "timeout_ms", find_int "priority" with
@@ -129,7 +129,7 @@ let cascade_group_of_json (json : Yojson.Safe.t) : cascade_group option =
       let find_str key =
         match List.assoc_opt key fields with
         | Some (`String s) -> Some s
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let name_opt = find_str "name" in
       let strategy_opt =
@@ -141,12 +141,12 @@ let cascade_group_of_json (json : Yojson.Safe.t) : cascade_group option =
         match List.assoc_opt "items" fields with
         | Some (`List arr) ->
             List.filter_map cascade_item_of_json arr
-        | _ -> []
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
       in
       let fallback_group =
         match List.assoc_opt "fallback_group" fields with
         | Some (`String s) -> Some s
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       (match name_opt, strategy_opt with
        | Some name, Some strategy -> Some { name; items; strategy; fallback_group }
@@ -165,12 +165,12 @@ let cascade_profile_of_json (json : Yojson.Safe.t) : cascade_profile option =
       let name_opt =
         match List.assoc_opt "name" fields with
         | Some (`String s) -> Some s
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let groups =
         match List.assoc_opt "groups" fields with
         | Some (`List arr) -> List.filter_map cascade_group_of_json arr
-        | _ -> []
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> []
       in
       (match name_opt with
        | Some name -> Some { name; groups }
@@ -192,12 +192,12 @@ let cascade_ref_of_json (json : Yojson.Safe.t) : cascade_ref option =
             (match Cascade_name.of_string s with
              | Ok cn -> Some cn
              | Error _ -> None)
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       let item =
         match List.assoc_opt "item" fields with
         | Some (`String s) -> Some s
-        | _ -> None
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
       in
       (match group_opt with
        | Some group -> Some { group; item }

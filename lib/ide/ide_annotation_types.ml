@@ -152,7 +152,7 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
     let find_string key default =
       match List.assoc_opt key fields with
       | Some (`String s) -> s
-      | _ -> default
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> default
     in
     (* [int_of_string_opt] / [Int64.of_string_opt] replace [try _ with _]
        exception-as-control-flow.  Overflow and malformed digits both
@@ -165,18 +165,18 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       match List.assoc_opt key fields with
       | Some (`Int i) -> i
       | Some (`Intlit s) -> Option.value ~default (int_of_string_opt s)
-      | _ -> default
+      | None | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) -> default
     in
     let find_int64 key default =
       match List.assoc_opt key fields with
       | Some (`Intlit s) -> Option.value ~default (Int64.of_string_opt s)
       | Some (`Int i) -> Int64.of_int i
-      | _ -> default
+      | None | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) -> default
     in
     let find_opt_string key =
       match List.assoc_opt key fields with
       | Some (`String s) when s <> "" -> Some s
-      | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
     in
     let kind_str = find_string "kind" "Comment" in
     let kind =
@@ -237,7 +237,7 @@ let region_of_json (json : Yojson.Safe.t) : (code_region, string) result =
     let find_string key default =
       match List.assoc_opt key fields with
       | Some (`String s) -> s
-      | _ -> default
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> default
     in
     (* [int_of_string_opt] / [Int64.of_string_opt] replace [try _ with _]
        exception-as-control-flow.  Overflow and malformed digits both
@@ -250,13 +250,13 @@ let region_of_json (json : Yojson.Safe.t) : (code_region, string) result =
       match List.assoc_opt key fields with
       | Some (`Int i) -> i
       | Some (`Intlit s) -> Option.value ~default (int_of_string_opt s)
-      | _ -> default
+      | None | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) -> default
     in
     let find_int64 key default =
       match List.assoc_opt key fields with
       | Some (`Intlit s) -> Option.value ~default (Int64.of_string_opt s)
       | Some (`Int i) -> Int64.of_int i
-      | _ -> default
+      | None | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) -> default
     in
     let source =
       match List.assoc_opt "source" fields with
@@ -267,21 +267,21 @@ let region_of_json (json : Yojson.Safe.t) : (code_region, string) result =
              { tool_name =
                  (match List.assoc_opt "tool_name" src_fields with
                   | Some (`String s) -> s
-                  | _ -> "")
+                  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> "")
              ; turn =
                  (match List.assoc_opt "turn" src_fields with
                   | Some (`Int i) -> i
-                  | _ -> 0)
+                  | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> 0)
              }
          | Some (`String "manual") ->
            Manual
              { note =
                  (match List.assoc_opt "note" src_fields with
                   | Some (`String s) -> s
-                  | _ -> "")
+                  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> "")
              }
-         | _ -> Manual { note = "" })
-      | _ -> Manual { note = "" }
+         | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> Manual { note = "" })
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> Manual { note = "" }
     in
     Ok
       { file_path = find_string "file_path" ""

@@ -202,7 +202,7 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
           else Some (k, v)
         ) fields in
         `Assoc safe_fields
-      | _ -> `String "<non-object>"
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `String "<non-object>"
     in
     let snippet = preview (Yojson.Safe.to_string redacted) in
     Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
@@ -319,8 +319,8 @@ let audit_summary ~action ~details =
     match details with
     | `Assoc fields -> (match List.assoc_opt key fields with
       | Some (`String v) -> Some (String.sub v 0 (min (String.length v) 80))
-      | _ -> None)
-    | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   match action with
   | ToolCall name ->
@@ -352,8 +352,8 @@ let audit_target ~action ~details =
     match details with
     | `Assoc fields -> (match List.assoc_opt key fields with
       | Some (`String v) -> Some v
-      | _ -> None)
-    | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
   in
   match action with
   | ToolCall name -> Some name

@@ -107,6 +107,30 @@ let invalid_assignments_for_public_profiles ~known_internal_profiles
 
 let member = Yojson.Safe.Util.member
 
+(* Restored after PR #19471 removed these two helpers but left external
+   call sites (dashboard_cascade_config.ml, dashboard_cascade_audit_runs.ml,
+   which [open Dashboard_cascade_helpers]) referencing them -> broken main.
+   They are kept rather than migrated to [Yojson.Safe.Util.member] /
+   [Json_util] because both are *total* (return `Null / [] on non-object),
+   whereas [Yojson.Safe.Util.member] raises on a non-object input -- the
+   audit-run parser relies on that totality for absent/Null sub-objects.
+   Root resolution: a total member/string-list accessor in a leaf module
+   shared by both the helpers and Json_util (RFC candidate). *)
+let json_assoc_member key = function
+  | `Assoc fields -> Option.value (List.assoc_opt key fields) ~default:`Null
+  | _ -> `Null
+;;
+
+let json_string_list = function
+  | `List values ->
+    List.filter_map
+      (function
+        | `String value -> Some value
+        | _ -> None)
+      values
+  | _ -> []
+;;
+
 let invalid_profiles_of_rejection_json rejection_json =
   match member "profiles" rejection_json with
   | `List profiles ->

@@ -80,6 +80,16 @@ let to_json t : Yojson.Safe.t =
       ("timestamp", `Float t.timestamp);
     ]
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+
 (* Defensive parsing: no exceptions escape — every malformed input
    maps to [Error msg] with a localised reason. The salience and id
    validations re-use the construction-time invariants. *)
@@ -99,7 +109,7 @@ let of_json (j : Yojson.Safe.t) : (t, string) result =
         | other ->
             Error
               (Printf.sprintf "Stimulus.of_json: id must be a string (received %s)"
-                 (Json_util.kind_name other))
+                 (json_kind_name other))
       in
       let* source_j = lookup "source" in
       let* source_str =
@@ -109,7 +119,7 @@ let of_json (j : Yojson.Safe.t) : (t, string) result =
             Error
               (Printf.sprintf
                  "Stimulus.of_json: source must be a string (received %s)"
-                 (Json_util.kind_name other))
+                 (json_kind_name other))
       in
       let* source =
         match source_of_string source_str with
@@ -129,7 +139,7 @@ let of_json (j : Yojson.Safe.t) : (t, string) result =
             Error
               (Printf.sprintf
                  "Stimulus.of_json: salience must be a number (received %s)"
-                 (Json_util.kind_name other))
+                 (json_kind_name other))
       in
       let* timestamp_j = lookup "timestamp" in
       let* timestamp =
@@ -140,7 +150,7 @@ let of_json (j : Yojson.Safe.t) : (t, string) result =
             Error
               (Printf.sprintf
                  "Stimulus.of_json: timestamp must be a number (received %s)"
-                 (Json_util.kind_name other))
+                 (json_kind_name other))
       in
       (* Re-run construction-time invariants so [of_json |> to_json]
          and [make ...] enforce the same range. *)
@@ -150,4 +160,4 @@ let of_json (j : Yojson.Safe.t) : (t, string) result =
       Error
         (Printf.sprintf
            "Stimulus.of_json: expected JSON object (received %s)"
-           (Json_util.kind_name other))
+           (json_kind_name other))

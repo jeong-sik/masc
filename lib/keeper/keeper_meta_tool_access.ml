@@ -109,6 +109,7 @@ let tool_preset_of_string raw =
   | "research" -> Some Research
   | "delivery" -> Some Delivery
   | "full" -> Some Full
+  | "coding" -> Some Full (* backward-compat alias: coding preset removed, map to full *)
   | _ -> None
 ;;
 
@@ -224,6 +225,14 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         | Ok tools -> Ok (normalize_tool_access (Custom tools))
         | Error msg -> Error msg)
      | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
-     | None -> Error "keeper tool_access.kind required")
-  | _ -> Error "keeper tool_access must be an object"
+     | None ->
+       (* Empty tool_access: {} — missing kind field.
+          Safe to default: ensure_keeper_meta resyncs from TOML on bootstrap.
+          Without this, meta_of_json fails and recovery via
+          load_or_materialize_boot_meta also fails (handle_keeper_up calls
+          read_meta which hits the same parse error). *)
+       Ok (default_tool_access_of_meta_json ()))
+  | _ ->
+    (* tool_access missing or not an object — same recovery rationale. *)
+    Ok (default_tool_access_of_meta_json ())
 ;;

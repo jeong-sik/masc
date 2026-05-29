@@ -70,10 +70,9 @@ let load_findings ~base_path : string list =
         else
           try
             let json = Yojson.Safe.from_string line in
-            let open Yojson.Safe.Util in
-            let worker = json |> member "worker" |> to_string_option
+            let worker = Json_util.get_string json "worker"
                          |> Option.value ~default:"unknown" in
-            let finding = json |> member "finding" |> to_string_option
+            let finding = Json_util.get_string json "finding"
                           |> Option.value ~default:"" in
             if finding <> "" then
               Some (Printf.sprintf "[%s] %s" worker finding)

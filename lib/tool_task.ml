@@ -2,8 +2,6 @@
    extracted to [Tool_task_handlers] (godfile decomp). *)
 
 open Tool_args
-open Yojson.Safe.Util
-
 include Tool_task_handlers
 
 let rec handle_done ~tool_name ~start_time ctx args =
@@ -11,7 +9,7 @@ let rec handle_done ~tool_name ~start_time ctx args =
   handle_transition ~tool_name ~start_time ctx
     (`Assoc
        [
-         ("task_id", args |> member "task_id");
+         ("task_id", Json_util.assoc_member_opt "task_id" args);
          ("action", `String "done");
          ("notes", `String notes);
        ])
@@ -651,7 +649,7 @@ let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
   let status =
-    match args |> member "status" with
+    match args |> Json_util.assoc_member_opt "status" with
     | `String s when not (String.equal s "") -> Some s
     | _ -> None
   in
@@ -664,8 +662,8 @@ let task_history_events_json (config : Coord.config) ~task_id ~limit =
     Fs_compat.parse_jsonl_lines ~source:"task_events" lines
   in
   let matches_task json =
-    let task = json |> member "task" |> to_string_option in
-    let task_id_field = json |> member "task_id" |> to_string_option in
+    let task = Json_util.get_string json "task" in
+    let task_id_field = Json_util.get_string json "task_id" in
     match task, task_id_field with
     | Some t, _ when String.equal t task_id -> true
     | _, Some t when String.equal t task_id -> true

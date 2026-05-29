@@ -52,7 +52,7 @@ let turn_identity_summary_json
   in
   let receipt_turn_counts =
     receipts
-    |> List.filter_map (json_int_member_opt "turn_count")
+    |> List.filter_map (Safe_ops.json_int_opt "turn_count")
     |> Scan_summary.unique_ints
   in
   `Assoc

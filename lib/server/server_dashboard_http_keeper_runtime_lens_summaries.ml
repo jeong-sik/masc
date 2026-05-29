@@ -36,7 +36,7 @@ let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
       ; ("result", Json_util.string_opt_to_json (json_string_member_opt "result" output))
       ; ("mode", Json_util.string_opt_to_json (json_string_member_opt "mode" claim_scope))
       ; ( "scoped",
-          match json_bool_member_opt "scoped" claim_scope with
+          match Safe_ops.json_bool_opt "scoped" claim_scope with
           | Some value -> `Bool value
           | None -> `Null )
       ; ( "active_goal_ids",
@@ -49,7 +49,7 @@ let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
       ; ( "matched_goal_id",
           Json_util.string_opt_to_json (json_string_member_opt "matched_goal_id" claim_scope) )
       ; ( "excluded_count",
-          match json_int_member_opt "excluded_count" claim_scope with
+          match Safe_ops.json_int_opt "excluded_count" claim_scope with
           | Some value -> `Int value
           | None -> `Null )
       ; ( "claimed_task_id",
@@ -62,7 +62,7 @@ let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
           | None -> `Null )
       ; ("trace_id", Json_util.string_opt_to_json (json_string_member_opt "trace_id" call))
       ; ( "keeper_turn_id",
-          match json_int_member_opt "keeper_turn_id" call with
+          match Safe_ops.json_int_opt "keeper_turn_id" call with
           | Some value -> `Int value
           | None -> `Null )
       ]
@@ -122,16 +122,16 @@ let config_drift_summary_json ~config ~keeper_name =
       ; ( "has_live_override",
           `Bool
             (Option.value
-               (json_bool_member_opt "has_live_override" sources)
+               (Safe_ops.json_bool_opt "has_live_override" sources)
                ~default:false) )
       ; ("cascade_override", `Bool cascade_override)
       ; ("override_fields", Json_util.json_string_list override_fields)
-      ; ("default_cascade_name", json_string_opt default_cascade_name)
-      ; ("live_cascade_name", json_string_opt live_cascade_name)
+      ; ("default_cascade_name", Json_util.string_opt_to_json default_cascade_name)
+      ; ("live_cascade_name", Json_util.string_opt_to_json live_cascade_name)
       ; ( "active_config_root",
           Json_util.string_opt_to_json (json_string_member_opt "active_config_root" sources) )
       ; ( "active_config_root_source",
-          json_string_opt
+          Json_util.string_opt_to_json
             (json_string_member_opt "active_config_root_source" sources) )
       ; ( "default_manifest_path",
           Json_util.string_opt_to_json (json_string_member_opt "default_manifest_path" sources) )

@@ -51,7 +51,7 @@ let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.kee
     then Keeper_fd_pressure.degraded_trust_json ()
     else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
   in
-  let member key = Yojson.Safe.Util.member key runtime_trust in
+  let member key = Option.value ~default:`Null (Json_util.assoc_member_opt key runtime_trust) in
   `Assoc
     [ "disposition", member "disposition"
     ; "disposition_reason", member "disposition_reason"
@@ -72,24 +72,15 @@ let reconcile_keeper_attention_fields_with_trust fields trust =
   match trust with
   | `Assoc _ ->
     let upsert key value fields = assoc_upsert fields key value in
+    let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key trust) in
     fields
-    |> upsert "disposition" (Yojson.Safe.Util.member "disposition" trust)
-    |> upsert
-         "disposition_reason"
-         (Yojson.Safe.Util.member "disposition_reason" trust)
-    |> upsert
-         "operator_disposition"
-         (Yojson.Safe.Util.member "operator_disposition" trust)
-    |> upsert
-         "operator_disposition_reason"
-         (Yojson.Safe.Util.member "operator_disposition_reason" trust)
-    |> upsert "needs_attention" (Yojson.Safe.Util.member "needs_attention" trust)
-    |> upsert
-         "attention_reason"
-         (Yojson.Safe.Util.member "attention_reason" trust)
-    |> upsert
-         "next_human_action"
-         (Yojson.Safe.Util.member "next_human_action" trust)
+    |> upsert "disposition" (m "disposition")
+    |> upsert "disposition_reason" (m "disposition_reason")
+    |> upsert "operator_disposition" (m "operator_disposition")
+    |> upsert "operator_disposition_reason" (m "operator_disposition_reason")
+    |> upsert "needs_attention" (m "needs_attention")
+    |> upsert "attention_reason" (m "attention_reason")
+    |> upsert "next_human_action" (m "next_human_action")
   | _ -> fields
 ;;
 
@@ -206,8 +197,8 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
 ;;
 
 let assoc_member_if_object key json =
-  match Yojson.Safe.Util.member key json with
-  | `Assoc _ as value -> Some value
+  match Json_util.assoc_member_opt key json with
+  | Some (`Assoc _ as value) -> Some value
   | _ -> None
 ;;
 
@@ -224,9 +215,9 @@ let upsert_keeper_trust_fields fields trust =
 ;;
 
 let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
   match keeper_json with
   | `Assoc fields ->
+    let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key keeper_json) in
     (* The upstream operator snapshot already carries these for most keeper rows.
        Reuse them before falling back to per-keeper file reads. *)
     let existing_diagnostic = assoc_member_if_object "diagnostic" keeper_json in
@@ -234,12 +225,12 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
     (match existing_diagnostic, existing_trust with
      | Some _, Some trust -> `Assoc (upsert_keeper_trust_fields fields trust)
      | _ ->
-       (match member "name" keeper_json with
+       (match m "name" with
         | `String name ->
           (match Keeper_types.read_meta_resolved config name with
            | Ok (Some (_resolved_name, meta)) ->
              let keepalive_running =
-               match member "keepalive_running" keeper_json with
+               match m "keepalive_running" with
                | `Bool value -> value
                | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
              in
@@ -250,7 +241,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
                | None ->
                  Keeper_status_runtime.keeper_diagnostic_json
                    ~meta
-                   ~agent_status:(member "agent" keeper_json)
+                   ~agent_status:(m "agent")
                    ~keepalive_running
                    ~history_items:[]
                    ~now_ts
@@ -295,11 +286,11 @@ let keeper_runtime_trust_json keeper =
 ;;
 
 let lowercase_json_string key json =
-  string_field_opt key json |> Option.map String.lowercase_ascii
+  Safe_ops.json_string_opt key json |> Option.map String.lowercase_ascii
 ;;
 
 let terminal_reason_json trust = member_assoc "latest_terminal_reason" trust
-let terminal_reason_code trust = terminal_reason_json trust |> string_field_opt "code"
+let terminal_reason_code trust = terminal_reason_json trust |> Safe_ops.json_string_opt "code"
 
 let terminal_reason_severity trust =
   terminal_reason_json trust |> lowercase_json_string "severity"
@@ -307,7 +298,7 @@ let terminal_reason_severity trust =
 
 let terminal_reason_disposition trust =
   terminal_reason_json trust
-  |> string_field_opt "disposition"
+  |> Safe_ops.json_string_opt "disposition"
   |> Option.map Keeper_turn_disposition.of_wire
 ;;
 
@@ -346,7 +337,7 @@ let keeper_queue_severity keeper trust =
         | Some "alert" -> "bad"
         | Some ("blocked" | "pause") -> "warn"
         | _ ->
-          if Option.is_some (string_field_opt "runtime_blocker_class" keeper)
+          if Option.is_some (Safe_ops.json_string_opt "runtime_blocker_class" keeper)
           then "bad"
           else "warn"))
 ;;
@@ -364,12 +355,12 @@ let first_text values =
 let keeper_queue_summary keeper trust =
   let terminal = terminal_reason_json trust in
   first_text
-    [ string_field_opt "attention_reason" trust
-    ; string_field_opt "summary" terminal
-    ; string_field_opt "runtime_blocker_summary" keeper
-    ; string_field_opt "operator_disposition_reason" trust
-    ; string_field_opt "disposition_reason" trust
-    ; string_field_opt "latest_next_action" trust
+    [ Safe_ops.json_string_opt "attention_reason" trust
+    ; Safe_ops.json_string_opt "summary" terminal
+    ; Safe_ops.json_string_opt "runtime_blocker_summary" keeper
+    ; Safe_ops.json_string_opt "operator_disposition_reason" trust
+    ; Safe_ops.json_string_opt "disposition_reason" trust
+    ; Safe_ops.json_string_opt "latest_next_action" trust
     ; Some "keeper needs operator attention"
     ]
   |> Option.value ~default:"keeper needs operator attention"
@@ -379,12 +370,12 @@ let keeper_queue_last_seen keeper trust =
   let latest_causal = member_assoc "latest_causal_event" trust in
   let last_seen_at =
     latest_iso_timestamp
-      [ string_field_opt "ts" latest_causal
-      ; string_field_opt "observed_at" latest_causal
-      ; string_field_opt "last_autonomous_action_at" keeper
-      ; string_field_opt "last_heartbeat" keeper
-      ; string_field_opt "updated_at" keeper
-      ; string_field_opt "created_at" keeper
+      [ Safe_ops.json_string_opt "ts" latest_causal
+      ; Safe_ops.json_string_opt "observed_at" latest_causal
+      ; Safe_ops.json_string_opt "last_autonomous_action_at" keeper
+      ; Safe_ops.json_string_opt "last_heartbeat" keeper
+      ; Safe_ops.json_string_opt "updated_at" keeper
+      ; Safe_ops.json_string_opt "created_at" keeper
       ]
   in
   last_seen_at, Dashboard_utils.parse_iso_opt last_seen_at |> Option.value ~default:0.0
@@ -393,7 +384,7 @@ let keeper_queue_last_seen keeper trust =
 let build_keeper_execution_queue keepers =
   keepers
   |> List.filter_map (fun keeper ->
-    match string_field_opt "name" keeper with
+    match Safe_ops.json_string_opt "name" keeper with
     | None -> None
     | Some keeper_name ->
       let trust = keeper_runtime_trust_json keeper in
@@ -403,7 +394,7 @@ let build_keeper_execution_queue keepers =
         || terminal_reason_requires_attention trust
       in
       let runtime_blocked =
-        Option.is_some (string_field_opt "runtime_blocker_class" keeper)
+        Option.is_some (Safe_ops.json_string_opt "runtime_blocker_class" keeper)
       in
       if not (trust_needs_attention || runtime_blocked)
       then None
@@ -413,12 +404,12 @@ let build_keeper_execution_queue keepers =
         let last_seen_at, last_seen_ts = keeper_queue_last_seen keeper trust in
         let terminal_code = terminal_reason_code trust in
         let next_human_action =
-          match string_field_opt "next_human_action" trust with
+          match Safe_ops.json_string_opt "next_human_action" trust with
           | Some _ as value -> value
           | None ->
-            (match string_field_opt "latest_next_action" trust with
+            (match Safe_ops.json_string_opt "latest_next_action" trust with
              | Some _ as value -> value
-             | None -> terminal_reason_json trust |> string_field_opt "next_action")
+             | None -> terminal_reason_json trust |> Safe_ops.json_string_opt "next_action")
         in
         let intervene_handoff =
           handoff_json
@@ -453,10 +444,10 @@ let build_keeper_execution_queue keepers =
                 ; "target_id", `String keeper_name
                 ; "linked_session_id", `Null
                 ; "linked_operation_id", `Null
-                ; "last_seen_at", json_string_option last_seen_at
+                ; "last_seen_at", Json_util.string_opt_to_json last_seen_at
                 ; "attention_reason", member_assoc "attention_reason" trust
-                ; "next_human_action", json_string_option next_human_action
-                ; "terminal_reason_code", json_string_option terminal_code
+                ; "next_human_action", Json_util.string_opt_to_json next_human_action
+                ; "terminal_reason_code", Json_util.string_opt_to_json terminal_code
                 ; "runtime_trust", trust
                 ; "top_handoff", command_handoff
                 ; "intervene_handoff", intervene_handoff
@@ -476,11 +467,11 @@ let merge_execution_queue left right =
 
 let model_map_of_keeper_rows keepers =
   let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
-  let open Yojson.Safe.Util in
   List.iter
     (function
       | `Assoc _ as keeper_json ->
-        (match member "name" keeper_json, member "active_model" keeper_json with
+        let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key keeper_json) in
+        (match m "name", m "active_model" with
          | `String _, `String _ | `String _, _ | _, `String _ | _, _ -> ())
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ())
     keepers;
@@ -726,7 +717,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let active_ops =
       List.filter
         (fun (op : operation_context) ->
-           let status = string_field_opt "status" op.json in
+           let status = Safe_ops.json_string_opt "status" op.json in
            status = Some "active" || status = Some "paused")
         operation_contexts
     in

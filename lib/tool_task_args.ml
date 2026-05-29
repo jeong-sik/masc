@@ -9,13 +9,13 @@
 let parse_task_contract args =
   match Json_util.assoc_member_opt "contract" args with
   | None | Some `Null -> Ok None
-  | (`Assoc _ as json) -> (
+  | Some (`Assoc _ as json) -> (
       match Masc_domain.task_contract_of_yojson json with
       | Ok contract -> Ok (Some contract)
       | Error error ->
           Error
             (Printf.sprintf "Invalid contract payload: %s" error))
-  | other ->
+  | Some other ->
       Error
         (Printf.sprintf
            "contract must be an object when provided (received %s)"

@@ -158,19 +158,20 @@ let keeper_decisions_json
             (fun line ->
               try
                 let json = Yojson.Safe.from_string line in
+                let jm key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
                 let ts =
-                  match Yojson.Safe.Util.member "ts_unix" json with
+                  match jm "ts_unix" with
                   | `Float f -> f
                   | `Int i -> float_of_int i
                   | _ -> 0.0
                 in
                 let event_type =
-                  match Yojson.Safe.Util.member "event" json with
+                  match jm "event" with
                   | `String s -> s
                   | _ -> "turn"
                 in
                 let keeper_name =
-                  match Yojson.Safe.Util.member "keeper_name" json with
+                  match jm "keeper_name" with
                   | `String s -> s
                   | _ -> m.name
                 in
@@ -190,7 +191,7 @@ let keeper_decisions_json
   let items =
     List.map
       (fun (_ts, json, event_type, keeper_name) ->
-        let m = Yojson.Safe.Util.member in
+        let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
         let string_member_opt key source =
           match m key source with
           | `String s ->
@@ -336,13 +337,14 @@ let keeper_decisions_log_json
             (fun line ->
               try
                 let json = Yojson.Safe.from_string line in
+                let jm key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
                 let str key =
-                  match Yojson.Safe.Util.member key json with
+                  match jm key with
                   | `String s -> s
                   | _ -> ""
                 in
                 let ts_unix =
-                  match Yojson.Safe.Util.member "ts_unix" json with
+                  match jm "ts_unix" with
                   | `Float f -> f
                   | `Int i -> float_of_int i
                   | _ -> 0.0
@@ -372,7 +374,7 @@ let keeper_decisions_log_json
                 let terminal_reason_code = terminal_reason_code_of_decision_json json in
                 let duration_ms =
                   let number key =
-                    match Yojson.Safe.Util.member key json with
+                    match jm key with
                     | `Float value -> Some value
                     | `Int value -> Some (float_of_int value)
                     | _ -> None
@@ -400,11 +402,11 @@ let keeper_decisions_log_json
                 in
                 let summary = String.concat " \xc2\xb7 " summary_parts in
                 let evidence_refs =
-                  let refs = json_string_list_member "evidence_refs" json in
+                  let refs = Json_util.json_string_list_member "evidence_refs" json in
                   let refs =
                     if refs <> []
                     then refs
-                    else json_string_list_member "raw_evidence_refs" json
+                    else Json_util.json_string_list_member "raw_evidence_refs" json
                   in
                   List.map (fun value -> `String value) refs
                 in

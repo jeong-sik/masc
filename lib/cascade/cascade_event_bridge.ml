@@ -36,9 +36,9 @@ let payload_agent_name payload =
   match Safe_ops.json_string_opt "agent_name" payload with
   | Some _ as value -> value
   | None ->
-    (match payload_string_opt "agent" payload with
+    (match Safe_ops.json_string_opt "agent" payload with
      | Some _ as value -> value
-     | None -> payload_string_opt "keeper_name" payload)
+     | None -> Safe_ops.json_string_opt "keeper_name" payload)
 ;;
 
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
@@ -137,10 +137,10 @@ let wrap_event
     ; "ts_unix", `Float ts
     ; "correlation_id", `String correlation_id
     ; "run_id", `String run_id
-    ; "agent_name", json_string_opt agent_name
-    ; "task_id", json_string_opt task_id
+    ; "agent_name", Json_util.string_opt_to_json agent_name
+    ; "task_id", Json_util.string_opt_to_json task_id
     ; "turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn
-    ; "tool_name", json_string_opt tool_name
+    ; "tool_name", Json_util.string_opt_to_json tool_name
     ; "payload", payload
     ]
 ;;
@@ -361,9 +361,9 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~event_type
          ~payload
          ?agent_name:(payload_agent_name payload)
-         ?task_id:(payload_string_opt "task_id" payload)
-         ?turn:(payload_int_opt "turn" payload)
-         ?tool_name:(payload_string_opt "tool_name" payload)
+         ?task_id:(Safe_ops.json_string_opt "task_id" payload)
+         ?turn:(Safe_ops.json_int_opt "turn" payload)
+         ?tool_name:(Safe_ops.json_string_opt "tool_name" payload)
          ())
   | Agent_sdk.Event_bus.InferenceTelemetry
       { provider

@@ -302,7 +302,7 @@ let read_int_field json key = Json_util.get_int json key
 let read_string_field json key =
   Json_util.get_string json key
   |> Option.map String.trim
-  |> Option.filter (fun s -> s <> "")
+  |> (fun o -> match o with Some s when s <> "" -> Some s | _ -> None)
 
 let read_bool_field json key = Json_util.get_bool json key
 

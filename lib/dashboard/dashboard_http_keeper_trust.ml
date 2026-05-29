@@ -8,9 +8,15 @@ let keeper_trust_json ?(include_receipt = false)
     then Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
     else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
   in
+  let rc key =
+    match latest_receipt with
+    | Some receipt -> Option.value ~default:`Null (Json_util.assoc_member_opt key receipt)
+    | None -> `Null
+  in
+  let rt key = Option.value ~default:`Null (Json_util.assoc_member_opt key runtime_trust) in
   let sandbox_json =
     match latest_receipt with
-    | Some receipt -> Yojson.Safe.Util.member "sandbox" receipt
+    | Some receipt -> rc "sandbox"
     | None ->
         `Assoc
           [
@@ -21,7 +27,7 @@ let keeper_trust_json ?(include_receipt = false)
   in
   let approval_json =
     match latest_receipt with
-    | Some receipt -> Yojson.Safe.Util.member "approval" receipt
+    | Some _ -> rc "approval"
     | None -> `Assoc [ ("profile", `Null); ("derived", `Bool false) ]
   in
   let cascade_json =
@@ -31,8 +37,8 @@ let keeper_trust_json ?(include_receipt = false)
       | None -> `Null
     in
     match latest_receipt with
-    | Some receipt -> (
-        match Yojson.Safe.Util.member "cascade" receipt with
+    | Some _ -> (
+        match rc "cascade" with
         | `Assoc fields -> `Assoc (("cascade_ref", cascade_ref_json) :: fields)
         | other -> other)
     | None ->
@@ -48,86 +54,85 @@ let keeper_trust_json ?(include_receipt = false)
   in
   let requested_tools =
     match latest_receipt with
-    | Some receipt -> json_string_list_member "requested_tools" receipt
+    | Some receipt -> Json_util.json_string_list_member "requested_tools" receipt
     | None -> []
   in
   let required_tools, required_tool_candidates, missing_required_tools =
     match latest_receipt with
     | Some receipt ->
-        let surface = Yojson.Safe.Util.member "tool_surface" receipt in
-        ( json_string_list_member "required_tools" surface,
-          json_string_list_member "required_tool_candidates" surface,
-          json_string_list_member "missing_required_tools" surface )
+        let surface = Option.value ~default:`Null (Json_util.assoc_member_opt "tool_surface" receipt) in
+        ( Json_util.json_string_list_member "required_tools" surface,
+          Json_util.json_string_list_member "required_tool_candidates" surface,
+          Json_util.json_string_list_member "missing_required_tools" surface )
     | None -> ([], [], [])
   in
   let tools_used =
     match latest_receipt with
-    | Some receipt -> json_string_list_member "tools_used" receipt
+    | Some receipt -> Json_util.json_string_list_member "tools_used" receipt
     | None -> []
   in
   let unexpected_tools =
     match latest_receipt with
-    | Some receipt -> json_string_list_member "unexpected_tools" receipt
+    | Some receipt -> Json_util.json_string_list_member "unexpected_tools" receipt
     | None -> []
   in
   `Assoc
     [
-      ( "last_outcome",
+      ("last_outcome",
         match latest_receipt with
-        | Some receipt -> Yojson.Safe.Util.member "outcome" receipt
-        | None -> `String "not_run" );
-      ( "terminal_reason_code",
+        | Some _ -> rc "outcome"
+        | None -> `String "not_run");
+      ("terminal_reason_code",
         match latest_receipt with
-        | Some receipt -> Yojson.Safe.Util.member "terminal_reason_code" receipt
-        | None -> `String "no_receipt" );
-      ( "operator_disposition",
+        | Some _ -> rc "terminal_reason_code"
+        | None -> `String "no_receipt");
+      ("operator_disposition",
         match latest_receipt with
-        | Some receipt -> Yojson.Safe.Util.member "operator_disposition" receipt
-        | None -> `String "not_run" );
-      ( "operator_disposition_reason",
+        | Some _ -> rc "operator_disposition"
+        | None -> `String "not_run");
+      ("operator_disposition_reason",
         match latest_receipt with
-        | Some receipt -> Yojson.Safe.Util.member "operator_disposition_reason" receipt
-        | None -> `String "no_receipt" );
-      ( "tool_contract_result",
+        | Some _ -> rc "operator_disposition_reason"
+        | None -> `String "no_receipt");
+      ("tool_contract_result",
         match latest_receipt with
-        | Some receipt -> Yojson.Safe.Util.member "tool_contract_result" receipt
-        | None -> `String "unknown" );
+        | Some _ -> rc "tool_contract_result"
+        | None -> `String "unknown");
       ("requested_tool_count", `Int (List.length requested_tools));
       ("required_tools", `List (List.map (fun value -> `String value) required_tools));
-      ( "required_tool_candidates",
-        `List (List.map (fun value -> `String value) required_tool_candidates) );
-      ( "missing_required_tools",
-        `List (List.map (fun value -> `String value) missing_required_tools) );
+      ("required_tool_candidates",
+        `List (List.map (fun value -> `String value) required_tool_candidates));
+      ("missing_required_tools",
+        `List (List.map (fun value -> `String value) missing_required_tools));
       ("tools_used", `List (List.map (fun value -> `String value) tools_used));
       ("unexpected_tools", `List (List.map (fun value -> `String value) unexpected_tools));
       ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ("sandbox", sandbox_json);
       ("approval", approval_json);
       ("cascade", cascade_json);
-      ("disposition", Yojson.Safe.Util.member "disposition" runtime_trust);
-      ("disposition_reason", Yojson.Safe.Util.member "disposition_reason" runtime_trust);
-      ("needs_attention", Yojson.Safe.Util.member "needs_attention" runtime_trust);
-      ("attention_reason", Yojson.Safe.Util.member "attention_reason" runtime_trust);
-      ("next_human_action", Yojson.Safe.Util.member "next_human_action" runtime_trust);
-      ("approval_state", Yojson.Safe.Util.member "approval" runtime_trust);
-      ("execution_summary", Yojson.Safe.Util.member "execution" runtime_trust);
-      ( "latest_terminal_reason",
-        Yojson.Safe.Util.member "latest_terminal_reason" runtime_trust );
-      ("latest_next_action", Yojson.Safe.Util.member "latest_next_action" runtime_trust);
-      ("latest_causal_event", Yojson.Safe.Util.member "latest_causal_event" runtime_trust);
-      ( "last_receipt_at",
+      ("disposition", rt "disposition");
+      ("disposition_reason", rt "disposition_reason");
+      ("needs_attention", rt "needs_attention");
+      ("attention_reason", rt "attention_reason");
+      ("next_human_action", rt "next_human_action");
+      ("approval_state", rt "approval");
+      ("execution_summary", rt "execution");
+      ("latest_terminal_reason", rt "latest_terminal_reason");
+      ("latest_next_action", rt "latest_next_action");
+      ("latest_causal_event", rt "latest_causal_event");
+      ("last_receipt_at",
         match latest_receipt with
-        | Some receipt -> Yojson.Safe.Util.member "ended_at" receipt
-        | None -> `Null );
-      ( "last_error",
+        | Some _ -> rc "ended_at"
+        | None -> `Null);
+      ("last_error",
         match latest_receipt with
-        | Some receipt -> Yojson.Safe.Util.member "error" receipt
-        | None -> `Null );
-      ( "last_receipt",
+        | Some _ -> rc "error"
+        | None -> `Null);
+      ("last_receipt",
         if include_receipt then
           match latest_receipt with
           | Some receipt -> receipt
           | None -> `Null
         else
-          `Null );
+          `Null);
     ]

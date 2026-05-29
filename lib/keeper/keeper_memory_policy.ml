@@ -676,7 +676,7 @@ let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Sa
     malformed or represents an empty snapshot (all fields absent/empty).
     RFC-MASC-001 Phase 1: structured working_context in Checkpoint. *)
 let keeper_state_snapshot_of_json (json : Yojson.Safe.t) : keeper_state_snapshot option =
-  let string_opt key = Json_util.get_string key json in
+  let string_opt key = Json_util.get_string json key in
   let string_list key =
     match Json_util.assoc_member_opt key json with
     | Some (`List items) ->

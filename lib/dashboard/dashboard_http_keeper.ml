@@ -348,13 +348,13 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             Keeper_runtime_contract.runtime_contract_json ~config m
           in
           let goal_progress =
-            Yojson.Safe.Util.member "goal_progress" runtime_contract
+            Option.value ~default:`Null (Json_util.assoc_member_opt "goal_progress" runtime_contract)
           in
           let blocked_task_count =
             Safe_ops.json_int "blocked_task_count" ~default:0 runtime_contract
           in
           let approval_policy_effective =
-            Yojson.Safe.Util.member "approval_policy_effective" runtime_contract
+            Option.value ~default:`Null (Json_util.assoc_member_opt "approval_policy_effective" runtime_contract)
           in
           let sandbox_target =
             Safe_ops.json_string "sandbox_target" ~default:"unknown"
@@ -859,20 +859,20 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
         | Some (`List rows) ->
           rows
           |> List.map (fun row ->
+                 let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key row) in
                  `Assoc
                    [
-                     ("name", Yojson.Safe.Util.member "name" row);
-                     ("agent_name", Yojson.Safe.Util.member "agent_name" row);
-                     ("keeper_id", Yojson.Safe.Util.member "keeper_id" row);
-                     ("phase", Yojson.Safe.Util.member "phase" row);
-                     ( "pipeline_stage",
-                       Yojson.Safe.Util.member "pipeline_stage" row );
-                     ("status", Yojson.Safe.Util.member "status" row);
-                     ("trace_id", Yojson.Safe.Util.member "trace_id" row);
-                     ("generation", Yojson.Safe.Util.member "generation" row);
-                     ("current_task_id", Yojson.Safe.Util.member "current_task_id" row);
-                     ("active_goal_ids", Yojson.Safe.Util.member "active_goal_ids" row);
-                     ("trust", Yojson.Safe.Util.member "trust" row);
+                     ("name", m "name");
+                     ("agent_name", m "agent_name");
+                     ("keeper_id", m "keeper_id");
+                     ("phase", m "phase");
+                     ("pipeline_stage", m "pipeline_stage");
+                     ("status", m "status");
+                     ("trace_id", m "trace_id");
+                     ("generation", m "generation");
+                     ("current_task_id", m "current_task_id");
+                     ("active_goal_ids", m "active_goal_ids");
+                     ("trust", m "trust");
                    ])
         | _ -> [])
     | _ -> []

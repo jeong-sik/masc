@@ -125,7 +125,7 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
-let json_string_member_opt = Json_util.get_string
+let json_string_member_opt key json = Json_util.get_string json key
 
 let json_string_list_member name json =
   Json_util.json_string_list_member name json |> Json_util.dedupe_keep_order
@@ -162,7 +162,7 @@ let unique_present_paths paths =
   |> Json_util.dedupe_keep_order
 
 let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
-  let decision_string key = json_string_member_opt row.decision key in
+  let decision_string key = json_string_member_opt key row.decision in
   `Assoc
     [
       ("ts", `String row.ts);

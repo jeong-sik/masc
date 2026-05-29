@@ -3329,6 +3329,27 @@ parse None None 0 false args|}
     ; parse_body =
         Some
           {|
+(* Npm flags that consume the next token as their argument *)
+let npm_value_flags =
+  [ "--registry"
+  ; "--prefix"
+  ; "--cache"
+  ; "--userconfig"
+  ; "--tag"
+  ; "--scope"
+  ; "--auth-type"
+  ; "--otp"
+  ; "--loglevel"
+  ; "--timing"
+  ; "--workspace"; "-w"
+  ; "--omit"
+  ; "--install-strategy"
+  ; "--save-exact"; "-E"
+  ; "--save-bundle"; "-B"
+  ; "--proxy"; "--https-proxy"
+  ; "--no-proxy"
+  ]
+in
 let rec parse subcmd sd glb frc dd = function
   | [] ->
     (match subcmd with
@@ -3340,6 +3361,20 @@ let rec parse subcmd sd glb frc dd = function
   | "--global" :: rest when not dd -> parse subcmd sd true frc dd rest
   | "-g" :: rest when not dd -> parse subcmd sd true frc dd rest
   | "--force" :: rest when not dd -> parse subcmd sd glb true dd rest
+  (* Value-consuming flags: skip the flag and its argument *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg npm_value_flags ->
+    parse subcmd sd glb frc dd rest
+  (* --flag=VALUE equal-sign form *)
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i ->
+                let flag = String.sub arg 0 i in
+                List.mem flag npm_value_flags
+              | None -> false) ->
+    parse subcmd sd glb frc dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd sd glb frc true rest
   | arg :: rest ->
@@ -3384,6 +3419,23 @@ parse None false false false false args|}
     ; parse_body =
         Some
           {|
+(* Cargo flags that consume the next token as their argument *)
+let cargo_value_flags =
+  [ "--target"; "--target-dir"
+  ; "--manifest-path"
+  ; "--color"
+  ; "--jobs"; "-j"
+  ; "--profile"
+  ; "--bin"; "--example"; "--test"; "--bench"
+  ; "--package"; "-p"
+  ; "--message-format"
+  ; "--out-dir"
+  ; "--config"
+  ; "--registry"; "--index"; "--token"
+  ; "--exclude"
+  ; "-Z"
+  ]
+in
 let rec parse subcmd rel verb feat dd = function
   | [] ->
     (match subcmd with
@@ -3394,27 +3446,39 @@ let rec parse subcmd rel verb feat dd = function
   | "--verbose" :: rest when not dd -> parse subcmd rel true feat dd rest
   | "-v" :: rest when not dd -> parse subcmd rel true feat dd rest
   | "--features" :: f :: rest when not dd -> parse subcmd rel verb (Some f) dd rest
+  (* Value-consuming flags: skip the flag and its argument *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg cargo_value_flags ->
+    parse subcmd rel verb feat dd rest
+  (* --flag=VALUE equal-sign form for value-consuming flags *)
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i ->
+                let flag = String.sub arg 0 i in
+                List.mem flag cargo_value_flags || flag = "--features"
+              | None -> false) ->
+    (match String.index_opt arg '=' with
+     | Some i when String.sub arg 0 i = "--features" ->
+       let f = String.sub arg (i + 1) (String.length arg - i - 1) in
+       parse subcmd rel verb (Some f) dd rest
+     | _ -> parse subcmd rel verb feat dd rest)
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd rel verb feat true rest
   | arg :: rest ->
-    (* Handle --features=VALUE *)
-    if not dd && String.length arg > 11 && String.sub arg 0 11 = "--features="
-    then (
-      let f = String.sub arg 11 (String.length arg - 11) in
-      parse subcmd rel verb (Some f) dd rest)
-    else (
-      match subcmd with
-      | None when not dd -> parse (Some arg) rel verb feat dd rest
-      | _ ->
-        let rec collect acc = function
-          | [] -> List.rev acc
-          | x :: xs -> collect (x :: acc) xs
-        in
-        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo {
-          subcommand = (match subcmd with Some s -> s | None -> arg);
-          release = rel; verbose = verb; features = feat;
-          rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
-        })))
+    (match subcmd with
+     | None when not dd -> parse (Some arg) rel verb feat dd rest
+     | _ ->
+       let rec collect acc = function
+         | [] -> List.rev acc
+         | x :: xs -> collect (x :: acc) xs
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cargo {
+         subcommand = (match subcmd with Some s -> s | None -> arg);
+         release = rel; verbose = verb; features = feat;
+         rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
+       })))
 in
 parse None false false None false args|}
     ; no_expand_combined = false
@@ -3443,6 +3507,29 @@ parse None false false None false args|}
     ; parse_body =
         Some
           {|
+(* Go flags that consume the next token as their argument *)
+let go_value_flags =
+  [ "-o"
+  ; "-C"
+  ; "-ldflags"; "-asmflags"; "-gcflags"
+  ; "-tags"
+  ; "-mod"
+  ; "-count"
+  ; "-benchtime"
+  ; "-timeout"
+  ; "-run"; "-bench"
+  ; "-coverprofile"; "-covermode"; "-coverpkg"
+  ; "-cpuprofile"; "-memprofile"; "-blockprofile"; "-mutexprofile"
+  ; "-trace"
+  ; "-outputdir"
+  ; "-parallel"
+  ; "-vet"
+  ; "-modfile"
+  ; "-overlay"
+  ; "-pkgdir"
+  ; "-toolexec"
+  ]
+in
 let rec parse subcmd v race dd = function
   | [] ->
     (match subcmd with
@@ -3451,6 +3538,12 @@ let rec parse subcmd v race dd = function
      | None -> None)
   | "-v" :: rest when not dd -> parse subcmd true race dd rest
   | "-race" :: rest when not dd -> parse subcmd v true dd rest
+  | "-trimpath" :: rest when not dd -> parse subcmd v race dd rest
+  (* Value-consuming flags: skip the flag and its argument *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg go_value_flags ->
+    parse subcmd v race dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd v race true rest
   | arg :: rest ->
@@ -3693,6 +3786,52 @@ parse false None None args|}
     ; parse_body =
         Some
           {|
+(* Docker flags that consume the next token as their argument *)
+let docker_value_flags =
+  [ "--name"; "--hostname"; "-h"
+  ; "--network"; "--net"
+  ; "-v"; "--volume"
+  ; "-p"; "--publish"
+  ; "--env"; "-e"
+  ; "--workdir"; "-w"
+  ; "--entrypoint"
+  ; "--platform"
+  ; "--user"; "-u"
+  ; "--label"; "-l"
+  ; "--log-driver"; "--log-opt"
+  ; "--mount"; "--tmpfs"
+  ; "--device"
+  ; "--add-host"
+  ; "--dns"; "--dns-search"; "--dns-option"
+  ; "--ip"; "--ip6"
+  ; "--link"
+  ; "--volumes-from"
+  ; "--network-alias"
+  ; "--restart"
+  ; "--stop-signal"; "--stop-timeout"
+  ; "--health-cmd"; "--health-interval"; "--health-timeout"
+  ; "--health-retries"; "--health-start-period"
+  ; "--memory"; "-m"
+  ; "--cpus"; "--cpu-shares"; "--cpu-period"; "--cpu-quota"; "--cpuset-cpus"
+  ; "--gpus"
+  ; "--pid"
+  ; "--pids-limit"
+  ; "--memory-swap"; "--memory-reservation"
+  ; "--kernel-memory"; "--oom-kill-disable"; "--oom-score-adj"
+  ; "--ulimit"
+  ; "--security-opt"; "--cap-add"; "--cap-drop"
+  ; "--group-add"
+  ; "--blkio-weight"; "--blkio-weight-device"
+  ; "--cgroup-parent"
+  ; "--device-cgroup-rule"
+  ; "--sysctl"
+  ; "--shm-size"
+  ; "--storage-opt"
+  ; "-c"; "--cpu-shares"
+  ; "--annotation"
+  ; "--init-binary"
+  ]
+in
 let rec parse subcmd rm priv det dd = function
   | [] ->
     (match subcmd with
@@ -3703,6 +3842,20 @@ let rec parse subcmd rm priv det dd = function
   | "--privileged" :: rest when not dd -> parse subcmd rm true det dd rest
   | "-d" :: rest when not dd -> parse subcmd rm priv true dd rest
   | "--detach" :: rest when not dd -> parse subcmd rm priv true dd rest
+  (* Value-consuming flags: skip the flag and its argument *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg docker_value_flags ->
+    parse subcmd rm priv det dd rest
+  (* --flag=VALUE equal-sign form for value-consuming flags *)
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i ->
+                let flag = String.sub arg 0 i in
+                List.mem flag docker_value_flags
+              | None -> false) ->
+    parse subcmd rm priv det dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd rm priv det true rest
   | arg :: rest ->
@@ -4400,6 +4553,7 @@ parse None false false false args|}
     ; parse_body =
         Some
           {|
+let gradle_value_flags = [ "--build-file"; "--settings-file"; "--gradle-user-home"; "--project-cache-dir"; "--project-dir"; "-D"; "--system-prop"; "--init-script"; "--include-build" ] in
 let rec parse subcmd nd p dd = function
   | [] ->
     (match subcmd with
@@ -4408,7 +4562,22 @@ let rec parse subcmd nd p dd = function
      | None -> None)
   | "--no-daemon" :: rest when not dd -> parse subcmd true p dd rest
   | "--parallel" :: rest when not dd -> parse subcmd nd true dd rest
+  | "--rerun-tasks" :: rest when not dd -> parse subcmd nd p dd rest
   | "--" :: rest -> parse subcmd nd p true rest
+  (* Value-consuming flags: skip the flag and its argument *)
+  | arg :: _val :: rest
+    when not dd && String.length arg > 0 && arg.[0] = '-'
+         && List.mem arg gradle_value_flags ->
+    parse subcmd nd p dd rest
+  (* --flag=VALUE equal-sign form for value-consuming flags *)
+  | arg :: rest
+    when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+         && (match String.index_opt arg '=' with
+              | Some i ->
+                let flag = String.sub arg 0 i in
+                List.mem flag gradle_value_flags
+              | None -> false) ->
+    parse subcmd nd p dd rest
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) nd p dd rest
@@ -4544,6 +4713,24 @@ parse None false false false args|}
     ; parse_body =
         Some
           {|
+  (* Mvn flags that consume the next token as their argument *)
+  let mvn_value_flags =
+    [ "-D"; "--define"
+    ; "-f"; "--file"
+    ; "-s"; "--settings"
+    ; "-gs"; "--global-settings"
+    ; "-P"; "--activate-profiles"
+    ; "--log-file"
+    ; "--color"
+    ; "-l"
+    ; "-pl"; "--projects"
+    ; "-rf"; "--resume-from"
+    ; "-t"; "--threads"
+    ; "-nt"; "--no-transfer-progress"
+    ; "-T"
+    ; "-X"
+    ]
+  in
   let rec parse subcmd off bat q dd = function
     | [] ->
       (match subcmd with
@@ -4557,6 +4744,20 @@ parse None false false false args|}
     | "--batch-mode" :: rest when not dd -> parse subcmd off true q dd rest
     | "-q" :: rest when not dd -> parse subcmd off bat true dd rest
     | "--quiet" :: rest when not dd -> parse subcmd off bat true dd rest
+    (* Value-consuming flags: skip the flag and its argument *)
+    | arg :: _val :: rest
+      when not dd && String.length arg > 0 && arg.[0] = '-'
+           && List.mem arg mvn_value_flags ->
+      parse subcmd off bat q dd rest
+    (* --flag=VALUE equal-sign form *)
+    | arg :: rest
+      when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+           && (match String.index_opt arg '=' with
+                | Some i ->
+                  let flag = String.sub arg 0 i in
+                  List.mem flag mvn_value_flags
+                | None -> false) ->
+      parse subcmd off bat q dd rest
     | "--" :: rest -> parse subcmd off bat q true rest
     | arg :: rest ->
       (match subcmd with

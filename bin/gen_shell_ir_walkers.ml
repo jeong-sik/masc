@@ -1221,6 +1221,17 @@ let rec parse reverse numeric unique key file = function
         let n_num = numeric || String.contains flags 'n' in
         parse r n_num unique (Some n) file rest)
       else parse reverse numeric unique key file rest)
+    (* Combined short flags: -rn, -ru, -nu, -rnu, etc. *)
+    else if String.length arg > 2
+         && arg.[0] = '-'
+         && arg.[1] <> '-'
+         && String.for_all (fun c -> c = 'r' || c = 'n' || c = 'u')
+              (String.sub arg 1 (String.length arg - 1))
+    then (
+      let r' = reverse || String.contains arg 'r' in
+      let n' = numeric || String.contains arg 'n' in
+      let u' = unique || String.contains arg 'u' in
+      parse r' n' u' key file rest)
     else if String.length arg > 0 && arg.[0] = '-'
     then parse reverse numeric unique key file rest
     else (
@@ -1689,7 +1700,17 @@ let rec parse human_readable summary max_depth = function
         | Some d -> parse human_readable summary (Some d) rest
         | None -> None)
      | _ ->
-       if String.length arg > 0 && arg.[0] = '-'
+       (* Combined short flags: -hs, -sh *)
+       if String.length arg > 2
+            && arg.[0] = '-'
+            && arg.[1] <> '-'
+            && String.for_all (fun c -> c = 'h' || c = 's')
+                 (String.sub arg 1 (String.length arg - 1))
+       then (
+         let h' = human_readable || String.contains arg 'h' in
+         let s' = summary || String.contains arg 's' in
+         parse h' s' max_depth rest)
+       else if String.length arg > 0 && arg.[0] = '-'
        then parse human_readable summary max_depth rest
        else
          Some

@@ -695,7 +695,35 @@ let test_combined_short_flags () =
   in
   (match rm_rf_f with
    | W (Rm { paths = [ "dir/" ]; recursive = true; force = true; _ }) -> ()
-   | w -> Alcotest.failf "rm -rf -f: expected recursive+force, got %a" pp w)
+   | w -> Alcotest.failf "rm -rf -f: expected recursive+force, got %a" pp w);
+  (* sort -rn file.txt *)
+  let sort_rn =
+    of_simple { (base "sort") with args = [ lit "-rn"; lit "file.txt" ] }
+  in
+  (match sort_rn with
+   | W (Sort { reverse = true; numeric = true; unique = false; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "sort -rn: expected reverse+numeric, got %a" pp w);
+  (* sort -rnu file.txt *)
+  let sort_rnu =
+    of_simple { (base "sort") with args = [ lit "-rnu"; lit "file.txt" ] }
+  in
+  (match sort_rnu with
+   | W (Sort { reverse = true; numeric = true; unique = true; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "sort -rnu: expected all three, got %a" pp w);
+  (* du -hs /tmp *)
+  let du_hs =
+    of_simple { (base "du") with args = [ lit "-hs"; lit "/tmp" ] }
+  in
+  (match du_hs with
+   | W (Du { path = Some "/tmp"; human_readable = true; summary = true; _ }) -> ()
+   | w -> Alcotest.failf "du -hs: expected human_readable+summary, got %a" pp w);
+  (* du -sh /tmp *)
+  let du_sh =
+    of_simple { (base "du") with args = [ lit "-sh"; lit "/tmp" ] }
+  in
+  (match du_sh with
+   | W (Du { path = Some "/tmp"; human_readable = true; summary = true; _ }) -> ()
+   | w -> Alcotest.failf "du -sh: expected human_readable+summary, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

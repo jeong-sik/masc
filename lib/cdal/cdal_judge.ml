@@ -166,6 +166,59 @@ let check_review_requirement (b : Cdal_loader.loaded_bundle) : Cdal_types.check_
 ;;
 
 (* ================================================================ *)
+(* Check 6: Runtime terminal status (completion precondition)       *)
+(* ================================================================ *)
+
+(* A run can only verify-complete its task/goal if it actually reached a
+   [Completed] terminal state. Before this check, judge ran only the four
+   containment checks plus review-requirement, so a [Cancelled]/[Timed_out]/
+   [Errored]/[Context_overflow] run could be judged [Satisfied] as long as
+   the containment checks passed — i.e. an unfinished run could verify task
+   completion. This stays within the [phase1_scoped_runtime_audit] scope:
+   it audits the proof's terminal [result_status], not deliverable
+   correctness (the typed evidence evaluator's job, out of Phase 1A scope). *)
+let check_result_status (b : Cdal_loader.loaded_bundle) : Cdal_types.check_result =
+  let check_id = "runtime.result_status" in
+  let module P = Masc_mcp_cdal_runtime.Cdal_proof in
+  match b.proof.result_status with
+  | P.Completed -> { check_id; status = Satisfied; findings = []; completeness_gaps = [] }
+  | P.Errored ->
+    (* Explicit runtime failure (hook/verifier crash, unexpected error):
+       the run did not complete successfully. *)
+    { check_id
+    ; status = Violated
+    ; findings =
+        [ { Cdal_types.check_id
+          ; event_id = None
+          ; observed = `String (P.result_status_to_string b.proof.result_status)
+          ; expected = `String (P.result_status_to_string P.Completed)
+          ; trace_ref = None
+          }
+        ]
+    ; completeness_gaps = []
+    }
+  | (P.Timed_out | P.Cancelled | P.Context_overflow) as status ->
+    (* Cut short before a completed terminal state (limit exceeded, policy
+       gate stop, or context exhaustion). Completion cannot be confirmed, so
+       the verdict is withheld ([Inconclusive] with a blocking gap) rather
+       than falsely [Satisfied] or falsely [Violated]. *)
+    { check_id
+    ; status = Inconclusive
+    ; findings = []
+    ; completeness_gaps =
+        [ { Cdal_types.artifact = "proof/status.json"
+          ; reason =
+              Printf.sprintf
+                "run terminated as %s, not completed; completion cannot be verified \
+                 from an unfinished run"
+                (P.result_status_to_string status)
+          ; impact = Blocks_verdict
+          }
+        ]
+    }
+;;
+
+(* ================================================================ *)
 (* Verdict derivation                                               *)
 (* ================================================================ *)
 
@@ -208,6 +261,7 @@ let judge (b : Cdal_loader.loaded_bundle) : Cdal_types.contract_verdict =
     ; check_contract_snapshot b
     ; check_required_artifact b
     ; check_review_requirement b
+    ; check_result_status b
     ]
   in
   let status = derive_status checks in

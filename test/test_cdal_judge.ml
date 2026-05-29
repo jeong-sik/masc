@@ -18,6 +18,7 @@ let make_proof
       ?(requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
       ?(effective = Masc_mcp_cdal_runtime.Execution_mode.Execute)
       ?(risk_class = Masc_mcp_cdal_runtime.Risk_class.Low)
+      ?(result_status = Masc_mcp_cdal_runtime.Cdal_proof.Completed)
       ()
   : Masc_mcp_cdal_runtime.Cdal_proof.t
   =
@@ -40,7 +41,7 @@ let make_proof
   ; tool_trace_refs = []
   ; raw_evidence_refs = []
   ; checkpoint_ref = None
-  ; result_status = Completed
+  ; result_status
   ; started_at = 1000.0
   ; ended_at = 1001.0
   ; scope = None
@@ -75,6 +76,7 @@ let make_bundle
       ?(contract_risk = Masc_mcp_cdal_runtime.Risk_class.Low)
       ?contract_review_requirement
       ?(proof_raw_evidence_refs = [])
+      ?(proof_result_status = Masc_mcp_cdal_runtime.Cdal_proof.Completed)
       ?(contract_id_match = true)
       ()
   : CL.loaded_bundle
@@ -97,6 +99,7 @@ let make_bundle
       ~requested:proof_requested
       ~effective:proof_effective
       ~risk_class:proof_risk
+      ~result_status:proof_result_status
       ()
   in
   let proof = { proof with raw_evidence_refs = proof_raw_evidence_refs } in
@@ -120,7 +123,7 @@ let test_all_satisfied () =
     "satisfied"
     (CT.contract_status_to_string verdict.status);
   Alcotest.(check int) "no findings" 0 (List.length verdict.findings);
-  Alcotest.(check int) "5 check results" 5 (List.length verdict.check_results);
+  Alcotest.(check int) "6 check results" 6 (List.length verdict.check_results);
   List.iter
     (fun (cr : CT.check_result) ->
        Alcotest.(check string)
@@ -361,6 +364,88 @@ let test_findings_populated () =
 ;;
 
 (* ================================================================ *)
+(* test_result_status_completed_satisfied                            *)
+(* ================================================================ *)
+
+let test_result_status_completed_satisfied () =
+  let bundle = make_bundle () in
+  let cr = CJ.check_result_status bundle in
+  Alcotest.(check string) "status" "satisfied" (CT.contract_status_to_string cr.status);
+  Alcotest.(check int) "no findings" 0 (List.length cr.findings);
+  Alcotest.(check int) "no gaps" 0 (List.length cr.completeness_gaps)
+;;
+
+(* ================================================================ *)
+(* test_result_status_errored_violated                               *)
+(* ================================================================ *)
+
+let test_result_status_errored_violated () =
+  let bundle =
+    make_bundle ~proof_result_status:Masc_mcp_cdal_runtime.Cdal_proof.Errored ()
+  in
+  let cr = CJ.check_result_status bundle in
+  Alcotest.(check string) "status" "violated" (CT.contract_status_to_string cr.status);
+  Alcotest.(check int) "1 finding" 1 (List.length cr.findings);
+  let f = List.hd cr.findings in
+  Alcotest.(check string) "finding check_id" "runtime.result_status" f.check_id
+;;
+
+(* ================================================================ *)
+(* test_result_status_cancelled_inconclusive                         *)
+(* ================================================================ *)
+
+let test_result_status_cancelled_inconclusive () =
+  let bundle =
+    make_bundle ~proof_result_status:Masc_mcp_cdal_runtime.Cdal_proof.Cancelled ()
+  in
+  let cr = CJ.check_result_status bundle in
+  Alcotest.(check string)
+    "status"
+    "inconclusive"
+    (CT.contract_status_to_string cr.status);
+  Alcotest.(check int) "1 completeness gap" 1 (List.length cr.completeness_gaps);
+  let gap = List.hd cr.completeness_gaps in
+  Alcotest.(check string)
+    "gap impact"
+    "blocks_verdict"
+    (CT.completeness_impact_to_string gap.impact)
+;;
+
+(* ================================================================ *)
+(* test_verdict_incomplete_run_not_satisfied                         *)
+(* ================================================================ *)
+
+let test_verdict_incomplete_run_not_satisfied () =
+  (* All containment checks pass, but the run did not complete (Timed_out) —
+     the overall verdict must NOT be Satisfied; it is withheld as
+     Inconclusive. This is the gap the result_status check closes: an
+     unfinished run could previously verify task/goal completion. *)
+  let bundle =
+    make_bundle ~proof_result_status:Masc_mcp_cdal_runtime.Cdal_proof.Timed_out ()
+  in
+  let verdict = CJ.judge bundle in
+  Alcotest.(check string)
+    "status"
+    "inconclusive"
+    (CT.contract_status_to_string verdict.status)
+;;
+
+(* ================================================================ *)
+(* test_verdict_errored_run_violated                                 *)
+(* ================================================================ *)
+
+let test_verdict_errored_run_violated () =
+  let bundle =
+    make_bundle ~proof_result_status:Masc_mcp_cdal_runtime.Cdal_proof.Errored ()
+  in
+  let verdict = CJ.judge bundle in
+  Alcotest.(check string)
+    "status"
+    "violated"
+    (CT.contract_status_to_string verdict.status)
+;;
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -394,6 +479,18 @@ let () =
             "review requirement warning only"
             `Quick
             test_review_requirement_inconclusive_warning_only
+        ; Alcotest.test_case
+            "result_status completed satisfied"
+            `Quick
+            test_result_status_completed_satisfied
+        ; Alcotest.test_case
+            "result_status errored violated"
+            `Quick
+            test_result_status_errored_violated
+        ; Alcotest.test_case
+            "result_status cancelled inconclusive"
+            `Quick
+            test_result_status_cancelled_inconclusive
         ] )
     ; ( "verdict"
       , [ Alcotest.test_case "violated wins" `Quick test_verdict_priority_violated_wins
@@ -402,6 +499,14 @@ let () =
         ; Alcotest.test_case "loader metadata set" `Quick test_loader_metadata_set
         ; Alcotest.test_case "replay determinism" `Quick test_replay_determinism
         ; Alcotest.test_case "findings populated" `Quick test_findings_populated
+        ; Alcotest.test_case
+            "incomplete run not satisfied"
+            `Quick
+            test_verdict_incomplete_run_not_satisfied
+        ; Alcotest.test_case
+            "errored run violated"
+            `Quick
+            test_verdict_errored_run_violated
         ] )
     ]
 ;;

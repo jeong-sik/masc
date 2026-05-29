@@ -2186,31 +2186,31 @@ match args with
     ; parse_body =
         Some
           {|
-let rec parse output continue_ ncc url = function
+let rec parse output continue_ ncc url dd = function
   | [] ->
     (match url with
      | Some u ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wget { url = u; output; continue_; no_check_certificate = ncc }))
      | None -> None)
-  | "-O" :: o :: rest -> parse (Some o) continue_ ncc url rest
-  | "--output-document" :: o :: rest -> parse (Some o) continue_ ncc url rest
-  | "-c" :: rest -> parse output true ncc url rest
-  | "--continue" :: rest -> parse output true ncc url rest
-  | "--no-check-certificate" :: rest -> parse output continue_ true url rest
+  | "-O" :: o :: rest when not dd -> parse (Some o) continue_ ncc url dd rest
+  | "--output-document" :: o :: rest when not dd -> parse (Some o) continue_ ncc url dd rest
+  | "-c" :: rest when not dd -> parse output true ncc url dd rest
+  | "--continue" :: rest when not dd -> parse output true ncc url dd rest
+  | "--no-check-certificate" :: rest when not dd -> parse output continue_ true url dd rest
   (* POSIX end-of-options: skip --, remaining args are positional *)
-  | "--" :: rest -> parse output continue_ ncc url rest
+  | "--" :: rest -> parse output continue_ ncc url true rest
   | arg :: rest ->
     (match String.split_on_char '=' arg with
-     | [ "--output-document"; o ] -> parse (Some o) continue_ ncc url rest
+     | [ "--output-document"; o ] when not dd -> parse (Some o) continue_ ncc url dd rest
      | _ ->
-       if String.length arg > 0 && arg.[0] = '-'
-       then parse output continue_ ncc url rest
+       if not dd && String.length arg > 0 && arg.[0] = '-'
+       then parse output continue_ ncc url dd rest
        else (
          match url with
-         | None -> parse output continue_ ncc (Some arg) rest
+         | None -> parse output continue_ ncc (Some arg) dd rest
          | Some _ -> None))
 in
-parse None false false None args|}
+parse None false false None false args|}
     }
   ; { name = "Ssh"
     ; anon_pattern = "Ssh _"
@@ -2501,34 +2501,35 @@ parse None `None None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse jobs target = function
+let rec parse jobs target dd = function
   | [] ->
     Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Make { target; jobs }))
-  | "-j" :: n :: rest ->
+  | "-j" :: n :: rest when not dd ->
     (match int_of_string_opt n with
-     | Some j -> parse (Some j) target rest
+     | Some j -> parse (Some j) target dd rest
      | None -> None)
   (* Combined form: -j4 → jobs = Some 4 *)
   | arg :: rest
-    when String.length arg > 2
+    when not dd
+         && String.length arg > 2
          && String.length arg <= 5
          && arg.[0] = '-'
          && arg.[1] = 'j'
          && String.for_all (fun c -> c >= '0' && c <= '9')
               (String.sub arg 2 (String.length arg - 2)) ->
     let j = int_of_string (String.sub arg 2 (String.length arg - 2)) in
-    parse (Some j) target rest
+    parse (Some j) target dd rest
   (* POSIX end-of-options: skip --, remaining args are positional *)
-  | "--" :: rest -> parse jobs target rest
+  | "--" :: rest -> parse jobs target true rest
   | arg :: rest ->
-    if String.length arg > 0 && arg.[0] = '-'
-    then parse jobs target rest
+    if not dd && String.length arg > 0 && arg.[0] = '-'
+    then parse jobs target dd rest
     else (
       match target with
-      | None -> parse jobs (Some arg) rest
+      | None -> parse jobs (Some arg) dd rest
       | Some _ -> None)
 in
-parse None None args|}
+parse None None false args|}
     }
   ; { name = "Diff"
     ; anon_pattern = "Diff _"

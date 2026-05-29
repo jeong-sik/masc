@@ -704,6 +704,13 @@ let test_posix_end_of_options () =
   (match make with
    | W (Make { target = Some "install"; _ }) -> ()
    | w -> Alcotest.failf "Make --: expected target=Some install, got %a" pp w);
+  (* Make: -- -target (dash-prefixed positional after --) *)
+  let make_dash =
+    of_simple { (base "make") with args = [ lit "-j"; lit "4"; lit "--"; lit "-target" ] }
+  in
+  (match make_dash with
+   | W (Make { target = Some "-target"; jobs = Some 4; _ }) -> ()
+   | w -> Alcotest.failf "Make -- -target: expected target=-target jobs=4, got %a" pp w);
   (* Wget: -- https://example.com/file *)
   let wget =
     of_simple { (base "wget") with args = [ lit "--"; lit "https://example.com/file" ] }
@@ -711,6 +718,13 @@ let test_posix_end_of_options () =
   (match wget with
    | W (Wget { url = "https://example.com/file"; _ }) -> ()
    | w -> Alcotest.failf "Wget --: expected url=https://example.com/file, got %a" pp w);
+  (* Wget: -O out -- -file.txt (dash-prefixed positional after --) *)
+  let wget_dash =
+    of_simple { (base "wget") with args = [ lit "-O"; lit "out"; lit "--"; lit "-file.txt" ] }
+  in
+  (match wget_dash with
+   | W (Wget { url = "-file.txt"; output = Some "out"; _ }) -> ()
+   | w -> Alcotest.failf "Wget -- -file: expected url=-file.txt output=out, got %a" pp w);
   (* Scp: -- -src/file -dest/file *)
   let scp =
     of_simple { (base "scp") with args = [ lit "-r"; lit "--"; lit "-src/file"; lit "-dest/file" ] }

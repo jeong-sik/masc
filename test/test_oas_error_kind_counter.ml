@@ -121,12 +121,13 @@ let test_no_tool_capable_provider_kind () =
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
-      (OWN.No_tool_capable_provider
-         {
-           cascade_name = typed_cascade_name cascade_name;
-           configured_labels = [ "provider_d"; "provider_a" ];
-           required_tool_names = [];
-           provider_rejections = [];
+      (OWN.Cascade_exhausted
+         { cascade_name = typed_cascade_name cascade_name
+         ; reason = Masc_mcp.Keeper_meta_contract.No_tool_capable (Some
+             { configured_labels = [ "provider_d"; "provider_a" ]
+             ; required_tool_names = []
+             ; provider_rejections = []
+             })
          })
   in
   Alcotest.(check (float 0.0001))
@@ -147,16 +148,16 @@ let contains_substring haystack needle =
 
 let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
   let payload =
-    OWN.No_tool_capable_provider
-      {
-        cascade_name = typed_cascade_name "tool_required";
-        configured_labels = [ "agent_code"; "provider_c" ];
-        required_tool_names = [ "tool_execute"; "tool_search_files" ];
-        provider_rejections =
-          [
-            { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };
-            { OWN.provider_label = "provider_c"; OWN.reason = "tool_lane_unsupported" };
-          ];
+    OWN.Cascade_exhausted
+      { cascade_name = typed_cascade_name "tool_required"
+      ; reason = Masc_mcp.Keeper_meta_contract.No_tool_capable (Some
+          { configured_labels = [ "agent_code"; "provider_c" ]
+          ; required_tool_names = [ "tool_execute"; "tool_search_files" ]
+          ; provider_rejections =
+              [ ("agent_code", "codex_keeper_bound_actor_required")
+              ; ("provider_c", "tool_lane_unsupported")
+              ]
+          })
       }
   in
   let json = OWN.masc_internal_error_to_json payload in

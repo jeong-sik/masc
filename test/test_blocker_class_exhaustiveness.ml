@@ -17,7 +17,7 @@ open Kmc
     added to the type, append it here — the compiler will refuse to build if
     the match in [to_string] / [of_serialized_string] is incomplete. *)
 let all_variants : blocker_class list =
-  [ Cascade_exhausted No_tool_capable
+  [ Cascade_exhausted (No_tool_capable None)
   ; Cascade_exhausted (Other_detail "test")
   ; Cascade_exhausted Connection_refused
   ; Cascade_exhausted Dns_failure
@@ -78,11 +78,11 @@ let test_roundtrip () =
 (* ── No_tool_capable specific test ─────────────────────────────── *)
 
 let test_no_tool_capable_mapping () =
-  let s = blocker_class_to_string (Cascade_exhausted No_tool_capable) in
+  let s = blocker_class_to_string (Cascade_exhausted (No_tool_capable None)) in
   check string "No_tool_capable serializes correctly" "cascade_exhausted_no_tool_capable" s;
   match blocker_class_of_serialized_string "cascade_exhausted_no_tool_capable" with
   | None -> fail "deserialization of cascade_exhausted_no_tool_capable returned None"
-  | Some (Cascade_exhausted No_tool_capable) -> ()
+  | Some (Cascade_exhausted (No_tool_capable None)) -> ()
   | Some other ->
     let s' = blocker_class_to_string other in
     failf "expected Cascade_exhausted No_tool_capable, got %S" s'

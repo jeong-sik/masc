@@ -110,12 +110,63 @@ let cascade_exhaustion_reason_code
   | Keeper_meta_contract.Structural_attempt_timeout _ ->
     "cascade_exhausted_structural_attempt_timeout"
   | Keeper_meta_contract.Capacity_exhausted -> "cascade_exhausted_capacity_exhausted"
-  | Keeper_meta_contract.No_tool_capable -> "cascade_exhausted_no_tool_capable"
+  | Keeper_meta_contract.No_tool_capable _ -> "cascade_exhausted_no_tool_capable"
   | Keeper_meta_contract.Other_detail detail -> cascade_exhaustion_detail_code detail
 ;;
 
 let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
   match Cascade_error_classify.classify_masc_internal_error_of_string raw_error with
+  (* No_tool_capable specific cases first — more specific than generic Cascade_exhausted *)
+  | Some
+      (Cascade_error_classify.Cascade_exhausted
+         { cascade_name = ntcp_cascade_name
+         ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
+         ; _
+         }) ->
+    let rejection_summary =
+      match detail.provider_rejections with
+      | [] -> ""
+      | rejections ->
+        Printf.sprintf
+          " [%d providers rejected: %s]"
+          (List.length rejections)
+          (String.concat
+             "; "
+             (List.map
+                (fun (label, reason) ->
+                   Printf.sprintf "%s: %s" label reason)
+                rejections))
+    in
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = "no_tool_capable_provider"
+         ; detail =
+             Printf.sprintf
+               "no tool-capable provider found (cascade=%s labels=[%s] \
+                required_tools=[%s]%s)"
+               (Cascade_name.to_string ntcp_cascade_name)
+               (String.concat ", " detail.configured_labels)
+               (String.concat ", " detail.required_tool_names)
+               rejection_summary
+         ; provider_id = None
+         ; http_status = None
+         ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
+         })
+  | Some
+      (Cascade_error_classify.Cascade_exhausted
+         { cascade_name = ntcp_cascade_name
+         ; reason = Keeper_meta_contract.No_tool_capable None
+         ; _
+         }) ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = "no_tool_capable_provider"
+         ; detail = "no tool-capable provider found"
+         ; provider_id = None
+         ; http_status = None
+         ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
+         })
+  (* Generic Cascade_exhausted catch-all — after No_tool_capable specifics *)
   | Some (Cascade_error_classify.Cascade_exhausted { reason; cascade_name }) ->
     Some
       (Keeper_registry.Provider_runtime_error
@@ -133,42 +184,6 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; cascade_name = None
-         })
-  | Some
-      (Cascade_error_classify.No_tool_capable_provider
-         { cascade_name = ntcp_cascade_name
-         ; configured_labels
-         ; required_tool_names
-         ; provider_rejections
-         }) ->
-    let rejection_summary =
-      match provider_rejections with
-      | [] -> ""
-      | rejections ->
-        Printf.sprintf
-          " [%d providers rejected: %s]"
-          (List.length rejections)
-          (String.concat
-             "; "
-             (List.map
-                (fun (r : Cascade_internal_error.provider_rejection) ->
-                   Printf.sprintf "%s: %s" r.provider_label r.reason)
-                rejections))
-    in
-    Some
-      (Keeper_registry.Provider_runtime_error
-         { code = "no_tool_capable_provider"
-         ; detail =
-             Printf.sprintf
-               "no tool-capable provider found (cascade=%s labels=[%s] \
-                required_tools=[%s]%s)"
-               (Cascade_name.to_string ntcp_cascade_name)
-               (String.concat ", " configured_labels)
-               (String.concat ", " required_tool_names)
-               rejection_summary
-         ; provider_id = None
-         ; http_status = None
-         ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
          })
   | Some
       ( Cascade_error_classify.Resumable_cli_session _

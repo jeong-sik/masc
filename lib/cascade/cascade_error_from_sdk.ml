@@ -121,22 +121,33 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String "no_tool_capable_provider") -> (
           match string_opt_of_assoc "cascade_name" json with
           | Some cascade_name ->
+            let configured_labels =
+              string_list_of_assoc "configured_labels" json
+            in
+            let required_tool_names =
+              string_list_of_assoc "required_tool_names" json
+            in
+            let rejections =
+              match
+                provider_rejections_of_assoc "provider_rejections" json
+              with
+              | [] ->
+                provider_rejection_reasons_of_assoc
+                  "rejection_reasons" json
+              | provider_rejections -> provider_rejections
+            in
+            let detail : Keeper_meta_contract.no_tool_capable_detail =
+              { configured_labels
+              ; required_tool_names
+              ; provider_rejections =
+                  List.map (fun r -> (r.provider_label, r.reason)) rejections
+              }
+            in
             Some
-              (No_tool_capable_provider
+              (Cascade_exhausted
                  {
                    cascade_name = Cascade_name.of_string_exn cascade_name;
-                   configured_labels =
-                     string_list_of_assoc "configured_labels" json;
-                   required_tool_names =
-                     string_list_of_assoc "required_tool_names" json;
-                   provider_rejections =
-                     (match
-                        provider_rejections_of_assoc "provider_rejections" json
-                      with
-                      | [] ->
-                          provider_rejection_reasons_of_assoc
-                            "rejection_reasons" json
-                      | provider_rejections -> provider_rejections);
+                   reason = Keeper_meta_contract.No_tool_capable (Some detail);
                  })
           | None -> None)
       | Some (`String "accept_rejected") -> (

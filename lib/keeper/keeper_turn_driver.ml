@@ -492,12 +492,20 @@ let run_named
       let internal_error =
         match empty_candidate_classification with
         | Tool_capability_empty ->
-          No_tool_capable_provider
+          let detail : Keeper_meta_contract.no_tool_capable_detail =
+            { configured_labels
+            ; required_tool_names
+            ; provider_rejections =
+                List.map
+                  (fun (r : Cascade_internal_error.provider_rejection) ->
+                     (r.provider_label, r.reason))
+                  provider_rejections
+            }
+          in
+          Cascade_exhausted
             {
               cascade_name = error_cascade_name;
-              configured_labels;
-              required_tool_names;
-              provider_rejections;
+              reason = Keeper_meta_contract.No_tool_capable (Some detail);
             }
         | Provider_unavailable ->
           Cascade_exhausted

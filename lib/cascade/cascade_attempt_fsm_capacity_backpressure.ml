@@ -29,7 +29,7 @@ let sdk_error_capacity_backpressure_source (err : Agent_sdk.Error.sdk_error)
     Some source
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
-  | Some (Cascade_error_classify.No_tool_capable_provider _)
+
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
   | Some (Cascade_error_classify.Admission_queue_rejected _)
@@ -59,7 +59,7 @@ let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
        Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec))
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
-  | Some (Cascade_error_classify.No_tool_capable_provider _)
+
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
   | Some (Cascade_error_classify.Admission_queue_rejected _)

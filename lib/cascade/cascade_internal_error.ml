@@ -109,12 +109,8 @@ type masc_internal_error =
       detail : string;
       exit_code : int option;
     }
-  | No_tool_capable_provider of {
-      cascade_name : Cascade_name.t;
-      configured_labels : string list;
-      required_tool_names : string list;
-      provider_rejections : provider_rejection list;
-    }
+  (* [No_tool_capable_provider] reclassified into [Cascade_exhausted
+     { reason = No_tool_capable _ }] — see keeper_meta_contract.ml. *)
   | Accept_rejected of {
       scope : string;
       model : string option;
@@ -271,25 +267,6 @@ let masc_internal_error_to_json = function
         ("detail", `String detail);
         ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
-  | No_tool_capable_provider
-      {
-        cascade_name;
-        configured_labels;
-        required_tool_names;
-        provider_rejections;
-      } ->
-    let cascade_name = cascade_name_to_string cascade_name in
-    let rejection_reasons = provider_rejection_reasons provider_rejections in
-    `Assoc
-      [
-        ("kind", `String "no_tool_capable_provider");
-        ("cascade_name", `String cascade_name);
-        ("configured_candidate_count", `Int (List.length configured_labels));
-        ("required_tool_names", Json_util.json_string_list required_tool_names);
-        ("rejected_candidate_count", `Int (List.length provider_rejections));
-        ("provider_rejections", provider_rejections_json provider_rejections);
-        ("rejection_reasons", Json_util.json_string_list rejection_reasons);
-      ]
   | Accept_rejected { scope; model; reason } ->
     `Assoc
       [
@@ -415,22 +392,6 @@ let summary_of_masc_internal_error = function
            (capacity_backpressure_source_to_string source)
            detail
            retry_after_suffix)
-  | No_tool_capable_provider
-      {
-        cascade_name;
-        configured_labels;
-        required_tool_names;
-        provider_rejections;
-      } ->
-      let cascade_name = cascade_name_to_string cascade_name in
-      Some
-        (Printf.sprintf
-           "No tool-capable provider for cascade %s; required_tools=[%s]; rejected_candidate_count=%d; rejection_reasons=[%s]; configured_candidate_count=%d"
-           cascade_name
-           (summarize_list required_tool_names)
-           (List.length provider_rejections)
-           (summarize_provider_rejections provider_rejections)
-           (List.length configured_labels))
   | Provider_timeout
       {
         budget_sec;
@@ -471,6 +432,15 @@ let summary_of_masc_internal_error = function
            is_retry
            (retry_admission_denial_to_yojson denial_reason
             |> Yojson.Safe.to_string))
+  | Cascade_exhausted { cascade_name; reason = Keeper_meta_contract.No_tool_capable (Some detail) } ->
+    let cascade_name = cascade_name_to_string cascade_name in
+    Some
+      (Printf.sprintf
+         "No tool-capable provider for cascade %s; required_tools=[%s]; rejected_candidate_count=%d; configured_candidate_count=%d"
+         cascade_name
+         (summarize_list detail.required_tool_names)
+         (List.length detail.provider_rejections)
+         (List.length detail.configured_labels))
   | Cascade_exhausted _
   | Resumable_cli_session _
   | Accept_rejected _
@@ -504,7 +474,7 @@ let () =
       "Total MASC-internal errors emitted as Agent_sdk.Error.Internal \
        payloads, classified by structured error kind. Labels: \
        kind (cascade_exhausted | capacity_backpressure | resumable_cli_session | \
-       no_tool_capable_provider | accept_rejected | \
+       accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
        turn_timeout | provider_timeout | retry_admission_denied | \
        max_tokens_ceiling_violation | \
@@ -518,7 +488,6 @@ let kind_of_masc_internal_error = function
   | Cascade_exhausted _ -> "cascade_exhausted"
   | Capacity_backpressure _ -> "capacity_backpressure"
   | Resumable_cli_session _ -> "resumable_cli_session"
-  | No_tool_capable_provider _ -> "no_tool_capable_provider"
   | Accept_rejected _ -> "accept_rejected"
   | Admission_queue_timeout _ -> "admission_queue_timeout"
   | Admission_queue_rejected _ -> "admission_queue_rejected"
@@ -538,7 +507,6 @@ let cascade_name_of_masc_internal_error = function
   | Cascade_exhausted { cascade_name; _ }
   | Capacity_backpressure { cascade_name; _ }
   | Resumable_cli_session { cascade_name; _ }
-  | No_tool_capable_provider { cascade_name; _ }
   | Admission_queue_timeout { cascade_name; _ }
   | Max_tokens_ceiling_violation { cascade_name; _ } ->
       let cascade_name = cascade_name_to_string cascade_name in

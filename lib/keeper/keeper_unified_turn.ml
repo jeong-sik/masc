@@ -200,8 +200,11 @@ let run_keeper_cycle
             let failure_reason =
               match Keeper_turn_driver.classify_masc_internal_error err with
               | Some
-                  (Keeper_turn_driver.No_tool_capable_provider
-                     { cascade_name; _ }) ->
+                  (Keeper_turn_driver.Cascade_exhausted
+                     { cascade_name
+                     ; reason = Keeper_meta_contract.No_tool_capable _
+                     ; _
+                     }) ->
                 Keeper_turn_fsm.Failure_no_tool_capable_provider
                   { cascade_name = Cascade_name.to_string cascade_name
                   ; detail = error_message
@@ -677,8 +680,11 @@ let run_keeper_cycle
                        else
                          match Keeper_turn_driver.classify_masc_internal_error err with
                          | Some
-                             (Keeper_turn_driver.No_tool_capable_provider
-                                { cascade_name; _ }) ->
+                             (Keeper_turn_driver.Cascade_exhausted
+                                { cascade_name
+                                ; reason = Keeper_meta_contract.No_tool_capable _
+                                ; _
+                                }) ->
                            Keeper_turn_fsm.Failure_no_tool_capable_provider
                              { cascade_name = Cascade_name.to_string cascade_name
                              ; detail = short_preview e_str

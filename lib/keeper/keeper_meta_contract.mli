@@ -131,6 +131,12 @@ type usage_metrics = {
 
 (** {1 Blocker classification} *)
 
+type no_tool_capable_detail =
+  { configured_labels : string list
+  ; required_tool_names : string list
+  ; provider_rejections : (string * string) list
+  }
+
 type cascade_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -154,11 +160,13 @@ type cascade_exhaustion_reason =
           Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
           through to [Other_detail message], losing auto-recovery eligibility
           and triggering the harsher failure policy. *)
-  | No_tool_capable
+  | No_tool_capable of no_tool_capable_detail option
       (** Cascade exhausted because no configured provider can satisfy the
           required tool set.  Previously a standalone [blocker_class] variant;
           reclassified here because the cascade rotation filtered all candidates
-          before dispatch — a semantic subset of cascade exhaustion. *)
+          before dispatch — a semantic subset of cascade exhaustion.
+          The optional detail carries telemetry from the former
+          [No_tool_capable_provider] variant of [masc_internal_error]. *)
   | Other_detail of string
 
 type blocker_class =

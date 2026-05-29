@@ -18,10 +18,11 @@ val cascade_name_to_string : Cascade_name.t -> string
 
 (** {1 Provider rejection payload}
 
-    Carried inside {!No_tool_capable_provider} to record per-candidate rejection
-    reasons.  The {!provider_rejection_reasons_of_assoc} and
-    {!provider_rejections_of_assoc} JSON helpers are internal to this module
-    and used by the parser in {!Cascade_error_classify}. *)
+    Carried inside [Cascade_exhausted { reason = No_tool_capable _ }] to
+    record per-candidate rejection reasons.  The
+    {!provider_rejection_reasons_of_assoc} and {!provider_rejections_of_assoc}
+    JSON helpers are internal to this module and used by the parser in
+    {!Cascade_error_classify}. *)
 
 type provider_rejection = {
   provider_label : string;
@@ -101,12 +102,8 @@ type masc_internal_error =
       detail : string;
       exit_code : int option;
     }
-  | No_tool_capable_provider of {
-      cascade_name : Cascade_name.t;
-      configured_labels : string list;
-      required_tool_names : string list;
-      provider_rejections : provider_rejection list;
-    }
+  (* [No_tool_capable_provider] reclassified into [Cascade_exhausted
+     { reason = No_tool_capable _ }] — see keeper_meta_contract.ml. *)
   | Accept_rejected of {
       scope : string;
       model : string option;

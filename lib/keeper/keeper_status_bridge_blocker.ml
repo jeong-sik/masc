@@ -20,7 +20,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
     Some (Cascade_exhausted reason)
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
-  | Some (Keeper_turn_driver.No_tool_capable_provider _) -> Some (Cascade_exhausted No_tool_capable)
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
     Some Admission_queue_wait_timeout
@@ -274,7 +273,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            (Printf.sprintf
               "No tool-capable provider available (registry path): %s"
               detail)
-         (Cascade_exhausted No_tool_capable))
+         (Cascade_exhausted (No_tool_capable None)))
   | Keeper_registry.Provider_runtime_error { code; detail } ->
     Some
       { blocker_class = "provider_runtime_error"

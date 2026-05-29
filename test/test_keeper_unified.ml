@@ -9303,7 +9303,7 @@ let test_social_model_previous_state_of_meta_restores_runtime_fields () =
             Some
               (Keeper_meta_contract.blocker_info_of_class
                  ~detail:"tool route unavailable"
-                 (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable))
+                 (Keeper_meta_contract.Cascade_exhausted (Keeper_meta_contract.No_tool_capable None)))
         ; last_need = "operator guidance"
         }
     }
@@ -9643,7 +9643,7 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
             Some
               (Keeper_meta_contract.blocker_info_of_class
                  ~detail:"tool route unavailable"
-                 (Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_tool_capable))
+                 (Keeper_meta_contract.Cascade_exhausted (Keeper_meta_contract.No_tool_capable None)))
         ; last_need = "operator guidance"
         }
     }

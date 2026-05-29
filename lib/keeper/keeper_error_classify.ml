@@ -191,7 +191,6 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
       true
   | Some (Keeper_turn_driver.Cascade_exhausted _) ->
       false
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
@@ -215,7 +214,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
   | Some (Keeper_turn_driver.Cascade_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
@@ -356,7 +354,6 @@ let degraded_retry_after_recoverable_error
            { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
         phase_recovery_retry Max_turns
     | Some (Keeper_turn_driver.Cascade_exhausted _)
-    | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
@@ -412,7 +409,6 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
            arm previously returned [None]. Other arms below remain
            non-recoverable to keep the surface conservative. *)
         Some Cascade_exhausted
-    | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
@@ -662,7 +658,6 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
   | Some (Keeper_turn_driver.Cascade_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
@@ -782,7 +777,6 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Cascade_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)

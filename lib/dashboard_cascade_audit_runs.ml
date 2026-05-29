@@ -8,42 +8,20 @@
 
 open Dashboard_cascade_helpers
 
-let json_string_member key json =
-  match json_assoc_member key json with
-  | `String value -> Some value
-  | _ -> None
-;;
-
-let json_float_member key json =
-  match json_assoc_member key json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | _ -> None
-;;
-
-let json_int_member key json =
-  match json_assoc_member key json with
-  | `Int value -> Some value
-  | `Float value -> Some (int_of_float value)
-  | _ -> None
-;;
-
 let json_list_member key json =
   match json_assoc_member key json with
   | `List values -> values
   | _ -> []
 ;;
 
-let nonempty_string value =
-  match value with
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
-  | None -> None
-;;
-
-let first_nonempty values = List.find_map nonempty_string values
-let json_string_opt_member key json = json_string_member key json |> nonempty_string
+let first_nonempty values =
+  List.find_map (fun v ->
+    match v with
+    | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+    | None -> None)
+    values
 
 let audit_store_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "cascade_audit"
@@ -71,9 +49,9 @@ let fallback_reason_for_model fallback_events =
 
 let audit_hop_json ~selected_attempt_index ~fallback_events attempt =
   let model = model_display_of_attempt attempt in
-  let attempt_index = json_int_member "attempt_index" attempt in
-  let latency_ms = json_int_member "latency_ms" attempt in
-  let error = json_string_opt_member "error" attempt in
+  let attempt_index = Json_util.assoc_int_opt "attempt_index" attempt in
+  let latency_ms = Json_util.assoc_int_opt "latency_ms" attempt in
+  let error = Json_util.assoc_string_opt "error" attempt in
   let reason =
     match error with
     | Some _ -> Some "runtime_error"
@@ -112,29 +90,29 @@ let audit_hop_json ~selected_attempt_index ~fallback_events attempt =
 let attempt_latency_total attempts =
   List.fold_left
     (fun acc attempt ->
-       acc + Option.value ~default:0 (json_int_member "latency_ms" attempt))
+       acc + Option.value ~default:0 (Json_util.assoc_int_opt "latency_ms" attempt))
     0
     attempts
 ;;
 
 let last_attempt_error attempts =
-  List.rev attempts |> List.find_map (json_string_opt_member "error")
+  List.rev attempts |> List.find_map (Json_util.assoc_string_opt "error")
 ;;
 
 let audit_run_json_of_record json =
   let observation = json_assoc_member "observation" json in
   let attempts = json_list_member "attempts" observation in
   let fallback_events = json_list_member "fallback_events" observation in
-  let selected_attempt_index = json_int_member "selected_index" observation in
+  let selected_attempt_index = Json_util.assoc_int_opt "selected_index" observation in
   let cascade =
     first_nonempty
-      [ json_string_member "cascade_name" json
-      ; json_string_member "cascade_name" observation
+      [ Json_util.assoc_string_opt "cascade_name" json
+      ; Json_util.assoc_string_opt "cascade_name" observation
       ]
     |> Option.value ~default:"unknown"
   in
-  let ts = Option.value ~default:0.0 (json_float_member "ts" json) in
-  let top_level_reason = json_string_opt_member "top_level_reason" json in
+  let ts = Option.value ~default:0.0 (Json_util.assoc_float_opt "ts" json) in
+  let top_level_reason = Json_util.assoc_string_opt "top_level_reason" json in
   let error_category =
     match top_level_reason with
     | Some _ -> Some "runtime_error"
@@ -148,10 +126,10 @@ let audit_run_json_of_record json =
     ; "cascade", `String cascade
     ; ( "trigger"
       , `String
-          (json_string_opt_member "keeper_name" json |> Option.value ~default:"unknown") )
+          (Json_util.assoc_string_opt "keeper_name" json |> Option.value ~default:"unknown") )
     ; "at", `Float ts
     ; ( "outcome"
-      , `String (json_string_member "outcome" json |> Option.value ~default:"unknown") )
+      , `String (Json_util.assoc_string_opt "outcome" json |> Option.value ~default:"unknown") )
     ; "configured", `List []
     ; "primary", `Null
     ; "selected", `Null
@@ -160,7 +138,7 @@ let audit_run_json_of_record json =
       , `String
           (if
              List.exists
-               (fun attempt -> Option.is_some (json_int_member "latency_ms" attempt))
+               (fun attempt -> Option.is_some (Json_util.assoc_int_opt "latency_ms" attempt))
                attempts
            then "attempt_latency_sum"
            else "unavailable") )
@@ -185,7 +163,7 @@ let audit_run_cascade_matches cascade_filter run =
   match cascade_filter with
   | None -> true
   | Some expected ->
-    (match json_string_member "cascade" run with
+    (match Json_util.assoc_string_opt "cascade" run with
      | Some actual -> String.equal actual expected
      | None -> false)
 ;;

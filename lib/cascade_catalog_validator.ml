@@ -82,23 +82,9 @@ let adapter_error_issues ~config_path errors =
                config_path message;
          })
 
-let assoc_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
+let assoc_opt = Json_util.assoc_member_opt
 
-let json_string_list_member key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`List values) ->
-          List.filter_map
-            (function
-              | `String value ->
-                  let value = String.trim value in
-                  if String.equal value "" then None else Some value
-              | _ -> None)
-            values
-      | _ -> [])
-  | _ -> []
+let json_string_list_member = Json_util.json_string_list_member
 
 let discover_profiles_from_materialized_json json =
   match assoc_opt "routes" json with

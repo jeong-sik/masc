@@ -79,9 +79,7 @@ let is_keeper_checkpoints_get_path req_path =
 let is_keeper_runtime_trace_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_runtime_trace
 
-let trim_to_opt (value : string) =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+let trim_to_opt = String_util.trim_to_option
 
 let truncate_text ~max_chars text =
   let len = String.length text in
@@ -127,33 +125,11 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
-let json_int_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
-let json_string_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `String value -> Some value
-  | _ -> None
-
-let json_bool_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Bool value -> Some value
-  | _ -> None
+let json_string_member_opt = Json_util.get_string
 
 let json_string_list_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `List values ->
-    values
-    |> List.filter_map (function
-      | `String value when String.trim value <> "" -> Some value
-      | _ -> None)
-    |> Json_util.dedupe_keep_order
-  | _ -> []
+  Json_util.json_string_list_member name json |> Json_util.dedupe_keep_order
 
-let json_string_opt = Json_util.string_opt_to_json
 let take_last limit values =
   let len = List.length values in
   if len <= limit then values
@@ -191,18 +167,18 @@ let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
     [
       ("ts", `String row.ts);
       ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
-      ("cascade_name", json_string_opt row.cascade_name);
-      ("model_source", json_string_opt (decision_string "model_source"));
+      ("cascade_name", Json_util.string_opt_to_json row.cascade_name);
+      ("model_source", Json_util.string_opt_to_json (decision_string "model_source"));
       ( "resolved_model_source",
-        json_string_opt (decision_string "resolved_model_source") );
-      ("capability_source", json_string_opt (decision_string "capability_source"));
-      ("fallback_authority", json_string_opt (decision_string "fallback_authority"));
+        Json_util.string_opt_to_json (decision_string "resolved_model_source") );
+      ("capability_source", Json_util.string_opt_to_json (decision_string "capability_source"));
+      ("fallback_authority", Json_util.string_opt_to_json (decision_string "fallback_authority"));
       ( "provider_source_cascade",
-        json_string_opt (decision_string "provider_source_cascade") );
+        Json_util.string_opt_to_json (decision_string "provider_source_cascade") );
       ("status", `String row.status);
-      ("error", json_string_opt (decision_string "error"));
+      ("error", Json_util.string_opt_to_json (decision_string "error"));
       ( "exception_kind",
-        json_string_opt (decision_string "exception_kind") );
+        Json_util.string_opt_to_json (decision_string "exception_kind") );
     ]
 
 let string_contains_substring = String_util.contains_substring
@@ -281,8 +257,8 @@ let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
     match turn_id with
     | None -> true
     | Some wanted ->
-      json_int_member_opt "keeper_turn_id" json = Some wanted
-      || json_int_member_opt "keeper_turn_id" contract = Some wanted
+      Json_util.assoc_int_opt "keeper_turn_id" json = Some wanted
+      || Json_util.assoc_int_opt "keeper_turn_id" contract = Some wanted
   in
   keeper_matches && trace_matches && turn_matches
 
@@ -292,10 +268,7 @@ let first_string_opt values =
 let first_int_opt values =
   List.find_map (fun value -> value) values
 
-let string_has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
+let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
 
 let claim_status_of_output output =
   let result =

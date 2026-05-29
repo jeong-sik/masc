@@ -126,10 +126,7 @@ let agent_events (config : Coord.config) ~agent_name :
                        ("room", `String "default");
                        ( "status",
                          `String (Masc_domain.agent_status_to_string a.status) );
-                       ( "current_task",
-                         match a.current_task with
-                         | Some t -> `String t
-                         | None -> `Null );
+                       ( "current_task", Json_util.string_opt_to_json a.current_task );
                      ];
                }
          | None -> None)
@@ -192,10 +189,7 @@ let task_events (config : Coord.config) ~agent_name :
                            ("task_id", `String task.id);
                            ("title", `String task.title);
                            ("priority", `Int task.priority);
-                           ( "notes",
-                             match notes with
-                             | Some n -> `String n
-                             | None -> `Null );
+                           ( "notes", Json_util.string_opt_to_json notes );
                          ];
                    }
              | None -> None)
@@ -213,10 +207,7 @@ let task_events (config : Coord.config) ~agent_name :
                          [
                            ("task_id", `String task.id);
                            ("title", `String task.title);
-                           ( "reason",
-                             match reason with
-                             | Some r -> `String r
-                             | None -> `Null );
+                           ( "reason", Json_util.string_opt_to_json reason );
                          ];
                    }
              | None -> None)
@@ -244,10 +235,7 @@ let message_events (config : Coord.config) ~agent_name ~limit :
                      [
                        ("content", `String m.content);
                        ("type", `String m.msg_type);
-                       ( "mention",
-                         match m.mention with
-                         | Some target -> `String target
-                         | None -> `Null );
+                       ( "mention", Json_util.string_opt_to_json m.mention );
                      ];
                }
          | None -> None)
@@ -300,8 +288,7 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
                  ("tool_name", `String tool_name);
                  ("success", `Bool success);
                  ("duration_ms", `Int duration_ms);
-                 ("error", match error_str with
-                           | Some s -> `String s | None -> `Null);
+                 ("error", Json_util.string_opt_to_json error_str);
                ];
          })
   |> take limit

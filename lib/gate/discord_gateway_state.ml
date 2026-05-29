@@ -189,9 +189,7 @@ let config t = t.config
 
 (* ── JSON helpers (internal) ───────────────────────────────────── *)
 
-let assoc_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+let assoc_opt = Json_util.assoc_member_opt
 
 let field_int_opt name json =
   match assoc_opt name json with

@@ -1,4 +1,3 @@
-val compact_preview : max_chars:int -> string -> string * bool
 val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t
 val json_string : string -> Yojson.Safe.t -> string option
 val json_int : string -> Yojson.Safe.t -> int option

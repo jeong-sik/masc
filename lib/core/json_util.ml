@@ -112,6 +112,14 @@ let option_to_yojson (f : 'a -> Yojson.Safe.t) : 'a option -> Yojson.Safe.t = fu
   | Some value -> f value
   | None -> `Null
 
+let int_option_to_yojson : int option -> Yojson.Safe.t = function
+  | Some n -> `Int n
+  | None -> `Null
+
+let string_option_to_yojson : string option -> Yojson.Safe.t = function
+  | Some s -> `String s
+  | None -> `Null
+
 let kind_name : Yojson.Safe.t -> string = function
   | `Null -> "null"
   | `Bool _ -> "bool"
@@ -134,6 +142,12 @@ let string_opt_to_json : string option -> Yojson.Safe.t = function
   | Some s -> `String s
   | None -> `Null
 
+let string_opt_to_json_trimmed : string option -> Yojson.Safe.t = function
+  | Some s ->
+    let trimmed = String.trim s in
+    if trimmed <> "" then `String trimmed else `Null
+  | None -> `Null
+
 let float_opt_to_json : float option -> Yojson.Safe.t = function
   | Some f -> `Float f
   | None -> `Null
@@ -141,6 +155,52 @@ let float_opt_to_json : float option -> Yojson.Safe.t = function
 let bool_opt_to_json : bool option -> Yojson.Safe.t = function
   | Some b -> `Bool b
   | None -> `Null
+
+let string_opt_field name (opt : string option) : string * Yojson.Safe.t =
+  (name, string_opt_to_json opt)
+
+
+(** {1 Assoc field extraction}
+
+    Canonical [Assoc] field accessors for building typed JSON parsers.
+    Replaces per-module [assoc_member_opt] / [assoc_string_opt] etc. *)
+
+let assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let assoc_string_opt name json =
+  match assoc_member_opt name json with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+
+let assoc_int_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Int value) -> Some value
+  | Some (`Intlit raw) -> int_of_string_opt raw
+  | _ -> None
+
+let assoc_bool_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+
+let assoc_float_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (Float.of_int value)
+  | _ -> None
+
+let json_string_list_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `List values ->
+    values
+    |> List.filter_map (function
+      | `String value ->
+        let trimmed = String.trim value in
+        if trimmed <> "" then Some trimmed else None
+      | _ -> None)
+  | _ -> []
 
 
 (** List utilities *)

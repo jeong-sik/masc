@@ -3,8 +3,6 @@
     Private helper for {!Keeper_status_detail}. *)
 
 val nonempty_trimmed : string -> string option
-val json_string_opt_member : Yojson.Safe.t -> string -> string option
-
 val latest_metrics_json :
   metrics_store:Dated_jsonl.t ->
   metrics_path:string ->

@@ -1,25 +1,3 @@
-let json_string_opt = function
-  | Some value when String.trim value <> "" -> `String value
-  | _ -> `Null
-;;
-
-let payload_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) when String.trim value <> "" -> Some value
-     | _ -> None)
-  | _ -> None
-;;
-
-let payload_int_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`Int value) -> Some value
-     | Some (`Intlit value) -> int_of_string_opt value
-     | _ -> None)
-  | _ -> None
-;;
-
 (* RFC-0166: the previous body of [inference_model_bucket] was a
    substring classifier over upstream LLM provider names
    ("provider_c"/"agent_llm_a"/"provider_d"/"provider_f"/"provider_k"/"provider_h"/"llama"). The

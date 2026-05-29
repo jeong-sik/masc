@@ -64,32 +64,11 @@ let count_table_incr (tbl : (string, int) Hashtbl.t) (key : string) : unit =
     let cur = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
     Hashtbl.replace tbl key (cur + 1)
 
-let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
-  if max_bytes <= 0 then ""
-  else
-    let len = String.length s in
-    if len <= max_bytes then s
-    else
-      let rec loop i last_good =
-        if i >= len || i >= max_bytes then last_good
-        else
-          let dec = String.get_utf_8_uchar s i in
-          let dlen = Uchar.utf_decode_length dec in
-          if dlen <= 0 then last_good
-          else
-            let next = i + dlen in
-            if next > max_bytes then last_good
-            else loop next next
-      in
-      let cut = loop 0 0 in
-      if cut <= 0 then ""
-      else String.sub s 0 cut
-
 let truncate_text ~(max_len : int) (s : string) : string =
   let s = String.trim s in
-  let n = String.length s in
-  if n <= max_len then s
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
+  match String_util.utf8_safe ~max_bytes:max_len ~suffix:"..." s with
+  | String_util.Untouched _ -> s
+  | String_util.Truncated { prefix; suffix; _ } -> prefix ^ suffix
 
 (* ASCII case-insensitive substring containment, byte-wise.
 

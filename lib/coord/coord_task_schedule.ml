@@ -118,8 +118,6 @@ let json_raw_string_path = Coord_task_receipts.json_raw_string_path
 let json_string_path = Coord_task_receipts.json_string_path
 let receipt_sort_key = Coord_task_receipts.receipt_sort_key
 let latest_execution_receipt_json = Coord_task_receipts.latest_execution_receipt_json
-let json_string_list = Coord_task_receipts.json_string_list
-
 let latest_receipt_blocks_required_tool_claim =
   Coord_task_receipts.latest_receipt_blocks_required_tool_claim
 ;;
@@ -470,7 +468,15 @@ let claim_next_r
           make_required_tools_predicate ?agent_tool_names ()
         in
         let required_tool_claim_allowed (task : Masc_domain.task) =
-          let required_tools = task_required_tools task in
+          let required_tools =
+            match task_required_tools task with
+            | [] ->
+              (* Fallback for tasks created before required_tools inference:
+                 infer from title/description keywords. *)
+              Coord_task_classify.infer_required_tools_from_text
+                ~title:task.title ~description:task.description
+            | tools -> tools
+          in
           required_tools_allowed_for_agent required_tools
           && not (receipt_blocks_task task)
         in

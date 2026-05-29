@@ -11,16 +11,7 @@ include Keeper_types_profile_defaults
 
 (* ── Normalizers (shared by TOML section and persona JSON loader) ── *)
 
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then
-        false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
+let dedupe_keep_order = Json_util.dedupe_keep_order
 
 let normalize_name_list items =
   items

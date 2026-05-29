@@ -69,10 +69,6 @@ let read_nonempty_text_file path =
       if value = "" then None else Some value
     with Sys_error _ -> None
 
-let option_field name = function
-  | Some value -> (name, `String value)
-  | None -> (name, `Null)
-
 let raw_token_file_path ~auth_dir agent_name =
   Filename.concat auth_dir (agent_name ^ ".token")
 
@@ -344,12 +340,9 @@ let watched_agent_to_yojson (agent : watched_agent) =
     [
       ("agent_name", `String agent.agent_name);
       ("credential_present", `Bool agent.credential_present);
-      (option_field "role" agent.credential_role);
-      ( "can_admin",
-        match agent.can_admin with
-        | Some value -> `Bool value
-        | None -> `Null );
-      (option_field "expires_at" agent.expires_at);
+      (Json_util.string_opt_field "role" agent.credential_role);
+      ( "can_admin", Json_util.bool_opt_to_json agent.can_admin );
+      (Json_util.string_opt_field "expires_at" agent.expires_at);
       ("raw_token_file_present", `Bool agent.raw_token_file_present);
     ]
 
@@ -363,7 +356,7 @@ let to_yojson (report : t) =
       ("auth_enabled", `Bool report.auth_enabled);
       ("require_token", `Bool report.require_token);
       ("default_role", `String report.default_role);
-      (option_field "initial_admin" report.initial_admin);
+      (Json_util.string_opt_field "initial_admin" report.initial_admin);
       ("bind_host", `String report.bind_host);
       ("bind_is_loopback", `Bool report.bind_is_loopback);
       ("http_auth_strict", `Bool report.http_auth_strict);
@@ -378,8 +371,8 @@ let to_yojson (report : t) =
           [
             ("configured", `Bool report.admin_token_env_configured);
             ("status", `String report.admin_token_env_status);
-            (option_field "agent" report.admin_token_env_agent);
-            (option_field "role" report.admin_token_env_role);
+            (Json_util.string_opt_field "agent" report.admin_token_env_agent);
+            (Json_util.string_opt_field "role" report.admin_token_env_role);
           ] );
       ("token_bound_admin_http_ready", `Bool report.token_bound_admin_http_ready);
       ( "admin_bearer_sources",

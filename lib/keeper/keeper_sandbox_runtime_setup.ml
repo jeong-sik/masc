@@ -181,11 +181,6 @@ let required_commands =
   ]
 ;;
 
-let option_field name = function
-  | Some value -> name, `String value
-  | None -> name, `Null
-;;
-
 type cleanup_result =
   { scanned : int
   ; removed : int

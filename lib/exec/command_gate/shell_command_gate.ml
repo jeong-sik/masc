@@ -65,6 +65,39 @@ type sandbox_context = {
 
 let allow_all_paths : path_policy = { classify = None }
 
+(* Path policy that rejects shell probes against .masc/ internal state
+   (backlog.json, goal-loop/, traces/, keepalives/).  The diagnostic
+   string contains "task_state_file_probe_blocked" so the deterministic
+   retry classifier in [keeper_tool_deterministic_error] recognises it.
+
+   The [literal_path_surfaces] function already normalises every
+   argument and redirect target through [raw_path], so we only need
+   a simple substring / prefix check here. *)
+let forbid_masc_internal_state_paths : path_policy =
+  let is_masc_path p =
+    (* Match ".masc/", "./.masc/", ".masc" at end *)
+    (String.starts_with ~prefix:".masc/" p)
+    || (String.starts_with ~prefix:"./.masc/" p)
+    || (String.equal p ".masc")
+    || (String.equal p "./.masc")
+  in
+  let is_backlog_json p =
+    (* Match ".../backlog.json" or bare "backlog.json" *)
+    let len = String.length p in
+    len >= 12
+    && String.sub p (len - 12) 12 = "backlog.json"
+    && (len = 12
+        || p.[len - 13] = '/')
+  in
+  { classify =
+      Some
+        (fun ~raw_path ->
+          if is_masc_path raw_path || is_backlog_json raw_path then
+            `Deny "task_state_file_probe_blocked: use keeper task/context tools"
+          else `Allow)
+  }
+;;
+
 let host_sandbox : sandbox_context = { target = ST.host () }
 
 (* Flatten an IR AST into ordered simple stages.

@@ -70,59 +70,16 @@ type tool_audit_snapshot = {
   tool_audit_at : string option;
 }
 
-let json_string_option value =
-  match value with
-  | Some text ->
-      let trimmed = String.trim text in
-      if trimmed <> "" then `String trimmed else `Null
-  | None -> `Null
-
 let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
 
-let member_assoc key json =
-  match json with
-  | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)
-  | _ -> `Null
-
-let string_field ?(default = "") key json =
-  match member_assoc key json with
-  | `String value -> value
-  | _ -> default
-
-let string_field_opt key json =
-  match member_assoc key json with
-  | `String value ->
-      let trimmed = String.trim value in
-      if trimmed <> "" then Some trimmed else None
-  | _ -> None
-
+let member_assoc = Dashboard_utils.member_assoc
+let string_field = Dashboard_utils.string_field
 let take = List.take
-
-let int_field ?(default = 0) key json =
-  match member_assoc key json with
-  | `Int value -> value
-  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
-  | `Float value -> int_of_float value
-  | _ -> default
-
-let list_field key json =
-  match member_assoc key json with
-  | `List items -> items
-  | _ -> []
-
-let compact_text ?(max_len = 160) raw =
-  let normalized =
-    String.trim raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun value -> value <> "")
-    |> String.concat " "
-    |> String.trim
-  in
-  if normalized = "" then ""
-  else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
+let int_field = Dashboard_utils.int_field
+let list_field = Dashboard_utils.list_field
+let compact_text = String_util.compact_text
 
 
 let latest_iso_timestamp values =

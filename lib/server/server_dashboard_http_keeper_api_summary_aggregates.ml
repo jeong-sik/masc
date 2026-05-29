@@ -62,7 +62,7 @@ let turn_identity_summary_json
         | None -> `Null )
     ; "manifest_keeper_turn_ids", Scan_summary.json_int_list manifest_keeper_turn_ids
     ; "receipt_turn_counts", Scan_summary.json_int_list receipt_turn_counts
-    ; "max_oas_turn_count", Scan_summary.json_int_opt scan.max_oas_turn_count
+    ; "max_oas_turn_count", Json_util.int_opt_to_json scan.max_oas_turn_count
     ; ( "provider_lane_resolved_count"
       , `Int
           (runtime_manifest_scan_event_count

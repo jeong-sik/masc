@@ -26,15 +26,13 @@ module StringSet = Set_util.StringSet
 
 let now_iso () = Masc_domain.now_iso ()
 
-let json_string_option = Json_util.string_opt_to_json
-
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc
     [ "model", `String c.model_string
     ; "display_model", `String c.display_model_string
-    ; "provider_name", json_string_option c.provider_name
-    ; "display_provider_name", json_string_option c.display_provider_name
-    ; "runtime_kind", json_string_option c.runtime_kind
+    ; "provider_name", Json_util.string_opt_to_json c.provider_name
+    ; "display_provider_name", Json_util.string_opt_to_json c.display_provider_name
+    ; "runtime_kind", Json_util.string_opt_to_json c.runtime_kind
     ; "expanded_models", `List (List.map (fun value -> `String value) c.expanded_models)
     ; "config_weight", `Int c.config_weight
     ; "effective_weight", `Int c.effective_weight
@@ -50,10 +48,8 @@ let source_to_string = function
   | CC.Load_failed _ -> "load_failed"
 ;;
 
-let string_list_to_json = Json_util.json_string_list
-
 let invalid_profile_to_json ((name, errors) : string * string list) =
-  `Assoc [ "name", `String name; "errors", string_list_to_json errors ]
+  `Assoc [ "name", `String name; "errors", Json_util.json_string_list errors ]
 ;;
 
 let public_cascade_profile_name name = name

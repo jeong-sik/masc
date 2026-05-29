@@ -27,9 +27,6 @@ let now_cache_stamp () =
   let ts = Unix.gettimeofday () in
   (ts, Masc_domain.now_iso ())
 
-let json_of_string_option = function
-  | Some value -> `String value
-  | None -> `Null
 
 let mark_cached_surface_attempt surface =
   let ts, iso = now_cache_stamp () in
@@ -95,10 +92,10 @@ let cached_surface_json surface =
   extend_projection_diagnostics surface.json
     [
       ("cache_state", `String cache_state);
-      ("last_success_at", json_of_string_option surface.last_success_at);
-      ("last_attempt_at", json_of_string_option surface.last_attempt_at);
-      ("last_error_at", json_of_string_option surface.last_error_at);
-      ("stale_reason", json_of_string_option stale_reason);
+      ("last_success_at", Json_util.string_opt_to_json surface.last_success_at);
+      ("last_attempt_at", Json_util.string_opt_to_json surface.last_attempt_at);
+      ("last_error_at", Json_util.string_opt_to_json surface.last_error_at);
+      ("stale_reason", Json_util.string_opt_to_json stale_reason);
       ( "stale_age_ms",
         match stale_age_ms with
         | Some value -> `Int value

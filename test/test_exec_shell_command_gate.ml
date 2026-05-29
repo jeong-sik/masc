@@ -443,6 +443,71 @@ let test_path_policy_rejects_redirect_target () =
       (Gate.verdict_tag other)
 ;;
 
+let test_masc_internal_state_policy_blocks_backlog () =
+  match
+    gate_from_raw
+      ~raw:"cat .masc/backlog.json"
+      ~allowlist
+      ~path_policy:Gate.forbid_masc_internal_state_paths
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Reject
+      { reason =
+          Gate.Path_outside_policy
+            { stage = 1; raw_path = ".masc/backlog.json"; _ }
+      ; diagnostic
+      ; _
+      } ->
+    if not (String.starts_with ~prefix:"task_state_file_probe_blocked" diagnostic)
+    then
+      Alcotest.failf
+        "diagnostic must contain task_state_file_probe_blocked, got %s"
+        diagnostic
+  | other ->
+    Alcotest.failf
+      "expected Path_outside_policy for .masc/backlog.json, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let test_masc_internal_state_policy_blocks_nested () =
+  let policy = Gate.forbid_masc_internal_state_paths in
+  let check_path path expected =
+    match (Option.get policy.classify) ~raw_path:path with
+    | `Deny _ when not expected ->
+      Alcotest.failf "expected Allow for %s, got Deny" path
+    | `Allow when expected ->
+      Alcotest.failf "expected Deny for %s, got Allow" path
+    | _ -> ()
+  in
+  check_path ".masc/backlog.json" true;
+  check_path "./.masc/backlog.json" true;
+  check_path ".masc/goal-loop/foo" true;
+  check_path ".masc/traces/abc" true;
+  check_path ".masc" true;
+  check_path "./.masc" true;
+  check_path "foo.ml" false;
+  check_path "lib/bar.ml" false;
+  check_path "cat" false;
+  check_path ".masc-not-backlog/foo" false
+;;
+
+let test_masc_internal_state_policy_allows_normal_commands () =
+  match
+    gate_from_raw
+      ~raw:"cat README.md"
+      ~allowlist
+      ~path_policy:Gate.forbid_masc_internal_state_paths
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Allow _ -> ()
+  | other ->
+    Alcotest.failf
+      "expected Allow for cat README.md, got %s"
+      (Gate.verdict_tag other)
+;;
+
 let test_sandbox_target_propagates_to_every_stage () =
   (* Plan: sandbox context is echoed through the IR so downstream
      dispatch does not re-parse. Verify every stage carries the
@@ -622,6 +687,18 @@ let () =
             "path policy sees file redirect target"
             `Quick
             test_path_policy_rejects_redirect_target
+        ; Alcotest.test_case
+            "masc internal state policy blocks .masc/backlog.json"
+            `Quick
+            test_masc_internal_state_policy_blocks_backlog
+        ; Alcotest.test_case
+            "masc internal state policy classifies paths correctly"
+            `Quick
+            test_masc_internal_state_policy_blocks_nested
+        ; Alcotest.test_case
+            "masc internal state policy allows normal commands"
+            `Quick
+            test_masc_internal_state_policy_allows_normal_commands
         ] )
     ; ( "phase_1_telemetry"
       , [ Alcotest.test_case

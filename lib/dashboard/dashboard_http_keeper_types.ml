@@ -65,29 +65,13 @@ let tokens_per_sec_json ~tokens ~latency_ms =
 let last_latency_ms_json latency_ms =
   if latency_ms <= 0 then `Null else `Int latency_ms
 
-let json_string_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List items ->
-    items
-    |> List.filter_map (function
-         | `String value ->
-           let trimmed = String.trim value in
-           if trimmed = "" then None else Some trimmed
-         | _ -> None)
-  | _ -> []
-
-let json_string_member_opt key json =
-  match Yojson.Safe.Util.member key json with
-  | `String value when String.trim value <> "" -> Some value
-  | _ -> None
-
 let terminal_reason_code_of_decision_json json =
-  match json_string_member_opt "terminal_reason_code" json with
+  match Json_util.assoc_string_opt "terminal_reason_code" json with
   | Some _ as value -> value
   | None ->
     (match Yojson.Safe.Util.member "terminal_reason" json with
      | `Assoc _ as terminal_reason ->
-       json_string_member_opt "code" terminal_reason
+       Json_util.assoc_string_opt "code" terminal_reason
      | _ -> None)
 
 let execution_trust_source = "execution_receipt"

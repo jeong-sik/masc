@@ -2,8 +2,6 @@
 
 module Cascade_decl = Cascade_declarative_types
 
-let option_int_json = Json_util.option_to_yojson (fun v -> `Int v)
-let option_string_json = Json_util.option_to_yojson (fun v -> `String v)
 
 let provider_log_surface = "/api/v1/dashboard/provider-logs"
 let provider_log_tail_surface = "/api/v1/dashboard/provider-logs/tail"
@@ -64,10 +62,10 @@ let provider_log_metadata_json
       ("display_name", `String provider.display_name);
       ("protocol", `String provider.protocol);
       ("enabled", `Bool log.enabled);
-      ("path", option_string_json log.path);
+      ("path", Json_util.string_option_to_yojson log.path);
       ("resolved_path", resolved_path);
-      ("default_lines", option_int_json log.default_lines);
-      ("max_bytes", option_int_json log.max_bytes);
+      ("default_lines", Json_util.int_option_to_yojson log.default_lines);
+      ("max_bytes", Json_util.int_option_to_yojson log.max_bytes);
       ("cascade_config_path", `String config_path);
     ]
 

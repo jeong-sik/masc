@@ -91,6 +91,11 @@ val option_trim : string option -> string option
 (** [option_trim opt] maps [trim_nonempty] over an option.
     [None] stays [None]; [Some s] becomes [None] if all whitespace. *)
 
+val compact_text : ?max_len:int -> string -> string
+(** [compact_text ~max_len raw] normalizes [raw]: trims, joins lines,
+    filters empty lines, then truncates to [max_len] characters (UTF-8 safe).
+    Default [max_len] is 160. Returns [""] for empty/whitespace-only input. *)
+
 val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.

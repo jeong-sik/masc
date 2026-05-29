@@ -73,10 +73,6 @@ type t = {
 
 (* JSON encoding — explicit, no ppx_deriving_yojson dependency. *)
 
-let opt_int_to_yojson = function
-  | None -> `Null
-  | Some i -> `Int i
-
 let to_yojson (t : t) : Yojson.Safe.t =
   `Assoc [
     "id", `String (Id.to_string t.id);
@@ -85,8 +81,8 @@ let to_yojson (t : t) : Yojson.Safe.t =
     "origin_name", `String t.origin_name;
     "origin_size_bytes", `Int t.origin_size_bytes;
     "mime_type", `String t.mime_type;
-    "width", opt_int_to_yojson t.width;
-    "height", opt_int_to_yojson t.height;
+    "width", Json_util.int_opt_to_json t.width;
+    "height", Json_util.int_opt_to_json t.height;
     "created_at", `Float t.created_at;
   ]
 

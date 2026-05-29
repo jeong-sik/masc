@@ -659,11 +659,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | `Float f -> Printf.sprintf "%0.0f" f
     | _ -> "unknown"
   in
-  let mcp_session_detail =
-    match mcp_session_id with
-    | Some session_id -> `String session_id
-    | None -> `Null
-  in
+  let mcp_session_detail = Json_util.string_opt_to_json mcp_session_id in
 
   (* Resolve caller identity for telemetry.  HTTP auth injects [_agent_name];
      tool-domain [agent_name] is not a caller identity. *)

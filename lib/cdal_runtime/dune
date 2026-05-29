@@ -31,6 +31,7 @@
  (name masc_mcp_cdal_runtime)
  (public_name masc_mcp.cdal_runtime)
  (libraries
+  masc_core
   agent_sdk.base
   ; agent_sdk (full) is needed for Guardrails_async, referenced from
   ; guardrail_llm.{ml,mli}.  The dune-package places guardrails_async

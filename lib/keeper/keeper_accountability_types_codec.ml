@@ -151,17 +151,7 @@ let json_int_opt key json =
 
 let json_bool key ~default json = Safe_ops.json_bool ~default key json
 
-let json_string_list key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`List items) ->
-       List.filter_map (function
-         | `String s -> Some s
-         | _ -> None) items
-     | _ -> [])
-  | _ -> []
-;;
+let json_string_list key json = Safe_ops.json_string_list key json
 
 let option_string_field key = function
   | Some value ->

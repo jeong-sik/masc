@@ -416,6 +416,7 @@ let launch_supervised_fiber
                   meta.name
                   (Some (Keeper_registry.Fiber_unresolved Cancelled_by_parent));
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
+                (* fire-and-forget: resolve_done signals completion *)
                 ignore (resolve_done (`Crashed "cancelled_by_parent")))
               else (
 	                let reason =

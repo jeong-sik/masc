@@ -166,15 +166,9 @@ let build_verdict_sse_payload
             ("gate", `String (Anti_rationalization.gate_to_string result.gate));
             ("verdict", `String (verdict_to_string result));
             ("evaluator_cascade", `String result.evaluator_cascade);
-            ( "generator_cascade",
-              match result.generator_cascade with
-              | Some c -> `String c
-              | None -> `Null );
+            ( "generator_cascade", Json_util.string_opt_to_json result.generator_cascade );
             ("cross_model", `Bool (is_cross_model_verdict result));
-            ( "fallback_reason",
-              match result.fallback_reason with
-              | Some reason -> `String reason
-              | None -> `Null );
+            ( "fallback_reason", Json_util.string_opt_to_json result.fallback_reason );
           ] );
     ]
 

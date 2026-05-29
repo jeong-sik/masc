@@ -186,14 +186,12 @@ let handle_keeper_get_subroutes state req request reqd =
               ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
               ("dashboard_surface", `String dashboard_surface);
               ("freshness_slo_s", `Float freshness_slo_s);
-              ( "latest_ts_unix",
-                match latest_ts with Some ts -> `Float ts | None -> `Null );
+              ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
               ( "latest_ts_iso",
                 match latest_ts with
                 | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
                 | None -> `Null );
-              ( "latest_age_s",
-                match latest_age_s with Some age -> `Float age | None -> `Null );
+              ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
               ("health", `String health);
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
@@ -280,14 +278,12 @@ let handle_keeper_get_subroutes state req request reqd =
         ("durable_store", `String (Filename.concat masc_root "tool_calls"));
         ("dashboard_surface", `String dashboard_surface);
         ("freshness_slo_s", `Float freshness_slo_s);
-        ( "latest_ts_unix",
-          match latest_ts with Some ts -> `Float ts | None -> `Null );
+        ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
         ( "latest_ts_iso",
           match latest_ts with
           | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
           | None -> `Null );
-        ( "latest_age_s",
-          match latest_age_s with Some age -> `Float age | None -> `Null );
+        ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
         ("health", `String health);
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );

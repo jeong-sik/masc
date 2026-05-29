@@ -328,8 +328,6 @@ let json_float_option = function
   | None -> `Null
 ;;
 
-let json_string_option = Json_util.string_opt_to_json
-
 let http_listener_json ?now () =
   let now =
     match now with
@@ -351,7 +349,7 @@ let http_listener_json ?now () =
       )
     ; "last_accept_unix", json_float_option last_accept_unix
     ; "last_accept_age_seconds", json_float_option last_accept_age_seconds
-    ; "last_error", json_string_option (Atomic.get http_last_accept_error)
+    ; "last_error", Json_util.string_opt_to_json (Atomic.get http_last_accept_error)
     ]
 ;;
 

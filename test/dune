@@ -123,6 +123,7 @@
   test_cascade_error_classify_decoder
   test_cascade_capacity_backpressure_cooldown
   test_cascade_capacity_backpressure_synthetic_backoff
+  test_cascade_runtime_candidate_capacity_key
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
@@ -439,6 +440,7 @@
   test_cascade_error_classify_decoder
   test_cascade_capacity_backpressure_cooldown
   test_cascade_capacity_backpressure_synthetic_backoff
+  test_cascade_runtime_candidate_capacity_key
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter

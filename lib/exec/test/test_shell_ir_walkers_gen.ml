@@ -602,7 +602,58 @@ let test_posix_end_of_options () =
   in
   (match df with
    | W (Df { path = Some "-mypath"; human_readable = true; _ }) -> ()
-   | w -> Alcotest.failf "Df --: expected path=-mypath human_readable=true, got %a" pp w)
+   | w -> Alcotest.failf "Df --: expected path=-mypath human_readable=true, got %a" pp w);
+  (* Cat: -- -myfile.txt *)
+  let cat =
+    of_simple { (base "cat") with args = [ lit "--"; lit "-myfile.txt" ] }
+  in
+  (match cat with
+   | W (Cat { path = "-myfile.txt" }) -> ()
+   | w -> Alcotest.failf "Cat --: expected path=-myfile.txt, got %a" pp w);
+  (* Ls: -la -- -hidden-dir *)
+  let ls =
+    of_simple { (base "ls") with args = [ lit "-la"; lit "--"; lit "-hidden-dir" ] }
+  in
+  (match ls with
+   | W (Ls { path = Some "-hidden-dir"; flags; _ }) ->
+     if not (List.mem `Long flags && List.mem `All flags)
+     then Alcotest.failf "Ls --: expected Long+All flags, got %a" pp ls
+   | w -> Alcotest.failf "Ls --: expected path=-hidden-dir, got %a" pp w);
+  (* Tr: -- 'a-z' 'A-Z' *)
+  let tr =
+    of_simple { (base "tr") with args = [ lit "-s"; lit "--"; lit "a-z"; lit "A-Z" ] }
+  in
+  (match tr with
+   | W (Tr { set1 = "a-z"; set2 = Some "A-Z"; squeeze = true; _ }) -> ()
+   | w -> Alcotest.failf "Tr --: expected set1=a-z set2=A-Z squeeze=true, got %a" pp w);
+  (* File: -- -myfile *)
+  let file =
+    of_simple { (base "file") with args = [ lit "--"; lit "-myfile" ] }
+  in
+  (match file with
+   | W (File { path = "-myfile"; _ }) -> ()
+   | w -> Alcotest.failf "File --: expected path=-myfile, got %a" pp w);
+  (* Diff: -- -file1.txt -file2.txt *)
+  let diff =
+    of_simple { (base "diff") with args = [ lit "-u"; lit "--"; lit "-file1.txt"; lit "-file2.txt" ] }
+  in
+  (match diff with
+   | W (Diff { file1 = "-file1.txt"; file2 = "-file2.txt"; unified = true; _ }) -> ()
+   | w -> Alcotest.failf "Diff --: expected file1=-file1.txt file2=-file2.txt unified=true, got %a" pp w);
+  (* Chmod: -- 755 -myfile *)
+  let chmod =
+    of_simple { (base "chmod") with args = [ lit "-R"; lit "--"; lit "755"; lit "-myfile" ] }
+  in
+  (match chmod with
+   | W (Chmod { mode = "755"; path = "-myfile"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Chmod --: expected mode=755 path=-myfile recursive=true, got %a" pp w);
+  (* Chown: -- user -myfile *)
+  let chown =
+    of_simple { (base "chown") with args = [ lit "-R"; lit "--"; lit "user"; lit "-myfile" ] }
+  in
+  (match chown with
+   | W (Chown { owner = "user"; path = "-myfile"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Chown --: expected owner=user path=-myfile recursive=true, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)

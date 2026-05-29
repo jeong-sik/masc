@@ -1625,16 +1625,18 @@ let rec parse delimiter fields file = function
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cut { delimiter; fields = f; file }))
      | None -> None)
   | arg :: rest ->
-    (match String.split_on_char '=' arg with
-     | [ "--delimiter"; d ] -> parse (Some d) fields file rest
-     | [ "--fields"; f ] -> parse delimiter (Some f) file rest
-     | _ ->
-       if String.length arg > 0 && arg.[0] = '-'
-       then parse delimiter fields file rest
-       else (
-         match file with
-         | None -> parse delimiter fields (Some arg) rest
-         | Some _ -> None))
+    (match Shell_ir_typed_types.eq_form_flag_value arg [ "--delimiter" ] with
+     | Some d -> parse (Some d) fields file rest
+     | None ->
+       (match Shell_ir_typed_types.eq_form_flag_value arg [ "--fields" ] with
+        | Some f -> parse delimiter (Some f) file rest
+        | None ->
+          if String.length arg > 0 && arg.[0] = '-'
+          then parse delimiter fields file rest
+          else (
+            match file with
+            | None -> parse delimiter fields (Some arg) rest
+            | Some _ -> None)))
 in
 parse None None None args|}
     ; no_expand_combined = false
@@ -2112,12 +2114,12 @@ let rec parse human_readable summary max_depth = function
             (Shell_ir_typed_types.Du
                { path = None; human_readable; summary; max_depth })))
   | arg :: rest ->
-    (match String.split_on_char '=' arg with
-     | [ "--max-depth"; n ] ->
+    (match Shell_ir_typed_types.eq_form_flag_value arg [ "--max-depth" ] with
+     | Some n ->
        (match int_of_string_opt n with
         | Some d -> parse human_readable summary (Some d) rest
         | None -> None)
-     | _ ->
+     | None ->
        (* Combined short flags: -hs, -sh *)
        if String.length arg > 2
             && arg.[0] = '-'
@@ -2198,9 +2200,9 @@ let rec parse human_readable fs_type = function
             (Shell_ir_typed_types.Df
                { path = None; human_readable; filesystem_type = fs_type })))
   | arg :: rest ->
-    (match String.split_on_char '=' arg with
-     | [ "--type"; t ] -> parse human_readable (Some t) rest
-     | _ ->
+    (match Shell_ir_typed_types.eq_form_flag_value arg [ "--type" ] with
+     | Some t -> parse human_readable (Some t) rest
+     | None ->
        if String.length arg >= 3 && arg.[0] = '-' && arg.[1] = 't'
        then parse human_readable (Some (String.sub arg 2 (String.length arg - 2))) rest
        else if String.length arg > 0 && arg.[0] = '-'
@@ -2514,16 +2516,11 @@ let rec parse output continue_ ncc url dd = function
   (* Eq-form value flags: --flag=VALUE *)
   | arg :: rest
     when not dd
-         && (let s = arg in
-             String.length s > 2 && s.[0] = '-'
-             && (match String.index_opt s '=' with
-                 | Some i ->
-                   let prefix = String.sub s 0 i in
-                   prefix = "--output-document" || List.mem prefix wget_value_flags
-                 | None -> false)) ->
-    (match String.split_on_char '=' arg with
-     | [ "--output-document"; o ] -> parse (Some o) continue_ ncc url dd rest
-     | _ -> parse output continue_ ncc url dd rest)
+         && Shell_ir_typed_types.is_eq_form_flag arg
+              ("--output-document" :: wget_value_flags) ->
+    (match Shell_ir_typed_types.eq_form_flag_value arg [ "--output-document" ] with
+     | Some o -> parse (Some o) continue_ ncc url dd rest
+     | None -> parse output continue_ ncc url dd rest)
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
     then parse output continue_ ncc url dd rest
@@ -3099,10 +3096,11 @@ let rec parse flags archive delete dry_run compress src dst = function
     done;
     parse flags !archive' !delete' !dry_run' !compress' src dst rest
   | arg :: rest ->
-    (match String.split_on_char '=' arg with
-     | [ flag; value ] when List.mem flag rsync_value_flags ->
+    (match Shell_ir_typed_types.eq_form_flag_value arg rsync_value_flags with
+     | Some value ->
+       let flag = String.sub arg 0 (String.length arg - String.length value - 1) in
        parse (value :: flag :: flags) archive delete dry_run compress src dst rest
-     | _ ->
+     | None ->
        if String.length arg > 0 && arg.[0] = '-'
        then parse (arg :: flags) archive delete dry_run compress src dst rest
        else (
@@ -4819,11 +4817,8 @@ parse None false false false args|}
       parse subcmd j dd (_val :: rest)
     | arg :: rest
       when not dd
-           && (let s = arg in
-               String.length s > 2 && s.[0] = '-'
-               && (match String.index_opt s '=' with
-                   | Some i -> List.mem (String.sub s 0 i) [ "-C"; "-f"; "-k"; "-l"; "-d" ]
-                   | None -> false)) ->
+           && Shell_ir_typed_types.is_eq_form_flag arg
+                [ "-C"; "-f"; "-k"; "-l"; "-d" ] ->
       parse subcmd j dd rest
     | arg :: rest ->
       if not dd && String.length arg > 2 && String.sub arg 0 2 = "-j"

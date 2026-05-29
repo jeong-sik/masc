@@ -82,12 +82,21 @@ val cli_tool_a_cannot_carry_keeper_bound_runtime_mcp :
 (** {1 Provider filter rejection classification} *)
 
 type filter_rejection_reason =
+  | Capability_profile_unknown of string
   | Capability_profile_mismatch of string
   | Codex_keeper_bound_actor_required
   | Tool_lane_unsupported
   | Required_tool_use of Provider_tool_support.rejection_reason
 (** Why a provider was rejected by the cascade filter.  Order mirrors the
-    filter's short-circuit priority. *)
+    filter's short-circuit priority.
+
+    [Capability_profile_unknown] signals that the profile name is not
+    known to the schema registry (neither builtin nor TOML-declared).
+    This is a configuration error — the operator typo'd a profile name
+    in [cascade.toml] or a downstream pin removed a profile.  Callers
+    must not collapse this to [Capability_profile_mismatch] because the
+    two cases require different operator actions (fix profile name vs
+    upgrade provider capabilities). *)
 
 val filter_rejection_reason_label : filter_rejection_reason -> string
 
@@ -103,7 +112,10 @@ val classify_filter_rejection :
 (** Classify why a single provider would be rejected by the tool-use gate.
     When [required_capability_profile] is provided, the provider must
     satisfy the named profile via {!Cascade_capability_profile} or it is
-    rejected with [Capability_profile_mismatch]. *)
+    rejected with [Capability_profile_mismatch].  When the profile name
+    itself is unknown to the schema registry, the rejection is
+    [Capability_profile_unknown] instead — callers must distinguish
+    these because the operator remediation differs. *)
 
 val filter_candidate_providers_for_tool_support :
   keeper_name:string ->

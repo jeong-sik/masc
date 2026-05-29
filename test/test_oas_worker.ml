@@ -3576,6 +3576,24 @@ let test_classify_filter_rejection_capability_profile_mismatch () =
      | _ -> false)
 ;;
 
+let test_classify_filter_rejection_capability_profile_unknown () =
+  let reason =
+    Masc_mcp.Cascade_oas_runner.classify_filter_rejection
+      ~keeper_name:"sangsu"
+      ~required_capability_profile:"nonexistent_profile_xyz"
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      (make_cli_tool_a_provider_cfg ())
+  in
+  Alcotest.(check bool)
+    "unknown profile → Capability_profile_unknown (not Capability_profile_mismatch)"
+    true
+    (match reason with
+     | Some (Masc_mcp.Cascade_oas_runner.Capability_profile_unknown "nonexistent_profile_xyz") ->
+       true
+     | _ -> false)
+;;
+
 let test_classify_filter_rejection_capability_profile_passes () =
   let reason =
     Masc_mcp.Cascade_oas_runner.classify_filter_rejection
@@ -6243,6 +6261,10 @@ let () =
             "classify_filter_rejection: tool_strict rejects cli_tool_a (no headers)"
             `Quick
             test_classify_filter_rejection_capability_profile_mismatch
+        ; Alcotest.test_case
+            "classify_filter_rejection: unknown profile → Capability_profile_unknown"
+            `Quick
+            test_classify_filter_rejection_capability_profile_unknown
         ; Alcotest.test_case
             "classify_filter_rejection: tool_strict accepts cli_tool_d (headers)"
             `Quick

@@ -147,7 +147,11 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
    pinpoints the failing check on the first read.
 
    Order of preference (mirrors the filter's short-circuit):
-   0. [Capability_profile_mismatch profile] — the provider's declared
+   0. [Capability_profile_unknown profile] — the profile name is not
+      known to the schema registry (builtin or TOML-declared).  This
+      is a configuration error: the operator typo'd a profile name in
+      [cascade.toml] or a downstream pin removed a profile.
+   0b. [Capability_profile_mismatch profile] — the provider's declared
       capabilities do not satisfy the profile's
       [required_capability_profile] (e.g. [tool_strict] requiring
       [runtime_mcp_tools], [runtime_tool_events], [runtime_mcp_http_headers]).
@@ -161,12 +165,15 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
       existing [rejection_reason] so dashboards stay consistent with
       [masc_cascade_filter_rejection_total]. *)
 type filter_rejection_reason =
+  | Capability_profile_unknown of string
   | Capability_profile_mismatch of string
   | Codex_keeper_bound_actor_required
   | Tool_lane_unsupported
   | Required_tool_use of Provider_tool_support.rejection_reason
 
 let filter_rejection_reason_label = function
+  | Capability_profile_unknown profile ->
+    Printf.sprintf "capability_profile_unknown:%s" profile
   | Capability_profile_mismatch profile ->
     Printf.sprintf "capability_profile_mismatch:%s" profile
   | Codex_keeper_bound_actor_required -> "codex_keeper_bound_actor_required"
@@ -200,7 +207,7 @@ let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason 
          (Provider_tool_support.provider_debug_label provider_cfg)
          keeper_name
          (filter_rejection_reason_label reason))
-  | Capability_profile_mismatch _ | Tool_lane_unsupported | Required_tool_use _ -> None
+  | Capability_profile_unknown _ | Capability_profile_mismatch _ | Tool_lane_unsupported | Required_tool_use _ -> None
 
 let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
   match codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason with
@@ -231,17 +238,18 @@ let classify_filter_rejection
       (provider_cfg : Llm_provider.Provider_config.t)
   : filter_rejection_reason option
   =
-  let profile_mismatch =
+  let profile_rejection =
     match required_capability_profile with
     | None -> None
     | Some profile ->
       let caps = Provider_tool_support.capabilities_of_config provider_cfg in
-      if not (Cascade_capability_profile.provider_satisfies_profile profile caps)
-      then Some (Capability_profile_mismatch profile)
-      else None
+      (match Cascade_capability_profile.provider_satisfies_named_profile ~name:profile caps with
+       | Error _ -> Some (Capability_profile_unknown profile)
+       | Ok false -> Some (Capability_profile_mismatch profile)
+       | Ok true -> None)
   in
-  match profile_mismatch with
-  | Some _ -> profile_mismatch
+  match profile_rejection with
+  | Some _ -> profile_rejection
   | None ->
     if
       cli_tool_a_cannot_carry_keeper_bound_runtime_mcp

@@ -81,23 +81,11 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input 
     Governance LEVEL (development/production/enterprise/paranoid) is the
     configurable dial — see [MASC_GOVERNANCE_LEVEL] env var. *)
 
-(** Explicit per-tool risk overrides.
-    Checked BEFORE pattern matching. Use this to correct misclassifications
-    caused by substring matching (e.g. "query_skill" matching "kill"). *)
-let risk_overrides : (string * risk_level) list =
-  [
-    ("masc_a2a_query_skill", Low); (* "skill" contains "kill" substring *)
-    ("masc_goal_upsert", Medium);
-    ("masc_goal_verify", Medium);
-    ("masc_keeper_msg", Low);
-    ("masc_claim_next", Medium);
-    ("keeper_task_create", Medium); (* routine keeper backlog expansion; force/delete stays gated *)
-    ("masc_keeper_reset", Medium); (* usage counter zeroing only; keeper_clear stays Critical *)
-    (* WORKAROUND: substring classifier false-positives (lib/governance_pipeline_risk.ml:101 high_patterns).
-       Removal target: RFC-0193 typed capability table (Issue #19032). Evidence: 11 approval_required/8.4h on 2026-05-27. *)
-    ("masc_plan_set_task", Low); (* "set" substring → High; payload is self-owned task plan metadata *)
-    ("keeper_memory_write", Low); (* "write" substring → High; scoped to own keeper memory *)
-  ]
+(* Former [risk_overrides] (9 entries) is removed: eight were corrections
+   for substring false-positives on registered tools and are now folded
+   into [risk_of_*] typed tables (RFC-0193 / Issue #19032); the one
+   non-typed name lives in [residual_risk_overrides]. The patterns below
+   classify transition-action verbs and unknown (non-[Tool_name]) names. *)
 
 let critical_patterns =
   [ "delete"; "remove"; "drop"; "force"; "reset"; "kill"; "destroy"; "purge" ]
@@ -135,6 +123,84 @@ let classify_name name =
   else if contains_pattern name high_patterns then High
   else if contains_pattern name medium_patterns then Medium
   else Low
+
+(* ── Typed per-tool risk SSOT (RFC-0193 / Issue #19032) ───────────────
+
+   Exhaustive [Tool_name.t -> risk_level] tables replace [classify_name]'s
+   substring matching for the ~130 registered tools. A new [Tool_name]
+   variant fails to compile here (no [_ ->] catch-all), so it cannot
+   silently fall through to [Low] — the failure mode the substring
+   classifier + [risk_overrides] patch loop accumulated.
+
+   Values reproduce the prior (substring + override) verdict exactly,
+   so the eight typed entries of the former [risk_overrides] list are
+   folded into the tier they belong to (e.g. [Goal_upsert -> Medium],
+   [Memory_write -> Low]) rather than patched at runtime. The one
+   non-typed override ([masc_a2a_query_skill], absent from [Tool_name])
+   survives in [residual_risk_overrides] below.
+
+   [Goal_transition] / [Transition] sit in [Low] only for totality;
+   [baseline_risk] intercepts both before they reach these tables, since
+   their risk is input-action dependent. Mirrors [Tool_resource_axis]. *)
+
+let risk_of_keeper (k : Tool_name.Keeper.t) : risk_level =
+  let open Tool_name.Keeper in
+  match k with
+  | Execute | Board_comment | Board_comment_vote | Board_curation_read
+  | Board_curation_submit | Board_get | Board_list | Board_post | Board_search
+  | Board_stats | Board_vote | Board_sub_board_get | Board_sub_board_list
+  | Broadcast | Context_status | Fs_read | Ide_annotate | Handoff
+  | Library_read | Library_search | Memory_search | Memory_write | Search_files
+  | Stay_silent | Task_done | Task_submit_for_verification | Tasks_audit
+  | Tasks_list | Time_now | Tool_search | Tools_list | Voice_agent
+  | Voice_listen | Voice_session_end | Voice_sessions | Voice_speak -> Low
+  | Task_claim | Task_create | Voice_session_start -> Medium
+  | Board_sub_board_create | Board_sub_board_update | Fs_edit -> High
+  | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
+;;
+
+let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
+  let open Tool_name.Masc in
+  match m with
+  | Add_task | Agent_fitness | Agent_card | Agents | Batch_add_tasks
+  | Board_cleanup | Board_comment | Board_comment_vote | Board_curation_read
+  | Board_curation_submit | Board_get | Board_hearths | Board_list | Board_post
+  | Board_profile | Board_reaction | Board_search | Board_stats | Board_vote
+  | Board_sub_board_get | Board_sub_board_list | Broadcast | Check
+  | Cleanup_zombies | Dashboard | Deliver | Goal_list | Goal_transition
+  | Heartbeat | Messages | Note_add | Operator_action | Operator_digest
+  | Operator_snapshot | Plan_clear_task | Plan_get | Plan_get_task | Plan_init
+  | Plan_set_task | Status | Task_history | Tasks | Tool_grant | Tool_help
+  | Tool_list | Tool_revoke | Transition | Web_fetch | Web_search | Who
+  | Approval_pending | Approval_get | Config | Gc | Get_metrics | Mcp_session
+  | Tool_admin_snapshot | Tool_stats -> Low
+  | Claim_next | Goal_upsert | Goal_verify | Join | Leave | Operator_confirm
+  | Pause | Resume | Start -> Medium
+  | Agent_update | Board_sub_board_create | Board_sub_board_update | Plan_update
+  | Update_priority | Tool_admin_update -> High
+  | Board_delete | Board_sub_board_delete | Reset -> Critical
+;;
+
+let risk_of_masc_keeper (mk : Tool_name.Masc_keeper.t) : risk_level =
+  let open Tool_name.Masc_keeper in
+  match mk with
+  | Clear | Compact | Down | List | Msg | Msg_result | Persona_audit | Repair
+  | Sandbox_status | Status | Up -> Low
+  | Reset | Sandbox_start | Sandbox_stop -> Medium
+  | Create_from_persona -> High
+;;
+
+let risk_of_typed : Tool_name.t -> risk_level = function
+  | Tool_name.Keeper k -> risk_of_keeper k
+  | Tool_name.Masc m -> risk_of_masc m
+  | Tool_name.Masc_keeper mk -> risk_of_masc_keeper mk
+;;
+
+(* Non-typed names absent from [Tool_name] keep an explicit override; the
+   substring path would misclassify them (e.g. "query_skill" contains
+   "kill" -> Critical). Candidate for a [Tool_name] enum entry. *)
+let residual_risk_overrides : (string * risk_level) list =
+  [ ("masc_a2a_query_skill", Low) ]
 
 let transition_action input =
   match input with
@@ -294,22 +360,26 @@ let classify_with_payload ~tool_name ~input =
 let baseline_risk ~tool_name ~input =
   match classify_with_metadata ~tool_name with
   | Some level -> level
-  | None -> (
-      if String.equal tool_name "masc_goal_transition"
-      then goal_transition_risk input
-      else
-        match List.assoc_opt tool_name risk_overrides with
-      | Some level -> level
-      | None ->
-          if
-            String.equal tool_name
-              (Tool_name.Masc.to_string Tool_name.Masc.Transition)
-          then
-            match transition_action input with
-            | Some action -> classify_name action
-            | None -> Low
-          else
-            classify_name tool_name)
+  | None ->
+      if String.equal tool_name "masc_goal_transition" then
+        goal_transition_risk input
+      else if
+        String.equal tool_name
+          (Tool_name.Masc.to_string Tool_name.Masc.Transition)
+      then (
+        (* transition risk depends on the action verb, not the tool name *)
+        match transition_action input with
+        | Some action -> classify_name action
+        | None -> Low)
+      else (
+        match Tool_name.of_string tool_name with
+        | Some typed -> risk_of_typed typed
+        | None -> (
+            (* not a registered Tool_name: explicit residual override,
+               else substring fallback (defense for unknown/typo names) *)
+            match List.assoc_opt tool_name residual_risk_overrides with
+            | Some level -> level
+            | None -> classify_name tool_name))
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with

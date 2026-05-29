@@ -297,8 +297,8 @@ let repo_name_of_json = function
             && String.equal (Filename.basename name) name
           then Some name
           else None
-      | _ -> None)
-  | _ -> None
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
@@ -336,7 +336,7 @@ let enrich_playground_repo_from_git
   let fields =
     match repo_json with
     | `Assoc fields -> fields
-    | _ -> [ ("name", `String repo_name) ]
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> [ ("name", `String repo_name) ]
   in
   let fields =
     fields
@@ -373,7 +373,7 @@ let playground_repo_entry_json ~(source : string) ~(repo_name : string)
   let fields =
     match repo_json with
     | `Assoc fields -> fields
-    | _ -> [ ("name", `String repo_name) ]
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> [ ("name", `String repo_name) ]
   in
   fields
   |> upsert_assoc "name" (`String repo_name)
@@ -452,8 +452,8 @@ let preflight_ok = function
   | Some (`Assoc fields) -> (
       match List.assoc_opt "ok" fields with
       | Some (`Bool value) -> Some value
-      | _ -> None)
-  | _ -> None
+      | None | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None
 
 let container_mode (meta : keeper_meta) containers =
   if meta.sandbox_profile = Local then

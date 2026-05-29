@@ -135,8 +135,8 @@ let value_is_truncated_marker (v : Yojson.Safe.t) : bool =
   | `Assoc fields ->
     (match List.assoc_opt "_truncated" fields with
      | Some (`Bool true) -> true
-     | _ -> false)
-  | _ -> false
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> false)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 (** Return the inline preview (first ~[truncation_preview_len] bytes
     of the original serialised payload) if [v] is a truncation
@@ -148,8 +148,8 @@ let truncation_marker_preview (v : Yojson.Safe.t) : string option =
     | `Assoc fields ->
       (match List.assoc_opt "_preview" fields with
        | Some (`String s) -> Some s
-       | _ -> None)
-    | _ -> None
+       | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 (** Return the original payload's top-level constructor name
     ("Assoc"/"List"/"String"/...) if [v] is a truncation marker,
@@ -161,8 +161,8 @@ let truncation_marker_original_type (v : Yojson.Safe.t) : string option =
     | `Assoc fields ->
       (match List.assoc_opt "_original_type" fields with
        | Some (`String s) -> Some s
-       | _ -> None)
-    | _ -> None
+       | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 (** Return the original payload's serialised byte size if [v] is a
     truncation marker, [None] otherwise. *)
@@ -173,8 +173,8 @@ let truncation_marker_original_size_bytes (v : Yojson.Safe.t) : int option =
     | `Assoc fields ->
       (match List.assoc_opt "_original_size_bytes" fields with
        | Some (`Int n) -> Some n
-       | _ -> None)
-    | _ -> None
+       | None | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 (** Bound the snippet length we log when a JSONL line is malformed
     so a single huge garbled line cannot blow up the log file. *)
@@ -209,7 +209,7 @@ let parse_line (line : string) : (string * Yojson.Safe.t option * float) option 
         let ts = match List.assoc_opt "ts" fields with
           | Some (`Float f) -> f
           | Some (`Int n) -> Float.of_int n
-          | _ -> 0.0
+          | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> 0.0
         in
         (match key with
          | Some k -> Some (k, value, ts)

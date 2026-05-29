@@ -90,13 +90,13 @@ max-concurrent = 1
 members = ["ollama.provider_h"]
 strategy = "failover"
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 |};
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config

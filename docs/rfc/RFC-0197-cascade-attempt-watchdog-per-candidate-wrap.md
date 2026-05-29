@@ -12,7 +12,7 @@
 
 ```
 analyst: keeper cycle FAILED 
-cascade=tier-group.glm-coding-with-spark 
+cascade=cascade.glm-coding-with-spark 
 max_context=128000 context_budget=128000 
 latency=579373ms 
 error=Timeout: Turn wall-clock budget exhausted during cascade attempt 
@@ -21,10 +21,10 @@ error=Timeout: Turn wall-clock budget exhausted during cascade attempt
 
 **Frequency**: 32 events / 2h (~16/h, ~384/day extrapolation)
 **Single keeper**: 100% analyst
-**Single cascade tier-group**: `tier-group.glm-coding-with-spark` (4 tier failover chain)
+**Single cascade cascade**: `cascade.glm-coding-with-spark` (4 tier failover chain)
 **Single budget value**: 99% `budget=555.0s, watchdog=570.0s` — *동일 cascade tier 만 fire*
 
-`tier-group.glm-coding-with-spark` 의 runtime config:
+`cascade.glm-coding-with-spark` 의 runtime config:
 ```toml
 tiers = ["strict_tool_candidates", "ollama_cloud_stable", "local_llama", "glm-coding-with-spark"]
 strategy = "failover"
@@ -209,7 +209,7 @@ Doc only, code = 0.
 
 ## Out of scope
 
-- Provider hang 자체 진단 (`tier-group.glm-coding-with-spark` 어느 tier 가 hang) — 별도 incident, Issue #18894 영역
+- Provider hang 자체 진단 (`cascade.glm-coding-with-spark` 어느 tier 가 hang) — 별도 incident, Issue #18894 영역
 - LLM 한테 alternatives 전달 (Meta-RFC §2, RFC-0195 영역)
 - 60min hard ceiling 자체 줄이기 — RFC-0192 PR-4 cleanup 영역
 

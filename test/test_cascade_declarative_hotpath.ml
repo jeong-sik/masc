@@ -3,7 +3,7 @@
     Tests parsing, adaptation, and route binding extraction from
     declarative TOML cascade configs.
 
-    Post-tier-purge (PR #19340): tier/tier-group sections are no longer
+    Post-tier-purge (PR #19340): tier/cascade sections are no longer
     part of the config format. Tests use routes + bindings instead.
 
     @stability Internal *)

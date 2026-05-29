@@ -16,19 +16,19 @@ related: RFC-0058 (declarative cascade config v2), RFC-0177 (phonebook internal 
 cascade routing has two coexisting paths, and *neither alone is the SSOT*:
 
 1. **Legacy `[routes.*]` in `config/cascade.toml`** — read by `Cascade_routes.cascade_name_for_use`. Every concrete caller today (governance_judge, operator_judge, cross_verifier, verifier, anti_rationalization, verifier_oas, keeper_turn, etc.) resolves through this path. This is what actually decides routing at runtime.
-2. **Phonebook (`cascade_phonebook_*.ml`, `Cascade_routing_policy.default_routing_policies`)** — wired in by RFC Cascade Phonebook Phase 1-4 (#18199, #18218). It receives a `task_use` and resolves to a tier-group of typed `Provider_config.t`. The infrastructure exists, but `config/cascade.toml` does **not** carry the phonebook schema sections (`[providers.*]`, `[models.*]`, `[tier-groups.*]` — plural form). Only the test fixture `test/fixtures/cascade-phonebook.toml` is populated.
+2. **Phonebook (`cascade_phonebook_*.ml`, `Cascade_routing_policy.default_routing_policies`)** — wired in by RFC Cascade Phonebook Phase 1-4 (#18199, #18218). It receives a `task_use` and resolves to a cascade of typed `Provider_config.t`. The infrastructure exists, but `config/cascade.toml` does **not** carry the phonebook schema sections (`[providers.*]`, `[models.*]`, `[cascades.*]` — plural form). Only the test fixture `test/fixtures/cascade-phonebook.toml` is populated.
 
 As a result:
 
 - `cascade_models_for_use_via_phonebook` and `cascade_provider_configs_for_use_via_phonebook` return `None` in production today.
-- The intent expressed in `task_use_of_logical_use` (4 judge routes → `Code_review`) is contradicted by `cascade.toml` (each judge route had its own `target = "tier-group.primary"` — fixed in PR #18695 to `tier-group.governance`, but the dual-path structure remains).
-- `default_routing_policies` declares `Code_review → primary_tier_group = "cross-verify"`, but no `tier-group.cross-verify` exists in any TOML file. Silent dangling reference.
+- The intent expressed in `task_use_of_logical_use` (4 judge routes → `Code_review`) is contradicted by `cascade.toml` (each judge route had its own `target = "cascade.primary"` — fixed in PR #18695 to `cascade.governance`, but the dual-path structure remains).
+- `default_routing_policies` declares `Code_review → primary_cascade = "cross-verify"`, but no `cascade.cross-verify` exists in any TOML file. Silent dangling reference.
 
 ### Why current state is fragile
 
 Symptom: `Dashboard_governance_judge.refresh_once` timed out at 45s every cycle (the immediate observation that motivated this RFC, mitigated by PR #18695). The user's instinctive question — "why does the cascade not fall back to a different model?" — exposed:
 
-- legacy `routes.*` uses `tier-group.primary` with `tiers = ["primary"]` (single tier, no cross-tier fallback path)
+- legacy `routes.*` uses `cascade.primary` with `tiers = ["primary"]` (single tier, no cross-tier fallback path)
 - phonebook would have offered a proper fallback chain (`primary → __safe_lane`) but is empty
 - a fully populated phonebook plus removal of legacy `[routes.*]` would be a one-SSOT system, but cannot be done while RFC-0177 is mid-flight
 
@@ -57,7 +57,7 @@ If we migrate the phonebook to be the SSOT *while RFC-0177 substitutes labels in
 The current sketch (to be refined):
 
 ```toml
-# Single section — no [routes.*] + [tier-group.*] + [tier.*] split
+# Single section — no [routes.*] + [cascade.*] + [tier.*] split
 
 [capability.judge-fast]
 description = "Advisory dashboard judge: ≤30s p50, JSON output, no tools required"
@@ -102,11 +102,11 @@ The runtime is then *pure data lookup* — no `[tier.X] members = [...]` strings
 
 The realistic plan is multi-PR. A first cut:
 
-1. **PR-1**: New `[capability.*]` + `[model.*]` + `[intent.*]` sections added to `cascade.toml`. Old `[tier.*]` / `[tier-group.*]` / `[routes.*]` remain. New `Cascade_capability_resolver` module added but not yet wired. Lint/test only.
+1. **PR-1**: New `[capability.*]` + `[model.*]` + `[intent.*]` sections added to `cascade.toml`. Old `[tier.*]` / `[cascade.*]` / `[routes.*]` remain. New `Cascade_capability_resolver` module added but not yet wired. Lint/test only.
 2. **PR-2**: Switch `Cascade_routes.cascade_name_for_use` to query capability resolver. Legacy fallback retained, gated by env var.
 3. **PR-3**: Migrate the 5+ direct call sites (`Cascade_routes.cascade_name_for_use` → typed capability/intent API). Existing callers stop holding strings.
 4. **PR-4**: Drop `[routes.*]` section + legacy resolver code + `Cascade_routing_policy.default_routing_policies "cross-verify"` dangling.
-5. **PR-5**: Drop `[tier.*]` / `[tier-group.*]` once capability resolution is the only consumer.
+5. **PR-5**: Drop `[tier.*]` / `[cascade.*]` once capability resolution is the only consumer.
 
 Each PR is reversible and CI-gateable.
 
@@ -143,7 +143,7 @@ The §5 5-PR sequence is implemented as a stacked PR chain (each PR base = paren
 
 ## 8. Evidence
 
-- PR #18695 (fix(cascade): route judge calls to tier-group.governance) — immediate symptom mitigation that exposed dual-SSOT structure.
+- PR #18695 (fix(cascade): route judge calls to cascade.governance) — immediate symptom mitigation that exposed dual-SSOT structure.
 - `config/cascade.toml` lines 859-911 (`[routes.*]` section) — legacy resolver input.
 - `lib/cascade/cascade_routes.ml:313` (`cascade_name_for_use`) — legacy resolver code path.
 - `lib/cascade/cascade_routing_policy.ml:67-70` — dangling `cross-verify` reference.
@@ -159,7 +159,7 @@ Architect concluded that cascade is the SSOT for every keeper turn, judge, and v
 
 Therefore:
 
-- Immediate symptom (governance_judge 45s timeout): already mitigated by PR #18695 (4-line route fix to `tier-group.governance`).
+- Immediate symptom (governance_judge 45s timeout): already mitigated by PR #18695 (4-line route fix to `cascade.governance`).
 - Dual-SSOT structural issue (legacy `[routes.*]` + empty phonebook + dangling `cross-verify`): documented here, not yet remediated.
 - Q1–Q5 decisions stand as the *design contract* when implementation resumes.
 

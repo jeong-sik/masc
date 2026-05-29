@@ -90,7 +90,7 @@ let mk_ctx ?(health = H.create ())
            ?(now = 0.0)
            ?(rand = fun _ -> 0)
            ?(keeper_name = "")
-           ?(cascade_name = "tier.test")
+           ?(cascade_name = "cascade.test")
            () : S.signal_ctx =
   { health; capacity; now; rand_int = rand;
     keeper_name; cascade_name = Cascade_name.of_string_exn cascade_name }
@@ -691,7 +691,7 @@ let test_history_json_exposes_provenance () =
 
 (* ── Strategy decision trace (LT-5) ─────────────────── *)
 
-let mk_trace_event ?(ts = 0.0) ?(cascade_name = "tier.primary")
+let mk_trace_event ?(ts = 0.0) ?(cascade_name = "cascade.primary")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered)
     ?trace_id ?(confidence_score = None) () =
@@ -720,17 +720,17 @@ let test_trace_record_snapshot_roundtrip () =
 
 let test_trace_cascade_filter () =
   ST.clear ();
-  ST.record (mk_trace_event ~cascade_name:"tier.primary" ~ts:1.0 ());
-  ST.record (mk_trace_event ~cascade_name:"tier.nick0cave" ~ts:2.0 ());
-  ST.record (mk_trace_event ~cascade_name:"tier.primary" ~ts:3.0 ());
-  let unified = ST.snapshot ~cascade:"tier.primary" () in
+  ST.record (mk_trace_event ~cascade_name:"cascade.primary" ~ts:1.0 ());
+  ST.record (mk_trace_event ~cascade_name:"cascade.nick0cave" ~ts:2.0 ());
+  ST.record (mk_trace_event ~cascade_name:"cascade.primary" ~ts:3.0 ());
+  let unified = ST.snapshot ~cascade:"cascade.primary" () in
   check int "primary → 2 events" 2 (List.length unified);
   List.iter
     (fun e ->
-      check string "cascade filter" "tier.primary"
+      check string "cascade filter" "cascade.primary"
         (Cascade_name.to_string e.ST.cascade_name))
     unified;
-  let missing = ST.snapshot ~cascade:"tier.does_not_exist" () in
+  let missing = ST.snapshot ~cascade:"cascade.does_not_exist" () in
   check int "missing cascade → empty" 0 (List.length missing)
 
 let test_trace_ring_drops_oldest () =
@@ -806,25 +806,25 @@ let test_trace_prometheus_counter_increments () =
   let before =
     find_strategy_counter_value
       (Masc_mcp.Prometheus.to_prometheus_text ())
-      ~cascade:"tier.primary" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"cascade.primary" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
-  ST.record (mk_trace_event ~cascade_name:"tier.primary"
+  ST.record (mk_trace_event ~cascade_name:"cascade.primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
-  ST.record (mk_trace_event ~cascade_name:"tier.primary"
+  ST.record (mk_trace_event ~cascade_name:"cascade.primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
-  ST.record (mk_trace_event ~cascade_name:"tier.nick0cave"
+  ST.record (mk_trace_event ~cascade_name:"cascade.nick0cave"
                ~strategy:"failover"
                ~kind:ST.Filtered_empty ~backoff_ms:500 ());
   let text = Masc_mcp.Prometheus.to_prometheus_text () in
   let ordered =
     find_strategy_counter_value text
-      ~cascade:"tier.primary" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"cascade.primary" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
   let filtered =
     find_strategy_counter_value text
-      ~cascade:"tier.nick0cave" ~strategy:"failover"
+      ~cascade:"cascade.nick0cave" ~strategy:"failover"
       ~kind:"filtered_empty"
     |> Option.value ~default:0.0
   in
@@ -836,9 +836,9 @@ let test_trace_prometheus_counter_increments () =
 let test_strategy_trace_json_exposes_provenance () =
   ST.clear ();
   ST.record
-    (mk_trace_event ~cascade_name:"tier.primary" ~strategy:"failover"
+    (mk_trace_event ~cascade_name:"cascade.primary" ~strategy:"failover"
        ~kind:ST.Ordered ());
-  let json = DC.strategy_trace_json ~limit:1 ~cascade:"tier.primary" () in
+  let json = DC.strategy_trace_json ~limit:1 ~cascade:"cascade.primary" () in
   check string "dashboard surface" "/api/v1/cascade/strategy_trace"
     (json_string "dashboard_surface" json);
   check string "source" "cascade_strategy_trace_ring" (json_string "source" json);
@@ -851,7 +851,7 @@ let test_strategy_trace_json_exposes_provenance () =
   check int "ring capacity" (ST.capacity ()) (json_int "ring_capacity" retention);
   let query = json_object "query" json in
   check int "query limit" 1 (json_int "limit" query);
-  check string "query cascade" "tier.primary" (json_string "cascade" query)
+  check string "query cascade" "cascade.primary" (json_string "cascade" query)
 
 let test_audit_runs_json_exposes_provenance () =
   let base_path =

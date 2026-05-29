@@ -53,11 +53,11 @@ max-concurrent = 1
 [tier.%s_primary]
 members = ["runtime_mock.%s"]
 
-[tier-group.%s]
+[cascade.%s]
 tiers = ["%s_primary"]
 
 [routes.%s]
-target = "tier-group.%s"
+target = "cascade.%s"
 |}
        endpoint
        model_id

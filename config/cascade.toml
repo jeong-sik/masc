@@ -729,8 +729,8 @@ max-output = 8192
 temperature = 0.3
 
 # ── Routes (simplified: direct model reference) ────────────────
-# Tier/tier-group concept removed. All routes reference the global
-# default model directly via provider:model string format.
+# Tier and tier-group concepts were removed in PR #19381.
+# All routes now use the provider:model string format.
 
 [routes.keeper_turn]
 target = "runpod_mtp.qwen-runpod"

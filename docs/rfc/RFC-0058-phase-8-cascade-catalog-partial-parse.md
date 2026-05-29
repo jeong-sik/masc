@@ -24,14 +24,14 @@ implementation_prs: [15733, 15737]
 
 ## 1. Problem
 
-cascade.toml has 4 well-formed `[tier-group.*]` entries (`runpod_mtp`, `local_mtp`, `ollama_cloud_stable`, `strict_tool_candidates`). 9 keeper .toml files reference them via `cascade_name = "tier-group.runpod_mtp"` etc.
+cascade.toml has 4 well-formed `[cascade.*]` entries (`runpod_mtp`, `local_mtp`, `ollama_cloud_stable`, `strict_tool_candidates`). 9 keeper .toml files reference them via `cascade_name = "cascade.runpod_mtp"` etc.
 
 Server log (2026-05-17 12:29:43, masc-mcp-8935.log:562-686) — all 9 rejected at load time:
 
 ```
 [WARN] [Keeper] toml_loader: skipping analyst.toml: ...
-  invalid cascade_name 'tier-group.ollama_cloud_stable' (
-    reserved: tier-group.provider-k-coding-with-spark, tier-group.strict_tool_candidates;
+  invalid cascade_name 'cascade.ollama_cloud_stable' (
+    reserved: cascade.provider-k-coding-with-spark, cascade.strict_tool_candidates;
     declarative cascade catalog invalid:
       (Cascade_declarative_adapter.Provider_not_found "agent-llm-a");
       (Cascade_declarative_adapter.Binding_resolution_failed "agent-llm-a.claude-api-sonnet");
@@ -39,7 +39,7 @@ Server log (2026-05-17 12:29:43, masc-mcp-8935.log:562-686) — all 9 rejected a
   )
 ```
 
-cascade.toml in mid-edit state held a stale `[agent-llm-a.claude-api-sonnet]` binding pointing at a removed `[providers.claude]`. **One stale binding** invalidates the **entire catalog**. Once the catalog is `Error`, keeper toml validation drops to the `reserved_cascade_names` fallback list (2 entries), which excludes 3 of 4 production tier-groups in active use. 9 keepers fail to load even though every tier-group they reference is well-formed.
+cascade.toml in mid-edit state held a stale `[agent-llm-a.claude-api-sonnet]` binding pointing at a removed `[providers.claude]`. **One stale binding** invalidates the **entire catalog**. Once the catalog is `Error`, keeper toml validation drops to the `reserved_cascade_names` fallback list (2 entries), which excludes 3 of 4 production cascades in active use. 9 keepers fail to load even though every cascade they reference is well-formed.
 
 ### 1.1 Live trace — the cliff
 
@@ -62,18 +62,18 @@ match Cascade_declarative_hotpath.try_load_declarative path with
 
 ### 1.2 Why this violates RFC-0058 §2.4
 
-RFC-0058 §2.4 states *"Cross-reference validation happens at load time."* The intent is *cross-reference invariants are detected at load, not at dispatch*. The current implementation interprets it as *the whole catalog is either invariant-clean or unusable*. A 1-binding error nullifies 11 valid bindings, 4 valid tier-groups, and 18 valid routes. That is not validation — that is fail-stop.
+RFC-0058 §2.4 states *"Cross-reference validation happens at load time."* The intent is *cross-reference invariants are detected at load, not at dispatch*. The current implementation interprets it as *the whole catalog is either invariant-clean or unusable*. A 1-binding error nullifies 11 valid bindings, 4 valid cascades, and 18 valid routes. That is not validation — that is fail-stop.
 
 ### 1.3 Why `reserved_cascade_names` is also a smell, but not the root
 
 `lib/keeper/keeper_config.ml:35-43` defines `phase_routing_cascade_names = [phase_buffer_cascade_name; recovery_cascade_name]` and `tool_required_cascade_name`. `keeper_types_profile.ml:47-50` unions them as `reserved_cascade_names`. These are used as a *safe minimal fallback* when the catalog `Error`-s, and as a fast-path skip in normal validation (line 803-805).
 
-Treating the reserved list as the root would lead to a workaround-class fix: *expand the reserved list to include all production tier-groups*. That is N-of-M (AGENT-LLM-A.md §workaround rejection bar): every new tier-group requires an OCaml edit, the SSOT moves *back* into code, and RFC-0058 §2.1 is violated more, not less.
+Treating the reserved list as the root would lead to a workaround-class fix: *expand the reserved list to include all production cascades*. That is N-of-M (AGENT-LLM-A.md §workaround rejection bar): every new cascade requires an OCaml edit, the SSOT moves *back* into code, and RFC-0058 §2.1 is violated more, not less.
 
-**Correction (2026-05-17 amend)**: an earlier draft of this section claimed reserved is *"legitimate as a phase-routing internal only"*. That is **incorrect**. Server log evidence (`masc-mcp-8935.log:562` shows `reserved: tier-group.provider-k-coding-with-spark, tier-group.strict_tool_candidates`) proves the reserved list includes the *current resolved value* of `cascade_name_for_use`, which **reads cascade.toml at runtime**. Hence:
+**Correction (2026-05-17 amend)**: an earlier draft of this section claimed reserved is *"legitimate as a phase-routing internal only"*. That is **incorrect**. Server log evidence (`masc-mcp-8935.log:562` shows `reserved: cascade.provider-k-coding-with-spark, cascade.strict_tool_candidates`) proves the reserved list includes the *current resolved value* of `cascade_name_for_use`, which **reads cascade.toml at runtime**. Hence:
 
 - `local_only` / `recovery` from `phase_routing_cascade_names` are *literal* internal names.
-- `provider-k-coding-with-spark` (and similar) appear in reserved because `Cascade_routes.cascade_name_for_use Tool_required` resolves to whatever the toml currently maps `Tool_required` to (here, `tier-group.strict_tool_candidates`).
+- `provider-k-coding-with-spark` (and similar) appear in reserved because `Cascade_routes.cascade_name_for_use Tool_required` resolves to whatever the toml currently maps `Tool_required` to (here, `cascade.strict_tool_candidates`).
 
 So reserved is **partially catalog-dependent**, not a pure compile-time enum. The dependency direction is *catalog → reserved*, not the other way. Expanding reserved manually still violates SSOT, but the diagnosis is sharper: reserved is *already SSOT-derived for its phase-routing slot*, and the gap is purely the *adapter binary surface* (Bug B). Phase 8.1 + 8.2 close that gap; reserved retains its legitimate role unchanged.
 
@@ -118,7 +118,7 @@ val try_load_partial : string -> partial_load_result option
     in [snapshot] and report failed entries in [errors].
 
     The [snapshot] obeys the invariant that every binding, tier, and
-    tier-group it contains is internally consistent (all cross-references
+    cascade it contains is internally consistent (all cross-references
     resolve). Entries with unresolved references are omitted, not
     half-stitched.
 
@@ -133,7 +133,7 @@ Internally `try_load_partial` walks the adapter's per-binding pipeline and stops
 
 ### 3.2 Adapter-level partial invariant
 
-The adapter (`cascade_declarative_adapter.ml`) must preserve the invariant: **a tier-group surfaced in the snapshot has at least one resolvable member**. Tiers that resolve zero members are omitted from the snapshot and emitted as `Tier_group_empty` errors. This avoids the *half-stitched* failure mode (a tier-group with a dangling member reference that crashes at dispatch).
+The adapter (`cascade_declarative_adapter.ml`) must preserve the invariant: **a cascade surfaced in the snapshot has at least one resolvable member**. Tiers that resolve zero members are omitted from the snapshot and emitted as `Tier_group_empty` errors. This avoids the *half-stitched* failure mode (a cascade with a dangling member reference that crashes at dispatch).
 
 Concretely:
 
@@ -141,8 +141,8 @@ Concretely:
 |---|---|---|
 | Binding (`[<p>.<m>]`) | provider + model | self if both present; else `Provider_not_found` / `Model_not_found` |
 | Tier (`[tier.X]`) | member bindings | self if ≥1 member resolved; else `Tier_group_empty "tier.X"` |
-| Tier-group (`[tier-group.G]`) | tier references | self if ≥1 tier resolved; else `Tier_group_empty "tier-group.G"` |
-| Route (`[routes.R]`) | tier-group | self if tier-group resolved; else `Binding_resolution_failed "routes.R"` |
+| Tier-group (`[cascade.G]`) | tier references | self if ≥1 tier resolved; else `Tier_group_empty "cascade.G"` |
+| Route (`[routes.R]`) | cascade | self if cascade resolved; else `Binding_resolution_failed "routes.R"` |
 
 The snapshot already has this shape internally; we change *exposure*, not *resolution semantics*.
 
@@ -152,7 +152,7 @@ The snapshot already has this shape internally; we change *exposure*, not *resol
 |---|---|---|
 | `declarative_public_catalog_names` (kcp.ml:81) | `Error` on any adapter error | `Ok names` from `partial_load_result.snapshot`; log errors to server log once per reload mtime |
 | `declarative_catalog_lookup_names` (kcp.ml:105) | same | same |
-| `catalog_names_for_validation` (kcp.ml:175) | `Error` on any adapter error | `Ok names` from valid subset; keeper toml validation now sees actual tier-groups |
+| `catalog_names_for_validation` (kcp.ml:175) | `Error` on any adapter error | `Ok names` from valid subset; keeper toml validation now sees actual cascades |
 | `Cascade_catalog_runtime.validate_path_result` (boot gate) | hard fail on any error | **unchanged** — boot still requires clean catalog; partial only applies to live reload |
 | `keeper_types_profile.ml:807-844` fallback path | reached on every adapter error | reached *only* when catalog has zero resolvable entries; reserved list narrows back to *internal phase-routing only* |
 
@@ -162,7 +162,7 @@ The boot-time gate stays strict deliberately: starting up with a broken config s
 
 Once `catalog_names_for_validation` returns the valid subset for partial catalogs:
 
-- `reserved_cascade_names` in `keeper_types_profile.ml:47-50` is still used as a *fast-path skip* (line 803-805). That role is fine — it short-circuits for phase-routing internal names (`tier.local_only`, `tier.recovery`, `tier-group.strict_tool_candidates`). These are RFC-0058-aligned: they are *names defined by RFC-0066* (phase routing), not vendor names hardcoded.
+- `reserved_cascade_names` in `keeper_types_profile.ml:47-50` is still used as a *fast-path skip* (line 803-805). That role is fine — it short-circuits for phase-routing internal names (`tier.local_only`, `tier.recovery`, `cascade.strict_tool_candidates`). These are RFC-0058-aligned: they are *names defined by RFC-0066* (phase routing), not vendor names hardcoded.
 - The *fallback* role at line 838-844 (`Error fallback_error` branch) becomes unreachable in practice, because `catalog_names_for_validation` now returns `Ok []` rather than `Error` when the catalog is degraded. Keeping the branch as defensive code is fine; treating it as the production load path is the bug.
 
 No code deletion is mandatory in Phase 8. The fallback becomes correct-but-irrelevant.
@@ -179,7 +179,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 - `lib/cascade/cascade_declarative_hotpath.ml` — new type, new function, refactor `try_load_declarative` to wrap it.
 - `lib/cascade/cascade_declarative_hotpath.mli` — expose `partial_load_result`, `try_load_partial`.
 
-**Tests:** `test/test_cascade_declarative_hotpath.ml` — `phase8_partial_parse` group, 3 cases; fixture with 1 stale `[ghost.ghost-model]` binding + 1 valid `[tier-group.local-group]`; assert `snapshot.profile_names` contains the tier-group; `errors` list non-empty.
+**Tests:** `test/test_cascade_declarative_hotpath.ml` — `phase8_partial_parse` group, 3 cases; fixture with 1 stale `[ghost.ghost-model]` binding + 1 valid `[cascade.local-group]`; assert `snapshot.profile_names` contains the cascade; `errors` list non-empty.
 
 **Status:** Merged at `423ad519` on 2026-05-17 04:23:28 UTC. No downstream caller switched; pure surface widening.
 
@@ -236,7 +236,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 - Never expose a profile whose tier resolves to zero members
 - Fail-loud (not silently fall back) when a `cascade_name` that *was* in the catalog drops out of the resolvable subset between two reloads
 
-**Why test-only:** §3.3 already asserts the adapter-level invariant (a tier-group surfacing in the snapshot has ≥1 resolvable member). The risk surfaced in §11 is that no test currently exercises *runtime dispatch* against a partial snapshot. We add the tests; if they pass without code change, the invariant is preserved through dispatch. If they fail, that finding triggers Phase 8.4.1 (separate RFC scope).
+**Why test-only:** §3.3 already asserts the adapter-level invariant (a cascade surfacing in the snapshot has ≥1 resolvable member). The risk surfaced in §11 is that no test currently exercises *runtime dispatch* against a partial snapshot. We add the tests; if they pass without code change, the invariant is preserved through dispatch. If they fail, that finding triggers Phase 8.4.1 (separate RFC scope).
 
 **Files:**
 - `test/test_cascade_dispatch_partial.ml` — new file. Cases:
@@ -250,7 +250,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 
 - Not changing `provider_kind` variant elimination (that is RFC-0058 Phase 5).
 - Not making *invalid binding repair* automatic (no fuzzy matching, no "did you mean"). The adapter reports the error; the operator fixes the toml.
-- Not expanding `reserved_cascade_names` to cover production tier-groups — explicitly rejected per AGENT-LLM-A.md §workaround rejection bar §3 (N-of-M abstraction absence).
+- Not expanding `reserved_cascade_names` to cover production cascades — explicitly rejected per AGENT-LLM-A.md §workaround rejection bar §3 (N-of-M abstraction absence).
 - Not changing dispatch-time behavior. Cascade at runtime still operates on the resolved snapshot; this RFC only changes which snapshot reaches the runtime when the source toml has partial errors.
 
 ## 6. Verification
@@ -269,7 +269,7 @@ Honest framing: **8.1 + 8.2 are a regression guard, not an active fix**. The act
 
 Once Phase 8.2 lands:
 
-- Keeper toml validation reaches `catalog_names_for_validation` → `Ok names` containing the resolvable tier-groups.
+- Keeper toml validation reaches `catalog_names_for_validation` → `Ok names` containing the resolvable cascades.
 - Reserved fallback branch (`keeper_types_profile.ml:838-844`) is reachable **only** when the catalog has zero resolvable entries (corrupt file, missing file, or all bindings broken). It remains correct as a defensive last resort.
 - Reserved fast-path (`keeper_types_profile.ml:803-805`) is unchanged. As §1.3 (corrected) clarifies, this list is *catalog-derived for its phase-routing slot*, not a static hardcode. No edit to it is required by 8.x.
 
@@ -280,9 +280,9 @@ This is **one structural fix at the adapter surface**, not a deletion of reserve
 `test/test_cascade_declarative_hotpath.ml` `phase8_partial_parse` group asserts (currently as fixed example-based cases, not yet generative):
 
 ```
-For the fixture (1 stale [ghost.ghost-model] + 1 valid [tier-group.local-group]):
+For the fixture (1 stale [ghost.ghost-model] + 1 valid [cascade.local-group]):
   let { snapshot; errors } = try_load_partial fixture in
-  snapshot.profile_names ⊇ { tier-group.local-group }
+  snapshot.profile_names ⊇ { cascade.local-group }
   errors ⊇ { Provider_not_found "ghost", Model_not_found "ghost-model" }
   errors ∩ snapshot.profile_names = ∅
 ```
@@ -301,7 +301,7 @@ No operator action required. cascade.toml schema unchanged. Existing keepers tha
 
 ## 8. Open questions
 
-- **Q: Should `Tier_group_empty` for *expected-to-be-empty during edit* tier-groups be elevated to error or silenced?** Tentative: keep as `WARN`, dedup by `(path, mtime, tier-group-name)`. Operators editing cascade.toml often leave temporarily empty groups; spamming the log obstructs the actual edit.
+- **Q: Should `Tier_group_empty` for *expected-to-be-empty during edit* cascades be elevated to error or silenced?** Tentative: keep as `WARN`, dedup by `(path, mtime, cascade-name)`. Operators editing cascade.toml often leave temporarily empty groups; spamming the log obstructs the actual edit.
 - **Q: Boot gate — does `cascade-allow-partial-boot` introduce a footgun?** Tentative: yes, hence off-by-default. Operators using it must accept that some keepers will not auto-boot. The dashboard should reflect this via a banner. Phase 8.3 follow-up.
 - **Q: Hot-reload of `try_load_partial` — does it interact with the existing additive merge?** No: `try_load_partial` is a pure function of the file at a given path+mtime. The merge layer at `Cascade_catalog_runtime` continues to compare snapshots and swap atomically.
 

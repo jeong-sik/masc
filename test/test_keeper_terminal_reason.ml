@@ -532,7 +532,7 @@ let test_structured_max_tokens_ceiling_violation () =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Max_tokens_ceiling_violation
          { cascade_name =
-             Cascade_name.of_string_exn "tier-group.keeper_unified"
+             Cascade_name.of_string_exn "cascade.keeper_unified"
          ; requested_max_tokens = 65_536
          ; provider_ceiling = 40_960
          ; reason = "requested_exceeds_provider_ceiling"
@@ -563,7 +563,7 @@ let test_structured_no_tool_capable_provider () =
       (Masc_mcp.Keeper_turn_driver.No_tool_capable_provider
          { cascade_name =
              Cascade_name.of_string_exn
-               "tier-group.provider_k-coding-with-spark"
+               "cascade.provider_k-coding-with-spark"
          ; configured_labels = [ "provider_k:provider_k-5.1" ]
          ; required_tool_names = [ "keeper_tool_search" ]
          ; provider_rejections = []

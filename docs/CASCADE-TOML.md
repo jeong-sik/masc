@@ -8,7 +8,7 @@ five-layer schema instead:
 2. `[models.<model>]`
 3. `[<provider>.<model>]`
 4. `[tier.<tier>]`
-5. `[tier-group.<group>]`
+5. `[cascade.<group>]`
 6. `[routes.<logical-use>]`
 
 The runtime materializer rejects unknown top-level profile tables so old flat
@@ -55,13 +55,13 @@ max-concurrent = 2
 members = ["provider-k-coding.provider-k-5-turbo"]
 strategy = "failover"
 
-[tier-group.provider-k-coding-with-spark]
+[cascade.provider-k-coding-with-spark]
 tiers = ["provider-k-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.provider-k-coding-with-spark"
+target = "cascade.provider-k-coding-with-spark"
 ```
 
 ## Ollama
@@ -90,13 +90,13 @@ max-concurrent = 1
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.recovery]
+[cascade.recovery]
 tiers = ["recovery"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.phase_recovery]
-target = "tier-group.recovery"
+target = "cascade.recovery"
 ```
 
 ## Checked-In Seed Policy

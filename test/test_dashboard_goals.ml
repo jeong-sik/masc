@@ -85,7 +85,7 @@ let rewrite_goal_updated_at config ~goal_id ~updated_at =
   in
   Goal_store.write_state config { state with updated_at; goals }
 
-let test_cascade_name = "tier.test"
+let test_cascade_name = "cascade.test"
 
 let make_keeper_meta ~name ~goal_id =
   match

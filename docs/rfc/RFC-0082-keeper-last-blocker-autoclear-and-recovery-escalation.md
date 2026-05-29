@@ -126,7 +126,7 @@ In a fleet of 18 keepers, 6 became stuck (`distinct_count=6` in `stale_fleet_bat
 ### Non-goals
 
 - Provider health probe redesign — that is upstream of this RFC and stays in `lib/keeper/keeper_health_probe.ml`. This RFC only touches the *consumption* of probe results.
-- Cascade strategy redesign (`tier-group.*` member selection) — out of scope.
+- Cascade strategy redesign (`cascade.*` member selection) — out of scope.
 - Generation lifecycle redesign — generation semantics ("identity reset counter") are correct; this RFC does not propose renaming or repurposing.
 
 ## §3 Design
@@ -292,7 +292,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
    ```
    Direct JSON edits while the server is running race with `main_eio` meta writes — only safe with server stopped.
 2. **Wait for Phase 3 (admin endpoint)** and use the dashboard *OVERRIDE* button.
-3. **Cascade-side fix**: ensure cascade `tier-group` member providers (e.g. `cli-tool-d.claude-auto.tool_candidate`, `cli-tool-c.provider-c-cli-coding.tool_candidate`) are healthy (CLI binaries installed, credentials valid). If a *normal-path* turn then completes, one of the six existing clear sites (§1.2 Axis C #5) will fire. *Stale-exit* keepers still need the stale-recovery flow that Phase 0.6 must trace before Phase 1 lands.
+3. **Cascade-side fix**: ensure cascade `cascade` member providers (e.g. `cli-tool-d.claude-auto.tool_candidate`, `cli-tool-c.provider-c-cli-coding.tool_candidate`) are healthy (CLI binaries installed, credentials valid). If a *normal-path* turn then completes, one of the six existing clear sites (§1.2 Axis C #5) will fire. *Stale-exit* keepers still need the stale-recovery flow that Phase 0.6 must trace before Phase 1 lands.
 
 ## §7 Risks
 

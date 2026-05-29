@@ -43,7 +43,7 @@ Adding a provider requires OCaml compilation. The system cannot express:
 1. Per-provider×model concurrency/capacity slots
 2. Same provider registered twice (e.g., two Provider-A accounts)
 3. Aliases — per-use overrides of a provider×model binding
-4. Routing by tier/group composition, not by hardcoded profile name
+4. Routing by cascade composition, not by hardcoded profile name
 
 **Root cause**: `Provider_kind.t` is a closed sum type. Provider identity
 should be a config-defined string, not a variant constructor.
@@ -67,7 +67,7 @@ Layer 1: [providers.*]     — How to connect (protocol, transport, credentials)
 Layer 2: [models.*]        — What it can do (capabilities, context window)
 Layer 3: [<p>.<m>]         — How much, at what cost (capacity, pricing)
 Layer 4: [<p>.<m>.<a>]     — Per-use overrides (aliases)
-Layer 5: [tier.*] + [tier-group.*] + [routes.*] — Routing strategy
+Layer 5: [tier.*] + [cascade.*] + [routes.*] — Routing strategy
 ```
 
 The naming convention IS the reference: `[agent-llm-a-code.haiku]` implicitly
@@ -129,18 +129,8 @@ type alias = {
   temperature : float option;
 }
 
-type tier = {
-  name : string;
-  members : string list;      (* "provider.model" or "provider.model.alias" *)
-  strategy : strategy;
-  max_concurrent : int option; (* tier-level cap *)
-}
-
-type tier_group = {
-  name : string;
-  tiers : string list;
-  strategy : strategy;
-}
+(* tier and tier_group types removed in PR #19381.
+   Routing now uses direct cascade names (provider:model format). *)
 
 type system_route = {
   name : string;              (* e.g. "governance" *)
@@ -173,7 +163,7 @@ Note: vLLM, LM Studio, and other Provider-D-compatible servers all use
 
 ### 3.1 Reserved Top-Level Namespaces
 
-`providers`, `models`, `system`, `tier`, `tier-group`, `routes`, `profiles`
+`providers`, `models`, `system`, `tier`, `cascade`, `routes`, `profiles`
 
 Any provider alias that collides with a reserved namespace is a load-time error.
 
@@ -374,23 +364,23 @@ max-concurrent = 5
 members = ["ollama.qwen3-8b"]
 strategy = "failover"
 
-[tier-group.primary]
+[cascade.primary]
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.rerank-only]
+[cascade.rerank-only]
 tiers = ["rerank"]
 strategy = "failover"
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "cascade.primary"
 
 [routes.governance_judge]
-target = "tier-group.primary"
+target = "cascade.primary"
 
 [routes.scoring]
-target = "tier-group.rerank-only"
+target = "cascade.rerank-only"
 
 [routes.simple_task]
 target = "tier.local"
@@ -422,7 +412,7 @@ target = "agent-llm-a-code.haiku.for-governance"
 3. Alias `max-input` ≤ binding's effective `max-input` ≤ model's `max-context`
 4. Tier members must resolve to valid bindings or aliases
 5. Tier-group tiers must resolve to valid tiers
-6. Route targets must resolve to valid tier-groups
+6. Route targets must resolve to valid cascades
 7. Provider alias must not collide with reserved namespaces
 8. `is-default = true` — at most one per provider
 9. Unknown fields in any table = load error (catch typos at config time)
@@ -483,7 +473,7 @@ binding/alias path.
 | `cascade_config_loader.ml` | Profile loading → declarative config loading |
 | `cascade_catalog_runtime.ml` | Profile snapshot → binding/tier snapshot |
 | `cascade_config.ml` | Re-exports → updated types |
-| `cascade_routes.ml` | Route mapping → tier-group routing |
+| `cascade_routes.ml` | Route mapping → cascade routing |
 | `cascade_strategy.ml` | Strategy selection → config-driven strategy |
 | `cascade_pool.ml` | Model pool → binding pool |
 
@@ -590,7 +580,7 @@ ships independently.
 - [ ] Per-binding capacity slots work
 - [ ] Cross-reference validation catches all invalid configs at startup
 - [ ] Existing cascade routes expressible in new schema
-- [ ] Tier/tier-group routing works (within-tier failover + between-tier priority)
+- [ ] Tier/cascade routing works (within-tier failover + between-tier priority)
 - [ ] Adding a new provider = TOML entry only (no compilation for existing protocols)
 - [ ] All existing integration tests pass (migrated to new schema)
 - [ ] `cascade.json` no longer generated or consumed

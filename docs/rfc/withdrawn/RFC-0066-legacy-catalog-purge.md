@@ -23,7 +23,7 @@ withdrawn_reason: "Self-positioned as 'closeout phase' of RFC-0058 (declarative 
 
 ## 1. Problem
 
-After RFC-0058 §9 (Phase 9.1–9.4) eliminated the on-disk `cascade.json`, the codebase still carries a *legacy catalog discovery* path that scans flat `<profile>_models` JSON keys emitted by the materializer's per-profile fallback layout. Production `cascade.toml` has migrated entirely to the declarative `[providers.X]` / `[tier-group.X]` namespaces; the legacy `Cascade_config_loader.load_catalog` returns `[]` on every production read.
+After RFC-0058 §9 (Phase 9.1–9.4) eliminated the on-disk `cascade.json`, the codebase still carries a *legacy catalog discovery* path that scans flat `<profile>_models` JSON keys emitted by the materializer's per-profile fallback layout. Production `cascade.toml` has migrated entirely to the declarative `[providers.X]` / `[cascade.X]` namespaces; the legacy `Cascade_config_loader.load_catalog` returns `[]` on every production read.
 
 The mismatch causes a known production divergence:
 
@@ -65,7 +65,7 @@ Delete `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_pr
 
 ### 2.2 Production cascade.toml shape
 
-Inspected `config/cascade.toml` at HEAD `49566db3d` (2026-05-11): top-level namespaces are exclusively `providers.`, `models.`, `routes.`, `tier.`, `tier-group.`, `profiles.`. Zero per-profile `[X]\nmodels = [...]` blocks. The flat materializer arm contributes nothing to the production runtime path.
+Inspected `config/cascade.toml` at HEAD `49566db3d` (2026-05-11): top-level namespaces are exclusively `providers.`, `models.`, `routes.`, `tier.`, `cascade.`, `profiles.`. Zero per-profile `[X]\nmodels = [...]` blocks. The flat materializer arm contributes nothing to the production runtime path.
 
 ### 2.3 Live declarative reader
 
@@ -114,16 +114,16 @@ For very hot paths that pre-RFC read the cached-string, introduce `default_casca
 
 Two strategies:
 
-1. **Per-profile → declarative tier-group**: each `[X]\nmodels = ["provider:auto"]` block becomes
+1. **Per-profile → declarative cascade**: each `[X]\nmodels = ["provider:auto"]` block becomes
    ```toml
    [tier.X]
    members = ["X-binding"]   # references a binding name
 
-   [tier-group.X]
+   [cascade.X]
    tiers = ["X"]
 
    [routes.keeper_turn]      # if X was the keeper default
-   target = "tier-group.X"
+   target = "cascade.X"
    ```
    Plus the matching `[providers.<provider>]` + `[<provider>.<model>]` binding blocks.
 
@@ -187,7 +187,7 @@ Final acceptance:
 
 ### 5.2 Per-profile-only operator configs
 
-Audit each known operator setup (kidsnote, internal envs). If any operator has a per-profile `cascade.toml` they wrote by hand, Phase 4 breaks them. Mitigation: Phase 4 ships with a migration script (`scripts/cascade/migrate_flat_to_declarative.sh`) that converts per-profile blocks to the equivalent tier-group/binding triple, and a one-release deprecation window where the materializer arm logs a `WARN` on use.
+Audit each known operator setup (kidsnote, internal envs). If any operator has a per-profile `cascade.toml` they wrote by hand, Phase 4 breaks them. Mitigation: Phase 4 ships with a migration script (`scripts/cascade/migrate_flat_to_declarative.sh`) that converts per-profile blocks to the equivalent cascade/binding triple, and a one-release deprecation window where the materializer arm logs a `WARN` on use.
 
 ### 5.3 Test suite migration churn
 

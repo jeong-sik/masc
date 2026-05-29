@@ -147,8 +147,8 @@ Keeper_turn_driver.run_named ~ctx:{ ctx with deadline = Some deadline } ...
 - **Fleet criterion**: 24h post PR-3 머지, `ambiguous_partial_commit` HITL latch 발동 0건.
 - **PR-4 머지 조건**: 7-day fleet, 다음 두 metric 모두 0:
   - `cascade_attempt_watchdog_floor_fired_count` (있다면 emit)
-  - `keeper_turn_timeout_ceiling_hit_count` for `tier-group.glm-coding-with-spark` /
-    `tier-group.primary` / `tier-group.governance`
+  - `keeper_turn_timeout_ceiling_hit_count` for `cascade.glm-coding-with-spark` /
+    `cascade.primary` / `cascade.governance`
 - Issue #18845 close at PR-4 merge.
 
 ## 7. TLA+ hint (optional, RFC-0136 spec hygiene)

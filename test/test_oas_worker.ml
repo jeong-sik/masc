@@ -174,7 +174,7 @@ max-concurrent = 1
 members = [%s]
 strategy = "failover"
 
-[tier-group.%s]
+[cascade.%s]
 tiers = [%s]
 strategy = "priority_tier"
 fallback = true

@@ -1,8 +1,8 @@
 (** Golden test pinning judge-route intent in [config/cascade.toml].
 
     The four judge routes (governance_judge, operator_judge,
-    cross_verifier, verifier) must target [tier-group.governance],
-    not [tier-group.primary] or any other production lane.
+    cross_verifier, verifier) must target [cascade.governance],
+    not [cascade.primary] or any other production lane.
 
     Regression bar for PR #18695 — a re-introduction of the mis-route
     that caused governance_judge to time out at 45s every refresh cycle
@@ -18,10 +18,10 @@ open Alcotest
 let cascade_toml_path = "config/cascade.toml"
 
 let expected_judge_routes : (string * string) list =
-  [ "governance_judge", "tier-group.governance"
-  ; "operator_judge", "tier-group.governance"
-  ; "cross_verifier", "tier-group.governance"
-  ; "verifier", "tier-group.governance"
+  [ "governance_judge", "cascade.governance"
+  ; "operator_judge", "cascade.governance"
+  ; "cross_verifier", "cascade.governance"
+  ; "verifier", "cascade.governance"
   ]
 
 let read_route_target ~route_key (toml : Otoml.t) : string option =
@@ -32,7 +32,7 @@ let read_route_target ~route_key (toml : Otoml.t) : string option =
      | s -> Some s)
   | None -> None
 
-let test_judge_routes_target_governance_tier_group () =
+let test_judge_routes_target_governance_cascade () =
   let toml = Otoml.Parser.from_file cascade_toml_path in
   List.iter
     (fun (route_key, expected_target) ->
@@ -59,8 +59,8 @@ let () =
     "cascade_judge_route_intent_golden"
     [ ( "judge_route_targets"
       , [ test_case
-            "all four judge routes target tier-group.governance"
+            "all four judge routes target cascade.governance"
             `Quick
-            test_judge_routes_target_governance_tier_group
+            test_judge_routes_target_governance_cascade
         ] )
     ]

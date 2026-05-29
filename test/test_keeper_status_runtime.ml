@@ -980,7 +980,7 @@ let test_runtime_surface_exposes_cascade_attempt_facts () =
   in
   let base =
     make_meta ~name:"runtime-cascade-attempt-facts-test" ()
-    |> Keeper_meta_contract.set_cascade_name "tier-group.strict_tool_candidates"
+    |> Keeper_meta_contract.set_cascade_name "cascade.strict_tool_candidates"
   in
   let meta =
     { base with
@@ -998,7 +998,7 @@ let test_runtime_surface_exposes_cascade_attempt_facts () =
   let facts = runtime |> member "runtime_blocker_facts" in
   check string "facts source" "keeper_runtime.last_cascade_attempt"
     (facts |> member "source" |> to_string);
-  check string "facts cascade" "tier-group.strict_tool_candidates"
+  check string "facts cascade" "cascade.strict_tool_candidates"
     (facts |> member "cascade_name" |> to_string);
   let last_attempt = facts |> member "last_cascade_attempt" in
   check string "attempt provider_id" attempt.provider_id

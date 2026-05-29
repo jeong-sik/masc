@@ -6,7 +6,7 @@
     [Error "declarative cascade catalog invalid: ..."], dropping keeper
     toml validation onto the [reserved_cascade_names] fallback. With the
     Phase 8 partial-parse surface and Phase 8.2 caller switch, the same
-    fixture must surface the valid tier-group names via [Ok names].
+    fixture must surface the valid cascade names via [Ok names].
 
     @stability Internal *)
 
@@ -33,7 +33,7 @@ let with_env name value f =
     f
 
 (* Same shape as the 2026-05-17 cascade.toml mid-edit state: one stale
-   binding plus a valid tier-group. The valid tier-group must reach
+   binding plus a valid cascade. The valid cascade must reach
    the keeper validator. *)
 let partial_cascade_toml = {|
 [providers.ollama]
@@ -51,7 +51,7 @@ tools-support = true
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.local-group]
+[cascade.local-group]
 tiers = ["local"]
 strategy = "failover"
 
@@ -94,9 +94,9 @@ let test_catalog_names_for_validation_surface_partial () =
          loading on 2026-05-17. Now it accepts the valid subset. *)
       check bool "keeper validator accepts partial catalog" true
         (List.length names > 0);
-      check bool "tier-group.local-group surfaces (qualified or stripped)" true
+      check bool "cascade.local-group surfaces (qualified or stripped)" true
         (List.exists
-           (fun n -> n = "tier-group.local-group" || n = "local-group")
+           (fun n -> n = "cascade.local-group" || n = "local-group")
            names))
 
 (* [catalog_names] is the read-mostly accessor used by dashboard /
@@ -106,7 +106,7 @@ let test_catalog_names_surface_partial () =
     let names = KCP.catalog_names ~config_path:cascade_path () in
     check bool "catalog_names returns non-empty for partial" true
       (List.length names > 0);
-    check bool "tier-group.local-group present" true
+    check bool "cascade.local-group present" true
       (List.exists (fun n -> n = "local-group") names))
 
 let test_catalog_names_result_surface_partial () =

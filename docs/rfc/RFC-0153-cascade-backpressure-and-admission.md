@@ -68,7 +68,7 @@ The closeout cohort that landed within the same week:
 
 제안 5단계:
 - **Phase A** — Time cap 의미 분리 (kill switch → typed `Cascade_saturation_signal`). OpenClaw `x-should-retry: false` 패턴 차용 (§7).
-- **Phase B** — Tier-level admission semaphore (Eio.Semaphore per tier-group).
+- **Phase B** — Tier-level admission semaphore (Eio.Semaphore per cascade).
 - **Phase C** — Adaptive client-side throttling (Google SRE Handbook §21 공식).
 - **Phase D** — RFC-0152 보완. **D.1** fixed cooldown ladder (OpenClaw 1m→5m→25m→1h validated). **D.2** EWMA decay (novel, deferred).
 - **Phase E** — Cascade → deadline-aware scheduler 재모델링 (별도 RFC 후보, 6개월 운영 데이터 후).
@@ -114,7 +114,7 @@ let rec try_cascade candidates ... =
 
 ### 1.3 사건 사슬 — 03:22:47~48 sangsu (대표 사례)
 
-1. tier-group `strict_tool_candidates` 시도
+1. cascade `strict_tool_candidates` 시도
 2. `max_execution_time 300s` hard timer fire
 3. cascade가 즉시 다음 후보로 ⇒ `productive slot 180s exhausted after 300.3s`
 4. "all cascades exhausted (terminal)" — 모두 1초 내 발생
@@ -139,7 +139,7 @@ let rec try_cascade candidates ... =
 
 - Provider health probe redesign (RFC-0127).
 - `transient_http_status` 분류 수정.
-- `cascade.toml` tier-group 멤버 선택 전략.
+- `cascade.toml` cascade 멤버 선택 전략.
 - last_blocker 경로 (RFC-0082, BLOCKED).
 - 새 wire-format / API surface (Phase A는 *추가만*).
 
@@ -269,11 +269,11 @@ val with_admission :
 | `Cascade_throttle` (기존) | per-URL | llama-server `/slots` Discovery — server-reported capacity | 자동 (Discovery loop) | server-side slot 수치 미러링 |
 | `Cascade_client_capacity` (기존, @since 0.9.6) | **per-URL endpoint** | ollama 등 slot 개념 없는 server 보호 — 같은 GPU 동시 hammer 방지 | `keeper_turn_driver.acquire_client_capacity_slot` (try_cascade 안) | `MASC_CLIENT_CAPACITY` env 로 register, `try_acquire` → `None` 시 cascade 가 next candidate (no queueing) |
 | `Admission_queue_*` variants (기존) | turn-level | error classification — provider 가 admission queue 거부 신호 보낼 때 | `cascade_error_classify.ml` 안 | error→retry 정책 분기 |
-| **`Cascade_tier_admission`** (NEW, B.1) | **per-tier-group** | tier 전체 동시성 cap — 같은 tier 안 여러 endpoint 합산 admission | (B.2 wire-in 예정) `try_cascade` *outer wrap* | `with_admission` → `Capacity_full` signal emit, cascade 가 next tier |
+| **`Cascade_tier_admission`** (NEW, B.1) | **per-cascade** | tier 전체 동시성 cap — 같은 tier 안 여러 endpoint 합산 admission | (B.2 wire-in 예정) `try_cascade` *outer wrap* | `with_admission` → `Capacity_full` signal emit, cascade 가 next tier |
 
 핵심 차이:
 - `Cascade_client_capacity` = **endpoint(URL) 1개당 동시 N개**. 한 endpoint 가 saturated 면 *같은 tier 안 다른 endpoint* 시도 가능.
-- `Cascade_tier_admission` = **tier-group 전체 동시 N개**. tier 가 saturated 면 *그 tier 전체 skip*, next tier 로.
+- `Cascade_tier_admission` = **cascade 전체 동시 N개**. tier 가 saturated 면 *그 tier 전체 skip*, next tier 로.
 
 호출 site 순서 (B.2 wire-in 시):
 ```
@@ -299,7 +299,7 @@ keeper_turn_driver.try_cascade
         └── { providers : Provider_config.t list; secondary_resolver }
 ```
 
-`providers` 는 *flattened* provider 리스트로, **parent tier-group identity 가 손실**됨. `try_cascade` 가 candidate 를 받을 시점에는 그 candidate 가 어느 tier-group 에 속하는지 알 수 없음.
+`providers` 는 *flattened* provider 리스트로, **parent cascade identity 가 손실**됨. `try_cascade` 가 candidate 를 받을 시점에는 그 candidate 가 어느 cascade 에 속하는지 알 수 없음.
 
 → Phase B.2 wire-in 의 진짜 prerequisite:
 - (a) `resolve_named_providers_strict*` 의 return type 을 `(Provider_config.t * tier_id) list` 로 확장, 또는
@@ -314,7 +314,7 @@ PR #17013 (`feat(cascade): wire tier admission into keeper attempts`, merged 202
 
 | 측면 | §4.2 원래 design | PR #17013 실제 구현 |
 |---|---|---|
-| Admission unit | per-tier-group (cascade.toml `[tier-group.X]`) | **per-cascade-name** (`tier_admission_id = cascade_name`) |
+| Admission unit | per-cascade (cascade.toml `[cascade.X]`) | **per-cascade-name** (`tier_admission_id = cascade_name`) |
 | Capacity 설정 | cascade.toml `max_inflight = 8` per group | 단일 `Cascade_tier_admission.create ()` (default cap 8) |
 | Policy 결정 | caller site 매핑 (§4.2 본문 테이블) | **per-priority** (`cascade_tier_admission_policy_of_priority : Request_priority.t -> admission_policy`) — Proactive→Required, Background→Bypass |
 | Env flag | (별도) | A.2 와 공유: `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` |
@@ -323,21 +323,21 @@ PR #17013 (`feat(cascade): wire tier admission into keeper attempts`, merged 202
 
 **Trade-off**:
 - ✅ §4.2.2 의 5+ caller chain plumbing 부담 제거. wire-in 3 파일로 완료 (lib/keeper/keeper_turn_driver.{ml,mli} + test).
-- ⚠️ per-tier-group cap (RFC §4.2 의 원래 motivation) 미실현. 한 cascade_name 안 여러 tier-group 이 같은 counter 공유 → tier 간 *상호 starvation* 가능.
+- ⚠️ per-cascade cap (RFC §4.2 의 원래 motivation) 미실현. 한 cascade_name 안 여러 cascade 이 같은 counter 공유 → tier 간 *상호 starvation* 가능.
 - ⚠️ priority 분류가 cascade.toml tier 구조와 *직교* — 한 cascade_name 안 Proactive + Background 가 같은 admission counter 공유.
 - ⚠️ `MASC_CLIENT_CAPACITY` (§4.2.1 inner layer) 와 cap 값 정합성 검증 부재.
 
 **Future work**:
-- per-tier-group granularity 가 측정상 진짜 필요한지 6개월 데이터로 결정 (§5 Phase E).
+- per-cascade granularity 가 측정상 진짜 필요한지 6개월 데이터로 결정 (§5 Phase E).
 - 필요 시 §4.2.2 plumbing 의 3 옵션 중 (c) `Cascade_runtime_candidate.t.tier_id` 가 가장 저비용 (build site 한 곳만 변경).
 - cascade.toml `max_inflight` 스키마는 *deferred* — 우선 모든 cascade default 8 로 운영하며 saturation signal 분포 측정.
 
-§11 Phased Rollout 의 B.2 단계가 PR #17013 으로 *partial-fulfilled*. cascade.toml 스키마 + per-tier-group cap 는 future work.
+§11 Phased Rollout 의 B.2 단계가 PR #17013 으로 *partial-fulfilled*. cascade.toml 스키마 + per-cascade cap 는 future work.
 
 **cascade.toml 스키마 확장** (deferred per §4.2.3):
 
 ```toml
-[tier-group.strict_tool_candidates]
+[cascade.strict_tool_candidates]
 tiers = [...]
 max_inflight = 8                  # NEW (optional, default 8)
 admission_wait_ms = 2000          # NEW (optional, default 2000)

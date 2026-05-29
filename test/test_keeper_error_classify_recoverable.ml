@@ -22,11 +22,11 @@ module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
 
-(* #19327 tier-group purge: Cascade_name is now a plain string alias. *)
+(* #19327 cascade purge: Cascade_name is now a plain string alias. *)
 let cascade_name raw = Cascade_name.of_string_exn (String.trim raw)
 ;;
 
-let test_cascade = cascade_name "tier.test_cascade"
+let test_cascade = cascade_name "cascade.test_cascade"
 
 let make_cascade_exhausted reason =
   Owne.sdk_error_of_masc_internal_error
@@ -211,23 +211,23 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Expected catalog-ordered degraded retry"
 
-let test_rotation_skips_direct_tier_after_attempted_tier_group () =
+let test_rotation_skips_direct_tier_after_attempted_cascade () =
   let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match
     KEC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:
-        [ "tier.strict_tool_candidates"; "tier-group.provider_k-coding-with-spark" ]
-      ~base_cascade:"tier-group.strict_tool_candidates"
-      ~effective_cascade:"tier-group.strict_tool_candidates"
+        [ "cascade.strict_tool_candidates"; "cascade.provider_k-coding-with-spark" ]
+      ~base_cascade:"cascade.strict_tool_candidates"
+      ~effective_cascade:"cascade.strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "tier-group.strict_tool_candidates" ]
+      ~attempted_cascades:[ "cascade.strict_tool_candidates" ]
       err
   with
   | Some retry ->
     check
       string
       "skip direct tier duplicate"
-      "tier-group.provider_k-coding-with-spark"
+      "cascade.provider_k-coding-with-spark"
       retry.next_cascade
   | None -> fail "Expected rotation to skip duplicate direct tier candidate"
 
@@ -236,7 +236,7 @@ let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
     Owne.sdk_error_of_masc_internal_error
       (Owne.Resumable_cli_session
          {
-           cascade_name = cascade_name "tier.strict_tool_candidates";
+           cascade_name = cascade_name "cascade.strict_tool_candidates";
            detail =
              "CLI JSON-stream transport reported a resumable session (exit 75). \
               Resumable session available via -r.";
@@ -265,7 +265,7 @@ let test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted ()
     Owne.sdk_error_of_masc_internal_error
       (Owne.Resumable_cli_session
          {
-           cascade_name = cascade_name "tier.strict_tool_candidates";
+           cascade_name = cascade_name "cascade.strict_tool_candidates";
            detail =
              "CLI JSON-stream transport reported a resumable session (exit 75). \
               Resumable session available via -r.";
@@ -468,18 +468,18 @@ let test_rotation_finds_next_cascade_for_auth_error () =
 
 (* ---- Bare-name requalification tests (cascade-name-prefix-mismatch fix) ---- *)
 
-(* #19327 tier-group purge: test_normalized_cascade_name_requalifies_bare_tier_name
+(* #19327 cascade purge: test_normalized_cascade_name_requalifies_bare_tier_name
    removed.  It asserted bare "strict_tool_candidates" was rewritten to
-   "tier.strict_tool_candidates" using the prefix canonical form, which is
+   "cascade.strict_tool_candidates" using the prefix canonical form, which is
    no longer the semantics of [normalized_cascade_name]. *)
 
 let test_normalized_cascade_name_passes_through_already_qualified () =
   let catalog_names = [ "strict_tool_candidates"; "primary" ] in
   let result =
-    KEC.normalized_cascade_name ~catalog_names "tier.strict_tool_candidates"
+    KEC.normalized_cascade_name ~catalog_names "cascade.strict_tool_candidates"
   in
   check string "already-qualified passes through"
-    "tier.strict_tool_candidates" result
+    "cascade.strict_tool_candidates" result
 
 let test_normalized_cascade_name_preserves_config_special_names () =
   let catalog_names = [] in
@@ -551,8 +551,8 @@ let () =
         [
           test_case "catalog order is not prefixed by base cascade" `Quick
             test_catalog_rotation_preserves_order_without_base_injection;
-          test_case "skips direct tier after attempted tier-group" `Quick
-            test_rotation_skips_direct_tier_after_attempted_tier_group;
+          test_case "skips direct tier after attempted cascade" `Quick
+            test_rotation_skips_direct_tier_after_attempted_cascade;
           test_case "required-tool rotation prefers tool route before fallback hint" `Quick
             test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint;
           test_case "required-tool rotation keeps fallback hint after tool route" `Quick

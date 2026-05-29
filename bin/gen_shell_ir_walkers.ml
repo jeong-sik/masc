@@ -3629,6 +3629,15 @@ let rec parse subcmd v race dd = function
     when not dd && String.length arg > 0 && arg.[0] = '-'
          && List.mem arg go_value_flags ->
     parse subcmd v race dd rest
+  (* Eq-form value flags: --flag=VALUE *)
+  | arg :: rest
+    when not dd
+         && (let s = arg in
+             String.length s > 2 && s.[0] = '-'
+             && (match String.index_opt s '=' with
+                 | Some i -> List.mem (String.sub s 0 i) go_value_flags
+                 | None -> false)) ->
+    parse subcmd v race dd rest
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd v race true rest
   | arg :: rest ->
@@ -4734,6 +4743,15 @@ let rec parse subcmd w lf dd = function
   | arg :: _val :: rest
     when not dd && List.mem arg [ "-tabs"; "-tabwidth"; "-comments" ] ->
     parse subcmd w lf dd (_val :: rest)
+  (* Eq-form value flags: -flag=VALUE *)
+  | arg :: rest
+    when not dd
+         && (let s = arg in
+             String.length s > 2 && s.[0] = '-'
+             && (match String.index_opt s '=' with
+                 | Some i -> List.mem (String.sub s 0 i) [ "-tabs"; "-tabwidth"; "-comments" ]
+                 | None -> false)) ->
+    parse subcmd w lf dd rest
   | "--" :: rest -> parse subcmd w lf true rest
   | arg :: rest ->
     (match subcmd with
@@ -4883,7 +4901,7 @@ parse None false false false args|}
     | arg :: rest
       when not dd
            && (let s = arg in
-               String.length s > 2 && String.sub s 0 2 = "--"
+               String.length s > 2 && s.[0] = '-'
                && (match String.index_opt s '=' with
                    | Some i -> List.mem (String.sub s 0 i) [ "-C"; "-f"; "-k"; "-l"; "-d" ]
                    | None -> false)) ->

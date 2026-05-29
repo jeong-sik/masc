@@ -1919,7 +1919,39 @@ let test_batch15_value_consuming_flags () =
   in
   (match w_rsync_exclude_eq with
    | W (Rsync { source = "src/"; dest = "dest/"; archive = true; flags = [ "--exclude"; "*.o" ]; _ }) -> ()
-   | w -> Alcotest.failf "Rsync --exclude=VALUE: expected flags=[--exclude;*.o], got %a" pp w)
+   | w -> Alcotest.failf "Rsync --exclude=VALUE: expected flags=[--exclude;*.o], got %a" pp w);
+  (* Go: -count=1 test — eq-form flag skipped, test becomes subcommand *)
+  let w_go_count_eq =
+    of_simple
+      { (base "go") with args = [ lit "-count=1"; lit "test" ] }
+  in
+  (match w_go_count_eq with
+   | W (Go { subcommand = "test"; _ }) -> ()
+   | w -> Alcotest.failf "Go -count=1: expected sub=test, got %a" pp w);
+  (* Go: -count 1 test — space-form flag skipped, test becomes subcommand *)
+  let w_go_count_space =
+    of_simple
+      { (base "go") with args = [ lit "-count"; lit "1"; lit "test" ] }
+  in
+  (match w_go_count_space with
+   | W (Go { subcommand = "test"; _ }) -> ()
+   | w -> Alcotest.failf "Go -count 1: expected sub=test, got %a" pp w);
+  (* Gofmt: -tabs=false file.go — eq-form flag skipped, file.go becomes subcommand *)
+  let w_gofmt_tabs_eq =
+    of_simple
+      { (base "gofmt") with args = [ lit "-tabs=false"; lit "main.go" ] }
+  in
+  (match w_gofmt_tabs_eq with
+   | W (Gofmt { subcommand = "main.go"; _ }) -> ()
+   | w -> Alcotest.failf "Gofmt -tabs=false: expected sub=main.go, got %a" pp w);
+  (* Ninja: -C=build — eq-form flag skipped *)
+  let w_ninja_c_eq =
+    of_simple
+      { (base "ninja") with args = [ lit "-C=build"; lit "all" ] }
+  in
+  (match w_ninja_c_eq with
+   | W (Ninja { subcommand = "all"; _ }) -> ()
+   | w -> Alcotest.failf "Ninja -C=build: expected sub=all, got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions

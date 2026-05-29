@@ -739,7 +739,7 @@ module Dashboard = struct
       [server_dashboard_http_core.ml:624,633,678] (mission projections).
       Default 25s preserves the pre-extraction inline literal. Floor 1s
       protects against degenerate operator config. *)
-  let mission_timeout_sec =
+  let briefing_timeout_sec =
     Float.max 1.0
       (get_float ~default:25.0 "MASC_DASHBOARD_MISSION_TIMEOUT_SEC")
 
@@ -771,7 +771,7 @@ module Dashboard = struct
       literal at [dashboard_execution.ml:204]. Floor 5s ensures even
       aggressive operator overrides leave room for cold-start hydration.
       Render budget should comfortably exceed the longest inner compute
-      budget (currently [mission_timeout_sec] = 25s). *)
+      budget (currently [briefing_timeout_sec] = 25s). *)
   let render_timeout_sec =
     Float.max 5.0
       (get_float ~default:60.0 "MASC_DASHBOARD_RENDER_TIMEOUT_SEC")

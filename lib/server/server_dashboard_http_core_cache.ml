@@ -95,7 +95,7 @@ let dashboard_cache_key (config : Coord.config) prefix suffix =
     suffix
 ;;
 
-let dashboard_mission_timeout_s = Env_config_runtime.Dashboard.mission_timeout_sec
+let dashboard_briefing_timeout_s = Env_config_runtime.Dashboard.briefing_timeout_sec
 
 let attach_projection_diagnostics json diagnostics =
   match json with

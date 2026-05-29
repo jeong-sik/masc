@@ -608,15 +608,15 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          handle_dashboard_task_history state req reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/briefing" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
-           Printf.sprintf "mission:%s" state.Mcp_server.room_config.base_path
+           Printf.sprintf "briefing:%s" state.Mcp_server.room_config.base_path
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_mission_http_json ~state ~sw ~clock req))
+               dashboard_briefing_http_json ~state ~sw ~clock req))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -650,7 +650,7 @@ let rec add_routes ~sw ~clock router =
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
            Printf.sprintf "mission_briefing:%s"
@@ -659,7 +659,7 @@ let rec add_routes ~sw ~clock router =
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_mission_briefing_http_json ~state ~sw ~clock req))
+               dashboard_briefing_sections_http_json ~state ~sw ~clock req))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

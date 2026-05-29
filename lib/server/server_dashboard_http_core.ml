@@ -40,7 +40,7 @@ let _last_good_shell_light = Server_dashboard_http_core_cache._last_good_shell_l
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
 let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
-let dashboard_mission_timeout_s = Server_dashboard_http_core_cache.dashboard_mission_timeout_s
+let dashboard_briefing_timeout_s = Server_dashboard_http_core_cache.dashboard_briefing_timeout_s
 let attach_projection_diagnostics = Server_dashboard_http_core_cache.attach_projection_diagnostics
 let projection_diagnostics_json = Server_dashboard_http_core_cache.projection_diagnostics_json
 let with_projection_diagnostics = Server_dashboard_http_core_cache.with_projection_diagnostics
@@ -127,7 +127,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
       |> fun run_compute ->
       let result =
         run_compute (fun ~config ~sw ->
-          Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
+          Dashboard_briefing.json ~config ~sw ~clock ~proc_mgr ())
       in
       let dt_total = Unix.gettimeofday () -. t0_mission in
       if dt_total >= 5.0 then Log.Dashboard.warn "[mission profile] total=%.1fs" dt_total;
@@ -151,7 +151,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~on_result:(mark_cached_surface_success mission_cache)
 ;;
 
-let dashboard_mission_http_json ~state ~sw ~clock request =
+let dashboard_briefing_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
     dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
@@ -166,7 +166,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
-         Dashboard_mission.json
+         Dashboard_briefing.json
            ?actor
            ~config
            ~sw
@@ -184,10 +184,10 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
            when proactive warm-up misses its first build window. *)
       cached_surface_or_first_success_json
         mission_cache
-        ~cache_key:"mission:default"
+        ~cache_key:"briefing:default"
         ~ttl:deep_surface_cache_ttl_s
         ~clock
-        ~timeout_sec:dashboard_mission_timeout_s
+        ~timeout_sec:dashboard_briefing_timeout_s
         (fun () -> compute ())
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
@@ -201,7 +201,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
         cache_key
         ~ttl:deep_surface_cache_ttl_s
         ~clock
-        ~timeout_sec:dashboard_mission_timeout_s
+        ~timeout_sec:dashboard_briefing_timeout_s
         (compute ?actor)
   in
   full_json
@@ -210,7 +210,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
   | Some session_id when String.trim session_id <> "" ->
-    Dashboard_mission.session_json
+    Dashboard_briefing.session_json
       ?actor:
         (dashboard_actor_for_request
            ~base_path:state.Mcp_server.room_config.base_path
@@ -234,13 +234,13 @@ let dashboard_session_http_json ~state ~sw ~clock request =
       ]
 ;;
 
-let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
+let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   let actor =
     dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
   in
   let force = bool_query_param request "force" ~default:false in
   let compute () =
-    Dashboard_mission_briefing.json
+    Dashboard_briefing_sections.json
       ?actor
       ~force
       ~config:state.Mcp_server.room_config
@@ -262,7 +262,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
       cache_key
       ~ttl:deep_surface_cache_ttl_s
       ~clock
-      ~timeout_sec:dashboard_mission_timeout_s
+      ~timeout_sec:dashboard_briefing_timeout_s
       compute)
 ;;
 

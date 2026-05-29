@@ -75,8 +75,8 @@
  dashboard_execution_builders
  briefing_gaps
  briefing_sections
- dashboard_mission_agents
- dashboard_mission_assembly
+ dashboard_briefing_agents
+ dashboard_briefing_assembly
  keeper_persona_authoring_contract
  keeper_persona_authoring_slug
  keeper_types_profile_sandbox

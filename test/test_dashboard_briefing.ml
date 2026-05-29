@@ -10,7 +10,7 @@ open Alcotest
 let () = Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
 
 let test_dir () =
-  let tmp = Filename.temp_file "masc_dashboard_mission" "" in
+  let tmp = Filename.temp_file "masc_dashboard_briefing" "" in
   Sys.remove tmp;
   Unix.mkdir tmp 0o755;
   tmp
@@ -95,7 +95,7 @@ let seed_room config session_id =
   ignore session_id;
   write_pending_confirm config session_id
 
-let test_dashboard_mission_projection () =
+let test_dashboard_briefing_projection () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -104,14 +104,14 @@ let test_dashboard_mission_projection () =
       with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
       seed_room config session_id;
-      (* Simulate delta departing: remove agent file so Dashboard_mission
+      (* Simulate delta departing: remove agent file so Dashboard_briefing
          sees delta as departed. *)
       let delta_path =
         Filename.concat (Coord_utils.agents_dir config) "llama-local-delta.json"
       in
       if Sys.file_exists delta_path then Sys.remove delta_path;
       let json =
-        Lib.Dashboard_mission.json
+        Lib.Dashboard_briefing.json
           ~actor:"test-dashboard-projection"
           ~config
           ~sw
@@ -173,7 +173,7 @@ let test_dashboard_mission_projection () =
          |> List.for_all (fun row ->
               row |> member "target_type" |> to_string = "root")))
 
-let test_dashboard_mission_http_full_contract () =
+let test_dashboard_briefing_http_full_contract () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -188,7 +188,7 @@ let test_dashboard_mission_http_full_contract () =
       Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
-        Lib.Server_dashboard_http.dashboard_mission_http_json
+        Lib.Server_dashboard_http.dashboard_briefing_http_json
           ~state
           ~sw
           ~clock
@@ -202,7 +202,7 @@ let test_dashboard_mission_http_full_contract () =
       check bool "command focus retained in mission http payload" true
         (json |> member "command_focus" <> `Null))
 
-let test_dashboard_mission_http_default_bootstraps_first_success () =
+let test_dashboard_briefing_http_default_bootstraps_first_success () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -213,7 +213,7 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
       seed_room config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
-        Lib.Server_dashboard_http.dashboard_mission_http_json
+        Lib.Server_dashboard_http.dashboard_briefing_http_json
           ~state
           ~sw
           ~clock
@@ -234,7 +234,7 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
       check bool "mission summary namespace removed" true
         (json |> member "summary" |> member "namespace" = `Null))
 
-let test_dashboard_mission_keeper_tool_audit_fallback () =
+let test_dashboard_briefing_keeper_tool_audit_fallback () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -247,7 +247,7 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
       Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
-        Lib.Server_dashboard_http.dashboard_mission_http_json
+        Lib.Server_dashboard_http.dashboard_briefing_http_json
           ~state
           ~sw
           ~clock
@@ -268,7 +268,7 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
       check bool "mission summary namespace removed" true
         (json |> member "summary" |> member "namespace" = `Null))
 
-let test_dashboard_mission_http_cache_isolation () =
+let test_dashboard_briefing_http_cache_isolation () =
   let dir_a = test_dir () in
   let dir_b = test_dir () in
   Fun.protect
@@ -294,14 +294,14 @@ let test_dashboard_mission_http_cache_isolation () =
         request ("/api/v1/dashboard/mission?agent_name=" ^ actor)
       in
       let json_a =
-        Lib.Server_dashboard_http.dashboard_mission_http_json
+        Lib.Server_dashboard_http.dashboard_briefing_http_json
           ~state:state_a
           ~sw
           ~clock
           request
       in
       let json_b =
-        Lib.Server_dashboard_http.dashboard_mission_http_json
+        Lib.Server_dashboard_http.dashboard_briefing_http_json
           ~state:state_b
           ~sw
           ~clock
@@ -313,7 +313,7 @@ let test_dashboard_mission_http_cache_isolation () =
       check bool "second room namespace_id removed" true
         (json_b |> member "summary" |> member "namespace_id" = `Null))
 
-let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
+let test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task () =
   let keeper_name = "audit-keeper-assembly-fixture" in
   let dir = test_dir () in
   Fun.protect
@@ -322,7 +322,7 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
       with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Coord_utils.default_config dir in
       let briefs =
-        Lib.Dashboard_mission_assembly.build_keeper_briefs config
+        Lib.Dashboard_briefing_assembly.build_keeper_briefs config
           [
             `Assoc
               [
@@ -352,7 +352,7 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
-let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
+let test_dashboard_briefing_keeper_tool_audit_uses_decision_log () =
   let keeper_name = "audit-keeper-decision-fixture" in
   let dir = test_dir () in
   Fun.protect
@@ -373,7 +373,7 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
             ("tools_used", `List []);
           ]);
       let briefs =
-        Lib.Dashboard_mission_assembly.build_keeper_briefs config
+        Lib.Dashboard_briefing_assembly.build_keeper_briefs config
           [
             `Assoc
               [
@@ -403,7 +403,7 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
       check bool "decision log still reports empty tool list" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
-let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
+let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () =
   let root_dir = test_dir () in
   let dir_a = Filename.concat root_dir "a-scope" in
   let dir_z = Filename.concat root_dir "z-scope" in
@@ -445,7 +445,7 @@ let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
         (Lib.Keeper_registry.register ~base_path:config_z.base_path keeper_name
            (make_meta ~also_allow:[ "keeper_board_post" ] keeper_name));
       let briefs =
-        Lib.Dashboard_mission_assembly.build_keeper_briefs config_a
+        Lib.Dashboard_briefing_assembly.build_keeper_briefs config_a
           [
             `Assoc
               [
@@ -479,21 +479,21 @@ let () =
       ( "read_model",
         [
           Alcotest.test_case "projection groups root-cause lanes" `Quick
-            test_dashboard_mission_projection;
+            test_dashboard_briefing_projection;
           Alcotest.test_case "http mission keeps full contract" `Quick
-            test_dashboard_mission_http_full_contract;
+            test_dashboard_briefing_http_full_contract;
           Alcotest.test_case "http mission default bootstraps first success"
-            `Quick test_dashboard_mission_http_default_bootstraps_first_success;
+            `Quick test_dashboard_briefing_http_default_bootstraps_first_success;
           Alcotest.test_case "keeper tool audit fallback" `Quick
-            test_dashboard_mission_keeper_tool_audit_fallback;
+            test_dashboard_briefing_keeper_tool_audit_fallback;
           Alcotest.test_case "http mission cache stays room-scoped" `Quick
-            test_dashboard_mission_http_cache_isolation;
+            test_dashboard_briefing_http_cache_isolation;
           Alcotest.test_case "keeper brief prefers heartbeat task" `Quick
-            test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task;
+            test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task;
           Alcotest.test_case "keeper brief uses decision log fallback" `Quick
-            test_dashboard_mission_keeper_tool_audit_uses_decision_log;
+            test_dashboard_briefing_keeper_tool_audit_uses_decision_log;
           Alcotest.test_case "keeper brief registry lookup scoped to base path"
             `Quick
-            test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path;
+            test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path;
         ] );
     ]

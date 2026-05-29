@@ -1,7 +1,7 @@
-(** Dashboard_mission_agents — Agent brief construction, archived agent metadata,
-    and message lookup helpers for the mission dashboard.
+(** Dashboard_briefing_agents — Agent brief construction, archived agent metadata,
+    and message lookup helpers for the dashboard.
 
-    Extracted from dashboard_mission_assembly to reduce file size. *)
+    Extracted from dashboard_briefing_assembly to reduce file size. *)
 
 include Dashboard_utils
 
@@ -44,7 +44,7 @@ let event_summary event_json =
 
 let session_recent_events session_json = list_field "recent_events" session_json
 
-(* Types duplicated from Dashboard_mission to avoid circular dependency. *)
+(* Types duplicated from Dashboard_briefing to avoid circular dependency. *)
 type session_context = {
   session_id : string;
   goal : string;

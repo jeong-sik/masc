@@ -1,4 +1,4 @@
-(** Mission briefing: cache, delivery state, and the public [json] entry point.
+(** Briefing: cache, delivery state, and the public [json] entry point.
     Domain logic is split into sub-modules:
     - {!Briefing_json_helpers} -- JSON extraction / normalization
     - {!Briefing_compactors}  -- compact_*_json, session filtering
@@ -9,7 +9,7 @@ open Briefing_json_helpers
 
 let cache_ttl_sec = Env_config.InternalTimers.briefing_cache_ttl_sec
 
-let mission_briefing_criteria =
+let briefing_sections_criteria =
   [
     "deterministic_rules_only";
     "no_model_status_inference";
@@ -20,7 +20,7 @@ let mission_briefing_criteria =
   ]
 
 let criteria_json () =
-  `List (List.map (fun item -> `String item) mission_briefing_criteria)
+  `List (List.map (fun item -> `String item) briefing_sections_criteria)
 
 (* ── Cache state ────────────────────────────────────────────────── *)
 
@@ -77,7 +77,7 @@ let pending_json ~now ~last_error =
       ("stale", `Bool false);
       ("refreshing", `Bool true);
       ("status", `String "pending");
-      ("summary", `String "Generating mission briefing from the latest snapshot.");
+      ("summary", `String "Generating briefing from the latest snapshot.");
       ("provenance", `String "narrative");
       ("authoritative", `Bool false);
       ("model", `Null);
@@ -110,8 +110,8 @@ let annotate_delivery_state json ~cached ~stale ~refreshing ~last_error =
 
 let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
   let now_ts = Unix.gettimeofday () in
-    let mission_json =
-      Dashboard_mission.json ~actor:actor_name ~config ~sw ~clock ~proc_mgr ()
+    let briefing_json =
+      Dashboard_briefing.json ~actor:actor_name ~config ~sw ~clock ~proc_mgr ()
     in
     let ctx : _ Operator_control.context =
       {
@@ -127,7 +127,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     let snapshot_json =
       (* Reuse the same lightweight summary shape as the operator/mission
          dashboard surfaces. The briefing only needs session status/events;
-         keeper metadata can come from mission_json. Pulling keepers,
+         keeper metadata can come from briefing_json. Pulling keepers,
          command-plane, and message payloads here duplicates the heaviest
          snapshot path and can spike memory on rooms with many keepers. *)
       Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
@@ -150,7 +150,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ~now_ts []
     in
     let keepers =
-      match mission_json |> member_assoc "keeper_briefs" with
+      match briefing_json |> member_assoc "keeper_briefs" with
       | `List items -> items
       | _ -> []
     in
@@ -198,8 +198,8 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
                  ("timestamp", `String message.timestamp);
                ])
     in
-    let mission_summary_json =
-      let summary = member_assoc "summary" mission_json in
+    let briefing_summary_json =
+      let summary = member_assoc "summary" briefing_json in
       `Assoc
         [
           ("room_health", member_assoc "room_health" summary);
@@ -219,7 +219,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ~agents:compact_agents
     in
     let watch_summary, sections =
-      Briefing_sections.build_briefing_sections ~mission_summary_json ~sessions:compact_sessions
+      Briefing_sections.build_briefing_sections ~briefing_summary_json ~sessions:compact_sessions
         ~agents:compact_agents ~recent_messages:messages_json ~metadata_gaps
     in
     let now_iso = Masc_domain.now_iso () in
@@ -243,7 +243,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
             `Assoc
               [
                 ( "project",
-                  member_assoc "summary" mission_json
+                  member_assoc "summary" briefing_json
                   |> member_assoc "project" );
                 ("crew_count", `Int (List.length sessions));
                 ("agent_count", `Int (List.length agents_json));

@@ -34,7 +34,7 @@ ALLOWLIST=(
   # Helper migration would reorder JSON keys → wire-breaking for the
   # dashboard frontend that parses generated_at/cached/stale before
   # status.
-  "lib/dashboard/dashboard_mission_briefing.ml"
+  "lib/dashboard/dashboard_briefing_sections.ml"
 
   # Tier B: Yojson.Safe.pretty_to_string (multi-line indented form)
   # rather than to_string. The SSOT helper emits compact form. Wire

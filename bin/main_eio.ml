@@ -26,9 +26,9 @@ module Keeper_runtime = Masc_mcp.Keeper_runtime
 module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
 module Dashboard_execution = Masc_mcp.Dashboard_execution
-module Dashboard_mission = Masc_mcp.Dashboard_mission
+module Dashboard_briefing = Masc_mcp.Dashboard_briefing
 (* module Dashboard_proof removed *)
-module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
+module Dashboard_briefing_sections = Masc_mcp.Dashboard_briefing_sections
 module Build_identity = Masc_mcp.Build_identity
 module Config_doctor = Masc_mcp.Config_doctor
 module Auth_doctor = Masc_mcp.Auth_doctor

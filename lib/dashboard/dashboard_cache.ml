@@ -217,7 +217,7 @@ let max_wait_sec () =
       [
         execution_timeout_sec;
         execution_trust_timeout_sec;
-        mission_timeout_sec;
+        briefing_timeout_sec;
         shell_timeout_sec;
         shell_light_timeout_sec;
         shell_prewarm_inner_timeout_sec;

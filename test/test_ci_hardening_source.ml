@@ -2020,20 +2020,20 @@ let test_keeper_continuity_harness_auth_contracts () =
 
 let test_mission_briefing_memory_guard_contracts () =
   check bool "mission briefing snapshot disables keeper payload" true
-    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+    (file_contains_pattern "lib/dashboard/dashboard_briefing_sections.ml"
        "~include_keepers:false");
   check bool "mission briefing snapshot no longer references command plane" true
-    (file_not_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+    (file_not_contains_pattern "lib/dashboard/dashboard_briefing_sections.ml"
        "include_command_plane");
   check bool "mission briefing snapshot stays off command plane" true
-    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+    (file_contains_pattern "lib/dashboard/dashboard_briefing_sections.ml"
        "~include_summary_fields:false");
   check bool "mission briefing snapshot stays lightweight" true
-    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+    (file_contains_pattern "lib/dashboard/dashboard_briefing_sections.ml"
        "~lightweight_summary:true");
   check bool "mission briefing reuses mission keeper briefs" true
-    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
-       {|mission_json |> member_assoc "keeper_briefs"|});
+    (file_contains_pattern "lib/dashboard/dashboard_briefing_sections.ml"
+       {|briefing_json |> member_assoc "keeper_briefs"|});
   check bool "mission briefing card no longer forces eager operator snapshot" true
     (file_not_contains_pattern "dashboard/src/components/mission-briefing-card.ts"
        "refreshOperatorSnapshot({ force: true })")
@@ -2122,10 +2122,10 @@ let test_dashboard_executor_pool_contracts () =
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "let start_mission_refresh_loop"
      && file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-          "Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ()");
+          "Dashboard_briefing.json ~config ~sw ~clock ~proc_mgr ()");
   check bool "mission actor path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "let dashboard_mission_http_json"
+       "let dashboard_briefing_http_json"
      && file_contains_pattern "lib/server/server_dashboard_http_core.ml"
           "let compute ?actor () ="
      && file_contains_pattern "lib/server/server_dashboard_http_core.ml"

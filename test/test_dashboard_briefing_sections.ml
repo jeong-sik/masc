@@ -2,12 +2,12 @@ module Types = Masc_domain
 
 open Alcotest
 
-module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
-module Briefing = Masc_mcp.Dashboard_mission_briefing.For_test
+module Dashboard_briefing_sections = Masc_mcp.Dashboard_briefing_sections
+module Briefing = Masc_mcp.Dashboard_briefing_sections.For_test
 module Coord = Masc_mcp.Coord
 
 let temp_dir () =
-  let dir = Filename.temp_file "test_dashboard_mission_briefing_" "" in
+  let dir = Filename.temp_file "test_dashboard_briefing_sections_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -92,7 +92,7 @@ let test_briefing_cold_call_returns_pending () =
       let config = Coord.default_config base_path in
       ignore (Coord.init config ~agent_name:None);
       let json =
-        Dashboard_mission_briefing.json
+        Dashboard_briefing_sections.json
           ~config ~sw ~clock ~proc_mgr:None ()
       in
       let open Yojson.Safe.Util in
@@ -117,7 +117,7 @@ let test_force_refresh_without_cache_returns_pending () =
       let config = Coord.default_config base_path in
       ignore (Coord.init config ~agent_name:None);
       let json =
-        Dashboard_mission_briefing.json
+        Dashboard_briefing_sections.json
           ~force:true ~config ~sw ~clock ~proc_mgr:None ()
       in
       let open Yojson.Safe.Util in
@@ -160,7 +160,7 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
             ("last_error", `Null);
           ]);
       let json =
-        Dashboard_mission_briefing.json
+        Dashboard_briefing_sections.json
           ~force:true ~config ~sw ~clock ~proc_mgr:None ()
       in
       let open Yojson.Safe.Util in
@@ -364,7 +364,7 @@ let test_collect_metadata_gaps_ignores_inactive_agents () =
   | _ -> fail "expected one live agent focus gap"
 
 let test_build_briefing_sections_demotes_metadata_only_communication () =
-  let mission_summary_json =
+  let briefing_summary_json =
     `Assoc
       [
         ("room_health", `String "ok");
@@ -374,7 +374,7 @@ let test_build_briefing_sections_demotes_metadata_only_communication () =
       ]
   in
   let watch_summary, sections =
-    Briefing.build_briefing_sections ~mission_summary_json ~sessions:[]
+    Briefing.build_briefing_sections ~briefing_summary_json ~sessions:[]
       ~agents:[] ~recent_messages:[]
       ~metadata_gaps:
         [
@@ -398,7 +398,7 @@ let test_build_briefing_sections_demotes_metadata_only_communication () =
   check_string_field watch "status" "ok"
 
 let test_build_briefing_sections_keeps_metadata_evidence_visible () =
-  let mission_summary_json =
+  let briefing_summary_json =
     `Assoc
       [
         ("room_health", `String "ok");
@@ -429,7 +429,7 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
       ]
   in
   let _watch_summary, sections =
-    Briefing.build_briefing_sections ~mission_summary_json ~sessions:[ session ]
+    Briefing.build_briefing_sections ~briefing_summary_json ~sessions:[ session ]
       ~agents:[] ~recent_messages:[ `Assoc [ ("from", `String "agent-a") ] ]
       ~metadata_gaps:
         [
@@ -459,7 +459,7 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
   | _ -> fail "expected communication evidence list"
 
 let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
-  let mission_summary_json =
+  let briefing_summary_json =
     `Assoc
       [
         ("room_health", `String "bad");
@@ -469,7 +469,7 @@ let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
       ]
   in
   let _watch_summary, sections =
-    Briefing.build_briefing_sections ~mission_summary_json ~sessions:[]
+    Briefing.build_briefing_sections ~briefing_summary_json ~sessions:[]
       ~agents:[] ~recent_messages:[]
       ~metadata_gaps:[]
   in

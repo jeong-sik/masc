@@ -1,7 +1,7 @@
 include Dashboard_utils
 
-(* Types from Dashboard_mission_assembly, re-exported for backward compat. *)
-type session_context = Dashboard_mission_assembly.session_context = {
+(* Types from Dashboard_briefing_assembly, re-exported for backward compat. *)
+type session_context = Dashboard_briefing_assembly.session_context = {
   session_id : string;
   goal : string;
   created_by : string option;
@@ -27,7 +27,7 @@ type session_context = Dashboard_mission_assembly.session_context = {
   top_recommendation : Yojson.Safe.t option;
 }
 
-type attention_context = Dashboard_mission_assembly.attention_context = {
+type attention_context = Dashboard_briefing_assembly.attention_context = {
   severity : string;
   has_action : bool;
   last_seen_ts : float;
@@ -237,7 +237,7 @@ let rec evidence_preview_strings json =
 (* Issue #8395: root-level attention uses [target_type="root"].  This
    predicate previously compared only to the literal "room", so the
    canonical form fell through to the public queue.  Delegate to the
-   shared canonical target check used by [Dashboard_mission_assembly]. *)
+   shared canonical target check used by [Dashboard_briefing_assembly]. *)
 let is_internal_attention incident =
   Operator_digest_types.is_root_target_type (string_field "target_type" incident)
 
@@ -341,7 +341,7 @@ let build_attention_queue incidents actions sessions =
            else Float.compare right.last_seen_ts left.last_seen_ts)
 
 
-type mission_projection = {
+type briefing_projection = {
   generated_at : string;
   snapshot_json : Yojson.Safe.t;
   digest_json : Yojson.Safe.t;
@@ -416,10 +416,10 @@ let build_projection ?actor ~config ~sw ~clock
     | _ -> []
   in
   let agent_briefs =
-    Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue namespace_json keeper_items
+    Dashboard_briefing_assembly.build_agent_briefs config sessions attention_queue namespace_json keeper_items
   in
-  let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs config keeper_items in
-  let internal_signals = Dashboard_mission_assembly.build_internal_signals incidents recommended_actions in
+  let keeper_briefs = Dashboard_briefing_assembly.build_keeper_briefs config keeper_items in
+  let internal_signals = Dashboard_briefing_assembly.build_internal_signals incidents recommended_actions in
   {
     generated_at = Masc_domain.now_iso ();
     snapshot_json;
@@ -492,10 +492,10 @@ let session_json ?actor ~session_id ~config ~sw
     if Coord.is_initialized config then Coord.get_tasks_safe config else []
   in
   let operation_contexts =
-    Dashboard_mission_assembly.build_operation_contexts ~tasks
+    Dashboard_briefing_assembly.build_operation_contexts ~tasks
   in
   let session_row_json =
-    Dashboard_mission_assembly.build_sessions
+    Dashboard_briefing_assembly.build_sessions
       ~operation_contexts
       projection.sessions projection.attention_queue projection.agent_briefs
       projection.keeper_briefs
@@ -523,19 +523,19 @@ let session_json ?actor ~session_id ~config ~sw
   let operations_json =
     match session_context with
     | None -> []
-    | Some session -> Dashboard_mission_assembly.operation_badges_for_session session operation_contexts
+    | Some session -> Dashboard_briefing_assembly.operation_badges_for_session session operation_contexts
   in
   let keepers_json =
     match session_context with
     | None -> []
     | Some session ->
-        Dashboard_mission_assembly.keeper_refs_for_session session.member_names projection.keeper_briefs
+        Dashboard_briefing_assembly.keeper_refs_for_session session.member_names projection.keeper_briefs
   in
   let participants_json =
     match session_context with
     | None -> []
     | Some session ->
-        Dashboard_mission_assembly.participant_preview_json session.session_id session.member_names projection.agent_briefs
+        Dashboard_briefing_assembly.participant_preview_json session.session_id session.member_names projection.agent_briefs
   in
   `Assoc
     [
@@ -545,7 +545,7 @@ let session_json ?actor ~session_id ~config ~sw
       ( "timeline",
         `List
           (match session_source_json with
-          | Some json -> Dashboard_mission_assembly.session_timeline_json json
+          | Some json -> Dashboard_briefing_assembly.session_timeline_json json
           | None -> []) );
       ("participants", `List participants_json);
       ("operations", `List operations_json);

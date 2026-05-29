@@ -165,7 +165,7 @@ let dedup_strings items =
     (List.filter_map String_util.trim_to_option items)
 
 (** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
-    Used by dashboard_mission / dashboard_mission_assembly for external JSON data. *)
+    Used by dashboard_briefing / dashboard_briefing_assembly for external JSON data. *)
 let severity_rank = function
   | "bad" | "critical" | "failed" -> 2
   | "warn" | "blocked" | "paused" | "interrupted" -> 1

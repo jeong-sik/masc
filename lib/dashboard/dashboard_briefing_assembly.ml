@@ -1,12 +1,12 @@
-(** Dashboard_mission_assembly — keeper briefs, operation contexts,
-    session assembly, internal signals, and timeline rendering for the mission dashboard.
+(** Dashboard_briefing_assembly — keeper briefs, operation contexts,
+    session assembly, internal signals, and timeline rendering for the dashboard.
 
-    Agent briefs and related helpers are in Dashboard_mission_agents. *)
+    Agent briefs and related helpers are in Dashboard_briefing_agents. *)
 
 (** Context ratio above which a keeper gets elevated lane pressure rank. *)
 let lane_pressure_ctx_ratio = 0.80
 
-include Dashboard_mission_agents
+include Dashboard_briefing_agents
 
 let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let keeper_name =

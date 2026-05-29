@@ -5,7 +5,7 @@ open Alcotest
     Original PR-17 (#15485) deleted 4 truly-dead functions (~250 LOC)
     and renamed 2 active bindings.  Shipped without test; pin now. *)
 
-let dead_in_dashboard_mission =
+let dead_in_dashboard_briefing =
   [ "_build_session_context"; "_build_briefs_from_sessions" ]
 ;;
 
@@ -25,14 +25,14 @@ let renamed_in_diagnostics =
   , "logged_once" )
 ;;
 
-let test_dashboard_mission_dead_gone () =
-  let path = "lib/dashboard/dashboard_mission.ml" in
+let test_dashboard_briefing_dead_gone () =
+  let path = "lib/dashboard/dashboard_briefing.ml" in
   List.iter
     (fun name ->
       let n = Ast_grep.count_value_bindings ~module_path:path ~name in
       let msg = Printf.sprintf "dead %s should be deleted in %s" name path in
       check int msg 0 n)
-    dead_in_dashboard_mission
+    dead_in_dashboard_briefing
 ;;
 
 let test_channel_gate_metrics_dead_gone () =
@@ -67,7 +67,7 @@ let () =
   run
     "rfc-0085-pr-17-dead-purge-and-rename"
     [ ( "dead removal"
-      , [ test_case "dashboard_mission dead gone" `Quick test_dashboard_mission_dead_gone
+      , [ test_case "dashboard_briefing dead gone" `Quick test_dashboard_briefing_dead_gone
         ; test_case
             "channel_gate_metrics dead gone"
             `Quick

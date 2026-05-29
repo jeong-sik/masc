@@ -204,6 +204,16 @@ parse [] None args|}
     ; parse_body =
         Some
           {|
+(* rg flags that consume the next argument as a value *)
+let rg_value_flags =
+  [ "--type"; "--glob"; "--max-depth"; "--max-filesize"
+  ; "--replace"; "--context"; "--before-context"; "--after-context"
+  ; "--encoding"; "--engine"; "--path-separator"
+  ; "--sort"; "--sortr"; "--threads"; "--regex"
+  ; "--files-with"; "--files-without"
+  ; "-g"; "-M"; "-r"; "-j"; "-e"; "-A"; "-B"; "-C"
+  ]
+in
 let rec parse case_sensitive pattern path dd = function
   | [] ->
     (match pattern with
@@ -211,6 +221,9 @@ let rec parse case_sensitive pattern path dd = function
      | None -> None)
   | "-i" :: rest | "--ignore-case" :: rest when not dd -> parse false pattern path dd rest
   | "--" :: rest -> parse case_sensitive pattern path true rest
+  (* value-consuming flags: skip flag + its value *)
+  | flag :: _ :: rest when not dd && List.mem flag rg_value_flags ->
+    parse case_sensitive pattern path dd rest
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
     then parse case_sensitive pattern path dd rest

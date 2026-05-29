@@ -167,7 +167,7 @@ val recent_tool_streak_count :
 
 val make_hooks :
   config:Coord.config ->
-  meta_ref:Keeper_types.keeper_meta ref ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
   generation:int ->
   ?max_cost_usd:float ->
   ?destructive_check:bool ->

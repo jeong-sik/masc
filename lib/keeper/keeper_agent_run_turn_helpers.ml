@@ -40,7 +40,7 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
     Hashtbl.mem link_task_cache (keeper, task_id, trace_id))
 
 let per_provider_timeout_for_turn
-    ~(meta : Keeper_types.keeper_meta)
+    ~(meta : Keeper_meta_contract.keeper_meta)
     ?oas_timeout_s
     ?(oas_timeout_is_explicit = true)
     ~(timeout_s : float)

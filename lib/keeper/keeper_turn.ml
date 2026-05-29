@@ -12,13 +12,16 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_alerting
 open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_setup
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
@@ -96,7 +99,7 @@ let direct_turn_observation ~(config : Coord.config) (meta : keeper_meta) :
     ~meta
 
 let resolve_turn_cascade_name (meta : keeper_meta) =
-  let raw_name = String.trim (Keeper_types.cascade_name_of_meta meta) in
+  let raw_name = String.trim (Keeper_meta_contract.cascade_name_of_meta meta) in
   match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
   | Ok cascade_name -> Ok cascade_name
   | Error detail ->
@@ -195,7 +198,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       @ get_string_list args "required_tool_names"
       |> List.map String.trim
       |> List.filter (fun name -> name <> "")
-      |> Keeper_types.dedupe_keep_order
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     (match keeper_msg_timeout_override args with
     | Error e -> tool_result_error e

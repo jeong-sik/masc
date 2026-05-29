@@ -5,6 +5,8 @@
     keepalive start, and response JSON generation. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Persist a freshly-built keeper_meta with field-merging CAS
     retry — preserves heartbeat-owned cursors when bootstrap races
@@ -16,6 +18,6 @@ val write_initial_meta :
     write checkpoint, start keepalive, return the [keeper_up]
     response envelope. *)
 val create_keeper :
-  _ Keeper_types.context ->
+  _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
   tool_result

@@ -1,6 +1,8 @@
 (** Alive-but-stuck supervisor detector and recovery request. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_supervisor_types
 
 (* Per-keeper dedup table for [scan]. Bounds counter emission to one

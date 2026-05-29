@@ -76,7 +76,7 @@ val retry_admission_denial_to_yojson :
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : Cascade_name.t;
-      reason : Keeper_types.cascade_exhaustion_reason;
+      reason : Keeper_meta_contract.cascade_exhaustion_reason;
     }
   | Capacity_backpressure of {
       cascade_name : Cascade_name.t;

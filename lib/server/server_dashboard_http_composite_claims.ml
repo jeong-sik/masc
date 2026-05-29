@@ -133,7 +133,7 @@ let find_override_field_source field sources =
 ;;
 
 let composite_config_drift_json ~config ~keeper_name =
-  match Keeper_types.read_meta config keeper_name with
+  match Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = Json_util.get_string_list sources "override_fields" in

@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let current_task_id_opt (meta : keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id

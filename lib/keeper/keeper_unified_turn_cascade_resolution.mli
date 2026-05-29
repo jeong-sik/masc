@@ -8,7 +8,7 @@
     the caller can resume with downstream pre-dispatch validation. *)
 
 type cascade_resolution =
-  { resolved_meta : Keeper_types.keeper_meta
+  { resolved_meta : Keeper_meta_contract.keeper_meta
     (** [meta] with [cascade_ref] potentially overridden by
         [selected_item] and with cascade name aligned to routing. *)
   ; resolved_cascade : string
@@ -16,7 +16,7 @@ type cascade_resolution =
   }
 
 val resolve_cascade
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> phase_opt:Keeper_state_machine.phase option
   -> selected_item:(string * Cascade_ref.cascade_item) option
   -> append_cascade_routed_manifest:

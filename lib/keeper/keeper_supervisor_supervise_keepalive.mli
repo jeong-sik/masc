@@ -9,13 +9,13 @@ val supervise_keepalive :
      unit) ->
   launch_supervised_fiber:
     (proactive_warmup_sec:int ->
-     'a Keeper_types.context ->
-     Keeper_types.keeper_meta ->
+     'a Keeper_types_profile.context ->
+     Keeper_meta_contract.keeper_meta ->
      Keeper_registry.registry_entry ->
      unit) ->
   proactive_warmup_sec:int ->
-  'a Keeper_types.context ->
-  Keeper_types.keeper_meta ->
+  'a Keeper_types_profile.context ->
+  Keeper_meta_contract.keeper_meta ->
   unit
 (** Register and launch a supervised keepalive fiber when spawn admission
     allows it. *)

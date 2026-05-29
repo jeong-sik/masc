@@ -35,6 +35,8 @@
       - keeper_memory_bank.ml (open_short / provenanced semantics) *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (* Static patterns for [STATE] block detection, hoisted from
    [find_state_block].  [Re.compile] runs once at module load. *)

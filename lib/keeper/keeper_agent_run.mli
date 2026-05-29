@@ -55,7 +55,7 @@ module For_testing : sig
 end
 
 val per_provider_timeout_for_turn
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> ?oas_timeout_s:float
   -> ?oas_timeout_is_explicit:bool
   -> timeout_s:float
@@ -96,7 +96,7 @@ val per_provider_timeout_for_turn
     @param event_bus Optional MASC event bus *)
 val run_turn
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> base_dir:string
   -> max_context:int
   -> build_turn_prompt:

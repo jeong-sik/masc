@@ -2,5 +2,5 @@
 
 val read_continuity_summary
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string

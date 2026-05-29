@@ -20,6 +20,8 @@
     Cancellation re-raises. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let dispatch_recurring_keepalive
       ~(ctx : _ context)

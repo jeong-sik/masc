@@ -2,6 +2,8 @@
    Extracted from keeper_run_tools.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 open Keeper_agent_error
@@ -46,7 +48,7 @@ type ctx =
   ; keeper_has_owned_active_task : unit -> bool
   ; manifest_keeper_turn_id : int option
   ; max_tools_per_turn : int
-  ; meta : Keeper_types.keeper_meta
+  ; meta : Keeper_meta_contract.keeper_meta
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
   ; canonical_tool_names_ref : string list ref
@@ -623,11 +625,11 @@ let assemble_hooks
                     (Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id)
                   ~goal_ids:meta.active_goal_ids
                   ~sandbox_profile:
-                    (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
+                    (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
                   ~sandbox_root:
                     (Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
                   ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
-                  ~network_mode:(Keeper_types.network_mode_to_string meta.network_mode)
+                  ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
                   ?approval_mode:approval_mode_effective
                   ~tool_surface_class:
                     (Keeper_agent_tool_surface.tool_surface_class_to_string

@@ -1,6 +1,8 @@
 (** Input query helpers for keeper world observation. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val backlog_updated_since_last_scheduled_autonomous
   :  meta:keeper_meta

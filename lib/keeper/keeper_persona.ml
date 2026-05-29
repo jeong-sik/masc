@@ -2,11 +2,13 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_persona_runtime
 
 module Turn = Keeper_turn
 module Authoring = Keeper_persona_authoring
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 (* RFC-0182 §3.1 — ctx-free body shared with the persona dispatch ref
    path.  Keeper_persona / Keeper_persona_authoring transitively touch

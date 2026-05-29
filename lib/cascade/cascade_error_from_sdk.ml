@@ -56,7 +56,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               match List.assoc_opt "reason"
                       (match json with `Assoc fields -> fields | _ -> []) with
               | Some json_val ->
-                  Keeper_types.cascade_exhaustion_reason_of_json json_val
+                  Keeper_meta_contract.cascade_exhaustion_reason_of_json json_val
               | None -> None
             in
             (match reason_opt with

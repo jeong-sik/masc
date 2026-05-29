@@ -6,14 +6,14 @@
 
 let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
     ~(cascade_name : string) : (bool, string) result =
-  let updated_at = Keeper_types.now_iso () in
-  match Keeper_types.read_meta config name with
+  let updated_at = Keeper_meta_contract.now_iso () in
+  match Keeper_meta_store.read_meta config name with
   | Error msg -> Error ("read_meta failed after TOML update: " ^ msg)
   | Ok (Some meta) ->
       let updated =
-        { (Keeper_types.set_cascade_name cascade_name meta) with updated_at }
+        { (Keeper_meta_contract.set_cascade_name cascade_name meta) with updated_at }
       in
-      (match Keeper_types.write_meta ~force:true config updated with
+      (match Keeper_meta_store.write_meta ~force:true config updated with
        | Ok () ->
            let registered =
              Option.is_some
@@ -27,9 +27,9 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
        | None -> Ok false
        | Some entry ->
            let updated =
-             { (Keeper_types.set_cascade_name cascade_name entry.meta) with updated_at }
+             { (Keeper_meta_contract.set_cascade_name cascade_name entry.meta) with updated_at }
            in
-           (match Keeper_types.write_meta ~force:true config updated with
+           (match Keeper_meta_store.write_meta ~force:true config updated with
             | Ok () ->
                 Keeper_registry.update_meta ~base_path:config.base_path name
                   updated;

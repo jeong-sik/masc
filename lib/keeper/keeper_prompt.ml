@@ -3,6 +3,12 @@
     text output. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_meta_contract
+open Keeper_types_profile
 
 
 (* Pre-compiled patterns for keeper name substitution in prompt templates.

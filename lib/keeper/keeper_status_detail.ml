@@ -7,6 +7,9 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_alerting
 open Agent_tool_dispatch_runtime
@@ -15,7 +18,7 @@ open Keeper_status_runtime
 open Keeper_status_metrics
 open Keeper_status_bridge
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
   match read_file_tail_lines_result path ~max_bytes ~max_lines with
@@ -864,7 +867,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                else `String m.runtime.last_social_transition_reason);
              ("last_blocker",
                match m.runtime.last_blocker with
-               | Some info -> Keeper_types.blocker_info_to_json info
+               | Some info -> Keeper_meta_contract.blocker_info_to_json info
                | None -> `Null);
              ("last_need",
                if String.trim m.runtime.last_need = ""

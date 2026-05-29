@@ -3,12 +3,15 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 open Keeper_status_runtime
 open Keeper_status_metrics
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 include Keeper_status_bridge
 
@@ -29,7 +32,7 @@ let handle_keeper_list ctx args : tool_result =
   match Safe_ops.list_dir_safe dir with
   | Error e -> tool_result_error e
   | Ok _files ->
-  let keeper_names = Keeper_types.keeper_names ctx.config |> take limit in
+  let keeper_names = Keeper_meta_store.keeper_names ctx.config |> take limit in
   if not detailed then
     let json = `Assoc [
       ("count", `Int (List.length keeper_names));

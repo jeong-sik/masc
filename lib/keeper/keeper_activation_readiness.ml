@@ -13,7 +13,7 @@ type t =
   ; autonomous_activation : autonomous_activation
   }
 
-let autonomous_blocker (meta : Keeper_types.keeper_meta) =
+let autonomous_blocker (meta : Keeper_meta_contract.keeper_meta) =
   if meta.paused then Some "paused"
   else if not meta.autoboot_enabled then Some "autoboot_disabled"
   else if not meta.proactive.enabled then Some "proactive_disabled"
@@ -31,7 +31,7 @@ let autonomous_hint = function
   | Some reason -> Some ("activation blocked: " ^ reason)
 ;;
 
-let autonomous_activation (meta : Keeper_types.keeper_meta) =
+let autonomous_activation (meta : Keeper_meta_contract.keeper_meta) =
   let blocker = autonomous_blocker meta in
   { ok = Option.is_none blocker
   ; autoboot_enabled = meta.autoboot_enabled

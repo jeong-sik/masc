@@ -43,6 +43,8 @@
     runtime — this is the generation contract the rollover enforces. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_core
 
 type handoff_rollover = {

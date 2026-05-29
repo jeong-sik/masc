@@ -9,6 +9,8 @@
 
 open Printf
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module Message_json = Keeper_context_core_message_json
 

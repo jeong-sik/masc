@@ -5,6 +5,8 @@
    reporting in one place. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 include Keeper_workspace_ops_setup

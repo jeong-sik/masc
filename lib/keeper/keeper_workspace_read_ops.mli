@@ -3,7 +3,7 @@
 val try_handle :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   op:string ->
   raw_path:string ->

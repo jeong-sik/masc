@@ -4,18 +4,16 @@
     keep their public API while durable meta storage is separated
     from the compatibility facade. *)
 
-open Keeper_types_profile
-open Keeper_meta_contract
 
 (** Hook invoked after each successful [write_meta] /
     [write_meta_with_merge]. Reset by the runtime to keep
     [Coord_state] caches in sync. *)
 val runtime_meta_write_sync_hook :
-  (Coord.config -> keeper_meta -> unit) ref
+  (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) ref
 
 (** Replace [runtime_meta_write_sync_hook] with [f]. *)
 val register_runtime_meta_write_sync :
-  (Coord.config -> keeper_meta -> unit) -> unit
+  (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
 
 (** Pre-compiled regex matching the CAS [meta version conflict]
     error message. Exposed for symmetry — used internally by

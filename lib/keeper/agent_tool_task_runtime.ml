@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =

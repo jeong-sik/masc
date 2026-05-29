@@ -251,8 +251,8 @@ let docker_label_args
 ;;
 
 let docker_network_args = function
-  | Keeper_types.Network_none -> [ "--network"; "none" ], "none"
-  | Keeper_types.Network_inherit ->
+  | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ], "none"
+  | Keeper_types_profile_sandbox.Network_inherit ->
     (* Host network — matches the variant name and the docstring on
          [keeper_types_profile.ml:20-24]. Empty args
          (docker default) gives bridge mode (NAT, no host egress) which

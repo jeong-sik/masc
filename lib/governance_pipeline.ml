@@ -211,7 +211,7 @@ let nonempty_trimmed value =
 
 let selected_model_of_meta = function
   | None -> None
-  | Some (meta : Keeper_types.keeper_meta) ->
+  | Some (meta : Keeper_meta_contract.keeper_meta) ->
     (match nonempty_trimmed meta.runtime.usage.last_model_used with
      | Some _ as selected_model -> selected_model
      | None ->
@@ -253,14 +253,14 @@ let destructive_tool_or_op ~tool_name ~input =
 
 let runtime_auto_approval_blocked = function
   | None -> false
-  | Some (meta : Keeper_types.keeper_meta) ->
+  | Some (meta : Keeper_meta_contract.keeper_meta) ->
     (match meta.runtime.last_blocker with
      | None -> false
      | Some info ->
-       let continue_gate = Keeper_types.blocker_class_continue_gate info.klass in
+       let continue_gate = Keeper_meta_contract.blocker_class_continue_gate info.klass in
        let typed_blocked =
          match info.klass with
-         | Keeper_types.Completion_contract_violation | Keeper_types.Cascade_exhausted _
+         | Keeper_meta_contract.Completion_contract_violation | Keeper_meta_contract.Cascade_exhausted _
            -> true
          | _ -> false
        in
@@ -350,7 +350,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
     then (
       let turn_id =
         Option.map
-          (fun (meta : Keeper_types.keeper_meta) -> meta.runtime.usage.total_turns + 1)
+          (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.runtime.usage.total_turns + 1)
           meta
       in
       let task_id =
@@ -363,7 +363,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
       in
       let goal_ids =
         Option.map
-          (fun (keeper_meta : Keeper_types.keeper_meta) -> keeper_meta.active_goal_ids)
+          (fun (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids)
           meta
       in
       let runtime_contract =
@@ -414,7 +414,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
          actually wins.  Recompute after-the-fact. *)
       let routine_label = if hard_forbidden then None else routine_label in
       let always_approve =
-        Option.bind meta (fun (m : Keeper_types.keeper_meta) -> m.always_approve)
+        Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
       in
       let rule_match =

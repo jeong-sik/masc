@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 let elapsed_duration_ms ~start_time ~end_time =
@@ -271,7 +273,7 @@ let handle_tool_execute_typed
             Log.Keeper.info
               "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
               meta.name
-              (Keeper_types.sandbox_profile_to_string sandbox_profile)
+              (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
               (Keeper_sandbox_exec_failure.status_label result.status)
               elapsed_ms;
             let output =
@@ -320,7 +322,7 @@ let handle_tool_execute
       args
   in
   let write_enabled =
-    match Keeper_types.tool_access_preset meta.tool_access with
+    match Keeper_meta_contract.tool_access_preset meta.tool_access with
     | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
     | None -> false
   in

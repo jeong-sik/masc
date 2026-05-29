@@ -3,6 +3,9 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_runtime
 
 include Tool_keeper_ops
@@ -287,8 +290,8 @@ let keeper_reset_body ~(config : Coord.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta ->
-    let reset_meta = Keeper_types.reset_runtime_state meta in
-    (match Keeper_types.write_meta config reset_meta with
+    let reset_meta = Keeper_meta_contract.reset_runtime_state meta in
+    (match Keeper_meta_store.write_meta config reset_meta with
      | Ok () ->
        tool_result_ok
          (Printf.sprintf
@@ -306,7 +309,7 @@ let handle_keeper_reset ctx args : tool_result =
     Returns the resolved primary provider/cascade budget, separate from any
     requested [max_context_override] turn-budget widening.
     Returns [min_keeper_context_tokens] when meta is unavailable. *)
-let resolve_primary_max_context (meta : Keeper_types.keeper_meta option) : int =
+let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =
   let min_ctx = Keeper_config.min_keeper_context_tokens in
   match meta with
   | None -> min_ctx
@@ -370,7 +373,7 @@ let keeper_compact_body ~(config : Coord.config) args : tool_result =
       | Ok None | Error _ ->
         tool_result_error (Printf.sprintf "keeper %s: meta unavailable for compaction" name)
       | Ok (Some (_resolved, meta)) ->
-        let base_dir = Keeper_types.session_base_dir config in
+        let base_dir = Keeper_types_profile.session_base_dir config in
         let model = Keeper_context_runtime.checkpoint_model_of_meta meta in
         let max_tokens = resolve_primary_max_context (Some meta) in
         Keeper_context_runtime.dispatch_keeper_phase_event
@@ -457,7 +460,7 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
     | Some entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
       let phase_before = Keeper_state_machine.phase_to_string entry.phase in
-      let base_dir = Keeper_types.session_base_dir config in
+      let base_dir = Keeper_types_profile.session_base_dir config in
       (* Must use the keeper's OWN trace_id to locate its checkpoint file.
          Using generate_trace_id () would create a fresh session dir and
          always report 0 cleared messages, because the existing checkpoint
@@ -555,7 +558,7 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
                 meta with
                 continuity_summary = "";
                 paused = meta.paused || preserve_paused_state;
-                updated_at = Keeper_types.now_iso ();
+                updated_at = Keeper_meta_contract.now_iso ();
                 runtime =
                   {
                     meta.runtime with
@@ -563,7 +566,7 @@ let keeper_clear_body ~(config : Coord.config) args : tool_result =
                   };
               }
             in
-            (match Keeper_types.write_meta ~force:true config updated_meta with
+            (match Keeper_meta_store.write_meta ~force:true config updated_meta with
              | Ok () -> true
              | Error err ->
                  Log.Keeper.warn

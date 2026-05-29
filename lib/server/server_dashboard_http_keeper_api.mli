@@ -62,7 +62,7 @@ val merge_keeper_trace_lines :
 (** {1 Tools route} *)
 
 val keeper_tools_response_json :
-  Keeper_types.keeper_meta -> Yojson.Safe.t
+  Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** JSON shape returned by [GET /tools]. *)
 
 val handle_keeper_tools_post :

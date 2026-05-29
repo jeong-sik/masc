@@ -3,6 +3,8 @@
    Extracted from keeper_memory_bank.ml during godfile decomposition. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_memory_policy
 

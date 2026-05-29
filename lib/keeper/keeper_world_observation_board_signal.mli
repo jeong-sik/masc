@@ -18,7 +18,7 @@ val text : Board_dispatch.keeper_board_signal -> string
 
 val match_signal
   :  continuity_summary:string
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.keeper_board_signal
   -> match_result
 
@@ -29,6 +29,6 @@ val check_self_comment_status
 
 val wake_reason
   :  continuity_summary:string
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.keeper_board_signal
   -> string option

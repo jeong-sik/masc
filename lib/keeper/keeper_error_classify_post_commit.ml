@@ -8,6 +8,8 @@
     @since God file decomposition *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"

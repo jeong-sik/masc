@@ -5,6 +5,8 @@
    builder + unified-max-tokens fallback. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
 module KCP = Keeper_cascade_profile

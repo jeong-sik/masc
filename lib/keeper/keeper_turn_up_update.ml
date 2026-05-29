@@ -5,6 +5,9 @@
     policy validation, and keepalive restart. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_keepalive
 open Keeper_turn_up_args
 

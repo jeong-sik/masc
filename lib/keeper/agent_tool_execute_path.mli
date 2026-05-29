@@ -2,19 +2,19 @@
 
 val resolve_tool_read_cwd :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
 
 val resolve_tool_write_cwd :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
 
 val validate_repo_path_args_ready :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result
@@ -24,7 +24,7 @@ val validate_repo_path_args_ready :
     [./repos/masc-mcp/lib/foo.ml]. *)
 
 val auto_correct_path :
-  meta:Keeper_types.keeper_meta -> string -> string option
+  meta:Keeper_meta_contract.keeper_meta -> string -> string option
 (** Auto-correct common LLM-hallucinated path prefixes
     ([/repos/…], [repos/…], [playground/…]) into the keeper's
     real playground bundle path.  Sanitization of [meta.name]
@@ -32,7 +32,7 @@ val auto_correct_path :
 
 val resolve_tool_read_path :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
 (** Resolve the [path] arg against the keeper's read root, with
@@ -46,7 +46,7 @@ val shell_command_available : string -> bool
     PATH entries as the current directory. *)
 
 val in_playground :
-  root:string -> cwd:string -> meta:Keeper_types.keeper_meta -> bool
+  root:string -> cwd:string -> meta:Keeper_meta_contract.keeper_meta -> bool
 (** [true] when [cwd] is inside the keeper's sandbox playground,
     or equal to it.  Normalises both paths before comparison so that
     trailing slashes do not affect the result. *)

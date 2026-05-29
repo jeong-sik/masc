@@ -13,29 +13,29 @@
     [<sandbox_root>/egress.json]. *)
 val egress_policy_path :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string
 
 (** Check [cmd] against [Masc_exec.Egress_policy] for the keeper.
     Returns [Some blocked_json] when blocked, [None] when allowed. *)
 val check_egress :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cmd:string ->
   string option
 
 (** Per-invocation container name [masc-keeper-<safe>-<pid>-<ms>]. *)
 val keeper_sandbox_container_name :
-  Keeper_types.keeper_meta -> string
+  Keeper_meta_contract.keeper_meta -> string
 
-val keeper_private_container_root : Keeper_types.keeper_meta -> string
+val keeper_private_container_root : Keeper_meta_contract.keeper_meta -> string
 
 (** Translate a host cwd into the in-container path mirror,
     falling back to the container root when [host_cwd] is outside
     the keeper sandbox root. *)
 val docker_private_workspace_cwd :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
 
@@ -44,7 +44,7 @@ val docker_private_workspace_cwd :
     still receives the original container paths. *)
 val rewrite_docker_command_paths_for_host_validation :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
 
@@ -52,8 +52,8 @@ val rewrite_docker_command_paths_for_host_validation :
     profile. The declared sandbox profile is the execution contract:
     [sandbox_profile=local] never becomes Docker because of call-site cwd. *)
 val effective_sandbox_profile :
-  meta:Keeper_types.keeper_meta ->
-  Keeper_types.sandbox_profile * Keeper_types.network_mode
+  meta:Keeper_meta_contract.keeper_meta ->
+  Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
 
 (** Tokens flagged as nested container-runtime invocations. *)
 val nested_container_runtime_tokens : string list
@@ -105,12 +105,12 @@ val docker_run_min_timeout_sec : float
     [Keeper_registry]. *)
 val run_docker_shell_command_with_status :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
   git_creds_enabled:bool ->
-  network_mode:Keeper_types.network_mode ->
+  network_mode:Keeper_types_profile_sandbox.network_mode ->
   (docker_shell_result, string) result
 
 (** Same as {!run_docker_shell_command_with_status}, but skips freeform
@@ -119,12 +119,12 @@ val run_docker_shell_command_with_status :
     the default validated entrypoint. *)
 val run_trusted_docker_shell_command_with_status :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
   git_creds_enabled:bool ->
-  network_mode:Keeper_types.network_mode ->
+  network_mode:Keeper_types_profile_sandbox.network_mode ->
   (docker_shell_result, string) result
 
 (** Run [cmd] inside the Docker sandbox with host credential bindings
@@ -132,7 +132,7 @@ val run_trusted_docker_shell_command_with_status :
 val run_docker_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
@@ -144,9 +144,9 @@ val run_docker_credentialed_bash :
 val run_docker_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  network_mode:Keeper_types.network_mode ->
+  network_mode:Keeper_types_profile_sandbox.network_mode ->
   string

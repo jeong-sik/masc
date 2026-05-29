@@ -40,7 +40,7 @@ let compact_runtime_trust_cache_ttl_sec = 1.0
    N keepers × M turns_per_window to just N keepers. *)
 let compact_runtime_trust_cache_key
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
   =
   Printf.sprintf
     "operator:keeper-runtime-trust:compact:v1:%s:%s:%d:%b"
@@ -67,8 +67,8 @@ let project_compact_runtime_trust runtime_trust =
     ]
 ;;
 
-let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
-  let cascade_name = non_empty_trimmed_string_opt (Keeper_types.cascade_name_of_meta meta) in
+let degraded_keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
+  let cascade_name = non_empty_trimmed_string_opt (Keeper_meta_contract.cascade_name_of_meta meta) in
   let cascade_json = Json_util.string_opt_to_json cascade_name in
   [ "cascade_name", cascade_json
   ; "cascade_canonical", cascade_json
@@ -82,7 +82,7 @@ let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
 
 let compact_keeper_runtime_trust_json
       ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
   =
   let runtime_trust =
     if Keeper_fd_pressure.active ()
@@ -96,7 +96,7 @@ let compact_keeper_runtime_trust_json
   project_compact_runtime_trust runtime_trust
 ;;
 
-let degraded_keeper_snapshot_row (meta : Keeper_types.keeper_meta) =
+let degraded_keeper_snapshot_row (meta : Keeper_meta_contract.keeper_meta) =
   let runtime_trust = Keeper_fd_pressure.degraded_trust_json () in
   let fd_fields = Keeper_fd_pressure.projection_fields () in
   `Assoc

@@ -41,7 +41,7 @@ val observation_has_question : string -> bool
 (** Heuristic: does [text] contain a question that warrants attention? *)
 
 val keeper_policy_observation_of_room_message :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   room_id:string -> Masc_domain.message -> keeper_policy_observation
 (** Build a [keeper_policy_observation] from a room message in [meta]'s
     context. *)

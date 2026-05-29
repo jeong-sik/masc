@@ -97,20 +97,20 @@ let cascade_exhaustion_detail_code detail =
 ;;
 
 let cascade_exhaustion_reason_code
-      (reason : Keeper_types.cascade_exhaustion_reason)
+      (reason : Keeper_meta_contract.cascade_exhaustion_reason)
   =
   match reason with
-  | Keeper_types.Connection_refused -> "cascade_exhausted_connection_refused"
-  | Keeper_types.Dns_failure -> "cascade_exhausted_dns_failure"
-  | Keeper_types.No_providers_available -> "cascade_exhausted_no_providers_available"
-  | Keeper_types.All_providers_failed -> "cascade_exhausted_all_providers_failed"
-  | Keeper_types.Candidates_filtered_after_cycles ->
+  | Keeper_meta_contract.Connection_refused -> "cascade_exhausted_connection_refused"
+  | Keeper_meta_contract.Dns_failure -> "cascade_exhausted_dns_failure"
+  | Keeper_meta_contract.No_providers_available -> "cascade_exhausted_no_providers_available"
+  | Keeper_meta_contract.All_providers_failed -> "cascade_exhausted_all_providers_failed"
+  | Keeper_meta_contract.Candidates_filtered_after_cycles ->
     "cascade_exhausted_candidates_filtered"
-  | Keeper_types.Max_turns_exceeded -> "cascade_exhausted_max_turns"
-  | Keeper_types.Structural_attempt_timeout _ ->
+  | Keeper_meta_contract.Max_turns_exceeded -> "cascade_exhausted_max_turns"
+  | Keeper_meta_contract.Structural_attempt_timeout _ ->
     "cascade_exhausted_structural_attempt_timeout"
-  | Keeper_types.Capacity_exhausted -> "cascade_exhausted_capacity_exhausted"
-  | Keeper_types.Other_detail detail -> cascade_exhaustion_detail_code detail
+  | Keeper_meta_contract.Capacity_exhausted -> "cascade_exhausted_capacity_exhausted"
+  | Keeper_meta_contract.Other_detail detail -> cascade_exhaustion_detail_code detail
 ;;
 
 let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
@@ -362,7 +362,7 @@ let record_turn_tool_events
     effects intentionally retained from the godfile. *)
 let record_streaming_cancelled_observation
       ~(config : Coord.config)
-      ~(run_meta : Keeper_types.keeper_meta)
+      ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
       ~(cascade_name : Cascade_name.t)
       ~(keeper_turn_id : int)

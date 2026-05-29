@@ -8,7 +8,7 @@
 
     Re-exports {!Keeper_meta_tool_access} via [include] for the
     [tool_preset] / [tool_access] ADT — callers can reach those
-    via either {!Keeper_types.tool_preset} or
+    via either {!Keeper_meta_contract.tool_preset} or
     {!Keeper_meta_contract.tool_preset} interchangeably (type
     identity preserved through the cascade).
 

@@ -43,11 +43,11 @@ let truncate_tool_surface_names ~max_tools ~essential_names all_allowed =
   if List.length all_allowed <= max_tools
   then all_allowed
   else (
-    let essential_names = Keeper_types.dedupe_keep_order essential_names in
+    let essential_names = Keeper_types_profile_toml_normalizers.dedupe_keep_order essential_names in
     let essential =
       all_allowed
       |> List.filter (fun name -> List.mem name essential_names)
-      |> Keeper_types.dedupe_keep_order
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     let non_essential =
       List.filter (fun name -> not (List.mem name essential_names)) all_allowed
@@ -56,5 +56,5 @@ let truncate_tool_surface_names ~max_tools ~essential_names all_allowed =
     essential
     @ (non_essential
        |> List.filteri (fun i _ -> i < budget)
-       |> Keeper_types.dedupe_keep_order))
+       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order))
 ;;

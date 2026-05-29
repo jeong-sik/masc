@@ -45,7 +45,7 @@ let messages_safe config =
 
 let assoc_upsert fields key value = (key, value) :: List.remove_assoc key fields
 
-let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
+let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) =
   let runtime_trust =
     if Keeper_fd_pressure.active ()
     then Keeper_fd_pressure.degraded_trust_json ()
@@ -236,7 +236,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
      | _ ->
        (match member "name" keeper_json with
         | `String name ->
-          (match Keeper_types.read_meta_resolved config name with
+          (match Keeper_meta_store.read_meta_resolved config name with
            | Ok (Some (_resolved_name, meta)) ->
              let keepalive_running =
                match member "keepalive_running" keeper_json with

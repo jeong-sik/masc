@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 (** Runtime adapter for descriptor-backed Remote_mcp agent tools. *)

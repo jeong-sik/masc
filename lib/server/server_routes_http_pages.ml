@@ -378,7 +378,7 @@ let bonsai_keeper_status_of_phase phase =
       Warn
   | Offline | Stopped | Crashed | Dead | Zombie -> Dead
 
-let bonsai_ctx_pct (meta : Keeper_types.keeper_meta) =
+let bonsai_ctx_pct (meta : Keeper_meta_contract.keeper_meta) =
   match meta.max_context_override with
   | Some max_tokens when max_tokens > 0 && meta.runtime.usage.last_total_tokens > 0 ->
       let pct =

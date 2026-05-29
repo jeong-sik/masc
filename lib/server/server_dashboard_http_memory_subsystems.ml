@@ -37,7 +37,7 @@ let load_memory_subsystems_entries ~(config : Coord_utils.config) =
   | _ ->
     let rows, errors =
       try
-        Keeper_types.keeper_names config
+        Keeper_meta_store.keeper_names config
         |> List.fold_left
              (fun (rows_acc, errs_acc) keeper ->
                match

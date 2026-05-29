@@ -28,7 +28,7 @@
     @since RFC-0109 Phase A *)
 
 (** Tool access JSON projection. Opaque to this module — kept as JSON to
-    avoid pulling [Keeper_types.tool_access] into [cdal_runtime]. *)
+    avoid pulling [Keeper_meta_contract.tool_access] into [cdal_runtime]. *)
 type tool_access_json = Yojson.Safe.t
 
 (** Goal reference for verification-aware variants. [goal_title] is a

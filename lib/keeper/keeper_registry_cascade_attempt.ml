@@ -13,6 +13,9 @@
     direct Atomic CAS path is required. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_registry_types
 
 let cascade_attempt_merge ~(latest : keeper_meta) ~(caller : keeper_meta) =

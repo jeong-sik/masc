@@ -10,20 +10,20 @@ val json_float_opt : 'a option -> [> `Float of 'a | `Null ]
 val json_string_opt : 'a option -> [> `Null | `String of 'a ]
 val effective_autoboot_enabled :
   string ->
-  Server_routes_http_common.Keeper_types.keeper_meta -> bool
+  Keeper_meta_contract.keeper_meta -> bool
 val pause_elapsed_sec :
   float ->
-  Server_routes_http_common.Keeper_types.keeper_meta -> float option
+  Keeper_meta_contract.keeper_meta -> float option
 val pause_kind :
-  Server_routes_http_common.Keeper_types.keeper_meta -> string
+  Keeper_meta_contract.keeper_meta -> string
 val pause_auto_resume_source :
-  Server_routes_http_common.Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   string option
 val paused_keeper_detail_json :
   now:float ->
   name:string ->
   autoboot_enabled:bool ->
-  Server_routes_http_common.Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   [> `Assoc of (string * Yojson.Safe.t) list ]
 val running_paused_keeper_names : unit -> String.t list
 val durable_paused_keeper_scan :

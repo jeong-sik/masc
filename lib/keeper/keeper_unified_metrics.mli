@@ -7,13 +7,13 @@
 
 (** Derive the trigger list from the observation. *)
 val observed_triggers_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
 (** Derive the affordance list from the observation. *)
 val observed_affordances_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
@@ -135,7 +135,7 @@ val record_turn_latency_by_model_bucket :
 
 
 val update_metrics_from_result :
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   ?is_autonomous_turn:bool ->
@@ -144,10 +144,10 @@ val update_metrics_from_result :
   ?social_transition_reason:string ->
   ?context_max:int ->
   Keeper_agent_run.run_result ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta
 
 val update_metrics_from_failure :
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   reason:string ->
@@ -155,11 +155,11 @@ val update_metrics_from_failure :
   ?social_transition_reason:string ->
   ?sdk_error:Agent_sdk.Error.sdk_error ->
   unit ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta
 
 val append_metrics_snapshot :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->
@@ -180,7 +180,7 @@ val append_metrics_snapshot :
 
 val append_decision_record :
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
   ?semaphore_wait_ms:int ->

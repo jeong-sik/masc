@@ -205,7 +205,7 @@ let execute_tool_eio
          let rec loop = function
            | [] -> []
            | keeper_name :: rest ->
-             (match Keeper_types.read_meta_resolved config keeper_name with
+             (match Keeper_meta_store.read_meta_resolved config keeper_name with
               | Ok (Some (_, meta)) -> Keeper_tool_policy.keeper_allowed_tool_names meta
               | Ok None | Error _ -> loop rest)
          in
@@ -630,7 +630,7 @@ let execute_tool_eio
                           agent: %s"
                          agent_name)
                   | candidate :: rest ->
-                    (match Keeper_types.read_meta_resolved config candidate with
+                    (match Keeper_meta_store.read_meta_resolved config candidate with
                      | Ok (Some (_resolved_name, meta)) -> Ok meta
                      | Ok None -> loop rest
                      | Error msg -> Error msg)
@@ -666,7 +666,7 @@ let execute_tool_eio
                    let turn_sandbox_factory_git =
                      Some
                        (Keeper_sandbox_factory.create
-                          ~default_network_override:Keeper_types.Network_inherit
+                          ~default_network_override:Keeper_types_profile_sandbox.Network_inherit
                           ~config
                           ~meta
                           ())

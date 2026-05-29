@@ -4,6 +4,8 @@
     combines the turn verdict with cascade backpressure admission. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 module Observations = Keeper_heartbeat_loop_observations
 
 (* Re-export cascade_backpressure_decision so the record field below

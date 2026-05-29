@@ -42,7 +42,7 @@ let count_execution_receipt_entries = Dashboard_http_keeper_execution_receipt.co
 let execution_receipt_coverage_gaps = Dashboard_http_keeper_execution_receipt.execution_receipt_coverage_gaps
 
 let keeper_names (config : Coord.config) =
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
 
 let keeper_count (config : Coord.config) : int =
   List.length (keeper_names config)
@@ -51,7 +51,7 @@ let running_keeper_count (config : Coord.config) : int =
   keeper_names config
   |> List.fold_left
        (fun count name ->
-         match Keeper_types.read_meta config name with
+         match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) when runtime_keepalive_running config meta -> count + 1
          | _ -> count)
        0
@@ -100,9 +100,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
   Eio.Fiber.all
     (List.mapi (fun idx name -> fun () ->
       results.(idx) <- (
-      match Keeper_types.read_meta config name with
+      match Keeper_meta_store.read_meta config name with
       | Error _ | Ok None -> None
-      | Ok (Some (m : Keeper_types.keeper_meta)) ->
+      | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
           let agent = Keeper_status_runtime.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
@@ -254,7 +254,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           in
           let history_path =
             Filename.concat
-              (Filename.concat (Keeper_types.session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id))
+              (Filename.concat (Keeper_types_profile.session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id))
               "history.jsonl"
           in
           let ( conversation_tail,
@@ -323,7 +323,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             | None -> None
           in
           let effective_sandbox_image =
-            if m.sandbox_profile = Keeper_types.Docker
+            if m.sandbox_profile = Keeper_types_profile_sandbox.Docker
             then
               Some (
                 match m.sandbox_image with
@@ -443,7 +443,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 ]
             | None ->
                 (let primary_max_context = 0 in
-                     let base_dir = Keeper_types.session_base_dir config in
+                     let base_dir = Keeper_types_profile.session_base_dir config in
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint
                          ~max_checkpoint_messages:m.compaction.max_checkpoint_messages
@@ -659,7 +659,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("active_model", `Null);
               ("next_model_hint", `Null);
               ("sandbox_profile",
-                `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
+                `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
               ("sandbox_target", `String sandbox_target);
               ("sandbox_last_error",
                 Json_util.string_opt_to_json sandbox_last_error);
@@ -730,7 +730,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
               ( "last_proactive_outcome"
               , `String
-                  (Keeper_types.proactive_cycle_outcome_to_string
+                  (Keeper_meta_contract.proactive_cycle_outcome_to_string
                      m.runtime.proactive_rt.last_outcome) );
               ("last_proactive_reason",
                 if String.trim m.runtime.proactive_rt.last_reason = ""

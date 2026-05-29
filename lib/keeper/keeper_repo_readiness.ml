@@ -5,6 +5,8 @@
     concrete answer about whether code work can safely start from that clone. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type command_result =
   { ok : bool

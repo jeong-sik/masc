@@ -3,6 +3,9 @@
     liveness/restart policy outside the turn loop. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 module Startup_helpers = Keeper_supervisor_startup_helpers
 

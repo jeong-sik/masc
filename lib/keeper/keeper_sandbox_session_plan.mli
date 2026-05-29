@@ -117,7 +117,7 @@ val of_request
   -> container_root:string
   -> base_path:string
   -> container_kind:string
-  -> network_mode:Keeper_types.network_mode
+  -> network_mode:Keeper_types_profile_sandbox.network_mode
   -> host_root:string
   -> uid:int
   -> gid:int
@@ -142,7 +142,7 @@ val identity_files : t -> (string * string) list
 (** [(name, value)] pairs, emitted as [--env name=value]. *)
 val env_overrides : t -> (string * string) list
 
-val network_mode : t -> Keeper_types.network_mode
+val network_mode : t -> Keeper_types_profile_sandbox.network_mode
 val user : t -> (int * int) option
 val ulimits : t -> ulimit list
 val read_only_rootfs : t -> bool

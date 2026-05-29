@@ -3,6 +3,8 @@
     @since PR #10670 — extracted from Keeper_supervisor. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val slot_holder_age_for_test :
   now:float -> keeper_name:string -> float option

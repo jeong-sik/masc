@@ -1,6 +1,9 @@
 (** Keeper_registry — SSOT for keeper state. Atomic.t + persistent StringMap; no mutex needed in single-domain Eio. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 (** Failure-reason cluster re-included from Keeper_registry_types for backward compatibility. *)
 include Keeper_registry_types

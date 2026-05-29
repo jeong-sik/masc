@@ -6,6 +6,8 @@
     coverage-gap tracking, and determines the final turn result. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_agent_result
 
 let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =

@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val keeper_allowed_tool_names
   :  ?write_done:bool

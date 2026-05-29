@@ -504,7 +504,7 @@ let run_named
           Cascade_exhausted
             {
               cascade_name = error_cascade_name;
-              reason = Keeper_types.No_providers_available;
+              reason = Keeper_meta_contract.No_providers_available;
             }
       in
       (match runtime_manifest_context, runtime_manifest_append with
@@ -807,7 +807,7 @@ let run_named
          (Cascade_exhausted
             {
               cascade_name = error_cascade_name;
-              reason = Keeper_types.Candidates_filtered_after_cycles;
+              reason = Keeper_meta_contract.Candidates_filtered_after_cycles;
             }))
   in
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =

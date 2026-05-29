@@ -296,9 +296,9 @@ type t =
   ; tools_used : string list
   ; tool_contract_result : tool_contract_result
   ; tool_surface : tool_surface
-  ; sandbox_kind : Keeper_types.sandbox_profile
+  ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option
-  ; network_mode : Keeper_types.network_mode
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
   ; cascade_name : Cascade_name.t
@@ -352,7 +352,7 @@ let enrich_contract_violation_reason (receipt : t) : string =
       let canonical_names names =
         names
         |> List.map Keeper_tool_resolution.canonical_tool_name
-        |> Keeper_types.dedupe_keep_order
+        |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
       in
       let called =
         canonical_names
@@ -365,7 +365,7 @@ let enrich_contract_violation_reason (receipt : t) : string =
         _contract_id
 ;;
 
-let sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) : Keeper_types.sandbox_profile =
+let sandbox_kind_of_meta (meta : Keeper_meta_contract.keeper_meta) : Keeper_types_profile_sandbox.sandbox_profile =
   meta.sandbox_profile
 ;;
 

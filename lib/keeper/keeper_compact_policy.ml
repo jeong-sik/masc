@@ -6,6 +6,8 @@
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_core
 
 (** Fraction of context window at which compaction is treated as an

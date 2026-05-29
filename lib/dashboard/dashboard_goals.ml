@@ -32,7 +32,7 @@ let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
 
 
 
-let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_types.keeper_meta) =
+let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
   | exn ->
       let error = Printexc.to_string exn in
@@ -60,9 +60,9 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
     | Some parent_id -> not (List.mem parent_id goal_ids)
   in
   let keeper_metas =
-    Keeper_types.keeper_names config
+    Keeper_meta_store.keeper_names config
     |> List.filter_map (fun keeper_name ->
-           match Keeper_types.read_meta config keeper_name with
+           match Keeper_meta_store.read_meta config keeper_name with
            | Ok (Some meta) -> Some meta
            | Ok None | Error _ -> None)
   in
@@ -73,7 +73,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
   in
   let latest_receipts =
     keeper_metas
-    |> List.map (fun (meta : Keeper_types.keeper_meta) -> meta.name)
+    |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
   let context =
@@ -85,7 +85,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
       latest_receipts;
       latest_runtime_trusts =
         keeper_metas
-        |> List.map (fun (meta : Keeper_types.keeper_meta) ->
+        |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) ->
                ( meta.name,
                  keeper_runtime_trust_snapshot_json ~config ~meta ));
     }
@@ -294,9 +294,9 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
   | Some node ->
       let keeper_details =
-        Keeper_types.keeper_names config
+        Keeper_meta_store.keeper_names config
         |> List.filter_map (fun keeper_name ->
-               match Keeper_types.read_meta config keeper_name with
+               match Keeper_meta_store.read_meta config keeper_name with
                | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->
                    let latest_receipt =
                      List.assoc_opt meta.name

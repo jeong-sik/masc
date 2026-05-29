@@ -7,6 +7,8 @@
     @since 0.6.0 — observational IDE Phase 1 *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Agent_tool_shared_runtime
 open Ide_annotation_types
 

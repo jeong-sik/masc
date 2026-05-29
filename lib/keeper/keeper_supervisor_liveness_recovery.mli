@@ -1,6 +1,8 @@
 (** Dead-keeper liveness recovery scan. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type credential_recovery_outcome =
   | Credential_recovery_not_needed

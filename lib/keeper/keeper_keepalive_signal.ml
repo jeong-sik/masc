@@ -5,6 +5,9 @@
    Extracted from keeper_keepalive.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 
@@ -67,7 +70,7 @@ let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
    skip the [current_task_id] field or persist a different id. *)
 let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
   ignore meta; ignore task_id
-  [@@fsm_guard "meta.Keeper_types.current_task_id = Some task_id"]
+  [@@fsm_guard "meta.current_task_id = Some task_id"]
 
 (* HeartbeatTick: the [compare_and_set wakeup true false] in
    [interruptible_sleep] succeeded — wakeup transitioned TRUE -> FALSE

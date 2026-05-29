@@ -261,7 +261,8 @@ let rec parse case_sensitive pattern path dd = function
   (* Eq-form value flags: --flag=VALUE *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg rg_value_flags ->
-    parse case_sensitive pattern path dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg rg_value_flags in
+    parse case_sensitive pattern path dd (match ev with Some evv -> evv :: rest | None -> rest)
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
     then parse case_sensitive pattern path dd rest
@@ -661,7 +662,8 @@ let rec parse name type_ maxdepth path = function
   (* Eq-form value flags: -flag=VALUE — extract prefix and skip *)
   | arg :: rest
     when Shell_ir_typed_types.is_eq_form_flag arg value_flags ->
-    parse name type_ maxdepth path rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg value_flags in
+    parse name type_ maxdepth path (match ev with Some evv -> evv :: rest | None -> rest)
   | "-exec" :: rest | "-ok" :: rest
   | "-execdir" :: rest | "-okdir" :: rest -> parse name type_ maxdepth path (skip_exec rest)
   (* POSIX end-of-options: treat all remaining as path *)
@@ -1161,7 +1163,8 @@ let rec parse oneline max_count = function
   (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
     when Shell_ir_typed_types.is_eq_form_flag arg git_log_value_flags_no_eq ->
-    parse oneline max_count rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg git_log_value_flags_no_eq in
+    parse oneline max_count (match ev with Some evv -> evv :: rest | None -> rest)
   | "--" :: rest -> parse oneline max_count rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
@@ -1301,7 +1304,8 @@ let rec parse force force_with_lease set_upstream remote branch = function
   (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
     when Shell_ir_typed_types.is_eq_form_flag arg git_push_value_flags_no_eq ->
-    parse force force_with_lease set_upstream remote branch rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg git_push_value_flags_no_eq in
+    parse force force_with_lease set_upstream remote branch (match ev with Some evv -> evv :: rest | None -> rest)
   | "--tags" :: rest | "--mirror" :: rest | "--prune" :: rest
   | "--follow-tags" :: rest | "--atomic" :: rest | "--quiet" :: rest
   | "-q" :: rest | "--verbose" :: rest | "-v" :: rest
@@ -1397,7 +1401,8 @@ let rec parse rebase remote branch = function
   (* --flag=VALUE form: extract prefix before = and check against no_eq list *)
   | arg :: rest
     when Shell_ir_typed_types.is_eq_form_flag arg git_pull_value_flags_no_eq ->
-    parse rebase remote branch rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg git_pull_value_flags_no_eq in
+    parse rebase remote branch (match ev with Some evv -> evv :: rest | None -> rest)
   (* boolean flags: specific exact-match arms *)
   | "--rebase" :: rest -> parse true remote branch rest
   | "--no-rebase" :: rest -> parse false remote branch rest
@@ -3155,7 +3160,8 @@ let rec parse inline script extra dd = function
     parse inline script extra dd rest
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg node_value_flags ->
-    parse inline script extra dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg node_value_flags in
+    parse inline script (match ev with Some evv -> evv :: extra | None -> extra) dd rest
   | arg :: rest ->
     (match inline, script with
      | Some _, _ -> parse inline script (arg :: extra) dd rest
@@ -3208,7 +3214,8 @@ let rec parse inline script extra dd = function
     parse inline script extra dd rest
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg python_value_flags ->
-    parse inline script extra dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg python_value_flags in
+    parse inline script (match ev with Some evv -> evv :: extra | None -> extra) dd rest
   | arg :: rest ->
     (match inline, script with
      | Some _, _ -> parse inline script (arg :: extra) dd rest
@@ -3261,7 +3268,8 @@ let rec parse inline script extra dd = function
     parse inline script extra dd rest
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg python3_value_flags ->
-    parse inline script extra dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg python3_value_flags in
+    parse inline script (match ev with Some evv -> evv :: extra | None -> extra) dd rest
   | arg :: rest ->
     (match inline, script with
      | Some _, _ -> parse inline script (arg :: extra) dd rest
@@ -3308,7 +3316,8 @@ let rec parse subcmd pkgs dd = function
     parse subcmd pkgs dd rest
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg pip_value_flags ->
-    parse subcmd pkgs dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg pip_value_flags in
+    parse subcmd (match ev with Some evv -> evv :: pkgs | None -> pkgs) dd rest
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) pkgs dd rest
@@ -3435,7 +3444,8 @@ let rec parse subcmd sd glb frc dd = function
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg npm_value_flags ->
-    parse subcmd sd glb frc dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg npm_value_flags in
+    parse subcmd sd glb frc dd (match ev with Some evv -> evv :: rest | None -> rest)
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd sd glb frc true rest
   | arg :: rest ->
@@ -3591,7 +3601,8 @@ let rec parse subcmd v race dd = function
   (* Eq-form value flags: --flag=VALUE *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg go_value_flags ->
-    parse subcmd v race dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg go_value_flags in
+    parse subcmd v race dd (match ev with Some evv -> evv :: rest | None -> rest)
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd v race true rest
   | arg :: rest ->
@@ -3893,7 +3904,8 @@ let rec parse subcmd rm priv det dd = function
   (* --flag=VALUE equal-sign form for value-consuming flags *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg docker_value_flags ->
-    parse subcmd rm priv det dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg docker_value_flags in
+    parse subcmd rm priv det dd (match ev with Some evv -> evv :: rest | None -> rest)
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd rm priv det true rest
   | arg :: rest ->
@@ -3950,7 +3962,8 @@ let opam_value_flags = [ "--repo"; "--root"; "--switch"; "--dir"; "--solver"; "-
     (* --flag=VALUE equal-sign form *)
     | arg :: rest
       when not dd && Shell_ir_typed_types.is_eq_form_flag arg opam_value_flags ->
-      parse subcmd y dd rest
+      let ev = Shell_ir_typed_types.eq_form_flag_value arg opam_value_flags in
+      parse subcmd y dd (match ev with Some evv -> evv :: rest | None -> rest)
     | arg :: rest ->
       (match subcmd with
        | None when not dd -> parse (Some arg) y dd rest
@@ -4004,7 +4017,8 @@ let npx_value_flags = [ "--package"; "--cache"; "--userconfig"; "--call"; "--she
     (* --flag=VALUE equal-sign form *)
     | arg :: rest
       when not dd && Shell_ir_typed_types.is_eq_form_flag arg npx_value_flags ->
-      parse subcmd y dd rest
+      let ev = Shell_ir_typed_types.eq_form_flag_value arg npx_value_flags in
+      parse subcmd y dd (match ev with Some evv -> evv :: rest | None -> rest)
     | arg :: rest ->
       (match subcmd with
        | None when not dd -> parse (Some arg) y dd rest
@@ -4067,7 +4081,8 @@ let rec parse subcmd dev glb prod fl dd = function
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg yarn_value_flags ->
-    parse subcmd dev glb prod fl dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg yarn_value_flags in
+    parse subcmd dev glb prod fl dd (match ev with Some evv -> evv :: rest | None -> rest)
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) dev glb prod fl dd rest
@@ -4127,7 +4142,8 @@ let rec parse subcmd sd glb frc prod dd = function
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--dir"; "--filter"; "--store-dir"; "--registry"; "--config"; "--global-dir"; "--reporter"; "--loglevel"; "--prefix"; "--color" ] ->
-    parse subcmd sd glb frc prod dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--dir"; "--filter"; "--store-dir"; "--registry"; "--config"; "--global-dir"; "--reporter"; "--loglevel"; "--prefix"; "--color" ] in
+    parse subcmd sd glb frc prod dd (match ev with Some evv -> evv :: rest | None -> rest)
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd sd glb frc prod true rest
   | arg :: rest ->
@@ -4183,7 +4199,8 @@ let rec parse subcmd nc sys dd = function
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--index-url"; "--extra-index-url"; "--python"; "--cache-dir"; "--find-links"; "--resolution"; "--prerelease"; "--index-strategy"; "--keyring-provider" ] ->
-    parse subcmd nc sys dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--index-url"; "--extra-index-url"; "--python"; "--cache-dir"; "--find-links"; "--resolution"; "--prerelease"; "--index-strategy"; "--keyring-provider" ] in
+    parse subcmd nc sys dd (match ev with Some evv -> evv :: rest | None -> rest)
   (* POSIX end-of-options: all remaining args are positional *)
   | "--" :: rest -> parse subcmd nc sys true rest
   | arg :: rest ->
@@ -4240,7 +4257,8 @@ let rec parse subcmd y f dd = function
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--repo"; "--hostname"; "--group"; "--output"; "--per-page"; "--jq"; "--template" ] ->
-    parse subcmd y f dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--repo"; "--hostname"; "--group"; "--output"; "--per-page"; "--jq"; "--template" ] in
+    parse subcmd y f dd (match ev with Some evv -> evv :: rest | None -> rest)
   | "--" :: rest -> parse subcmd y f true rest
   | arg :: rest ->
     (match subcmd with
@@ -4294,7 +4312,8 @@ let rec parse subcmd v x dd = function
   (* --flag=VALUE equal-sign form (double-dash only) *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--tb"; "--deselect"; "--junitxml"; "--result-log"; "--confcutdir"; "--rootdir"; "--override-ini" ] ->
-    parse subcmd v x dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--tb"; "--deselect"; "--junitxml"; "--result-log"; "--confcutdir"; "--rootdir"; "--override-ini" ] in
+    parse subcmd v x dd (match ev with Some evv -> evv :: rest | None -> rest)
   | "--" :: rest -> parse subcmd v x true rest
   | arg :: rest ->
     (match subcmd with
@@ -4385,7 +4404,8 @@ let rec parse subcmd f s dd = function
     parse subcmd f s dd rest
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg ruff_value_flags ->
-    parse subcmd f s dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg ruff_value_flags in
+    parse subcmd f s dd (match ev with Some evv -> evv :: rest | None -> rest)
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) f s dd rest
@@ -4436,7 +4456,8 @@ let rec parse subcmd st dd = function
   (* --flag=VALUE equal-sign form *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg [ "--pythonversion"; "--pythonplatform"; "--lib"; "--project"; "--venv-path" ] ->
-    parse subcmd st dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--pythonversion"; "--pythonplatform"; "--lib"; "--project"; "--venv-path" ] in
+    parse subcmd st dd (match ev with Some evv -> evv :: rest | None -> rest)
   | "--" :: rest -> parse subcmd st true rest
   | arg :: rest ->
     (match subcmd with
@@ -4491,7 +4512,8 @@ let rec parse subcmd nw w dd = function
     parse subcmd nw w dd rest
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg tsc_value_flags ->
-    parse subcmd nw w dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg tsc_value_flags in
+    parse subcmd nw w dd (match ev with Some evv -> evv :: rest | None -> rest)
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) nw w dd rest
@@ -4545,7 +4567,8 @@ let rec parse subcmd opt tst dd = function
     when not dd
          && Shell_ir_typed_types.is_eq_form_flag arg
               [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "--sysroot"; "--print" ] ->
-    parse subcmd opt tst dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "--sysroot"; "--print" ] in
+    parse subcmd opt tst dd (match ev with Some evv -> evv :: rest | None -> rest)
   | "--" :: rest -> parse subcmd opt tst true rest
   | arg :: rest ->
     (match subcmd with
@@ -4598,7 +4621,8 @@ let rec parse subcmd w lf dd = function
   | arg :: rest
     when not dd
          && Shell_ir_typed_types.is_eq_form_flag arg [ "-tabs"; "-tabwidth"; "-comments" ] ->
-    parse subcmd w lf dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "-tabs"; "-tabwidth"; "-comments" ] in
+    parse subcmd w lf dd (match ev with Some evv -> evv :: rest | None -> rest)
   | "--" :: rest -> parse subcmd w lf true rest
   | arg :: rest ->
     (match subcmd with
@@ -4655,7 +4679,8 @@ let rec parse subcmd nd p dd = function
   (* --flag=VALUE equal-sign form for value-consuming flags *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg gradle_value_flags ->
-    parse subcmd nd p dd rest
+    let ev = Shell_ir_typed_types.eq_form_flag_value arg gradle_value_flags in
+    parse subcmd nd p dd (match ev with Some evv -> evv :: rest | None -> rest)
   | arg :: rest ->
     (match subcmd with
      | None when not dd -> parse (Some arg) nd p dd rest
@@ -4724,7 +4749,8 @@ parse None false false false args|}
       when not dd
            && Shell_ir_typed_types.is_eq_form_flag arg
                 [ "-C"; "-f"; "-k"; "-l"; "-d" ] ->
-      parse subcmd j dd rest
+      let ev = Shell_ir_typed_types.eq_form_flag_value arg [ "-C"; "-f"; "-k"; "-l"; "-d" ] in
+      parse subcmd j dd (match ev with Some evv -> evv :: rest | None -> rest)
     | arg :: rest ->
       if not dd && String.length arg > 2 && String.sub arg 0 2 = "-j"
       then
@@ -4813,7 +4839,8 @@ parse None false false false args|}
     (* --flag=VALUE equal-sign form *)
     | arg :: rest
       when not dd && Shell_ir_typed_types.is_eq_form_flag arg mvn_value_flags ->
-      parse subcmd off bat q dd rest
+      let ev = Shell_ir_typed_types.eq_form_flag_value arg mvn_value_flags in
+      parse subcmd off bat q dd (match ev with Some evv -> evv :: rest | None -> rest)
     | "--" :: rest -> parse subcmd off bat q true rest
     | arg :: rest ->
       (match subcmd with

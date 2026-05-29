@@ -1060,6 +1060,112 @@ let test_sed_long_forms () =
    | w -> Alcotest.failf "sed --quiet --regexp-extended: expected both flags, got %a" pp w)
 ;;
 
+let test_df_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* df --human-readable --type ext4 /dev/sda1 *)
+  let df1 =
+    of_simple { (base "df") with args = [ lit "--human-readable"; lit "--type"; lit "ext4"; lit "/dev/sda1" ] }
+  in
+  (match df1 with
+   | W (Df { human_readable = true; filesystem_type = Some "ext4"; path = Some "/dev/sda1"; _ }) -> ()
+   | w -> Alcotest.failf "df --human-readable --type: expected both, got %a" pp w);
+  (* df -h *)
+  let df2 = of_simple { (base "df") with args = [ lit "-h" ] } in
+  (match df2 with
+   | W (Df { human_readable = true; _ }) -> ()
+   | w -> Alcotest.failf "df -h: expected human_readable, got %a" pp w)
+;;
+
+let test_uname_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* uname --all --kernel-name --release --machine *)
+  let u1 =
+    of_simple { (base "uname") with args = [ lit "--all"; lit "--kernel-name"; lit "--release"; lit "--machine" ] }
+  in
+  (match u1 with
+   | W (Uname { all = true; kernel_name = true; release = true; machine = true; _ }) -> ()
+   | w -> Alcotest.failf "uname --all --kernel-name --release --machine: got %a" pp w);
+  (* uname -srm *)
+  let u2 = of_simple { (base "uname") with args = [ lit "-s"; lit "-r"; lit "-m" ] } in
+  (match u2 with
+   | W (Uname { all = false; kernel_name = true; release = true; machine = true; _ }) -> ()
+   | w -> Alcotest.failf "uname -srm: got %a" pp w)
+;;
+
+let test_ps_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* ps --all --full --user root *)
+  let ps1 =
+    of_simple { (base "ps") with args = [ lit "--all"; lit "--full"; lit "--user"; lit "root" ] }
+  in
+  (match ps1 with
+   | W (Ps { all = true; full = true; user = Some "root"; _ }) -> ()
+   | w -> Alcotest.failf "ps --all --full --user root: got %a" pp w);
+  (* ps -ef *)
+  let ps2 = of_simple { (base "ps") with args = [ lit "-e"; lit "-f" ] } in
+  (match ps2 with
+   | W (Ps { all = true; full = true; user = None; _ }) -> ()
+   | w -> Alcotest.failf "ps -ef: got %a" pp w)
+;;
+
+let test_scp_long_forms () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* scp --recursive --port 2222 src/ dest/ *)
+  let scp1 =
+    of_simple { (base "scp") with args = [ lit "--recursive"; lit "-P"; lit "2222"; lit "src/"; lit "dest/" ] }
+  in
+  (match scp1 with
+   | W (Scp { recursive = true; port = Some 2222; source = "src/"; dest = "dest/"; _ }) -> ()
+   | w -> Alcotest.failf "scp --recursive -P 2222: got %a" pp w);
+  (* scp -r file.txt host:/tmp/ *)
+  let scp2 =
+    of_simple { (base "scp") with args = [ lit "-r"; lit "file.txt"; lit "host:/tmp/" ] }
+  in
+  (match scp2 with
+   | W (Scp { recursive = true; source = "file.txt"; dest = "host:/tmp/"; _ }) -> ()
+   | w -> Alcotest.failf "scp -r: got %a" pp w)
+;;
+
 (* Combined short-flag parsing: -rf → -r + -f *)
 let test_combined_short_flags () =
   let open Shell_ir_typed in
@@ -1407,6 +1513,10 @@ let () =
         ; Alcotest.test_case "--message= form" `Quick test_git_commit_message_equals
         ; Alcotest.test_case "--port=/--identity-file= form" `Quick test_ssh_long_forms
         ; Alcotest.test_case "sed --in-place/--expression form" `Quick test_sed_long_forms
+        ; Alcotest.test_case "df --human-readable/--type form" `Quick test_df_long_forms
+        ; Alcotest.test_case "uname --all/--kernel-name form" `Quick test_uname_long_forms
+        ; Alcotest.test_case "ps --all/--full/--user form" `Quick test_ps_long_forms
+        ; Alcotest.test_case "scp --recursive form" `Quick test_scp_long_forms
         ; Alcotest.test_case "combined short flags" `Quick test_combined_short_flags
         ] )
     ; ( "spec_invariants"

@@ -2025,8 +2025,8 @@ let rec parse human_readable fs_type = function
       (Shell_ir_typed_types.W
          (Shell_ir_typed_types.Df
             { path = None; human_readable; filesystem_type = fs_type }))
-  | "-h" :: rest -> parse true fs_type rest
-  | "-t" :: t :: rest -> parse human_readable (Some t) rest
+  | "-h" :: rest | "--human-readable" :: rest -> parse true fs_type rest
+  | "-t" :: t :: rest | "--type" :: t :: rest -> parse human_readable (Some t) rest
   (* POSIX end-of-options: next non-empty arg is the path *)
   | "--" :: rest ->
     let remaining = List.filter (fun a -> String.length a > 0) rest in
@@ -2182,10 +2182,10 @@ let rec parse all kn rel mach = function
       (Shell_ir_typed_types.W
          (Shell_ir_typed_types.Uname
             { all; kernel_name = kn; release = rel; machine = mach }))
-  | "-a" :: rest -> parse true kn rel mach rest
-  | "-s" :: rest -> parse all true rel mach rest
-  | "-r" :: rest -> parse all kn true mach rest
-  | "-m" :: rest -> parse all kn rel true rest
+  | "-a" :: rest | "--all" :: rest -> parse true kn rel mach rest
+  | "-s" :: rest | "--kernel-name" :: rest -> parse all true rel mach rest
+  | "-r" :: rest | "--release" :: rest -> parse all kn true mach rest
+  | "-m" :: rest | "--machine" :: rest -> parse all kn rel true rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
@@ -2241,9 +2241,9 @@ let rec parse all full user = function
     Some
       (Shell_ir_typed_types.W
          (Shell_ir_typed_types.Ps { all; full; user }))
-  | "-e" :: rest | "-A" :: rest -> parse true full user rest
-  | "-f" :: rest -> parse all true user rest
-  | "-u" :: u :: rest when not (String.length u > 0 && u.[0] = '-') -> parse all full (Some u) rest
+  | "-e" :: rest | "-A" :: rest | "--all" :: rest -> parse true full user rest
+  | "-f" :: rest | "--full" :: rest -> parse all true user rest
+  | "-u" :: u :: rest | "--user" :: u :: rest when not (String.length u > 0 && u.[0] = '-') -> parse all full (Some u) rest
   | arg :: rest ->
     if String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-'
     then (
@@ -2464,7 +2464,7 @@ let rec parse recursive port src dest = function
      | Some s, Some d ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive; port }))
      | _ -> None)
-  | "-r" :: rest -> parse true port src dest rest
+  | "-r" :: rest | "--recursive" :: rest -> parse true port src dest rest
   | "-P" :: p_str :: rest ->
     (match int_of_string_opt p_str with
      | Some p -> parse recursive (Some p) src dest rest

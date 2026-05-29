@@ -371,60 +371,152 @@ let of_command = function
     in
     let file_args = match file with None -> [] | Some f -> [ arg f ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Patch, flag_args @ file_args) ]
-  | Shell_ir_typed.W (Npm { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Npm, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Cargo { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Cargo, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Go { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Go, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Gh { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gh, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Npm { subcommand; save_dev; global; force; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if save_dev then args @ [ arg "--save-dev" ] else args in
+    let args = if global then args @ [ arg "--global" ] else args in
+    let args = if force then args @ [ arg "--force" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Npm, args) ]
+  | Shell_ir_typed.W (Cargo { subcommand; release; verbose; features; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if release then args @ [ arg "--release" ] else args in
+    let args = if verbose then args @ [ arg "--verbose" ] else args in
+    let args = match features with Some f -> args @ [ arg "--features"; arg f ] | None -> args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Cargo, args) ]
+  | Shell_ir_typed.W (Go { subcommand; verbose; race; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if verbose then args @ [ arg "-v" ] else args in
+    let args = if race then args @ [ arg "-race" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Go, args) ]
+  | Shell_ir_typed.W (Gh { subcommand; action; draft; squash; delete_branch; body; title; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = match action with Some a -> args @ [ arg a ] | None -> args in
+    let args = if draft then args @ [ arg "--draft" ] else args in
+    let args = if squash then args @ [ arg "--squash" ] else args in
+    let args = if delete_branch then args @ [ arg "--delete-branch" ] else args in
+    let args = match body with Some b -> args @ [ arg "--body"; arg b ] | None -> args in
+    let args = match title with Some t -> args @ [ arg "--title"; arg t ] | None -> args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gh, args) ]
   | Shell_ir_typed.W (Chmod { mode; path; recursive }) ->
     let flag_args = if recursive then [ arg "-R" ] else [] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Chmod, flag_args @ [ arg mode; arg path ]) ]
   | Shell_ir_typed.W (Chown { owner; path; recursive }) ->
     let flag_args = if recursive then [ arg "-R" ] else [] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Chown, flag_args @ [ arg owner; arg path ]) ]
-  | Shell_ir_typed.W (Docker { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Docker, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Opam { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Opam, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Npx { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Npx, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Yarn { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Yarn, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Pnpm { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pnpm, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Uv { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Uv, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Glab { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Glab, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Pytest { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pytest, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Docker { subcommand; rm; privileged; detach; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if rm then args @ [ arg "--rm" ] else args in
+    let args = if privileged then args @ [ arg "--privileged" ] else args in
+    let args = if detach then args @ [ arg "-d" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Docker, args) ]
+  | Shell_ir_typed.W (Opam { subcommand; yes; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if yes then args @ [ arg "-y" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Opam, args) ]
+  | Shell_ir_typed.W (Npx { subcommand; yes; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if yes then args @ [ arg "-y" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Npx, args) ]
+  | Shell_ir_typed.W (Yarn { subcommand; dev; global; production; frozen_lockfile; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if dev then args @ [ arg "--dev" ] else args in
+    let args = if global then args @ [ arg "--global" ] else args in
+    let args = if production then args @ [ arg "--production" ] else args in
+    let args = if frozen_lockfile then args @ [ arg "--frozen-lockfile" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Yarn, args) ]
+  | Shell_ir_typed.W (Pnpm { subcommand; save_dev; global; force; production; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if save_dev then args @ [ arg "--save-dev" ] else args in
+    let args = if global then args @ [ arg "--global" ] else args in
+    let args = if force then args @ [ arg "--force" ] else args in
+    let args = if production then args @ [ arg "--production" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pnpm, args) ]
+  | Shell_ir_typed.W (Uv { subcommand; no_cache; system; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if no_cache then args @ [ arg "--no-cache" ] else args in
+    let args = if system then args @ [ arg "--system" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Uv, args) ]
+  | Shell_ir_typed.W (Glab { subcommand; yes; force; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if yes then args @ [ arg "--yes" ] else args in
+    let args = if force then args @ [ arg "--force" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Glab, args) ]
+  | Shell_ir_typed.W (Pytest { subcommand; verbose; exitfirst; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if verbose then args @ [ arg "-v" ] else args in
+    let args = if exitfirst then args @ [ arg "-x" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pytest, args) ]
   | Shell_ir_typed.W (Terminal_notifier { title; message }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Terminal_notifier, [ arg title; arg message ]) ]
-  | Shell_ir_typed.W (Ruff { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ruff, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Pyright { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pyright, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Tsc { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tsc, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Ruff { subcommand; fix; show_source; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if fix then args @ [ arg "--fix" ] else args in
+    let args = if show_source then args @ [ arg "--show-source" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ruff, args) ]
+  | Shell_ir_typed.W (Pyright { subcommand; strict; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if strict then args @ [ arg "--strict" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Pyright, args) ]
+  | Shell_ir_typed.W (Tsc { subcommand; no_emit; watch; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if no_emit then args @ [ arg "--noEmit" ] else args in
+    let args = if watch then args @ [ arg "--watch" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tsc, args) ]
   | Shell_ir_typed.W (Ocamlfind { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Ocamlfind, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Rustc { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rustc, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Gofmt { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gofmt, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Gradle { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gradle, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Ninja { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ninja, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Rustc { subcommand; optimize; test; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if optimize then args @ [ arg "-O" ] else args in
+    let args = if test then args @ [ arg "--test" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rustc, args) ]
+  | Shell_ir_typed.W (Gofmt { subcommand; write; list_files; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if write then args @ [ arg "-w" ] else args in
+    let args = if list_files then args @ [ arg "-l" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gofmt, args) ]
+  | Shell_ir_typed.W (Gradle { subcommand; no_daemon; parallel; rest }) ->
+    let args = [ arg subcommand ] in
+    let args = if no_daemon then args @ [ arg "--no-daemon" ] else args in
+    let args = if parallel then args @ [ arg "--parallel" ] else args in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gradle, args) ]
+  | Shell_ir_typed.W (Ninja { subcommand; jobs; rest }) ->
+    let args = [ arg subcommand ] in
+    let args =
+      match jobs with
+      | Some n -> args @ [ arg (Printf.sprintf "-j%d" n) ]
+      | None -> args
+    in
+    let args = args @ List.map arg rest in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ninja, args) ]
   | Shell_ir_typed.W (Java { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Java, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Javac { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Javac, arg subcommand :: List.map arg args) ]
-  | Shell_ir_typed.W (Mvn { subcommand; args }) ->
-    [ Capability.Exec_program (Exec_program.of_known Exec_program.Mvn, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Mvn { subcommand; offline; batch_mode; quiet; args }) ->
+    let args' = [ arg subcommand ] in
+    let args' = if offline then args' @ [ arg "-o" ] else args' in
+    let args' = if batch_mode then args' @ [ arg "-B" ] else args' in
+    let args' = if quiet then args' @ [ arg "-q" ] else args' in
+    let args' = args' @ List.map arg args in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Mvn, args') ]
   | Shell_ir_typed.W (Cmake { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Cmake, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Dune_local_sh { subcommand; args }) ->

@@ -79,32 +79,32 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Python3 { script = "main.py"; args = [ "-v" ]; inline = None })
   ; W (Pip { subcommand = "install"; packages = [ "requests"; "flask" ] })
   ; W (Patch { file = Some "foo.c"; patchfile = Some "fix.patch"; strip = 1; reverse = false })
-  ; W (Npm { subcommand = "install"; args = [ "--save-dev" ] })
-  ; W (Cargo { subcommand = "build"; args = [ "--release" ] })
-  ; W (Go { subcommand = "build"; args = [ "-o"; "bin" ] })
-  ; W (Gh { subcommand = "pr"; args = [ "list"; "--state"; "open" ] })
+  ; W (Npm { subcommand = "install"; save_dev = true; global = false; force = false; rest = [] })
+  ; W (Cargo { subcommand = "build"; release = true; verbose = false; features = None; rest = [] })
+  ; W (Go { subcommand = "build"; verbose = false; race = false; rest = [ "-o"; "bin" ] })
+  ; W (Gh { subcommand = "pr"; action = Some "list"; draft = false; squash = false; delete_branch = false; body = None; title = None; rest = [] })
   ; W (Chmod { mode = "755"; path = "/tmp/x"; recursive = false })
   ; W (Chown { owner = "root"; path = "/tmp/x"; recursive = false })
-  ; W (Docker { subcommand = "run"; args = [ "-d"; "nginx" ] })
-  ; W (Opam { subcommand = "install"; args = [ "dune" ] })
-  ; W (Npx { subcommand = "tsc"; args = [ "--noEmit" ] })
-  ; W (Yarn { subcommand = "install"; args = [ "--frozen-lockfile" ] })
-  ; W (Pnpm { subcommand = "run"; args = [ "build" ] })
-  ; W (Uv { subcommand = "pip"; args = [ "install"; "requests" ] })
-  ; W (Glab { subcommand = "mr"; args = [ "list"; "--state"; "opened" ] })
-  ; W (Pytest { subcommand = ""; args = [ "-v"; "tests/" ] })
+  ; W (Docker { subcommand = "run"; rm = false; privileged = false; detach = true; rest = [ "nginx" ] })
+  ; W (Opam { subcommand = "install"; yes = true; rest = [ "dune" ] })
+  ; W (Npx { subcommand = "tsc"; yes = false; rest = [ "--noEmit" ] })
+  ; W (Yarn { subcommand = "install"; dev = false; global = false; production = false; frozen_lockfile = true; rest = [] })
+  ; W (Pnpm { subcommand = "run"; save_dev = false; global = false; force = false; production = false; rest = [ "build" ] })
+  ; W (Uv { subcommand = "pip"; no_cache = false; system = false; rest = [ "install"; "requests" ] })
+  ; W (Glab { subcommand = "mr"; yes = false; force = false; rest = [ "list"; "--state"; "opened" ] })
+  ; W (Pytest { subcommand = ""; verbose = true; exitfirst = false; rest = [ "tests/" ] })
   ; W (Terminal_notifier { title = "Done"; message = "Build finished" })
-  ; W (Ruff { subcommand = "check"; args = [ "--fix" ] })
-  ; W (Pyright { subcommand = ""; args = [ "--project"; "." ] })
-  ; W (Tsc { subcommand = ""; args = [ "--noEmit" ] })
+  ; W (Ruff { subcommand = "check"; fix = true; show_source = false; rest = [] })
+  ; W (Pyright { subcommand = ""; strict = false; rest = [ "--project"; "." ] })
+  ; W (Tsc { subcommand = ""; no_emit = true; watch = false; rest = [] })
   ; W (Ocamlfind { subcommand = "list"; args = [ "-desc" ] })
-  ; W (Rustc { subcommand = ""; args = [ "--edition"; "2021" ] })
-  ; W (Gofmt { subcommand = ""; args = [ "-w"; "main.go" ] })
-  ; W (Gradle { subcommand = "build"; args = [ "--no-daemon" ] })
-  ; W (Ninja { subcommand = ""; args = [ "-j4" ] })
+  ; W (Rustc { subcommand = ""; optimize = false; test = false; rest = [ "--edition"; "2021" ] })
+  ; W (Gofmt { subcommand = ""; write = true; list_files = false; rest = [ "main.go" ] })
+  ; W (Gradle { subcommand = "build"; no_daemon = true; parallel = false; rest = [] })
+  ; W (Ninja { subcommand = ""; jobs = Some 4; rest = [] })
   ; W (Java { subcommand = "MyClass"; args = [ "-cp"; "." ] })
   ; W (Javac { subcommand = "Main.java"; args = [ "-d"; "out" ] })
-  ; W (Mvn { subcommand = "clean"; args = [ "install" ] })
+  ; W (Mvn { subcommand = "clean"; offline = false; batch_mode = true; quiet = false; args = [ "install" ] })
   ; W (Cmake { subcommand = "--build"; args = [ "."; "--target"; "install" ] })
   ; W (Dune_local_sh { subcommand = "build"; args = [ "-j4" ] })
   ; W (Osascript { subcommand = "-e"; args = [ "tell app \"Finder\"" ] })
@@ -282,32 +282,32 @@ let test_of_simple_round_trip () =
     ; W (Python3 { script = ""; args = [ "-u" ]; inline = Some "import sys; print(sys.version)" })
     ; W (Pip { subcommand = "install"; packages = [ "numpy" ] })
     ; W (Patch { file = None; patchfile = Some "fix.patch"; strip = 0; reverse = true })
-    ; W (Npm { subcommand = "run"; args = [ "build" ] })
-    ; W (Cargo { subcommand = "test"; args = [ "--lib" ] })
-    ; W (Go { subcommand = "run"; args = [ "main.go"; "-v" ] })
-    ; W (Gh { subcommand = "issue"; args = [ "create"; "--title"; "bug" ] })
+    ; W (Npm { subcommand = "run"; save_dev = false; global = false; force = false; rest = [ "build" ] })
+    ; W (Cargo { subcommand = "test"; release = false; verbose = false; features = None; rest = [ "--lib" ] })
+    ; W (Go { subcommand = "run"; verbose = true; race = false; rest = [ "main.go" ] })
+    ; W (Gh { subcommand = "issue"; action = Some "create"; draft = false; squash = false; delete_branch = false; body = None; title = Some "bug"; rest = [] })
     ; W (Chmod { mode = "644"; path = "/etc/config"; recursive = true })
     ; W (Chown { owner = "user:group"; path = "/var/data"; recursive = true })
-    ; W (Docker { subcommand = "build"; args = [ "-t"; "myapp"; "." ] })
-    ; W (Opam { subcommand = "switch"; args = [ "create"; "5.2.0" ] })
-    ; W (Npx { subcommand = "jest"; args = [ "--coverage" ] })
-    ; W (Yarn { subcommand = "add"; args = [ "lodash" ] })
-    ; W (Pnpm { subcommand = "dev"; args = [] })
-    ; W (Uv { subcommand = "sync"; args = [] })
-    ; W (Glab { subcommand = "ci"; args = [ "status" ] })
-    ; W (Pytest { subcommand = ""; args = [ "--cov" ] })
+    ; W (Docker { subcommand = "build"; rm = false; privileged = false; detach = false; rest = [ "-t"; "myapp"; "." ] })
+    ; W (Opam { subcommand = "switch"; yes = false; rest = [ "create"; "5.2.0" ] })
+    ; W (Npx { subcommand = "jest"; yes = true; rest = [ "--coverage" ] })
+    ; W (Yarn { subcommand = "add"; dev = false; global = false; production = false; frozen_lockfile = false; rest = [ "lodash" ] })
+    ; W (Pnpm { subcommand = "dev"; save_dev = false; global = false; force = false; production = false; rest = [] })
+    ; W (Uv { subcommand = "sync"; no_cache = false; system = false; rest = [] })
+    ; W (Glab { subcommand = "ci"; yes = false; force = false; rest = [ "status" ] })
+    ; W (Pytest { subcommand = ""; verbose = false; exitfirst = false; rest = [ "--cov" ] })
     ; W (Terminal_notifier { title = "Test"; message = "All passed" })
-    ; W (Ruff { subcommand = "format"; args = [ "--check"; "src/" ] })
-    ; W (Pyright { subcommand = ""; args = [ "--strict" ] })
-    ; W (Tsc { subcommand = ""; args = [ "--project"; "tsconfig.json" ] })
+    ; W (Ruff { subcommand = "format"; fix = false; show_source = false; rest = [ "--check"; "src/" ] })
+    ; W (Pyright { subcommand = ""; strict = true; rest = [] })
+    ; W (Tsc { subcommand = ""; no_emit = false; watch = false; rest = [ "--project"; "tsconfig.json" ] })
     ; W (Ocamlfind { subcommand = "query"; args = [ "eio" ] })
-    ; W (Rustc { subcommand = ""; args = [ "-O"; "src/main.rs" ] })
-    ; W (Gofmt { subcommand = ""; args = [ "-l"; "." ] })
-    ; W (Gradle { subcommand = "test"; args = [ "--info" ] })
-    ; W (Ninja { subcommand = ""; args = [ "-C"; "build" ] })
+    ; W (Rustc { subcommand = ""; optimize = true; test = false; rest = [ "src/main.rs" ] })
+    ; W (Gofmt { subcommand = ""; write = false; list_files = true; rest = [ "." ] })
+    ; W (Gradle { subcommand = "test"; no_daemon = false; parallel = false; rest = [ "--info" ] })
+    ; W (Ninja { subcommand = ""; jobs = None; rest = [ "-C"; "build" ] })
     ; W (Java { subcommand = "app.Main"; args = [ "--port"; "8080" ] })
     ; W (Javac { subcommand = "src/App.java"; args = [ "-d"; "build/" ] })
-    ; W (Mvn { subcommand = "test"; args = [ "-DskipTests=false" ] })
+    ; W (Mvn { subcommand = "test"; offline = true; batch_mode = false; quiet = true; args = [ "-DskipTests=false" ] })
     ; W (Cmake { subcommand = ".."; args = [ "-DCMAKE_BUILD_TYPE=Release" ] })
     ; W (Dune_local_sh { subcommand = "runtest"; args = [ "-f" ] })
     ; W (Osascript { subcommand = "-e"; args = [ "display dialog \"hello\"" ] })
@@ -400,6 +400,247 @@ let test_of_simple_generic_fallback () =
      | _ -> false)
 ;;
 
+(* --flag=value parsing robustness: of_simple must handle both
+   "--flag value" (two tokens) and "--flag=value" (one token). *)
+let test_flag_equals_parsing () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  (* Git_clone: --depth=5 --branch=develop *)
+  let gc =
+    of_simple
+      { (base "git") with
+        args = [ lit "clone"; lit "--depth=5"; lit "--branch=develop"; lit "repo.git" ]
+      }
+  in
+  (match gc with
+   | W (Git_clone { depth = Some 5; branch = Some "develop"; repo = "repo.git"; _ }) -> ()
+   | w ->
+     Alcotest.failf "Git_clone --flag=value: expected depth=5 branch=develop, got %a" pp w);
+  (* Gh: --body=hello --title=world *)
+  let gh =
+    of_simple
+      { (base "gh") with
+        args =
+          [ lit "pr"; lit "create"; lit "--body=hello world"; lit "--title=my pr"; lit "--draft" ]
+      }
+  in
+  (match gh with
+   | W (Gh { subcommand = "pr"; action = Some "create"; body = Some "hello world"; title = Some "my pr"; draft = true; _ }) -> ()
+   | w ->
+     Alcotest.failf "Gh --flag=value: expected body/title parsed, got %a" pp w);
+  (* Curl: --request=POST --data=hello *)
+  let curl =
+    of_simple
+      { (base "curl") with
+        args = [ lit "--request=POST"; lit "--data=hello"; lit "http://x" ]
+      }
+  in
+  (match curl with
+   | W (Curl { method_ = `POST; body = Some "hello"; url = "http://x"; _ }) -> ()
+   | w ->
+     Alcotest.failf "Curl --flag=value: expected POST+body, got %a" pp w);
+  (* Git_log: --max-count=5 *)
+  let gl =
+    of_simple { (base "git") with args = [ lit "log"; lit "--max-count=5"; lit "--oneline" ] }
+  in
+  (match gl with
+   | W (Git_log { oneline = true; max_count = Some 5; _ }) -> ()
+   | w ->
+     Alcotest.failf "Git_log --max-count=5: expected 5, got %a" pp w);
+  (* Cargo: --features=serde *)
+  let cargo =
+    of_simple { (base "cargo") with args = [ lit "build"; lit "--features=serde" ] }
+  in
+  (match cargo with
+   | W (Cargo { subcommand = "build"; features = Some "serde"; _ }) -> ()
+   | w ->
+     Alcotest.failf "Cargo --flag=value: expected features=serde, got %a" pp w);
+  (* Ninja: -j8 with -C build — -C becomes subcommand (first non-flag arg) *)
+  let ninja =
+    of_simple { (base "ninja") with args = [ lit "-j8"; lit "-C"; lit "build" ] }
+  in
+  (match ninja with
+   | W (Ninja { subcommand = "-C"; jobs = Some 8; rest = [ "build" ]; _ }) -> ()
+   | w ->
+     Alcotest.failf "Ninja -j8: expected sub=-C jobs=8, got %a" pp w);
+  (* Ninja: no flags, just subcommand + rest *)
+  let ninja2 =
+    of_simple { (base "ninja") with args = [ lit "all"; lit "-C"; lit "build" ] }
+  in
+  (match ninja2 with
+   | W (Ninja { subcommand = "all"; jobs = None; rest = [ "-C"; "build" ]; _ }) -> ()
+   | w ->
+     Alcotest.failf "Ninja plain: expected sub=all, got %a" pp w);
+  (* Cut: --delimiter=: --fields=1,3 *)
+  let cut =
+    of_simple { (base "cut") with args = [ lit "--delimiter=:"; lit "--fields=1,3"; lit "file.txt" ] }
+  in
+  (match cut with
+   | W (Cut { delimiter = Some ":"; fields = "1,3"; file = Some "file.txt"; _ }) -> ()
+   | w ->
+     Alcotest.failf "Cut --flag=value: expected d=: f=1,3, got %a" pp w);
+  (* Du: --max-depth=2 *)
+  let du =
+    of_simple { (base "du") with args = [ lit "-h"; lit "--max-depth=2"; lit "/tmp" ] }
+  in
+  (match du with
+   | W (Du { human_readable = true; max_depth = Some 2; path = Some "/tmp"; _ }) -> ()
+   | w ->
+     Alcotest.failf "Du --max-depth=2: expected depth=2, got %a" pp w);
+  (* Wget: --output-document=out.html *)
+  let wget =
+    of_simple { (base "wget") with args = [ lit "--output-document=out.html"; lit "http://x" ] }
+  in
+  (match wget with
+   | W (Wget { output = Some "out.html"; url = "http://x"; _ }) -> ()
+   | w ->
+     Alcotest.failf "Wget --output-document=: expected out.html, got %a" pp w);
+  (* Sort: --key=3 *)
+  let sort =
+    of_simple { (base "sort") with args = [ lit "-n"; lit "--key=3"; lit "file.txt" ] }
+  in
+  (match sort with
+   | W (Sort { numeric = true; key = Some 3; file = Some "file.txt"; _ }) -> ()
+   | w ->
+     Alcotest.failf "Sort --key=3: expected key=3, got %a" pp w)
+;;
+
+(* POSIX -- end-of-options handling *)
+let test_posix_end_of_options () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Sort: -- -file.txt (file starting with -) *)
+  let sort =
+    of_simple { (base "sort") with args = [ lit "-n"; lit "--"; lit "-file.txt" ] }
+  in
+  (match sort with
+   | W (Sort { numeric = true; file = Some "-file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sort --: expected file=-file.txt, got %a" pp w);
+  (* Grep: -- pattern -file *)
+  let grep =
+    of_simple { (base "grep") with args = [ lit "-r"; lit "--"; lit "pattern"; lit "-file" ] }
+  in
+  (match grep with
+   | W (Grep { pattern = "pattern"; path = Some "-file"; recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --: expected pattern+path, got %a" pp w);
+  (* Find: -- /tmp -name "*.ml" *)
+  let find =
+    of_simple { (base "find") with args = [ lit "--"; lit "/tmp"; lit "-name"; lit "*.ml" ] }
+  in
+  (match find with
+   | W (Find { path = "/tmp"; _ }) -> ()
+   | w -> Alcotest.failf "Find --: expected path=/tmp, got %a" pp w);
+  (* Cut: -- -d: -f1 file.txt — after --, -d: is positional *)
+  let cut =
+    of_simple { (base "cut") with args = [ lit "-f"; lit "1"; lit "--"; lit "-d:"; lit "file.txt" ] }
+  in
+  (match cut with
+   | W (Cut { fields = "1"; file = Some "-d:"; _ }) -> ()
+   | w -> Alcotest.failf "Cut --: expected fields=1 file=-d: (first positional after --), got %a" pp w);
+  (* Head: -- -logfile.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "-n"; lit "5"; lit "--"; lit "-logfile.txt" ] }
+  in
+  (match head with
+   | W (Head { path = "-logfile.txt"; lines = 5; _ }) -> ()
+   | w -> Alcotest.failf "Head --: expected path=-logfile.txt lines=5, got %a" pp w);
+  (* Tail: -- -myfile *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "-n"; lit "3"; lit "--"; lit "-myfile" ] }
+  in
+  (match tail with
+   | W (Tail { path = "-myfile"; lines = 3; _ }) -> ()
+   | w -> Alcotest.failf "Tail --: expected path=-myfile lines=3, got %a" pp w);
+  (* Rm: -- -myfile.txt file.txt (both after -- are paths) *)
+  let rm =
+    of_simple { (base "rm") with args = [ lit "-r"; lit "-f"; lit "--"; lit "-myfile.txt"; lit "file.txt" ] }
+  in
+  (match rm with
+   | W (Rm { paths; recursive = true; force = true; _ }) when paths = [ "-myfile.txt"; "file.txt" ] -> ()
+   | w -> Alcotest.failf "Rm --: expected paths=[-myfile.txt; file.txt], got %a" pp w);
+  (* Wc: -- -l-file *)
+  let wc =
+    of_simple { (base "wc") with args = [ lit "-l"; lit "--"; lit "-l-file" ] }
+  in
+  (match wc with
+   | W (Wc { path = "-l-file"; mode = Some `Lines; _ }) -> ()
+   | w -> Alcotest.failf "Wc --: expected path=-l-file mode=Lines, got %a" pp w);
+  (* Stat: -- -myfile *)
+  let stat =
+    of_simple { (base "stat") with args = [ lit "--"; lit "-myfile" ] }
+  in
+  (match stat with
+   | W (Stat { path = "-myfile"; format = None; _ }) -> ()
+   | w -> Alcotest.failf "Stat --: expected path=-myfile, got %a" pp w);
+  (* Du: -- -mydir *)
+  let du =
+    of_simple { (base "du") with args = [ lit "-h"; lit "--"; lit "-mydir" ] }
+  in
+  (match du with
+   | W (Du { path = Some "-mydir"; human_readable = true; _ }) -> ()
+   | w -> Alcotest.failf "Du --: expected path=-mydir human_readable=true, got %a" pp w);
+  (* Df: -- -mypath *)
+  let df =
+    of_simple { (base "df") with args = [ lit "-h"; lit "--"; lit "-mypath" ] }
+  in
+  (match df with
+   | W (Df { path = Some "-mypath"; human_readable = true; _ }) -> ()
+   | w -> Alcotest.failf "Df --: expected path=-mypath human_readable=true, got %a" pp w)
+;;
+
+(* --lines=N form for Head and Tail *)
+let test_lines_equals_form () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Head: --lines=25 file.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "--lines=25"; lit "file.txt" ] }
+  in
+  (match head with
+   | W (Head { path = "file.txt"; lines = 25; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines=25: expected lines=25, got %a" pp w);
+  (* Tail: --lines=7 /var/log/syslog *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "--lines=7"; lit "/var/log/syslog" ] }
+  in
+  (match tail with
+   | W (Tail { path = "/var/log/syslog"; lines = 7; _ }) -> ()
+   | w -> Alcotest.failf "Tail --lines=7: expected lines=7, got %a" pp w);
+  (* Head: --lines=0 (edge case) *)
+  let head0 =
+    of_simple { (base "head") with args = [ lit "--lines=0"; lit "f" ] }
+  in
+  (match head0 with
+   | W (Head { lines = 0; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines=0: expected lines=0, got %a" pp w)
+;;
+
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
    in subcommand+args parsing when args are empty or minimal. *)
 let test_all_wrapped_minimal_round_trip () =
@@ -439,9 +680,9 @@ let test_bin_variant_dispatch () =
     ; W (Cat { path = "/dev/null" }), "cat"
     ; W (Rg { pattern = "."; path = None; case_sensitive = false }), "rg"
     ; W (Rm { paths = []; recursive = false; force = false }), "rm"
-    ; W (Docker { subcommand = "ps"; args = [] }), "docker"
-    ; W (Npm { subcommand = "test"; args = [] }), "npm"
-    ; W (Cargo { subcommand = "build"; args = [] }), "cargo"
+    ; W (Docker { subcommand = "ps"; rm = false; privileged = false; detach = false; rest = [] }), "docker"
+    ; W (Npm { subcommand = "test"; save_dev = false; global = false; force = false; rest = [] }), "npm"
+    ; W (Cargo { subcommand = "build"; release = false; verbose = false; features = None; rest = [] }), "cargo"
     ; W (Su { subcommand = "root"; args = [] }), "su"
     ; W (Dd { subcommand = "if=/dev/null"; args = [] }), "dd"
     ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdb1" ] }), "mkfs"
@@ -508,6 +749,9 @@ let () =
             `Quick
             test_all_wrapped_minimal_round_trip
         ; Alcotest.test_case "bin variant dispatch" `Quick test_bin_variant_dispatch
+        ; Alcotest.test_case "--flag=value parsing robustness" `Quick test_flag_equals_parsing
+        ; Alcotest.test_case "POSIX -- end-of-options" `Quick test_posix_end_of_options
+        ; Alcotest.test_case "--lines=N form" `Quick test_lines_equals_form
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

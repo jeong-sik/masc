@@ -388,80 +388,95 @@ let pp fmt = function
     Format.fprintf fmt "Patch(file=%a, patchfile=%a, strip=%d, reverse=%b)"
       (Format.pp_print_option Format.pp_print_string) file
       (Format.pp_print_option Format.pp_print_string) patchfile strip reverse
-  | W (Npm { subcommand; args }) ->
-    Format.fprintf fmt "Npm(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Cargo { subcommand; args }) ->
-    Format.fprintf fmt "Cargo(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Go { subcommand; args }) ->
-    Format.fprintf fmt "Go(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Gh { subcommand; args }) ->
-    Format.fprintf fmt "Gh(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
+  | W (Npm { subcommand; save_dev; global; force; rest }) ->
+    Format.fprintf fmt "Npm(sub=%s, D=%b, g=%b, force=%b, rest=%a)" subcommand save_dev global force
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Cargo { subcommand; release; verbose; features; rest }) ->
+    Format.fprintf fmt "Cargo(sub=%s, rel=%b, verb=%b, feat=%a, rest=%a)" subcommand release verbose
+      (Format.pp_print_option Format.pp_print_string) features
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Go { subcommand; verbose; race; rest }) ->
+    Format.fprintf fmt "Go(sub=%s, v=%b, race=%b, rest=%a)" subcommand verbose race
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Gh { subcommand; action; draft; squash; delete_branch; body; title; rest }) ->
+    Format.fprintf
+      fmt
+      "Gh(sub=%s, action=%a, draft=%b, squash=%b, del_br=%b, body=%a, title=%a, rest=%a)"
+      subcommand
+      (Format.pp_print_option Format.pp_print_string)
+      action
+      draft
+      squash
+      delete_branch
+      (Format.pp_print_option Format.pp_print_string)
+      body
+      (Format.pp_print_option Format.pp_print_string)
+      title
+      (Format.pp_print_list Format.pp_print_string)
+      rest
   | W (Chmod { mode; path; recursive }) ->
     Format.fprintf fmt "Chmod(mode=%s, path=%s, recursive=%b)" mode path recursive
   | W (Chown { owner; path; recursive }) ->
     Format.fprintf fmt "Chown(owner=%s, path=%s, recursive=%b)" owner path recursive
-  | W (Docker { subcommand; args }) ->
-    Format.fprintf fmt "Docker(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Opam { subcommand; args }) ->
-    Format.fprintf fmt "Opam(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Npx { subcommand; args }) ->
-    Format.fprintf fmt "Npx(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Yarn { subcommand; args }) ->
-    Format.fprintf fmt "Yarn(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Pnpm { subcommand; args }) ->
-    Format.fprintf fmt "Pnpm(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Uv { subcommand; args }) ->
-    Format.fprintf fmt "Uv(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Glab { subcommand; args }) ->
-    Format.fprintf fmt "Glab(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Pytest { subcommand; args }) ->
-    Format.fprintf fmt "Pytest(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
+  | W (Docker { subcommand; rm; privileged; detach; rest }) ->
+    Format.fprintf fmt "Docker(sub=%s, rm=%b, priv=%b, det=%b, rest=%a)" subcommand rm privileged detach
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Opam { subcommand; yes; rest }) ->
+    Format.fprintf fmt "Opam(sub=%s, yes=%b, rest=%a)" subcommand yes
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Npx { subcommand; yes; rest }) ->
+    Format.fprintf fmt "Npx(sub=%s, yes=%b, rest=%a)" subcommand yes
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Yarn { subcommand; dev; global; production; frozen_lockfile; rest }) ->
+    Format.fprintf fmt "Yarn(sub=%s, D=%b, g=%b, prod=%b, fl=%b, rest=%a)" subcommand dev global production frozen_lockfile
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Pnpm { subcommand; save_dev; global; force; production; rest }) ->
+    Format.fprintf fmt "Pnpm(sub=%s, D=%b, g=%b, force=%b, prod=%b, rest=%a)" subcommand save_dev global force production
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Uv { subcommand; no_cache; system; rest }) ->
+    Format.fprintf fmt "Uv(sub=%s, nc=%b, sys=%b, rest=%a)" subcommand no_cache system
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Glab { subcommand; yes; force; rest }) ->
+    Format.fprintf fmt "Glab(sub=%s, y=%b, f=%b, rest=%a)" subcommand yes force
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Pytest { subcommand; verbose; exitfirst; rest }) ->
+    Format.fprintf fmt "Pytest(sub=%s, v=%b, x=%b, rest=%a)" subcommand verbose exitfirst
+      (Format.pp_print_list Format.pp_print_string) rest
   | W (Terminal_notifier { title; message }) ->
     Format.fprintf fmt "Terminal_notifier(title=%s, message=%s)" title message
-  | W (Ruff { subcommand; args }) ->
-    Format.fprintf fmt "Ruff(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Pyright { subcommand; args }) ->
-    Format.fprintf fmt "Pyright(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Tsc { subcommand; args }) ->
-    Format.fprintf fmt "Tsc(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
+  | W (Ruff { subcommand; fix; show_source; rest }) ->
+    Format.fprintf fmt "Ruff(sub=%s, fix=%b, show_src=%b, rest=%a)" subcommand fix show_source
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Pyright { subcommand; strict; rest }) ->
+    Format.fprintf fmt "Pyright(sub=%s, strict=%b, rest=%a)" subcommand strict
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Tsc { subcommand; no_emit; watch; rest }) ->
+    Format.fprintf fmt "Tsc(sub=%s, noEmit=%b, watch=%b, rest=%a)" subcommand no_emit watch
+      (Format.pp_print_list Format.pp_print_string) rest
   | W (Ocamlfind { subcommand; args }) ->
     Format.fprintf fmt "Ocamlfind(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Rustc { subcommand; args }) ->
-    Format.fprintf fmt "Rustc(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Gofmt { subcommand; args }) ->
-    Format.fprintf fmt "Gofmt(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Gradle { subcommand; args }) ->
-    Format.fprintf fmt "Gradle(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
-  | W (Ninja { subcommand; args }) ->
-    Format.fprintf fmt "Ninja(subcommand=%s, args=%a)" subcommand
-      (Format.pp_print_list Format.pp_print_string) args
+  | W (Rustc { subcommand; optimize; test; rest }) ->
+    Format.fprintf fmt "Rustc(sub=%s, opt=%b, test=%b, rest=%a)" subcommand optimize test
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Gofmt { subcommand; write; list_files; rest }) ->
+    Format.fprintf fmt "Gofmt(sub=%s, w=%b, l=%b, rest=%a)" subcommand write list_files
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Gradle { subcommand; no_daemon; parallel; rest }) ->
+    Format.fprintf fmt "Gradle(sub=%s, no_daemon=%b, parallel=%b, rest=%a)" subcommand no_daemon parallel
+      (Format.pp_print_list Format.pp_print_string) rest
+  | W (Ninja { subcommand; jobs; rest }) ->
+    Format.fprintf fmt "Ninja(sub=%s, jobs=%a, rest=%a)" subcommand
+      (fun fmt j -> match j with None -> Format.fprintf fmt "none" | Some n -> Format.fprintf fmt "%d" n) jobs
+      (Format.pp_print_list Format.pp_print_string) rest
   | W (Java { subcommand; args }) ->
     Format.fprintf fmt "Java(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
   | W (Javac { subcommand; args }) ->
     Format.fprintf fmt "Javac(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
-  | W (Mvn { subcommand; args }) ->
-    Format.fprintf fmt "Mvn(subcommand=%s, args=%a)" subcommand
+  | W (Mvn { subcommand; offline; batch_mode; quiet; args }) ->
+    Format.fprintf fmt "Mvn(sub=%s, offline=%b, batch=%b, quiet=%b, args=%a)" subcommand offline batch_mode quiet
       (Format.pp_print_list Format.pp_print_string) args
   | W (Cmake { subcommand; args }) ->
     Format.fprintf fmt "Cmake(subcommand=%s, args=%a)" subcommand

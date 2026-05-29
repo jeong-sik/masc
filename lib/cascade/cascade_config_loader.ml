@@ -295,37 +295,16 @@ type inference_params =
       [reasoning_effort]) happens downstream in OAS. *)
   }
 
-let read_float_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `Float f -> Some f
-  | `Int i -> Some (float_of_int i)
-  | _ -> None
-;;
+let read_float_field json key = Json_util.get_float json key
 
-let read_int_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `Int i -> Some i
-  | `Float f -> Some (int_of_float f)
-  | _ -> None
-;;
+let read_int_field json key = Json_util.get_int json key
 
 let read_string_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `String s ->
-    let trimmed = String.trim s in
-    if trimmed <> "" then Some trimmed else None
-  | _ -> None
-;;
+  Json_util.get_string json key
+  |> Option.map String.trim
+  |> (fun o -> match o with Some s when s <> "" -> Some s | _ -> None)
 
-let read_bool_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `Bool b -> Some b
-  | _ -> None
-;;
+let read_bool_field json key = Json_util.get_bool json key
 
 let resolve_inference_params ~config_path ~name =
   match load_catalog_source config_path with
@@ -401,8 +380,7 @@ let resolve_inference_params ~config_path ~name =
     Returns an association list of [(provider_name, env_var_name)].
     The special key ["*"] means "all providers". *)
 let read_api_key_env_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
+  match Option.value ~default:`Null (Json_util.assoc_member_opt key json) with
   | `String s ->
     let trimmed = String.trim s in
     if trimmed <> "" then [ "*", trimmed ] else []
@@ -444,6 +422,7 @@ type strategy_config =
   ; backoff_cap_ms : int option
   ; ollama_max_concurrent : int option
   ; cli_max_concurrent : int option
+  ; tiers : string list list option
   ; sticky_ttl_ms : int option
   ; (* ── Retired scoring parameter overrides (diagnostics only) ── *)
     latency_baseline_ms : float option
@@ -470,6 +449,31 @@ type strategy_config =
       When [None], falls back to env var, then default 4. *)
   }
 
+(* Read a [string list list] from a JSON [list of list of string].
+   Returns [None] when the key is missing or any element has the
+   wrong shape; tier configuration must be all-or-nothing to avoid
+   silent misroutes. *)
+let read_tiers_field json key =
+  match Option.value ~default:`Null (Json_util.assoc_member_opt key json) with
+  | `Null -> None
+  | `List outer ->
+    let parse_tier = function
+      | `List inner ->
+        let strs =
+          List.filter_map
+            (function
+              | `String s when String.trim s <> "" -> Some (String.trim s)
+              | _ -> None)
+            inner
+        in
+        if List.length strs = List.length inner && strs <> [] then Some strs else None
+      | _ -> None
+    in
+    let tiers = List.filter_map parse_tier outer in
+    if List.length tiers = List.length outer && tiers <> [] then Some tiers else None
+  | _ -> None
+;;
+
 let empty_strategy_config =
   { kind = None
   ; max_cycles = None
@@ -477,6 +481,7 @@ let empty_strategy_config =
   ; backoff_cap_ms = None
   ; ollama_max_concurrent = None
   ; cli_max_concurrent = None
+  ; tiers = None
   ; sticky_ttl_ms = None
   ; latency_baseline_ms = None
   ; rate_limit_recency_window_s = None
@@ -504,6 +509,7 @@ let resolve_strategy_config_impl ~emit_telemetry ~config_path ~name =
     ; backoff_cap_ms = read_int_field json (name ^ "_backoff_cap_ms")
     ; ollama_max_concurrent = read_int_field json (name ^ "_ollama_max_concurrent")
     ; cli_max_concurrent = read_int_field json (name ^ "_cli_max_concurrent")
+    ; tiers = read_tiers_field json (name ^ "_tiers")
     ; sticky_ttl_ms = read_int_field json (name ^ "_sticky_ttl_ms")
     ; latency_baseline_ms = read_float_field json (name ^ "_latency_baseline_ms")
     ; rate_limit_recency_window_s =

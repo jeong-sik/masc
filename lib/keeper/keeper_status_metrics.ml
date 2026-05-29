@@ -246,7 +246,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
 
 let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
     metrics_summary =
-  let open Yojson.Safe.Util in
   List.fold_left
     (fun acc line ->
       try
@@ -259,6 +258,7 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
                 ~detail:"keeper metrics row is not a JSON object";
               raise Exit
         in
+        let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key j) in
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         let trace_id = Safe_ops.json_string ~default:"" "trace_id" j in
         let generation =
@@ -279,14 +279,14 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           Safe_ops.json_int ~default:0 "compaction_after_tokens" j
         in
         let saved_tokens = max 0 (before_tokens - after_tokens) in
-        let handoff = j |> member "handoff" in
+        let handoff = m "handoff" in
         let handoff_performed =
           Safe_ops.json_bool ~default:false "performed" handoff
         in
         let to_model = Safe_ops.json_string_opt "to_model" handoff in
         let prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff in
         let new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff in
-        let memory = j |> member "memory_check" in
+        let memory = m "memory_check" in
         let memory_performed =
           Safe_ops.json_bool ~default:false "performed" memory
         in
@@ -317,14 +317,14 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let memory_compaction_invalid_now =
           Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
         in
-        let drift = j |> member "drift" in
+        let drift = m "drift" in
         let drift_applied_now =
           Safe_ops.json_bool ~default:false "applied" drift
         in
         let memory_is_weather =
           match memory_expected_topic with Some "weather" -> true | _ -> false
         in
-        let auto_rules = j |> member "auto_rules" in
+        let auto_rules = m "auto_rules" in
         let auto_reflect_now =
           Safe_ops.json_bool
             ~default:(Safe_ops.json_bool ~default:false "reflect" auto_rules)

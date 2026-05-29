@@ -359,11 +359,10 @@ let handle_get_prompt_eio state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some (`Assoc _ as payload) ->
-    let open Yojson.Safe.Util in
-    (match payload |> member "name" with
-     | `String name ->
+    (match Json_util.assoc_member_opt "name" payload with
+     | Some (`String name) ->
        let arguments =
-         match payload |> member "arguments" with
+         match Option.value ~default:`Null (Json_util.assoc_member_opt "arguments" payload) with
          | `Assoc _ as args -> args
          | `Null -> `Assoc []
          | _ -> `Assoc []
@@ -382,12 +381,11 @@ let handle_get_prompt_eio state id params =
 ;;
 
 let handle_resources_subscribe_eio id ?mcp_session_id params =
-  let open Yojson.Safe.Util in
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/subscribe requires an MCP session"
   | Some session_id, Some (`Assoc _ as payload) ->
-    (match payload |> member "uri" with
-     | `String uri ->
+    (match Json_util.assoc_member_opt "uri" payload with
+     | Some (`String uri) ->
        subscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
@@ -396,12 +394,11 @@ let handle_resources_subscribe_eio id ?mcp_session_id params =
 ;;
 
 let handle_resources_unsubscribe_eio id ?mcp_session_id params =
-  let open Yojson.Safe.Util in
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/unsubscribe requires an MCP session"
   | Some session_id, Some (`Assoc _ as payload) ->
-    (match payload |> member "uri" with
-     | `String uri ->
+    (match Json_util.assoc_member_opt "uri" payload with
+     | Some (`String uri) ->
        unsubscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
@@ -680,7 +677,7 @@ let handle_request
                  | Some params ->
                    (try
                       let name =
-                        Yojson.Safe.Util.(params |> member "name" |> to_string)
+                        Json_util.get_string params "name" |> Option.value ~default:""
                       in
                       (* Issue #8699: exhaustive match on tool_profile.
                                Catch-all `_ -> Full` would silently elevate any

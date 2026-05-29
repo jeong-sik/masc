@@ -348,7 +348,6 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
        | None -> false)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
-       let open Yojson.Safe.Util in
        (* Pure-shape JSON access via Safe_ops: no exception swallow, no
           performative [Cancelled] re-raise. Behavior parity with the prior
           [try ... |> to_X with _ -> default] pattern on missing/wrong-typed
@@ -372,30 +371,27 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
        in
        let context_ratio = Safe_ops.json_float_opt "context_ratio" e.payload in
        let tools_used = Safe_ops.json_string_list "tools_used" e.payload in
+       let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key e.payload) in
        let optional_fields =
          let reasoning =
-           try match e.payload |> member "reasoning_tokens" with
-               | `Int n -> [("reasoning_tokens", `Int n)]
-               | _ -> []
-           with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+           match m "reasoning_tokens" with
+           | `Int n -> [("reasoning_tokens", `Int n)]
+           | _ -> []
          in
         let tps =
-          try match e.payload |> member "tokens_per_second" with
-              | `Float v -> [("tokens_per_second", `Float v)]
-              | _ -> []
-          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+          match m "tokens_per_second" with
+          | `Float v -> [("tokens_per_second", `Float v)]
+          | _ -> []
         in
         let prompt_tps =
-          try match e.payload |> member "prompt_per_second" with
-              | `Float v -> [("prompt_per_second", `Float v)]
-              | _ -> []
-          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+          match m "prompt_per_second" with
+          | `Float v -> [("prompt_per_second", `Float v)]
+          | _ -> []
         in
         let hw_decode_tps =
-          try match e.payload |> member "hw_decode_tokens_per_second" with
-              | `Float v -> [("hw_decode_tokens_per_second", `Float v)]
-              | _ -> []
-          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+          match m "hw_decode_tokens_per_second" with
+          | `Float v -> [("hw_decode_tokens_per_second", `Float v)]
+          | _ -> []
         in
          reasoning @ tps @ prompt_tps @ hw_decode_tps
        in

@@ -3,43 +3,6 @@ module Types = Masc_domain
 open Masc_mcp
 open Test_operator_control_support
 
-module CT = Cdal_types
-
-let make_review_required_verdict ?(run_id = "review-run-001") () :
-    CT.contract_verdict =
-  let gap : CT.completeness_gap =
-    {
-      artifact = "evidence/review_warning.json";
-      reason =
-        "review_requirement present but only warning-style review evidence exists";
-      impact = CT.Blocks_verdict;
-    }
-  in
-  let basis_input =
-    Printf.sprintf "%s|%s|%s"
-      "md5:review-contract"
-      CT.loader_semantics_version_phase1
-      CT.schema_compat_mode_v1
-  in
-  let basis_hash = "md5:" ^ (Digest.string basis_input |> Digest.to_hex) in
-  let verdict_without_hash : CT.contract_verdict =
-    {
-      run_id;
-      contract_id = "md5:review-contract";
-      claim_scope = CT.claim_scope_phase1;
-      judgment_basis_hash = basis_hash;
-      judgment_hash = "";
-      loader_semantics_version = CT.loader_semantics_version_phase1;
-      schema_compat_mode = CT.schema_compat_mode_v1;
-      status = CT.Inconclusive;
-      findings = [];
-      completeness_gaps = [ gap ];
-      check_results = [];
-    }
-  in
-  let judgment_hash = CT.compute_judgment_hash verdict_without_hash in
-  { verdict_without_hash with judgment_hash }
-
 let claim_and_start config ~agent_name ~task_id =
   (match
      Coord.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Claim ()

@@ -63,57 +63,14 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
               "task %s is awaiting verification by %s; approve or reject before marking done"
               task_id assignee)))
 
+(* Verification is owned solely by [Cdal_evidence_gate], applied upstream in
+   [Tool_task.handle_transition]. This per-action layer formerly ran a second
+   gate against the CDAL verdict ledger; that ledger no longer exists, so this
+   layer never rejects. Kept as a typed seam so the transition control flow is
+   unchanged. *)
 let persisted_contract_rejection ~(agent_name : string)
-    ~(task_opt : Masc_domain.task option) ~(notes : string) =
+    ~(task_opt : Masc_domain.task option) ~(notes : string) : string option =
+  ignore agent_name;
+  ignore task_opt;
   ignore notes;
-  match task_opt with
-  | None -> None
-  | Some task ->
-    if not (Env_config_runtime.Cdal.gate_enabled ()) then begin
-      Log.Task.info ~keeper_name:task.id
-        "[cdal-gate] disabled, skipping for task=%s agent=%s"
-        task.id agent_name;
-      None
-    end else
-      match task.contract with
-      | None -> None
-      | Some contract ->
-        (* Always run the verdict lookup so Dashboard_attribution records the
-           outcome (pass / policy_failed / missing). strict=false stays
-           advisory — we drop the rejection but keep the audit trail so the
-           dashboard shows a verification trace instead of nothing.
-
-           Advisory recordings go into the [cdal_verdict_advisory] gate
-           bucket so the dashboard can distinguish "strict-enforced"
-           from "allowed through under advisory" without guessing. *)
-        let gate_label =
-          if contract.strict then Cdal_verdict_gate.strict_gate_label
-          else Cdal_verdict_gate.advisory_gate_label
-        in
-        Log.Task.info
-          ~keeper_name:task.id
-          "[cdal-gate] checking verdict for task=%s agent=%s strict=%b gate=%s"
-          task.id agent_name contract.strict gate_label;
-        let rejection =
-          Cdal_verdict_gate.gate_check
-            ~gate_label
-            ~warn_on_missing:contract.strict
-            ~task_id:task.id
-            ()
-        in
-        if contract.strict then rejection
-        else begin
-          (match rejection with
-           | Some msg ->
-             Log.Task.info
-               ~keeper_name:task.id
-               "[cdal-gate] advisory (strict=false) for task=%s: %s"
-               task.id msg
-           | None -> ());
-          None
-        end
-
-let cdal_gate_label_for_task = function
-  | Some ({ contract = Some { strict = false; _ }; _ } : Masc_domain.task) ->
-    Cdal_verdict_gate.advisory_gate_label
-  | _ -> Cdal_verdict_gate.strict_gate_label
+  None

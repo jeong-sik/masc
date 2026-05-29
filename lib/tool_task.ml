@@ -579,24 +579,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                task_id
            | Some verification_id ->
              Verification_protocol.notify_approve_verification
-               ~task_id ~verifier:ctx.agent_name ~verification_id ~notes);
-          (* Record a CDAL verdict attribution on the approval leg so the
-             dashboard gets a complete audit line.  With the verification
-             FSM enabled, tasks reach Done via approve_verification rather
-             than Done_action, so the gate_check call on the Done_action
-             path (persisted_contract_rejection) never fires and the CDAL
-             gate shows zero entries in Dashboard_attribution even when
-             contracts are present.  The rejection string is intentionally
-             dropped — the verifier keeper has already judged the task,
-             we only want the [Dashboard_attribution] side effect that
-             [gate_check] performs internally.  This runs independently
-             of verification_id presence. *)
-          if Env_config_runtime.Cdal.gate_enabled () then
-            ignore
-              (Cdal_verdict_gate.gate_check
-                 ~gate_label:(cdal_gate_label_for_task task_opt)
-                 ~warn_on_missing:false
-                 ~task_id ())
+               ~task_id ~verifier:ctx.agent_name ~verification_id ~notes)
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
           (match verification_id_before with
@@ -607,13 +590,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                task_id
            | Some verification_id ->
              Verification_protocol.notify_reject_verification
-               ~task_id ~verifier:ctx.agent_name ~verification_id ~reason);
-          if Env_config_runtime.Cdal.gate_enabled () then
-            ignore
-              (Cdal_verdict_gate.gate_check
-                 ~gate_label:(cdal_gate_label_for_task task_opt)
-                 ~warn_on_missing:false
-                 ~task_id ())
+               ~task_id ~verifier:ctx.agent_name ~verification_id ~reason)
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);

@@ -61,6 +61,7 @@ type error_kind =
   | Cascade_resolution_failure (** Cascade tier/strategy resolution failure. *)
   | Unknown_phase_transition (** FSM unknown phase transition. *)
   | Auth_token_mismatch (** Auth/token mismatch family. *)
+  | Shutdown_artifact (** Shutdown artifact from supervisor. *)
   | Other (** Anything not yet promoted to its own arm. *)
 
 (** Stable label used in Prometheus dimensions and log dedupe keys.

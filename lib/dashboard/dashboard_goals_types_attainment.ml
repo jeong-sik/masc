@@ -14,6 +14,8 @@ open Dashboard_goals_types_accessor
 let clamp_float lower upper value =
   if value < lower then lower else if value > upper then upper else value
 
+let contains_ci = String_util.contains_substring_ci
+
 let pct_of_float value =
   int_of_float (floor (clamp_float 0.0 100.0 value +. 0.5))
 

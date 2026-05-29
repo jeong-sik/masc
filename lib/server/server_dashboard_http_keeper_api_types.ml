@@ -356,3 +356,5 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
 
 let runtime_manifest_public_json row =
   Keeper_runtime_manifest.public_to_json row
+
+let take_last = List_util.take_last

@@ -48,7 +48,7 @@ type ctor =
    subcommand+args parse pattern: first token becomes [subcommand],
    the rest becomes [args].  [of_simple ∘ to_simple] round-trip
    invariant is satisfied by construction. *)
-let subcommand_args_ctor ~name ~risk ~sandbox =
+let subcommand_args_ctor ~name ~risk ~sandbox ?(value_flags = []) () =
   { name
   ; anon_pattern = Printf.sprintf "%s _" name
   ; bind_pattern = Printf.sprintf "%s { subcommand; args }" name
@@ -69,8 +69,9 @@ let subcommand_args_ctor ~name ~risk ~sandbox =
   ; bin_variant = Some name
   ; parse_body =
       Some
-        (Printf.sprintf
-           {|
+        (if value_flags = [] then
+           Printf.sprintf
+             {|
 let rec parse subcmd extra dd = function
   | [] ->
     (match subcmd with
@@ -84,7 +85,45 @@ let rec parse subcmd extra dd = function
      | _ -> parse subcmd (arg :: extra) dd rest)
 in
 parse None [] false args|}
-           name)
+             name
+         else
+           let flags_str =
+             String.concat "; " (List.map (fun s -> Printf.sprintf "%S" s) value_flags)
+           in
+           Printf.sprintf
+             {|
+let rec parse subcmd extra dd = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.%s { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | "--" :: rest -> parse subcmd extra true rest
+  | arg :: _val :: rest
+    when not dd
+         && (List.mem arg [ %s ]
+             || (let s = arg in
+                 String.length s > 2 && String.sub s 0 2 = "--"
+                 && (match String.index_opt s '=' with
+                     | Some i -> List.mem (String.sub s 0 i) [ %s ]
+                     | None -> false))) ->
+    parse subcmd (_val :: extra) dd rest
+  | arg :: rest
+    when not dd
+         && (List.mem arg [ %s ]
+             || (let s = arg in
+                 String.length s > 2 && String.sub s 0 2 = "--"
+                 && (match String.index_opt s '=' with
+                     | Some i -> List.mem (String.sub s 0 i) [ %s ]
+                     | None -> false))) ->
+    parse subcmd extra dd rest
+  | arg :: rest ->
+    (match subcmd with
+     | None when not dd -> parse (Some arg) extra dd rest
+     | _ -> parse subcmd (arg :: extra) dd rest)
+in
+parse None [] false args|}
+             name flags_str flags_str flags_str flags_str)
   ; no_expand_combined = false
   }
 
@@ -4597,7 +4636,7 @@ in
 parse None false false false args|}
     ; no_expand_combined = false
     }
-  ; subcommand_args_ctor ~name:"Ocamlfind" ~risk:"`Audited" ~sandbox:"`Host"
+  ; subcommand_args_ctor ~name:"Ocamlfind" ~risk:"`Audited" ~sandbox:"`Host" ()
   ; { name = "Rustc"
     ; anon_pattern = "Rustc _"
     ; bind_pattern = "Rustc { subcommand; optimize; test; rest }"
@@ -4630,6 +4669,18 @@ let rec parse subcmd opt tst dd = function
      | None -> None)
   | "-O" :: rest when not dd -> parse subcmd true tst dd rest
   | "--test" :: rest when not dd -> parse subcmd opt true dd rest
+  | arg :: _val :: rest
+    when not dd
+         && List.mem arg [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "-L"; "-l"; "--sysroot"; "--print" ] ->
+    parse subcmd opt tst dd (_val :: rest)
+  | arg :: rest
+    when not dd
+         && (let s = arg in
+             String.length s > 2 && String.sub s 0 2 = "--"
+             && (match String.index_opt s '=' with
+                 | Some i -> List.mem (String.sub s 0 i) [ "--edition"; "--target"; "--out-dir"; "--emit"; "--crate-name"; "--crate-type"; "--sysroot"; "--print" ]
+                 | None -> false)) ->
+    parse subcmd opt tst dd rest
   | "--" :: rest -> parse subcmd opt tst true rest
   | arg :: rest ->
     (match subcmd with
@@ -4680,6 +4731,9 @@ let rec parse subcmd w lf dd = function
      | None -> None)
   | "-w" :: rest when not dd -> parse subcmd true lf dd rest
   | "-l" :: rest when not dd -> parse subcmd w true dd rest
+  | arg :: _val :: rest
+    when not dd && List.mem arg [ "-tabs"; "-tabwidth"; "-comments" ] ->
+    parse subcmd w lf dd (_val :: rest)
   | "--" :: rest -> parse subcmd w lf true rest
   | arg :: rest ->
     (match subcmd with
@@ -4823,6 +4877,17 @@ parse None false false false args|}
            subcommand = (match subcmd with Some s -> s | None -> arg); jobs = j;
            rest = collect (match subcmd with Some _ -> [ arg ] | None -> []) rest
          })))
+    | arg :: _val :: rest
+      when not dd && List.mem arg [ "-C"; "-f"; "-k"; "-l"; "-d" ] ->
+      parse subcmd j dd (_val :: rest)
+    | arg :: rest
+      when not dd
+           && (let s = arg in
+               String.length s > 2 && String.sub s 0 2 = "--"
+               && (match String.index_opt s '=' with
+                   | Some i -> List.mem (String.sub s 0 i) [ "-C"; "-f"; "-k"; "-l"; "-d" ]
+                   | None -> false)) ->
+      parse subcmd j dd rest
     | arg :: rest ->
       if not dd && String.length arg > 2 && String.sub arg 0 2 = "-j"
       then
@@ -4855,8 +4920,8 @@ parse None false false false args|}
   parse None None false args|}
     ; no_expand_combined = false
     }
-  ; subcommand_args_ctor ~name:"Java" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Javac" ~risk:"`Audited" ~sandbox:"`Host"
+  ; subcommand_args_ctor ~name:"Java" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Javac" ~risk:"`Audited" ~sandbox:"`Host" ()
   ; { name = "Mvn"
     ; anon_pattern = "Mvn _"
     ; bind_pattern = "Mvn { subcommand; offline; batch_mode; quiet; args }"
@@ -4944,17 +5009,19 @@ parse None false false false args|}
   parse None false false false false args|}
     ; no_expand_combined = false
     }
-  ; subcommand_args_ctor ~name:"Cmake" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Dune_local_sh" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Osascript" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Play" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Rec" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Ffplay" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Mpg123" ~risk:"`Audited" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Open" ~risk:"`Audited" ~sandbox:"`Host"
+  ; subcommand_args_ctor ~name:"Cmake" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Dune_local_sh" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Osascript" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Play" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Rec" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Ffplay" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Mpg123" ~risk:"`Audited" ~sandbox:"`Host" ()
+  ; subcommand_args_ctor ~name:"Open" ~risk:"`Audited" ~sandbox:"`Host" ()
   ; subcommand_args_ctor ~name:"Su" ~risk:"`Privileged" ~sandbox:"`Host"
-  ; subcommand_args_ctor ~name:"Dd" ~risk:"`Privileged" ~sandbox:"`Host"
+      ~value_flags:[ "-s"; "--shell"; "-g"; "--group"; "-G"; "--supp-group"; "-c"; "--command"; "-w"; "--whitelist-environment" ] ()
+  ; subcommand_args_ctor ~name:"Dd" ~risk:"`Privileged" ~sandbox:"`Host" ()
   ; subcommand_args_ctor ~name:"Mkfs" ~risk:"`Privileged" ~sandbox:"`Host"
+      ~value_flags:[ "-t"; "--type"; "-L"; "--label"; "-U"; "-b"; "-i"; "-I"; "-N"; "-m"; "-O" ] ()
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"

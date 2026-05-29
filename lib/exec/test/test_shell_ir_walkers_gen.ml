@@ -98,7 +98,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Pyright { subcommand = ""; strict = false; rest = [] })
   ; W (Tsc { subcommand = ""; no_emit = true; watch = false; rest = [] })
   ; W (Ocamlfind { subcommand = "list"; args = [ "-desc" ] })
-  ; W (Rustc { subcommand = ""; optimize = false; test = false; rest = [ "--edition"; "2021" ] })
+  ; W (Rustc { subcommand = ""; optimize = false; test = false; rest = [ "src/main.rs" ] })
   ; W (Gofmt { subcommand = ""; write = true; list_files = false; rest = [ "main.go" ] })
   ; W (Gradle { subcommand = "build"; no_daemon = true; parallel = false; rest = [] })
   ; W (Ninja { subcommand = ""; jobs = Some 4; rest = [] })
@@ -115,7 +115,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Open { subcommand = "file.txt"; args = [] })
   ; W (Su { subcommand = "root"; args = [] })
   ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=10" ] })
-  ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdb1" ] })
+  ; W (Mkfs { subcommand = "/dev/sdb1"; args = [] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -304,7 +304,7 @@ let test_of_simple_round_trip () =
     ; W (Rustc { subcommand = ""; optimize = true; test = false; rest = [ "src/main.rs" ] })
     ; W (Gofmt { subcommand = ""; write = false; list_files = true; rest = [ "." ] })
     ; W (Gradle { subcommand = "test"; no_daemon = false; parallel = false; rest = [ "--info" ] })
-    ; W (Ninja { subcommand = ""; jobs = None; rest = [ "-C"; "build" ] })
+    ; W (Ninja { subcommand = "build"; jobs = None; rest = [] })
     ; W (Java { subcommand = "app.Main"; args = [ "--port"; "8080" ] })
     ; W (Javac { subcommand = "src/App.java"; args = [ "-d"; "build/" ] })
     ; W (Mvn { subcommand = "test"; offline = true; batch_mode = false; quiet = true; args = [ "-DskipTests=false" ] })
@@ -316,9 +316,9 @@ let test_of_simple_round_trip () =
     ; W (Ffplay { subcommand = "clip.mp4"; args = [ "-nodisp"; "-autoexit" ] })
     ; W (Mpg123 { subcommand = "podcast.mp3"; args = [ "-q"; "--list"; "playlist.m3u" ] })
     ; W (Open { subcommand = "https://example.com"; args = [ "-a"; "Safari" ] })
-    ; W (Su { subcommand = "root"; args = [ "-c"; "whoami" ] })
+    ; W (Su { subcommand = "root"; args = [ "whoami" ] })
     ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=1" ] })
-    ; W (Mkfs { subcommand = "-t"; args = [ "ext4"; "/dev/sdc1" ] })
+    ; W (Mkfs { subcommand = "/dev/sdc1"; args = [] })
     ]
   in
   List.iter
@@ -476,22 +476,22 @@ let test_flag_equals_parsing () =
    | W (Cargo { subcommand = "build"; features = Some "serde"; _ }) -> ()
    | w ->
      Alcotest.failf "Cargo --flag=value: expected features=serde, got %a" pp w);
-  (* Ninja: -j8 with -C build — -C becomes subcommand (first non-flag arg) *)
+  (* Ninja: -j8 with -C build — -C is value-consuming flag, "build" passes through to become subcommand *)
   let ninja =
     of_simple { (base "ninja") with args = [ lit "-j8"; lit "-C"; lit "build" ] }
   in
   (match ninja with
-   | W (Ninja { subcommand = "-C"; jobs = Some 8; rest = [ "build" ]; _ }) -> ()
+   | W (Ninja { subcommand = "build"; jobs = Some 8; rest = []; _ }) -> ()
    | w ->
-     Alcotest.failf "Ninja -j8: expected sub=-C jobs=8, got %a" pp w);
-  (* Ninja: no flags, just subcommand + rest *)
+     Alcotest.failf "Ninja -j8 -C build: expected sub=build jobs=8, got %a" pp w);
+  (* Ninja: subcommand + -C build — -C build is discarded, rest=[] *)
   let ninja2 =
     of_simple { (base "ninja") with args = [ lit "all"; lit "-C"; lit "build" ] }
   in
   (match ninja2 with
-   | W (Ninja { subcommand = "all"; jobs = None; rest = [ "-C"; "build" ]; _ }) -> ()
+   | W (Ninja { subcommand = "all"; jobs = None; rest = [ "build" ]; _ }) -> ()
    | w ->
-     Alcotest.failf "Ninja plain: expected sub=all, got %a" pp w);
+     Alcotest.failf "Ninja all -C build: expected sub=all rest=[build], got %a" pp w);
   (* Cut: --delimiter=: --fields=1,3 *)
   let cut =
     of_simple { (base "cut") with args = [ lit "--delimiter=:"; lit "--fields=1,3"; lit "file.txt" ] }

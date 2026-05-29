@@ -525,8 +525,10 @@ let to_json () : Yojson.Safe.t =
 (** Import registry from JSON *)
 let of_json (json : Yojson.Safe.t) : (int, string) result =
   try
-    let open Yojson.Safe.Util in
-    let entries = to_list json in
+    let entries = match json with
+      | `List items -> items
+      | _ -> raise (Yojson.Safe.Util.Type_error ("expected list", json))
+    in
     let count = ref 0 in
     List.iter (fun entry_json ->
       match prompt_entry_of_yojson entry_json with

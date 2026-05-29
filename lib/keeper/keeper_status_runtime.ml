@@ -166,7 +166,6 @@ let quiet_hours_active () =
   && current_hour < quiet_end
 
 let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
-  let open Yojson.Safe.Util in
   let normalize_content item =
     match json_string_opt "content" item with
     | Some value -> value
@@ -185,7 +184,7 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
       (fun acc item ->
         match item with
         | `Assoc _ ->
-            let role = item |> member "role" |> to_string_option in
+            let role = Json_util.get_string item "role" in
             let ts_unix =
               match json_float_opt "ts_unix" item with
               | Some ts when ts > 0.0 -> Some ts

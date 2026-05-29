@@ -318,40 +318,39 @@ let scenario_to_json (s : scenario) : Yojson.Safe.t =
 (** Parse a scenario from JSON (loaded from YAML→JSON or direct JSON). *)
 let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
   try
-    let open Yojson.Safe.Util in
-    let str key = json |> member key |> to_string in
+    let str key = Json_util.get_string json key |> Option.value ~default:"" in
     let str_opt key default =
-      match json |> member key with
-      | `String s -> s
+      match Json_util.assoc_member_opt key json with
+      | Some (`String s) -> s
       | _ -> default
     in
     let int_opt key default =
-      match json |> member key with
-      | `Int i -> i
+      match Json_util.assoc_member_opt key json with
+      | Some (`Int i) -> i
       | _ -> default
     in
     let float_opt key default =
-      match json |> member key with
-      | `Float f -> f
-      | `Int i -> float_of_int i
+      match Json_util.assoc_member_opt key json with
+      | Some (`Float f) -> f
+      | Some (`Int i) -> float_of_int i
       | _ -> default
     in
     let str_list key =
-      match json |> member key with
-      | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+      match Json_util.assoc_member_opt key json with
+      | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
       | _ -> []
     in
 
     (* Per-grader JSON field helpers (using grader JSON, not scenario JSON) *)
     let g_str_opt g key default =
-      match g |> member key with
-      | `String s -> s
+      match Json_util.assoc_member_opt key g with
+      | Some (`String s) -> s
       | _ -> default
     in
     let g_float_opt g key default =
-      match g |> member key with
-      | `Float f -> f
-      | `Int i -> float_of_int i
+      match Json_util.assoc_member_opt key g with
+      | Some (`Float f) -> f
+      | Some (`Int i) -> float_of_int i
       | _ -> default
     in
 
@@ -365,28 +364,28 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
     let parse_deterministic g mode =
       Deterministic {
         field = g_str_opt g "field" "result";
-        expected = (match g |> member "expected" with
-          | `String s -> s
-          | _ -> g |> member "pattern" |> to_string);
+        expected = (match g |> Json_util.assoc_member_opt "expected" with
+          | Some (`String s) -> s
+          | _ -> Json_util.get_string g "pattern" |> Option.value ~default:"");
         mode;
         weight = g_float_opt g "weight" 1.0;
         description = g_str_opt g "description" "unnamed grader";
       }
     in
     let graders =
-      match json |> member "graders" with
-      | `List items ->
+      match Json_util.assoc_member_opt "graders" json with
+      | Some (`List items) ->
           List.filter_map (fun g ->
-            match g |> member "type" |> to_string with
-            | "exact" -> Some (parse_deterministic g Exact)
-            | "contains" -> Some (parse_deterministic g Contains)
-            | "not_contains" -> Some (parse_deterministic g NotContains)
-            | "regex" ->
+            match Json_util.get_string g "type" with
+            | Some "exact" -> Some (parse_deterministic g Exact)
+            | Some "contains" -> Some (parse_deterministic g Contains)
+            | Some "not_contains" -> Some (parse_deterministic g NotContains)
+            | Some "regex" ->
                 Some (parse_deterministic g
-                        (Regex (g |> member "pattern" |> to_string)))
-            | "model" ->
+                        (Regex (Json_util.get_string g "pattern" |> Option.value ~default:"")))
+            | Some "model" ->
                 Some (ModelBased {
-                  prompt_template = g |> member "prompt" |> to_string;
+                  prompt_template = Json_util.get_string g "prompt" |> Option.value ~default:"";
                   rubric = g_str_opt g "rubric" "";
                   weight = g_float_opt g "weight" 1.0;
                   description = g_str_opt g "description" "MODEL grader";
@@ -398,17 +397,17 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
 
     (* Parse tool expectations *)
     let tool_expectations =
-      match json |> member "tool_expectations" with
-      | `List items ->
+      match Json_util.assoc_member_opt "tool_expectations" json with
+      | Some (`List items) ->
           List.filter_map (fun te ->
             try Some {
-              tool_name = te |> member "tool" |> to_string;
-              required = (match te |> member "required" with
-                | `Bool b -> b | _ -> false);
-              max_calls = (match te |> member "max_calls" with
-                | `Int i -> Some i | _ -> None);
-              args_contain = (match te |> member "args_contain" with
-                | `String s -> Some s | _ -> None);
+              tool_name = Json_util.get_string te "tool" |> Option.value ~default:"";
+              required = (match Json_util.assoc_member_opt "required" te with
+                | Some (`Bool b) -> b | _ -> false);
+              max_calls = (match Json_util.assoc_member_opt "max_calls" te with
+                | Some (`Int i) -> Some i | _ -> None);
+              args_contain = (match Json_util.assoc_member_opt "args_contain" te with
+                | Some (`String s) -> Some s | _ -> None);
             }
             with Yojson.Safe.Util.Type_error _ -> None
           ) items

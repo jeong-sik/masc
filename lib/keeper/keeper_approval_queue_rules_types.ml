@@ -162,18 +162,15 @@ let approval_rule_to_yojson (rule : approval_rule) =
 ;;
 
 let approval_rule_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let keeper_name = json |> member "keeper_name" |> to_string in
-    let tool_name = json |> member "tool_name" |> to_string in
-    let sandbox_profile = json |> member "sandbox_profile" |> to_string_option in
-    let backend = json |> member "backend" |> to_string_option in
-    let request_fingerprint = json |> member "request_fingerprint" |> to_string in
+    let id = (match Json_util.assoc_member_opt "id" json with Some (`String s) -> s | _ -> "") in
+    let keeper_name = (match Json_util.assoc_member_opt "keeper_name" json with Some (`String s) -> s | _ -> "") in
+    let tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "") in
+    let sandbox_profile = Json_util.get_string json "sandbox_profile" in
+    let backend = Json_util.get_string json "backend" in
+    let request_fingerprint = (match Json_util.assoc_member_opt "request_fingerprint" json with Some (`String s) -> s | _ -> "") in
     let request_fingerprint_preview =
-      json
-      |> member "request_fingerprint_preview"
-      |> to_string_option
+      Json_util.get_string json "request_fingerprint_preview"
       |> Option.value
            ~default:
              (String.sub
@@ -182,24 +179,20 @@ let approval_rule_of_yojson json =
                 (min 12 (String.length request_fingerprint)))
     in
     let max_risk =
-      json
-      |> member "max_risk"
-      |> to_string
+      (match Json_util.assoc_member_opt "max_risk" json with Some (`String s) -> s | _ -> "")
       |> risk_level_of_string
       |> Option.value ~default:High
     in
     let created_at =
-      json
-      |> member "created_at"
-      |> to_float_option
+      Json_util.get_float json "created_at"
       |> Option.value ~default:(Unix.gettimeofday ())
     in
-    let created_by = json |> member "created_by" |> to_string_option in
-    let last_matched_at = json |> member "last_matched_at" |> to_float_option in
+    let created_by = Json_util.get_string json "created_by" in
+    let last_matched_at = Json_util.get_float json "last_matched_at" in
     let match_count =
-      json |> member "match_count" |> to_int_option |> Option.value ~default:0
+      Json_util.get_int json "match_count" |> Option.value ~default:0
     in
-    let source_approval_id = json |> member "source_approval_id" |> to_string_option in
+    let source_approval_id = Json_util.get_string json "source_approval_id" in
     Some
       { id
       ; keeper_name

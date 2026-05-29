@@ -38,15 +38,14 @@ type diversity_summary = {
 (** Parse keeper tool_usage JSON (the .masc/keepers/tool_usage/{name}.json
     format) into a list of tool_stat. *)
 let parse_tool_usage_json (json : Yojson.Safe.t) : tool_stat list =
-  let open Yojson.Safe.Util in
-  match member "tools" json with
+  match Json_util.assoc_member_opt "tools" json with
   | `List items ->
     List.filter_map (fun item ->
-      match member "tool" item |> to_string_option with
+      match Json_util.assoc_member_opt "tool" item  with
       | Some name ->
-        let count = member "count" item |> to_int_option |> Option.value ~default:0 in
-        let successes = member "successes" item |> to_int_option |> Option.value ~default:0 in
-        let failures = member "failures" item |> to_int_option |> Option.value ~default:0 in
+        let count = Json_util.assoc_member_opt "count" item  |> Option.value ~default:0 in
+        let successes = Json_util.assoc_member_opt "successes" item  |> Option.value ~default:0 in
+        let failures = Json_util.assoc_member_opt "failures" item  |> Option.value ~default:0 in
         Some { name; count; successes; failures }
       | None -> None
     ) items

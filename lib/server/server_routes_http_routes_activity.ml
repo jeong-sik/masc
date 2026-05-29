@@ -693,9 +693,9 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let key = Yojson.Safe.Util.(member "key" args |> to_string_option)
+             let key = Json_util.get_string args "key"
                |> Option.value ~default:"" in
-             let action = Yojson.Safe.Util.(member "action" args |> to_string_option)
+             let action = Json_util.get_string args "action"
                |> Option.value ~default:"set" in
              if key = "" then
                respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -712,7 +712,7 @@ let add_routes ~sw ~clock router =
                         (Printexc.to_string exn));
                    Ok "override cleared"
                  | "set" | _ ->
-                   let value = Yojson.Safe.Util.(member "value" args |> to_string_option)
+                   let value = Json_util.get_string args "value"
                      |> Option.value ~default:"" in
                    match Prompt_registry.set_override key value with
                    | Ok () ->
@@ -761,10 +761,9 @@ let add_routes ~sw ~clock router =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"
              in
-             let param_key = Yojson.Safe.Util.(member "param_key" args
-               |> to_string_option) |> Option.value ~default:"" |> String.trim in
-             let value_json = match Yojson.Safe.Util.member "value" args with
-               | `Null -> None | v -> Some v in
+             let param_key = Json_util.get_string args "param_key"
+               |> Option.value ~default:"" |> String.trim in
+             let value_json = Json_util.assoc_member_opt "value" args in
             if param_key = "" then
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc
@@ -832,8 +831,8 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let param_key = Yojson.Safe.Util.(member "param_key" args
-               |> to_string_option) |> Option.value ~default:"" in
+             let param_key = Json_util.get_string args "param_key"
+               |> Option.value ~default:"" in
              let base_path = state.Mcp_server.room_config.base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request

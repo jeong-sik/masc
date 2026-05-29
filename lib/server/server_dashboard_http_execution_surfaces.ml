@@ -437,15 +437,14 @@ let paused_of_lifecycle_event = function
 ;;
 
 let keeper_agent_status_opt row =
-  let open Yojson.Safe.Util in
-  match member "agent" row with
-  | `Assoc _ as agent ->
-    (match member "status" agent with
-     | `String status -> Some status
+  match Json_util.assoc_member_opt "agent" row with
+  | Some (`Assoc _ as agent) ->
+    (match Json_util.assoc_member_opt "status" agent with
+     | Some (`String status) -> Some status
      | _ -> None)
-  | _ ->
-    (match member "status" row with
-     | `String status -> Some status
+  | None | Some _ ->
+    (match Json_util.assoc_member_opt "status" row with
+     | Some (`String status) -> Some status
      | _ -> None)
 ;;
 
@@ -461,7 +460,7 @@ let patched_keeper_status row ~keepalive_running =
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
   | `Assoc fields as row ->
-    (match Yojson.Safe.Util.member "name" row with
+    (match Json_util.assoc_member_opt "name" row with
      | `String name when String.equal name keeper_name ->
        let row_fields : (string * Yojson.Safe.t) list = fields in
        let row_fields =

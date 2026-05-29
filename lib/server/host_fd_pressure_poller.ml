@@ -86,9 +86,8 @@ type parsed =
 let parse_state_line line =
   match Yojson.Safe.from_string line with
   | json ->
-    let open Yojson.Safe.Util in
     (try
-       let level_str = json |> member "level" |> to_string in
+       let level_str = (match Json_util.assoc_member_opt "level" json with Some (`String s) -> s | _ -> "") in
        let level =
          match String.uppercase_ascii level_str with
          | "WARN" -> Some Keeper_fd_pressure.External_warn
@@ -96,17 +95,17 @@ let parse_state_line line =
          | _ -> None
        in
        let ts_str =
-         match json |> member "ts" with
+         match json |> Json_util.assoc_member_opt "ts" with
          | `String s -> s
          | _ -> ""
        in
        let kinds =
-         match json |> member "kinds" with
+         match json |> Json_util.assoc_member_opt "kinds" with
          | `String s -> s
          | _ -> "?"
        in
        let summary =
-         match json |> member "summary" with
+         match json |> Json_util.assoc_member_opt "summary" with
          | `String s -> s
          | _ -> ""
        in

@@ -407,12 +407,11 @@ let report_review_verdict_schema : Masc_domain.tool_schema =
 
 (** Parse review verdict from tool call JSON arguments (deterministic). *)
 let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
-  let open Yojson.Safe.Util in
   try
-    let verdict_str = args |> member "verdict" |> to_string |> String.uppercase_ascii in
+    let verdict_str = (match Json_util.assoc_member_opt "verdict" args with Some (`String s) -> s | _ -> "") |> String.uppercase_ascii in
     let reason =
-      try args |> member "reason" |> to_string with
-      | Type_error _ -> ""
+      try (match Json_util.assoc_member_opt "reason" args with Some (`String s) -> s | _ -> "") with
+      | Yojson.Safe.Util.Type_error _ -> ""
     in
     match verdict_str with
     | "APPROVE" -> Ok Approve
@@ -423,7 +422,7 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
       Ok (Reject r)
     | other -> Error (sprintf "unexpected review verdict value: %s" other)
   with
-  | Type_error (msg, _) -> Error (sprintf "review verdict JSON type error: %s" msg)
+  | Yojson.Safe.Util.Type_error (msg, _) -> Error (sprintf "review verdict JSON type error: %s" msg)
   (* RFC-0106 — cancellation MUST propagate; the file's other parsers
      (see line ~244) already do this, so the catch-all here was an
      N-of-M omission within the same module. *)

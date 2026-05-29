@@ -229,10 +229,9 @@ let add_routes ~sw router =
          Http.Request.read_body_async reqd (fun body_str ->
              try
                let json = Yojson.Safe.from_string body_str in
-               let open Yojson.Safe.Util in
-               let provider = json |> member "provider" |> to_string in
-               let model_opt = json |> member "model" |> to_string_option in
-               let prompt = json |> member "prompt" |> to_string in
+               let provider = (match Json_util.assoc_member_opt "provider" json with Some (`String s) -> s | _ -> "") in
+               let model_opt = Json_util.get_string json "model" in
+               let prompt = (match Json_util.assoc_member_opt "prompt" json with Some (`String s) -> s | _ -> "") in
                match
                  Dashboard_provider_runs.start_run ~sw
                    ~net:state.Mcp_server.net ~provider ~model_opt

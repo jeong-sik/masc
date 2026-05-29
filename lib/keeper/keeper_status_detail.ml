@@ -363,7 +363,6 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            if not include_metrics_overview then
              None
            else
-             let open Yojson.Safe.Util in
              let rec find_latest = function
                | [] -> None
                | line :: tl ->
@@ -372,14 +371,14 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                     match Safe_ops.json_string_opt "skill_primary" j with
                     | Some primary when String.trim primary <> "" ->
                       let secondary =
-                        match j |> member "skill_secondary" with
-                        | `List xs ->
+                        match Json_util.assoc_member_opt "skill_secondary" j with
+                        | Some (`List xs) ->
                           xs
                           |> List.filter_map (fun v ->
                                match v with
                                | `String s when String.trim s <> "" -> Some s
                                | _ -> None)
-                        | _ -> []
+                        | None | Some _ -> []
                       in
                       let reason = Safe_ops.json_string_opt "skill_reason" j in
                       Some

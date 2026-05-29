@@ -398,13 +398,12 @@ let serialize_context (ctx : working_context) : string =
 
 let deserialize_context (s : string) ~max_tokens : working_context =
   let json = Yojson.Safe.from_string s in
-  let open Yojson.Safe.Util in
-  let system_prompt = json |> member "system_prompt" |> to_string in
+  let system_prompt = (match Json_util.assoc_member_opt "system_prompt" json with Some (`String s) -> s | _ -> "") in
   let messages =
-    json |> member "messages" |> to_list |> List.map message_of_json
+    (match Json_util.assoc_member_opt "messages" json with Some (`List l) -> l | _ -> []) |> List.map message_of_json
     |> repair_broken_tool_call_pairs
   in
-  let _legacy_token_count = json |> member "token_count" |> to_int_option in
+  let _legacy_token_count = Json_util.get_int json "token_count" in
   let context = Agent_sdk.Context.create () in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context

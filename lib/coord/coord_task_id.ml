@@ -15,20 +15,19 @@ let task_id_to_int id =
 let read_archive_task_ids config =
   if not (Sys.file_exists (archive_path config)) then []
   else
-    let open Yojson.Safe.Util in
     let json = read_json config (archive_path config) in
     let tasks =
       match json with
       | `List tasks -> tasks
       | `Assoc _ -> begin
-          match json |> member "tasks" with
-          | `List tasks -> tasks
+          match Json_util.assoc_member_opt "tasks" json with
+          | Some (`List tasks) -> tasks
           | _ -> []
         end
       | _ -> []
     in
     List.filter_map (fun task ->
-      match task |> member "id" |> to_string_option with
+      match Json_util.get_string task "id" with
       | Some id -> task_id_to_int id
       | None -> None
     ) tasks
@@ -42,14 +41,13 @@ let append_archive_tasks config (tasks : task list) =
   else
     let arch_path = archive_path config in
     with_file_lock config arch_path (fun () ->
-      let open Yojson.Safe.Util in
       let existing = read_json config arch_path in
       let existing_tasks =
         match existing with
         | `List items -> items
         | `Assoc _ -> begin
-            match existing |> member "tasks" with
-            | `List items -> items
+            match Json_util.assoc_member_opt "tasks" existing with
+            | Some (`List items) -> items
             | _ -> []
           end
         | _ -> []
@@ -57,7 +55,7 @@ let append_archive_tasks config (tasks : task list) =
       let new_tasks = List.map task_to_yojson tasks in
       let seen = Hashtbl.create 64 in
       let dedup = List.filter (fun json ->
-        match json |> member "id" |> to_string_option with
+        match Json_util.get_string json "id" with
         | Some id ->
             if Hashtbl.mem seen id then false
             else (Hashtbl.add seen id (); true)

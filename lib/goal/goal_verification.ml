@@ -41,17 +41,16 @@ let goal_principal_to_yojson (principal : goal_principal) =
 
 let goal_principal_of_yojson = function
   | `Assoc fields as json -> (
-      let open Yojson.Safe.Util in
-      match principal_kind_of_yojson (member "kind" json) with
+      match principal_kind_of_yojson (Json_util.assoc_member_opt "kind" json) with
       | Error msg -> Error msg
       | Ok kind -> (
-          match member "id" json with
+          match Json_util.assoc_member_opt "id" json with
           | `String id when String.trim id <> "" ->
               Ok
                 {
                   kind;
                   id;
-                  display_name = member "display_name" json |> to_string_option;
+                  display_name = Json_util.assoc_member_opt "display_name" json ;
                 }
           | `String _ -> Error "goal_principal_of_yojson: id must be non-empty"
           | other ->
@@ -103,11 +102,10 @@ let goal_verifier_policy_to_yojson (policy : goal_verifier_policy) =
 
 let goal_verifier_policy_of_yojson = function
   | `Assoc _ as json -> (
-      let open Yojson.Safe.Util in
-      match inherit_mode_of_yojson (member "inherit_mode" json) with
+      match inherit_mode_of_yojson (Json_util.assoc_member_opt "inherit_mode" json) with
       | Error msg -> Error msg
       | Ok inherit_mode -> (
-          match member "principals" json with
+          match Json_util.assoc_member_opt "principals" json with
           | `List values -> (
               let rec collect acc = function
                 | [] -> Ok (List.rev acc)
@@ -120,7 +118,7 @@ let goal_verifier_policy_of_yojson = function
               | Error msg -> Error msg
               | Ok principals ->
                   let required_verdicts =
-                    match member "required_verdicts" json with
+                    match Json_util.assoc_member_opt "required_verdicts" json with
                     | `Null -> Ok None
                     | `Int n -> Ok (Some n)
                     | other ->
@@ -206,7 +204,6 @@ let policy_snapshot_to_yojson (snapshot : policy_snapshot) =
 
 let policy_snapshot_of_yojson = function
   | `Assoc _ as json -> (
-      let open Yojson.Safe.Util in
       let parse_principal_list field =
         match member field json with
         | `List values ->
@@ -225,7 +222,7 @@ let policy_snapshot_of_yojson = function
       in
       match parse_principal_list "principals", parse_principal_list "eligible_principals" with
       | Ok principals, Ok eligible_principals -> (
-          match member "required_verdicts" json with
+          match Json_util.assoc_member_opt "required_verdicts" json with
           | `Int required_verdicts ->
               Ok { principals; eligible_principals; required_verdicts }
           | other ->
@@ -258,16 +255,15 @@ let goal_verification_vote_to_yojson (vote : goal_verification_vote) =
 
 let goal_verification_vote_of_yojson = function
   | `Assoc _ as json -> (
-      let open Yojson.Safe.Util in
       match
-        goal_principal_of_yojson (member "principal" json),
-        vote_decision_of_yojson (member "decision" json)
+        goal_principal_of_yojson (Json_util.assoc_member_opt "principal" json),
+        vote_decision_of_yojson (Json_util.assoc_member_opt "decision" json)
       with
       | Ok principal, Ok decision -> (
-          match member "submitted_at" json with
+          match Json_util.assoc_member_opt "submitted_at" json with
           | `String submitted_at ->
               let evidence_refs =
-                match member "evidence_refs" json with
+                match Json_util.assoc_member_opt "evidence_refs" json with
                 | `Null -> Ok []
                 | `List values -> (
                     try Ok (List.map to_string values)
@@ -285,7 +281,7 @@ let goal_verification_vote_of_yojson = function
                   {
                     principal;
                     decision;
-                    note = member "note" json |> to_string_option;
+                    note = Json_util.assoc_member_opt "note" json ;
                     evidence_refs;
                     submitted_at;
                   })
@@ -328,18 +324,17 @@ let goal_verification_request_to_yojson (request : goal_verification_request) =
 
 let goal_verification_request_of_yojson = function
   | `Assoc _ as json -> (
-      let open Yojson.Safe.Util in
       match
-        Goal_phase.of_yojson (member "target_phase" json),
-        goal_principal_of_yojson (member "requested_by" json),
-        policy_snapshot_of_yojson (member "policy_snapshot" json),
-        request_status_of_yojson (member "status" json)
+        Goal_phase.of_yojson (Json_util.assoc_member_opt "target_phase" json),
+        goal_principal_of_yojson (Json_util.assoc_member_opt "requested_by" json),
+        policy_snapshot_of_yojson (Json_util.assoc_member_opt "policy_snapshot" json),
+        request_status_of_yojson (Json_util.assoc_member_opt "status" json)
       with
       | Ok target_phase, Ok requested_by, Ok policy_snapshot, Ok status -> (
-          match member "id" json, member "goal_id" json, member "created_at" json with
+          match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "goal_id" json, Json_util.assoc_member_opt "created_at" json with
           | `String id, `String goal_id, `String created_at ->
               let votes =
-                match member "votes" json with
+                match Json_util.assoc_member_opt "votes" json with
                 | `Null -> Ok []
                 | `List rows ->
                     let rec collect acc = function
@@ -366,7 +361,7 @@ let goal_verification_request_of_yojson = function
                     votes;
                     status;
                     created_at;
-                    resolved_at = member "resolved_at" json |> to_string_option;
+                    resolved_at = Json_util.assoc_member_opt "resolved_at" json ;
                   })
                 votes
           | _ ->
@@ -401,8 +396,7 @@ let state_to_yojson (state : state) =
 
 let state_of_yojson = function
   | `Assoc _ as json -> (
-      let open Yojson.Safe.Util in
-      match member "version" json, member "updated_at" json, member "requests" json with
+      match Json_util.assoc_member_opt "version" json, Json_util.assoc_member_opt "updated_at" json, Json_util.assoc_member_opt "requests" json with
       | `Int version, `String updated_at, `List requests_json ->
           let rec collect acc = function
             | [] -> Ok (List.rev acc)

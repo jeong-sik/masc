@@ -86,10 +86,9 @@ type dispatch_result =
 (* ── JSON Codecs ─────────────────────────────────────────────── *)
 
 let inbound_of_json json =
-  let open Yojson.Safe.Util in
   try
     let str key =
-      json |> member key |> to_string_option
+      Json_util.get_string json key
       |> Option.value ~default:""
     in
     let channel =
@@ -98,8 +97,8 @@ let inbound_of_json json =
     in
     let keeper_name = str "destination_id" in
     let metadata =
-      match json |> member "metadata" with
-      | `Assoc pairs ->
+      match Json_util.assoc_member_opt "metadata" json with
+      | Some (`Assoc pairs) ->
           List.filter_map (fun (k, v) ->
             match v with `String s -> Some (k, s) | _ -> None
           ) pairs

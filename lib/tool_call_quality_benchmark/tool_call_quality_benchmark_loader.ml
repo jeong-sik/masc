@@ -82,42 +82,38 @@ let string_list_field json key =
       |> normalize_string_list)
 
 let parse_json_check json =
-  let open Yojson.Safe.Util in
   let* path = required_string_field json "path" in
   Ok {
     path;
     equals = member_opt "equals" json;
-    contains = json |> member "contains" |> to_string_option;
-    min_int = json |> member "min_int" |> to_int_option;
-    present = json |> member "present" |> to_bool_option;
+    contains = Json_util.get_string json "contains";
+    min_int = Json_util.get_int json "min_int";
+    present = Json_util.get_bool json "present";
   }
 
 let parse_arg_check json =
-  let open Yojson.Safe.Util in
   let* tool_name = required_string_field json "tool_name" in
   let* path = required_string_field json "path" in
   Ok {
     tool_name;
     path;
     equals = member_opt "equals" json;
-    contains = json |> member "contains" |> to_string_option;
-    min_int = json |> member "min_int" |> to_int_option;
-    present = json |> member "present" |> to_bool_option;
+    contains = Json_util.get_string json "contains";
+    min_int = Json_util.get_int json "min_int";
+    present = Json_util.get_bool json "present";
   }
 
 let parse_recovery_policy json =
-  let open Yojson.Safe.Util in
   {
-    required = json |> member "required" |> to_bool_option |> Option.value ~default:false;
+    required = Json_util.get_bool json "required" |> Option.value ~default:false;
     success_after_failure =
-      json |> member "success_after_failure" |> to_bool_option
+      Json_util.get_bool json "success_after_failure"
       |> Option.value ~default:false;
     max_failures_before_success =
-      json |> member "max_failures_before_success" |> to_int_option;
+      Json_util.get_int json "max_failures_before_success";
   }
 
 let benchmark_case_of_yojson json =
-  let open Yojson.Safe.Util in
   let* id = required_string_field json "id" in
   let* keeper_profiles = string_list_field json "keeper_profiles" in
   let* success_check_items = list_field json "success_checks" in
@@ -133,7 +129,7 @@ let benchmark_case_of_yojson json =
     else Ok ()
   in
   let max_tool_calls =
-    json |> member "max_tool_calls" |> to_int_option |> Option.value ~default:0
+    Json_util.get_int json "max_tool_calls" |> Option.value ~default:0
   in
   let* () =
     if max_tool_calls < 0 then
@@ -144,7 +140,7 @@ let benchmark_case_of_yojson json =
   let* required_tools = string_list_field json "required_tools" in
   let* forbidden_tools = string_list_field json "forbidden_tools" in
   let* category =
-    json |> member "category" |> to_string_option
+    Json_util.get_string json "category"
     |> Option.value ~default:"tool_required"
     |> case_category_of_string
   in
@@ -169,20 +165,18 @@ let benchmark_case_of_yojson json =
   }
 
 let tool_call_of_yojson json =
-  let open Yojson.Safe.Util in
   {
     tool_name =
-      (match json |> member "tool_name" |> to_string_option with
+      (match Json_util.get_string json "tool_name" with
        | Some value -> value
-       | None -> json |> member "tool" |> to_string_option |> Option.value ~default:"");
-    success = json |> member "success" |> to_bool_option |> Option.value ~default:false;
+       | None -> Json_util.get_string json "tool" |> Option.value ~default:"");
+    success = Json_util.get_bool json "success" |> Option.value ~default:false;
     input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
     output = member_opt "output" json;
-    duration_ms = json |> member "duration_ms" |> to_float_option;
+    duration_ms = Json_util.get_float json "duration_ms";
   }
 
 let evidence_run_of_yojson json =
-  let open Yojson.Safe.Util in
   let* case_id = required_string_field json "case_id" in
   let* provider = required_string_field json "provider" in
   let* model = required_string_field json "model" in
@@ -193,18 +187,18 @@ let evidence_run_of_yojson json =
     provider;
     model;
     keeper_profile;
-    run_id = json |> member "run_id" |> to_string_option;
-    repeat_index = json |> member "repeat_index" |> to_int_option;
-    prompt_fingerprint = json |> member "prompt_fingerprint" |> to_string_option;
-    task_success = json |> member "task_success" |> to_bool_option;
-    final_output = json |> member "final_output" |> to_string_option;
+    run_id = Json_util.get_string json "run_id";
+    repeat_index = Json_util.get_int json "repeat_index";
+    prompt_fingerprint = Json_util.get_string json "prompt_fingerprint";
+    task_success = Json_util.get_bool json "task_success";
+    final_output = Json_util.get_string json "final_output";
     final_result = member_opt "final_result" json;
-    latency_ms = json |> member "latency_ms" |> to_int_option;
-    input_tokens = json |> member "input_tokens" |> to_int_option;
-    output_tokens = json |> member "output_tokens" |> to_int_option;
-    cost_usd = json |> member "cost_usd" |> to_float_option;
+    latency_ms = Json_util.get_int json "latency_ms";
+    input_tokens = Json_util.get_int json "input_tokens";
+    output_tokens = Json_util.get_int json "output_tokens";
+    cost_usd = Json_util.get_float json "cost_usd";
     status =
-      json |> member "status" |> to_string_option |> Option.value ~default:"ok"
+      Json_util.get_string json "status" |> Option.value ~default:"ok"
       |> run_status_of_string;
     tool_calls = List.map tool_call_of_yojson tool_call_items;
   }

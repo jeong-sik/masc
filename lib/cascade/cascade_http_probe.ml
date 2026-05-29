@@ -85,10 +85,9 @@ let store_capacity ~url ~capacity ~now =
    parallel mode can override [total] via the optional argument
    so [process_available] is still meaningful. *)
 let parse_response ?(total = 1) json =
-  let open Yojson.Safe.Util in
   match json with
   | `Assoc _ ->
-    (match member "models" json with
+    (match Json_util.assoc_member_opt "models" json with
      | `List items ->
        let process_active = List.length items in
        let process_available = max 0 (total - process_active) in

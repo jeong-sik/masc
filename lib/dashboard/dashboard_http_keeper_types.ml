@@ -70,7 +70,7 @@ let terminal_reason_code_of_decision_json json =
   | Some _ as value -> value
   | None ->
     (match Json_util.assoc_member_opt "terminal_reason" json with
-     | `Assoc _ as terminal_reason ->
+     | Some (`Assoc _ as terminal_reason) ->
        Json_util.assoc_string_opt "code" terminal_reason
      | _ -> None)
 

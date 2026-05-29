@@ -283,17 +283,17 @@ let get_state base_path =
 let key_of kind id = kind ^ ":" ^ id
 
 let judgment_key json =
-  let kind = Json_util.get_string "target_kind" json |> Option.value ~default:"" in
-  let id = Json_util.get_string "target_id" json |> Option.value ~default:"" in
+  let kind = Json_util.get_string json "target_kind" |> Option.value ~default:"" in
+  let id = Json_util.get_string json "target_id" |> Option.value ~default:"" in
   key_of kind id
 
 let judgment_generated_at json =
-  Json_util.get_string "generated_at" json |> Dashboard_utils.parse_iso_opt
+  Json_util.get_string json "generated_at" |> Dashboard_utils.parse_iso_opt
   |> Option.value ~default:0.0
 
 let normalize_disk_recommended_action judgment =
   match Json_util.assoc_member_opt "recommended_action" judgment with
-  | `Assoc action_fields ->
+  | Some (`Assoc action_fields) ->
       let canonical_tool =
         match List.assoc_opt "resolved_tool" action_fields with
         | Some (`String tool) ->
@@ -328,7 +328,7 @@ let load_judgments_into_table jsons =
   let table = Hashtbl.create 32 in
   List.iter (fun json ->
     try
-      let status = Json_util.get_string "status" json in
+      let status = Json_util.get_string json "status" in
       if status = Some "active" then
         let key = judgment_key json in
         match Hashtbl.find_opt table key with
@@ -385,7 +385,7 @@ let fresh_judgments_json ~base_path ~limit =
   latest_judgments base_path
   |> List.map normalize_disk_recommended_action
   |> List.filter (fun j ->
-    match Json_util.get_string "expires_at" j with
+    match Json_util.get_string j "expires_at" with
     | Some iso ->
       (match Dashboard_utils.parse_iso_opt (Some iso) with
        | Some ts -> ts > now
@@ -482,7 +482,7 @@ let parse_recommended_action json =
   match Json_util.assoc_member_opt "recommended_action" json with
   | Some (`Assoc _ as action_json) ->
       let resolved_tool =
-        Json_util.get_string "resolved_tool" action_json
+        Json_util.get_string action_json "resolved_tool"
         |> Option.map normalize_allowed_tool_name
       in
       let resolved_tool =
@@ -500,7 +500,7 @@ let parse_recommended_action json =
             ( "reason",
               `String
                 (normalize_text
-                   (Json_util.get_string "reason" action_json
+                   (Json_util.get_string action_json "reason"
                   |> Option.value ~default:"")) );
             ("payload_preview", m "payload_preview" action_json);
           ])
@@ -529,7 +529,7 @@ let parse_lenient_governance_json raw_text =
 
 let parse_required_guardrail_state json =
   match Json_util.assoc_member_opt "guardrail_state" json with
-  | `Assoc fields ->
+  | Some (`Assoc fields) ->
       let required_field name =
         match List.assoc_opt name fields with
         | Some value -> Ok value
@@ -555,24 +555,24 @@ let parse_required_guardrail_state json =
            Error
              "invalid guardrail_state: expected requires_human_gate bool, \
               pending_confirm_token string|null, ready_to_execute bool")
-  | `Null -> Error "missing guardrail_state"
+  | None | Some `Null -> Error "missing guardrail_state"
   | _ -> Error "invalid guardrail_state: expected object"
 
 let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
   let target_kind =
-    Json_util.get_string "kind" json |> Option.value ~default:""
+    Json_util.get_string json "kind" |> Option.value ~default:""
     |> String.lowercase_ascii
   in
-  let target_id = Json_util.get_string "id" json |> Option.value ~default:"" in
+  let target_id = Json_util.get_string json "id" |> Option.value ~default:"" in
   if target_kind = "" || target_id = "" then Ok None
   else
     let summary =
-      normalize_text (Json_util.get_string "summary" json |> Option.value ~default:"")
+      normalize_text (Json_util.get_string json "summary" |> Option.value ~default:"")
     in
     if summary = "" then Ok None
     else
       let confidence =
-        Json_util.get_float "confidence" json
+        Json_util.get_float json "confidence"
         |> Option.value ~default:0.0
         |> fun v -> max 0.0 (min 1.0 v)
       in
@@ -614,7 +614,7 @@ let parse_governance_response ~raw_text ~generated_at ~expires_at ~model_used =
       match parsed with
       | `Assoc _ -> (
           match Json_util.assoc_member_opt "items" parsed with
-          | `List rows ->
+          | Some (`List rows) ->
               let rec loop acc = function
                 | [] -> Ok (List.rev acc)
                 | row :: rest -> (

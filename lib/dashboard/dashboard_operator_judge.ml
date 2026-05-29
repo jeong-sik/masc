@@ -126,22 +126,21 @@ let build_recommended_action ~actor ~target_type ~target_id json =
   match json with
   | `Assoc _ ->
       let action_type =
-        Json_util.get_string member_action_type json |> Option.map String.trim
+        Json_util.get_string json member_action_type |> Option.map String.trim
       in
       (match action_type with
       | Some action_type when action_type <> "" && allowed_action_type action_type ->
           let severity =
-            Json_util.get_string member_severity json
+            Json_util.get_string json member_severity
             |> Option.value ~default:severity_warn
           in
           let reason =
             normalize_text
-              (Json_util.get_string member_reason json |> Option.value ~default:"")
+              (Json_util.get_string json member_reason |> Option.value ~default:"")
           in
           let suggested_payload =
             match Json_util.assoc_member_opt member_suggested_payload json with
             | Some (`Assoc _ as value) -> value
-            | `Assoc _ as value -> value
             | _ -> `Assoc []
           in
           let preview =
@@ -184,12 +183,12 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
   | `Assoc _ ->
       let summary =
         normalize_text
-          (Json_util.get_string member_summary json |> Option.value ~default:"")
+          (Json_util.get_string json member_summary |> Option.value ~default:"")
       in
       if summary = "" then None
       else
         let confidence =
-          Json_util.get_float member_confidence json
+          Json_util.get_float json member_confidence
           |> Option.value ~default:0.0
         in
         let fresh_until_unix =
@@ -204,7 +203,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
                   ~target_id:None (Option.value ~default:`Null (Json_util.assoc_member_opt member_recommended_action json)))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:
-               (Json_util.get_bool member_disagreement_with_truth json
+               (Json_util.get_bool json member_disagreement_with_truth
                |> Option.value ~default:false)
              ~generated_at ~generated_at_unix
              ~fresh_until:(Dashboard_utils.iso_of_unix fresh_until_unix)

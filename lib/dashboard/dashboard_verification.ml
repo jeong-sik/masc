@@ -42,10 +42,10 @@ let required_evidence_of_output (output : Yojson.Safe.t) : string list =
        | Some (`List items) ->
            List.filter_map (function
              | `String s -> Some s
-             | _ -> None
+             | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _ -> None
            ) items
-       | _ -> [])
-  | _ -> []
+       | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _) -> [])
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> []
 
 (* Pull task_title from the submit envelope so the UI detail cell has a
    fallback when contract/evidence/verdict_reason are all empty. Empty
@@ -55,32 +55,32 @@ let task_title_of_output (output : Yojson.Safe.t) : string =
   | `Assoc fields ->
       (match List.assoc_opt "task_title" fields with
        | Some (`String s) -> s
-       | _ -> "")
-  | _ -> ""
+       | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> "")
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> ""
 
 let request_kind_of_output (output : Yojson.Safe.t) : string =
   match output with
   | `Assoc fields ->
       (match List.assoc_opt "request_kind" fields with
        | Some (`String "conflict_triage") -> "conflict_triage"
-       | _ -> "normal")
-  | _ -> "normal"
+       | Some (`String _) | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> "normal")
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> "normal"
 
 let request_summary_of_output (output : Yojson.Safe.t) : string =
   match output with
   | `Assoc fields ->
       (match List.assoc_opt "request_summary" fields with
        | Some (`String s) -> s
-       | _ -> "")
-  | _ -> ""
+       | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> "")
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> ""
 
 let next_action_of_output (output : Yojson.Safe.t) : string option =
   match output with
   | `Assoc fields ->
       (match List.assoc_opt "next_action" fields with
        | Some (`String s) when String.trim s <> "" -> Some s
-       | _ -> None)
-  | _ -> None
+       | Some (`String _) | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> None)
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> None
 
 (** Status + verdict + approver triple. Keeps all three derivations in one
     place so the match is exhaustive over the Verification state machine. *)

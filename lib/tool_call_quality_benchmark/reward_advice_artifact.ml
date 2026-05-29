@@ -91,8 +91,8 @@ let string_field ~default key (json : Yojson.Safe.t) =
   | `Assoc fields ->
     (match List.assoc_opt key fields with
      | Some (`String s) -> s
-     | _ -> default)
-  | _ -> default
+     | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> default)
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> default
 
 let float_field ~default key (json : Yojson.Safe.t) =
   match json with
@@ -100,17 +100,20 @@ let float_field ~default key (json : Yojson.Safe.t) =
     (match List.assoc_opt key fields with
      | Some (`Float f) -> f
      | Some (`Int i) -> float_of_int i
-     | _ -> default)
-  | _ -> default
+     | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> default)
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> default
 
 let string_list_field key (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
     (match List.assoc_opt key fields with
      | Some (`List items) ->
-       List.filter_map (function `String s -> Some s | _ -> None) items
-     | _ -> [])
-  | _ -> []
+       List.filter_map (function
+         | `String s -> Some s
+         | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _ -> None
+       ) items
+     | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _) -> [])
+  | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> []
 
 let of_yojson (json : Yojson.Safe.t) : (reward_advice_artifact, string) result =
   let source_str = string_field ~default:"" "source" json in
@@ -132,8 +135,8 @@ let of_yojson (json : Yojson.Safe.t) : (reward_advice_artifact, string) result =
           | `Assoc fields ->
             (match List.assoc_opt "task_id" fields with
              | Some (`String s) when s <> "" -> Some s
-             | _ -> None)
-          | _ -> None
+             | Some (`String _) | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _) -> None)
+          | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> None
         in
         Ok {
           source;

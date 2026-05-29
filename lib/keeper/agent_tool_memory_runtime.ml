@@ -404,8 +404,8 @@ let keeper_memory_search_json
     | `Assoc fields ->
       (match List.assoc_opt "match_count" fields with
        | Some (`Int n) -> n
-       | _ -> 0)
-    | _ -> 0
+       | None | Some (`Null | `Bool _ | `Float _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> 0)
+    | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> 0
   in
   let log_top_score =
     match result with
@@ -416,10 +416,11 @@ let keeper_memory_search_json
           | `Assoc mfields ->
             (match List.assoc_opt "score" mfields with
              | Some (`Float s) -> Some s
-             | _ -> None)
-          | _ -> None)
-       | _ -> None)
-    | _ -> None
+             | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None)
+          | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> None)
+       | Some (`List []) -> None
+       | None | Some (`Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `Assoc _) -> None)
+    | `Null | `Bool _ | `Int _ | `Float _ | `Intlit _ | `String _ | `List _ -> None
   in
   (try
      let log_entry =

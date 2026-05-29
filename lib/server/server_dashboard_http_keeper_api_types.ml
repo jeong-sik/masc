@@ -125,24 +125,10 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
-let json_string_member_opt = Json_util.get_string
-
-let json_string_list_member name json =
-  Json_util.json_string_list_member name json |> Json_util.dedupe_keep_order
-
 let take_last limit values =
   let len = List.length values in
   if len <= limit then values
   else List.filteri (fun idx _ -> idx >= len - limit) values
-
-let json_assoc_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
-
-let json_string_value_opt = function
-  | `String value -> Some value
-  | _ -> None
 
 let manifest_row_matches ?turn_id keeper_name trace_id
     (row : Keeper_runtime_manifest.t) =
@@ -162,7 +148,7 @@ let unique_present_paths paths =
   |> Json_util.dedupe_keep_order
 
 let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
-  let decision_string key = json_string_member_opt row.decision key in
+  let decision_string key = Json_util.get_string row.decision key in
   `Assoc
     [
       ("ts", `String row.ts);
@@ -220,8 +206,8 @@ let tool_call_output_text_opt json =
   match Yojson.Safe.Util.member "output" json with
   | `String value -> Some value
   | `Assoc _ as output -> (
-    match json_assoc_member_opt "_blob" output with
-    | Some blob -> json_string_member_opt "preview" blob
+    match Json_util.assoc_member_opt "_blob" output with
+    | Some blob -> Json_util.get_string blob "preview"
     | None -> None)
   | _ -> None
 
@@ -234,21 +220,21 @@ let parse_tool_output_json_opt json =
     | Error _ -> None)
 
 let tool_call_runtime_contract json =
-  match json_assoc_member_opt "runtime_contract" json with
+  match Json_util.assoc_member_opt "runtime_contract" json with
   | Some contract -> contract
   | None -> `Assoc []
 
 let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
   let contract = tool_call_runtime_contract json in
   let keeper_matches =
-    match json_string_member_opt "keeper" json with
+    match Json_util.get_string json "keeper" with
     | Some keeper -> String.equal keeper keeper_name
     | None -> true
   in
   let trace_matches =
     match
-      ( json_string_member_opt "trace_id" json,
-        json_string_member_opt "trace_id" contract )
+      ( Json_util.get_string json "trace_id",
+        Json_util.get_string contract "trace_id" )
     with
     | Some value, _ | _, Some value -> String.equal value trace_id
     | None, None -> false
@@ -272,11 +258,11 @@ let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
 
 let claim_status_of_output output =
   let result =
-    match json_string_member_opt "result" output with
+    match Json_util.get_string output "result" with
     | Some value -> String.trim value
     | None -> ""
   in
-  match json_assoc_member_opt "claimed_task" output with
+  match Json_util.assoc_member_opt "claimed_task" output with
   | Some _ -> "claimed"
   | None when string_has_prefix ~prefix:"No eligible tasks" result -> "no_eligible"
   | None when string_has_prefix ~prefix:"No unclaimed tasks" result -> "no_unclaimed"

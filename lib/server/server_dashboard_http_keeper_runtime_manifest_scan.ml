@@ -124,8 +124,8 @@ let update_runtime_manifest_scan scan row =
      let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
      match clock_refs with
      | `Assoc _ ->
-       let event_id = json_string_member_opt "event_id" clock_refs in
-       let parent_event_id = json_string_member_opt "parent_event_id" clock_refs in
+       let event_id = Json_util.get_string clock_refs "event_id" in
+       let parent_event_id = Json_util.get_string clock_refs "parent_event_id" in
        (match event_id, parent_event_id with
         | Some eid, Some peid -> Some (peid, eid)
         | _ -> None)
@@ -155,7 +155,7 @@ let update_runtime_manifest_scan scan row =
     in
     match clock_refs with
     | `Assoc _ ->
-      (match json_string_member_opt "source_clock" clock_refs with
+      (match Json_util.get_string clock_refs "source_clock" with
        | Some clock -> (
          match Keeper_runtime_manifest.source_clock_of_string clock with
          | Some valid -> Keeper_runtime_manifest.source_clock_to_string valid
@@ -206,10 +206,10 @@ let update_runtime_manifest_scan scan row =
    | Keeper_runtime_manifest.Event_bus_correlated ->
      let decision = row.Keeper_runtime_manifest.decision in
      scan.event_bus_count <- scan.event_bus_count + 1;
-     (match json_string_member_opt "correlation_id" decision with
+     (match Json_util.get_string decision "correlation_id" with
       | Some value -> scan.event_bus_correlation_ids <- value :: scan.event_bus_correlation_ids
       | None -> ());
-     (match json_string_member_opt "run_id" decision with
+     (match Json_util.get_string decision "run_id" with
       | Some value -> scan.event_bus_run_ids <- value :: scan.event_bus_run_ids
       | None -> ());
      scan.context_compact_started_count <-

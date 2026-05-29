@@ -675,7 +675,7 @@ let compute_judgments
       try
         let raw_text = Agent_sdk_response.text_of_response response in
         let generated_at = Masc_domain.now_iso () in
-        let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+        let expires_at = Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday () +. cache_ttl_sec ()) in
         (* #9880: keep the internal fallback/counter for empty OAS model
            metadata, but do not project concrete model names into MASC-owned
            dashboard or judgment JSON. *)

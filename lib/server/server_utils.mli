@@ -41,14 +41,6 @@ val take : int -> 'a list -> 'a list
 val drop : int -> 'a list -> 'a list
 (** [drop n xs] is [List.drop n xs], symmetric with {!take}. *)
 
-(** {1 Time helpers} *)
-
-val iso8601_of_unix : float -> string
-(** [iso8601_of_unix ts] renders a Unix timestamp as
-    [YYYY-MM-DDTHH:MM:SSZ] (UTC, no fractional seconds, no
-    timezone offset other than [Z]).  Stable wire format —
-    dashboards parse this with the same regex across modules. *)
-
 (** {1 Board sort helpers} *)
 
 val board_sort_order_of_request :

@@ -205,7 +205,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
                (Json_util.get_bool json member_disagreement_with_truth
                |> Option.value ~default:false)
              ~generated_at ~generated_at_unix
-             ~fresh_until:(Dashboard_utils.iso_of_unix fresh_until_unix)
+             ~fresh_until:(Masc_domain.iso8601_of_unix_seconds fresh_until_unix)
              ~fresh_until_unix ~keeper_name ())
   | _ -> None
 
@@ -301,9 +301,9 @@ let refresh_once ~sw ~net
             st.last_error <- Some message)
     | Ok (model_used, result_json) ->
         let generated_at_unix = Unix.gettimeofday () in
-        let generated_at = Dashboard_utils.iso_of_unix generated_at_unix in
+        let generated_at = Masc_domain.iso8601_of_unix_seconds generated_at_unix in
         let expires_at =
-          Dashboard_utils.iso_of_unix (generated_at_unix +. float_of_int (room_ttl_sec ()))
+          Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (room_ttl_sec ()))
         in
         let room_judgment =
           parse_room_judgment ~config ~generated_at ~generated_at_unix

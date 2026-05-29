@@ -85,7 +85,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
               let latest_at = List.fold_left (fun acc (_, e) ->
                 max acc e.Keeper_types.last_used_at) 0.0 tracked in
               let at_str = if latest_at > 0.0
-                then Some (Dashboard_utils.iso_of_unix latest_at) else None in
+                then Some (Masc_domain.iso8601_of_unix_seconds latest_at) else None in
               (fallback_allowed, names, Some total, None, Some "keeper_dispatch", at_str)
             else
               ( fallback_allowed,

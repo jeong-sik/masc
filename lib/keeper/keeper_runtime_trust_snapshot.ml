@@ -447,7 +447,7 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
       ("latest_event_kind", Json_util.string_opt_to_json latest_event_kind);
       ( "latest_event_at",
         match Option.bind latest_approval_audit (json_float_opt_member "ts") with
-        | Some ts -> `String (iso_of_unix_seconds ts)
+        | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
         | None -> `Null );
       ( "matched_by",
         match latest_rule_match with

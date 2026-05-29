@@ -29,9 +29,6 @@ let key_tool_error_count = "session:tool_error_count"
 (* ISO 8601 formatting                                               *)
 (* ================================================================ *)
 
-let iso8601_of_float (t : float) : string =
-  Masc_domain.iso8601_of_unix_seconds t
-
 (* ================================================================ *)
 (* Injector factory                                                  *)
 (* ================================================================ *)
@@ -50,7 +47,7 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
     let elapsed = now -. config.start_time in
     Some Agent_sdk.Hooks.{
       context_updates = [
-        (key_wall_time, `String (iso8601_of_float now));
+        (key_wall_time, `String (Masc_domain.iso8601_of_unix_seconds now));
         (key_elapsed_seconds, `Float elapsed);
         (key_tool_call_count, `Int (Atomic.get call_count));
         (key_last_tool_name, `String tool_name);

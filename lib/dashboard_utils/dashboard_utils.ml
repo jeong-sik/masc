@@ -1,5 +1,3 @@
-let iso_of_unix unix_ts = Masc_domain.iso8601_of_unix_seconds unix_ts
-
 let parse_iso_opt = function
   | Some raw when String.trim raw <> "" -> (
       try Some (Masc_domain.parse_iso8601 raw) with Failure _ -> None)

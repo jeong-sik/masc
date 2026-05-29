@@ -23,8 +23,6 @@ let clamp ~min_v ~max_v v = max min_v (min max_v v)
 let take = List.take
 let drop = List.drop
 
-let iso8601_of_unix = Masc_domain.iso8601_of_unix_seconds
-
 (** Issue #8449 PR C: HTTP query-param sort_by parser. Delegates to
     [Board_dispatch.sort_order_of_string_opt] instead of duplicating
     the inline match. HTTP semantics keep the "default to Hot" fallback
@@ -329,8 +327,8 @@ let board_post_dashboard_json ?(include_moderation = false)
           ("body", `String p.body);
           ("votes", if blind_active then `Null else `Int score);
           ("comment_count", `Int p.reply_count);
-          ("created_at_iso", `String (iso8601_of_unix p.created_at));
-          ("updated_at_iso", `String (iso8601_of_unix p.updated_at));
+          ("created_at_iso", `String (Masc_domain.iso8601_of_unix_seconds p.created_at));
+          ("updated_at_iso", `String (Masc_domain.iso8601_of_unix_seconds p.updated_at));
           ("hearth", Json_util.string_opt_to_json p.hearth);
           ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
           ("author_identity", board_actor_identity_json author);

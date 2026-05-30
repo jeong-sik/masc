@@ -329,73 +329,7 @@ also_allow = ["tool_execute", "tool_search_files"]
         (list string)
         "allowed_paths"
         [ "workspace/example/project" ]
-        updated.allowed_paths;
-      check
-        (option string)
-        "tool_preset_source"
-        (Some "toml")
-        updated.tool_preset_source
-
-let test_tool_preset_source_resyncs_from_toml_without_policy_delta () =
-  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
-  with_config_dir @@ fun config_dir ->
-  Fs_compat.clear_fs ();
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "tool_source_toml_resync" in
-  let keepers_toml_dir = Filename.concat config_dir "keepers" in
-  Unix.mkdir keepers_toml_dir 0o755;
-  write_file
-    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
-    {|[keeper]
-sandbox_profile = "docker"
-goal = "test"
-
-[keeper.tool_access]
-kind = "preset"
-preset = "social"
-|};
-  let config = Coord.default_config room_dir in
-  let initial_meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [
-            ("name", `String keeper_name);
-            ("agent_name", `String keeper_name);
-            ("trace_id", `String "trace-tool-source-toml-resync");
-            ("goal", `String "test");
-            ( "tool_access",
-              `Assoc
-                [
-                  ("kind", `String "preset");
-                  ("preset", `String "social");
-                  ("also_allow", `List []);
-                ] );
-          ])
-    with
-    | Ok meta -> meta
-    | Error e -> fail ("meta_of_json failed: " ^ e)
-  in
-  let persisted_path = write_persisted_meta_file config initial_meta in
-  Fs_compat.clear_fs ();
-  check bool "persisted meta fixture exists" true (Sys.file_exists persisted_path);
-  (match Keeper_meta_store.read_meta_file_path persisted_path with
-  | Ok (Some _) -> ()
-  | Ok None -> fail "persisted meta fixture was not readable"
-  | Error e -> fail ("persisted meta fixture read failed: " ^ e));
-  (match Keeper_meta_store.read_meta config keeper_name with
-  | Ok (Some _) -> ()
-  | Ok None -> fail ("persisted meta fixture not found via read_meta: " ^ persisted_path)
-  | Error e -> fail ("persisted meta fixture read_meta failed: " ^ e));
-  match Keeper_runtime.ensure_keeper_meta config keeper_name with
-  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
-  | Ok updated ->
-      check
-        (option string)
-        "tool_preset_source resynced from TOML"
-        (Some "toml")
-        updated.Keeper_meta_contract.tool_preset_source
+        updated.allowed_paths
 
 let test_persona_no_longer_drives_tool_preset_source () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -465,11 +399,8 @@ persona_name = "%s"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check
-        (option string)
-        "persona does not drive tool_preset_source"
-        None
-        updated.Keeper_meta_contract.tool_preset_source
+      let (Keeper_meta_tool_access.Custom tools) = updated.Keeper_meta_contract.tool_access in
+      check bool "persona does not drive tool_access" true (tools = [])
 
 (** Test: explicit empty allowed_paths in TOML clears stale runtime JSON values. *)
 let test_allowed_paths_explicit_empty_clears_runtime () =
@@ -610,9 +541,9 @@ allowed_paths = ["workspace/example/project"]
         ((fun _ -> None) updated.Keeper_meta_contract.tool_access
          |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
       check
-        (option (list string))
+        (list string)
         "custom allowlist preserved"
-        (Some [ "keeper_board_get"; "masc_status" ])
+        [ "keeper_board_get"; "masc_status" ]
         (Keeper_meta_tool_access.tool_access_custom_allowlist updated.tool_access);
       check
         (list string)
@@ -708,10 +639,10 @@ preset = "delivery"
       ((fun _ -> None) updated.tool_access
          |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
       check
-        (option string)
-        "tool_preset_source from toml overlay"
-        (Some "toml")
-        updated.tool_preset_source
+        bool
+        "tool_access is custom from toml overlay"
+        true
+        (match updated.tool_access with Keeper_meta_tool_access.Custom _ -> true)
 
 let test_toml_integer_per_provider_timeout_updates_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -1195,10 +1126,6 @@ let () =
             "TOML tool policy fields overwrite stale runtime JSON"
             `Quick
             test_tool_policy_resync;
-          test_case
-            "TOML tool_preset_source resyncs without policy delta"
-            `Quick
-            test_tool_preset_source_resyncs_from_toml_without_policy_delta;
           test_case
             "persona no longer drives tool_preset_source"
             `Quick

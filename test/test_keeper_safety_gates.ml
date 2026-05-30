@@ -189,7 +189,7 @@ let test_write_done_kills_all () =
   check (list string) "write_done returns empty" [] tools
 
 let test_all_keepers_get_full_toolset () =
-  let meta = make_meta ~preset:Keeper_meta_tool_access.Full () in
+  let meta = make_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
@@ -197,34 +197,34 @@ let test_all_keepers_get_full_toolset () =
   check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_all_keepers_have_research_tools () =
-  let meta = make_meta ~preset:Keeper_meta_tool_access.Research  () in
+  let meta = make_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "research has library search" true (List.mem "keeper_library_search" tools);
   check bool "research has web search" true (List.mem "masc_web_search" tools);
   check bool "research has file search" true (List.mem "tool_search_files" tools)
 
 let test_heuristic_mode_tools () =
-  let meta = make_meta ~preset:Keeper_meta_tool_access.Minimal () in
+  let meta = make_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "heuristic returns nonempty tools" true (List.length tools > 0)
 
 let test_messaging_preset_tools () =
-  let meta = make_meta ~preset:Keeper_meta_tool_access.Messaging () in
+  let meta = make_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_execution_preset_has_repo_tools () =
-  let meta = make_meta ~preset:Keeper_meta_tool_access.Delivery () in
+  let meta = make_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "tool_search_files included" true (List.mem "tool_search_files" tools);
   check bool "tool_read_file included" true (List.mem "tool_read_file" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
 let test_all_modes_produce_same_tools () =
-  let meta_a = make_meta ~preset:Keeper_meta_tool_access.Minimal () in
-  let meta_b = make_meta ~preset:Keeper_meta_tool_access.Full () in
+  let meta_a = make_meta () in
+  let meta_b = make_meta () in
   let tools_a = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta_a in
   let tools_b = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta_b in
   check bool "full has more tools" true (List.length tools_b > List.length tools_a)

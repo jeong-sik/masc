@@ -160,16 +160,13 @@ let docker_image_available image =
   in
   Sys.command cmd = 0
 
-let make_meta ?preset ~name ~sandbox () =
+let make_meta ~name ~sandbox () =
   let tool_access_fields =
-    match preset with
-    | None -> []
-    | Some preset ->
-        [
-          ( "tool_access",
-            Keeper_meta_tool_access.tool_access_to_json
-              (Keeper_meta_tool_access.Custom []) );
-        ]
+    [
+      ( "tool_access",
+        Keeper_meta_tool_access.tool_access_to_json
+          (Keeper_meta_tool_access.Custom []) );
+    ]
   in
   let json =
     `Assoc
@@ -209,7 +206,7 @@ let setup ~sandbox f =
   ensure_dir playground;
   f ~config ~meta ~playground
 
-let setup_with_preset ~sandbox ~preset f =
+let setup_with_preset ~sandbox f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
@@ -220,7 +217,7 @@ let setup_with_preset ~sandbox ~preset f =
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_meta ~name:"minjae" ~sandbox ~preset () in
+  let meta = make_meta ~name:"minjae" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~config ~meta ~playground
@@ -966,7 +963,7 @@ exit 2\n"
 
 let test_execute_git_creds_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -988,7 +985,7 @@ let test_execute_git_creds_routes_through_docker () =
 let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1031,7 +1028,7 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
 let test_execute_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -1064,7 +1061,7 @@ let test_execute_git_creds_missing_bundle_is_structured_blocker () =
 let test_execute_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1126,7 +1123,7 @@ let test_execute_missing_playground_blocks_before_docker () =
 let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1192,7 +1189,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
 let test_execute_git_push_routes_through_git_creds_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1802,7 +1799,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1829,7 +1826,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
 let test_execute_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let lib =
     Filename.concat
@@ -1863,7 +1860,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
 let test_execute_blocks_file_redirect_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1891,7 +1888,7 @@ let test_execute_blocks_file_redirect_before_docker () =
 let test_execute_repo_checks_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1921,7 +1918,7 @@ let test_execute_repo_checks_routes_through_docker () =
 let test_execute_search_pipeline_exposes_structured_recovery_plan () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker ~preset:Keeper_meta_tool_access.Delivery
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->

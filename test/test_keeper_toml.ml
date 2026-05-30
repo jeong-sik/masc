@@ -1240,10 +1240,6 @@ let test_persona_resolver_renders_durable_keeper_toml () =
                 [ "probe"; "@probe" ] defaults.mention_targets;
               check (option (list string)) "allowed_paths"
                 (Some [ "/tmp/probe" ]) defaults.allowed_paths;
-              check (option string) "tool_preset" (Some "research")
-                defaults.tool_preset;
-              check (option (list string)) "tool_also_allow"
-                (Some [ "masc_status" ]) defaults.tool_also_allow;
               check (option (list string)) "tool_denylist"
                 (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
 

@@ -547,7 +547,7 @@ let test_preset_universe_subset_of_global () =
     List.filter (fun name -> not (List.mem name global)) scoped
   in
   check (list string) "scoped is subset of global" [] outside;
-  check bool "scoped < global for non-Full preset" true
+  check bool "scoped < global for custom tool_access" true
     (List.length scoped < List.length global)
 
 let test_preset_universe_includes_core () =
@@ -566,31 +566,6 @@ let test_preset_universe_includes_core () =
     (List.mem "masc_tool_help" scoped);
   check bool "masc_broadcast excluded from scoped" false
     (List.mem "masc_broadcast" scoped)
-
-let test_preset_universe_sizes () =
-  init_keeper_tool_registry ();
-  let make preset =
-    let base = make_gate_test_meta () in
-    { base with
-      tool_access = Custom [];
-      tool_denylist = [];
-    }
-  in
-  let minimal_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Minimal)) in
-  let messaging_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Messaging)) in
-  let delivery_size =
-    List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Delivery))
-  in
-  let full_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Full)) in
-  check bool
-    (Printf.sprintf "Minimal(%d) < Messaging(%d)" minimal_size messaging_size)
-    true (minimal_size < messaging_size);
-  check bool
-    (Printf.sprintf "Messaging(%d) < Delivery(%d)" messaging_size delivery_size)
-    true (messaging_size < delivery_size);
-  check bool
-    (Printf.sprintf "Delivery(%d) <= Full(%d)" delivery_size full_size)
-    true (delivery_size <= full_size)
 
 let test_dispatch_preset_routes_pm_tools () =
   init_keeper_tool_registry ();
@@ -655,7 +630,7 @@ let test_delivery_preset_routes_coordination_read_models () =
 let test_coordination_presets_route_plan_history_reads () =
   init_keeper_tool_registry ();
   List.iter
-    (fun (label, preset) ->
+    (fun label ->
       let base = make_gate_test_meta ~name:("test-" ^ label ^ "-coordination") () in
       let meta =
         {
@@ -673,7 +648,7 @@ let test_coordination_presets_route_plan_history_reads () =
         (List.mem "masc_plan_get_task" allowed);
       check bool (label ^ " does not include goal upsert") false
         (List.mem "masc_goal_upsert" allowed))
-    [ ("social", Social); ("messaging", Messaging) ]
+    ["social"; "messaging"]
 
 let test_preset_universe_superset_of_policy () =
   init_keeper_tool_registry ();
@@ -867,8 +842,6 @@ let () =
             test_preset_universe_subset_of_global;
           test_case "scoped includes core" `Quick
             test_preset_universe_includes_core;
-          test_case "preset size ordering" `Quick
-            test_preset_universe_sizes;
           test_case "scoped superset of policy" `Quick
             test_preset_universe_superset_of_policy;
         ] );

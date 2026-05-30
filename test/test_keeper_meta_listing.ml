@@ -685,7 +685,7 @@ also_allow = ["masc_tasks", "masc_transition"]
             (list string)
             "tool allowlist resynced"
             [ "masc_tasks"; "masc_transition" ]
-            (Keeper_meta_tool_access.tool_access_also_allowlist meta.tool_access);
+            (match meta.tool_access with Custom lst -> lst);
           check
             (option (float 0.0001))
             "per provider timeout resynced"

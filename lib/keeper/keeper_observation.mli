@@ -108,7 +108,7 @@ type cascade_metrics_capture
     callers do not pattern-match on the internal
     counter / list state — they construct one via
     {!cascade_metrics_for_candidates}, hand it to OAS
-    through [Oas_compat.Metrics.make], then materialise
+    through a direct [Llm_provider.Metrics.t] record, then materialise
     a {!cascade_observation} via
     {!cascade_observation_with_metrics}. *)
 

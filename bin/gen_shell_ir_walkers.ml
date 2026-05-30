@@ -5031,20 +5031,28 @@ let emit_flag_expander buf =
     buf
     {|(** Expand combined short flags into individual flags.
     ["-la"] → ["-l"; "-a"]; ["-rf"] → ["-r"; "-f"].
-    Long flags (--foo), flag+value (-n5), and bare "-" are unchanged. *)
+    Long flags (--foo), flag+value (-n5), bare "-", and everything after [--] are unchanged.
+    Length capped at 4 to avoid expanding flag+value forms like ["-ePATTERN"]. *)
 let expand_combined_short_flags (args : string list) : string list =
-  List.concat_map
-    (fun arg ->
-       if String.length arg >= 3
-          && String.length arg <= 4
-          && Char.code arg.[0] = Char.code '-'
-          && Char.code arg.[1] <> Char.code '-'
-          && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) (String.sub arg 1 (String.length arg - 1))
-       then
-         List.init (String.length arg - 1) (fun i ->
-           Printf.sprintf "-%c" arg.[i + 1])
-       else [ arg ])
-    args
+  let rec go = function
+    | [] -> []
+    | "--" :: rest -> "--" :: rest  (* POSIX end-of-options: pass remainder untouched *)
+    | arg :: rest ->
+      let expanded =
+        if String.length arg >= 3
+           && String.length arg <= 4
+           && Char.code arg.[0] = Char.code '-'
+           && Char.code arg.[1] <> Char.code '-'
+           && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+                (String.sub arg 1 (String.length arg - 1))
+        then
+          List.init (String.length arg - 1) (fun i ->
+            Printf.sprintf "-%c" arg.[i + 1])
+        else [ arg ]
+      in
+      expanded @ go rest
+  in
+  go args
 ;;
 
 |}

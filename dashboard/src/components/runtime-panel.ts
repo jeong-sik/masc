@@ -34,7 +34,6 @@ import { RuntimeMonitor } from './runtime-monitor'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 import { TelemetryPanel, isTelemetryView, TELEMETRY_VIEW_CHIPS } from './telemetry-panel'
-import { CascadeInspector } from './cascade-inspector'
 import { RouteLink } from './common/route-link'
 
 type RuntimeView =
@@ -44,7 +43,6 @@ type RuntimeView =
   | 'audit'
   | 'heuristics'
   | 'stress'
-  | 'inspector'
   | 'prometheus'
   | 'verification'
 
@@ -55,7 +53,6 @@ const RUNTIME_VIEWS: RuntimeView[] = [
   'audit',
   'heuristics',
   'stress',
-  'inspector',
   'prometheus',
   'verification',
 ]
@@ -76,7 +73,6 @@ const activeView = computed<RuntimeView>(() => {
 const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'default', label: '전체' },
   { key: 'providers', label: '런타임' },
-  { key: 'inspector', label: '검사기' },
 ]
 
 // Advanced chips are infra/billing telemetry plus the raw / formal layers.
@@ -97,31 +93,6 @@ function updateViewParam(view: RuntimeView): void {
       ? { section: 'runtime' }
       : { section: 'runtime', view },
   )
-}
-
-function CascadeConfigCanonicalLink() {
-  return html`
-    <section
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
-      aria-label="Cascade canonical surface"
-    >
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="min-w-0">
-          <div class="text-sm font-semibold text-text-strong">Cascade Config</div>
-          <div class="mt-1 max-w-2xl text-xs leading-relaxed text-text-muted">
-            Providers, models, and routing rules are managed in the dedicated Cascade Config surface.
-          </div>
-        </div>
-        <${RouteLink}
-          tab="monitoring"
-          params=${{ section: 'cascade-config' }}
-          class="inline-flex min-h-9 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 text-xs font-semibold text-text-strong transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
-        >
-          Open Cascade Config
-        <//>
-      </div>
-    </section>
-  `
 }
 
 function HiddenDiagnosticsLinks() {
@@ -203,15 +174,12 @@ export function RuntimePanel() {
           `
         : isTelemetryView(view)
           ? html`<${TelemetryPanel} view=${view} />`
-        : view === 'inspector'
-          ? html`<${CascadeInspector} />`
         : view === 'prometheus'
           ? html`<${PrometheusMetrics} />`
         : view === 'verification'
           ? html`<${VerificationSpecsPanel} />`
         : html`
             <${OasHealthChip} />
-            <${CascadeConfigCanonicalLink} />
             <${HiddenDiagnosticsLinks} />
             <${CollapsibleSection} id="runtime-details-providers" title="런타임">
               <${RuntimeMonitor} />

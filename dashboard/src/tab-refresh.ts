@@ -49,11 +49,6 @@ async function refreshSurfaceReadinessSurface(): Promise<void> {
   await refreshSurfaceReadiness()
 }
 
-async function refreshCascadeInspectorSurface(): Promise<void> {
-  const { refreshCascadeInspector } = await import('./components/cascade-inspector')
-  await refreshCascadeInspector()
-}
-
 type RefreshTask =
   | 'shell'
   | 'namespaceTruth'
@@ -68,7 +63,6 @@ type RefreshTask =
   | 'toolQuality'
   | 'inspector'
   | 'surfaceReadiness'
-  | 'cascadeInspector'
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
 
@@ -102,9 +96,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       if (routeState.params.section === 'cognition') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
-      }
-      if (routeState.params.section === 'runtime' && routeState.params.view === 'inspector') {
-        return ['cascadeInspector']
       }
       // fleet-health: view-aware refresh (Phase 1 contract from tab-refresh.test.ts)
       if (routeState.params.section === 'fleet-health') {
@@ -172,7 +163,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
     void refreshDoctorSurface()
   },
   surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
-  cascadeInspector: () => { void refreshCascadeInspectorSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
 }

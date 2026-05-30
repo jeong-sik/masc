@@ -1,11 +1,9 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
-import { fetchCascadeProfiles, updateKeeperCascade } from '../api/dashboard'
+import { useState } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
-import { showToast } from './common/toast'
 import type { Keeper } from '../types'
-import { refreshDashboard, keepers } from '../store'
+import { keepers } from '../store'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { keeperDisplayModel } from '../lib/keeper-runtime-display'
 
@@ -21,102 +19,6 @@ function KeeperModelChip({ keeper }: { keeper: Keeper }) {
       class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
       title=${`${display.label}: ${display.value}`}
     >${display.value}</span>
-  `
-}
-
-function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
-  const [cascadeProfiles, setCascadeProfiles] = useState<Awaited<ReturnType<typeof fetchCascadeProfiles>> | null>(null)
-  const [draftCascade, setDraftCascade] = useState<{
-    keeperName: string
-    from: string
-    cascade: string
-  } | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    fetchCascadeProfiles()
-      .then((next) => {
-        if (!cancelled) setCascadeProfiles(next)
-      })
-      .catch((err) => {
-        // P1 silent-failure fix: an empty selector previously rendered
-        // identically to "no profiles to switch between" (line 69 returns
-        // null when profiles + invalid_profiles <= 1).  Surfacing the
-        // failure to the console lets an operator distinguish "fetch
-        // failed" from "no profiles configured" via DevTools.
-        if (!cancelled) {
-          console.warn('[keeper-cascade-selector] fetchCascadeProfiles failed', err)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const fallbackCascade = keeper.cascade_name || '(no cascade)'
-  const currentCascade = draftCascade?.keeperName === keeper.name && draftCascade.from === fallbackCascade
-    ? draftCascade.cascade
-    : fallbackCascade
-  const profiles = cascadeProfiles?.profiles ?? []
-  const invalidProfiles = cascadeProfiles?.invalid_profiles ?? []
-  if (profiles.length + invalidProfiles.length <= 1) return null
-
-  const invalidSummary = invalidProfiles
-    .map((profile) => `${profile.name}: ${profile.errors.join(' | ')}`)
-    .join('\n')
-  const knownValues = new Set([
-    ...profiles,
-    ...invalidProfiles.map((profile) => profile.name),
-  ])
-
-  return html`
-    <div class="flex min-w-0 items-center gap-1.5">
-      <select
-        aria-label="Cascade 프로필 선택"
-        class="min-w-0 max-w-full py-0.5 px-1 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border border-[var(--color-border-default)] cursor-pointer"
-        title=${invalidProfiles.length > 0
-          ? `Cascade 프로필\n\n비활성화된 잘못된 프로필:\n${invalidSummary}`
-          : 'Cascade 프로필'}
-        value=${currentCascade}
-        onChange=${(e: Event) => {
-          const val = (e.target as HTMLSelectElement).value
-          const draft = { keeperName: keeper.name, from: fallbackCascade, cascade: val }
-          setDraftCascade(draft)
-          updateKeeperCascade(keeper.name, val)
-            .then(() => {
-              refreshDashboard()
-            })
-            .catch((err) => {
-              setDraftCascade((current) => current === draft ? null : current)
-              const msg = err instanceof Error ? err.message : 'Cascade 변경 실패'
-              showToast(msg, 'error')
-            })
-        }}
-      >
-        ${!knownValues.has(currentCascade) && currentCascade
-          ? html`<option value=${currentCascade}>${currentCascade} (current)</option>`
-          : null}
-        ${profiles.map((profile) => html`<option value=${profile}>${profile}</option>`)}
-        ${invalidProfiles.length > 0
-          ? html`<option disabled>──────── invalid ────────</option>`
-          : null}
-        ${invalidProfiles.map((profile) => html`
-          <option
-            value=${profile.name}
-            disabled
-            title=${profile.errors.join(' | ')}
-          >${profile.name} (invalid)</option>
-        `)}
-      </select>
-      ${invalidProfiles.length > 0
-        ? html`
-            <span
-              class="inline-flex items-center py-0.5 px-1.5 rounded-[var(--r-1)] text-3xs font-semibold bg-[var(--bad-10)] text-[var(--rose-light)] border border-[var(--bad-30)]"
-              title=${invalidSummary}
-            >${invalidProfiles.length} invalid</span>
-          `
-        : null}
-    </div>
   `
 }
 
@@ -188,7 +90,6 @@ export function KeeperDetailHeaderInfo({
           <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
           <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
           <${KeeperModelChip} keeper=${keeper} />
-          <${KeeperCascadeSelector} keeper=${keeper} />
         </div>
         ${keeper.koreanName || keeper.created_at ? html`
           <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">

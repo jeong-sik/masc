@@ -18,7 +18,6 @@ type SurfaceSectionId =
   | 'agents'
   | 'cognition'
   | 'runtime'
-  | 'cascade-config' // Dedicated entry for cascade.toml TOML editor (formerly buried inside runtime/cascade view)
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'doctor'         // Dedicated entry for /api/v1/dashboard/doctor (formerly buried inside Command → Operations → Inspector → "진단" sub-tab)
   | 'transport-health' // Dedicated entry for /api/v1/dashboard/transport-health (was 5-hop buried inside Command → Operations → Inspector → "서버 설정" → ServerConfig → TransportHealthPanel)
@@ -194,13 +193,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Observatory',
       description: 'Activity and runtime evidence.',
       params: { section: 'observatory' },
-    },
-    {
-      id: 'cascade-config',
-      label: 'Runtime Config',
-      description: 'Runtime providers, models and rules.',
-      params: { section: 'cascade-config' },
-      hidden: true,
     },
     {
       id: 'doctor',
@@ -379,7 +371,6 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:attribution':   { section: 'fleet-health', view: 'attribution' },
   'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
   'monitoring:metrics':      { section: 'runtime' },
-  'monitoring:cascade-inspector': { section: 'runtime', view: 'inspector' },
   'monitoring:cost': { section: 'runtime', view: 'cost' },
 
   // Dashboard consolidation Phase 1+6: command surface
@@ -433,11 +424,6 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   if (!validSectionIds(typedTabId).includes(next.section as SurfaceSectionId)) {
     next.section = defaultParamsForTab(tabId).section ?? ''
-  }
-
-  if (tabId === 'monitoring' && next.section === 'runtime' && next.view === 'cascade') {
-    next.section = 'cascade-config'
-    delete next.view
   }
 
   if (!(tabId === 'code' && next.section === 'ide-shell')) {

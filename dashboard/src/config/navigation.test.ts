@@ -150,7 +150,6 @@ describe('monitoring navigation labels', () => {
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('observatory')
-    expect(allIds).toContain('cascade-config')
     expect(allIds).toContain('doctor')
     expect(allIds).toContain('transport-health')
     expect(allIds).toContain('feature-health')
@@ -191,7 +190,6 @@ describe('monitoring navigation labels', () => {
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
     expect(hiddenIds).toEqual([
-      'cascade-config',
       'doctor',
       'transport-health',
       'feature-health',
@@ -258,19 +256,9 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
   })
 
   it('redirects standalone runtime diagnostics into runtime views', () => {
-    expect(normalizeRouteParams('monitoring', { section: 'cascade-inspector' })).toMatchObject({
-      section: 'runtime',
-      view: 'inspector',
-    })
     expect(normalizeRouteParams('monitoring', { section: 'cost' })).toMatchObject({
       section: 'runtime',
       view: 'cost',
-    })
-  })
-
-  it('redirects legacy runtime cascade view to the dedicated cascade config surface', () => {
-    expect(normalizeRouteParams('monitoring', { section: 'runtime', view: 'cascade' })).toMatchObject({
-      section: 'cascade-config',
     })
   })
 

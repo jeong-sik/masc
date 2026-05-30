@@ -86,7 +86,24 @@ include module type of Prometheus_core_metric_names
 
 include module type of Prometheus_policy_metric_names
 
-include module type of Prometheus_cascade_metric_names
+(* Inlined from deleted Prometheus_cascade_metric_names (cascade purge). *)
+val metric_cascade_strategy_decisions : string
+val metric_cascade_capacity_events : string
+val metric_cascade_attempt_liveness_kill : string
+val metric_cascade_attempt_liveness_observed : string
+val metric_cascade_ttfb_seconds : string
+val metric_cascade_inter_chunk_seconds : string
+val metric_cascade_provider_health_score : string
+val metric_cascade_decisions : string
+val metric_cascade_fallbacks : string
+val metric_cascade_providers_exhausted : string
+val metric_cascade_routing_phase_overrides : string
+val metric_cascade_server_error_skip_total : string
+val metric_cascade_pre_dispatch_required_tool_filtered : string
+val metric_cascade_fallback_cycle_detected_total : string
+val metric_provider_health_probe_skipped : string
+val metric_provider_actual_health_status : string
+val metric_provider_health_probe_error : string
 
 (** Counter incremented once per breach event when [update_entry] drops
     cross [orphan_drop_threshold] inside [orphan_drop_window_sec] for a

@@ -15,6 +15,169 @@ include Cascade_attempt_fsm
 include Keeper_turn_driver_helpers
 include Keeper_turn_driver_provider_attempt
 
+(* ── Inlined from Cascade_candidate_skip_reason ───────────────── *)
+type candidate_skip_reason =
+  | Required_tool_unsupported of { missing : string list }
+  | Capacity_constrained of { provider_key : string }
+  | Health_cooldown_active of { provider_key : string; cooldown_reason : string }
+  | Capacity_full of
+      { capacity_key : string
+      ; capacity_kind : [ `Client | `Admission ]
+      ; retry_after_sec : float option
+      }
+  | Accept_rejected of { reason : string }
+
+let skip_reason_to_manifest_tag = function
+  | Required_tool_unsupported _ -> "required_tool_unsupported"
+  | Capacity_constrained _ -> "capacity_constrained"
+  | Health_cooldown_active _ -> "health_cooldown_active"
+  | Capacity_full { capacity_kind = `Client; _ } -> "client_capacity_full"
+  | Capacity_full { capacity_kind = `Admission; _ } -> "admission_full"
+  | Accept_rejected _ -> "accept_rejected"
+
+let skip_reason_to_yojson ~candidate reason =
+  match reason with
+  | Required_tool_unsupported { missing } ->
+    `Assoc
+      [
+        ("kind", `String (skip_reason_to_manifest_tag reason));
+        ("candidate", `String candidate);
+        ("missing", `List (List.map (fun tool -> `String tool) missing));
+      ]
+  | Capacity_constrained { provider_key } ->
+    `Assoc
+      [
+        ("kind", `String (skip_reason_to_manifest_tag reason));
+        ("candidate", `String candidate);
+        ("provider_key", `String provider_key);
+      ]
+  | Health_cooldown_active { provider_key; cooldown_reason } ->
+    `Assoc
+      [
+        ("kind", `String (skip_reason_to_manifest_tag reason));
+        ("candidate", `String candidate);
+        ("provider_key", `String provider_key);
+        ("cooldown_reason", `String cooldown_reason);
+      ]
+  | Capacity_full { capacity_key; capacity_kind; retry_after_sec } ->
+    let kind_label =
+      match capacity_kind with `Client -> "client" | `Admission -> "admission"
+    in
+    let fields =
+      [
+        ("kind", `String (skip_reason_to_manifest_tag reason));
+        ("candidate", `String candidate);
+        ("capacity_key", `String capacity_key);
+        ("capacity_kind", `String kind_label);
+      ]
+    in
+    let fields =
+      match retry_after_sec with
+      | Some sec -> ("retry_after_sec", `Float sec) :: fields
+      | None -> fields
+    in
+    `Assoc (List.rev fields)
+  | Accept_rejected { reason = reject_reason } ->
+    `Assoc
+      [
+        ("kind", `String (skip_reason_to_manifest_tag reason));
+        ("candidate", `String candidate);
+        ("reason", `String reject_reason);
+      ]
+(* ── Inlined from Provider_capability ─────────────────────────── *)
+type provider_cap =
+  { provider_name : string
+  ; satisfying_tools_snapshot : string list option
+  ; tool_choice_support : bool option
+  }
+
+type provider_cap_unsupported =
+  { missing_tools : string list
+  ; tool_choice_required : bool
+  ; tool_choice_supported : bool option
+  }
+
+type provider_cap_decision =
+  | Can_satisfy
+  | Cannot_satisfy of provider_cap_unsupported
+  | Capability_unknown
+
+let strip_mcp_prefix name =
+  let prefix = "mcp__" in
+  if String.starts_with ~prefix name then
+    match String.split_on_char '_' name with
+    | "mcp" :: "" :: _server :: "" :: rest when rest <> [] ->
+      String.concat "_" rest
+    | _ -> name
+  else name
+
+let canonical_tool_name name = strip_mcp_prefix (String.trim name)
+
+let dedupe_canonical tools =
+  tools |> List.map canonical_tool_name |> Json_util.dedupe_keep_order
+
+let pcap_known ~provider_name ~satisfying_tools ~tool_choice_support =
+  {
+    provider_name;
+    satisfying_tools_snapshot = Some (dedupe_canonical satisfying_tools);
+    tool_choice_support = Some tool_choice_support;
+  }
+
+let pcap_missing_required_tools t ~(required_tools : string list) =
+  match t.satisfying_tools_snapshot with
+  | None -> None
+  | Some satisfying_tools ->
+    let satisfying_tools = dedupe_canonical satisfying_tools in
+    let required_tools = dedupe_canonical required_tools in
+    Some
+      (List.filter
+         (fun required -> not (List.mem required satisfying_tools))
+         required_tools)
+
+let pcap_decide_required_action ?(require_tool_choice = true) t ~required_tools =
+  let missing = pcap_missing_required_tools t ~required_tools in
+  let tool_choice_blocks =
+    require_tool_choice && t.tool_choice_support = Some false
+  in
+  match missing, tool_choice_blocks, require_tool_choice, t.tool_choice_support with
+  | Some missing_tools, _, _, _ when missing_tools <> [] ->
+    Cannot_satisfy
+      {
+        missing_tools;
+        tool_choice_required = require_tool_choice;
+        tool_choice_supported = t.tool_choice_support;
+      }
+  | _, true, _, _ ->
+    Cannot_satisfy
+      {
+        missing_tools = [];
+        tool_choice_required = true;
+        tool_choice_supported = Some false;
+      }
+  | Some [], _, false, _ -> Can_satisfy
+  | Some [], _, true, Some true -> Can_satisfy
+  | None, _, false, _ when required_tools = [] -> Can_satisfy
+  | None, _, true, Some true when required_tools = [] -> Can_satisfy
+  | _ -> Capability_unknown
+
+let pcap_can_satisfy_required_action ?require_tool_choice t ~required_tools =
+  match pcap_decide_required_action ?require_tool_choice t ~required_tools with
+  | Can_satisfy -> Some true
+  | Cannot_satisfy _ -> Some false
+  | Capability_unknown -> None
+
+let pcap_filtered_missing_tools t required_tools =
+  match pcap_missing_required_tools t ~required_tools with
+  | Some missing -> missing
+  | None -> []
+
+let pcap_record_pre_dispatch_required_tool_filtered ~provider ~missing_count =
+  Prometheus.inc_counter
+    Prometheus.metric_cascade_pre_dispatch_required_tool_filtered
+    ~labels:[ "provider", provider; "missing_count", string_of_int missing_count ]
+    ()
+(* ── End inlined section ─────────────────────────────────────── *)
+
 let provider_attempt_provenance = base_provider_attempt_provenance
 
 type try_cascade_ctx =
@@ -302,13 +465,13 @@ let rec run
           | None -> satisfying_tools
         in
         let snapshot =
-          Provider_capability.known
+          pcap_known
             ~provider_name:provider_label
             ~satisfying_tools
             ~tool_choice_support:ctx.require_tool_choice_support
         in
         (match
-           Provider_capability.can_satisfy_required_action
+           pcap_can_satisfy_required_action
              ~require_tool_choice:ctx.require_tool_choice_support
              snapshot
              ~required_tools:required_tool_names
@@ -316,14 +479,14 @@ let rec run
          | Some false ->
            let missing =
              match
-               Provider_capability.missing_required_tools
+               pcap_missing_required_tools
                  snapshot ~required_tools:required_tool_names
              with
              | Some m -> m
              | None -> required_tool_names
            in
            let skip_reason =
-             Cascade_candidate_skip_reason.Required_tool_unsupported { missing }
+             Required_tool_unsupported { missing }
            in
            let provider_rejection =
              provider_rejection_for_required_tool_unsupported
@@ -335,9 +498,9 @@ let rec run
               missing=[%s]"
              ctx.cascade_name
              provider_label
-             (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+             (skip_reason_to_manifest_tag skip_reason)
              (String.concat ", " missing);
-           Provider_capability.record_pre_dispatch_required_tool_filtered
+           pcap_record_pre_dispatch_required_tool_filtered
              ~provider:provider_label
              ~missing_count:(List.length missing);
            ctx.emit_runtime_manifest
@@ -377,18 +540,18 @@ let rec run
         | [] -> provider_label
       in
       let skip_reason =
-        Cascade_candidate_skip_reason.Capacity_constrained { provider_key }
+        Capacity_constrained { provider_key }
       in
       Log.Misc.info
         "cascade %s: pre-admission skip provider=%s reason=%s"
         ctx.cascade_name
         provider_label
-        (Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
+        (skip_reason_to_manifest_tag skip_reason);
       ctx.emit_runtime_manifest
         ~status:"blocked"
         ~decision:
           (`Assoc
-             [ "blocker", `String (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+             [ "blocker", `String (skip_reason_to_manifest_tag skip_reason)
              ; "provider", `String provider_label
              ; "provider_key", `String provider_key
              ; "provider_attempt_started", `Bool false
@@ -410,18 +573,18 @@ let rec run
       match health_cooldown with
       | Some (blocked_health_key, msg) ->
           let skip_reason =
-            Cascade_candidate_skip_reason.Health_cooldown_active
+            Health_cooldown_active
               { provider_key = blocked_health_key; cooldown_reason = msg }
           in
           Log.Misc.debug
             "cascade %s: skipping %s (provider_key=%s reason=%s cooldown: %s)"
             ctx.cascade_name runtime_candidate_label runtime_candidate_label
-            (Cascade_candidate_skip_reason.to_manifest_tag skip_reason) msg;
+            (skip_reason_to_manifest_tag skip_reason) msg;
           ctx.emit_runtime_manifest
             ~status:"blocked"
             ~decision:
               (`Assoc
-                 [ "blocker", `String (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+                 [ "blocker", `String (skip_reason_to_manifest_tag skip_reason)
                  ; "provider", `String runtime_candidate_label
                  ; "provider_key", `String blocked_health_key
                  ; "cooldown_reason", `String msg
@@ -448,7 +611,7 @@ let rec run
     match Keeper_turn_driver_cascade_health.acquire_client_capacity_slot candidate with
     | `Full (capacity_key, retry_after_s) ->
       let skip_reason =
-        Cascade_candidate_skip_reason.Capacity_full
+        Capacity_full
           { capacity_key; capacity_kind = `Client; retry_after_sec = retry_after_s }
       in
       emit_capacity_blocked_manifest ctx ~capacity_key;
@@ -456,7 +619,7 @@ let rec run
       Cascade_observation.record_fallback_event ctx.capture
         ~from_model:runtime_candidate_label
         ~to_model:runtime_candidate_label
-        ~reason:(Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
+        ~reason:(skip_reason_to_manifest_tag skip_reason);
       Log.Misc.info
         "[cascade-fallback] cascade %s: %s skipped because client capacity \
          key %s is full, trying next"
@@ -830,20 +993,20 @@ let rec run
                  Ok result
        | Cascade_fsm.Try_next { last_err = new_err } ->
          let skip_reason =
-           Cascade_candidate_skip_reason.Accept_rejected { reason }
+           Accept_rejected { reason }
          in
          record_candidate_health_rejected candidate ~reason;
          Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next"
            ctx.cascade_name runtime_candidate_label
-           (Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
+           (skip_reason_to_manifest_tag skip_reason);
          Cascade_observation.record_fallback_event ctx.capture
            ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
-           ~reason:(Cascade_candidate_skip_reason.to_manifest_tag skip_reason);
+           ~reason:(skip_reason_to_manifest_tag skip_reason);
          ctx.emit_runtime_manifest
            ~status:"blocked"
            ~decision:
              (`Assoc
-                [ "blocker", `String (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+                [ "blocker", `String (skip_reason_to_manifest_tag skip_reason)
                 ; "provider", `String runtime_candidate_label
                 ; "reason", `String reason
                 ; "provider_attempt_started", `Bool true

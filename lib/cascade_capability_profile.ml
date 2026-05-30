@@ -1,25 +1,144 @@
 (** RFC-0058: Declarative capability profile (v2).
 
-    Replaces the closed variant with config-driven profile lookup via
-    {!Cascade_capability_schema}.  Profiles are string-named; capability
-    requirements live in the schema registry.
+    Profiles are string-named; capability requirements live in
+    the builtin schema registry (inlined from former Cascade_capability_schema).
 
     Migration note: callers that previously used [profile] variant values
     now use string profile names directly.  [catalog_entry] stores
     [required_capability_profile] as [string option]. *)
 
+(* ── Inlined from Cascade_capability_schema ──────────────────────── *)
+
+type capability_level = Verified | Declared | Unsupported
+
+type profile_spec = {
+  required_capabilities : string list;
+  provider_filter : string option;
+}
+
+let known_capability_fields : (string * (Provider_tool_support.capabilities -> bool)) list =
+  [
+    ( "inline_tools",
+      fun caps -> caps.supports_inline_tools );
+    ( "inline_tool_choice",
+      fun caps -> caps.supports_inline_tool_choice );
+    ( "runtime_mcp_tools",
+      fun caps -> caps.supports_runtime_mcp_tools );
+    ( "runtime_tool_events",
+      fun caps -> caps.supports_runtime_tool_events );
+    ( "runtime_mcp_http_headers",
+      fun caps -> caps.supports_runtime_mcp_http_headers );
+  ]
+
+let capability_field_of_string name =
+  match List.find_opt (fun (n, _) -> String.equal n name) known_capability_fields with
+  | Some (_, getter) -> Ok getter
+  | None ->
+      Error
+        (Printf.sprintf
+           "unknown capability name %S (known: %s)"
+           name
+           (known_capability_fields
+            |> List.map fst
+            |> String.concat ", "))
+
+let provider_satisfies_required caps required_names =
+  List.for_all
+    (fun name ->
+       match capability_field_of_string name with
+       | Ok getter -> getter caps
+       | Error _ -> false)
+    required_names
+
+let builtin_profiles : (string * profile_spec) list =
+  [
+    ( "tool_strict",
+      {
+        required_capabilities =
+          [ "runtime_mcp_tools"; "runtime_tool_events"; "runtime_mcp_http_headers" ];
+        provider_filter = None;
+      } );
+    ( "inline_tools",
+      {
+        required_capabilities = [ "inline_tools"; "inline_tool_choice" ];
+        provider_filter = None;
+      } );
+    ( "lite",
+      {
+        required_capabilities = [ "runtime_mcp_tools"; "runtime_tool_events" ];
+        provider_filter = None;
+      } );
+    ( "local_inline",
+      { required_capabilities = [ "inline_tools" ]; provider_filter = None } );
+    ( "local",
+      { required_capabilities = []; provider_filter = None } );
+  ]
+
+let resolve_profile name =
+  List.find_map
+    (fun (n, spec) ->
+       if String.equal n name then Some spec else None)
+    builtin_profiles
+
+let schema_all_profile_names =
+  builtin_profiles |> List.map fst
+
+let is_known_profile name =
+  List.exists (fun (n, _) -> String.equal n name) builtin_profiles
+
+type profile_lookup_error =
+  | Unknown_source_profile of { name : string; known : string list }
+  | Unknown_destination_profile of { name : string; known : string list }
+  | Unknown_both_profiles of { src : string; dst : string; known : string list }
+
+let profile_lookup_error_to_string = function
+  | Unknown_source_profile { name; known } ->
+      Printf.sprintf
+        "unknown source profile %S (known: %s)"
+        name
+        (String.concat ", " known)
+  | Unknown_destination_profile { name; known } ->
+      Printf.sprintf
+        "unknown destination profile %S (known: %s)"
+        name
+        (String.concat ", " known)
+  | Unknown_both_profiles { src; dst; known } ->
+      Printf.sprintf
+        "unknown source profile %S and unknown destination profile %S \
+         (known: %s)"
+        src
+        dst
+        (String.concat ", " known)
+
+let is_subset_profile ~src ~dst =
+  match resolve_profile src, resolve_profile dst with
+  | Some s, Some d ->
+      Ok
+        (List.for_all
+           (fun cap -> List.mem cap d.required_capabilities)
+           s.required_capabilities)
+  | None, None ->
+      Error (Unknown_both_profiles { src; dst; known = schema_all_profile_names })
+  | None, Some _ ->
+      Error (Unknown_source_profile { name = src; known = schema_all_profile_names })
+  | Some _, None ->
+      Error
+        (Unknown_destination_profile { name = dst; known = schema_all_profile_names })
+
+(* ── Public profile API ──────────────────────────────────────────── *)
+
 let profile_to_string name = name
 
 let profile_of_string name =
-  if Cascade_capability_schema.is_known_profile name then Some name else None
+  if is_known_profile name then Some name else None
 
 let all_profiles =
-  Cascade_capability_schema.all_profile_names
+  schema_all_profile_names
 
 let provider_satisfies_profile name (caps : Provider_tool_support.capabilities) =
-  match Cascade_capability_schema.resolve_profile name with
+  match resolve_profile name with
   | Some spec ->
-      Cascade_capability_schema.provider_satisfies_required
+      provider_satisfies_required
         caps
         spec.required_capabilities
   | None -> false
@@ -125,7 +244,7 @@ let register_declared_profiles_from_json json =
   | _ -> Ok ()
 
 let resolve_required_capabilities name =
-  match Cascade_capability_schema.resolve_profile name with
+  match resolve_profile name with
   | Some spec ->
       Some (required_capabilities_of_string_list spec.required_capabilities)
   | None ->
@@ -172,7 +291,7 @@ let provider_satisfies_named_profile
       Error
         (Unknown_named_profile
            { name
-           ; builtin = Cascade_capability_schema.all_profile_names
+           ; builtin = schema_all_profile_names
            ; declared = declared_profile_names ()
            })
   | Some req ->

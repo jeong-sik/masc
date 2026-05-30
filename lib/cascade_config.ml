@@ -1,49 +1,29 @@
-(** Provider-list filtering + context-window helpers.
+(** Cascade configuration facade — inlined from sub-modules. *)
 
-    Extracted from [cascade_config.ml]. *)
+include Cascade_model_resolve
+include Cascade_config_loader
+include Cascade_config_provider_binding
+include Cascade_config_parser
+include Cascade_config_selection
+include Cascade_config_resolve
+include Cascade_health_filter
+include Cascade_config_strategy_resolve
 
-module Binding = Cascade_config_provider_binding
-module Parser = Cascade_config_parser
-module Runtime_binding = Binding.Runtime_binding
-
-(* ── Context window resolution ──────────────────────────── *)
+(* ── Inlined from Cascade_config_provider_filter ───────────────── *)
 
 let effective_max_context (entry : Llm_provider.Provider_registry.entry)
     (caps : Llm_provider.Capabilities.capabilities) =
-  (* Defensive unwrap: treat [Some 0] / negative as absent rather than
-     handing a broken value to downstream budget arithmetic. Aligns with
-     the same guard in [Pipeline.proactive_context_window_tokens] (#815)
-     and [Provider.resolve_max_context_tokens] (#823). *)
   match caps.max_context_tokens with
   | Some n when n > 0 -> n
   | _ -> entry.max_context
 
-(** Resolve a model label to the per-slot context of the endpoint
-    that would serve it.  Returns the discovered context for
-    "custom:*" labels; all other label shapes return [None].
-
-    Does NOT advance the round-robin counter — safe to call for
-    prompt sizing before the actual cascade request.
-
-    RFC-0167: previously had a dedicated `"llama"` arm that called
-    `Llm_provider.Discovery.context_for_model` and fell back to
-    `current_llama_endpoint`. The product-named arm is removed; any
-    self-hosted endpoint that needs discovery-based per-slot context
-    should be addressed through the generic `"custom:<url>"` label
-    shape.
-
-    @since 0.100.8 *)
 let resolve_label_context (label : string) : int option =
-  match Parser.split_provider_model (String.trim label) with
+  match split_provider_model (String.trim label) with
   | None -> None
   | Some ("custom", model_id) ->
-    let _, url = Cascade_model_resolve.parse_custom_model model_id in
+    let _, url = parse_custom_model model_id in
     Llm_provider.Discovery.discovered_context_for_url url
-  | Some (_, _) ->
-    (* Cloud providers and other labels: no discovery-based per-slot context *)
-    None
-
-(* ── Capability-aware filtering ─────────────────────────── *)
+  | Some (_, _) -> None
 
 let filter_by_capabilities ~(pred : Llm_provider.Capabilities.capabilities -> bool)
     (providers : Llm_provider.Provider_config.t list) =
@@ -54,16 +34,12 @@ let filter_by_capabilities ~(pred : Llm_provider.Capabilities.capabilities -> bo
   if filtered = [] then providers
   else filtered
 
-(* ── Helpers ────────────────────────────────────────────── *)
-
 let text_of_response (resp : Llm_provider.Types.api_response) : string =
   resp.content
   |> List.filter_map (function
     | Llm_provider.Types.Text t -> Some t
     | _ -> None)
   |> fun lst -> String.concat "" lst
-
-(* ── Provider filter rejection (strict mode) ───────────── *)
 
 type provider_filter_rejection =
   | Filter_matched_none of { filter : string list; available_kinds : string list }
@@ -75,11 +51,6 @@ let provider_filter_rejection_to_string = function
       (String.concat "," filter)
       (String.concat "," available_kinds)
 
-(* Filter providers by kind name (exact, case-insensitive).
-   Valid filter values are the provider-kind slugs registered in
-   [Llm_provider.Provider_config.string_of_provider_kind]; the
-   registry is the SSOT — this function does not enumerate them.
-   Empty/None filter passes through unchanged. No-match falls back to unfiltered. *)
 let apply_provider_filter ~provider_filter ~label providers =
   match provider_filter with
   | None | Some [] -> providers
@@ -120,3 +91,8 @@ let apply_provider_filter_strict ~provider_filter ~label providers =
              |> List.sort_uniq String.compare
            })
     else Ok filtered
+
+(* ── End inlined section ─────────────────────────────────────────── *)
+
+(* Strategy re-exports via include above. *)
+

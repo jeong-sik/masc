@@ -17,13 +17,72 @@
     @modified 2.255.0 — accept OAS native events (#5620)
     @modified 2.260.0 — emit envelope correlation_id/run_id (oas#845) *)
 
-open Cascade_event_bridge_inference
 open Cascade_event_bridge_error_json
 
 (** Drain interval: how often we poll the Event_bus subscription.
     Lower default keeps the dashboard close to real-time, while staying
     runtime-tunable for quieter deployments. *)
 let drain_interval_s () = Env_config.Oas_sse.drain_interval_sec
+
+(* ── Inlined from Cascade_event_bridge_inference ────────────────── *)
+
+let inference_model_bucket ~provider:_ ~model:_ = "upstream"
+
+let inference_provider_bucket ~provider ~model:_ =
+  let provider = String.trim provider in
+  if provider = "" then "upstream" else provider
+
+let positive_finite value =
+  value > 0.0
+  &&
+  match classify_float value with
+  | FP_nan | FP_infinite -> false
+  | FP_normal | FP_subnormal | FP_zero -> true
+
+let tok_per_sec_from_ms ~tokens ~ms =
+  match tokens, ms with
+  | Some tokens, Some ms when tokens > 0 && positive_finite ms ->
+    Some (float_of_int tokens /. (ms /. 1000.0))
+  | _ -> None
+
+let observe_inference_rate metric ~model_bucket = function
+  | Some rate when positive_finite rate ->
+    Prometheus.observe_histogram metric ~labels:[ "model_bucket", model_bucket ] rate
+  | _ -> ()
+
+let observe_inference_telemetry
+      ~provider
+      ~model
+      ~prompt_tokens
+      ~completion_tokens
+      ~prompt_ms
+      ~decode_ms
+      ~decode_tok_s
+  =
+  let model_bucket = inference_model_bucket ~provider ~model in
+  observe_inference_rate
+    Prometheus.metric_oas_inference_prompt_tok_per_sec
+    ~model_bucket
+    (tok_per_sec_from_ms ~tokens:prompt_tokens ~ms:prompt_ms);
+  let decode_tok_s =
+    match decode_tok_s with
+    | Some rate when positive_finite rate -> Some rate
+    | _ -> tok_per_sec_from_ms ~tokens:completion_tokens ~ms:decode_ms
+  in
+  observe_inference_rate
+    Prometheus.metric_oas_inference_decode_tok_per_sec
+    ~model_bucket
+    decode_tok_s
+
+let observe_inference_cost ~provider ~model_bucket = function
+  | Some cost when positive_finite cost ->
+    Prometheus.observe_histogram
+      Prometheus.metric_oas_inference_cost_usd
+      ~labels:[ "provider", provider; "model_bucket", model_bucket ]
+      cost
+  | _ -> ()
+
+(* ── End inlined section ─────────────────────────────────────────── *)
 
 let payload_agent_name payload =
   (* Check [agent_name], [agent], then [keeper_name] for Custom events

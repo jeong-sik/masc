@@ -134,7 +134,12 @@ let capacity_key_of_config (cfg : Llm_provider.Provider_config.t) =
     | None -> ""
 
 let http_probe_url_of_config (cfg : Llm_provider.Provider_config.t) =
-  Cascade_http_probe_url.of_provider_config cfg
+  let base_url = String.trim cfg.base_url in
+  if String.equal base_url ""
+  then None
+  else if Cascade_capacity_probe.can_probe ~url:base_url
+  then Some base_url
+  else None
 
 let of_provider_config provider_cfg =
   let health_key = provider_health_key_of_config provider_cfg in

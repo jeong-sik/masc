@@ -40,10 +40,78 @@ let retry_message_looks_like_model_access_denied (message : string) : bool =
   || String_util.contains_substring_ci message "does not have access to"
   || String_util.contains_substring_ci message "not authorized to access"
 
-let provider_capacity_scope_to_http =
-  Cascade_attempt_fsm_http_error.provider_capacity_scope_to_http
-let provider_error_to_http_error =
-  Cascade_attempt_fsm_http_error.provider_error_to_http_error
+let provider_capacity_scope_to_http = function
+  | Llm_provider.Error.CapacityModel -> Llm_provider.Http_client.Failure_scope_model
+  | Llm_provider.Error.CapacityAccount ->
+    Llm_provider.Http_client.Failure_scope_account
+  | Llm_provider.Error.CapacityRegion ->
+    Llm_provider.Http_client.Failure_scope_region
+  | Llm_provider.Error.CapacityProvider ->
+    Llm_provider.Http_client.Failure_scope_provider
+  | Llm_provider.Error.CapacityUnknown ->
+    Llm_provider.Http_client.Failure_scope_unknown
+
+let provider_error_to_http_error (err : Agent_sdk.Error.provider_error)
+  : Llm_provider.Http_client.http_error =
+  let module E = Llm_provider.Error in
+  let message = E.to_string err in
+  match err with
+  | E.MissingApiKey _ | E.InvalidConfig _ ->
+    Llm_provider.Http_client.AcceptRejected { reason = message }
+  | E.ParseError { detail } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Provider_parse_error { parser = None }
+      ; message = detail
+      }
+  | E.UnknownVariant { type_name; value } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind =
+          Llm_provider.Http_client.Unknown_provider_failure
+            { reason = Some (Printf.sprintf "%s:%s" type_name value) }
+      ; message
+      }
+  | E.ProviderUnavailable { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 503; body = detail }
+  | E.RateLimit { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 429; body = detail }
+  | E.HardQuota { retry_after; detail; _ } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Hard_quota { retry_after }
+      ; message = detail
+      }
+  | E.CapacityExhausted { scope; affected; retry_after; detail } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind =
+          Llm_provider.Http_client.Capacity_exhausted
+            { scope = provider_capacity_scope_to_http scope
+            ; retry_after
+            ; model = List.find_opt (fun value -> String.trim value <> "") affected
+            }
+      ; message = detail
+      }
+  | E.AuthError { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 401; body = detail }
+  | E.ServerError { code; detail; _ } ->
+    Llm_provider.Http_client.HttpError { code; body = detail }
+  | E.NetworkError { timeout_phase = Some phase; detail; _ } ->
+    Llm_provider.Http_client.TimeoutError { message = detail; phase }
+  | E.NetworkError { kind; timeout_phase = None; detail; _ } ->
+    Llm_provider.Http_client.NetworkError { message = detail; kind }
+  | E.Timeout { timeout_phase; detail; _ } ->
+    let phase =
+      match timeout_phase with
+      | Some phase -> phase
+      | None -> Llm_provider.Http_client.Unknown_timeout
+    in
+    Llm_provider.Http_client.TimeoutError
+      { message = detail; phase }
+  | E.InvalidRequest { reason; _ } ->
+    Llm_provider.Http_client.HttpError { code = 400; body = reason }
+  | E.NotFound { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 404; body = detail }
+  | E.ProviderTerminal { reason; detail; _ } ->
+    Llm_provider.Http_client.ProviderTerminal
+      { kind = Llm_provider.Http_client.Other reason; message = detail }
 
 let capacity_backpressure_source_to_failure_scope = function
   | Cascade_error_classify.Provider_capacity ->
@@ -784,7 +852,97 @@ let emit_sdk_provider_error_metric ~cascade_name ~provider err =
       Some provider_error
 
 
-include Cascade_attempt_fsm_capacity_backpressure
+(* ── Inlined from Cascade_attempt_fsm_capacity_backpressure ─────── *)
+
+let default_capacity_backpressure_backoff_sec =
+  Cascade_health_tracker.default_capacity_backpressure_backoff_sec
+
+let sdk_error_capacity_backpressure_retry_after_s (err : Agent_sdk.Error.sdk_error)
+  : float option option =
+  match err with
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.CapacityExhausted { retry_after; _ }) ->
+    Some retry_after
+  | _ -> None
+
+type capacity_backpressure_retry_hint =
+  | Cbr_explicit of float
+  | Cbr_synthetic_default of float
+
+let sdk_error_capacity_backpressure_source (err : Agent_sdk.Error.sdk_error)
+  : Cascade_error_classify.capacity_backpressure_source option =
+  match Cascade_error_classify.classify_masc_internal_error err with
+  | Some (Cascade_error_classify.Capacity_backpressure { source; _ }) ->
+    Some source
+  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Resumable_cli_session _)
+  | Some (Cascade_error_classify.Accept_rejected _)
+  | Some (Cascade_error_classify.Admission_queue_timeout _)
+  | Some (Cascade_error_classify.Admission_queue_rejected _)
+  | Some (Cascade_error_classify.Turn_timeout _)
+  | Some (Cascade_error_classify.Provider_timeout _)
+  | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
+  | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  | Some (Cascade_error_classify.Retry_admission_denied _)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _)
+  | None -> None
+
+let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
+  : capacity_backpressure_retry_hint option =
+  match Cascade_error_classify.classify_masc_internal_error err with
+  | Some (Cascade_error_classify.Capacity_backpressure { retry_after; _ }) ->
+    (match retry_after with
+     | Cascade_internal_error.Explicit s when s > 0.0 -> Some (Cbr_explicit s)
+     | Cascade_internal_error.Explicit _ ->
+       Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec)
+     | Cascade_internal_error.Synthetic_default s -> Some (Cbr_synthetic_default s)
+     | Cascade_internal_error.No_retry_hint ->
+       Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec))
+  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Resumable_cli_session _)
+  | Some (Cascade_error_classify.Accept_rejected _)
+  | Some (Cascade_error_classify.Admission_queue_timeout _)
+  | Some (Cascade_error_classify.Admission_queue_rejected _)
+  | Some (Cascade_error_classify.Turn_timeout _)
+  | Some (Cascade_error_classify.Provider_timeout _)
+  | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
+  | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  | Some (Cascade_error_classify.Retry_admission_denied _)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _)
+  | None -> None
+
+let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
+  : float option option =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
+    when not (Llm_provider.Retry.is_hard_quota api_err) ->
+    Some retry_after
+  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
+    Some retry_after
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> None
+
+(* ── End inlined section ─────────────────────────────────────────── *)
 
 let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Cascade_error_classify.classify_masc_internal_error err with

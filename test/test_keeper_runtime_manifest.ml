@@ -3722,13 +3722,13 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "Llm_provider.Model_meta";
   check_source_omits
     "lib/keeper/keeper_turn_driver_try_provider.ml"
-    "Cascade_runner.default_config";
+    "Keeper_runner.default_config";
   check_source_omits
     "lib/keeper/keeper_turn_driver_try_provider.ml"
-    "Cascade_runner.resolve_tool_lane_for_oas_tools";
+    "Keeper_runner.resolve_tool_lane_for_oas_tools";
   check_source_omits
     "lib/keeper/keeper_turn_driver_try_provider.ml"
-    "Cascade_runner.runtime_mcp_policy_for_provider";
+    "Keeper_runner.runtime_mcp_policy_for_provider";
   check_source_omits "lib/keeper/keeper_turn_driver_try_provider.ml" "~provider_cfg";
   List.iter
     (fun rel ->

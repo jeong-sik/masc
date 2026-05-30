@@ -248,7 +248,7 @@ let test_no_runtime_placeholder_when_identity_is_real () =
     contains_placeholder
 
 (* ───────────────────────────────────────────────────────────────────
-   Companion coverage: Cascade_observation.cascade_observation_to_json
+   Companion coverage: Keeper_observation.cascade_observation_to_json
    pins the same Runtime Lens carve-out for the audit-log surface
    (second site fixed in PR #15070's second commit f567e57272). The
    non-redacted serializer must emit real model_id / model_label on
@@ -256,7 +256,7 @@ let test_no_runtime_placeholder_when_identity_is_real () =
    external metrics lives in Keeper_unified_metrics.
    ─────────────────────────────────────────────────────────────────── *)
 
-module LR = Cascade_observation
+module LR = Keeper_observation
 module KP = Keeper_turn_profile
 
 let mk_attempt ~model_id ~model_label : LR.cascade_attempt =

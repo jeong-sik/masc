@@ -7,7 +7,7 @@ open Alcotest
 module R = Masc_mcp.Keeper_model_resolve
 module C = Masc_mcp.Cascade_config
 module State = Masc_mcp.Cascade_state
-module H = Masc_mcp.Cascade_health_tracker
+module H = Masc_mcp.Keeper_health_tracker
 
 let synthetic_catalog_json =
   {|

@@ -5,13 +5,13 @@ type finalized = {
   response_text : string;
 }
 
-val stop_reason_label : Cascade_runner.stop_reason -> string
+val stop_reason_label : Keeper_runner.stop_reason -> string
 
 val finalize :
   keeper_name:string ->
   goal:string ->
   actual_keeper_tool_names:string list ->
   fallback_tool_names:string list ->
-  stop_reason:Cascade_runner.stop_reason ->
+  stop_reason:Keeper_runner.stop_reason ->
   raw_response_text:string ->
   finalized

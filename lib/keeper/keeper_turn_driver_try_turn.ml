@@ -190,7 +190,7 @@ type try_cascade_ctx =
     candidate_count : int
   ; configured_labels : string list
   ; error_selected_model_raw : string option
-  ; capture : Cascade_observation.cascade_metrics_capture
+  ; capture : Keeper_observation.cascade_metrics_capture
   ; cascade_strategy_name_ref : string option ref
   ; (* Provider dispatch *)
     try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx
@@ -370,13 +370,13 @@ let rec run
       | None -> Keeper_meta_contract.No_providers_available
     in
     let observation =
-      Cascade_observation.cascade_observation_with_metrics
+      Keeper_observation.cascade_observation_with_metrics
         ~cascade_name:ctx.error_cascade_name
         ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
         ~candidate_count:ctx.candidate_count ~selected_model_raw:ctx.error_selected_model_raw
         ~capture:ctx.capture ()
     in
-    Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
+    Keeper_observation.record_cascade ~keeper_name:ctx.keeper_name
       ~cascade_name:ctx.error_cascade_name
       ~outcome:`Failure ~observation:(Some observation) ();
     let terminal_error =
@@ -409,8 +409,8 @@ let rec run
               | None -> None
               | Some (key, _) -> (
                 match
-                  Cascade_health_tracker.provider_info
-                    Cascade_health_tracker.global ~provider_key:key
+                  Keeper_health_tracker.provider_info
+                    Keeper_health_tracker.global ~provider_key:key
                 with
                 | None -> None
                 | Some info -> info.cooldown_expires_at))
@@ -529,8 +529,8 @@ let rec run
     let capacity_constrained =
       Keeper_runtime_candidate.health_keys candidate
       |> List.exists (fun key ->
-        Cascade_health_tracker.is_capacity_constrained
-          Cascade_health_tracker.global ~provider_key:key)
+        Keeper_health_tracker.is_capacity_constrained
+          Keeper_health_tracker.global ~provider_key:key)
     in
     if capacity_constrained then (
       let provider_label = Keeper_runtime_candidate.provider_label candidate in
@@ -616,7 +616,7 @@ let rec run
       in
       emit_capacity_blocked_manifest ctx ~capacity_key;
       record_cascade_attempt ctx candidate ~outcome:(`Failure "client_capacity_full") ();
-      Cascade_observation.record_fallback_event ctx.capture
+      Keeper_observation.record_fallback_event ctx.capture
         ~from_model:runtime_candidate_label
         ~to_model:runtime_candidate_label
         ~reason:(skip_reason_to_manifest_tag skip_reason);
@@ -756,7 +756,7 @@ let rec run
         then Some (int_of_float attempt_latency_ms)
         else None
       in
-      Cascade_observation.record_attempt_terminal ctx.capture
+      Keeper_observation.record_attempt_terminal ctx.capture
         ~model_id:runtime_candidate_label ~latency_ms ~error
     in
     let result, checkpoint_after, liveness_success_sample, attempt_latency_ms =
@@ -945,7 +945,7 @@ let rec run
       Keeper_turn_driver_health.record_candidate_success
         candidate ~latency_ms:attempt_latency_ms result;
       let observation =
-        Cascade_observation.cascade_observation_with_metrics
+        Keeper_observation.cascade_observation_with_metrics
           ~cascade_name:ctx.error_cascade_name
           ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
           ~candidate_count:ctx.candidate_count
@@ -956,7 +956,7 @@ let rec run
         ()
       in
       let result = { result with cascade_observation = Some observation } in
-              Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
+              Keeper_observation.record_cascade ~keeper_name:ctx.keeper_name
                 ~cascade_name:ctx.error_cascade_name
                 ~outcome:`Success ~observation:(Some observation) ();
               record_cascade_attempt ctx candidate ~outcome:`Success ();
@@ -974,7 +974,7 @@ let rec run
          Keeper_turn_driver_health.record_candidate_success
            candidate ~latency_ms:attempt_latency_ms result;
          let observation =
-           Cascade_observation.cascade_observation_with_metrics
+           Keeper_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
              ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count
@@ -985,7 +985,7 @@ let rec run
         ()
          in
          let result = { result with cascade_observation = Some observation } in
-                 Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
+                 Keeper_observation.record_cascade ~keeper_name:ctx.keeper_name
                    ~cascade_name:ctx.error_cascade_name
                    ~outcome:`Success ~observation:(Some observation) ();
                  record_cascade_attempt ctx candidate ~outcome:`Success ();
@@ -999,7 +999,7 @@ let rec run
          Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next"
            ctx.cascade_name runtime_candidate_label
            (skip_reason_to_manifest_tag skip_reason);
-         Cascade_observation.record_fallback_event ctx.capture
+         Keeper_observation.record_fallback_event ctx.capture
            ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
            ~reason:(skip_reason_to_manifest_tag skip_reason);
          ctx.emit_runtime_manifest
@@ -1022,7 +1022,7 @@ let rec run
        | Keeper_fsm.Exhausted _ ->
          record_candidate_health_rejected candidate ~reason;
          let observation =
-           Cascade_observation.cascade_observation_with_metrics
+           Keeper_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
              ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count ~selected_model_raw:ctx.error_selected_model_raw
@@ -1031,7 +1031,7 @@ let rec run
           (Keeper_turn_engine.allows_oas_internal_cascade ctx.cascade_engine)
         ()
          in
-         Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
+         Keeper_observation.record_cascade ~keeper_name:ctx.keeper_name
            ~cascade_name:ctx.error_cascade_name
            ~outcome:`Rejected ~observation:(Some observation) ();
          Log.Misc.error
@@ -1056,7 +1056,7 @@ let rec run
          Keeper_turn_driver_health.record_candidate_success
            candidate ~latency_ms:attempt_latency_ms result;
          let observation =
-           Cascade_observation.cascade_observation_with_metrics
+           Keeper_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
              ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count
@@ -1067,7 +1067,7 @@ let rec run
         ()
          in
          let result = { result with cascade_observation = Some observation } in
-                 Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
+                 Keeper_observation.record_cascade ~keeper_name:ctx.keeper_name
                    ~cascade_name:ctx.error_cascade_name
                    ~outcome:`Success ~observation:(Some observation) ();
                  record_cascade_attempt ctx candidate ~outcome:`Success ();
@@ -1123,7 +1123,7 @@ let rec run
                 "[cascade-fallback] cascade %s: %s failed (%s%s), trying next"
                 ctx.cascade_name runtime_candidate_label class_label
                 (Agent_sdk.Error.to_string sdk_err);
-            Cascade_observation.record_fallback_event ctx.capture
+            Keeper_observation.record_fallback_event ctx.capture
               ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
               ~reason:(class_label ^ Agent_sdk.Error.to_string sdk_err);
             let retry_resume_checkpoint =
@@ -1149,13 +1149,13 @@ let rec run
               new_err
           | Keeper_fsm.Exhausted _ ->
             let observation =
-              Cascade_observation.cascade_observation_with_metrics
+              Keeper_observation.cascade_observation_with_metrics
                 ~cascade_name:ctx.error_cascade_name
                 ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
                 ~candidate_count:ctx.candidate_count
                 ~selected_model_raw:ctx.error_selected_model_raw ~capture:ctx.capture ()
             in
-            Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
+            Keeper_observation.record_cascade ~keeper_name:ctx.keeper_name
               ~cascade_name:ctx.error_cascade_name
               ~outcome:`Failure ~observation:(Some observation) ();
             let log =
@@ -1173,13 +1173,13 @@ let rec run
           | Keeper_fsm.Accept_on_exhaustion _ -> Error sdk_err)
        | None ->
          let observation =
-           Cascade_observation.cascade_observation_with_metrics
+           Keeper_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
              ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count
              ~selected_model_raw:ctx.error_selected_model_raw ~capture:ctx.capture ()
          in
-         Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
+         Keeper_observation.record_cascade ~keeper_name:ctx.keeper_name
            ~cascade_name:ctx.error_cascade_name
            ~outcome:`Failure ~observation:(Some observation) ();
          Log.Misc.error "cascade %s: non-cascadable error from %s: %s"

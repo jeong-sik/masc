@@ -23,12 +23,12 @@
       side-effecting telemetry only.
     - [Enforce] mode: on the first [Outcome] the observer calls
       [Eio.Switch.fail sw {!Liveness_kill}] so the surrounding
-      [Cascade_runner.run] tears down via Eio cancellation.
+      [Keeper_runner.run] tears down via Eio cancellation.
 
     {1 Tick fiber lifetime}
 
     The tick fiber is forked under the same [~sw] that owns
-    [Cascade_runner.run], but a provider can return a terminal error
+    [Keeper_runner.run], but a provider can return a terminal error
     before the streaming FSM sees a terminal event. Callers must invoke
     {!stop_tick_fiber} on attempt completion before leaving the switch;
     otherwise a pending no-token tick loop can keep the attempt switch open

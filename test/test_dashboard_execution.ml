@@ -463,7 +463,7 @@ let append_execution_receipt
     ?(terminal_reason_code = "completed")
     ?(tool_contract_result : Lib.Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
-    ?(stop_reason = Some Lib.Cascade_runner.Completed)
+    ?(stop_reason = Some Lib.Keeper_runner.Completed)
     ?(required_tool_candidates = [])
     config ~keeper_name =
   let meta =

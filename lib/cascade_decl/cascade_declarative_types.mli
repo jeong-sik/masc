@@ -85,7 +85,7 @@ type cascade_provider =
   ; capabilities : cascade_capabilities option
     (** Caller cutover (A.3) replaces:
       - [Llm_provider.Capabilities.*] variant defaults (Phase 5.6, tool/event fields)
-      - [Cascade_transport] / [Provider_tool_support] / [Cascade_error_classify] /
+      - [Keeper_transport] / [Provider_tool_support] / [Cascade_error_classify] /
         [Keeper_usage_trust] closed-variant matches (Phase 5.1, dispatch fields) *)
   ; log : cascade_provider_log option
     (** Optional operator-facing provider log tail. When enabled, the

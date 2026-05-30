@@ -2,7 +2,7 @@
 
     Verifies that [Auth.load_raw_token] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token]. This is the data path
-    consumed by [Cascade_transport.runtime_mcp_policy_of_tool_names]
+    consumed by [Keeper_transport.runtime_mcp_policy_of_tool_names]
     when [MASC_MCP_TOKEN] is unset (the CLI subprocess case for
     cli_tool_a/cli_tool_b/cli_tool_c that callback into masc-mcp).
 
@@ -76,11 +76,11 @@ let masc_headers
   |> require_some "masc runtime MCP server"
 
 let codex_provider_cfg () =
-  match Cascade_runner.resolve_provider_config_of_label "cli_tool_a:auto" with
+  match Keeper_runner.resolve_provider_config_of_label "cli_tool_a:auto" with
   | Ok cfg -> cfg
   | Error err ->
       fail
-        (Cascade_runner.label_resolution_error_to_string err)
+        (Keeper_runner.label_resolution_error_to_string err)
 
 let test_load_raw_token_reads_seeded_file () =
   with_temp_dir "f1-load-raw" @@ fun base_path ->
@@ -121,18 +121,18 @@ let test_codex_keeper_bound_policy_uses_per_keeper_bearer () =
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let policy =
-    Cascade_runner.runtime_mcp_policy_of_tool_names ~agent_name
+    Keeper_runner.runtime_mcp_policy_of_tool_names ~agent_name
       [ "masc_transition" ]
     |> require_some "runtime_mcp_policy_of_tool_names"
   in
   check bool "actor-bound approval tool preserved" true
     (List.mem "masc_transition" policy.allowed_tool_names);
   check bool "agent_code can authenticate keeper-bound policy" true
-    (Cascade_runner.cli_tool_a_can_auth_keeper_bound_runtime_mcp
+    (Keeper_runner.cli_tool_a_can_auth_keeper_bound_runtime_mcp
        ~agent_name policy);
   let agent_code = codex_provider_cfg () in
   let codex_policy =
-    Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg:agent_code
+    Keeper_runner.runtime_mcp_policy_for_provider ~provider_cfg:agent_code
       ~agent_name (Some policy)
     |> require_some "runtime_mcp_policy_for_provider"
   in

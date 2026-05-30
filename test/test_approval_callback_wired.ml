@@ -142,7 +142,7 @@ let builder_sites = [
   ( "lib/worker_oas.ml",
     "Agent_sdk.Builder.build_safe",
     "Agent_sdk.Builder.with_approval" );
-  (* Cascade_runner Builder — run_named pipeline. This file wires
+  (* Keeper_runner Builder — run_named pipeline. This file wires
      config.approval into the builder directly. *)
   ( "lib/cascade/cascade_runner.ml",
     "Agent_sdk.Builder.build_safe",

@@ -1,10 +1,10 @@
 (** Cascade health provider serializers.
 
-    Pure conversions between [Cascade_health_tracker.provider_info]
+    Pure conversions between [Keeper_health_tracker.provider_info]
     snapshots and dashboard JSON.  No I/O.  The aggregator-driven
     [health_json] surface lives in {!Dashboard_cascade_health_json}. *)
 
-module Health = Cascade_health_tracker
+module Health = Keeper_health_tracker
 
 (** Classify a provider's operational state for dashboard rendering.
 
@@ -30,7 +30,7 @@ let provider_status (info : Health.provider_info) : string =
 (** Synthesise a provider_info with optimistic defaults for a
     cascade-declared provider that has not been observed by the tracker
     in the current window.  [success_rate = 1.0] mirrors
-    [Cascade_health_tracker]'s "unknown = optimistic" convention. *)
+    [Keeper_health_tracker]'s "unknown = optimistic" convention. *)
 let zero_provider_info (key : string) : Health.provider_info =
   { provider_key = key
   ; success_rate = 1.0

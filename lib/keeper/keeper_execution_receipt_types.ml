@@ -311,7 +311,7 @@ type t =
   ; degraded_retry_cascade : Keeper_name.t option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
-  ; stop_reason : Cascade_runner.stop_reason option
+  ; stop_reason : Keeper_runner.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option
   ; started_at : string
@@ -326,10 +326,10 @@ type t =
   }
 
 let stop_reason_to_string = function
-  | Cascade_runner.Completed -> "completed"
-  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
+  | Keeper_runner.Completed -> "completed"
+  | Keeper_runner.TurnBudgetExhausted { turns_used; limit } ->
     Printf.sprintf "turn_budget_exhausted:%d/%d" turns_used limit
-  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
+  | Keeper_runner.MutationBoundaryReached { turns_used; tool_name } ->
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary:%s:%d" tool turns_used
      | None -> Printf.sprintf "mutation_boundary:%d" turns_used)

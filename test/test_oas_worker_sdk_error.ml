@@ -233,7 +233,7 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
 
 let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   let detail =
-    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
+    Keeper_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
   let structured =
     Keeper_turn_driver.sdk_error_of_masc_internal_error

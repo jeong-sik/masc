@@ -1,7 +1,7 @@
 (** Cascade config construction and CLI prompt preflight.
 
     Kept separate from {!Cascade_error_classify}: the classifier is used by
-    {!Cascade_runner}, while config/preflight needs the runner's config type. *)
+    {!Keeper_runner}, while config/preflight needs the runner's config type. *)
 
 open Result.Syntax
 
@@ -26,14 +26,14 @@ let config_for_label
     ?compact_ratio
     ?approval
     ~(description : string option)
-    () : (Cascade_runner.config, Agent_sdk.Error.sdk_error) result =
+    () : (Keeper_runner.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
-    Cascade_runner.resolve_provider_config_of_label model_label
-    |> Result.map_error Cascade_runner.label_resolution_error_to_sdk_error
+    Keeper_runner.resolve_provider_config_of_label model_label
+    |> Result.map_error Keeper_runner.label_resolution_error_to_sdk_error
   in
   Ok
     {
-      (Cascade_runner.default_config ~name ~provider_cfg:provider
+      (Keeper_runner.default_config ~name ~provider_cfg:provider
          ~system_prompt ~tools)
       with
       max_turns;
@@ -81,13 +81,13 @@ let cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
    preflight. The server no longer enumerates client commands. The
    cascade-decl [argv_prompt_preflight] capability flag exists for
    adapters that need this preflight, but it is not yet wired into
-   [Cascade_runner.config]; until that cutover lands, this function
+   [Keeper_runner.config]; until that cutover lands, this function
    returns [false] universally. Callers retain the [with_cli_preflight]
    wrapper so the wiring can flip in one place without touching
    keeper_turn_driver paths. *)
 let provider_requires_argv_prompt_preflight _provider_cfg = false
 
-let cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
+let cli_prompt_preflight ~(config : Keeper_runner.config) ~(goal : string)
     : cli_prompt_preflight option =
   let requires_preflight =
     provider_requires_argv_prompt_preflight config.provider_cfg
@@ -169,7 +169,7 @@ let cli_preflight_error ~(scope : string)
          limit = preflight.retry_limit_tokens;
        })
 
-let with_cli_preflight ~(scope : string) ~(config : Cascade_runner.config)
+let with_cli_preflight ~(scope : string) ~(config : Keeper_runner.config)
     ~(goal : string) (run : unit -> ('a, Agent_sdk.Error.sdk_error) result)
     : ('a, Agent_sdk.Error.sdk_error) result =
   match cli_prompt_preflight ~config ~goal with

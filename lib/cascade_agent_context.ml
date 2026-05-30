@@ -2,7 +2,7 @@
 
     This module owns the shared [config] surface plus the pure/defaulted
     preparation logic used by both [build] and [resume_from_checkpoint].
-    [Cascade_runner] remains the public facade and still performs the
+    [Keeper_runner] remains the public facade and still performs the
     approval wiring and final [build_safe] / [Agent.resume] calls. *)
 
 (* ── Inlined from Cascade_wire_overlay ──────────────────────────── *)
@@ -233,7 +233,7 @@ type config =
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
-  ; cli_transport_overrides : Cascade_transport.cli_transport_overrides option
+  ; cli_transport_overrides : Keeper_transport.cli_transport_overrides option
     (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]

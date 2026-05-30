@@ -1,4 +1,4 @@
-(** CLI-transport override record extracted from [Cascade_transport]. *)
+(** CLI-transport override record extracted from [Keeper_transport]. *)
 
 type cli_transport_overrides =
   { cwd : string option

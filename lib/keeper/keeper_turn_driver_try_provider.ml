@@ -46,7 +46,7 @@ type try_provider_ctx =
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
-  ; cli_transport_overrides : Cascade_runner.cli_transport_overrides option
+  ; cli_transport_overrides : Keeper_runner.cli_transport_overrides option
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; (* Session / checkpoint *)
     allowed_paths : string list
@@ -62,7 +62,7 @@ type try_provider_ctx =
   ; enable_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
-  ; exit_condition_result : (int -> Cascade_runner.stop_reason * string option) option
+  ; exit_condition_result : (int -> Keeper_runner.stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; (* Eio concurrency *)
@@ -490,7 +490,7 @@ let run_try_provider
                 in
                 let run_fn () =
                   Eio_guard.check_if_ready ();
-                  Cascade_runner.run
+                  Keeper_runner.run
                     ~sw:attempt_sw
                     ~net:ctx.net
                     ~config

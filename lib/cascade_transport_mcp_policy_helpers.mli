@@ -1,4 +1,4 @@
-(** Runtime-MCP policy header helpers, extracted from [Cascade_transport]. *)
+(** Runtime-MCP policy header helpers, extracted from [Keeper_transport]. *)
 
 (** Trim an optional string and return [None] for blank values. *)
 

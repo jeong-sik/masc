@@ -685,7 +685,7 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
 
 let test_status_bridge_does_not_fabricate_resumable_cli_session_blocker () =
   let detail =
-    Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
+    Masc_mcp.Keeper_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
   let sdk_error =
     OWN.sdk_error_of_masc_internal_error

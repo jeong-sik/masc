@@ -24,7 +24,7 @@ let make_assistant_tool_use_msg name : Agent_sdk.Types.message =
 let test_enrich_idle_detail_with_tool () =
   let detail = "Idle detected after 3 identical turns" in
   let messages = [ make_assistant_tool_use_msg "my_tool" ] in
-  let result = Cascade_runner.enrich_idle_detail detail messages in
+  let result = Keeper_runner.enrich_idle_detail detail messages in
   Alcotest.(check bool)
     "contains original prefix"
     true
@@ -46,20 +46,20 @@ let test_enrich_idle_detail_no_tool () =
       }
     ]
   in
-  let result = Cascade_runner.enrich_idle_detail detail messages in
+  let result = Keeper_runner.enrich_idle_detail detail messages in
   Alcotest.(check string) "unchanged when no tool" detail result
 ;;
 
 let test_enrich_idle_detail_empty_messages () =
   let detail = "Idle detected: no progress" in
-  let result = Cascade_runner.enrich_idle_detail detail [] in
+  let result = Keeper_runner.enrich_idle_detail detail [] in
   Alcotest.(check string) "unchanged with empty messages" detail result
 ;;
 
 let test_enrich_idle_detail_non_idle_error () =
   let detail = "Rate limit exceeded" in
   let messages = [ make_assistant_tool_use_msg "some_tool" ] in
-  let result = Cascade_runner.enrich_idle_detail detail messages in
+  let result = Keeper_runner.enrich_idle_detail detail messages in
   Alcotest.(check string) "non-idle error unchanged" detail result
 ;;
 
@@ -69,7 +69,7 @@ let test_enrich_idle_detail_picks_last_tool () =
     [ make_assistant_tool_use_msg "first_tool"; make_assistant_tool_use_msg "last_tool" ]
   in
   let expected = detail ^ " (tool: last_tool)" in
-  let result = Cascade_runner.enrich_idle_detail detail messages in
+  let result = Keeper_runner.enrich_idle_detail detail messages in
   Alcotest.(check string) "exact string with last tool" expected result
 ;;
 

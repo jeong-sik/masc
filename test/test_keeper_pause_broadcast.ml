@@ -602,7 +602,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
       ~required_tool_candidates:[ "tool_search_files"; "tool_execute" ]
       ~missing_required_tools:[ "tool_search_files" ]
       ~current_task_id:"task-102"
-      ~stop_reason:Masc_mcp.Cascade_runner.Completed
+      ~stop_reason:Masc_mcp.Keeper_runner.Completed
       ~goal_ids:[ "goal-main" ]
       ()
   in

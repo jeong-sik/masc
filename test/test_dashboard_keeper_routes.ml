@@ -837,7 +837,7 @@ let append_execution_receipt
              };
            ]
          | _ -> []);
-      stop_reason = Some Masc_mcp.Cascade_runner.Completed;
+      stop_reason = Some Masc_mcp.Keeper_runner.Completed;
       error_kind = None;
       error_message = None;
       started_at;

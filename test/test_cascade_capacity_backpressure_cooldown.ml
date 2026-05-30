@@ -6,7 +6,7 @@
     [record_failure] (threshold-based) instead of [record_soft_rate_limited]
     (immediate). One capacity-exhausted event is sufficient evidence to
     deprioritize a provider — the same reasoning
-    [Cascade_health_tracker.soft_rate_limit_cooldown_sec] documents for a 429.
+    [Keeper_health_tracker.soft_rate_limit_cooldown_sec] documents for a 429.
 
     Closes §6 R2 (admission pre-check wiring) from the 2026-05-20
     consolidated state report. *)

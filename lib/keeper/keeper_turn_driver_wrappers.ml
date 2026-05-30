@@ -40,7 +40,7 @@ let run_model_by_label
     ?sw
     ?net
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Keeper_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     Keeper_config_builder.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
@@ -73,7 +73,7 @@ let run_model_by_label
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
-                match Cascade_runner.run ~sw ~net ~config ?on_event  goal with
+                match Keeper_runner.run ~sw ~net ~config ?on_event  goal with
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
                     Error
@@ -133,7 +133,7 @@ let run_named_with_masc_tools
     ?sw
     ?net
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Keeper_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
@@ -177,7 +177,7 @@ let run_model_with_masc_tools
     ?sw
     ?net
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Keeper_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     Keeper_config_builder.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
@@ -208,7 +208,7 @@ let run_model_with_masc_tools
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->
-                Cascade_runner.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch  ?on_event
+                Keeper_runner.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch  ?on_event
                   goal))
       with
       | Ok result -> result

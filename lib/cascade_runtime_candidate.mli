@@ -92,7 +92,7 @@ val default_config :
   system_prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   t ->
-  Cascade_runner.config
+  Keeper_runner.config
 
 val enrich_sdk_error :
   cascade_name:Cascade_name.t ->

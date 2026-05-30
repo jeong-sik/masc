@@ -89,7 +89,7 @@ let run_named
     ?net
     ?per_provider_timeout_s
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Keeper_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let cascade_engine = Keeper_turn_engine.keeper_managed in
   match Keeper_turn_engine.guard_keeper_hot_path cascade_engine with
   | Error msg -> Error (Agent_sdk.Error.Internal msg)
@@ -582,7 +582,7 @@ let run_named
   | _ ->
   let candidate_count = List.length candidates in
   let capture, _metrics =
-    Cascade_observation.cascade_metrics_for_candidates ~candidate_count ()
+    Keeper_observation.cascade_metrics_for_candidates ~candidate_count ()
   in
   let cascade_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -781,7 +781,7 @@ let run_named
   let _ = sw, net in
   let adapter = Keeper_runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
-    health = Cascade_health_tracker.global;
+    health = Keeper_health_tracker.global;
     capacity = Keeper_capacity_probe.capacity;
     now = Unix.gettimeofday ();
     rand_int = Random.int;
@@ -805,12 +805,12 @@ let run_named
   in
   let route_exhausted_after_filter ~cycle =
     let observation =
-      Cascade_observation.cascade_observation_with_metrics
+      Keeper_observation.cascade_observation_with_metrics
         ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
         ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
     in
-    Cascade_observation.record_cascade ~keeper_name
+    Keeper_observation.record_cascade ~keeper_name
       ~cascade_name:error_cascade_name
       ~outcome:`Failure ~observation:(Some observation) ();
     Error

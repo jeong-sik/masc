@@ -67,7 +67,7 @@ type cascade_capabilities =
   ; supports_runtime_mcp_http_headers : bool
   ; (* Dispatch axes — A.1 Phase 5.1 caller cutover prep *)
     requires_per_keeper_bridging_for_bound_actor_tools : bool
-    (** A.3 will route [Cascade_transport.resolve_tool_lane_for_oas_tools]
+    (** A.3 will route [Keeper_transport.resolve_tool_lane_for_oas_tools]
           through this flag instead of matching on [Cli_tool_a]. *)
   ; identity_runtime_mcp_header_keys : string list
     (** Header keys honored by the runtime's auth surface even when

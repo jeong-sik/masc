@@ -5,7 +5,7 @@
    --mcp-config argv. Filters servers by the runtime mcp policy's
    allowed_server_names whitelist (empty = allow all).
 
-   Extracted from [Cascade_transport] (godfile decomp). Pure mapping
+   Extracted from [Keeper_transport] (godfile decomp). Pure mapping
    over [Llm_provider.Llm_transport] values. *)
 
 let json_of_string_pairs pairs = `Assoc (List.map (fun (k, v) -> k, `String v) pairs)

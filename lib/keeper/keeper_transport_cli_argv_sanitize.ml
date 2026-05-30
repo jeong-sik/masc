@@ -5,7 +5,7 @@
    this layer scrubs strings through [Inference_utils.sanitize_text_utf8]
    before they cross the transport boundary.
 
-   Extracted from [Cascade_transport] (godfile decomp). All functions
+   Extracted from [Keeper_transport] (godfile decomp). All functions
    are pure mappings over [Llm_provider.Llm_transport] values. *)
 
 let sanitize_runtime_mcp_server_for_cli =

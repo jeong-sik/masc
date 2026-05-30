@@ -1,4 +1,4 @@
-(** Env-driven runtime configuration for {!Cascade_health_tracker}. *)
+(** Env-driven runtime configuration for {!Keeper_health_tracker}. *)
 
 val window_sec : float
 val cooldown_threshold : int

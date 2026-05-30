@@ -1,17 +1,17 @@
 (** Cascade trust JSONL snapshot.
 
-    Periodically snapshots the global {!Cascade_health_tracker} state to
+    Periodically snapshots the global {!Keeper_health_tracker} state to
     [base_path/cascade_trust/YYYY-MM/DD.jsonl] for offline analysis of
     failure fingerprints, success-rate evolution, and provider availability.
 
-    Pull model: a tick fiber polls {!Cascade_health_tracker.all_providers}
+    Pull model: a tick fiber polls {!Keeper_health_tracker.all_providers}
     every [snapshot_interval_s] (default 60s, env
     [MASC_CASCADE_TRUST_SNAPSHOT_SEC]) and appends one JSON object per
     tick.  Each object carries [ts] (Unix timestamp) and [providers]
     (list of structured provider rows mirroring {!provider_info}).
 
     Companion to Phase 0a observability (PR #10292) — fingerprint counter
-    in {!Cascade_health_tracker} captures the *what*, this module
+    in {!Keeper_health_tracker} captures the *what*, this module
     captures the *over time*.  Hydration restores durable cooldown/failure
     state plus the latest bounded routing hints, so cascade selection does
     not restart with a cold latency/cost view after a process restart.
@@ -26,7 +26,7 @@ val snapshot_interval_s : float
 
 val snapshot_now : base_path:string -> unit
 (** Append one snapshot record immediately to today's day-file.  Reads
-    {!Cascade_health_tracker.global} via {!Cascade_health_tracker.all_providers}.
+    {!Keeper_health_tracker.global} via {!Keeper_health_tracker.all_providers}.
     Used by the tick fiber and shutdown hook. *)
 
 val hydrate_latest : base_path:string -> int

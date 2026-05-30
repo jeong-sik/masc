@@ -10,7 +10,7 @@
 
 open Alcotest
 module S = Masc_mcp.Cascade_strategy
-module H = Masc_mcp.Cascade_health_tracker
+module H = Masc_mcp.Keeper_health_tracker
 module C = Masc_mcp.Keeper_client_capacity
 module CH = Masc_mcp.Keeper_client_capacity_history
 module ST = Masc_mcp.Keeper_strategy_trace

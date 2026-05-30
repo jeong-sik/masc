@@ -127,7 +127,7 @@ val sdk_error_capacity_backpressure_retry_after_s :
 (** [Some (Some retry_after)] for a [Provider.CapacityExhausted] error
     carrying a parsed [retry_after].  [Some None] when [retry_after] is
     absent.  [None] for all other errors.  Mirrors
-    {!sdk_error_soft_rate_limited} so [Cascade_health_tracker.record_soft_rate_limited]
+    {!sdk_error_soft_rate_limited} so [Keeper_health_tracker.record_soft_rate_limited]
     can be reused for the immediate-cooldown semantics — one capacity
     rejection is enough to deprioritize the provider, threshold-counting
     via [record_failure] would burn additional cascade attempts on the
@@ -144,7 +144,7 @@ type capacity_backpressure_retry_hint =
     (** Upstream supplied [retry_after_sec = Some s]. *)
   | Cbr_synthetic_default of float
     (** Upstream omitted the hint ([retry_after_sec = None]); the consumer
-        injects {!Cascade_health_tracker.default_capacity_backpressure_backoff_sec}
+        injects {!Keeper_health_tracker.default_capacity_backpressure_backoff_sec}
         to prevent immediate cascade re-rotation onto the same provider. *)
 
 val sdk_error_capacity_backpressure_source :

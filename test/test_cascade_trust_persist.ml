@@ -2,16 +2,16 @@
 
     Verifies the snapshot-to-JSONL contract without spinning a real
     fiber: each test creates a temp base_path, mutates the global
-    [Cascade_health_tracker] via the public record_* API, calls
+    [Keeper_health_tracker] via the public record_* API, calls
     [snapshot_now], then re-reads the JSONL and asserts the shape.
 
-    Test isolation: tests share [Cascade_health_tracker.global], so
+    Test isolation: tests share [Keeper_health_tracker.global], so
     each test uses a unique [provider_key] prefix to avoid cross-talk.
     [reset_for_testing ()] clears the persist module's store cache
     between tests so each gets a fresh [Dated_jsonl.t]. *)
 
 open Alcotest
-module H = Masc_mcp.Cascade_health_tracker
+module H = Masc_mcp.Keeper_health_tracker
 module P = Masc_mcp.Keeper_trust_persist
 
 let kind value = H.error_kind_of_string value

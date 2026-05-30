@@ -333,12 +333,12 @@ let on_auto_expansion_fanout ~cascade ~fanout =
       ()
 
 (* [order_weighted_entries] is a fail-OPEN ordering step: when the
-   [Cascade_health_tracker] has cooled all providers (every weight
+   [Keeper_health_tracker] has cooled all providers (every weight
    drops to 0 and [active = []]), the function silently falls back
    to the unfiltered [entries] list — same shape as iter 12's
    [provider_filter_widening], one stage later in the pipeline.
 
-   A non-zero rate here means [Cascade_health_tracker] judged every
+   A non-zero rate here means [Keeper_health_tracker] judged every
    provider in this cascade unhealthy, yet keeper turns continue to
    route on the same list as if the health tracker had said nothing.
    That's an emergency signal: either the health tracker is wrong
@@ -353,7 +353,7 @@ let on_ordering_health_widening ~cascade =
     ~labels:[ ("cascade", cascade) ]
     ()
 
-(* [Cascade_health_tracker.record] has four distinct cooldown-entry
+(* [Keeper_health_tracker.record] has four distinct cooldown-entry
    branches (Failure-threshold, Soft_rate_limited, Hard_quota,
    Terminal_failure) that each set a fresh [cooldown_until].  Until
    iter 20 these only emitted a [keeper_provider_block_duration_sec]
@@ -734,7 +734,7 @@ let metric_cascade_invariant_violation =
 let on_cascade_invariant_violation () =
   Prometheus.inc_counter metric_cascade_invariant_violation ()
 
-(* [Cascade_observation]'s in-memory cascade-counter table is
+(* [Keeper_observation]'s in-memory cascade-counter table is
    bounded by [cascade_max_keys].  When a new cascade name arrives
    and the table is full, the LRU entry is silently evicted and the
    existing WARN-once line logs the eviction event.  Operators
@@ -760,7 +760,7 @@ let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 let on_max_tokens_clamped () =
   Prometheus.inc_counter metric_max_tokens_clamped ()
 
-(* [Cascade_observation] persists cascade-decision audit records
+(* [Keeper_observation] persists cascade-decision audit records
    to [Dated_jsonl] storage for post-incident analysis.  Two
    exception arms swallow non-cancellation failures with only a
    WARN log:
@@ -888,7 +888,7 @@ let all_cascade_counters : (string * string) list =
   ; ( "masc_cascade_ordering_health_widening_total"
     , "masc_cascade_ordering_health_widening_total" )
   ; ( "masc_cascade_provider_cooldown_total"
-    , "Total fresh cooldown entries set at [Cascade_health_tracker]. \
+    , "Total fresh cooldown entries set at [Keeper_health_tracker]. \
        Labels: provider, reason (failure_threshold | soft_rate_limit \
        | hard_quota | terminal_failure). Counter complement to the \
        existing [keeper_provider_block_duration_sec] histogram \

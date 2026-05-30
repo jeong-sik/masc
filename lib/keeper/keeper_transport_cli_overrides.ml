@@ -13,7 +13,7 @@
 
     This sibling owns the canonical definition; the parent re-exports
     via a transparent type alias so existing callers
-    ([Cascade_runner.cli_transport_overrides] alias and the keeper
+    ([Keeper_runner.cli_transport_overrides] alias and the keeper
     layer's record-typed forwarders) keep working unchanged.
 
     Extracted as an enabling step for follow-up extraction of the

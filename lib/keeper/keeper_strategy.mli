@@ -19,7 +19,7 @@
 (** {1 Signal context — what the strategy can read} *)
 
 type signal_ctx = {
-  health : Cascade_health_tracker.t;
+  health : Keeper_health_tracker.t;
   (** Health tracker for success_rate, cooldown, effective_weight. *)
 
   capacity : string -> Keeper_throttle.capacity_info option;

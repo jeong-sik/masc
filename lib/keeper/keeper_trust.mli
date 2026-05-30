@@ -10,10 +10,10 @@
     The score reflects recent success rate, consecutive failures, and
     cooldown state.  It is NOT a replacement for cooldown — providers
     in cooldown get weight 0 from
-    {!Cascade_health_tracker.effective_weight} regardless of trust.
+    {!Keeper_health_tracker.effective_weight} regardless of trust.
 
     When [disabled] is [true], returns 1.0 unconditionally. *)
-val trust_score : Cascade_health_tracker.provider_info -> float
+val trust_score : Keeper_health_tracker.provider_info -> float
 
 
 (**/**)
@@ -26,6 +26,6 @@ module For_testing : sig
   val max_consecutive_penalty : float
   val cooldown_penalty : float
   val minimum_trust : float
-  val trust_score : Cascade_health_tracker.provider_info -> float
+  val trust_score : Keeper_health_tracker.provider_info -> float
   val modulated_weight : config_weight:int -> trust:float -> int
 end

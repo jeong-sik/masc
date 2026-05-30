@@ -233,7 +233,7 @@ let compute_judgments
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
-      let response = result.Cascade_runner.response in
+      let response = result.Keeper_runner.response in
       try
         (* See dashboard_governance_judge.ml for rationale: LLMs frequently
            wrap JSON in ```json … ``` markdown fences. Lenient_json strips

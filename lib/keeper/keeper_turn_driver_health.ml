@@ -37,13 +37,13 @@ let cost_usd_of_response (response : Agent_sdk.Types.api_response) =
   | None -> None
 
 let record_candidate_success candidate ~latency_ms
-    (result : Cascade_runner.run_result) =
+    (result : Keeper_runner.run_result) =
   let latency_ms = positive_finite_float latency_ms in
   let cost_usd = cost_usd_of_response result.response in
   List.iter
     (fun provider_key ->
-       Cascade_health_tracker.record_success
-         Cascade_health_tracker.global
+       Keeper_health_tracker.record_success
+         Keeper_health_tracker.global
          ~provider_key
          ?latency_ms
          ?cost_usd
@@ -52,12 +52,12 @@ let record_candidate_success candidate ~latency_ms
 
 let record_candidate_rejected candidate ~reason =
   let error_kind =
-    Cascade_health_tracker.error_kind_of_string "accept_rejected"
+    Keeper_health_tracker.error_kind_of_string "accept_rejected"
   in
   List.iter
     (fun provider_key ->
-       Cascade_health_tracker.record_rejected
-         Cascade_health_tracker.global
+       Keeper_health_tracker.record_rejected
+         Keeper_health_tracker.global
          ~provider_key
          ~error_kind
          ~error_reason:reason
@@ -69,27 +69,27 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
   let error_kind =
     Cascade_attempt_fsm.sdk_error_cascade_fallback_class sdk_err
     |> Option.value ~default:"provider_error"
-    |> Cascade_health_tracker.error_kind_of_string
+    |> Keeper_health_tracker.error_kind_of_string
   in
   let provider_key = Keeper_runtime_candidate.health_key candidate in
   let model_key = Keeper_runtime_candidate.model_health_key candidate in
   if sdk_error_is_hard_quota sdk_err then
-    Cascade_health_tracker.record_hard_quota
-      Cascade_health_tracker.global
+    Keeper_health_tracker.record_hard_quota
+      Keeper_health_tracker.global
       ~provider_key
       ~error_kind
       ~error_reason
       ()
   else if sdk_error_is_model_access_denied sdk_err then
-    Cascade_health_tracker.record_terminal_failure
-      Cascade_health_tracker.global
+    Keeper_health_tracker.record_terminal_failure
+      Keeper_health_tracker.global
       ~provider_key:model_key
       ~error_kind
       ~error_reason
       ()
   else if sdk_error_is_required_tool_contract_violation sdk_err then
-    Cascade_health_tracker.record_terminal_failure
-      Cascade_health_tracker.global
+    Keeper_health_tracker.record_terminal_failure
+      Keeper_health_tracker.global
       ~provider_key:model_key
       ~error_kind
       ~error_reason
@@ -97,8 +97,8 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
   else if sdk_error_is_resumable_cli_session sdk_err
           || sdk_error_is_terminal_provider_runtime_failure sdk_err
   then
-    Cascade_health_tracker.record_terminal_failure
-      Cascade_health_tracker.global
+    Keeper_health_tracker.record_terminal_failure
+      Keeper_health_tracker.global
       ~provider_key
       ~error_kind
       ~error_reason
@@ -122,7 +122,7 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
          |> Option.map capacity_backpressure_source_to_string
          |> Option.value ~default:"unknown")
         provider_key
-        (Cascade_health_tracker.error_kind_to_string error_kind)
+        (Keeper_health_tracker.error_kind_to_string error_kind)
     else
       let immediate_cooldown_retry_after =
         match sdk_error_capacity_backpressure_retry_after_s sdk_err with
@@ -140,14 +140,14 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
                "cascade_capacity_backpressure: provider=%s no provider \
                 retry_after; using synthetic backoff=%.1fs (error_kind=%s)"
                provider_key s
-               (Cascade_health_tracker.error_kind_to_string error_kind);
+               (Keeper_health_tracker.error_kind_to_string error_kind);
              Some (Some s)
            | None -> sdk_error_soft_rate_limited sdk_err)
       in
       match immediate_cooldown_retry_after with
       | Some retry_after_s ->
-        Cascade_health_tracker.record_capacity_backpressure
-          Cascade_health_tracker.global
+        Keeper_health_tracker.record_capacity_backpressure
+          Keeper_health_tracker.global
           ~provider_key
           ?retry_after_s
           ~error_kind
@@ -155,8 +155,8 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
           ~now:(Unix.time ())
           ()
       | None ->
-        Cascade_health_tracker.record_failure
-          Cascade_health_tracker.global
+        Keeper_health_tracker.record_failure
+          Keeper_health_tracker.global
           ~provider_key
           ~error_kind
           ~error_reason

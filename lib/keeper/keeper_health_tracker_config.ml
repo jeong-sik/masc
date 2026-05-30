@@ -1,4 +1,4 @@
-(** Env-driven runtime configuration for {!Cascade_health_tracker}. *)
+(** Env-driven runtime configuration for {!Keeper_health_tracker}. *)
 
 let read_float_setting ~primary ~default () =
   match Sys.getenv_opt primary with

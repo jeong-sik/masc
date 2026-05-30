@@ -3,16 +3,16 @@
 
     This module was previously embedded as a nested
     [module Json_stream_cli_transport_local] inside
-    [Cascade_transport] (665 LOC). Moving it to a separate file
+    [Keeper_transport] (665 LOC). Moving it to a separate file
     preserves all type identities + value bindings — the parent
     file retains a 1-line module alias
     [module Json_stream_cli_transport_local =
        Keeper_transport_json_stream_cli_local], and the
-    [Cascade_transport.mli] signature constraint continues to
+    [Keeper_transport.mli] signature constraint continues to
     apply unchanged.
 
     External callers reference
-    [Cascade_transport.Json_stream_cli_transport_local.*] — those
+    [Keeper_transport.Json_stream_cli_transport_local.*] — those
     paths keep working through the alias. *)
 
 module Runtime_policy_provider = Keeper_transport_runtime_policy_provider

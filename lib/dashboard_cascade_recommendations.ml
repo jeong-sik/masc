@@ -5,7 +5,7 @@
    suggested config edit themselves.  Phase 2b is what would make these
    self-applying, and it is gated by [MASC_CASCADE_TRUST_PERSIST]. *)
 
-module Health = Cascade_health_tracker
+module Health = Keeper_health_tracker
 
 type recommendation_action =
   | Reduce_weight (* unreliable but partially working *)

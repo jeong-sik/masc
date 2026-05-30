@@ -78,14 +78,14 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
       runtime_tool_names
   in
   match
-    ( Cascade_runner.runtime_mcp_policy_of_tool_names
+    ( Keeper_runner.runtime_mcp_policy_of_tool_names
         ?agent_name
         ~allow_keeper_internal:has_keeper_internal
         runtime_tool_names
     , agent_name )
   with
   | Some policy, Some agent_name ->
-    Some (Cascade_runner.runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
+    Some (Keeper_runner.runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
   | Some policy, None -> Some policy
   | None, _ -> None
 
@@ -114,7 +114,7 @@ let runtime_mcp_policy_for_provider
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
   =
   let agent_name = keeper_agent_name_opt keeper_name |> Option.value ~default:"" in
-  Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
+  Keeper_runner.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
 
 let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
       ~(keeper_name : string)
@@ -133,9 +133,9 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
     | Some agent_name, Some policy
       when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name) ->
       (not
-         (Cascade_runner.cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
+         (Keeper_runner.cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
       && List.exists
-           Cascade_runner.runtime_mcp_tool_requires_bound_actor
+           Keeper_runner.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names
     | _ -> false)
 
@@ -155,7 +155,7 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
       runtime MCP policy that requires bound-actor tools (keeper-scoped).
    2. [Tool_lane_unsupported] — [resolve_tool_lane_for_oas_tools]
       returned [Error], typically transport/auth/capability mismatch
-      surfaced by [Cascade_runner].
+      surfaced by [Keeper_runner].
    3. [Required_tool_use { reason }] — the inline-tool-choice / runtime
       MCP capability gate from [Provider_tool_support]. Re-uses the
       existing [rejection_reason] so dashboards stay consistent with
@@ -258,7 +258,7 @@ let classify_filter_rejection
         | [] -> true
         | _ ->
           (match
-             Cascade_runner.resolve_tool_lane_for_oas_tools
+             Keeper_runner.resolve_tool_lane_for_oas_tools
                ?agent_name:(keeper_agent_name_opt keeper_name)
                ~tool_requirement:
                  (if require_tool_choice_support || require_tool_support

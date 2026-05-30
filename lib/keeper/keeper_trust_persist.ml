@@ -6,7 +6,7 @@
     [Dashboard_cascade.provider_entry_to_json].  The duplication is
     intentional — dashboard depends on cascade, not the reverse. *)
 
-module H = Cascade_health_tracker
+module H = Keeper_health_tracker
 
 let snapshot_interval_s =
   match Sys.getenv_opt "MASC_CASCADE_TRUST_SNAPSHOT_SEC" with

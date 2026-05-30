@@ -108,7 +108,7 @@ val on_auto_expansion_fanout : cascade:string -> fanout:int -> unit
 
 val on_ordering_health_widening : cascade:string -> unit
 (** Tick the ordering-step health-widening counter at
-    [order_weighted_entries] when [Cascade_health_tracker] has cooled
+    [order_weighted_entries] when [Keeper_health_tracker] has cooled
     every provider (active = []) and the function falls back to the
     unfiltered [entries] list.  A non-zero rate signals the health
     tracker judged every provider in this cascade unhealthy yet
@@ -117,7 +117,7 @@ val on_ordering_health_widening : cascade:string -> unit
 
 val on_provider_cooldown : provider:string -> reason:string -> unit
 (** Tick the per-provider cooldown-entry counter at
-    [Cascade_health_tracker.record] when a fresh cooldown_until is
+    [Keeper_health_tracker.record] when a fresh cooldown_until is
     set.  [reason] must be one of [failure_threshold],
     [soft_rate_limit], [hard_quota], [terminal_failure].  Distinct
     from the existing [keeper_provider_block_duration_sec]
@@ -251,7 +251,7 @@ val on_cascade_invariant_violation : unit -> unit
 
 val on_cascade_metrics_eviction : unit -> unit
 (** Tick the cascade-metrics LRU eviction counter at
-    [Cascade_observation] when the in-memory cascade-counter
+    [Keeper_observation] when the in-memory cascade-counter
     table evicts an LRU entry to admit a new cascade name.  High
     rate signals cascade-name churn — either raise
     [cascade_max_keys] or canonicalize synthesized names. *)
@@ -264,7 +264,7 @@ val on_max_tokens_clamped : unit -> unit
 
 val on_cascade_audit_failure : stage:string -> unit
 (** Tick the cascade-audit subsystem failure counter at
-    [Cascade_observation].  [stage] must be one of
+    [Keeper_observation].  [stage] must be one of
     [store_creation] (JSONL store init failed) or [append]
     (single record append failed).  Audit subsystem failures
     don't break keeper turns but compromise post-incident

@@ -168,7 +168,7 @@ let append_keeper_receipt
       degraded_retry_cascade = None;
       fallback_reason = None;
       cascade_rotation_attempts = [];
-      stop_reason = Some Cascade_runner.Completed;
+      stop_reason = Some Keeper_runner.Completed;
       error_kind = None;
       error_message = None;
       started_at;

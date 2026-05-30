@@ -27,7 +27,7 @@ val cascade_prefix_of_provider_kind :
 val provider_label_of_config : Llm_provider.Provider_config.t -> string
 
 val provider_health_key_of_config : Llm_provider.Provider_config.t -> string
-(** Key used by {!Cascade_health_tracker}. For OpenAI-compatible configs
+(** Key used by {!Keeper_health_tracker}. For OpenAI-compatible configs
     the model and base URL are appended so each endpoint is tracked
     independently. *)
 

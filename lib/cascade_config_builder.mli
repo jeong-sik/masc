@@ -1,6 +1,6 @@
 (** Cascade config construction and CLI prompt preflight.
 
-    This module intentionally depends on {!Cascade_runner}; keep it out of
+    This module intentionally depends on {!Keeper_runner}; keep it out of
     {!Cascade_error_classify} so structured error conversion stays below the
     runner boundary and does not participate in runner/classifier cycles. *)
 
@@ -26,8 +26,8 @@ val config_for_label :
   ?approval:Agent_sdk.Hooks.approval_callback ->
   description:string option ->
   unit ->
-  (Cascade_runner.config, Agent_sdk.Error.sdk_error) result
-(** Build a {!Cascade_runner.config} from a model label string.  Resolves
+  (Keeper_runner.config, Agent_sdk.Error.sdk_error) result
+(** Build a {!Keeper_runner.config} from a model label string.  Resolves
     the provider config and fills in defaults. *)
 
 type cli_prompt_preflight = {
@@ -41,16 +41,16 @@ type cli_prompt_preflight = {
 (** Preflight metadata for argv-limited transports. *)
 
 val cli_prompt_preflight :
-  config:Cascade_runner.config ->
+  config:Keeper_runner.config ->
   goal:string ->
   cli_prompt_preflight option
 (** Compute preflight metadata. Always returns [None] until the
     cascade-decl [argv_prompt_preflight] capability is wired into
-    {!Cascade_runner.config}; see {!provider_requires_argv_prompt_preflight}
+    {!Keeper_runner.config}; see {!provider_requires_argv_prompt_preflight}
     note in the implementation. *)
 
 val with_cli_preflight :  scope:string ->
-  config:Cascade_runner.config ->
+  config:Keeper_runner.config ->
   goal:string ->
   (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
   ('a, Agent_sdk.Error.sdk_error) result

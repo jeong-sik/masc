@@ -141,13 +141,13 @@ let success_selected_model_raw candidate =
 let error_selected_model_raw = None
 
 let health_error_kind label =
-  Cascade_health_tracker.error_kind_of_string label
+  Keeper_health_tracker.error_kind_of_string label
 
 let record_candidate_health_success candidate ~latency_ms =
   Keeper_runtime_candidate.health_keys candidate
   |> List.iter (fun provider_key ->
-    Cascade_health_tracker.record_success
-      Cascade_health_tracker.global
+    Keeper_health_tracker.record_success
+      Keeper_health_tracker.global
       ~provider_key
       ~latency_ms
       ())
@@ -156,8 +156,8 @@ let record_candidate_health_rejected candidate ~reason =
   let error_kind = health_error_kind "accept_rejected" in
   Keeper_runtime_candidate.health_keys candidate
   |> List.iter (fun provider_key ->
-    Cascade_health_tracker.record_rejected
-      Cascade_health_tracker.global
+    Keeper_health_tracker.record_rejected
+      Keeper_health_tracker.global
       ~provider_key
       ~error_kind
       ~error_reason:reason
@@ -171,8 +171,8 @@ let record_candidate_health_error candidate sdk_err =
     let error_kind = health_error_kind "hard_quota" in
     health_keys
     |> List.iter (fun provider_key ->
-      Cascade_health_tracker.record_hard_quota
-        Cascade_health_tracker.global
+      Keeper_health_tracker.record_hard_quota
+        Keeper_health_tracker.global
         ~provider_key
         ~error_kind
         ~error_reason
@@ -182,8 +182,8 @@ let record_candidate_health_error candidate sdk_err =
     let error_kind = health_error_kind "terminal_provider_runtime_failure" in
     health_keys
     |> List.iter (fun provider_key ->
-      Cascade_health_tracker.record_terminal_failure
-        Cascade_health_tracker.global
+      Keeper_health_tracker.record_terminal_failure
+        Keeper_health_tracker.global
         ~provider_key
         ~error_kind
         ~error_reason
@@ -193,8 +193,8 @@ let record_candidate_health_error candidate sdk_err =
     let error_kind = health_error_kind "required_tool_contract_violation" in
     health_keys
     |> List.iter (fun provider_key ->
-      Cascade_health_tracker.record_terminal_failure
-        Cascade_health_tracker.global
+      Keeper_health_tracker.record_terminal_failure
+        Keeper_health_tracker.global
         ~provider_key
         ~error_kind
         ~error_reason
@@ -205,8 +205,8 @@ let record_candidate_health_error candidate sdk_err =
       let error_kind = health_error_kind "soft_rate_limited" in
       health_keys
       |> List.iter (fun provider_key ->
-        Cascade_health_tracker.record_soft_rate_limited
-          Cascade_health_tracker.global
+        Keeper_health_tracker.record_soft_rate_limited
+          Keeper_health_tracker.global
           ~provider_key
           ?retry_after_s
           ~error_kind
@@ -216,8 +216,8 @@ let record_candidate_health_error candidate sdk_err =
       let error_kind = health_error_kind "provider_error" in
       health_keys
       |> List.iter (fun provider_key ->
-        Cascade_health_tracker.record_failure
-          Cascade_health_tracker.global
+        Keeper_health_tracker.record_failure
+          Keeper_health_tracker.global
           ~provider_key
           ~error_kind
           ~error_reason

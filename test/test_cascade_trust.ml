@@ -12,7 +12,7 @@
 open Alcotest
 
 module CT = Masc_mcp.Keeper_trust
-module HT = Masc_mcp.Cascade_health_tracker
+module HT = Masc_mcp.Keeper_health_tracker
 
 let info ?(success_rate = 1.0) ?(consecutive_failures = 0)
     ?(in_cooldown = false) ?(provider_key = "test-provider") () :

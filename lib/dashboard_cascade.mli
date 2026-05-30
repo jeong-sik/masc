@@ -1,7 +1,7 @@
 (** Dashboard projection for cascade configuration and runtime health.
 
     Exposes the validated runtime cascade catalog alongside the live
-    {!Cascade_health_tracker.global} snapshot so operators can see *why*
+    {!Keeper_health_tracker.global} snapshot so operators can see *why*
     a given provider is preferred without re-running a turn.
 
     Contracts:
@@ -145,7 +145,7 @@ val keeper_profile_fields
     [cascade.toml]'s declared candidate list.
 
     Entries come from two sources:
-    1. {!Cascade_health_tracker.all_providers Health.global} — every
+    1. {!Keeper_health_tracker.all_providers Health.global} — every
        provider the tracker has observed events for.
     2. Providers declared in any [cascade.toml] profile but absent from
        the tracker, synthesised via {!zero_provider_info}.  Lets the UI
@@ -212,14 +212,14 @@ val health_json : ?window_minutes:int -> ?base_path:string -> unit -> Yojson.Saf
 
 (** Classify a provider's operational state from tracker fields.  See
     the [status] enum in {!health_json}. *)
-val provider_status : Cascade_health_tracker.provider_info -> string
+val provider_status : Keeper_health_tracker.provider_info -> string
 
 (** Synthesise a provider_info with optimistic defaults for a provider
     that is declared in [cascade.toml] but has no tracker events in the
     current window.  Used by {!health_json} to merge declared-only
     candidates; exposed for tests so fixtures don't have to hand-build
     the record. *)
-val zero_provider_info : string -> Cascade_health_tracker.provider_info
+val zero_provider_info : string -> Keeper_health_tracker.provider_info
 
 (** Serialize a tracker entry (or synthesized placeholder) to the shape
     described by {!health_json}.  [declared] controls the [declared]
@@ -233,7 +233,7 @@ val zero_provider_info : string -> Cascade_health_tracker.provider_info
 val provider_entry_to_json
   :  declared:bool
   -> ?perf:Model_inference_metrics.provider_stats
-  -> Cascade_health_tracker.provider_info
+  -> Keeper_health_tracker.provider_info
   -> Yojson.Safe.t
 
 (** {1 Phase 2a operator recommendations}
@@ -273,19 +273,19 @@ type recommendation =
 (** Classify a single provider snapshot.  Returns [None] for healthy
     providers (no operator action recommended). *)
 val classify_recommendation
-  :  Cascade_health_tracker.provider_info
+  :  Keeper_health_tracker.provider_info
   -> recommendation option
 
 (** Apply {!classify_recommendation} to each provider, drop the
     healthy ones, and sort ascending by [trust_score] so the most
     urgent items render first. *)
 val low_trust_recommendations
-  :  Cascade_health_tracker.provider_info list
+  :  Keeper_health_tracker.provider_info list
   -> recommendation list
 
 val recommendation_to_json : recommendation -> Yojson.Safe.t
 
-(** Standalone endpoint — reads {!Cascade_health_tracker.global},
+(** Standalone endpoint — reads {!Keeper_health_tracker.global},
     runs {!low_trust_recommendations}, returns a JSON array.
     Also embedded under ["recommendations"] in {!health_json}. *)
 val recommendations_json : unit -> Yojson.Safe.t

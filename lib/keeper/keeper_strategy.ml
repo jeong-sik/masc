@@ -1,7 +1,7 @@
 (** See cascade_strategy.mli for documentation. *)
 
 type signal_ctx = {
-  health : Cascade_health_tracker.t;
+  health : Keeper_health_tracker.t;
   capacity : string -> Keeper_throttle.capacity_info option;
   now : float;
   rand_int : int -> int;
@@ -115,7 +115,7 @@ let dedupe_full_capacity_keys adapter ctx cands =
 let filter_cooldown adapter ctx cands =
   List.filter
     (fun c ->
-       not (Cascade_health_tracker.is_in_cooldown ctx.health
+       not (Keeper_health_tracker.is_in_cooldown ctx.health
               ~provider_key:(adapter.health_key c)))
     cands
 

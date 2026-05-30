@@ -1,7 +1,7 @@
 (** Cascade trust score — kill switch + hardcoded calibration.
 
     Computes a per-provider trust score [0.0..1.0] from the rolling
-    health data maintained by {!Cascade_health_tracker}.  The score
+    health data maintained by {!Keeper_health_tracker}.  The score
     modulates cascade selection weights so poorly-performing providers
     are gradually de-prioritised even when not in hard cooldown.
 
@@ -65,7 +65,7 @@ let minimum_trust = 0.05
     2. Consecutive-failure penalty (capped)
     3. Cooldown history decay
     4. Clamp to [minimum_trust, 1.0] *)
-let trust_score (info : Cascade_health_tracker.provider_info) : float =
+let trust_score (info : Keeper_health_tracker.provider_info) : float =
   if disabled then 1.0
   else
     let consecutive_penalty =
@@ -90,7 +90,7 @@ let trust_score (info : Cascade_health_tracker.provider_info) : float =
     Returns [max 1 (int_of_float (config_weight *. trust))] so the
     provider always has at least weight 1 when not in hard cooldown
     (hard cooldown is handled by
-    [Cascade_health_tracker.effective_weight] returning 0). *)
+    [Keeper_health_tracker.effective_weight] returning 0). *)
 let modulated_weight ~config_weight ~trust =
   if disabled then config_weight
   else max 1 (int_of_float (float_of_int config_weight *. trust))

@@ -3477,7 +3477,7 @@ let make_run_result
   ; checkpoint = None
   ; trace_ref
   ; run_validation
-  ; stop_reason = Masc_mcp.Cascade_runner.Completed
+  ; stop_reason = Masc_mcp.Keeper_runner.Completed
   ; inference_telemetry = None
   ; tool_surface = sample_tool_surface_metrics ()
   ; pre_dispatch_compacted = false
@@ -3640,7 +3640,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~input_tok:100
       ~output_tok:50
       ~cascade_observation:
-        { Masc_mcp.Cascade_observation.cascade_name =
+        { Masc_mcp.Keeper_observation.cascade_name =
             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
         ; strategy = Some "round_robin"
         ; configured_labels = [ "llama:auto" ]
@@ -3652,7 +3652,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
         ; fallback_hops = Some 1
         ; fallback_applied = true
         ; attempts =
-            [ { Masc_mcp.Cascade_observation.attempt_index = 0
+            [ { Masc_mcp.Keeper_observation.attempt_index = 0
               ; model_id = "qwen3.5-35b-a3b-ud-q8-xl"
               ; model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl"
               ; latency_ms = None
@@ -4292,7 +4292,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ; run_validation = Some validation
          ; cascade_observation =
              Some
-               { Masc_mcp.Cascade_observation.cascade_name =
+               { Masc_mcp.Keeper_observation.cascade_name =
                    oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
                ; strategy = Some "round_robin"
                ; configured_labels = [ "llama:auto" ]
@@ -4305,7 +4305,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                ; fallback_hops = Some 1
                ; fallback_applied = true
                ; attempts =
-                   [ { Masc_mcp.Cascade_observation.attempt_index = 0
+                   [ { Masc_mcp.Keeper_observation.attempt_index = 0
                      ; model_id = "qwen3.5-35b-a3b-ud-q8-xl"
                      ; model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl"
                      ; latency_ms = None
@@ -7006,7 +7006,7 @@ let test_metrics_failure_response_redacts_resumable_cli_session_payload () =
      To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
+    Masc_mcp.Keeper_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
   let sdk_error =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
@@ -7913,7 +7913,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
          ; detail =
-             Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
+             Masc_mcp.Keeper_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in
@@ -7930,7 +7930,7 @@ let test_route_exhausted_error_includes_resumable_cli_session_error () =
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
          ; detail =
-             Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
+             Masc_mcp.Keeper_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in

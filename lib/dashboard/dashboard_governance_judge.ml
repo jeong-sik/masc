@@ -671,7 +671,7 @@ let compute_judgments
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
-      let response = result.Cascade_runner.response in
+      let response = result.Keeper_runner.response in
       try
         let raw_text = Agent_sdk_response.text_of_response response in
         let generated_at = Masc_domain.now_iso () in

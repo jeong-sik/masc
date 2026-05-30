@@ -300,8 +300,8 @@ let first_health_cooldown candidate =
   health_keys candidate
   |> List.find_map (fun provider_key ->
     match
-      Cascade_health_tracker.check_circuit_breaker
-        Cascade_health_tracker.global
+      Keeper_health_tracker.check_circuit_breaker
+        Keeper_health_tracker.global
         ~provider_key
     with
     | Ok () -> None
@@ -311,8 +311,8 @@ let has_recovery_evidence candidate =
   health_keys candidate
   |> List.exists (fun provider_key ->
     match
-      Cascade_health_tracker.provider_info
-        Cascade_health_tracker.global
+      Keeper_health_tracker.provider_info
+        Keeper_health_tracker.global
         ~provider_key
     with
     | None -> false
@@ -365,17 +365,17 @@ let resolve_tool_lane_for_oas_tools
     ~tools
     candidate
   =
-  Cascade_runner.resolve_tool_lane_for_oas_tools ?agent_name ?tool_requirement
+  Keeper_runner.resolve_tool_lane_for_oas_tools ?agent_name ?tool_requirement
     ~provider_cfg:candidate.provider_cfg ~tools ()
 
 let runtime_mcp_policy_for_agent ~agent_name candidate runtime_mcp_policy =
-  Cascade_runner.runtime_mcp_policy_for_provider
+  Keeper_runner.runtime_mcp_policy_for_provider
     ~provider_cfg:candidate.provider_cfg
     ~agent_name
     runtime_mcp_policy
 
 let default_config ~name ~system_prompt ~tools candidate =
-  Cascade_runner.default_config ~name ~provider_cfg:candidate.provider_cfg
+  Keeper_runner.default_config ~name ~provider_cfg:candidate.provider_cfg
     ~system_prompt ~tools
 
 let enrich_sdk_error ~cascade_name candidate =

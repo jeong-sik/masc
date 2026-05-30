@@ -129,7 +129,7 @@ type t = {
   fallback_reason :
     Keeper_error_classify.degraded_retry_reason option;
   cascade_rotation_attempts : cascade_rotation_attempt list;
-  stop_reason : Cascade_runner.stop_reason option;
+  stop_reason : Keeper_runner.stop_reason option;
   error_kind : error_kind option;
   error_message : string option;
   started_at : string;
@@ -142,7 +142,7 @@ type t = {
   pre_dispatch_compaction_before_tokens : int option;
   pre_dispatch_compaction_after_tokens : int option;
 }
-val stop_reason_to_string : Cascade_runner.stop_reason -> string
+val stop_reason_to_string : Keeper_runner.stop_reason -> string
 val enrich_contract_violation_reason : t -> string
 val sandbox_kind_of_meta :
   Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile

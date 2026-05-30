@@ -172,7 +172,7 @@ val render_keeper_prompt_feedback : aggregate -> string
     whose [provider] matches. Feeds {!Dashboard_cascade.health_json}'s
     [providers] array so the UI can render per-provider throughput and
     latency next to the existing behavioural (success_rate, cooldown)
-    fields from {!Cascade_health_tracker}.
+    fields from {!Keeper_health_tracker}.
 
     All perf fields are [entry_count]-weighted averages of the underlying
     [model_stats] values. Latency percentiles are approximations (a true

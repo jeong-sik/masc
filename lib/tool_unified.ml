@@ -123,5 +123,5 @@ let summary_report () : Yojson.Safe.t =
        Hashtbl dispatch path is now the only code path so the field
        carried no signal. *)
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
-    ("cascade_metrics", Cascade_observation.cascade_metrics_json ());
+    ("cascade_metrics", Keeper_observation.cascade_metrics_json ());
   ]

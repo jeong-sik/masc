@@ -24,7 +24,7 @@
 module FSM = Masc_mcp.Cascade_attempt_fsm
 module Classify = Masc_mcp.Cascade_error_classify
 module Internal = Masc_mcp.Keeper_internal_error
-module HT = Masc_mcp.Cascade_health_tracker
+module HT = Masc_mcp.Keeper_health_tracker
 
 let pp_hint fmt = function
   | None -> Format.fprintf fmt "None"

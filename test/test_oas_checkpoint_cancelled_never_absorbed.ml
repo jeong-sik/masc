@@ -12,7 +12,7 @@
    runtime's compliance.
 
    [Keeper_oas_checkpoint.persist_checkpoint] is in the modelled OAS
-   bridge surface (called from {!Cascade_runner}).  Its [try/with]
+   bridge surface (called from {!Keeper_runner}).  Its [try/with]
    returns [(unit, string) result] but re-raises [Cancelled] via a
    dedicated arm placed *before* the [| exn ->] catch-all.  This test
    asserts, by source inspection, that:

@@ -855,7 +855,7 @@ let emit_sdk_provider_error_metric ~cascade_name ~provider err =
 (* ── Inlined from Cascade_attempt_fsm_capacity_backpressure ─────── *)
 
 let default_capacity_backpressure_backoff_sec =
-  Cascade_health_tracker.default_capacity_backpressure_backoff_sec
+  Keeper_health_tracker.default_capacity_backpressure_backoff_sec
 
 let sdk_error_capacity_backpressure_retry_after_s (err : Agent_sdk.Error.sdk_error)
   : float option option =

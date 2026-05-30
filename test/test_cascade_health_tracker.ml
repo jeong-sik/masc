@@ -1,11 +1,11 @@
-(** Unit tests for Cascade_health_tracker record behavior.
+(** Unit tests for Keeper_health_tracker record behavior.
 
     Guards against the regression where record_success / record_failure
     were defined but never wired into the cascade execution path, leaving
     every provider's effective_weight stuck at config_weight * 1.0. *)
 
 open Alcotest
-module H = Masc_mcp.Cascade_health_tracker
+module H = Masc_mcp.Keeper_health_tracker
 module P = Masc_mcp.Prometheus
 
 let kind value = H.error_kind_of_string value

@@ -3,9 +3,9 @@
 
     Owns the shared per-worker {!config} record + pure / defaulted
     preparation logic shared by both
-    {!Cascade_runner.build} and
-    {!Cascade_runner.resume_from_checkpoint}.
-    {!Cascade_runner} remains the public facade and still
+    {!Keeper_runner.build} and
+    {!Keeper_runner.resume_from_checkpoint}.
+    {!Keeper_runner} remains the public facade and still
     performs the approval wiring and final
     [build_safe] / [Agent.resume] calls.
 
@@ -83,10 +83,10 @@ type config = {
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
   cli_transport_overrides :
-    Cascade_transport.cli_transport_overrides option;
+    Keeper_transport.cli_transport_overrides option;
 }
 (** Per-worker configuration.  49 fields — concrete record because
-    callers ({!Cascade_runner}, keeper workers) construct + tweak
+    callers ({!Keeper_runner}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 
 (** {1 Default config builder} *)
@@ -114,7 +114,7 @@ val builder_without_approval :
 (** [builder_without_approval ~net ~config ?transport ()] builds an
     {!Agent_sdk.Builder.t} from [config] without wiring approval
     callbacks.  Approval wiring is the responsibility of the
-    public facade ({!Cascade_runner}) which adds the approval
+    public facade ({!Keeper_runner}) which adds the approval
     callback before calling [Builder.build_safe]. *)
 
 (** {1 Resume preparation} *)

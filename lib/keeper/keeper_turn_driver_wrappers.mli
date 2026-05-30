@@ -35,7 +35,7 @@ val run_model_by_label :
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+  (Keeper_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] using a model label string
     (e.g. ["llama:qwen3.5"]).  Validates the label before execution. *)
 
@@ -72,7 +72,7 @@ val run_named_with_masc_tools :
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+  (Keeper_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_named] variant that bridges MASC tool schemas into OAS tools
     via {!Tool_bridge.oas_tool_of_masc}. *)
 
@@ -101,5 +101,5 @@ val run_model_with_masc_tools :
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+  (Keeper_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_model_by_label] variant that bridges MASC tool schemas into OAS tools. *)

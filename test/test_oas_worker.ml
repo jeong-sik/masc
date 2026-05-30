@@ -352,7 +352,7 @@ let with_cascade_attempt_liveness mode f =
 
 let flush_cascade_actor () =
   (* See cascade actor tests: this forces the actor to drain before assertions. *)
-  ignore (Cascade_observation.cascade_metrics_json () : Yojson.Safe.t)
+  ignore (Keeper_observation.cascade_metrics_json () : Yojson.Safe.t)
 ;;
 
 let with_liveness_off f = with_cascade_attempt_liveness "off" f
@@ -825,7 +825,7 @@ let test_cascade_inference_rejects_removed_keeper_aliases () =
 ;;
 
 let test_cascade_observation_json_includes_fallback_fields () =
-  let observation : Cascade_observation.cascade_observation =
+  let observation : Keeper_observation.cascade_observation =
     { cascade_name =
         Keeper_name.of_string_exn
           Masc_mcp.(Keeper_config.default_cascade_name ())
@@ -865,7 +865,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
     ; oas_internal_cascade_allowed = false
     }
   in
-  let json = Cascade_observation.cascade_observation_to_json observation in
+  let json = Keeper_observation.cascade_observation_to_json observation in
   Alcotest.(check string)
     "cascade name preserved"
     Masc_mcp.(Keeper_config.default_cascade_name ())
@@ -909,15 +909,15 @@ let find_cascade_metric_entry name (json : Yojson.Safe.t) =
 let test_cascade_metrics_concurrent_recording () =
   with_temp_masc_base_path "test_cascade_metrics_concurrent"
   @@ fun () ->
-  Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
+  Masc_mcp.Keeper_observation.reset_cascade_counters_for_test ();
   Fun.protect
-    ~finally:(fun () -> Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ())
+    ~finally:(fun () -> Masc_mcp.Keeper_observation.reset_cascade_counters_for_test ())
     (fun () ->
        Eio.Fiber.all
          (List.init 8 (fun _ ->
             fun () ->
             for _ = 1 to 25 do
-              Masc_mcp.Cascade_observation.record_cascade
+              Masc_mcp.Keeper_observation.record_cascade
                 ~cascade_name:(internal_cascade_name "concurrent-cascade")
                 ~observation:None
                 ~outcome:`Success
@@ -926,7 +926,7 @@ let test_cascade_metrics_concurrent_recording () =
        match
          find_cascade_metric_entry
            "concurrent-cascade"
-           (Cascade_observation.cascade_metrics_json ())
+           (Keeper_observation.cascade_metrics_json ())
        with
        | None -> Alcotest.fail "expected concurrent-cascade metrics"
        | Some entry ->
@@ -947,45 +947,45 @@ let test_cascade_metrics_concurrent_recording () =
 let test_cascade_metrics_evicts_lowest_call_key () =
   with_temp_masc_base_path "test_cascade_metrics_evicts"
   @@ fun () ->
-  Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
+  Masc_mcp.Keeper_observation.reset_cascade_counters_for_test ();
   Fun.protect
-    ~finally:(fun () -> Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ())
+    ~finally:(fun () -> Masc_mcp.Keeper_observation.reset_cascade_counters_for_test ())
     (fun () ->
-       Masc_mcp.Cascade_observation.record_cascade
+       Masc_mcp.Keeper_observation.record_cascade
          ~cascade_name:(internal_cascade_name "victim-key")
          ~observation:None
          ~outcome:`Success
          ();
        for i = 1 to 254 do
          let name = Printf.sprintf "stable-%03d" i in
-         Masc_mcp.Cascade_observation.record_cascade
+         Masc_mcp.Keeper_observation.record_cascade
            ~cascade_name:(internal_cascade_name name)
            ~observation:None
            ~outcome:`Success
            ();
-         Masc_mcp.Cascade_observation.record_cascade
+         Masc_mcp.Keeper_observation.record_cascade
            ~cascade_name:(internal_cascade_name name)
            ~observation:None
            ~outcome:`Success
            ()
        done;
        for _ = 1 to 3 do
-         Masc_mcp.Cascade_observation.record_cascade
+         Masc_mcp.Keeper_observation.record_cascade
            ~cascade_name:(internal_cascade_name "hot-key")
            ~observation:None
            ~outcome:`Success
            ()
        done;
        let before =
-         Yojson.Safe.Util.to_list (Cascade_observation.cascade_metrics_json ())
+         Yojson.Safe.Util.to_list (Keeper_observation.cascade_metrics_json ())
        in
        Alcotest.(check int) "table capped before admit" 256 (List.length before);
-       Masc_mcp.Cascade_observation.record_cascade
+       Masc_mcp.Keeper_observation.record_cascade
          ~cascade_name:(internal_cascade_name "new-key")
          ~observation:None
          ~outcome:`Success
          ();
-       let after_json = Cascade_observation.cascade_metrics_json () in
+       let after_json = Keeper_observation.cascade_metrics_json () in
        let after = Yojson.Safe.Util.to_list after_json in
        Alcotest.(check int) "table stays capped" 256 (List.length after);
        Alcotest.(check bool)
@@ -1006,7 +1006,7 @@ let test_cascade_audit_persists_observation () =
   let base = temp_dir "test_cascade_audit" in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
+  Masc_mcp.Keeper_observation.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
@@ -1015,12 +1015,12 @@ let test_cascade_audit_persists_observation () =
       (match old_base_path_input with
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
-      Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
+      Masc_mcp.Keeper_observation.reset_cascade_counters_for_test ();
       cleanup_dir base)
     (fun () ->
        Unix.putenv "MASC_BASE_PATH" base;
        Unix.putenv "MASC_BASE_PATH_INPUT" base;
-       let observation : Masc_mcp.Cascade_observation.cascade_observation =
+       let observation : Masc_mcp.Keeper_observation.cascade_observation =
          { cascade_name = Keeper_name.of_string_exn "audit-cascade"
          ; strategy = Some "round_robin"
          ; configured_labels = [ "primary:auto"; "secondary:auto" ]
@@ -1058,14 +1058,14 @@ let test_cascade_audit_persists_observation () =
          ; oas_internal_cascade_allowed = false
          }
        in
-       Masc_mcp.Cascade_observation.record_cascade
+       Masc_mcp.Keeper_observation.record_cascade
          ~keeper_name:"keeper-provider-agent-test"
          ~cascade_name:(internal_cascade_name "audit-cascade")
          ~observation:(Some observation)
          ~outcome:`Failure
          ();
        (* See cascade audit assertions below: this forces the actor to drain. *)
-       ignore (Cascade_observation.cascade_metrics_json ());
+       ignore (Keeper_observation.cascade_metrics_json ());
        let store =
          Dated_jsonl.create ~base_dir:(Filename.concat base ".masc/cascade_audit") ()
        in
@@ -1188,7 +1188,7 @@ let test_default_config_preserves_custom_local_request_path () =
       ()
   in
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"custom-local-path"
       ~provider_cfg
       ~system_prompt:"system"
@@ -1376,17 +1376,17 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
       | providers ->
         Alcotest.failf "expected 2 resolved providers, got %d" (List.length providers)
     in
-    for _ = 1 to Masc_mcp.Cascade_health_tracker.cooldown_threshold do
-      Masc_mcp.Cascade_health_tracker.record_failure
-        Masc_mcp.Cascade_health_tracker.global
+    for _ = 1 to Masc_mcp.Keeper_health_tracker.cooldown_threshold do
+      Masc_mcp.Keeper_health_tracker.record_failure
+        Masc_mcp.Keeper_health_tracker.global
         ~provider_key:primary_model_health_key
         ()
     done;
     reset_primary_calls ();
     reset_fallback_calls ();
     (match
-       Masc_mcp.Cascade_health_tracker.check_circuit_breaker
-         Masc_mcp.Cascade_health_tracker.global
+       Masc_mcp.Keeper_health_tracker.check_circuit_breaker
+         Masc_mcp.Keeper_health_tracker.global
          ~provider_key:primary_model_health_key
      with
      | Ok () -> Alcotest.fail "primary provider should be OPEN before run_named"
@@ -1408,8 +1408,8 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         true
         (fallback_calls () > 0);
       (match
-         Masc_mcp.Cascade_health_tracker.provider_info
-           Masc_mcp.Cascade_health_tracker.global
+         Masc_mcp.Keeper_health_tracker.provider_info
+           Masc_mcp.Keeper_health_tracker.global
            ~provider_key:fallback_provider_health_key
        with
        | None -> Alcotest.fail "fallback provider should have health info"
@@ -1658,7 +1658,7 @@ let test_resume_model_id_falls_back_to_meta_model () =
 
 let test_oas_worker_exec_build_defaults_without_retry_policy () =
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-default"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1666,7 +1666,7 @@ let test_oas_worker_exec_build_defaults_without_retry_policy () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let policy = (Agent_sdk.Agent.options agent).tool_retry_policy in
     Alcotest.(check bool) "default leaves retry disabled" true (Option.is_none policy);
@@ -1676,7 +1676,7 @@ let test_oas_worker_exec_build_defaults_without_retry_policy () =
 
 let test_oas_worker_exec_build_applies_retry_policy () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-retry"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1689,7 +1689,7 @@ let test_oas_worker_exec_build_applies_retry_policy () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let policy = (Agent_sdk.Agent.options agent).tool_retry_policy in
     check_policy_matches_default_internal "exec build opt-in" policy;
@@ -1699,7 +1699,7 @@ let test_oas_worker_exec_build_applies_retry_policy () =
 
 let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-stream-idle"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1708,7 +1708,7 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   let config = { base_config with stream_idle_timeout_s = Some 12.5 } in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let timeout_s = (Agent_sdk.Agent.options agent).stream_idle_timeout_s in
     Alcotest.(check (option (float 0.0001)))
@@ -1721,7 +1721,7 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
 
 let test_oas_worker_exec_build_applies_body_timeout () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-body-timeout"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1730,7 +1730,7 @@ let test_oas_worker_exec_build_applies_body_timeout () =
   let config = { base_config with body_timeout_s = Some 34.5 } in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let timeout_s = (Agent_sdk.Agent.options agent).body_timeout_s in
     Alcotest.(check (option (float 0.0001)))
@@ -1748,7 +1748,7 @@ let is_missing_approval_callback_reject = function
 
 let test_oas_worker_exec_build_rejects_missing_approval_callback () =
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-missing-approval-policy"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1756,7 +1756,7 @@ let test_oas_worker_exec_build_rejects_missing_approval_callback () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let policy =
       (Agent_sdk.Agent.options agent).missing_approval_callback_policy
@@ -1779,7 +1779,7 @@ let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
       ()
   in
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-ollama-cloud"
       ~provider_cfg
       ~system_prompt:"system"
@@ -1787,7 +1787,7 @@ let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let transport = (Agent_sdk.Agent.options agent).transport in
     Alcotest.(check bool)
@@ -1817,7 +1817,7 @@ let test_cascade_runner_request_patch_preserves_tool_choice_override () =
       ()
   in
   let patched =
-    Cascade_runner.For_testing.request_runtime_fields_on_base_config ~base req
+    Keeper_runner.For_testing.request_runtime_fields_on_base_config ~base req
   in
   Alcotest.(check string) "base url stays source of truth" base.base_url patched.base_url;
   Alcotest.(check string) "model id stays source of truth" base.model_id patched.model_id;
@@ -1845,7 +1845,7 @@ let test_oas_worker_exec_build_applies_tool_choice_override_to_contract () =
       ()
   in
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-provider_k-tool-choice-override"
       ~provider_cfg
       ~system_prompt:"system"
@@ -1853,7 +1853,7 @@ let test_oas_worker_exec_build_applies_tool_choice_override_to_contract () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let options = Agent_sdk.Agent.options agent in
     Alcotest.(check bool)
@@ -1891,7 +1891,7 @@ let test_apply_stream_idle_timeout_default_injects_keepalive_default () =
 
 let test_oas_worker_exec_build_default_priority_unset () =
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-default-priority"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1899,7 +1899,7 @@ let test_oas_worker_exec_build_default_priority_unset () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let priority = (Agent_sdk.Agent.state agent).config.priority in
     Alcotest.(check bool) "default priority remains unset" true (Option.is_none priority);
@@ -1909,7 +1909,7 @@ let test_oas_worker_exec_build_default_priority_unset () =
 
 let test_oas_worker_exec_build_applies_priority () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-priority"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1920,7 +1920,7 @@ let test_oas_worker_exec_build_applies_priority () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
     let priority = (Agent_sdk.Agent.state agent).config.priority in
     Alcotest.(check bool)
@@ -1942,7 +1942,7 @@ let test_oas_worker_exec_build_supports_kimi_direct () =
       ()
   in
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-provider_c-direct"
       ~provider_cfg
       ~system_prompt:"system"
@@ -1950,7 +1950,7 @@ let test_oas_worker_exec_build_supports_kimi_direct () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent -> Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
@@ -1964,7 +1964,7 @@ let test_oas_worker_exec_build_supports_cli_tool_c () =
       ()
   in
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"oas-worker-provider_c-cli"
       ~provider_cfg
       ~system_prompt:"system"
@@ -1974,7 +1974,7 @@ let test_oas_worker_exec_build_supports_cli_tool_c () =
   @@ fun () ->
   Eio.Switch.run
   @@ fun sw ->
-  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  match Keeper_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent -> Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
@@ -1995,7 +1995,7 @@ let test_resume_propagates_approval () =
     Agent_sdk.Hooks.Approve
   in
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"resume-approval"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -2006,7 +2006,7 @@ let test_resume_propagates_approval () =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Cascade_runner.resume_from_checkpoint
+    Keeper_runner.resume_from_checkpoint
       ~sw
       ~net:(require_test_net ())
       ~config
@@ -2029,7 +2029,7 @@ let test_resume_propagates_approval () =
 
 let test_resume_rejects_missing_approval_callback () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"resume-missing-approval-policy"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -2039,7 +2039,7 @@ let test_resume_rejects_missing_approval_callback () =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Cascade_runner.resume_from_checkpoint
+    Keeper_runner.resume_from_checkpoint
       ~sw
       ~net:(require_test_net ())
       ~config:base_config
@@ -2059,7 +2059,7 @@ let test_resume_rejects_missing_approval_callback () =
 
 let test_resume_propagates_slot_id () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"resume-slot-id"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -2070,7 +2070,7 @@ let test_resume_propagates_slot_id () =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Cascade_runner.resume_from_checkpoint
+    Keeper_runner.resume_from_checkpoint
       ~sw
       ~net:(require_test_net ())
       ~config
@@ -2090,7 +2090,7 @@ let test_resume_propagates_summarizer () =
     "summary"
   in
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"resume-summarizer"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -2101,7 +2101,7 @@ let test_resume_propagates_summarizer () =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Cascade_runner.resume_from_checkpoint
+    Keeper_runner.resume_from_checkpoint
       ~sw
       ~net:(require_test_net ())
       ~config
@@ -2121,7 +2121,7 @@ let test_resume_propagates_summarizer () =
 
 let test_resume_propagates_stream_idle_timeout () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"resume-stream-idle"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -2132,7 +2132,7 @@ let test_resume_propagates_stream_idle_timeout () =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Cascade_runner.resume_from_checkpoint
+    Keeper_runner.resume_from_checkpoint
       ~sw
       ~net:(require_test_net ())
       ~config
@@ -2150,7 +2150,7 @@ let test_resume_propagates_stream_idle_timeout () =
 
 let test_resume_propagates_body_timeout () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"resume-body-timeout"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -2161,7 +2161,7 @@ let test_resume_propagates_body_timeout () =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Cascade_runner.resume_from_checkpoint
+    Keeper_runner.resume_from_checkpoint
       ~sw
       ~net:(require_test_net ())
       ~config
@@ -2179,7 +2179,7 @@ let test_resume_propagates_body_timeout () =
 
 let test_resume_propagates_priority () =
   let base_config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"resume-priority"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -2192,7 +2192,7 @@ let test_resume_propagates_priority () =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Cascade_runner.resume_from_checkpoint
+    Keeper_runner.resume_from_checkpoint
       ~sw
       ~net:(require_test_net ())
       ~config
@@ -2211,11 +2211,11 @@ let test_resume_propagates_priority () =
 ;;
 
 let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
-  match Cascade_runner.resolve_provider_config_of_label "not-a-model-label" with
+  match Keeper_runner.resolve_provider_config_of_label "not-a-model-label" with
   | Ok _ ->
     Alcotest.fail "expected invalid explicit model label to be rejected without fallback"
   | Error err ->
-    let msg = Cascade_runner.label_resolution_error_to_string err in
+    let msg = Keeper_runner.label_resolution_error_to_string err in
     Alcotest.(check bool)
       "mentions invalid model label"
       true
@@ -2321,7 +2321,7 @@ let test_provider_http_transport_uses_fd_accountant_slot () =
           response)
     }
   in
-  let wrapped = Cascade_runner.For_testing.provider_http_slot_transport transport in
+  let wrapped = Keeper_runner.For_testing.provider_http_slot_transport transport in
   Alcotest.(check int) "provider http starts idle" 0 (provider_http_in_flight ());
   ignore (wrapped.complete_sync request);
   Alcotest.(check bool) "sync call ran under provider http slot" true !sync_observed_slot;
@@ -2348,7 +2348,7 @@ let test_provider_cli_transport_uses_fd_accountant_slot () =
           response)
     }
   in
-  let wrapped = Cascade_runner.For_testing.provider_cli_slot_transport transport in
+  let wrapped = Keeper_runner.For_testing.provider_cli_slot_transport transport in
   Alcotest.(check int) "provider cli starts idle" 0 (provider_cli_in_flight ());
   ignore (wrapped.complete_sync request);
   Alcotest.(check bool) "sync call ran under provider cli slot" true !sync_observed_slot;
@@ -2376,7 +2376,7 @@ let test_make_per_call_switch_transport_releases_cli_fd_resources () =
     ~minimum:32
     leaking_delta;
   let wrapped =
-    Cascade_runner.make_per_call_switch_transport leaking_test_transport_factory
+    Keeper_runner.make_per_call_switch_transport leaking_test_transport_factory
   in
   let before = Prometheus_process.approximate_open_fd_count () in
   for _ = 1 to 32 do
@@ -2434,7 +2434,7 @@ let test_classify_masc_internal_error_roundtrip () =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
          { cascade_name = internal_cascade_name "json_stream_cli_keeper"
-         ; detail = Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
+         ; detail = Keeper_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in
@@ -2446,7 +2446,7 @@ let test_classify_masc_internal_error_roundtrip () =
       (internal_cascade_name_to_string cascade_name);
     Alcotest.(check string)
       "resumable detail redacted"
-      Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
+      Keeper_transport.Json_stream_cli_transport_local.resumable_session_detail
       detail;
     Alcotest.(check bool)
       "resumable detail hides raw resume hint"
@@ -2566,7 +2566,7 @@ let test_resolve_tool_lane_for_cli_tool_a_public_tools_uses_runtime_mcp_policy (
   @@ fun () ->
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools
       ()
@@ -2620,7 +2620,7 @@ let test_resolve_tool_lane_for_cli_tool_a_public_tools_with_agent_name_keeps_ide
   @@ fun _base_path ->
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools
@@ -2670,7 +2670,7 @@ let test_resolve_tool_lane_for_cli_tool_a_keeper_bound_public_tools_omits_bound_
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
   in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~tool_requirement:`Optional
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
@@ -2729,7 +2729,7 @@ let test_resolve_tool_lane_for_cli_tool_a_keeper_bound_public_tools_with_per_kee
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
   in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools
@@ -2775,7 +2775,7 @@ let test_resolve_tool_lane_for_cli_tool_c_public_tools_uses_runtime_mcp_policy (
   @@ fun () ->
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
       ()
@@ -2811,7 +2811,7 @@ let test_resolve_tool_lane_for_cli_tool_c_public_tools_with_agent_name_keeps_run
   @@ fun () ->
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
@@ -2849,7 +2849,7 @@ let test_resolve_tool_lane_for_cli_tool_d_keeper_internal_tools_uses_runtime_mcp
   @@ fun () ->
   let tools = [ make_named_noop_tool "tool_execute" ] in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_d_provider_cfg ())
       ~tools
@@ -2892,7 +2892,7 @@ let test_resolve_tool_lane_for_cli_tool_c_keeper_internal_tools_uses_runtime_mcp
   @@ fun () ->
   let tools = [ make_named_noop_tool "tool_execute" ] in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
@@ -2922,7 +2922,7 @@ let test_resolve_tool_lane_for_cli_tool_c_mixed_tools_keeps_public_runtime_subse
     ]
   in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
       ()
@@ -2946,7 +2946,7 @@ let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
   @@ fun () ->
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_openai_compat_provider_cfg ())
       ~tools
       ()
@@ -2965,7 +2965,7 @@ let test_resolve_tool_lane_for_cli_tool_a_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ]
       ()
@@ -2988,7 +2988,7 @@ let test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_rejec
   with_temp_masc_base_path "agent_code-internal-no-token"
   @@ fun _base_path ->
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "tool_execute" ]
@@ -3017,7 +3017,7 @@ let test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_and_p
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-abc";
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "tool_execute" ]
@@ -3059,7 +3059,7 @@ let test_resolve_tool_lane_for_cli_tool_c_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ]
       ()
@@ -3076,7 +3076,7 @@ let test_resolve_tool_lane_for_cli_tool_a_internal_tools_optional_drops_tools ()
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   match
-    Cascade_runner.resolve_tool_lane_for_oas_tools
+    Keeper_runner.resolve_tool_lane_for_oas_tools
       ~tool_requirement:`Optional
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ]
@@ -3100,7 +3100,7 @@ let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers ()
   with_env "MASC_MCP_TOKEN" "shared-agent_code-token"
   @@ fun () ->
   let runtime_mcp_policy =
-    Cascade_runner.public_mcp_runtime_policy_of_tool_names
+    Keeper_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent"
       [ "masc_status" ]
   in
@@ -3131,7 +3131,7 @@ let test_filter_candidate_providers_for_tool_support_drops_cli_tool_a_keeper_bou
   with_temp_masc_base_path "agent_code-filter-no-token"
   @@ fun _base_path ->
   let runtime_mcp_policy =
-    Cascade_runner.public_mcp_runtime_policy_of_tool_names
+    Keeper_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent"
       [ "masc_status"; "masc_claim_next" ]
   in
@@ -3211,7 +3211,7 @@ let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-raw-token";
   let runtime_mcp_policy =
-    Cascade_runner.public_mcp_runtime_policy_of_tool_names
+    Keeper_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent"
       [ "masc_status"; "masc_claim_next" ]
   in
@@ -3469,7 +3469,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
   with_temp_masc_base_path "agent_code-classify-no-token"
   @@ fun _base_path ->
   let runtime_mcp_policy =
-    Cascade_runner.public_mcp_runtime_policy_of_tool_names
+    Keeper_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent"
       [ "masc_status"; "masc_claim_next" ]
   in
@@ -3482,7 +3482,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
      Alcotest.(check bool)
        "masc_claim_next requires actor binding"
        true
-       (Cascade_runner.runtime_mcp_tool_requires_bound_actor "masc_claim_next")
+       (Keeper_runner.runtime_mcp_tool_requires_bound_actor "masc_claim_next")
    | None -> Alcotest.fail "expected public MCP runtime policy");
   let reason =
     Masc_mcp.Keeper_oas_runner.classify_filter_rejection
@@ -3536,7 +3536,7 @@ let test_classify_filter_rejection_passes_when_provider_supported () =
   with_env "MASC_MCP_TOKEN" "shared-agent_code-token"
   @@ fun () ->
   let runtime_mcp_policy =
-    Cascade_runner.public_mcp_runtime_policy_of_tool_names
+    Keeper_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent"
       [ "masc_status" ]
   in
@@ -3655,7 +3655,7 @@ let test_cli_mcp_config_json_of_policy_filters_to_allowed_servers () =
     ; disable_builtin_tools = true
     }
   in
-  match Cascade_transport.cli_mcp_config_json_of_policy policy with
+  match Keeper_transport.cli_mcp_config_json_of_policy policy with
   | None -> Alcotest.fail "expected CLI runtime MCP config JSON"
   | Some raw_json ->
     let open Yojson.Safe.Util in
@@ -3704,7 +3704,7 @@ let test_runtime_mcp_policy_with_masc_agent_name_upserts_header () =
     }
   in
   let updated =
-    Cascade_runner.runtime_mcp_policy_with_masc_agent_name
+    Keeper_runner.runtime_mcp_policy_with_masc_agent_name
       ~agent_name:"keeper-sangsu-agent"
       policy
   in
@@ -3752,7 +3752,7 @@ let test_runtime_mcp_policy_with_masc_agent_name_prefers_internal_keeper_token (
       }
     in
     let updated =
-      Cascade_runner.runtime_mcp_policy_with_masc_agent_name
+      Keeper_runner.runtime_mcp_policy_with_masc_agent_name
         ~agent_name:"keeper-sangsu-agent"
         policy
     in
@@ -3777,7 +3777,7 @@ let test_public_mcp_runtime_policy_binds_keeper_internal_headers () =
   with_env "MASC_MCP_TOKEN" "ambient-bearer-token"
   @@ fun () ->
   match
-    Cascade_runner.public_mcp_runtime_policy_of_tool_names
+    Keeper_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent"
       [ "masc_status" ]
   with
@@ -3838,14 +3838,14 @@ let test_runtime_mcp_policy_for_provider_cli_tool_a_preserves_identity_header ()
   in
   let codex_headers =
     find_masc_headers
-      (Cascade_runner.runtime_mcp_policy_for_provider
+      (Keeper_runner.runtime_mcp_policy_for_provider
          ~provider_cfg:(make_cli_tool_a_provider_cfg ())
          ~agent_name:"keeper-sangsu-agent"
          (Some policy))
   in
   let openai_headers =
     find_masc_headers
-      (Cascade_runner.runtime_mcp_policy_for_provider
+      (Keeper_runner.runtime_mcp_policy_for_provider
          ~provider_cfg:(make_openai_compat_provider_cfg ())
          ~agent_name:"keeper-sangsu-agent"
          (Some policy))
@@ -3895,7 +3895,7 @@ let test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_fails_closed () =
     "no agent_name -> no runtime MCP policy"
     true
     (Option.is_none
-       (Cascade_runner.runtime_mcp_policy_for_provider
+       (Keeper_runner.runtime_mcp_policy_for_provider
           ~provider_cfg:(make_cli_tool_a_provider_cfg ())
           ~agent_name:""
           (Some policy)))
@@ -3914,7 +3914,7 @@ let test_cli_runtime_mcp_jsons_include_request_policy () =
     ; disable_builtin_tools = true
     }
   in
-  let merged = Cascade_transport.cli_runtime_mcp_jsons ~base:[] (Some policy) in
+  let merged = Keeper_transport.cli_runtime_mcp_jsons ~base:[] (Some policy) in
   Alcotest.(check int)
     "request policy contributes one CLI MCP config"
     1
@@ -3939,11 +3939,11 @@ let test_json_stream_cli_build_args_include_runtime_mcp_config () =
     }
   in
   let mcp_config_json =
-    Cascade_transport.cli_runtime_mcp_jsons ~base:[] (Some policy)
+    Keeper_transport.cli_runtime_mcp_jsons ~base:[] (Some policy)
   in
   let argv =
-    Cascade_transport.Json_stream_cli_transport_local.build_args
-      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
+    Keeper_transport.Json_stream_cli_transport_local.build_args
+      ~config:Keeper_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json
       ~prompt:"hello"
@@ -3958,8 +3958,8 @@ let test_json_stream_cli_build_args_include_runtime_mcp_config () =
 let test_json_stream_cli_build_args_uses_stdin_for_large_prompt () =
   let long_prompt = String.make (20 * 1024) 'x' in
   let argv =
-    Cascade_transport.Json_stream_cli_transport_local.build_args
-      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
+    Keeper_transport.Json_stream_cli_transport_local.build_args
+      ~config:Keeper_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt:long_prompt
@@ -3974,8 +3974,8 @@ let test_json_stream_cli_build_args_uses_stdin_for_large_prompt () =
 let test_json_stream_cli_build_args_uses_stdin_for_non_ascii_prompt () =
   let prompt = "한글 prompt" in
   let argv =
-    Cascade_transport.Json_stream_cli_transport_local.build_args
-      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
+    Keeper_transport.Json_stream_cli_transport_local.build_args
+      ~config:Keeper_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
@@ -3990,8 +3990,8 @@ let test_json_stream_cli_build_args_uses_stdin_for_non_ascii_prompt () =
 let test_json_stream_cli_build_args_sanitizes_broken_utf8_prompt () =
   let prompt = "prefix\x80suffix" in
   let argv =
-    Cascade_transport.Json_stream_cli_transport_local.build_args
-      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
+    Keeper_transport.Json_stream_cli_transport_local.build_args
+      ~config:Keeper_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
@@ -4051,7 +4051,7 @@ let test_cli_model_for_provider_config_uses_runtime_default_on_auto () =
   Alcotest.(check (option string))
     "auto uses runtime binding default"
     (runtime_binding_default_model_exn provider_cfg)
-    (Cascade_transport.cli_model_for_provider_config provider_cfg)
+    (Keeper_transport.cli_model_for_provider_config provider_cfg)
 ;;
 
 let test_cli_model_for_provider_config_keeps_explicit_model () =
@@ -4065,7 +4065,7 @@ let test_cli_model_for_provider_config_keeps_explicit_model () =
   Alcotest.(check (option string))
     "explicit model preserved"
     (Some "provider-model-2.5")
-    (Cascade_transport.cli_model_for_provider_config provider_cfg)
+    (Keeper_transport.cli_model_for_provider_config provider_cfg)
 ;;
 
 let test_json_stream_cli_config_uses_oas_context_ssot () =
@@ -4078,7 +4078,7 @@ let test_json_stream_cli_config_uses_oas_context_ssot () =
       ~api_key:"test-key"
       ()
   in
-  match Cascade_transport.cli_runtime_config_json_for_provider provider_cfg with
+  match Keeper_transport.cli_runtime_config_json_for_provider provider_cfg with
   | None -> Alcotest.fail "expected CLI config json"
   | Some raw ->
     let json = _parse_json raw in
@@ -4121,7 +4121,7 @@ let test_json_stream_cli_rejects_invalid_tool_argument_json () =
   close_out oc;
   Unix.chmod fake_cli_path 0o755;
   let config =
-    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+    { Keeper_transport.Json_stream_cli_transport_local.default_config with
       cli_path = fake_cli_path
     }
   in
@@ -4141,7 +4141,7 @@ let test_json_stream_cli_rejects_invalid_tool_argument_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Json_stream_cli_transport_local.create
+    Keeper_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4191,7 +4191,7 @@ let test_json_stream_cli_treats_whitespace_tool_arguments_as_empty_json () =
     fake_cli_path
     ("#!/bin/sh\ncat <<'JSON'\n" ^ whitespace_tool_line ^ "\nJSON\n");
   let config =
-    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+    { Keeper_transport.Json_stream_cli_transport_local.default_config with
       cli_path = fake_cli_path
     }
   in
@@ -4211,7 +4211,7 @@ let test_json_stream_cli_treats_whitespace_tool_arguments_as_empty_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Json_stream_cli_transport_local.create
+    Keeper_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4267,7 +4267,7 @@ let test_json_stream_cli_stream_rejects_invalid_tool_argument_json () =
        ]
      ^ "\n");
   let config =
-    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+    { Keeper_transport.Json_stream_cli_transport_local.default_config with
       cli_path = fake_cli_path
     }
   in
@@ -4287,7 +4287,7 @@ let test_json_stream_cli_stream_rejects_invalid_tool_argument_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Json_stream_cli_transport_local.create
+    Keeper_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4325,7 +4325,7 @@ let test_json_stream_cli_stream_rejects_invalid_tool_argument_json () =
 ;;
 
 let test_json_stream_cli_should_log_stderr_line_filters_resume_noise () =
-  let should_log = Cascade_transport.Json_stream_cli_transport_local.should_log_stderr_line in
+  let should_log = Keeper_transport.Json_stream_cli_transport_local.should_log_stderr_line in
   Alcotest.(check bool) "blank stderr line suppressed" false (should_log "");
   Alcotest.(check bool) "whitespace stderr line suppressed" false (should_log "   ");
   Alcotest.(check bool)
@@ -4353,7 +4353,7 @@ let test_json_stream_cli_error_completion_uses_measured_latency () =
     fake_cli_path
     "#!/bin/sh\nsleep 0.05\nprintf '%s\\n' 'simulated failure' >&2\nexit 7\n";
   let config =
-    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+    { Keeper_transport.Json_stream_cli_transport_local.default_config with
       cli_path = fake_cli_path
     }
   in
@@ -4373,7 +4373,7 @@ let test_json_stream_cli_error_completion_uses_measured_latency () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Json_stream_cli_transport_local.create
+    Keeper_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4396,7 +4396,7 @@ let test_json_stream_cli_classify_cli_error_redacts_resumable_session_detail () 
      To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   match
-    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
+    Keeper_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4420,7 +4420,7 @@ let test_json_stream_cli_classify_cli_error_keeps_exit_1_resume_hint_as_plain_re
      To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   match
-    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
+    Keeper_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4452,7 +4452,7 @@ let test_json_stream_cli_classify_cli_error_keeps_exit_1_with_error_as_reject ()
      To resume this session: cli-tool -r ff37febe"
   in
   match
-    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
+    Keeper_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4479,7 +4479,7 @@ let test_json_stream_cli_classify_cli_error_labels_process_title_unicode_crash (
      getproctitle() UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef"
   in
   match
-    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
+    Keeper_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4597,7 +4597,7 @@ let test_sdk_error_terminal_provider_runtime_ignores_unknown_network_error () =
 let test_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_cli_tool_a_provider_cfg () in
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"cli-preflight"
       ~provider_cfg
       ~system_prompt:"system"
@@ -4622,7 +4622,7 @@ let test_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
 let test_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
   let provider_cfg = make_cli_tool_a_provider_cfg ~model_id:"model-d-4.1" () in
   let config =
-    Cascade_runner.default_config
+    Keeper_runner.default_config
       ~name:"cli-preflight"
       ~provider_cfg
       ~system_prompt:"system"
@@ -4688,7 +4688,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
     ; runtime_mcp_policy = Some policy
     }
   in
-  let sanitized = Cascade_transport.sanitize_cli_completion_request_for_argv req in
+  let sanitized = Keeper_transport.sanitize_cli_completion_request_for_argv req in
   Alcotest.(check (option string))
     "system prompt sanitized"
     (Some "sys prompt")
@@ -4965,7 +4965,7 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
     in
     let noop_tool = make_noop_tool () in
     let base_config =
-      Cascade_runner.default_config
+      Keeper_runner.default_config
         ~name:"oas-worker-exit-condition"
         ~provider_cfg:
           (Llm_provider.Provider_config.make
@@ -4982,17 +4982,17 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
       ; exit_condition_result =
           Some
             (fun turn ->
-              ( Cascade_runner.MutationBoundaryReached
+              ( Keeper_runner.MutationBoundaryReached
                   { turns_used = turn; tool_name = Some "tool_search_files" }
               , Some "[mutation boundary reached after committed tool: tool_search_files]" ))
       }
     in
-    match Cascade_runner.run ~sw ~net:(require_test_net ()) ~config "say hello" with
+    match Keeper_runner.run ~sw ~net:(require_test_net ()) ~config "say hello" with
     | Ok result ->
       Alcotest.(check int) "turn count preserved" 1 result.turns;
       Alcotest.(check bool) "checkpoint present" true (Option.is_some result.checkpoint);
       (match result.stop_reason with
-       | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
+       | Keeper_runner.MutationBoundaryReached { turns_used; tool_name } ->
          Alcotest.(check int) "boundary turn count" 1 turns_used;
          Alcotest.(check (option string)) "boundary tool" (Some "tool_search_files") tool_name
        | _ -> Alcotest.fail "expected mutation boundary stop reason");
@@ -5774,15 +5774,15 @@ let test_run_named_circuit_breaker_skips_open_provider () =
   let primary_key = "cb_open_primary" in
   let fallback_key = "cb_healthy_fallback" in
   (* 1. Seed the global health tracker: 3 consecutive failures → OPEN. *)
-  Cascade_health_tracker.(
+  Keeper_health_tracker.(
     record_failure global ~provider_key:primary_key ();
     record_failure global ~provider_key:primary_key ();
     record_failure global ~provider_key:primary_key ());
   Alcotest.(check bool)
     "pre-condition: primary is in cooldown after 3 failures"
     true
-    (Cascade_health_tracker.is_in_cooldown
-       Cascade_health_tracker.global
+    (Keeper_health_tracker.is_in_cooldown
+       Keeper_health_tracker.global
        ~provider_key:primary_key);
   try
     Eio.Switch.run
@@ -5832,19 +5832,19 @@ let test_run_named_circuit_breaker_skips_open_provider () =
       Alcotest.(check bool)
         "primary remains OPEN (zero requests spent on open provider)"
         true
-        (Cascade_health_tracker.is_in_cooldown
-           Cascade_health_tracker.global
+        (Keeper_health_tracker.is_in_cooldown
+           Keeper_health_tracker.global
            ~provider_key:primary_key);
       (* 7. Fallback provider has a recorded success in the tracker. *)
       Alcotest.(check bool)
         "fallback is not in cooldown after success"
         false
-        (Cascade_health_tracker.is_in_cooldown
-           Cascade_health_tracker.global
+        (Keeper_health_tracker.is_in_cooldown
+           Keeper_health_tracker.global
            ~provider_key:fallback_key);
       let rate =
-        Cascade_health_tracker.success_rate
-          Cascade_health_tracker.global
+        Keeper_health_tracker.success_rate
+          Keeper_health_tracker.global
           ~provider_key:fallback_key
       in
       Alcotest.(check bool) "fallback success_rate > 0 after run_named" true (rate > 0.0);
@@ -5898,7 +5898,7 @@ let () =
   Eio_guard.enable ();
   Eio.Switch.run
   @@ fun sw ->
-  Masc_mcp.Cascade_observation.start_actor_if_needed ~sw;
+  Masc_mcp.Keeper_observation.start_actor_if_needed ~sw;
   Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.run
     "OAS Worker"

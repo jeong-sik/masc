@@ -97,11 +97,11 @@ let order_weighted_entries
   in
   if not has_weights then entries
   else
-    let health = Cascade_health_tracker.global in
+    let health = Keeper_health_tracker.global in
     let health_adjusted = List.map
         (fun (e : Keeper_config_loader.weighted_entry) ->
            let provider_key = provider_key_of_model_string e.model in
-           let ew = Cascade_health_tracker.effective_weight health
+           let ew = Keeper_health_tracker.effective_weight health
                ~provider_key ~config_weight:e.weight in
            { e with weight = ew })
         entries
@@ -158,20 +158,20 @@ let runtime_kind_of_provider_name provider_name =
     Reads current health tracker state for [success_rate] / [in_cooldown]
     / [effective_weight], so the trace reflects state at call time. *)
 let candidate_info_of_weighted (e : Keeper_config_loader.weighted_entry) =
-  let health = Cascade_health_tracker.global in
+  let health = Keeper_health_tracker.global in
   let expanded_raw_models = Parser.expand_auto_model_string e.model in
   let provider_keys = List.map provider_key_of_model_string expanded_raw_models in
   let health_rows =
     List.map
       (fun provider_key ->
          let success_rate =
-           Cascade_health_tracker.success_rate health ~provider_key
+           Keeper_health_tracker.success_rate health ~provider_key
          in
          let in_cooldown =
-           Cascade_health_tracker.is_in_cooldown health ~provider_key
+           Keeper_health_tracker.is_in_cooldown health ~provider_key
          in
          let effective_weight =
-           Cascade_health_tracker.effective_weight health
+           Keeper_health_tracker.effective_weight health
              ~provider_key ~config_weight:e.weight
          in
          (success_rate, in_cooldown, effective_weight))

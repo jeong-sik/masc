@@ -33,3 +33,8 @@ val get_default_runtime_id : unit -> string
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a
     recoverable condition. Callers must invoke this at runtime, never as a
     module-level [let] binding (would crash config-less test binaries). *)
+
+val config_path : unit -> string option
+(** Path to the runtime config TOML, or [None] if unresolved. Re-homed from
+    deleted [Cascade_runtime.cascade_config_path] (delegates to
+    [Config_dir_resolver]). *)

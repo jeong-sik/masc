@@ -238,7 +238,7 @@ type try_cascade_ctx =
   ; (* RFC-0192 §2: turn-level absolute deadline. Composed with per-attempt
        amplifier in [pp_timeout] so a candidate never receives more wall-clock
        budget than remains in the turn. [None] = no turn deadline. *)
-    turn_deadline : Cascade_deadline.t option
+    turn_deadline : Keeper_deadline.t option
   }
 
 (* Manifest ID helpers — pure functions taking manifest context. *)
@@ -660,7 +660,7 @@ let rec run
           (match Eio_context.get_clock_opt () with
            | Some clock ->
                let budget =
-                 Cascade_deadline.composed_attempt_budget ~clock ~deadline ~amplifier
+                 Keeper_deadline.composed_attempt_budget ~clock ~deadline ~amplifier
                in
                if budget > 0.0 then Some budget else Some 0.1
            | None -> timeout_resolution.timeout_s)
@@ -813,7 +813,7 @@ let rec run
            [min(amplifier, deadline - now)]) is deliberately left to a
            follow-up PR: [try_cascade_ctx] currently carries only
            [wait_timeout_sec] which is the admission-wait budget, not a
-           turn-level deadline. Threading a real [Cascade_deadline.t]
+           turn-level deadline. Threading a real [Keeper_deadline.t]
            into this ctx is its own surgical change. *)
         let attempt_call () =
           try_provider ctx

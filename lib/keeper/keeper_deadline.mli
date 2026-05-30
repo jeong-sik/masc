@@ -1,12 +1,9 @@
-(** Cascade per-attempt deadline value carrying a wall-clock time horizon.
+(** Per-attempt deadline value carrying a wall-clock time horizon.
 
     RFC-0192 § 2 invariant carrier:
     [effective_attempt_budget(i) = min(default_amplifier, deadline - now())]
 
-    PR-1 establishes the type and math helpers; PR-2 wires it into
-    [Cascade_tier_wait_scheduler.try_admission_or_wait]; PR-3 has
-    [Keeper_agent_run] compute it from [admission_wait_timeout_sec] and
-    thread through the keeper turn driver chain.
+    Moved from [Cascade_deadline] to decouple from cascade module surface.
 
     The pure {!remaining_at} / {!composed_attempt_budget_at} variants take
     an explicit [now_s] so the math is unit-testable without an Eio runtime.

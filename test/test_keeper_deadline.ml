@@ -1,4 +1,4 @@
-(** Unit tests for [Cascade_deadline] (RFC-0192 PR-1).
+(** Unit tests for [Keeper_deadline] (RFC-0192).
 
     Pure math tests use the [_at] variants with explicit [now_s] so no
     Eio runtime is required. The clock-bearing wrappers are exercised by
@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module D = Masc_mcp.Cascade_deadline
+module D = Masc_mcp.Keeper_deadline
 
 let test_remaining_at_future () =
   let d = D.create ~expires_at_s:100.0 in
@@ -56,7 +56,7 @@ let test_expires_at_roundtrips () =
   check (float 1e-9) "expires_at preserved" 1779864000.5 (D.expires_at d)
 
 let () =
-  run "cascade_deadline"
+  run "keeper_deadline"
     [
       ( "pure math (RFC-0192 § 2 invariant)",
         [

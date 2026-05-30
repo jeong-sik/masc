@@ -2,7 +2,7 @@
 
     Extracted from [cascade_config.ml]. *)
 
-module Binding = Cascade_config_provider_binding
+module Binding = Keeper_config_provider_binding
 module Parser = Cascade_config_parser
 module Selection = Cascade_config_selection
 module Runtime_binding = Binding.Runtime_binding

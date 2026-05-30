@@ -17,14 +17,14 @@ let unknown_runtime_label = "unknown_provider"
 
 
 let runtime_binding_of_label =
-  Cascade_config_provider_binding.runtime_binding_of_label
+  Keeper_config_provider_binding.runtime_binding_of_label
 
 let binding_is_local_runtime (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
   | Runtime_binding.Cli -> false
   | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_provider_d_compat ->
-      Cascade_config_provider_binding.binding_auth_is_no_auth binding
-      && Cascade_config_provider_binding.binding_base_url_is_loopback binding
+      Keeper_config_provider_binding.binding_auth_is_no_auth binding
+      && Keeper_config_provider_binding.binding_base_url_is_loopback binding
 
 let local_runtime_provider_id () =
   Runtime_binding.all ()

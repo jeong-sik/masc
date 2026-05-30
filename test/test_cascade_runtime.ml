@@ -79,11 +79,11 @@ let test_custom_urls_use_endpoint_scoped_health_keys () =
   with
   | Some first_cfg, Some second_cfg ->
     let binding_first =
-      Masc_mcp.Cascade_config_provider_binding.provider_health_key_of_config
+      Masc_mcp.Keeper_config_provider_binding.provider_health_key_of_config
         first_cfg
     in
     let binding_second =
-      Masc_mcp.Cascade_config_provider_binding.provider_health_key_of_config
+      Masc_mcp.Keeper_config_provider_binding.provider_health_key_of_config
         second_cfg
     in
     let runtime_keys =

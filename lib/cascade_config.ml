@@ -2,7 +2,7 @@
 
 include Cascade_model_resolve
 include Keeper_config_loader
-include Cascade_config_provider_binding
+include Keeper_config_provider_binding
 include Cascade_config_parser
 include Cascade_config_selection
 include Cascade_config_resolve

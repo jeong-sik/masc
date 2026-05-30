@@ -4,7 +4,7 @@
     re-exports every public binding so external callers keep their
     existing API. *)
 
-module Binding = Cascade_config_provider_binding
+module Binding = Keeper_config_provider_binding
 module Runtime_binding = Binding.Runtime_binding
 
 let default_registry = Llm_provider.Provider_registry.default ()

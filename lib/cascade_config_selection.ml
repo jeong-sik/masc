@@ -3,7 +3,7 @@
 
     Extracted from [cascade_config.ml]. *)
 
-module Binding = Cascade_config_provider_binding
+module Binding = Keeper_config_provider_binding
 module Parser = Cascade_config_parser
 
 (** Weighted shuffle: pick first element by weighted random, then order

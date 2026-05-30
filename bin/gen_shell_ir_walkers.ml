@@ -1275,6 +1275,14 @@ let rec parse message amend = function
      | None -> parse (Some m) amend rest
      | Some _ -> None)
   | "--" :: rest -> parse message amend rest
+  (* --message=MSG eq-form *)
+  | arg :: rest
+    when String.length arg > 10
+         && String.sub arg 0 10 = "--message=" ->
+    let m = String.sub arg 10 (String.length arg - 10) in
+    (match message with
+     | None -> parse (Some m) amend rest
+     | Some _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse message amend rest
@@ -1616,6 +1624,12 @@ let rec parse reverse numeric unique key file = function
       let n' = numeric || String.contains arg 'n' in
       let u' = unique || String.contains arg 'u' in
       parse r' n' u' key file rest)
+    else if String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+    then (
+      (* eq-form: --field-separator=SEP *)
+      match Shell_ir_typed_types.eq_form_flag_value arg [ "--field-separator" ] with
+      | Some _sep -> parse reverse numeric unique key file rest
+      | None -> parse reverse numeric unique key file rest)
     else if String.length arg > 0 && arg.[0] = '-'
     then parse reverse numeric unique key file rest
     else (
@@ -2905,13 +2919,19 @@ parse None `None None [] args|}
     }
   ; { name = "Make"
     ; anon_pattern = "Make _"
-    ; bind_pattern = "Make { target; jobs }"
+    ; bind_pattern = "Make { target; jobs; directory; makefile; dry_run; keep_going; silent; always_make }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
       let args =
-        (match jobs with None -> [] | Some j -> [ "-j"; string_of_int j ])
+        (match directory with None -> [] | Some d -> [ "-C"; d ])
+        @ (match makefile with None -> [] | Some f -> [ "-f"; f ])
+        @ (if dry_run then [ "-n" ] else [])
+        @ (if keep_going then [ "-k" ] else [])
+        @ (if silent then [ "-s" ] else [])
+        @ (if always_make then [ "-B" ] else [])
+        @ (match jobs with None -> [] | Some j -> [ "-j"; string_of_int j ])
         @ (match target with None -> [] | Some t -> [ t ])
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Make
@@ -2925,24 +2945,34 @@ parse None `None None [] args|}
     ; parse_body =
         Some
           {|
-let rec parse jobs target dd = function
+let is_eq_form_flag arg flag =
+  let len = String.length arg in
+  let flen = String.length flag in
+  len > flen + 1 && String.sub arg 0 (flen + 1) = flag ^ "="
+in
+let eq_form_flag_value arg flag =
+  let flen = String.length flag in
+  if is_eq_form_flag arg flag
+  then Some (String.sub arg (flen + 1) (String.length arg - flen - 1))
+  else None
+in
+let rec parse jobs target directory makefile dry_run keep_going silent always_make dd = function
   | [] ->
-    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Make { target; jobs }))
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Make
+      { target; jobs; directory; makefile; dry_run; keep_going; silent; always_make }))
+  (* -j N / --jobs N *)
   | "-j" :: n :: rest when not dd ->
     (match int_of_string_opt n with
-     | Some j -> parse (Some j) target dd rest
+     | Some j -> parse (Some j) target directory makefile dry_run keep_going silent always_make dd rest
      | None -> None)
   | "--jobs" :: n :: rest when not dd ->
     (match int_of_string_opt n with
-     | Some j -> parse (Some j) target dd rest
+     | Some j -> parse (Some j) target directory makefile dry_run keep_going silent always_make dd rest
      | None -> None)
-  | arg :: rest
-    when not dd
-         && String.length arg > 7
-         && String.sub arg 0 7 = "--jobs=" ->
-    let n = String.sub arg 7 (String.length arg - 7) in
-    (match int_of_string_opt n with
-     | Some j -> parse (Some j) target dd rest
+  (* --jobs=N *)
+  | arg :: rest when not dd && is_eq_form_flag arg "--jobs" ->
+    (match int_of_string_opt (Option.get (eq_form_flag_value arg "--jobs")) with
+     | Some j -> parse (Some j) target directory makefile dry_run keep_going silent always_make dd rest
      | None -> None)
   (* Combined form: -j4 → jobs = Some 4 *)
   | arg :: rest
@@ -2954,18 +2984,62 @@ let rec parse jobs target dd = function
          && String.for_all (fun c -> c >= '0' && c <= '9')
               (String.sub arg 2 (String.length arg - 2)) ->
     let j = int_of_string (String.sub arg 2 (String.length arg - 2)) in
-    parse (Some j) target dd rest
+    parse (Some j) target directory makefile dry_run keep_going silent always_make dd rest
+  (* -C DIR / --directory DIR / --directory=DIR *)
+  | "-C" :: d :: rest when not dd ->
+    parse jobs target (Some d) makefile dry_run keep_going silent always_make dd rest
+  | "--directory" :: d :: rest when not dd ->
+    parse jobs target (Some d) makefile dry_run keep_going silent always_make dd rest
+  | arg :: rest when not dd && is_eq_form_flag arg "--directory" ->
+    let d = Option.get (eq_form_flag_value arg "--directory") in
+    parse jobs target (Some d) makefile dry_run keep_going silent always_make dd rest
+  (* -f FILE / --file FILE / --file=FILE / --makefile FILE / --makefile=FILE *)
+  | "-f" :: f :: rest when not dd ->
+    parse jobs target directory (Some f) dry_run keep_going silent always_make dd rest
+  | "--file" :: f :: rest when not dd ->
+    parse jobs target directory (Some f) dry_run keep_going silent always_make dd rest
+  | arg :: rest when not dd && is_eq_form_flag arg "--file" ->
+    let f = Option.get (eq_form_flag_value arg "--file") in
+    parse jobs target directory (Some f) dry_run keep_going silent always_make dd rest
+  | "--makefile" :: f :: rest when not dd ->
+    parse jobs target directory (Some f) dry_run keep_going silent always_make dd rest
+  | arg :: rest when not dd && is_eq_form_flag arg "--makefile" ->
+    let f = Option.get (eq_form_flag_value arg "--makefile") in
+    parse jobs target directory (Some f) dry_run keep_going silent always_make dd rest
+  (* -n / --dry-run *)
+  | "-n" :: rest when not dd ->
+    parse jobs target directory makefile true keep_going silent always_make dd rest
+  | "--dry-run" :: rest when not dd ->
+    parse jobs target directory makefile true keep_going silent always_make dd rest
+  (* -k / --keep-going *)
+  | "-k" :: rest when not dd ->
+    parse jobs target directory makefile dry_run true silent always_make dd rest
+  | "--keep-going" :: rest when not dd ->
+    parse jobs target directory makefile dry_run true silent always_make dd rest
+  (* -s / --silent / --quiet *)
+  | "-s" :: rest when not dd ->
+    parse jobs target directory makefile dry_run keep_going true always_make dd rest
+  | "--silent" :: rest when not dd ->
+    parse jobs target directory makefile dry_run keep_going true always_make dd rest
+  | "--quiet" :: rest when not dd ->
+    parse jobs target directory makefile dry_run keep_going true always_make dd rest
+  (* -B / --always-make *)
+  | "-B" :: rest when not dd ->
+    parse jobs target directory makefile dry_run keep_going silent true dd rest
+  | "--always-make" :: rest when not dd ->
+    parse jobs target directory makefile dry_run keep_going silent true dd rest
   (* POSIX end-of-options: skip --, remaining args are positional *)
-  | "--" :: rest -> parse jobs target true rest
+  | "--" :: rest ->
+    parse jobs target directory makefile dry_run keep_going silent always_make true rest
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
-    then parse jobs target dd rest
+    then parse jobs target directory makefile dry_run keep_going silent always_make dd rest
     else (
       match target with
-      | None -> parse jobs (Some arg) dd rest
+      | None -> parse jobs (Some arg) directory makefile dry_run keep_going silent always_make dd rest
       | Some _ -> None)
 in
-parse None None false args|}
+parse None None None None false false false false false args|}
     ; no_expand_combined = false
     }
   ; { name = "Diff"

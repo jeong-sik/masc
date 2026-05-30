@@ -70,7 +70,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Ssh { host = "x"; user = None; command = None; port = None; identity_file = None })
   ; W (Scp { source = "a"; dest = "b"; recursive = false; port = None })
   ; W (Tar { action = `Create; archive = "x.tar"; paths = []; compression = `None })
-  ; W (Make { target = None; jobs = None })
+  ; W (Make { target = None; jobs = None; directory = None; makefile = None; dry_run = false; keep_going = false; silent = false; always_make = false })
   ; W (Diff { file1 = "a"; file2 = "b"; unified = false; brief = false })
   ; W (Sed { expression = "s/x/y/"; file = "/tmp/x"; in_place = false; extended_regex = false; suppress_output = false })
   ; W (Rsync { source = "/tmp/a"; dest = "/tmp/b"; archive = false; delete = false; dry_run = false; compress = false; flags = [ "-avz" ] })
@@ -270,7 +270,8 @@ let test_of_simple_round_trip () =
     ; W (Ssh { host = "server"; user = Some "root"; command = Some "uptime"; port = Some 2222; identity_file = Some "id_rsa" })
     ; W (Scp { source = "/tmp/a"; dest = "server:/tmp/b"; recursive = true; port = Some 2222 })
     ; W (Tar { action = `Extract; archive = "x.tar.gz"; paths = [ "a"; "b" ]; compression = `Gzip })
-    ; W (Make { target = Some "install"; jobs = Some 4 })
+    ; W (Make { target = Some "install"; jobs = Some 4; directory = None; makefile = None; dry_run = false; keep_going = false; silent = false; always_make = false })
+    ; W (Make { target = Some "all"; jobs = Some 8; directory = Some "/build"; makefile = Some "Makefile.prod"; dry_run = true; keep_going = true; silent = true; always_make = true })
     ; W (Diff { file1 = "old.ml"; file2 = "new.ml"; unified = true; brief = true })
     ; W (Sed { expression = "s/foo/bar/g"; file = "input.txt"; in_place = true; extended_regex = true; suppress_output = true })
     ; W (Rsync { source = "src/"; dest = "dest/"; archive = true; delete = true; dry_run = false; compress = true; flags = [ "-v" ] })
@@ -1198,6 +1199,34 @@ let test_jobs_equals_form () =
   (match make2 with
    | W (Make { target = Some "test"; jobs = Some 4; _ }) -> ()
    | w -> Alcotest.failf "Make --jobs 4: expected jobs=4, got %a" pp w);
+  (* Make: -C /builddir -f Makefile.prod -n -k -s -B install *)
+  let make_all =
+    of_simple { (base "make") with args =
+      [ lit "-C"; lit "/builddir"; lit "-f"; lit "Makefile.prod"
+      ; lit "-n"; lit "-k"; lit "-s"; lit "-B"; lit "install" ] }
+  in
+  (match make_all with
+   | W (Make { target = Some "install"; directory = Some "/builddir"; makefile = Some "Makefile.prod"
+             ; dry_run = true; keep_going = true; silent = true; always_make = true; _ }) -> ()
+   | w -> Alcotest.failf "Make -C -f -n -k -s -B: expected all flags, got %a" pp w);
+  (* Make: --directory=/src --makefile=custom.mk --dry-run --keep-going --silent --always-make target *)
+  let make_long =
+    of_simple { (base "make") with args =
+      [ lit "--directory=/src"; lit "--makefile=custom.mk"
+      ; lit "--dry-run"; lit "--keep-going"; lit "--silent"; lit "--always-make"; lit "target" ] }
+  in
+  (match make_long with
+   | W (Make { target = Some "target"; directory = Some "/src"; makefile = Some "custom.mk"
+             ; dry_run = true; keep_going = true; silent = true; always_make = true; _ }) -> ()
+   | w -> Alcotest.failf "Make --directory= --makefile= --dry-run --keep-going --silent --always-make: expected all flags, got %a" pp w);
+  (* Make: --directory /src --makefile custom.mk --quiet *)
+  let make_quiet =
+    of_simple { (base "make") with args =
+      [ lit "--directory"; lit "/src"; lit "--makefile"; lit "custom.mk"; lit "--quiet" ] }
+  in
+  (match make_quiet with
+   | W (Make { directory = Some "/src"; makefile = Some "custom.mk"; silent = true; _ }) -> ()
+   | w -> Alcotest.failf "Make --directory --makefile --quiet: expected flags, got %a" pp w);
   (* Ninja: --jobs=16 subcommand *)
   let ninja =
     of_simple { (base "ninja") with args = [ lit "--jobs=16"; lit "build" ] }
@@ -2854,7 +2883,6 @@ let test_eq_form_value_consuming_flags () =
    | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
    | w -> Alcotest.failf "Sed --expression/--file eq-form: expected expression=script.sed, file=input.txt, got %a" pp w)
 ;;
-
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"

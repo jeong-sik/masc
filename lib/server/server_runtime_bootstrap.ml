@@ -435,7 +435,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          (match Runtime.init_default ~config_path with
           | Ok () ->
             Log.Server.info "Runtime default initialized: %s"
-              (Runtime.get_default_runtime_id ())
+              (Runtime.get_default_cascade_name ())
           | Error msg ->
             Log.Server.error
               "Runtime.init_default failed (fatal, refusing to boot): %s" msg;

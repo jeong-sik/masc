@@ -22,7 +22,7 @@ let one_day_seconds_int = Masc_time_constants.day_int
    넷 다 default_cascade_name () 으로 수렴하는 죽은 구분이었다. 단일 함수로
    collapse 하고, eager 모듈-레벨 baking(module-init 시점 미초기화 싱글톤 읽기)
    도 함께 제거한다. *)
-let default_cascade_name () = Runtime.get_default_runtime_id ()
+let default_cascade_name () = Runtime.get_default_cascade_name ()
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward

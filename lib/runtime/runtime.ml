@@ -88,4 +88,8 @@ let get_default_runtime_id () =
   match !default_runtime_ref with
   | Some rt -> rt.id
   | None -> "tool_strict"
+
+(** Cascade name is always "tool_strict" — the cascade indirection layer is nuked.
+    All keepers and routing resolve directly through Runtime.get_default_runtime. *)
+let get_default_cascade_name () = "tool_strict"
 ;;

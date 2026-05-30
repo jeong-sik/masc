@@ -215,7 +215,7 @@ let compute_judgments
     ~facts_json =
   let prompt = prompt_for_facts facts_json in
   let cascade_name =
-    Runtime.get_default_runtime_id ()
+    Runtime.get_default_cascade_name ()
   in
   match
     (* #9629: caller uses run_with_caller so this judge inherits
@@ -258,7 +258,7 @@ let compute_judgments
 
 let should_backoff ~sw ~net =
   let cascade_name =
-    Runtime.get_default_runtime_id ()
+    Runtime.get_default_cascade_name ()
   in
   try
     let capacity =

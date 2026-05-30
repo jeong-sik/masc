@@ -610,7 +610,7 @@ type keeper_meta =
   }
 
 let cascade_name_of_meta (_m : keeper_meta) : string =
-  Runtime.get_default_runtime_id ()
+  Runtime.get_default_cascade_name ()
 ;;
 
 

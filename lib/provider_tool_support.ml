@@ -154,11 +154,7 @@ let declarative_tool_policy_for_provider_ids provider_ids =
 ;;
 
 let binding_supports_runtime_mcp_http_headers (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.transport with
-  | Runtime_binding.Cli -> binding.Runtime_binding.capabilities.supports_tools
-  | Runtime_binding.Http
-  | Runtime_binding.Managed
-  | Runtime_binding.Custom_provider_d_compat -> false
+  binding.Runtime_binding.capabilities.supports_tools
 ;;
 
 let fallback_tool_policy_for_config (provider_cfg : Llm_provider.Provider_config.t) =

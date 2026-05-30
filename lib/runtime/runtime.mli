@@ -27,3 +27,4 @@ val load_list : config_path:string -> (t list * t, string) result
 val init_default : config_path:string -> (unit, string) result
 val get_default_runtime : unit -> t option
 val get_default_runtime_id : unit -> string
+val get_default_cascade_name : unit -> string

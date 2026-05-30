@@ -536,7 +536,7 @@ let required_tool_rotation_candidate
 
 let tool_required_rotation_cascade_name () =
   try
-    Runtime.get_default_runtime_id ()
+    Runtime.get_default_cascade_name ()
   with Failure _ -> (Keeper_config.default_cascade_name ())
 
 let default_degraded_rotation_candidates
@@ -552,7 +552,7 @@ let default_degraded_rotation_candidates
   in
   let phase_recovery_cascade =
     normalized_cascade_name ~catalog_names
-      (Runtime.get_default_runtime_id ())
+      (Runtime.get_default_cascade_name ())
   in
   match tool_requirement with
   | Required -> [ normalized_base; tool_required_cascade ]

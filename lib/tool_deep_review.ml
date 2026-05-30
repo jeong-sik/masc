@@ -152,7 +152,7 @@ let handle_deep_review
           (`Assoc [ ("error", `String msg) ])
     | Ok prompt ->
         let cascade_name =
-          Runtime.get_default_runtime_id ()
+          Runtime.get_default_cascade_name ()
         in
         match
           Masc_oas_bridge.run_with_caller

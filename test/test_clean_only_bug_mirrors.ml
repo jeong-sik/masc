@@ -116,7 +116,7 @@ let test_bug_derive_phase_mismatch_caught () =
    4. KeeperTurnCycle / BugSelectingWithoutToolPolicy
    ============================================================ *)
 
-type cascade_state_tc =
+type route_phase_tc =
   | Cs_idle
   | Cs_selecting
   | Cs_trying
@@ -137,16 +137,16 @@ type decision_stage_tc =
   | Ds_tool_policy_selected
 
 (* TLA+ SelectingRequiresToolPolicy ==
-     cascade_state = "selecting" =>
+     route_phase = "selecting" =>
        turn_live /\ turn_phase = "prompting"
        /\ decision_stage = "tool_policy_selected" *)
 let check_selecting_requires_tool_policy
-    ~(cascade_state : cascade_state_tc)
+    ~(route_phase : route_phase_tc)
     ~(turn_live : bool)
     ~(turn_phase : turn_phase_tc)
     ~(decision_stage : decision_stage_tc)
   =
-  match cascade_state with
+  match route_phase with
   | Cs_selecting ->
     turn_live && turn_phase = Tp_prompting && decision_stage = Ds_tool_policy_selected
   | _ -> true
@@ -155,7 +155,7 @@ let check_selecting_requires_tool_policy
 let test_bug_selecting_without_tool_policy_caught () =
   let invariant_holds =
     check_selecting_requires_tool_policy
-      ~cascade_state:Cs_selecting
+      ~route_phase:Cs_selecting
       ~turn_live:true
       ~turn_phase:Tp_prompting
       ~decision_stage:Ds_guard_ok
@@ -212,7 +212,7 @@ let test_clean_holds_selecting_with_tool_policy () =
     "Selecting with tool_policy is fine"
     true
     (check_selecting_requires_tool_policy
-       ~cascade_state:Cs_selecting
+       ~route_phase:Cs_selecting
        ~turn_live:true
        ~turn_phase:Tp_prompting
        ~decision_stage:Ds_tool_policy_selected);
@@ -220,7 +220,7 @@ let test_clean_holds_selecting_with_tool_policy () =
     "Idle cascade unconditional"
     true
     (check_selecting_requires_tool_policy
-       ~cascade_state:Cs_idle
+       ~route_phase:Cs_idle
        ~turn_live:false
        ~turn_phase:Tp_idle
        ~decision_stage:Ds_undecided)

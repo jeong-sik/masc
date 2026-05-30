@@ -17,16 +17,16 @@ open Kmc
     added to the type, append it here — the compiler will refuse to build if
     the match in [to_string] / [of_serialized_string] is incomplete. *)
 let all_variants : blocker_class list =
-  [ Cascade_exhausted (No_tool_capable None)
-  ; Cascade_exhausted (Other_detail "test")
-  ; Cascade_exhausted Connection_refused
-  ; Cascade_exhausted Dns_failure
-  ; Cascade_exhausted No_providers_available
-  ; Cascade_exhausted All_providers_failed
-  ; Cascade_exhausted Candidates_filtered_after_cycles
-  ; Cascade_exhausted Max_turns_exceeded
-  ; Cascade_exhausted (Structural_attempt_timeout { detail = "30" })
-  ; Cascade_exhausted Capacity_exhausted
+  [ Route_exhausted (No_tool_capable None)
+  ; Route_exhausted (Other_detail "test")
+  ; Route_exhausted Connection_refused
+  ; Route_exhausted Dns_failure
+  ; Route_exhausted No_providers_available
+  ; Route_exhausted All_providers_failed
+  ; Route_exhausted Candidates_filtered_after_cycles
+  ; Route_exhausted Max_turns_exceeded
+  ; Route_exhausted (Structural_attempt_timeout { detail = "30" })
+  ; Route_exhausted Capacity_exhausted
   ; Capacity_backpressure
   ; Ambiguous_post_commit_timeout
   ; Ambiguous_post_commit_failure
@@ -67,7 +67,7 @@ let test_roundtrip () =
             "blocker_class_of_serialized_string returned None for %S (from variant)"
             s
         | Some result ->
-          (* Cascade_exhausted with non-No_tool_capable payloads all collapse
+          (* Route_exhausted with non-No_tool_capable payloads all collapse
              to [Other_detail] on deserialization — that is the expected
              lossy round-trip.  Only [No_tool_capable] must be exact. *)
           let s' = blocker_class_to_string result in
@@ -78,29 +78,29 @@ let test_roundtrip () =
 (* ── No_tool_capable specific test ─────────────────────────────── *)
 
 let test_no_tool_capable_mapping () =
-  let s = blocker_class_to_string (Cascade_exhausted (No_tool_capable None)) in
-  check string "No_tool_capable serializes correctly" "cascade_exhausted_no_tool_capable" s;
-  match blocker_class_of_serialized_string "cascade_exhausted_no_tool_capable" with
-  | None -> fail "deserialization of cascade_exhausted_no_tool_capable returned None"
-  | Some (Cascade_exhausted (No_tool_capable None)) -> ()
+  let s = blocker_class_to_string (Route_exhausted (No_tool_capable None)) in
+  check string "No_tool_capable serializes correctly" "route_exhausted_no_tool_capable" s;
+  match blocker_class_of_serialized_string "route_exhausted_no_tool_capable" with
+  | None -> fail "deserialization of route_exhausted_no_tool_capable returned None"
+  | Some (Route_exhausted (No_tool_capable None)) -> ()
   | Some other ->
     let s' = blocker_class_to_string other in
-    failf "expected Cascade_exhausted No_tool_capable, got %S" s'
+    failf "expected Route_exhausted No_tool_capable, got %S" s'
 ;;
 
 (* ── Uniqueness test ───────────────────────────────────────────── *)
 
-(** [Cascade_exhausted] sub-variants (except [No_tool_capable]) all collapse to
-    the same ["cascade_exhausted"] string — this is the intended lossy design.
+(** [Route_exhausted] sub-variants (except [No_tool_capable]) all collapse to
+    the same ["route_exhausted"] string — this is the intended lossy design.
     We test uniqueness on the *canonical* strings (one per top-level variant). *)
 let test_string_uniqueness () =
   let strings = List.map blocker_class_to_string all_variants in
   let rec check_unique seen = function
     | [] -> ()
     | s :: rest ->
-      (* "cascade_exhausted" appears for every Cascade_exhausted sub-variant
+      (* "route_exhausted" appears for every Route_exhausted sub-variant
          except No_tool_capable — skip duplicates of that specific string. *)
-      if s = "cascade_exhausted" then check_unique seen rest
+      if s = "route_exhausted" then check_unique seen rest
       else if List.mem s seen
       then failf "duplicate blocker_class string: %S" s
       else check_unique (s :: seen) rest

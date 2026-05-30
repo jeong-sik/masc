@@ -170,7 +170,7 @@ type cascade_exhaustion_reason =
   | Other_detail of string
 
 type blocker_class =
-  | Cascade_exhausted of cascade_exhaustion_reason
+  | Route_exhausted of cascade_exhaustion_reason
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
@@ -222,9 +222,9 @@ val cascade_exhaustion_reason_of_json :
 val blocker_class_of_serialized_string :
   string -> blocker_class option
 (** [blocker_class_of_serialized_string label] is the inverse
-    of {!blocker_class_to_string}.  [Cascade_exhausted _]
-    maps from the bare ["cascade_exhausted"] string to
-    [Cascade_exhausted (Other_detail "cascade_exhausted")] —
+    of {!blocker_class_to_string}.  [Route_exhausted _]
+    maps from the bare ["route_exhausted"] string to
+    [Route_exhausted (Other_detail "route_exhausted")] —
     the reason payload is not round-trippable through this
     function alone (callers needing the reason use
     {!cascade_exhaustion_reason_of_json}).  Used by
@@ -250,7 +250,7 @@ val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
     for [klass].  [detail] defaults to [""]. *)
 
 val blocker_info_to_json : blocker_info -> Yojson.Safe.t
-(** Round-trippable JSON encoding.  [Cascade_exhausted reason] uses
+(** Round-trippable JSON encoding.  [Route_exhausted reason] uses
     a structured object so the inner [cascade_exhaustion_reason] is
     preserved across read/write cycles. *)
 

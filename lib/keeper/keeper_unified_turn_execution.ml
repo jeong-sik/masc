@@ -233,7 +233,7 @@ let run (ctx : ctx)
     let mark_terminal_error err =
       match EC.extract_input_required err with
       | Some ir ->
-        Keeper_registry.mark_turn_cascade_done
+        Keeper_registry.mark_turn_route_done
           ~base_path:config.base_path
           meta.name;
         Log.Keeper.info
@@ -348,7 +348,7 @@ let run (ctx : ctx)
         ~base_path:config.base_path
         meta.name
         selected_model;
-      Keeper_registry.mark_turn_cascade_done
+      Keeper_registry.mark_turn_route_done
         ~base_path:config.base_path
         meta.name;
       Ok result

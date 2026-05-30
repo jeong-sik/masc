@@ -77,7 +77,7 @@ and turn_observation =
   ; last_progress_kind : string option
   ; turn_phase : packed_turn_phase
   ; decision_stage : packed_decision_stage
-  ; cascade_state : packed_cascade_state
+  ; route_phase : packed_route_phase
   ; measurement : turn_measurement option
   ; measurement_bind_count : int
   ; selected_model : string option
@@ -88,7 +88,7 @@ and completed_turn_observation =
   ; ct_started_at : float
   ; ct_ended_at : float
   ; ct_decision_stage : packed_decision_stage
-  ; ct_cascade_state : packed_cascade_state
+  ; ct_route_phase : packed_route_phase
   ; ct_selected_model : string option
   }
 
@@ -109,13 +109,13 @@ let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 ;;
 
-let turn_phase_of_cascade_state (s : packed_cascade_state) : packed_turn_phase =
+let turn_phase_of_route_phase (s : packed_route_phase) : packed_turn_phase =
   match s with
-  | Packed Cascade_idle -> Packed Turn_prompting
-  | Packed Cascade_selecting -> Packed Turn_routing
-  | Packed Cascade_trying -> Packed Turn_executing
-  | Packed Cascade_done -> Packed Turn_finalizing
-  | Packed Cascade_exhausted -> Packed Turn_exhausted
+  | Packed Route_idle -> Packed Turn_prompting
+  | Packed Route_selecting -> Packed Turn_routing
+  | Packed Route_trying -> Packed Turn_executing
+  | Packed Route_done -> Packed Turn_finalizing
+  | Packed Route_exhausted -> Packed Turn_exhausted
 ;;
 
 let completed_turn_outcome_of_observation (obs : turn_observation)
@@ -123,18 +123,18 @@ let completed_turn_outcome_of_observation (obs : turn_observation)
   =
   (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
      meant that adding a new variant to either ADT (decision_stage or
-     cascade_state) would silently fall through to Turn_failed without
+     route_phase) would silently fall through to Turn_failed without
      a compile error.  Spelling out every variant lets the OCaml
      exhaustiveness checker catch missing cases at build time. *)
   match obs.decision_stage with
   | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
   | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
-    (match obs.cascade_state with
-     | Packed Cascade_done -> Keeper_transition_audit.Turn_substantive
-     | Packed Cascade_idle
-     | Packed Cascade_selecting
-     | Packed Cascade_trying
-     | Packed Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
+    (match obs.route_phase with
+     | Packed Route_done -> Keeper_transition_audit.Turn_substantive
+     | Packed Route_idle
+     | Packed Route_selecting
+     | Packed Route_trying
+     | Packed Route_exhausted -> Keeper_transition_audit.Turn_failed)
 ;;
 
 (* RFC-0002 Event Dispatch — lifecycle_event_origin type + pure helpers. *)

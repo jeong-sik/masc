@@ -80,45 +80,45 @@ let sdk_error_of_retry_slot_reacquire_timeout
 let cascade_exhaustion_detail_code detail =
   let contains needle = String_util.contains_substring_ci detail needle in
   if contains "no_first_token"
-  then "cascade_exhausted_no_first_token"
+  then "route_exhausted_no_first_token"
   else if contains "inter_chunk_idle"
-  then "cascade_exhausted_inter_chunk_idle"
+  then "route_exhausted_inter_chunk_idle"
   else if contains "http 429" || contains "usage limit" || contains "rate limit"
-  then "cascade_exhausted_rate_limited"
+  then "route_exhausted_rate_limited"
   else if contains "max_execution_time"
-  then "cascade_exhausted_max_execution_time"
+  then "route_exhausted_max_execution_time"
   else if contains "wall-clock timeout"
-  then "cascade_exhausted_wall_clock_timeout"
+  then "route_exhausted_wall_clock_timeout"
   else if contains "connection closed by peer"
-  then "cascade_exhausted_connection_closed"
+  then "route_exhausted_connection_closed"
   else if contains "connection refused"
-  then "cascade_exhausted_connection_refused"
-  else "cascade_exhausted_provider_failure"
+  then "route_exhausted_connection_refused"
+  else "route_exhausted_provider_failure"
 ;;
 
 let cascade_exhaustion_reason_code
       (reason : Keeper_meta_contract.cascade_exhaustion_reason)
   =
   match reason with
-  | Keeper_meta_contract.Connection_refused -> "cascade_exhausted_connection_refused"
-  | Keeper_meta_contract.Dns_failure -> "cascade_exhausted_dns_failure"
-  | Keeper_meta_contract.No_providers_available -> "cascade_exhausted_no_providers_available"
-  | Keeper_meta_contract.All_providers_failed -> "cascade_exhausted_all_providers_failed"
+  | Keeper_meta_contract.Connection_refused -> "route_exhausted_connection_refused"
+  | Keeper_meta_contract.Dns_failure -> "route_exhausted_dns_failure"
+  | Keeper_meta_contract.No_providers_available -> "route_exhausted_no_providers_available"
+  | Keeper_meta_contract.All_providers_failed -> "route_exhausted_all_providers_failed"
   | Keeper_meta_contract.Candidates_filtered_after_cycles ->
-    "cascade_exhausted_candidates_filtered"
-  | Keeper_meta_contract.Max_turns_exceeded -> "cascade_exhausted_max_turns"
+    "route_exhausted_candidates_filtered"
+  | Keeper_meta_contract.Max_turns_exceeded -> "route_exhausted_max_turns"
   | Keeper_meta_contract.Structural_attempt_timeout _ ->
-    "cascade_exhausted_structural_attempt_timeout"
-  | Keeper_meta_contract.Capacity_exhausted -> "cascade_exhausted_capacity_exhausted"
-  | Keeper_meta_contract.No_tool_capable _ -> "cascade_exhausted_no_tool_capable"
+    "route_exhausted_structural_attempt_timeout"
+  | Keeper_meta_contract.Capacity_exhausted -> "route_exhausted_capacity_exhausted"
+  | Keeper_meta_contract.No_tool_capable _ -> "route_exhausted_no_tool_capable"
   | Keeper_meta_contract.Other_detail detail -> cascade_exhaustion_detail_code detail
 ;;
 
-let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
+let route_exhausted_failure_reason_of_raw_error ~detail raw_error =
   match Cascade_error_classify.classify_masc_internal_error_of_string raw_error with
-  (* No_tool_capable specific cases first — more specific than generic Cascade_exhausted *)
+  (* No_tool_capable specific cases first — more specific than generic Route_exhausted *)
   | Some
-      (Cascade_error_classify.Cascade_exhausted
+      (Cascade_error_classify.Route_exhausted
          { cascade_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
          ; _
@@ -153,7 +153,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; cascade_name = Some (Keeper_name.to_string ntcp_cascade_name)
          })
   | Some
-      (Cascade_error_classify.Cascade_exhausted
+      (Cascade_error_classify.Route_exhausted
          { cascade_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable None
          ; _
@@ -166,8 +166,8 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; http_status = None
          ; cascade_name = Some (Keeper_name.to_string ntcp_cascade_name)
          })
-  (* Generic Cascade_exhausted catch-all — after No_tool_capable specifics *)
-  | Some (Cascade_error_classify.Cascade_exhausted { reason; cascade_name }) ->
+  (* Generic Route_exhausted catch-all — after No_tool_capable specifics *)
+  | Some (Cascade_error_classify.Route_exhausted { reason; cascade_name }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = cascade_exhaustion_reason_code reason
@@ -220,7 +220,7 @@ let registry_failure_reason_of_terminal_reason
   : Keeper_registry.failure_reason option
   =
   let detail = Keeper_types_profile.short_preview raw_error in
-  match cascade_exhausted_failure_reason_of_raw_error ~detail raw_error with
+  match route_exhausted_failure_reason_of_raw_error ~detail raw_error with
   | Some _ as reason -> reason
   | None ->
   match terminal_reason.disposition with

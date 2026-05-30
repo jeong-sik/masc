@@ -147,7 +147,7 @@ let tool_descriptor_summary_json receipt =
 
 (* Cycle 51 observability: alert when [operator_disposition] cannot
    classify a receipt and falls through to the catch-all
-   [(Disp_unknown, Reason_unmapped_cascade_state)].
+   [(Disp_unknown, Reason_unmapped_route_phase)].
 
    PR #11651 fixed the historical "blocked" -> "unknown" silent path
    (livelock turns emitted [outcome="blocked"] which was not in
@@ -166,7 +166,7 @@ let () =
     ~help:
       "Total receipts whose (outcome, cascade_outcome) tuple did not match any branch of \
        operator_disposition and fell through to the typed catch-all \
-       (Disp_unknown, Reason_unmapped_cascade_state).  PR #11651 fixed the historical \
+       (Disp_unknown, Reason_unmapped_route_phase).  PR #11651 fixed the historical \
        'blocked' -> 'unknown' silent path; this counter alerts operators if a future \
        refactor reintroduces such a path. A non-zero rate is a regression signal — \
        investigate which receipt.outcome / cascade_outcome / terminal_reason_code \
@@ -199,7 +199,7 @@ let operator_disposition_kind_to_string = function
 
 type operator_disposition_reason =
   | Reason_healthy
-  | Reason_cascade_exhausted
+  | Reason_route_exhausted
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_cascade_fallback
@@ -210,11 +210,11 @@ type operator_disposition_reason =
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
-  | Reason_unmapped_cascade_state
+  | Reason_unmapped_route_phase
 
 let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
-  | Reason_cascade_exhausted -> "cascade_exhausted"
+  | Reason_route_exhausted -> "route_exhausted"
   | Reason_preflight_config_error -> "preflight_config_error"
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_cascade_fallback -> "cascade_fallback"
@@ -225,7 +225,7 @@ let operator_disposition_reason_to_string = function
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
-  | Reason_unmapped_cascade_state -> "unmapped_cascade_state"
+  | Reason_unmapped_route_phase -> "unmapped_route_phase"
 ;;
 
 let operator_disposition (receipt : t)
@@ -256,14 +256,14 @@ let operator_disposition (receipt : t)
       string_contains_ci terminal_reason "config"
       || string_contains_ci terminal_reason "auth"
   in
-  (* Pre-typing, this branch also matched cascade_outcome="cascade_exhausted"
+  (* Pre-typing, this branch also matched cascade_outcome="route_exhausted"
      and "exhausted" — neither is in the producer's closed [cascade_outcome]
      set ([Cascade_passed_to_next_model] / [_completed] / [_not_observed] /
      [_not_dispatched]).  Those branches were unreachable workarounds; the
      typed migration drops them.  Cascade exhaustion still reaches this
-     branch via [terminal_reason="cascade_exhausted"]. *)
-  if String.equal terminal_reason "cascade_exhausted"
-  then Disp_alert_exhausted, Reason_cascade_exhausted
+     branch via [terminal_reason="route_exhausted"]. *)
+  if String.equal terminal_reason "route_exhausted"
+  then Disp_alert_exhausted, Reason_route_exhausted
   else if preflight_config_failure
   then Disp_pause_human, Reason_preflight_config_error
   else if
@@ -436,7 +436,7 @@ let operator_disposition (receipt : t)
           (Option.value
              (Option.map error_kind_to_string receipt.error_kind)
              ~default:"<none>");
-        Disp_unknown, Reason_unmapped_cascade_state)
+        Disp_unknown, Reason_unmapped_route_phase)
 ;;
 
 let to_json (receipt : t) =

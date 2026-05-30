@@ -32,19 +32,19 @@ let all_decision_stages : Keeper_registry.packed_decision_stage list =
   ; Keeper_registry.Packed Decision_tool_policy_selected
   ]
 
-type cascade_state = Keeper_registry.cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+type route_phase = Keeper_registry.route_phase =
+  | Route_idle
+  | Route_selecting
+  | Route_trying
+  | Route_done
+  | Route_exhausted
 
-let all_cascade_states : Keeper_registry.packed_cascade_state list =
-  [ Keeper_registry.Packed Cascade_idle
-  ; Keeper_registry.Packed Cascade_selecting
-  ; Keeper_registry.Packed Cascade_trying
-  ; Keeper_registry.Packed Cascade_done
-  ; Keeper_registry.Packed Cascade_exhausted
+let all_route_phases : Keeper_registry.packed_route_phase list =
+  [ Keeper_registry.Packed Route_idle
+  ; Keeper_registry.Packed Route_selecting
+  ; Keeper_registry.Packed Route_trying
+  ; Keeper_registry.Packed Route_done
+  ; Keeper_registry.Packed Route_exhausted
   ]
 
 type compaction_stage = Keeper_registry.compaction_stage =
@@ -66,8 +66,8 @@ type tla_action =
   | Action_start_cascade_selection
   | Action_select_cascade
   | Action_gate_rejected
-  | Action_cascade_done
-  | Action_cascade_exhausted
+  | Action_route_done
+  | Action_route_exhausted
   | Action_finish_turn
   | Action_start_compaction
   | Action_finish_compaction
@@ -79,8 +79,8 @@ type tla_action =
 let all_tla_actions =
   [
     Action_start_turn; Action_measurement_broadcast; Action_decide_guard; Action_select_tool_policy;
-    Action_start_cascade_selection; Action_select_cascade; Action_gate_rejected; Action_cascade_done;
-    Action_cascade_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
+    Action_start_cascade_selection; Action_select_cascade; Action_gate_rejected; Action_route_done;
+    Action_route_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
     Action_enter_failing; Action_clear_failing; Action_enter_overflowed; Action_overflowed_auto_compact;
   ]
 
@@ -110,7 +110,7 @@ type last_outcome = {
   turn_id : int;
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
-  cascade_state : Keeper_registry.packed_cascade_state;
+  route_phase : Keeper_registry.packed_route_phase;
   selected_model : string option;
 }
 
@@ -135,7 +135,7 @@ type snapshot = {
   phase : Keeper_state_machine.phase;
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
-  kcl_cascade_state : Keeper_registry.packed_cascade_state;
+  kcl_route_phase : Keeper_registry.packed_route_phase;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
@@ -217,20 +217,20 @@ let decision_stage_of_string = function
   | "tool_policy_selected" -> Some Decision_tool_policy_selected
   | _ -> None
 
-let cascade_state_to_string (s : Keeper_registry.packed_cascade_state) =
+let route_phase_to_string (s : Keeper_registry.packed_route_phase) =
   match s with
-  | Keeper_registry.Packed Cascade_idle -> "idle"
-  | Keeper_registry.Packed Cascade_selecting -> "selecting"
-  | Keeper_registry.Packed Cascade_trying -> "trying"
-  | Keeper_registry.Packed Cascade_done -> "done"
-  | Keeper_registry.Packed Cascade_exhausted -> "exhausted"
+  | Keeper_registry.Packed Route_idle -> "idle"
+  | Keeper_registry.Packed Route_selecting -> "selecting"
+  | Keeper_registry.Packed Route_trying -> "trying"
+  | Keeper_registry.Packed Route_done -> "done"
+  | Keeper_registry.Packed Route_exhausted -> "exhausted"
 
-let cascade_state_of_string = function
-  | "idle" -> Some Cascade_idle
-  | "selecting" -> Some Cascade_selecting
-  | "trying" -> Some Cascade_trying
-  | "done" -> Some Cascade_done
-  | "exhausted" -> Some Cascade_exhausted
+let route_phase_of_string = function
+  | "idle" -> Some Route_idle
+  | "selecting" -> Some Route_selecting
+  | "trying" -> Some Route_trying
+  | "done" -> Some Route_done
+  | "exhausted" -> Some Route_exhausted
   | _ -> None
 
 let compaction_stage_to_string (s : Keeper_registry.packed_compaction_stage) =
@@ -253,8 +253,8 @@ let tla_action_to_string = function
   | Action_start_cascade_selection -> "StartCascadeSelection"
   | Action_select_cascade -> "SelectCascade"
   | Action_gate_rejected -> "GateRejected"
-  | Action_cascade_done -> "CascadeDone"
-  | Action_cascade_exhausted -> "CascadeExhausted"
+  | Action_route_done -> "CascadeDone"
+  | Action_route_exhausted -> "CascadeExhausted"
   | Action_finish_turn -> "FinishTurn"
   | Action_start_compaction -> "StartCompaction"
   | Action_finish_compaction -> "FinishCompaction"
@@ -271,8 +271,8 @@ let tla_action_of_string = function
   | "StartCascadeSelection" -> Some Action_start_cascade_selection
   | "SelectCascade" -> Some Action_select_cascade
   | "GateRejected" -> Some Action_gate_rejected
-  | "CascadeDone" -> Some Action_cascade_done
-  | "CascadeExhausted" -> Some Action_cascade_exhausted
+  | "CascadeDone" -> Some Action_route_done
+  | "CascadeExhausted" -> Some Action_route_exhausted
   | "FinishTurn" -> Some Action_finish_turn
   | "StartCompaction" -> Some Action_start_compaction
   | "FinishCompaction" -> Some Action_finish_compaction
@@ -331,10 +331,10 @@ let live_decision_stage (entry : Keeper_registry.registry_entry) =
   | Some obs -> obs.decision_stage
   | None -> Keeper_registry.Packed Decision_undecided
 
-let live_cascade_state (entry : Keeper_registry.registry_entry) =
+let live_route_phase (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
-  | Some obs -> obs.cascade_state
-  | None -> Keeper_registry.Packed Cascade_idle
+  | Some obs -> obs.route_phase
+  | None -> Keeper_registry.Packed Route_idle
 
 let live_measurement (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
@@ -370,12 +370,12 @@ let check_compaction_atomicity
       not (phase = Keeper_state_machine.Compacting)
 
 let check_no_cascade_before_measurement
-    ~(cascade_state : Keeper_registry.packed_cascade_state)
+    ~(route_phase : Keeper_registry.packed_route_phase)
     ~(measurement_captured : bool)
     : bool =
-  match cascade_state with
-  | Packed Cascade_idle -> true
-  | Packed (Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted) ->
+  match route_phase with
+  | Packed Route_idle -> true
+  | Packed (Route_selecting | Route_trying | Route_done | Route_exhausted) ->
       measurement_captured
 
 type event_priority_state = {
@@ -411,7 +411,7 @@ let compute_invariants
     (entry : Keeper_registry.registry_entry)
     ~(phase : Keeper_state_machine.phase)
     ~(turn_phase : Keeper_registry.packed_turn_phase)
-    ~(cascade_state : Keeper_registry.packed_cascade_state)
+    ~(route_phase : Keeper_registry.packed_route_phase)
     ~(compaction_stage : Keeper_registry.packed_compaction_stage)
     ~(measurement_captured : bool)
     : invariants_check =
@@ -419,7 +419,7 @@ let compute_invariants
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
     no_cascade_before_measurement =
       check_no_cascade_before_measurement
-        ~cascade_state
+        ~route_phase
         ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase compaction_stage;
     event_priority_monotone = check_event_priority_monotone entry;
@@ -479,7 +479,7 @@ let observe
   let turn_phase = live_turn_phase entry in
   let compaction_stage = entry.compaction_stage in
   let decision_stage = live_decision_stage entry in
-  let cascade_state = live_cascade_state entry in
+  let route_phase = live_route_phase entry in
   let measurement = live_measurement entry in
   let measurement_captured = Option.is_some measurement in
   let invariants =
@@ -487,7 +487,7 @@ let observe
       entry
       ~phase:entry.phase
       ~turn_phase
-      ~cascade_state
+      ~route_phase
       ~compaction_stage
       ~measurement_captured
   in
@@ -504,7 +504,7 @@ let observe
     phase = entry.phase;
     ktc_turn_phase = turn_phase;
     kdp_decision = decision_stage;
-    kcl_cascade_state = cascade_state;
+    kcl_route_phase = route_phase;
     kmc_compaction = compaction_stage;
     kcb_state;
     shared_measurement = measurement;
@@ -529,7 +529,7 @@ let observe
            turn_id = lc.ct_turn_id;
            ended_at = lc.ct_ended_at;
            decision_stage = lc.ct_decision_stage;
-           cascade_state = lc.ct_cascade_state;
+           route_phase = lc.ct_route_phase;
            selected_model = lc.ct_selected_model;
          }
        | None -> None);
@@ -686,7 +686,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       "stage", `String (decision_stage_to_string s.kdp_decision);
     ];
     "cascade", `Assoc [
-      "state", `String (cascade_state_to_string s.kcl_cascade_state);
+      "state", `String (route_phase_to_string s.kcl_route_phase);
     ];
     "compaction", `Assoc [
       "stage", `String (compaction_stage_to_string s.kmc_compaction);
@@ -725,8 +725,8 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "ended_at", `Float lo.ended_at;
           "decision_stage",
             `String (decision_stage_to_string lo.decision_stage);
-          "cascade_state",
-            `String (cascade_state_to_string lo.cascade_state);
+          "route_phase",
+            `String (route_phase_to_string lo.route_phase);
           "selected_model",
             Json_util.string_opt_to_json lo.selected_model;
         ]

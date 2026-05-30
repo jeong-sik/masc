@@ -34,7 +34,7 @@ let pp_turn = Alcotest.testable
     (=)
 
 let pp_cascade = Alcotest.testable
-    (fun fmt p -> Format.pp_print_string fmt (Obs.cascade_state_to_string p))
+    (fun fmt p -> Format.pp_print_string fmt (Obs.route_phase_to_string p))
     (=)
 
 let pp_compaction = Alcotest.testable
@@ -82,11 +82,11 @@ let expected_compaction_atomicity (phase : SM.phase)
    (cascade in {selecting, trying, done, exhausted}) =>
      (shared_measurement /= 0) *)
 let expected_no_cascade_before_measurement
-    ~(cascade : Masc_mcp.Keeper_registry.packed_cascade_state) ~(measured : bool) : bool =
+    ~(cascade : Masc_mcp.Keeper_registry.packed_route_phase) ~(measured : bool) : bool =
   match cascade with
-  | Packed Cascade_idle -> true
-  | Packed Cascade_selecting | Packed Cascade_trying
-  | Packed Cascade_done | Packed Cascade_exhausted -> measured
+  | Packed Route_idle -> true
+  | Packed Route_selecting | Packed Route_trying
+  | Packed Route_done | Packed Route_exhausted -> measured
 
 let test_phase_turn_alignment_table () =
   List.iter (fun phase ->
@@ -119,14 +119,14 @@ let test_no_cascade_before_measurement_table () =
     List.iter (fun measured ->
       let expected = expected_no_cascade_before_measurement ~cascade ~measured in
       let actual = Obs.check_no_cascade_before_measurement
-                     ~cascade_state:cascade ~measurement_captured:measured
+                     ~route_phase:cascade ~measurement_captured:measured
       in
       let label = Printf.sprintf "I2 cascade=%s × measured=%b"
-        (Obs.cascade_state_to_string cascade) measured
+        (Obs.route_phase_to_string cascade) measured
       in
       Alcotest.(check bool) label expected actual
     ) [false; true]
-  ) Obs.all_cascade_states
+  ) Obs.all_route_phases
 
 (* ============================================================
    Section 2 — TLA+ BugAction mirrors.
@@ -142,16 +142,16 @@ let test_no_cascade_before_measurement_table () =
      ktc_turn_phase = "prompting"
      /\ shared_measurement = 0      (* not measured *)
      /\ kdp_decision = "undecided"
-     /\ kcl_cascade_state = "idle"
+     /\ kcl_route_phase = "idle"
      /\ kdp_decision' = "tool_policy_selected"
-     /\ kcl_cascade_state' = "selecting"
+     /\ kcl_route_phase' = "selecting"
    Post-bug state: cascade jumps to selecting with measurement_captured = false.
    Invariant violated: NoCascadeBeforeMeasurement (I2). *)
 let test_bug_cascade_before_measurement_caught () =
-  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state = Packed Cascade_selecting in
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_route_phase = Packed Route_selecting in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
-             ~cascade_state:post_bug_cascade
+             ~route_phase:post_bug_cascade
              ~measurement_captured:measured
   in
   Alcotest.(check bool)
@@ -192,19 +192,19 @@ let test_phase_turn_alignment_strengthening () =
 
 (* TLA+ BugSelectingWithoutToolPolicy (KeeperTurnCycle.tla:289-294):
      turn_live /\ turn_phase="prompting" /\ decision_stage="guard_ok"
-     /\ cascade_state' = "selecting"
+     /\ route_phase' = "selecting"
    Post-bug state: cascade jumps to selecting without tool_policy_selected.
    Invariant violated: SelectingRequiresToolPolicy.
    OCaml mirror: check_no_cascade_before_measurement — selecting past idle
    requires measurement_captured=true. The bug sets selecting while
    measurement is still unbound (analogous to no tool policy selected). *)
 let test_bug_selecting_without_tool_policy_caught () =
-  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
-    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_route_phase =
+    Masc_mcp.Keeper_registry.Packed Route_selecting
   in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
-             ~cascade_state:post_bug_cascade
+             ~route_phase:post_bug_cascade
              ~measurement_captured:measured
   in
   Alcotest.(check bool)
@@ -212,20 +212,20 @@ let test_bug_selecting_without_tool_policy_caught () =
     false i2
 
 (* TLA+ BugSelectWithoutMeasurement (KeeperDecisionPipeline.tla:255-263):
-     turn_live /\ turn_phase="prompting" /\ cascade_state="idle"
+     turn_live /\ turn_phase="prompting" /\ route_phase="idle"
      /\ decision_stage="undecided" /\ ~measurement_bound
-     /\ decision_stage'="tool_policy_selected" /\ cascade_state'="selecting"
+     /\ decision_stage'="tool_policy_selected" /\ route_phase'="selecting"
    Post-bug state: decision boundary crossed without measurement.
    Invariant violated: DecisionBoundaryRequiresMeasurement.
    OCaml mirror: same predicate as BugSelectingWithoutToolPolicy — selecting
    with no measurement captured. *)
 let test_bug_select_without_measurement_caught () =
-  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
-    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_route_phase =
+    Masc_mcp.Keeper_registry.Packed Route_selecting
   in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
-             ~cascade_state:post_bug_cascade
+             ~route_phase:post_bug_cascade
              ~measurement_captured:measured
   in
   Alcotest.(check bool)
@@ -426,8 +426,8 @@ let arb_turn =
                   (int_range 0 (Array.length arr - 1)))
 
 let arb_cascade =
-  let arr = array_of_list Obs.all_cascade_states in
-  QCheck.make ~print:Obs.cascade_state_to_string
+  let arr = array_of_list Obs.all_route_phases in
+  QCheck.make ~print:Obs.route_phase_to_string
     QCheck.Gen.(map (fun i -> arr.(i))
                   (int_range 0 (Array.length arr - 1)))
 
@@ -444,13 +444,13 @@ let prop_predicates_pure =
     ~count:500
     (QCheck.quad arb_phase arb_turn arb_cascade arb_compaction)
     (fun (ksm, turn, cascade, kmc) ->
-      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
+      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Route_idle)) in
       let i1a = Obs.check_phase_turn_alignment ksm turn in
       let i1b = Obs.check_phase_turn_alignment ksm turn in
       let i2a = Obs.check_no_cascade_before_measurement
-                  ~cascade_state:cascade ~measurement_captured:measured in
+                  ~route_phase:cascade ~measurement_captured:measured in
       let i2b = Obs.check_no_cascade_before_measurement
-                  ~cascade_state:cascade ~measurement_captured:measured in
+                  ~route_phase:cascade ~measurement_captured:measured in
       let i3a = Obs.check_compaction_atomicity ksm kmc in
       let i3b = Obs.check_compaction_atomicity ksm kmc in
       i1a = i1b && i2a = i2b && i3a = i3b)
@@ -472,9 +472,9 @@ let prop_predicates_match_spec =
       Obs.check_compaction_atomicity ksm kmc
         = expected_compaction_atomicity ksm kmc
       &&
-      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
+      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Route_idle)) in
       Obs.check_no_cascade_before_measurement
-          ~cascade_state:cascade ~measurement_captured:measured
+          ~route_phase:cascade ~measurement_captured:measured
         = expected_no_cascade_before_measurement ~cascade ~measured)
 
 (* ============================================================

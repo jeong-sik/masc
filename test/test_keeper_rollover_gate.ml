@@ -36,9 +36,9 @@ let non_overflow_classes_are_not_matched () =
      a compile error in [Keeper_rollover.blocker_class_indicates_overflow]
      — the catch-all is intentionally omitted. *)
   let cases : Keeper_meta_contract.blocker_class list = [
-    Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.No_providers_available;
-    Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.All_providers_failed;
-    Keeper_meta_contract.Cascade_exhausted Keeper_meta_contract.Max_turns_exceeded;
+    Keeper_meta_contract.Route_exhausted Keeper_meta_contract.No_providers_available;
+    Keeper_meta_contract.Route_exhausted Keeper_meta_contract.All_providers_failed;
+    Keeper_meta_contract.Route_exhausted Keeper_meta_contract.Max_turns_exceeded;
     Keeper_meta_contract.Capacity_backpressure;
     Keeper_meta_contract.Ambiguous_post_commit_timeout;
     Keeper_meta_contract.Ambiguous_post_commit_failure;
@@ -50,7 +50,7 @@ let non_overflow_classes_are_not_matched () =
     Keeper_meta_contract.Turn_timeout;
     Keeper_meta_contract.Turn_livelock_blocked;
     Keeper_meta_contract.Completion_contract_violation;
-    (Keeper_meta_contract.Cascade_exhausted (Keeper_meta_contract.No_tool_capable None));
+    (Keeper_meta_contract.Route_exhausted (Keeper_meta_contract.No_tool_capable None));
     Keeper_meta_contract.Fiber_unresolved;
     Keeper_meta_contract.Stale_turn_timeout;
     Keeper_meta_contract.Stale_fleet_batch;

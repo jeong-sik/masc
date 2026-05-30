@@ -5,7 +5,7 @@
     Prometheus accounting, and the per-variant kind/cascade_name labels live in
     {!Keeper_internal_error}.  This module [include]s that surface so callers
     that reference [Cascade_error_classify.masc_internal_error],
-    [Cascade_error_classify.Cascade_exhausted], etc. continue to compile
+    [Cascade_error_classify.Route_exhausted], etc. continue to compile
     unchanged.
 
     @since God file decomposition *)

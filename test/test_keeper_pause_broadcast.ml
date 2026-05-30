@@ -217,7 +217,7 @@ let test_pause_human_when_no_tools_used () =
    [terminal_reason="completion_contract_violation:require_tool_use"] while
    the earlier tool_contract classifier reports
    [tool_contract_result="satisfied_completion"]. Before this branch the
-   two-layer disagreement fell through to ("unknown","unmapped_cascade_state")
+   two-layer disagreement fell through to ("unknown","unmapped_route_phase")
    and tripped the #11651 regression counter. The terminal_reason is
    authoritative — pause_human/tool_required_unsatisfied. *)
 let test_pause_human_for_completion_contract_violation_with_satisfied_inner () =
@@ -291,17 +291,17 @@ let test_preflight_config_failure_not_reported_as_tool_unsatisfied () =
 
 (* === Cascade exhausted always alerts ================================ *)
 
-let test_alert_for_cascade_exhausted () =
+let test_alert_for_route_exhausted () =
   (* Pre-typing: ~cascade_outcome:"exhausted" was paired with
-     terminal_reason_code="cascade_exhausted" to drive operator_disposition's
-     dead "exhausted"/"cascade_exhausted" string-matching branches.  Those
+     terminal_reason_code="route_exhausted" to drive operator_disposition's
+     dead "exhausted"/"route_exhausted" string-matching branches.  Those
      branches were unreachable workarounds (producer never emits
-     "exhausted"/"cascade_exhausted" in cascade_outcome); the typed
+     "exhausted"/"route_exhausted" in cascade_outcome); the typed
      [cascade_outcome] migration drops them.  The remaining live path is
-     terminal_reason_code="cascade_exhausted", which still triggers
+     terminal_reason_code="route_exhausted", which still triggers
      alert_exhausted regardless of cascade_outcome. *)
-  let r = mk_receipt ~terminal_reason_code:"cascade_exhausted" () in
-  check_disp "cascade_exhausted" r "alert_exhausted" "cascade_exhausted"
+  let r = mk_receipt ~terminal_reason_code:"route_exhausted" () in
+  check_disp "route_exhausted" r "alert_exhausted" "route_exhausted"
 ;;
 
 (* === Unknown / unmapped state must NOT silently look healthy ========= *)
@@ -318,7 +318,7 @@ let test_unknown_when_unmapped () =
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
-  check_disp "unmapped" r "unknown" "unmapped_cascade_state"
+  check_disp "unmapped" r "unknown" "unmapped_route_phase"
 ;;
 
 (* === Forward-progress states do NOT broadcast ======================== *)
@@ -446,11 +446,11 @@ let test_each_broadcast_disp_is_reachable () =
   let d1, _ = R.operator_disposition r1 in
   check bool "pause_human reachable" true (R.needs_operator_broadcast d1);
   (* alert_exhausted via terminal_reason_code.  Pre-typing this was driven
-     by cascade_outcome="cascade_exhausted", but that string is not in the
+     by cascade_outcome="route_exhausted", but that string is not in the
      producer's closed [cascade_outcome] set; the dead path was dropped
      with the typed migration.  terminal_reason_code remains the live
      trigger. *)
-  let r2 = mk_receipt ~terminal_reason_code:"cascade_exhausted" () in
+  let r2 = mk_receipt ~terminal_reason_code:"route_exhausted" () in
   let d2, _ = R.operator_disposition r2 in
   check bool "alert_exhausted reachable" true (R.needs_operator_broadcast d2);
   (* unknown via unmapped *)
@@ -884,9 +884,9 @@ let () =
             `Quick
             test_preflight_config_failure_not_reported_as_tool_unsatisfied
         ; test_case
-            "cascade_exhausted -> alert_exhausted"
+            "route_exhausted -> alert_exhausted"
             `Quick
-            test_alert_for_cascade_exhausted
+            test_alert_for_route_exhausted
         ; test_case "unmapped -> unknown" `Quick test_unknown_when_unmapped
         ; test_case "ok+completed -> pass" `Quick test_pass_for_healthy
         ; test_case

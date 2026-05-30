@@ -116,7 +116,7 @@ type cascade_exhaustion_reason =
     (** Typed surface for capacity-induced cascade exhaustion.
         Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
         through to [Other_detail message], losing auto-recovery eligibility
-        and triggering the harsher [Cascade_exhausted { retryable = false }]
+        and triggering the harsher [Route_exhausted { retryable = false }]
         failure policy.  This variant enables the softer
         [Soft_fail_turn + Provider_cooldown] path. *)
   | No_tool_capable of no_tool_capable_detail option
@@ -129,7 +129,7 @@ type cascade_exhaustion_reason =
   | Other_detail of string
 
 type blocker_class =
-  | Cascade_exhausted of cascade_exhaustion_reason
+  | Route_exhausted of cascade_exhaustion_reason
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
@@ -176,8 +176,8 @@ type blocker_class =
   | Sdk_input_required
 
 let blocker_class_to_string = function
-  | Cascade_exhausted (No_tool_capable _) -> "cascade_exhausted_no_tool_capable"
-  | Cascade_exhausted _ -> "cascade_exhausted"
+  | Route_exhausted (No_tool_capable _) -> "route_exhausted_no_tool_capable"
+  | Route_exhausted _ -> "route_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
   | Ambiguous_post_commit_failure -> "ambiguous_post_commit_failure"
@@ -205,8 +205,8 @@ let blocker_class_to_string = function
 ;;
 
 let blocker_class_of_serialized_string = function
-  | "cascade_exhausted_no_tool_capable" -> Some (Cascade_exhausted (No_tool_capable None))
-  | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
+  | "route_exhausted_no_tool_capable" -> Some (Route_exhausted (No_tool_capable None))
+  | "route_exhausted" -> Some (Route_exhausted (Other_detail "route_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
   | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
@@ -259,7 +259,7 @@ let cascade_exhaustion_summary = function
 let blocker_class_continue_gate = function
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure -> true
-  | Cascade_exhausted _
+  | Route_exhausted _
   | Capacity_backpressure
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
@@ -376,8 +376,8 @@ let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
 let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
   let klass_payload = match info.klass with
-    | Cascade_exhausted reason ->
-      `Assoc [ "name", `String "cascade_exhausted"
+    | Route_exhausted reason ->
+      `Assoc [ "name", `String "route_exhausted"
              ; "reason", cascade_exhaustion_reason_to_json reason
              ]
     | _ -> `String (blocker_class_to_string info.klass)
@@ -397,16 +397,16 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
       | Some (`String s) -> blocker_class_of_serialized_string s
       | Some (`Assoc kfields) ->
         (match List.assoc_opt "name" kfields with
-         | Some (`String "cascade_exhausted") ->
+         | Some (`String "route_exhausted") ->
            let reason =
              match List.assoc_opt "reason" kfields with
              | Some r ->
                (match cascade_exhaustion_reason_of_json r with
                 | Some r -> r
-                | None -> Other_detail "cascade_exhausted")
-             | None -> Other_detail "cascade_exhausted"
+                | None -> Other_detail "route_exhausted")
+             | None -> Other_detail "route_exhausted"
            in
-           Some (Cascade_exhausted reason)
+           Some (Route_exhausted reason)
          | Some (`String s) -> blocker_class_of_serialized_string s
          | _ -> None)
       | _ -> None

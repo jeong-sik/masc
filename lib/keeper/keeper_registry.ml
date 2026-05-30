@@ -11,36 +11,36 @@ include Keeper_registry_setup
 
 
 let mark_turn_provider_attempt_started ~base_path name =
-  let set_cascade_state cascade_state =
-    set_turn_cascade_state
+  let set_route_phase route_phase =
+    set_turn_route_phase
       ~base_path
       name
-      (Packed cascade_state : packed_cascade_state)
+      (Packed route_phase : packed_route_phase)
   in
   match get ~base_path name with
   | None | Some { current_turn_observation = None; _ } -> ()
   | Some { current_turn_observation = Some obs; _ } ->
-    (match obs.cascade_state with
-     | Packed Cascade_idle ->
+    (match obs.route_phase with
+     | Packed Route_idle ->
        set_turn_decision_stage
          ~base_path
          name
          Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_selecting;
-       set_cascade_state Cascade_trying
-     | Packed Cascade_selecting ->
+       set_route_phase Route_selecting;
+       set_route_phase Route_trying
+     | Packed Route_selecting ->
        set_turn_decision_stage
          ~base_path
          name
          Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_trying
-     | Packed Cascade_trying ->
+       set_route_phase Route_trying
+     | Packed Route_trying ->
        set_turn_decision_stage
          ~base_path
          name
          Decision_active_tool_policy_selected
-     | Packed Cascade_done
-     | Packed Cascade_exhausted ->
+     | Packed Route_done
+     | Packed Route_exhausted ->
        Log.Keeper.warn
          "registry: ignoring provider-attempt start after terminal cascade state \
           name=%s base_path=%s"
@@ -113,14 +113,14 @@ let prepare_turn_retry_after_compaction ~base_path name =
   update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       validate_cascade_transition
-        ~from:obs.cascade_state
-        ~to_:(Packed Cascade_idle : packed_cascade_state);
+        ~from:obs.route_phase
+        ~to_:(Packed Route_idle : packed_route_phase);
       validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_prompting);
       changed := true;
       { (stamp_turn_progress ~now ~event_kind:"retry_after_compaction" obs) with
         turn_phase = Packed Turn_prompting
       ; decision_stage = Packed Decision_guard_ok
-      ; cascade_state = Packed Cascade_idle
+      ; route_phase = Packed Route_idle
       ; selected_model = None
       }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -179,7 +179,7 @@ let mark_turn_finished ~base_path name =
           ; ct_started_at = obs.started_at
           ; ct_ended_at = ended_at
           ; ct_decision_stage = obs.decision_stage
-          ; ct_cascade_state = obs.cascade_state
+          ; ct_route_phase = obs.route_phase
           ; ct_selected_model = obs.selected_model
           }
       | None -> e.last_completed_turn (* no live turn → preserve previous *)

@@ -268,22 +268,22 @@ let check_cascade_failure_reason raw_error expected_code =
 let test_registry_failure_reason_preserves_no_provider_cascade_reason () =
   let raw_error =
     "Internal error: [masc_oas_error] \
-     {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"cascade.strict_tool_candidates\",\
+     {\"kind\":\"route_exhausted\",\"cascade_name\":\"cascade.strict_tool_candidates\",\
      \"reason\":\"no_providers_available\"}"
   in
   check_cascade_failure_reason
     raw_error
-    "cascade_exhausted_no_providers_available"
+    "route_exhausted_no_providers_available"
 ;;
 
 let test_registry_failure_reason_buckets_cascade_liveness_reason () =
   let raw_error =
     "Internal error: [masc_oas_error] \
-     {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"cascade.ollama_cloud_stable\",\
+     {\"kind\":\"route_exhausted\",\"cascade_name\":\"cascade.ollama_cloud_stable\",\
      \"reason\":{\"tag\":\"other_detail\",\"message\":\"Cascade attempt liveness guard \
      killed runtime lane cascade.ollama_cloud_stable: inter_chunk_idle\"}}"
   in
-  check_cascade_failure_reason raw_error "cascade_exhausted_inter_chunk_idle"
+  check_cascade_failure_reason raw_error "route_exhausted_inter_chunk_idle"
 ;;
 
 let () =

@@ -7,7 +7,7 @@
     {!Cascade_error_classify}.  That file now
     re-exports this surface via [include Keeper_internal_error] so callers
     that reference [Cascade_error_classify.masc_internal_error],
-    [Cascade_error_classify.Cascade_exhausted], etc. continue to compile
+    [Cascade_error_classify.Route_exhausted], etc. continue to compile
     unchanged. *)
 
 let cascade_name_to_string = Cascade_name.to_string
@@ -94,7 +94,7 @@ type capacity_retry_after =
   | No_retry_hint
 
 type masc_internal_error =
-  | Cascade_exhausted of {
+  | Route_exhausted of {
       cascade_name : Cascade_name.t;
       reason : Keeper_meta_contract.cascade_exhaustion_reason;
     }
@@ -109,7 +109,7 @@ type masc_internal_error =
       detail : string;
       exit_code : int option;
     }
-  (* [No_tool_capable_provider] reclassified into [Cascade_exhausted
+  (* [No_tool_capable_provider] reclassified into [Route_exhausted
      { reason = No_tool_capable _ }] — see keeper_meta_contract.ml. *)
   | Accept_rejected of {
       scope : string;
@@ -228,11 +228,11 @@ let string_opt_of_assoc key json =
 ;;
 
 let masc_internal_error_to_json = function
-  | Cascade_exhausted { cascade_name; reason } ->
+  | Route_exhausted { cascade_name; reason } ->
     let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
       [
-        ("kind", `String "cascade_exhausted");
+        ("kind", `String "route_exhausted");
         ("cascade_name", `String cascade_name);
         ("reason", Keeper_meta_contract.cascade_exhaustion_reason_to_json reason);
       ]
@@ -432,7 +432,7 @@ let summary_of_masc_internal_error = function
            is_retry
            (retry_admission_denial_to_yojson denial_reason
             |> Yojson.Safe.to_string))
-  | Cascade_exhausted { cascade_name; reason = Keeper_meta_contract.No_tool_capable (Some detail) } ->
+  | Route_exhausted { cascade_name; reason = Keeper_meta_contract.No_tool_capable (Some detail) } ->
     let cascade_name = cascade_name_to_string cascade_name in
     Some
       (Printf.sprintf
@@ -441,7 +441,7 @@ let summary_of_masc_internal_error = function
          (summarize_list detail.required_tool_names)
          (List.length detail.provider_rejections)
          (List.length detail.configured_labels))
-  | Cascade_exhausted _
+  | Route_exhausted _
   | Resumable_cli_session _
   | Accept_rejected _
   | Admission_queue_timeout _
@@ -454,7 +454,7 @@ let summary_of_masc_internal_error = function
 
 (* #9933: classify emitted [masc_oas_error] payloads by kind so
    dashboards and Grafana alerts can watch the fleet-wide rate per
-   error class (cascade_exhausted vs provider_timeout vs
+   error class (route_exhausted vs provider_timeout vs
    ambiguous_post_commit, etc.) rather than reading the free-form
    BDI blocker string.  Historical provider-timeout events accumulated across 9 keepers in 24h
    without an aggregate signal — this counter is the per-kind surface.
@@ -473,7 +473,7 @@ let () =
     ~help:
       "Total MASC-internal errors emitted as Agent_sdk.Error.Internal \
        payloads, classified by structured error kind. Labels: \
-       kind (cascade_exhausted | capacity_backpressure | resumable_cli_session | \
+       kind (route_exhausted | capacity_backpressure | resumable_cli_session | \
        accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
        turn_timeout | provider_timeout | retry_admission_denied | \
@@ -485,7 +485,7 @@ let () =
     ()
 
 let kind_of_masc_internal_error = function
-  | Cascade_exhausted _ -> "cascade_exhausted"
+  | Route_exhausted _ -> "route_exhausted"
   | Capacity_backpressure _ -> "capacity_backpressure"
   | Resumable_cli_session _ -> "resumable_cli_session"
   | Accept_rejected _ -> "accept_rejected"
@@ -504,7 +504,7 @@ let kind_of_masc_internal_error = function
    in cascade_error_classify.ml history for the rationale — operators
    could not attribute cascade-level error rates without this label. *)
 let cascade_name_of_masc_internal_error = function
-  | Cascade_exhausted { cascade_name; _ }
+  | Route_exhausted { cascade_name; _ }
   | Capacity_backpressure { cascade_name; _ }
   | Resumable_cli_session { cascade_name; _ }
   | Admission_queue_timeout { cascade_name; _ }

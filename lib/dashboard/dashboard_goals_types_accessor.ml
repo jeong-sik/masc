@@ -182,7 +182,7 @@ let trust_sandbox_risk json =
 let trust_cascade_risk json =
   String.equal
     (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
-    "cascade_exhausted"
+    "route_exhausted"
 
 let receipt_has_error json =
   match receipt_error_kind json with

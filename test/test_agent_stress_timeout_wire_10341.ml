@@ -50,16 +50,16 @@ let test_trims_whitespace () =
 
 (* --- non-timeout kinds map to None (this cycle) ---------------- *)
 
-let test_cascade_exhausted_does_not_map () =
-  (* [cascade_exhausted] is semantically a fallback condition but
+let test_route_exhausted_does_not_map () =
+  (* [route_exhausted] is semantically a fallback condition but
      the [Fallback_approval] variant has anti-rationalization
      semantics that doesn't fit cleanly here. Leave unmapped this
      cycle — the issue body explicitly defers other kinds to a
      follow-up tick. *)
   check (option string)
-    "cascade_exhausted intentionally unmapped"
+    "route_exhausted intentionally unmapped"
     None
-    (B.stress_kind_for_error_kind (kind "cascade_exhausted")
+    (B.stress_kind_for_error_kind (kind "route_exhausted")
      |> Option.map (fun _ -> "mapped"))
 
 let test_resumable_cli_session_does_not_map () =
@@ -133,8 +133,8 @@ let () =
         ] );
       ( "non-timeout-kinds-unmapped-this-cycle",
         [
-          test_case "cascade_exhausted unmapped" `Quick
-            test_cascade_exhausted_does_not_map;
+          test_case "route_exhausted unmapped" `Quick
+            test_route_exhausted_does_not_map;
           test_case "resumable_cli_session unmapped" `Quick
             test_resumable_cli_session_does_not_map;
           test_case "accept_rejected unmapped" `Quick

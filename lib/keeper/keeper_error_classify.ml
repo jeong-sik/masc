@@ -173,23 +173,23 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
    than lumping it into a generic server_error bucket. *)
 let is_gateway_backpressure_status status = status = 524
 
-let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_auto_recoverable_route_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
-      (Keeper_turn_driver.Cascade_exhausted
+      (Keeper_turn_driver.Route_exhausted
          { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
       true
   | Some
-      (Keeper_turn_driver.Cascade_exhausted
+      (Keeper_turn_driver.Route_exhausted
          { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
       true
   | Some
-      (Keeper_turn_driver.Cascade_exhausted
+      (Keeper_turn_driver.Route_exhausted
          { reason = Keeper_meta_contract.Capacity_exhausted; _ }) ->
       true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
-  | Some (Keeper_turn_driver.Cascade_exhausted _) ->
+  | Some (Keeper_turn_driver.Route_exhausted _) ->
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
@@ -212,7 +212,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
 let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Route_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
@@ -235,7 +235,7 @@ let is_auto_recoverable_cascade_fail_open_error
   Keeper_turn_driver.sdk_error_is_hard_quota err
   || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
-  || is_auto_recoverable_cascade_exhausted_error err
+  || is_auto_recoverable_route_exhausted_error err
 
 (* Classification of why a degraded retry is being attempted.  Closed set
    covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
@@ -251,7 +251,7 @@ type degraded_retry_reason =
   | Turn_timeout
   | Cascade_candidates_filtered
   | Required_tool_contract_violation
-  | Cascade_exhausted
+  | Route_exhausted
   | Capacity_backpressure
   | Rate_limit
   | Server_error
@@ -266,7 +266,7 @@ let degraded_retry_reason_to_string = function
   | Turn_timeout -> "turn_timeout"
   | Cascade_candidates_filtered -> "cascade_candidates_filtered"
   | Required_tool_contract_violation -> "required_tool_contract_violation"
-  | Cascade_exhausted -> "cascade_exhausted"
+  | Route_exhausted -> "route_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
@@ -342,18 +342,18 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
         phase_recovery_retry Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
+        (Keeper_turn_driver.Route_exhausted
            { reason = Keeper_meta_contract.Capacity_exhausted; _ }) ->
         phase_recovery_retry Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
+        (Keeper_turn_driver.Route_exhausted
            { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
         phase_recovery_retry Cascade_candidates_filtered
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
+        (Keeper_turn_driver.Route_exhausted
            { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
         phase_recovery_retry Max_turns
-    | Some (Keeper_turn_driver.Cascade_exhausted _)
+    | Some (Keeper_turn_driver.Route_exhausted _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
@@ -389,18 +389,18 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
         Some Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
+        (Keeper_turn_driver.Route_exhausted
            { reason = Keeper_meta_contract.Capacity_exhausted; _ }) ->
         Some Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
+        (Keeper_turn_driver.Route_exhausted
            { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
         Some Cascade_candidates_filtered
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
+        (Keeper_turn_driver.Route_exhausted
            { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
         Some Max_turns
-    | Some (Keeper_turn_driver.Cascade_exhausted _) ->
+    | Some (Keeper_turn_driver.Route_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
            [fallback_cascade] hints declared in cascade.toml actually
@@ -408,7 +408,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
            silent turns ended with [(null)] fallback_reason because this
            arm previously returned [None]. Other arms below remain
            non-recoverable to keep the surface conservative. *)
-        Some Cascade_exhausted
+        Some Route_exhausted
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
@@ -650,13 +650,13 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   || is_server_rejected_parse_error err
   || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
-  || is_auto_recoverable_cascade_exhausted_error err
+  || is_auto_recoverable_route_exhausted_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Provider_timeout _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Route_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
@@ -773,9 +773,9 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
 
 (** [true] when an error represents terminal cascade exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
-let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_route_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Route_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _)

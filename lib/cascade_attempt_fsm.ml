@@ -157,7 +157,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
                   }
             ; message = detail
             }))
-  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Route_exhausted _)
 
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
@@ -874,7 +874,7 @@ let sdk_error_capacity_backpressure_source (err : Agent_sdk.Error.sdk_error)
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some (Cascade_error_classify.Capacity_backpressure { source; _ }) ->
     Some source
-  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Route_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
@@ -900,7 +900,7 @@ let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
      | Keeper_internal_error.Synthetic_default s -> Some (Cbr_synthetic_default s)
      | Keeper_internal_error.No_retry_hint ->
        Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec))
-  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Route_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
@@ -947,10 +947,10 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
 let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some
-      (Cascade_error_classify.Cascade_exhausted
+      (Cascade_error_classify.Route_exhausted
          { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
       true
-  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Route_exhausted _)
   | Some (Cascade_error_classify.Capacity_backpressure _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
 

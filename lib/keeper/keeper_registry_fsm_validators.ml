@@ -15,7 +15,7 @@ open Keeper_registry_types
 let cascade_transition ~from ~to_ =
   (* Wrapped in [Keeper_fsm_guard_runtime.wrap_unit] for symmetry with
      [turn_phase_transition] and the setters
-     ([set_turn_cascade_state] / [set_turn_phase]): a forbidden pair
+     ([set_turn_route_phase] / [set_turn_phase]): a forbidden pair
      reached via this validator bumps [metric_fsm_guard_violation]
      (action=cascade_transition, stage=guard) before re-raising the typed
      [Cascade_transition_violation] with its backtrace intact. Without

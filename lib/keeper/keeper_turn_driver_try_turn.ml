@@ -394,7 +394,7 @@ let rec run
           (match pre_dispatch_no_tool_capable with
            | Some internal_error -> internal_error
            | None ->
-             Cascade_exhausted
+             Route_exhausted
                { cascade_name = ctx.error_cascade_name; reason })
     in
     Error terminal_error

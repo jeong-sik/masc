@@ -263,8 +263,8 @@ let test_observer_executing_during_turn () =
   let name = "obs-active" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
   Reg.mark_turn_started ~base_path:test_obs_bp name;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_selecting);
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
+  Reg.set_turn_route_phase ~base_path:test_obs_bp name (Reg.Packed Reg.Route_selecting);
+  Reg.set_turn_route_phase ~base_path:test_obs_bp name (Reg.Packed Reg.Route_trying);
   (match Reg.get ~base_path:test_obs_bp name with
    | None -> Alcotest.fail "entry missing after mark_turn_started"
    | Some entry ->

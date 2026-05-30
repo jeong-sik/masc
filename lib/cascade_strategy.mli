@@ -50,7 +50,7 @@ type signal_ctx = {
 
 type cycle_policy = {
   max_cycles : int;
-  (** Maximum cycle count before returning [Cascade_exhausted].
+  (** Maximum cycle count before returning [Route_exhausted].
       [max_cycles = 1] means the current linear failover behaviour
       (no retry after first pass). *)
 
@@ -151,7 +151,7 @@ val order_candidates :
     subset of [candidates] to attempt in [cycle].  Returns the empty
     list when no candidate is usable right now, in which case the caller
     should either advance to the next cycle with a backoff or report
-    [Cascade_exhausted].
+    [Route_exhausted].
 
     When a capacity domain is known full, the returned list keeps at most
     one representative for that full domain in the cycle. This preserves a

@@ -38,14 +38,14 @@ type decision_stage = Keeper_registry.decision_stage =
 
 val all_decision_stages : Keeper_registry.packed_decision_stage list
 
-type cascade_state = Keeper_registry.cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+type route_phase = Keeper_registry.route_phase =
+  | Route_idle
+  | Route_selecting
+  | Route_trying
+  | Route_done
+  | Route_exhausted
 
-val all_cascade_states : Keeper_registry.packed_cascade_state list
+val all_route_phases : Keeper_registry.packed_route_phase list
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
@@ -64,8 +64,8 @@ type tla_action =
   | Action_start_cascade_selection
   | Action_select_cascade
   | Action_gate_rejected
-  | Action_cascade_done
-  | Action_cascade_exhausted
+  | Action_route_done
+  | Action_route_exhausted
   | Action_finish_turn
   | Action_start_compaction
   | Action_finish_compaction
@@ -131,7 +131,7 @@ val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.p
     (KeeperCompositeLifecycle.tla:361): cascade selection past [idle]
     requires a captured measurement. *)
 val check_no_cascade_before_measurement :
-  cascade_state:Keeper_registry.packed_cascade_state -> measurement_captured:bool -> bool
+  route_phase:Keeper_registry.packed_route_phase -> measurement_captured:bool -> bool
 
 val check_phase_derivation_agreement :
   Keeper_registry.registry_entry -> bool
@@ -162,7 +162,7 @@ type last_outcome = {
   turn_id : int;
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
-  cascade_state : Keeper_registry.packed_cascade_state;
+  route_phase : Keeper_registry.packed_route_phase;
   selected_model : string option;
 }
 
@@ -207,7 +207,7 @@ type snapshot = {
           [specs/keeper-state-machine/KeeperStateMachine.tla] exactly. *)
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
-  kcl_cascade_state : Keeper_registry.packed_cascade_state;
+  kcl_route_phase : Keeper_registry.packed_route_phase;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
       (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
@@ -299,9 +299,9 @@ val turn_phase_of_string : string -> turn_phase option
 val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
 val decision_stage_of_string : string -> decision_stage option
 
-(** Stringify [cascade_state]. Mirrors KeeperCascadeLifecycle.tla. *)
-val cascade_state_to_string : Keeper_registry.packed_cascade_state -> string
-val cascade_state_of_string : string -> cascade_state option
+(** Stringify [route_phase]. Mirrors KeeperCascadeLifecycle.tla. *)
+val route_phase_to_string : Keeper_registry.packed_route_phase -> string
+val route_phase_of_string : string -> route_phase option
 
 (** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
 val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string

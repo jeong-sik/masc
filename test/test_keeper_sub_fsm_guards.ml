@@ -1,6 +1,6 @@
 (** Tests for sub-FSM runtime transition guards (PR #14153).
     Mirrors the TLA+ transition matrix in executable form.
-    Valid transitions must pass; forbidden transitions for [cascade_state]
+    Valid transitions must pass; forbidden transitions for [route_phase]
     and [turn_phase] raise the typed [Cascade_transition_violation] /
     [Turn_phase_transition_violation] (RFC-0072 Phase 5) carrying the
     spec-violation payload, and bump [masc_fsm_guard_violation_total].
@@ -157,29 +157,29 @@ let test_valid_decision_transitions () =
     cases
 ;;
 
-(* ── KCL: cascade_state ─────────────────────────────────── *)
+(* ── KCL: route_phase ─────────────────────────────────── *)
 
 let test_valid_cascade_transitions () =
-  let cases : (packed_cascade_state * packed_cascade_state) list =
-    [ (* from Cascade_idle *)
-      Packed Cascade_idle, Packed Cascade_idle
-    ; Packed Cascade_idle, Packed Cascade_selecting (* from Cascade_selecting *)
-    ; Packed Cascade_selecting, Packed Cascade_idle
-    ; Packed Cascade_selecting, Packed Cascade_selecting
-    ; Packed Cascade_selecting, Packed Cascade_trying (* from Cascade_trying *)
-    ; Packed Cascade_trying, Packed Cascade_idle
-    ; Packed Cascade_trying, Packed Cascade_selecting
-    ; Packed Cascade_trying, Packed Cascade_trying
-    ; Packed Cascade_trying, Packed Cascade_done
-    ; Packed Cascade_trying, Packed Cascade_exhausted (* from Cascade_done *)
-    ; Packed Cascade_done, Packed Cascade_idle
-    ; Packed Cascade_done, Packed Cascade_selecting
-    ; Packed Cascade_done, Packed Cascade_trying
-    ; Packed Cascade_done, Packed Cascade_done (* from Cascade_exhausted *)
-    ; Packed Cascade_exhausted, Packed Cascade_idle
-    ; Packed Cascade_exhausted, Packed Cascade_selecting
-    ; Packed Cascade_exhausted, Packed Cascade_trying
-    ; Packed Cascade_exhausted, Packed Cascade_exhausted
+  let cases : (packed_route_phase * packed_route_phase) list =
+    [ (* from Route_idle *)
+      Packed Route_idle, Packed Route_idle
+    ; Packed Route_idle, Packed Route_selecting (* from Route_selecting *)
+    ; Packed Route_selecting, Packed Route_idle
+    ; Packed Route_selecting, Packed Route_selecting
+    ; Packed Route_selecting, Packed Route_trying (* from Route_trying *)
+    ; Packed Route_trying, Packed Route_idle
+    ; Packed Route_trying, Packed Route_selecting
+    ; Packed Route_trying, Packed Route_trying
+    ; Packed Route_trying, Packed Route_done
+    ; Packed Route_trying, Packed Route_exhausted (* from Route_done *)
+    ; Packed Route_done, Packed Route_idle
+    ; Packed Route_done, Packed Route_selecting
+    ; Packed Route_done, Packed Route_trying
+    ; Packed Route_done, Packed Route_done (* from Route_exhausted *)
+    ; Packed Route_exhausted, Packed Route_idle
+    ; Packed Route_exhausted, Packed Route_selecting
+    ; Packed Route_exhausted, Packed Route_trying
+    ; Packed Route_exhausted, Packed Route_exhausted
     ]
   in
   List.iter
@@ -189,27 +189,27 @@ let test_valid_cascade_transitions () =
          Alcotest.fail
            (Printf.sprintf
               "valid cascade %s -> %s rejected"
-              (Obs.cascade_state_to_string from)
-              (Obs.cascade_state_to_string to_)))
+              (Obs.route_phase_to_string from)
+              (Obs.route_phase_to_string to_)))
     cases
 ;;
 
 let test_invalid_cascade_transitions () =
-  let cases : (packed_cascade_state * packed_cascade_state) list =
-    [ (* from Cascade_idle *)
-      Packed Cascade_idle, Packed Cascade_trying
+  let cases : (packed_route_phase * packed_route_phase) list =
+    [ (* from Route_idle *)
+      Packed Route_idle, Packed Route_trying
       (* Regression: pre-fix [Keeper_unified_turn.retry_loop] line
-           1138 era marked Cascade_trying immediately after budget
-           resolution, jumping past Cascade_selecting.  The fix moves
+           1138 era marked Route_trying immediately after budget
+           resolution, jumping past Route_selecting.  The fix moves
            the trying mark into the disclosure hook so the matrix
            below keeps rejecting any future re-introduction of the
            direct jump. *)
-    ; Packed Cascade_idle, Packed Cascade_done
-    ; Packed Cascade_idle, Packed Cascade_exhausted (* from Cascade_selecting *)
-    ; Packed Cascade_selecting, Packed Cascade_done
-    ; Packed Cascade_selecting, Packed Cascade_exhausted (* from Cascade_done *)
-    ; Packed Cascade_done, Packed Cascade_exhausted (* from Cascade_exhausted *)
-    ; Packed Cascade_exhausted, Packed Cascade_done
+    ; Packed Route_idle, Packed Route_done
+    ; Packed Route_idle, Packed Route_exhausted (* from Route_selecting *)
+    ; Packed Route_selecting, Packed Route_done
+    ; Packed Route_selecting, Packed Route_exhausted (* from Route_done *)
+    ; Packed Route_done, Packed Route_exhausted (* from Route_exhausted *)
+    ; Packed Route_exhausted, Packed Route_done
     ]
   in
   List.iter
@@ -219,19 +219,19 @@ let test_invalid_cascade_transitions () =
          Alcotest.fail
            (Printf.sprintf
               "invalid cascade %s -> %s should raise"
-              (Obs.cascade_state_to_string from)
-              (Obs.cascade_state_to_string to_))
+              (Obs.route_phase_to_string from)
+              (Obs.route_phase_to_string to_))
        with
        (* RFC-0072 Phase 5: forbidden pairs raise the typed exception. *)
        | Cascade_transition_violation { from = ef; to_ = et; _ } ->
          Alcotest.(check string)
            "violation.from matches"
-           (packed_cascade_state_label from)
-           (packed_cascade_state_label ef);
+           (packed_route_phase_label from)
+           (packed_route_phase_label ef);
          Alcotest.(check string)
            "violation.to_ matches"
-           (packed_cascade_state_label to_)
-           (packed_cascade_state_label et))
+           (packed_route_phase_label to_)
+           (packed_route_phase_label et))
     cases
 ;;
 
@@ -241,7 +241,7 @@ let test_invalid_cascade_transitions () =
     atomic group [SelectToolPolicy(idle->selecting) ->
     CascadeTrying(selecting->trying)] inside the disclosure hook.
     Pre-fix [Keeper_unified_turn.retry_loop] line 1138 era marked
-    Cascade_trying before disclosure ran, producing the rejected
+    Route_trying before disclosure ran, producing the rejected
     [idle -> trying] jump that this PR removes.  These end-to-end
     sequence tests guard the full retry_loop trajectory rather than
     individual transitions.
@@ -259,17 +259,17 @@ let walk_cascade_sequence label seq =
            (Printf.sprintf
               "%s step %s -> %s should pass"
               label
-              (Obs.cascade_state_to_string from)
-              (Obs.cascade_state_to_string to_)))
+              (Obs.route_phase_to_string from)
+              (Obs.route_phase_to_string to_)))
     seq
 ;;
 
 let test_first_turn_attempt_sequence () =
   walk_cascade_sequence
     "first-turn attempt"
-    [ Packed Cascade_idle, Packed Cascade_selecting
-    ; Packed Cascade_selecting, Packed Cascade_trying
-    ; Packed Cascade_trying, Packed Cascade_done
+    [ Packed Route_idle, Packed Route_selecting
+    ; Packed Route_selecting, Packed Route_trying
+    ; Packed Route_trying, Packed Route_done
     ]
 ;;
 
@@ -279,11 +279,11 @@ let test_retry_attempt_sequence () =
      attempt may fail and end at [exhausted]. *)
   walk_cascade_sequence
     "retry attempt"
-    [ Packed Cascade_idle, Packed Cascade_selecting
-    ; Packed Cascade_selecting, Packed Cascade_trying
-    ; Packed Cascade_trying, Packed Cascade_selecting
-    ; Packed Cascade_selecting, Packed Cascade_trying
-    ; Packed Cascade_trying, Packed Cascade_exhausted
+    [ Packed Route_idle, Packed Route_selecting
+    ; Packed Route_selecting, Packed Route_trying
+    ; Packed Route_trying, Packed Route_selecting
+    ; Packed Route_selecting, Packed Route_trying
+    ; Packed Route_trying, Packed Route_exhausted
     ]
 ;;
 
@@ -409,8 +409,8 @@ let test_turn_phase_violation_payload () =
    unrepresentable through the [decision_stage_active] [to_] type). *)
 
 let test_cascade_violation_payload () =
-  let from : packed_cascade_state = Packed Cascade_idle in
-  let to_ : packed_cascade_state = Packed Cascade_exhausted in
+  let from : packed_route_phase = Packed Route_idle in
+  let to_ : packed_route_phase = Packed Route_exhausted in
   match validate_cascade_transition ~from ~to_ with
   | () -> Alcotest.fail "validator should have raised Cascade_transition_violation"
   | exception Cascade_transition_violation { where; from = ef; to_ = et; violation } ->
@@ -420,12 +420,12 @@ let test_cascade_violation_payload () =
       where;
     Alcotest.(check string)
       "violation.from"
-      (packed_cascade_state_label from)
-      (packed_cascade_state_label ef);
+      (packed_route_phase_label from)
+      (packed_route_phase_label ef);
     Alcotest.(check string)
       "violation.to_"
-      (packed_cascade_state_label to_)
-      (packed_cascade_state_label et);
+      (packed_route_phase_label to_)
+      (packed_route_phase_label et);
     Alcotest.(check string)
       "violation tag"
       "idle->exhausted"
@@ -435,8 +435,8 @@ let test_cascade_violation_payload () =
         (Cascade_transition_violation { where; from = ef; to_ = et; violation })
     in
     assert_str_contains ~haystack:rendered ~needle:"validate_cascade_transition";
-    assert_str_contains ~haystack:rendered ~needle:(packed_cascade_state_label from);
-    assert_str_contains ~haystack:rendered ~needle:(packed_cascade_state_label to_)
+    assert_str_contains ~haystack:rendered ~needle:(packed_route_phase_label from);
+    assert_str_contains ~haystack:rendered ~needle:(packed_route_phase_label to_)
 ;;
 
 let test_compaction_violation_payload () =
@@ -489,7 +489,7 @@ let () =
              [decision_stage_active] [to_] type — the test would not
              compile.  Compile-time enforcement supersedes runtime test. *)
         ] )
-    ; ( "cascade_state"
+    ; ( "route_phase"
       , [ Alcotest.test_case "valid transitions" `Quick test_valid_cascade_transitions
         ; Alcotest.test_case "invalid transitions" `Quick test_invalid_cascade_transitions
         ] )

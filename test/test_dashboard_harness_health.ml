@@ -368,22 +368,22 @@ let test_outcomes_rollup_counts_gate_rejected_from_completed_turns () =
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
     ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
-  Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_selecting);
-  Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_trying);
-  Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_done);
+  Reg.set_turn_route_phase
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Route_selecting);
+  Reg.set_turn_route_phase
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Route_trying);
+  Reg.set_turn_route_phase
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Route_done);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
     ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
-  Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_selecting);
-  Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_trying);
-  Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_exhausted);
+  Reg.set_turn_route_phase
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Route_selecting);
+  Reg.set_turn_route_phase
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Route_trying);
+  Reg.set_turn_route_phase
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Route_exhausted);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   let outcomes =
     Masc_mcp.Dashboard_http_keeper.compute_outcomes_rollup

@@ -70,7 +70,7 @@ type handoff_rollover = {
 let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   match klass with
   | Sdk_token_budget_exceeded -> true
-  | Cascade_exhausted _
+  | Route_exhausted _
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure

@@ -560,7 +560,7 @@ let test_structured_turn_wall_clock_timeout () =
 let test_structured_no_tool_capable_provider () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
+      (Masc_mcp.Keeper_turn_driver.Route_exhausted
          { cascade_name =
              Keeper_name.of_string_exn
                "cascade.provider_k-coding-with-spark"

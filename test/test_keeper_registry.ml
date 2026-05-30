@@ -1586,7 +1586,7 @@ let test_missing_turn_observation_updates_are_silent () =
     ~base_path:bp
     name
     R.Decision_active_tool_policy_selected;
-  R.set_turn_cascade_state ~base_path:bp name (R.Packed R.Cascade_selecting);
+  R.set_turn_route_phase ~base_path:bp name (R.Packed R.Route_selecting);
   R.set_turn_phase ~base_path:bp name (R.Packed R.Turn_executing);
   R.set_turn_selected_model ~base_path:bp name (Some "runtime");
   R.prepare_turn_retry_after_compaction ~base_path:bp name;
@@ -2052,9 +2052,9 @@ let drive_turn_to_finalizing keeper_name =
   R.mark_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
     ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
-  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
-  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_trying);
-  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_done)
+  R.set_turn_route_phase ~base_path:bp keeper_name (R.Packed R.Route_selecting);
+  R.set_turn_route_phase ~base_path:bp keeper_name (R.Packed R.Route_trying);
+  R.set_turn_route_phase ~base_path:bp keeper_name (R.Packed R.Route_done)
 
 let test_mark_sdk_turn_started_resets_after_finalizing () =
   R.clear ();
@@ -2070,8 +2070,8 @@ let test_mark_sdk_turn_started_resets_after_finalizing () =
      | Some obs ->
        check bool "turn_phase reset to Turn_prompting" true
          (obs.R.turn_phase = R.Packed R.Turn_prompting);
-       check bool "cascade_state reset to Cascade_idle" true
-         (obs.R.cascade_state = R.Packed R.Cascade_idle);
+       check bool "route_phase reset to Route_idle" true
+         (obs.R.route_phase = R.Packed R.Route_idle);
        check bool "decision_stage reset to Decision_undecided" true
          (obs.R.decision_stage = R.Packed R.Decision_undecided))
 
@@ -2208,68 +2208,68 @@ let test_mark_sdk_turn_started_no_op_without_obs () =
     fail "mark_sdk_turn_started installed observation without keeper-turn"
   | None -> fail "entry missing"
 
-let test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path () =
+let test_mark_turn_route_exhausted_materializes_pre_disclosure_path () =
   R.clear ();
   let keeper_name = "k-cascade-exhausted-pre-disclosure" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
-  R.mark_turn_cascade_exhausted ~base_path:bp keeper_name;
+  R.mark_turn_route_exhausted ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "cascade_state lands on Cascade_exhausted" true
-      (obs.R.cascade_state = R.Packed R.Cascade_exhausted);
+    check bool "route_phase lands on Route_exhausted" true
+      (obs.R.route_phase = R.Packed R.Route_exhausted);
     check bool "turn_phase lands on Turn_exhausted" true
       (obs.R.turn_phase = R.Packed R.Turn_exhausted);
     check bool "decision_stage records tool policy boundary" true
       (obs.R.decision_stage = R.Packed R.Decision_tool_policy_selected)
   | Some { current_turn_observation = None; _ } ->
-    fail "mark_turn_cascade_exhausted cleared observation"
+    fail "mark_turn_route_exhausted cleared observation"
   | None -> fail "entry missing"
 
-let test_mark_turn_cascade_done_materializes_pre_disclosure_path () =
+let test_mark_turn_route_done_materializes_pre_disclosure_path () =
   R.clear ();
   let keeper_name = "k-cascade-done-pre-disclosure" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
-  R.mark_turn_cascade_done ~base_path:bp keeper_name;
+  R.mark_turn_route_done ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "cascade_state lands on Cascade_done" true
-      (obs.R.cascade_state = R.Packed R.Cascade_done);
+    check bool "route_phase lands on Route_done" true
+      (obs.R.route_phase = R.Packed R.Route_done);
     check bool "turn_phase lands on Turn_finalizing" true
       (obs.R.turn_phase = R.Packed R.Turn_finalizing);
     check bool "decision_stage records tool policy boundary" true
       (obs.R.decision_stage = R.Packed R.Decision_tool_policy_selected)
   | Some { current_turn_observation = None; _ } ->
-    fail "mark_turn_cascade_done cleared observation"
+    fail "mark_turn_route_done cleared observation"
   | None -> fail "entry missing"
 
-let test_mark_turn_cascade_done_no_op_without_obs () =
+let test_mark_turn_route_done_no_op_without_obs () =
   R.clear ();
   let keeper_name = "k-cascade-done-no-obs" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
-  R.mark_turn_cascade_done ~base_path:bp keeper_name;
+  R.mark_turn_route_done ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = None; _ } -> ()
   | Some { current_turn_observation = Some _; _ } ->
-    fail "mark_turn_cascade_done installed observation without keeper-turn"
+    fail "mark_turn_route_done installed observation without keeper-turn"
   | None -> fail "entry missing"
 
-let test_mark_turn_cascade_done_no_op_after_exhausted () =
+let test_mark_turn_route_done_no_op_after_exhausted () =
   R.clear ();
   let keeper_name = "k-cascade-done-after-exhausted" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
-  R.mark_turn_cascade_exhausted ~base_path:bp keeper_name;
-  R.mark_turn_cascade_done ~base_path:bp keeper_name;
+  R.mark_turn_route_exhausted ~base_path:bp keeper_name;
+  R.mark_turn_route_done ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "cascade_state remains Cascade_exhausted" true
-      (obs.R.cascade_state = R.Packed R.Cascade_exhausted);
+    check bool "route_phase remains Route_exhausted" true
+      (obs.R.route_phase = R.Packed R.Route_exhausted);
     check bool "turn_phase remains Turn_exhausted" true
       (obs.R.turn_phase = R.Packed R.Turn_exhausted)
   | Some { current_turn_observation = None; _ } ->
-    fail "mark_turn_cascade_done cleared observation"
+    fail "mark_turn_route_done cleared observation"
   | None -> fail "entry missing"
 
 let test_mark_turn_provider_attempt_started_lands_on_executing () =
@@ -2280,8 +2280,8 @@ let test_mark_turn_provider_attempt_started_lands_on_executing () =
   R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "cascade_state lands on Cascade_trying" true
-      (obs.R.cascade_state = R.Packed R.Cascade_trying);
+    check bool "route_phase lands on Route_trying" true
+      (obs.R.route_phase = R.Packed R.Route_trying);
     check bool "turn_phase lands on Turn_executing" true
       (obs.R.turn_phase = R.Packed R.Turn_executing);
     check bool "decision_stage records tool policy boundary" true
@@ -2310,8 +2310,8 @@ let test_mark_turn_provider_attempt_started_is_idempotent () =
   R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "cascade_state remains Cascade_trying" true
-      (obs.R.cascade_state = R.Packed R.Cascade_trying);
+    check bool "route_phase remains Route_trying" true
+      (obs.R.route_phase = R.Packed R.Route_trying);
     check bool "turn_phase remains Turn_executing" true
       (obs.R.turn_phase = R.Packed R.Turn_executing)
   | Some { current_turn_observation = None; _ } ->
@@ -2323,20 +2323,20 @@ let test_mark_turn_provider_attempt_started_no_op_after_done () =
   let keeper_name = "k-provider-attempt-done" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
-  R.set_turn_cascade_state
+  R.set_turn_route_phase
     ~base_path:bp
     keeper_name
-    (R.Packed R.Cascade_selecting);
-  R.set_turn_cascade_state
+    (R.Packed R.Route_selecting);
+  R.set_turn_route_phase
     ~base_path:bp
     keeper_name
-    (R.Packed R.Cascade_trying);
-  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_done);
+    (R.Packed R.Route_trying);
+  R.set_turn_route_phase ~base_path:bp keeper_name (R.Packed R.Route_done);
   R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "cascade_state remains Cascade_done" true
-      (obs.R.cascade_state = R.Packed R.Cascade_done);
+    check bool "route_phase remains Route_done" true
+      (obs.R.route_phase = R.Packed R.Route_done);
     check bool "decision_stage remains unchanged" true
       (obs.R.decision_stage = R.Packed R.Decision_undecided)
   | Some { current_turn_observation = None; _ } ->
@@ -2346,10 +2346,10 @@ let test_mark_turn_provider_attempt_started_no_op_after_done () =
 (* The production [Assert_failure] at keeper_registry.ml:775 was triggered
    when the SDK fired [before_turn_params] for a second time inside one
    keeper-turn.  This test reproduces the same shape: two
-   [set_turn_cascade_state(Cascade_selecting)] calls separated by a
-   [Cascade_done] terminal, with [mark_sdk_turn_started] used as the
+   [set_turn_route_phase(Route_selecting)] calls separated by a
+   [Route_done] terminal, with [mark_sdk_turn_started] used as the
    boundary.  Without the RFC-0045 boundary call this test would crash
-   on the second [set_turn_cascade_state]. *)
+   on the second [set_turn_route_phase]. *)
 let test_two_sdk_turn_boundaries_no_assert () =
   R.clear ();
   let keeper_name = "k-rfc-0045-two-boundaries" in
@@ -2359,11 +2359,11 @@ let test_two_sdk_turn_boundaries_no_assert () =
   R.mark_sdk_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
     ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
-  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
+  R.set_turn_route_phase ~base_path:bp keeper_name (R.Packed R.Route_selecting);
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "second SDK turn lands in Cascade_selecting / Turn_routing" true
-      (obs.R.cascade_state = R.Packed R.Cascade_selecting
+    check bool "second SDK turn lands in Route_selecting / Turn_routing" true
+      (obs.R.route_phase = R.Packed R.Route_selecting
        && obs.R.turn_phase = R.Packed R.Turn_routing)
   | _ -> fail "obs missing after second SDK boundary"
 
@@ -2649,14 +2649,14 @@ let () =
             test_registry_progress_wrapper_survives_liveness_off;
           eio_test "mark_sdk_turn_started no-op without observation"
             test_mark_sdk_turn_started_no_op_without_obs;
-          eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"
-            test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path;
-          eio_test "mark_turn_cascade_done materializes pre-disclosure path"
-            test_mark_turn_cascade_done_materializes_pre_disclosure_path;
-          eio_test "mark_turn_cascade_done no-op without observation"
-            test_mark_turn_cascade_done_no_op_without_obs;
-          eio_test "mark_turn_cascade_done no-op after exhausted"
-            test_mark_turn_cascade_done_no_op_after_exhausted;
+          eio_test "mark_turn_route_exhausted materializes pre-disclosure path"
+            test_mark_turn_route_exhausted_materializes_pre_disclosure_path;
+          eio_test "mark_turn_route_done materializes pre-disclosure path"
+            test_mark_turn_route_done_materializes_pre_disclosure_path;
+          eio_test "mark_turn_route_done no-op without observation"
+            test_mark_turn_route_done_no_op_without_obs;
+          eio_test "mark_turn_route_done no-op after exhausted"
+            test_mark_turn_route_done_no_op_after_exhausted;
           eio_test "mark_turn_provider_attempt_started lands on executing"
             test_mark_turn_provider_attempt_started_lands_on_executing;
           eio_test "mark_turn_provider_attempt_started no-op without observation"

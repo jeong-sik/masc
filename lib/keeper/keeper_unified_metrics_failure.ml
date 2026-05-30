@@ -80,7 +80,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             Option.value
               ~default:reason
               (Keeper_turn_driver.summary_of_masc_internal_error err)
-        | Some (Keeper_turn_driver.Cascade_exhausted _ as err) -> (
+        | Some (Keeper_turn_driver.Route_exhausted _ as err) -> (
             match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
             | None -> reason)
@@ -100,7 +100,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             | Keeper_turn_driver.Admission_queue_rejected _
             | Keeper_turn_driver.Resumable_cli_session _
             | Keeper_turn_driver.Capacity_backpressure _
-            (* No_tool_capable (inside Cascade_exhausted) excluded:
+            (* No_tool_capable (inside Route_exhausted) excluded:
                this is a configuration/capability mismatch, not a
                transient condition.  Counting it toward noop_backoff
                causes spurious keeper fiber kills (59/day on 2026-05-24)
@@ -116,7 +116,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   (match sdk_error with
    | Some err ->
        (match Keeper_turn_driver.classify_masc_internal_error err with
-        | Some (Keeper_turn_driver.Cascade_exhausted
+        | Some (Keeper_turn_driver.Route_exhausted
 	                  { cascade_name
 	                  ; reason = Keeper_meta_contract.No_tool_capable _
 	                  ; _

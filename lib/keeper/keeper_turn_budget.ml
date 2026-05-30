@@ -189,11 +189,11 @@ let degraded_retry_bypasses_slot_phase_guard
      for a guard that decides whether to bypass slot-phase admission. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Provider_timeout _) -> true
-  | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ })
+  | Some (Keeper_turn_driver.Route_exhausted { reason; _ })
     when cascade_reason_is_structural_attempt_timeout reason ->
       true
   | Some
-      ( Keeper_turn_driver.Cascade_exhausted _
+      ( Keeper_turn_driver.Route_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
 

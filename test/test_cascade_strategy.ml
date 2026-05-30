@@ -436,7 +436,7 @@ let test_client_capacity_json_exposes_provenance () =
 
 (* ── Cascade_state auto-rotation primitive ───────────────────── *)
 
-let test_cascade_state_round_robin_negative_bound () =
+let test_route_phase_round_robin_negative_bound () =
   Cascade_state.clear_all ();
   let v = Cascade_state.rotate_round_robin ~cascade:"x" ~bound:0 in
   check int "bound<=0 → returns 0" 0 v;
@@ -929,9 +929,9 @@ let () =
       test_case "dashboard JSON exposes provenance" `Quick
         test_client_capacity_json_exposes_provenance;
     ];
-    "cascade_state", [
+    "route_phase", [
       test_case "round_robin bound<=0 returns 0" `Quick
-        test_cascade_state_round_robin_negative_bound;
+        test_route_phase_round_robin_negative_bound;
     ];
     "client_capacity_history", [
       test_case "record + snapshot roundtrip newest-first" `Quick

@@ -7,14 +7,14 @@
 
     {v
       cascade_auto_paused =
-        EC.is_cascade_exhausted_error err
+        EC.is_route_exhausted_error err
         && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
         && not updated_meta.paused
     v}
 
     Two load-bearing facts that this test pins:
 
-    1. [is_cascade_exhausted_error] returns [true] for the variants that
+    1. [is_route_exhausted_error] returns [true] for the variants that
        a misconfigured / unavailable cascade actually emits, and [false]
        for transient errors that are already retried at a lower layer
        (otherwise auto-pause would fire on a single 429).
@@ -34,16 +34,16 @@ module UT = Masc_mcp.Keeper_unified_turn
 
 let cascade_name raw = Keeper_name.of_string_exn raw
 
-(* --- 1. is_cascade_exhausted_error covers the variants auto-pause cares about --- *)
+(* --- 1. is_route_exhausted_error covers the variants auto-pause cares about --- *)
 
-let mk_cascade_exhausted () =
+let mk_route_exhausted () =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.Cascade_exhausted
+    (Owne.Route_exhausted
        { cascade_name = cascade_name "test"; reason = Keeper_meta_contract.All_providers_failed })
 
 let mk_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.Cascade_exhausted
+    (Owne.Route_exhausted
        { cascade_name = cascade_name "test"
        ; reason = Keeper_meta_contract.No_tool_capable (Some
            { configured_labels = []
@@ -63,17 +63,17 @@ let mk_resumable_cli_session () =
          detail = "rollout-thread-not-found";
          exit_code = Some 1 })
 
-let test_pause_fires_on_cascade_exhausted_variants () =
-  check bool "Cascade_exhausted -> pause" true
-    (EC.is_cascade_exhausted_error (mk_cascade_exhausted ()));
-  check bool "No_tool_capable (inside Cascade_exhausted) -> pause" true
-    (EC.is_cascade_exhausted_error (mk_no_tool_capable ()));
+let test_pause_fires_on_route_exhausted_variants () =
+  check bool "Route_exhausted -> pause" true
+    (EC.is_route_exhausted_error (mk_route_exhausted ()));
+  check bool "No_tool_capable (inside Route_exhausted) -> pause" true
+    (EC.is_route_exhausted_error (mk_no_tool_capable ()));
   check bool "Accept_rejected -> pause" true
-    (EC.is_cascade_exhausted_error (mk_accept_rejected ()));
+    (EC.is_route_exhausted_error (mk_accept_rejected ()));
   check bool "Resumable_cli_session -> pause" true
-    (EC.is_cascade_exhausted_error (mk_resumable_cli_session ()))
+    (EC.is_route_exhausted_error (mk_resumable_cli_session ()))
 
-(* --- 2. is_cascade_exhausted_error stays false for transient/timeout variants ---
+(* --- 2. is_route_exhausted_error stays false for transient/timeout variants ---
    If this regresses, a single 429 + 2 prior unrelated failures would
    flip the keeper to paused on its first transient error of the streak. *)
 
@@ -111,11 +111,11 @@ let mk_required_tool_contract_violation () =
 
 let test_pause_does_not_fire_on_transient () =
   check bool "Provider_timeout -> no pause" false
-    (EC.is_cascade_exhausted_error (mk_oas_timeout_budget ()));
+    (EC.is_route_exhausted_error (mk_oas_timeout_budget ()));
   check bool "Turn_timeout -> no pause" false
-    (EC.is_cascade_exhausted_error (mk_turn_timeout ()));
+    (EC.is_route_exhausted_error (mk_turn_timeout ()));
   check bool "Admission_queue_timeout -> no pause" false
-    (EC.is_cascade_exhausted_error (mk_admission_queue_timeout ()))
+    (EC.is_route_exhausted_error (mk_admission_queue_timeout ()))
 
 (* --- 3. threshold ordering: pause fires before crash --- *)
 
@@ -176,7 +176,7 @@ let () =
       ( "predicate covers cascade-class errors",
         [
           test_case "cascade variants trigger pause" `Quick
-            test_pause_fires_on_cascade_exhausted_variants;
+            test_pause_fires_on_route_exhausted_variants;
           test_case "transient variants do not trigger pause" `Quick
             test_pause_does_not_fire_on_transient;
         ] );

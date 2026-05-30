@@ -275,7 +275,7 @@ val operator_disposition_kind_to_string : operator_disposition_kind -> string
     form is byte-compatible with the pre-typing string. *)
 type operator_disposition_reason =
   | Reason_healthy
-  | Reason_cascade_exhausted
+  | Reason_route_exhausted
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_cascade_fallback
@@ -286,7 +286,7 @@ type operator_disposition_reason =
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
-  | Reason_unmapped_cascade_state
+  | Reason_unmapped_route_phase
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string
 

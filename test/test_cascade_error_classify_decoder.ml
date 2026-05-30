@@ -33,7 +33,7 @@ let test_roundtrip_other_detail () =
      decode losslessly even after the schema-drift hardening. *)
   let payload =
     `Assoc
-      [ ("kind", `String "cascade_exhausted")
+      [ ("kind", `String "route_exhausted")
       ; ("cascade_name", `String "cascade.primary")
       ; ( "reason"
         , `Assoc
@@ -46,7 +46,7 @@ let test_roundtrip_other_detail () =
     Classify.classify_masc_internal_error_of_string (wrap_masc_oas_error payload)
   in
   match decoded with
-  | Some (Classify.Cascade_exhausted { cascade_name; reason }) ->
+  | Some (Classify.Route_exhausted { cascade_name; reason }) ->
     Alcotest.(check string)
       "cascade name preserved"
       "cascade.primary"
@@ -55,12 +55,12 @@ let test_roundtrip_other_detail () =
      | Keeper_meta_contract.Other_detail msg ->
        Alcotest.(check string) "Other_detail payload preserved" "all providers tried" msg
      | _ -> Alcotest.fail "expected Other_detail reason")
-  | _ -> Alcotest.fail "expected Cascade_exhausted"
+  | _ -> Alcotest.fail "expected Route_exhausted"
 
 let test_roundtrip_structural_attempt_timeout () =
   let payload =
     `Assoc
-      [ ("kind", `String "cascade_exhausted")
+      [ ("kind", `String "route_exhausted")
       ; ("cascade_name", `String "cascade.primary")
       ; ( "reason"
         , `Assoc
@@ -73,7 +73,7 @@ let test_roundtrip_structural_attempt_timeout () =
     Classify.classify_masc_internal_error_of_string (wrap_masc_oas_error payload)
   in
   match decoded with
-  | Some (Classify.Cascade_exhausted { reason; _ }) ->
+  | Some (Classify.Route_exhausted { reason; _ }) ->
     (match reason with
      | Keeper_meta_contract.Structural_attempt_timeout { detail } ->
        Alcotest.(check string)
@@ -81,14 +81,14 @@ let test_roundtrip_structural_attempt_timeout () =
          "max_execution_time_s exceeded"
          detail
      | _ -> Alcotest.fail "expected Structural_attempt_timeout")
-  | _ -> Alcotest.fail "expected Cascade_exhausted"
+  | _ -> Alcotest.fail "expected Route_exhausted"
 
 let test_roundtrip_bare_string_reason () =
   (* Bare string reasons like "no_providers_available" decode through the
      [`String _] arm of [cascade_exhaustion_reason_of_json]. *)
   let payload =
     `Assoc
-      [ ("kind", `String "cascade_exhausted")
+      [ ("kind", `String "route_exhausted")
       ; ("cascade_name", `String "cascade.secondary")
       ; ("reason", `String "no_providers_available")
       ]
@@ -97,7 +97,7 @@ let test_roundtrip_bare_string_reason () =
     Classify.classify_masc_internal_error_of_string (wrap_masc_oas_error payload)
   in
   match decoded with
-  | Some (Classify.Cascade_exhausted { reason; _ }) ->
+  | Some (Classify.Route_exhausted { reason; _ }) ->
     Alcotest.check
       (Alcotest.testable
          (fun fmt _ -> Format.fprintf fmt "reason")
@@ -105,7 +105,7 @@ let test_roundtrip_bare_string_reason () =
       "bare string reason decoded"
       Keeper_meta_contract.No_providers_available
       reason
-  | _ -> Alcotest.fail "expected Cascade_exhausted"
+  | _ -> Alcotest.fail "expected Route_exhausted"
 
 let test_roundtrip_capacity_backpressure () =
   let payload =
@@ -173,7 +173,7 @@ let test_sdk_internal_nested_prefix_roundtrip () =
   in
   match Classify.classify_masc_internal_error err with
   | Some
-      (Classify.Cascade_exhausted
+      (Classify.Route_exhausted
          { cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
          ; _
@@ -192,7 +192,7 @@ let test_sdk_internal_nested_prefix_roundtrip () =
       (List.length detail.provider_rejections)
   | decoded ->
     Alcotest.failf
-      "expected Cascade_exhausted (No_tool_capable), got %a"
+      "expected Route_exhausted (No_tool_capable), got %a"
       pp_internal_error
       decoded
 
@@ -206,7 +206,7 @@ let test_unknown_reason_tag_decodes_to_none () =
      real cascade reason. *)
   let payload =
     `Assoc
-      [ ("kind", `String "cascade_exhausted")
+      [ ("kind", `String "route_exhausted")
       ; ("cascade_name", `String "cascade.primary")
       ; ( "reason"
         , `Assoc
@@ -225,7 +225,7 @@ let test_unknown_reason_tag_decodes_to_none () =
 let test_missing_reason_field_decodes_to_none () =
   let payload =
     `Assoc
-      [ ("kind", `String "cascade_exhausted")
+      [ ("kind", `String "route_exhausted")
       ; ("cascade_name", `String "cascade.primary")
       ]
   in
@@ -240,7 +240,7 @@ let test_malformed_reason_payload_decodes_to_none () =
   (* "reason" is present but is an unexpected JSON shape (a bool). *)
   let payload =
     `Assoc
-      [ ("kind", `String "cascade_exhausted")
+      [ ("kind", `String "route_exhausted")
       ; ("cascade_name", `String "cascade.primary")
       ; ("reason", `Bool true)
       ]

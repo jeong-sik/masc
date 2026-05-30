@@ -1,101 +1,101 @@
 (** Keeper_registry_types_turn — cascade and compaction FSM types and transitions.
 
     Extracted from [Keeper_registry_types] (534 LoC). Pure type definitions
-    and functions for the cascade_state and compaction_stage GADTs, witnesses,
+    and functions for the route_phase and compaction_stage GADTs, witnesses,
     transition matrices, spec violation types, and resolvers.
 
     @since Keeper 500-line decomposition *)
 
-type cascade_state =
-  | Cascade_idle [@tla.idle]
-  | Cascade_selecting [@tla.active]
-  | Cascade_trying [@tla.active]
-  | Cascade_done [@tla.terminal]
-  | Cascade_exhausted [@tla.terminal]
+type route_phase =
+  | Route_idle [@tla.idle]
+  | Route_selecting [@tla.active]
+  | Route_trying [@tla.active]
+  | Route_done [@tla.terminal]
+  | Route_exhausted [@tla.terminal]
 [@@deriving tla]
 
-(* Phantom witness types for cascade_state GADT (Tier B5 pattern). *)
-type cascade_idle = |
-type cascade_selecting = |
-type cascade_trying = |
-type cascade_done = |
-type cascade_exhausted = |
+(* Phantom witness types for route_phase GADT (Tier B5 pattern). *)
+type route_idle = |
+type route_selecting = |
+type route_trying = |
+type route_done = |
+type route_exhausted = |
 
-type 'a cascade_state_witness =
-  | Cascade_idle : cascade_idle cascade_state_witness
-  | Cascade_selecting : cascade_selecting cascade_state_witness
-  | Cascade_trying : cascade_trying cascade_state_witness
-  | Cascade_done : cascade_done cascade_state_witness
-  | Cascade_exhausted : cascade_exhausted cascade_state_witness
+type 'a route_phase_witness =
+  | Route_idle : route_idle route_phase_witness
+  | Route_selecting : route_selecting route_phase_witness
+  | Route_trying : route_trying route_phase_witness
+  | Route_done : route_done route_phase_witness
+  | Route_exhausted : route_exhausted route_phase_witness
 
-type packed_cascade_state = Packed : 'a cascade_state_witness -> packed_cascade_state
+type packed_route_phase = Packed : 'a route_phase_witness -> packed_route_phase
 
-let cascade_state_to_witness : cascade_state -> packed_cascade_state = function
-  | Cascade_idle -> Packed Cascade_idle
-  | Cascade_selecting -> Packed Cascade_selecting
-  | Cascade_trying -> Packed Cascade_trying
-  | Cascade_done -> Packed Cascade_done
-  | Cascade_exhausted -> Packed Cascade_exhausted
+let route_phase_to_witness : route_phase -> packed_route_phase = function
+  | Route_idle -> Packed Route_idle
+  | Route_selecting -> Packed Route_selecting
+  | Route_trying -> Packed Route_trying
+  | Route_done -> Packed Route_done
+  | Route_exhausted -> Packed Route_exhausted
 ;;
 
-let witness_to_cascade_state : packed_cascade_state -> cascade_state = function
-  | Packed Cascade_idle -> Cascade_idle
-  | Packed Cascade_selecting -> Cascade_selecting
-  | Packed Cascade_trying -> Cascade_trying
-  | Packed Cascade_done -> Cascade_done
-  | Packed Cascade_exhausted -> Cascade_exhausted
+let witness_to_route_phase : packed_route_phase -> route_phase = function
+  | Packed Route_idle -> Route_idle
+  | Packed Route_selecting -> Route_selecting
+  | Packed Route_trying -> Route_trying
+  | Packed Route_done -> Route_done
+  | Packed Route_exhausted -> Route_exhausted
 ;;
 
 (* Diagnostic label for invalid-transition error messages.  Mirrors
-   [cascade_state]; constructor changes will fail compilation here. *)
-let packed_cascade_state_label : packed_cascade_state -> string = function
-  | Packed Cascade_idle -> "Cascade_idle"
-  | Packed Cascade_selecting -> "Cascade_selecting"
-  | Packed Cascade_trying -> "Cascade_trying"
-  | Packed Cascade_done -> "Cascade_done"
-  | Packed Cascade_exhausted -> "Cascade_exhausted"
+   [route_phase]; constructor changes will fail compilation here. *)
+let packed_route_phase_label : packed_route_phase -> string = function
+  | Packed Route_idle -> "Route_idle"
+  | Packed Route_selecting -> "Route_selecting"
+  | Packed Route_trying -> "Route_trying"
+  | Packed Route_done -> "Route_done"
+  | Packed Route_exhausted -> "Route_exhausted"
 ;;
 
 (* RFC-0072 Phase 1: GADT-encoded cascade transitions.
 
    Enumerates the 13 valid cross-state transitions of the 5-variant
-   [cascade_state] FSM.  Idempotent (self-loop) transitions are
+   [route_phase] FSM.  Idempotent (self-loop) transitions are
    intentionally not represented — mirrors [Decision_transition] —
    because they correspond to no-op writes at the mutator boundary.
 
    The 7 forbidden pairs ([Idle -> Trying/Done/Exhausted],
    [Selecting -> Done/Exhausted], [Done <-> Exhausted]) have no
    constructor and are therefore type-unrepresentable.  Adding a new
-   [cascade_state] variant will trigger Warning 8 in [to_tag] and in
+   [route_phase] variant will trigger Warning 8 in [to_tag] and in
    any future per-transition dispatcher.
 
    Phase 1 (this PR) introduces the module additively — no caller is
-   wired yet.  Phase 2 routes [set_turn_cascade_state] through
+   wired yet.  Phase 2 routes [set_turn_route_phase] through
    [resolve_cascade_transition] for internal dispatch.  Phase 3
    converts [validate_cascade_transition] into a compile-time
    fixture (mirroring PR #14893 for decision). *)
 module Cascade_transition = struct
   type ('from, 'to_) t =
     (* Boot dispatch (Idle -> Selecting). *)
-    | Idle_to_selecting : (cascade_idle, cascade_selecting) t
+    | Idle_to_selecting : (route_idle, route_selecting) t
     (* Selecting -> {Idle, Trying} (retry-back or forward dispatch). *)
-    | Selecting_to_idle : (cascade_selecting, cascade_idle) t
-    | Selecting_to_trying : (cascade_selecting, cascade_trying) t
+    | Selecting_to_idle : (route_selecting, route_idle) t
+    | Selecting_to_trying : (route_selecting, route_trying) t
     (* Trying -> {Idle, Selecting, Done, Exhausted}: retry-back,
        re-entry, completion, exhaustion. *)
-    | Trying_to_idle : (cascade_trying, cascade_idle) t
-    | Trying_to_selecting : (cascade_trying, cascade_selecting) t
-    | Trying_to_done : (cascade_trying, cascade_done) t
-    | Trying_to_exhausted : (cascade_trying, cascade_exhausted) t
+    | Trying_to_idle : (route_trying, route_idle) t
+    | Trying_to_selecting : (route_trying, route_selecting) t
+    | Trying_to_done : (route_trying, route_done) t
+    | Trying_to_exhausted : (route_trying, route_exhausted) t
     (* Compaction-driven retry from terminal states.
        prepare_turn_retry_after_compaction lifts Done/Exhausted back
        into Idle/Selecting/Trying. *)
-    | Done_to_idle : (cascade_done, cascade_idle) t
-    | Done_to_selecting : (cascade_done, cascade_selecting) t
-    | Done_to_trying : (cascade_done, cascade_trying) t
-    | Exhausted_to_idle : (cascade_exhausted, cascade_idle) t
-    | Exhausted_to_selecting : (cascade_exhausted, cascade_selecting) t
-    | Exhausted_to_trying : (cascade_exhausted, cascade_trying) t
+    | Done_to_idle : (route_done, route_idle) t
+    | Done_to_selecting : (route_done, route_selecting) t
+    | Done_to_trying : (route_done, route_trying) t
+    | Exhausted_to_idle : (route_exhausted, route_idle) t
+    | Exhausted_to_selecting : (route_exhausted, route_selecting) t
+    | Exhausted_to_trying : (route_exhausted, route_trying) t
 
   type packed = Packed_transition : ('a, 'b) t -> packed
 
@@ -146,7 +146,7 @@ let cascade_transition_spec_violation_to_tag = function
 
 (* RFC-0072 Phase 5: typed exception for forbidden cascade transitions.
    Replaces the prior [invalid_arg (Printf.sprintf ...)] at
-   [validate_cascade_transition] / [set_turn_cascade_state] — the typed
+   [validate_cascade_transition] / [set_turn_route_phase] — the typed
    [cascade_transition_spec_violation] payload now travels on the exception
    instead of being projected through a string, so callers (and the test
    surface) can pattern-match on the violation directly. The [where] field
@@ -156,8 +156,8 @@ let cascade_transition_spec_violation_to_tag = function
 exception
   Cascade_transition_violation of
     { where : string
-    ; from : packed_cascade_state
-    ; to_ : packed_cascade_state
+    ; from : packed_route_phase
+    ; to_ : packed_route_phase
     ; violation : cascade_transition_spec_violation
     }
 
@@ -165,8 +165,8 @@ let cascade_transition_violation_message ~where ~from ~to_ ~violation =
   Printf.sprintf
     "%s: invalid cascade transition %s -> %s (spec_violation=%s)"
     where
-    (packed_cascade_state_label from)
-    (packed_cascade_state_label to_)
+    (packed_route_phase_label from)
+    (packed_route_phase_label to_)
     (cascade_transition_spec_violation_to_tag violation)
 ;;
 
@@ -197,60 +197,60 @@ let () =
    semantically clean (Ok = transition value exists, Error = spec violation).
 
    Phase 2 will use this to replace the [validate_cascade_transition] call
-   inside [set_turn_cascade_state]. *)
+   inside [set_turn_route_phase]. *)
 type cascade_resolve_outcome =
   | Resolved_transition of Cascade_transition.packed
   | Resolved_idempotent
   | Resolved_violation of cascade_transition_spec_violation
 
 let resolve_cascade_transition
-      ~(from : packed_cascade_state)
-      ~(target : packed_cascade_state)
+      ~(from : packed_route_phase)
+      ~(target : packed_route_phase)
   : cascade_resolve_outcome
   =
   match from, target with
   (* Idempotent self-loops (5). *)
-  | Packed Cascade_idle, Packed Cascade_idle
-  | Packed Cascade_selecting, Packed Cascade_selecting
-  | Packed Cascade_trying, Packed Cascade_trying
-  | Packed Cascade_done, Packed Cascade_done
-  | Packed Cascade_exhausted, Packed Cascade_exhausted -> Resolved_idempotent
+  | Packed Route_idle, Packed Route_idle
+  | Packed Route_selecting, Packed Route_selecting
+  | Packed Route_trying, Packed Route_trying
+  | Packed Route_done, Packed Route_done
+  | Packed Route_exhausted, Packed Route_exhausted -> Resolved_idempotent
   (* Valid cross-state transitions (13). *)
-  | Packed Cascade_idle, Packed Cascade_selecting ->
+  | Packed Route_idle, Packed Route_selecting ->
     Resolved_transition (Cascade_transition.Packed_transition Idle_to_selecting)
-  | Packed Cascade_selecting, Packed Cascade_idle ->
+  | Packed Route_selecting, Packed Route_idle ->
     Resolved_transition (Cascade_transition.Packed_transition Selecting_to_idle)
-  | Packed Cascade_selecting, Packed Cascade_trying ->
+  | Packed Route_selecting, Packed Route_trying ->
     Resolved_transition (Cascade_transition.Packed_transition Selecting_to_trying)
-  | Packed Cascade_trying, Packed Cascade_idle ->
+  | Packed Route_trying, Packed Route_idle ->
     Resolved_transition (Cascade_transition.Packed_transition Trying_to_idle)
-  | Packed Cascade_trying, Packed Cascade_selecting ->
+  | Packed Route_trying, Packed Route_selecting ->
     Resolved_transition (Cascade_transition.Packed_transition Trying_to_selecting)
-  | Packed Cascade_trying, Packed Cascade_done ->
+  | Packed Route_trying, Packed Route_done ->
     Resolved_transition (Cascade_transition.Packed_transition Trying_to_done)
-  | Packed Cascade_trying, Packed Cascade_exhausted ->
+  | Packed Route_trying, Packed Route_exhausted ->
     Resolved_transition (Cascade_transition.Packed_transition Trying_to_exhausted)
-  | Packed Cascade_done, Packed Cascade_idle ->
+  | Packed Route_done, Packed Route_idle ->
     Resolved_transition (Cascade_transition.Packed_transition Done_to_idle)
-  | Packed Cascade_done, Packed Cascade_selecting ->
+  | Packed Route_done, Packed Route_selecting ->
     Resolved_transition (Cascade_transition.Packed_transition Done_to_selecting)
-  | Packed Cascade_done, Packed Cascade_trying ->
+  | Packed Route_done, Packed Route_trying ->
     Resolved_transition (Cascade_transition.Packed_transition Done_to_trying)
-  | Packed Cascade_exhausted, Packed Cascade_idle ->
+  | Packed Route_exhausted, Packed Route_idle ->
     Resolved_transition (Cascade_transition.Packed_transition Exhausted_to_idle)
-  | Packed Cascade_exhausted, Packed Cascade_selecting ->
+  | Packed Route_exhausted, Packed Route_selecting ->
     Resolved_transition (Cascade_transition.Packed_transition Exhausted_to_selecting)
-  | Packed Cascade_exhausted, Packed Cascade_trying ->
+  | Packed Route_exhausted, Packed Route_trying ->
     Resolved_transition (Cascade_transition.Packed_transition Exhausted_to_trying)
   (* Spec violations (7). *)
-  | Packed Cascade_idle, Packed Cascade_trying -> Resolved_violation Idle_to_trying
-  | Packed Cascade_idle, Packed Cascade_done -> Resolved_violation Idle_to_done
-  | Packed Cascade_idle, Packed Cascade_exhausted -> Resolved_violation Idle_to_exhausted
-  | Packed Cascade_selecting, Packed Cascade_done -> Resolved_violation Selecting_to_done
-  | Packed Cascade_selecting, Packed Cascade_exhausted ->
+  | Packed Route_idle, Packed Route_trying -> Resolved_violation Idle_to_trying
+  | Packed Route_idle, Packed Route_done -> Resolved_violation Idle_to_done
+  | Packed Route_idle, Packed Route_exhausted -> Resolved_violation Idle_to_exhausted
+  | Packed Route_selecting, Packed Route_done -> Resolved_violation Selecting_to_done
+  | Packed Route_selecting, Packed Route_exhausted ->
     Resolved_violation Selecting_to_exhausted
-  | Packed Cascade_done, Packed Cascade_exhausted -> Resolved_violation Done_to_exhausted
-  | Packed Cascade_exhausted, Packed Cascade_done -> Resolved_violation Exhausted_to_done
+  | Packed Route_done, Packed Route_exhausted -> Resolved_violation Done_to_exhausted
+  | Packed Route_exhausted, Packed Route_done -> Resolved_violation Exhausted_to_done
 ;;
 
 (* ── Compaction stage FSM ────────────────────────────────────────────── *)

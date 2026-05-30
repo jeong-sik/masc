@@ -109,7 +109,7 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_meta_contract.keeper
             ( "severity",
               `String
                 (match blocker_class with
-                 | Some "cascade_exhausted"
+                 | Some "route_exhausted"
                  | Some "completion_contract_violation" ->
                      "bad"
                  | _ -> "warn") );

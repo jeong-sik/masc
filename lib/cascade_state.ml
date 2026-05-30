@@ -1,4 +1,4 @@
-(** See cascade_state.mli for documentation. *)
+(** See route_phase.mli for documentation. *)
 
 (* ── Round-robin ────────────────────────────────────────────────── *)
 

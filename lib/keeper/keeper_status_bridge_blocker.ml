@@ -17,8 +17,8 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
-  | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
-    Some (Cascade_exhausted reason)
+  | Some (Keeper_turn_driver.Route_exhausted { reason; _ }) ->
+    Some (Route_exhausted reason)
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
@@ -89,14 +89,14 @@ let runtime_blocker_class_label ?(summary = "") cls =
   let _ = summary in
   blocker_class_to_string (runtime_blocker_surface_class cls)
 
-let is_cascade_exhausted_blocker_class blocker_class =
+let is_route_exhausted_blocker_class blocker_class =
   String.equal
     blocker_class
-    (blocker_class_to_string (Cascade_exhausted (Other_detail "")))
+    (blocker_class_to_string (Route_exhausted (Other_detail "")))
 ;;
 
 let is_no_tool_capable_blocker_class blocker_class =
-  String.equal blocker_class "cascade_exhausted_no_tool_capable"
+  String.equal blocker_class "route_exhausted_no_tool_capable"
 ;;
 
 let is_completion_contract_blocker_class blocker_class =
@@ -127,7 +127,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       if summary = ""
       then "Provider or client capacity backpressure blocked this keeper turn."
       else summary
-    | Cascade_exhausted reason ->
+    | Route_exhausted reason ->
       if summary = "" then cascade_exhaustion_summary reason else summary
     | Turn_livelock_blocked ->
       if summary = ""
@@ -273,7 +273,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            (Printf.sprintf
               "No tool-capable provider available (registry path): %s"
               detail)
-         (Cascade_exhausted (No_tool_capable None)))
+         (Route_exhausted (No_tool_capable None)))
   | Keeper_registry.Provider_runtime_error { code; detail } ->
     Some
       { blocker_class = "provider_runtime_error"

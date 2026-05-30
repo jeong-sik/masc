@@ -3131,7 +3131,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
       ~pre_dispatch_provider_rejections:[ provider_rejection ]
   with
   | Some
-      (Masc_mcp.Cascade_error_classify.Cascade_exhausted
+      (Masc_mcp.Cascade_error_classify.Route_exhausted
         { reason = Masc_mcp.Keeper_meta_contract.No_tool_capable (Some detail); _ }) ->
     Alcotest.(check (list string))
       "required tool names survive empty materialized tool list"
@@ -3160,7 +3160,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
       (contains_substring rejection_reason "missing_required_tools=[tool_execute]")
   | Some err ->
     Alcotest.failf
-      "expected Cascade_exhausted (No_tool_capable), got %s"
+      "expected Route_exhausted (No_tool_capable), got %s"
       (Masc_mcp.Cascade_error_classify.kind_of_masc_internal_error err)
   | None ->
     Alcotest.fail

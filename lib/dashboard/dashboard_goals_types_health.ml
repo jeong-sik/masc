@@ -155,7 +155,7 @@ let goal_fsm_to_json ~effective_policy (goal : Goal_store.goal)
 
 let display_disposition_of_receipt_json receipt =
   (* Previously this defaulted to the literal "unknown", which then hit
-     the [| "unknown" -> "Alert"/"unmapped_cascade_state"] arm below.
+     the [| "unknown" -> "Alert"/"unmapped_route_phase"] arm below.
      That conflated two distinct producer-side failure modes:
      (1) missing [operator_disposition] field — the receipt was emitted
          without the disposition at all (producer bug);
@@ -205,10 +205,10 @@ let display_disposition_of_receipt_json receipt =
   | "user_cancelled" ->
       ("Blocked", reason "cancelled", operator_disposition, operator_disposition_reason)
   | "alert_exhausted" ->
-      ("Alert", reason "cascade_exhausted", operator_disposition, operator_disposition_reason)
+      ("Alert", reason "route_exhausted", operator_disposition, operator_disposition_reason)
   | "unknown" ->
       ( "Alert",
-        reason "unmapped_cascade_state",
+        reason "unmapped_route_phase",
         operator_disposition,
         operator_disposition_reason )
   | _ ->

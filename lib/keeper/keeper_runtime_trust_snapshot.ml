@@ -76,7 +76,7 @@ let disposition_of_runtime_blocker_class raw_blocker_class =
       Keeper_turn_disposition.Post_commit_ambiguous
   | "sdk_input_required" ->
       Keeper_turn_disposition.Input_required
-  | ("cascade_exhausted" | "no_tool_capable_provider"
+  | ("route_exhausted" | "no_tool_capable_provider"
      | "provider_runtime_error") as cls ->
       Keeper_turn_disposition.Provider_error
         (Keeper_turn_terminal_code.Provider_runtime_error cls)
@@ -210,7 +210,7 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
   else if continue_gate then ("Blocked", "waiting_human_decision")
   else
     match blocker_class, blocker_summary with
-    | Some "cascade_exhausted", _ -> ("Alert", "cascade_exhausted")
+    | Some "route_exhausted", _ -> ("Alert", "route_exhausted")
     | Some "completion_contract_violation", _ -> ("Alert", "fsm_invariant")
     | _, Some summary
       when String_util.contains_substring_ci summary "sandbox" ->
@@ -241,8 +241,8 @@ let display_disposition_of_operator ~operator_disposition
   | "pause_human" -> ("Blocked", reason "needs_human_attention")
   | "fail_open_next_cascade" -> ("Blocked", reason "degraded_retry")
   | "user_cancelled" -> ("Blocked", reason "cancelled")
-  | "alert_exhausted" -> ("Alert", reason "cascade_exhausted")
-  | "unknown" -> ("Alert", reason "unmapped_cascade_state")
+  | "alert_exhausted" -> ("Alert", reason "route_exhausted")
+  | "unknown" -> ("Alert", reason "unmapped_route_phase")
   | _ -> ("Alert", reason "unmapped_operator_disposition")
 
 let display_disposition_requires_attention = function

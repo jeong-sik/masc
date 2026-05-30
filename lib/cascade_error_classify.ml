@@ -20,7 +20,7 @@
     The {!Keeper_internal_error} surface (types, [masc_internal_error_to_json],
     [sdk_error_of_masc_internal_error], summaries, labels, metric name) is
     re-exported via [include] so callers that reference
-    [Cascade_error_classify.masc_internal_error], [Cascade_error_classify.Cascade_exhausted],
+    [Cascade_error_classify.masc_internal_error], [Cascade_error_classify.Route_exhausted],
     etc. continue to compile unchanged.
 
     @since God file decomposition *)
@@ -72,7 +72,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
   match json with
   | `Assoc fields -> (
       match List.assoc_opt "kind" fields with
-      | Some (`String "cascade_exhausted") -> (
+      | Some (`String "route_exhausted") -> (
           match string_opt_of_assoc "cascade_name" json with
           | Some cascade_name ->
             let reason_opt =
@@ -85,7 +85,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             (match reason_opt with
              | Some reason ->
                Some
-                 (Cascade_exhausted
+                 (Route_exhausted
                     {
                       cascade_name = Cascade_name.of_string_exn cascade_name;
                       reason;
@@ -163,7 +163,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               }
             in
             Some
-              (Cascade_exhausted
+              (Route_exhausted
                  {
                    cascade_name = Cascade_name.of_string_exn cascade_name;
                    reason = Keeper_meta_contract.No_tool_capable (Some detail);

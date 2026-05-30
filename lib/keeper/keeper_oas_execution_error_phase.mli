@@ -14,7 +14,7 @@
 
 type t =
   | Turn_start
-  | Cascade_exhausted
+  | Route_exhausted
   | Terminal_non_exhaustion
   | Recoverable_cascade_transient
   | Cycle_failed

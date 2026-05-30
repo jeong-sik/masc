@@ -60,13 +60,13 @@ let test_turn_timeout_kind () =
     (before +. 1.0)
     (counter_for kind)
 
-let test_cascade_exhausted_kind () =
-  let kind = "cascade_exhausted" in
+let test_route_exhausted_kind () =
+  let kind = "route_exhausted" in
   let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
-      (OWN.Cascade_exhausted
+      (OWN.Route_exhausted
          {
            cascade_name = typed_cascade_name cascade_name;
            reason =
@@ -74,7 +74,7 @@ let test_cascade_exhausted_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "cascade_exhausted{cascade_name=primary} counter +1"
+    "route_exhausted{cascade_name=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -121,7 +121,7 @@ let test_no_tool_capable_provider_kind () =
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
-      (OWN.Cascade_exhausted
+      (OWN.Route_exhausted
          { cascade_name = typed_cascade_name cascade_name
          ; reason = Masc_mcp.Keeper_meta_contract.No_tool_capable (Some
              { configured_labels = [ "provider_d"; "provider_a" ]
@@ -148,7 +148,7 @@ let contains_substring haystack needle =
 
 let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
   let payload =
-    OWN.Cascade_exhausted
+    OWN.Route_exhausted
       { cascade_name = typed_cascade_name "tool_required"
       ; reason = Masc_mcp.Keeper_meta_contract.No_tool_capable (Some
           { configured_labels = [ "agent_code"; "provider_c" ]
@@ -410,8 +410,8 @@ let () =
             test_provider_timeout_kind;
           Alcotest.test_case "turn_timeout" `Quick
             test_turn_timeout_kind;
-          Alcotest.test_case "cascade_exhausted" `Quick
-            test_cascade_exhausted_kind;
+          Alcotest.test_case "route_exhausted" `Quick
+            test_route_exhausted_kind;
           Alcotest.test_case "capacity_backpressure" `Quick
             test_capacity_backpressure_kind;
           Alcotest.test_case "resumable_cli_session" `Quick

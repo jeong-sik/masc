@@ -1,48 +1,48 @@
 (** Cascade and compaction FSM types and transitions. *)
 
-type cascade_state =
-  | Cascade_idle [@tla.idle]
-  | Cascade_selecting [@tla.active]
-  | Cascade_trying [@tla.active]
-  | Cascade_done [@tla.terminal]
-  | Cascade_exhausted [@tla.terminal]
+type route_phase =
+  | Route_idle [@tla.idle]
+  | Route_selecting [@tla.active]
+  | Route_trying [@tla.active]
+  | Route_done [@tla.terminal]
+  | Route_exhausted [@tla.terminal]
 [@@deriving tla]
 
-type cascade_idle
-type cascade_selecting
-type cascade_trying
-type cascade_done
-type cascade_exhausted
+type route_idle
+type route_selecting
+type route_trying
+type route_done
+type route_exhausted
 
-type 'a cascade_state_witness =
-  | Cascade_idle : cascade_idle cascade_state_witness
-  | Cascade_selecting : cascade_selecting cascade_state_witness
-  | Cascade_trying : cascade_trying cascade_state_witness
-  | Cascade_done : cascade_done cascade_state_witness
-  | Cascade_exhausted : cascade_exhausted cascade_state_witness
+type 'a route_phase_witness =
+  | Route_idle : route_idle route_phase_witness
+  | Route_selecting : route_selecting route_phase_witness
+  | Route_trying : route_trying route_phase_witness
+  | Route_done : route_done route_phase_witness
+  | Route_exhausted : route_exhausted route_phase_witness
 
-type packed_cascade_state =
-  | Packed : 'a cascade_state_witness -> packed_cascade_state
+type packed_route_phase =
+  | Packed : 'a route_phase_witness -> packed_route_phase
 
-val cascade_state_to_witness : cascade_state -> packed_cascade_state
-val witness_to_cascade_state : packed_cascade_state -> cascade_state
-val packed_cascade_state_label : packed_cascade_state -> string
+val route_phase_to_witness : route_phase -> packed_route_phase
+val witness_to_route_phase : packed_route_phase -> route_phase
+val packed_route_phase_label : packed_route_phase -> string
 
 module Cascade_transition : sig
   type ('from, 'to_) t =
-    | Idle_to_selecting : (cascade_idle, cascade_selecting) t
-    | Selecting_to_idle : (cascade_selecting, cascade_idle) t
-    | Selecting_to_trying : (cascade_selecting, cascade_trying) t
-    | Trying_to_idle : (cascade_trying, cascade_idle) t
-    | Trying_to_selecting : (cascade_trying, cascade_selecting) t
-    | Trying_to_done : (cascade_trying, cascade_done) t
-    | Trying_to_exhausted : (cascade_trying, cascade_exhausted) t
-    | Done_to_idle : (cascade_done, cascade_idle) t
-    | Done_to_selecting : (cascade_done, cascade_selecting) t
-    | Done_to_trying : (cascade_done, cascade_trying) t
-    | Exhausted_to_idle : (cascade_exhausted, cascade_idle) t
-    | Exhausted_to_selecting : (cascade_exhausted, cascade_selecting) t
-    | Exhausted_to_trying : (cascade_exhausted, cascade_trying) t
+    | Idle_to_selecting : (route_idle, route_selecting) t
+    | Selecting_to_idle : (route_selecting, route_idle) t
+    | Selecting_to_trying : (route_selecting, route_trying) t
+    | Trying_to_idle : (route_trying, route_idle) t
+    | Trying_to_selecting : (route_trying, route_selecting) t
+    | Trying_to_done : (route_trying, route_done) t
+    | Trying_to_exhausted : (route_trying, route_exhausted) t
+    | Done_to_idle : (route_done, route_idle) t
+    | Done_to_selecting : (route_done, route_selecting) t
+    | Done_to_trying : (route_done, route_trying) t
+    | Exhausted_to_idle : (route_exhausted, route_idle) t
+    | Exhausted_to_selecting : (route_exhausted, route_selecting) t
+    | Exhausted_to_trying : (route_exhausted, route_trying) t
 
   type packed = Packed_transition : ('a, 'b) t -> packed
 
@@ -65,22 +65,22 @@ val cascade_transition_spec_violation_to_tag
 exception
   Cascade_transition_violation of
     { where : string
-    ; from : packed_cascade_state
-    ; to_ : packed_cascade_state
+    ; from : packed_route_phase
+    ; to_ : packed_route_phase
     ; violation : cascade_transition_spec_violation
     }
 
 val cascade_transition_violation_message
   :  where:string
-  -> from:packed_cascade_state
-  -> to_:packed_cascade_state
+  -> from:packed_route_phase
+  -> to_:packed_route_phase
   -> violation:cascade_transition_spec_violation
   -> string
 
 val raise_cascade_transition_violation
   :  where:string
-  -> from:packed_cascade_state
-  -> to_:packed_cascade_state
+  -> from:packed_route_phase
+  -> to_:packed_route_phase
   -> violation:cascade_transition_spec_violation
   -> 'a
 
@@ -90,8 +90,8 @@ type cascade_resolve_outcome =
   | Resolved_violation of cascade_transition_spec_violation
 
 val resolve_cascade_transition
-  :  from:packed_cascade_state
-  -> target:packed_cascade_state
+  :  from:packed_route_phase
+  -> target:packed_route_phase
   -> cascade_resolve_outcome
 
 type compaction_stage =

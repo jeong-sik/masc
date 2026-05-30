@@ -148,7 +148,7 @@ type failure =
       ; liveness : liveness_evidence
       }
   | Transient_provider_failure
-  | Cascade_exhausted of { retryable : bool }
+  | Route_exhausted of { retryable : bool }
   | Required_tool_contract_violation
   | Fatal_environment of { detail : string option }
   | Stale_turn of { progress_seen : bool }
@@ -345,22 +345,22 @@ let decide = function
       ~operator_action:Reroute_or_tune_provider
       ~keeper_death_allowed:false
       ~reason:"transient_provider_failure"
-  | Cascade_exhausted { retryable = true } ->
+  | Route_exhausted { retryable = true } ->
     make_decision
       ~failure_scope:Provider_scope
       ~lifecycle_effect:Soft_fail_turn
       ~circuit_effect:Provider_cooldown
       ~operator_action:Reroute_or_tune_provider
       ~keeper_death_allowed:false
-      ~reason:"cascade_exhausted_retryable"
-  | Cascade_exhausted { retryable = false } ->
+      ~reason:"route_exhausted_retryable"
+  | Route_exhausted { retryable = false } ->
     make_decision
       ~failure_scope:Turn_scope
       ~lifecycle_effect:Pause_current_work
       ~circuit_effect:Operator_breaker
       ~operator_action:Reroute_or_tune_provider
       ~keeper_death_allowed:false
-      ~reason:"cascade_exhausted_terminal"
+      ~reason:"route_exhausted_terminal"
   | Required_tool_contract_violation ->
     make_decision
       ~failure_scope:Turn_scope

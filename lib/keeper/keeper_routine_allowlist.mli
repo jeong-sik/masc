@@ -14,7 +14,7 @@
     destructive tool/op substring gate, but hard blockers still win, so:
 
     - Critical risk still gates
-    - runtime_auto_approval_blocked (cascade_exhausted etc.) still gates
+    - runtime_auto_approval_blocked (route_exhausted etc.) still gates
     - shell or git tool names still gate unless an exact routine rule
       matches the tool plus op/action
     - High-risk code write/edit tools auto-approve only when a keeper has a

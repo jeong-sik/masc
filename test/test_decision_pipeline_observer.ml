@@ -161,7 +161,7 @@ let test_observer_executing_during_turn () =
   let name = "obs-active" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
   Reg.mark_turn_started ~base_path:test_obs_bp name;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
+  Reg.set_turn_route_phase ~base_path:test_obs_bp name (Reg.Packed Reg.Route_trying);
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing after mark_turn_started"
   | Some entry ->
@@ -183,7 +183,7 @@ let test_observer_prompting_at_turn_start () =
       check string "fresh turn starts undecided"
         "undecided" (Obs.decision_stage_to_string snap.kdp_decision);
       check string "fresh turn starts with idle cascade"
-        "idle" (Obs.cascade_state_to_string snap.kcl_cascade_state)
+        "idle" (Obs.route_phase_to_string snap.kcl_route_phase)
 
 let test_observer_no_stale_after_turn_end () =
   Eio_main.run @@ fun _env ->
@@ -205,7 +205,7 @@ let test_observer_gate_rejected_finalizes_turn () =
   Reg.mark_turn_started ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
+  Reg.set_turn_route_phase ~base_path:test_obs_bp name (Reg.Packed Reg.Route_trying);
   Reg.mark_turn_gate_rejected_by_name name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing after gate rejection"
@@ -216,7 +216,7 @@ let test_observer_gate_rejected_finalizes_turn () =
       check string "gate rejection records decision stage"
         "gate_rejected" (Obs.decision_stage_to_string snap.kdp_decision);
       check string "gate rejection preserves in-flight trying edge"
-        "trying" (Obs.cascade_state_to_string snap.kcl_cascade_state)
+        "trying" (Obs.route_phase_to_string snap.kcl_route_phase)
 
 let test_observer_finished_idempotent () =
   Eio_main.run @@ fun _env ->
@@ -263,7 +263,7 @@ let test_observer_last_outcome_populated_after_turn () =
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
+  Reg.set_turn_route_phase ~base_path:test_obs_bp name (Reg.Packed Reg.Route_done);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "provider_k-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
@@ -281,7 +281,7 @@ let test_observer_last_outcome_populated_after_turn () =
             "tool_policy_selected"
             (Obs.decision_stage_to_string lo.decision_stage);
           check string "last_outcome cascade persisted"
-            "done" (Obs.cascade_state_to_string lo.cascade_state);
+            "done" (Obs.route_phase_to_string lo.route_phase);
           check (option string) "last_outcome selected_model persisted"
             (Some "provider_k-4.5") lo.selected_model
 
@@ -314,7 +314,7 @@ let test_observer_json_includes_terminal_fields () =
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
+  Reg.set_turn_route_phase ~base_path:test_obs_bp name (Reg.Packed Reg.Route_done);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "provider_k-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
@@ -328,7 +328,7 @@ let test_observer_json_includes_terminal_fields () =
         (json |> member "last_outcome" |> member "decision_stage" |> to_string);
       check string "cascade state rendered"
         "done"
-        (json |> member "last_outcome" |> member "cascade_state" |> to_string);
+        (json |> member "last_outcome" |> member "route_phase" |> to_string);
       check string "selected model rendered"
         "provider_k-4.5"
         (json |> member "last_outcome" |> member "selected_model" |> to_string)
@@ -357,7 +357,7 @@ let test_turn_retry_after_compaction_resets_cascade_attempt () =
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
+  Reg.set_turn_route_phase ~base_path:test_obs_bp name (Reg.Packed Reg.Route_trying);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "provider_k-4.5");
   Reg.set_turn_phase ~base_path:test_obs_bp name Reg.(Packed Turn_compacting);
   Reg.prepare_turn_retry_after_compaction ~base_path:test_obs_bp name;
@@ -370,7 +370,7 @@ let test_turn_retry_after_compaction_resets_cascade_attempt () =
       check string "retry preserves guard_ok posture"
         "guard_ok" (Obs.decision_stage_to_string snap.kdp_decision);
       check string "retry clears prior cascade attempt"
-        "idle" (Obs.cascade_state_to_string snap.kcl_cascade_state);
+        "idle" (Obs.route_phase_to_string snap.kcl_route_phase);
       match entry.current_turn_observation with
       | None -> Alcotest.fail "live turn missing after retry reset"
       | Some obs ->
@@ -395,7 +395,7 @@ let test_composite_observer_variants_match_tla_sets () =
   check_set
     "CascadeSet matches observer cascade variants"
     (extract_tla_set ~marker:"CascadeSet" tla)
-    (List.map Obs.cascade_state_to_string Obs.all_cascade_states);
+    (List.map Obs.route_phase_to_string Obs.all_route_phases);
   check_set
     "CompactionSet matches observer compaction variants"
     (extract_tla_set ~marker:"CompactionSet" tla)

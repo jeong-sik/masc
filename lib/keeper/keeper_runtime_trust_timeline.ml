@@ -406,7 +406,7 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
            ~summary
            ~severity:
              (match blocker_class with
-              | "cascade_exhausted" | "completion_contract_violation" -> "bad"
+              | "route_exhausted" | "completion_contract_violation" -> "bad"
               | _ -> "warn")
            ())
   | None, Some summary

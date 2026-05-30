@@ -12,7 +12,7 @@ let record_failure_and_maybe_escalate
   =
   let base_path = config.base_path in
   let counts_toward_crash =
-    (not is_auto_recoverable) || EC.is_cascade_exhausted_error err
+    (not is_auto_recoverable) || EC.is_route_exhausted_error err
   in
   if counts_toward_crash
   then Keeper_registry.increment_turn_failures ~base_path meta.name
@@ -31,14 +31,14 @@ let record_failure_and_maybe_escalate
     ~consecutive:count
     ~threshold
     ~err;
-  if EC.is_cascade_exhausted_error err && count > 0
+  if EC.is_route_exhausted_error err && count > 0
   then
     Keeper_registry.set_failure_reason
       ~base_path:config.base_path
       meta.name
       (Some (Keeper_registry.Turn_consecutive_failures count));
   let cascade_auto_paused =
-    EC.is_cascade_exhausted_error err
+    EC.is_route_exhausted_error err
     && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
     && not updated_meta.paused
   in
@@ -76,7 +76,7 @@ let record_failure_and_maybe_escalate
             meta.name
             (Some (Keeper_registry.Turn_consecutive_failures count));
           Log.Keeper.warn
-            "%s: auto-paused after %d cascade_exhausted failures \
+            "%s: auto-paused after %d route_exhausted failures \
              (pause_threshold=%d, crash_threshold=%d); operator must resume after \
              cascade fix"
             meta.name

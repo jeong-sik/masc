@@ -2393,14 +2393,14 @@ let test_make_per_call_switch_transport_releases_cli_fd_resources () =
 let test_classify_masc_internal_error_roundtrip () =
   let cascade_err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
-      (Keeper_turn_driver.Cascade_exhausted
+      (Keeper_turn_driver.Route_exhausted
          { cascade_name =
              internal_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
          ; reason = Keeper_meta_contract.All_providers_failed
          })
   in
   (match Keeper_turn_driver.classify_masc_internal_error cascade_err with
-   | Some (Keeper_turn_driver.Cascade_exhausted { cascade_name; reason }) ->
+   | Some (Keeper_turn_driver.Route_exhausted { cascade_name; reason }) ->
      Alcotest.(check string)
        "cascade name"
        Masc_mcp.(Keeper_config.default_cascade_name ())

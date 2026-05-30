@@ -222,17 +222,17 @@ let failure_reason_policy_decision
   | Some Keeper_registry.Turn_livelock_pause ->
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Turn_livelock_pause)
   | Some (Keeper_registry.Provider_runtime_error { code; _ })
-    when String.starts_with ~prefix:"cascade_exhausted_" code ->
+    when String.starts_with ~prefix:"route_exhausted_" code ->
     let retryable =
       match code with
-      | "cascade_exhausted_candidates_filtered"
-      | "cascade_exhausted_max_turns"
-      | "cascade_exhausted_capacity_exhausted" -> true
+      | "route_exhausted_candidates_filtered"
+      | "route_exhausted_max_turns"
+      | "route_exhausted_capacity_exhausted" -> true
       | _ -> false
     in
     Some
       (Keeper_failure_policy.decide
-         (Keeper_failure_policy.Cascade_exhausted { retryable }))
+         (Keeper_failure_policy.Route_exhausted { retryable }))
   | Some
       ( Keeper_registry.Heartbeat_consecutive_failures _
       | Keeper_registry.Stale_fleet_batch _

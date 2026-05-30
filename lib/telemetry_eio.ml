@@ -58,7 +58,6 @@ type event =
   | Tool_assigned of {
       agent_id: string;
       profile: string;
-      preset: string option [@default None];
       tool_count: int;
       assignment_id: string;
     }
@@ -555,8 +554,8 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
           track ?fs config
             (Error_occurred { code = trimmed_kind; message; context })
 
-let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assignment_id () =
-  track ?fs config (Tool_assigned { agent_id; profile; preset; tool_count; assignment_id })
+let track_tool_assigned ?fs config ~agent_id ~profile ~tool_count ~assignment_id () =
+  track ?fs config (Tool_assigned { agent_id; profile; tool_count; assignment_id })
 
 (** Prune telemetry entries older than [max_age_days] days.
     Replaces the old rotate function; date-split makes rewriting unnecessary. *)

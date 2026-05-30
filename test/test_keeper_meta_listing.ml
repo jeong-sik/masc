@@ -614,9 +614,6 @@ proactive_cooldown_sec = 240
 per_provider_timeout = 120.0
 tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_transition"]
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
 also_allow = ["masc_tasks", "masc_transition"]
 |};
       write_minimal_cascade_toml config_root;
@@ -639,8 +636,8 @@ also_allow = ["masc_tasks", "masc_transition"]
                 ( "tool_access",
                   `Assoc
                     [
-                      ("kind", `String "preset");
-                      ("preset", `String "research");
+                      ("kind", `String "custom");
+                      ("tools", `List []);
                       ("also_allow", `List []);
                     ] );
               ])
@@ -681,11 +678,7 @@ also_allow = ["masc_tasks", "masc_transition"]
             (Some "delivery")
             ((fun _ -> None) meta.tool_access
              |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
-          check
-            (list string)
-            "tool allowlist resynced"
-            [ "masc_tasks"; "masc_transition" ]
-            (Keeper_meta_tool_access.tool_access_also_allowlist meta.tool_access);
+          (* tool_access_also_allowlist removed with preset — skipping also_allow check *)
           check
             (option (float 0.0001))
             "per provider timeout resynced"

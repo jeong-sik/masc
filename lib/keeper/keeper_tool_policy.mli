@@ -133,7 +133,7 @@ val keeper_allowed_tool_names :
 val keeper_universe_tool_names : keeper_meta -> string list
 
 (** Preset-scoped universe: preset allowlist + core_always - denied. *)
-val keeper_preset_universe_tool_names : keeper_meta -> string list
+val keeper_tool_search_scope : keeper_meta -> string list
 
 (** Tools safe to call on the keeper's last turn. *)
 val last_turn_safe_tool_names : unit -> string list
@@ -148,7 +148,7 @@ val keeper_allowed_model_tools :
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** Preset-scoped universe model tool schemas for BM25 indexing. *)
-val keeper_preset_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
+val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)
 val filter_schemas_by_names :

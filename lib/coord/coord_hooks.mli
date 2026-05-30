@@ -55,7 +55,6 @@ val fsm_drift_observer_fn : (variant:string -> force:bool -> agent_name:string -
 val distributed_lock_acquire_failed_fn : (key:string -> attempts:int -> unit) Atomic.t
 val tool_assigned_fn : (agent_id:string ->
             profile:string ->
-            ?preset:string ->
             tool_list:string list ->
             ?allow_set:string list ->
             ?deny_set:string list ->

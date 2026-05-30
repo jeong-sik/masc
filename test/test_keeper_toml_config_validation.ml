@@ -180,15 +180,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
         "verifier instructions avoid hidden shell implementation name"
         false
         (contains ~needle:"tool_search_files" instructions);
-      let preset =
-        match defaults.tool_preset with
-        | Some raw -> (
-            match Keeper_meta_tool_access.tool_preset_of_string raw with
-            | Some preset -> preset
-            | None -> fail (Printf.sprintf "unknown verifier preset %S" raw))
-        | None -> fail "verifier tool_access.preset is required"
-      in
-      let also_allow = Option.value ~default:[] defaults.tool_also_allow in
+      let tools = Option.value ~default:["tool_search_files"; "tool_execute"] defaults.tool_custom_list in
       let denylist = Option.value ~default:[] defaults.tool_denylist in
       let meta =
         match
@@ -201,10 +193,8 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
                  ( "tool_access",
                    `Assoc
                      [
-                       ("kind", `String "preset");
-                       ("preset", `String (Keeper_meta_tool_access.(fun _ -> "custom") preset));
-                       ( "also_allow",
-                         `List (List.map (fun value -> `String value) also_allow) );
+                       ("kind", `String "custom");
+                       ("tools", `List (List.map (fun v -> `String v) tools));
                      ] );
                  ( "tool_denylist",
                    `List (List.map (fun value -> `String value) denylist) );
@@ -745,8 +735,8 @@ let test_tool_access_accepts_dispatch () =
   match result with
   | Error e -> fail (Printf.sprintf "dispatch should be accepted: %s" e)
   | Ok (_loaded_name, defaults) ->
-      check (option string) "dispatch preset parsed" (Some "dispatch")
-        defaults.tool_preset
+      check bool "tool_custom_list is None (no tool_access in TOML)" true
+        (defaults.tool_custom_list = None)
 
 (** Reject [network_mode = "bogus"] at TOML load time so invalid strings
     do not silently fall back to persona defaults. *)

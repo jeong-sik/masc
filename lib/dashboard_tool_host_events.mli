@@ -82,7 +82,6 @@ val record :
 type assignment_snapshot = {
   agent_name : string;
   profile : string;
-  preset : string option;
   tool_count : int;
   assignment_id : string;
 }

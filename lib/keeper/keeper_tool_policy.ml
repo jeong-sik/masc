@@ -1,6 +1,6 @@
-(** Keeper_tool_policy — tool access control, presets, and allowed-tool resolution.
+(** Keeper_tool_policy — tool access control and allowed-tool resolution.
 
-    Preset definitions are loaded from [config/tool_policy.toml] at startup
+    Group definitions are loaded from [config/tool_policy.toml] at startup
     via {!Keeper_tool_policy_config}.  See that module for the config format.
 
     Consumes [Keeper_tool_registry] for candidate aggregation and core tools.
@@ -48,7 +48,7 @@ let is_masc_write_allowed path =
     String.starts_with path ~prefix
   ) keeper_writable_prefixes
 
-(* -- Config-driven preset resolution -------------------------------- *)
+(* -- Config-driven policy group resolution ------------------------- *)
 
 (* Loaded by init_policy_config at server startup.
    None = config not yet loaded (init_policy_config not yet called). *)
@@ -281,7 +281,7 @@ let tool_name_set names =
 let tool_access_lookup_of_meta (meta : keeper_meta) =
   (* keeper_base_candidate_tool_names pulls [groups.voice] from
      tool_policy.toml via all_group_tools — voice tools are present iff
-     the keeper's preset includes the voice group. No per-keeper gate. *)
+     the keeper's allowlist includes the voice group. No per-keeper gate. *)
   let base = keeper_base_candidate_tool_names () in
   let candidate_names = dedupe_tool_names base in
   let candidate_set = tool_name_set candidate_names in
@@ -356,7 +356,7 @@ let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema l
 
     INTENTIONAL: this bypasses the normal access/deny filtering.
     In Failing phase the keeper must retain a guaranteed floor of tools
-    regardless of preset, deny-list, or policy config.  The floor is
+    regardless of custom allowlist, deny-list, or policy config.  The floor is
     determined solely by shard removability (structural, not policy). *)
 (** Essential MASC tools always available in Failing recovery,
     on top of [removable=false] shard floor. Mirrors [masc.essential]
@@ -402,9 +402,9 @@ let keeper_allowed_tool_names ?(write_done = false)
 
 (** Universe tool names: candidates minus denied, no policy filter.
     Superset of keeper_allowed_tool_names.  BM25 indexes this set so
-    progressive disclosure can discover tools beyond the active preset.
+    progressive disclosure can discover tools beyond the active allowlist.
     Core tools are always included even if masc_schemas haven't been
-    injected yet (startup race) or the tool is not in any preset. *)
+    injected yet (startup race) or the tool is not in the allowlist. *)
 let keeper_universe_tool_names (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
   let from_candidates =
@@ -417,13 +417,13 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
   in
   dedupe_tool_names (from_candidates @ from_core)
 
-(** Preset-scoped universe: preset allowlist + core_always - denied.
+(** Scoped tool universe: custom allowlist + core_always - denied.
     Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
     to improve signal-to-noise ratio: a Minimal keeper indexes ~30 tools
     instead of 244+.  Execution gate still uses the full universe so
     externally-granted tools (tool_overlay) remain callable.
     See #4637 (Samchon harness: absence > prohibition). *)
-let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
+let keeper_tool_search_scope (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
   let preset_tools =
     match meta.tool_access with
@@ -458,10 +458,10 @@ let filter_schemas_by_names (names : string list)
   |> List.filter (fun (tool : Masc_domain.tool_schema) -> StringSet.mem tool.name name_set)
   |> dedupe_tool_schemas
 
-(** Preset-scoped model tool schemas for BM25 indexing.
+(** Scoped model tool schemas for BM25 indexing.
     Returns schemas only for the preset-scoped universe. *)
-let keeper_preset_universe_model_tools (meta : keeper_meta) : Masc_domain.tool_schema list =
-  let scoped = keeper_preset_universe_tool_names meta in
+let keeper_model_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
+  let scoped = keeper_tool_search_scope meta in
   all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
   |> filter_schemas_by_names scoped
 

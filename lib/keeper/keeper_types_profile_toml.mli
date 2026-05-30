@@ -209,8 +209,6 @@ val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option
-val valid_tool_preset_raw_strings : string list
-val normalize_tool_preset_raw : string -> string option
 val first_some : 'a option -> 'a option -> 'a option
 val normalize_per_provider_timeout_opt :
   source:string -> float option -> float option

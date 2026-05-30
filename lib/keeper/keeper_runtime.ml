@@ -332,7 +332,7 @@ let ensure_keeper_meta config name =
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)
     let cascade_changed =
-      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
+      String.trim (cascade_name_of_meta meta)
       <> resolved_target_cascade_name
     in
     (* #10061: persisted state vs TOML source can differ by a single

@@ -13,7 +13,7 @@ open Cascade_name
 (* Sub-module includes (God file decomposition).
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
-include Cascade_oas_runner
+include Runtime_oas_runner
 include Cascade_error_classify
 include Cascade_attempt_fsm
 include Keeper_turn_driver_helpers
@@ -89,7 +89,7 @@ let run_named
     ?net
     ?per_provider_timeout_s
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let cascade_engine = Keeper_cascade_engine.keeper_managed in
   match Keeper_cascade_engine.guard_keeper_hot_path cascade_engine with
   | Error msg -> Error (Agent_sdk.Error.Internal msg)
@@ -100,8 +100,8 @@ let run_named
   let cascade_name =
     Keeper_cascade_profile.normalize_declared_name cascade_name
   in
-  let error_cascade_name = Cascade_name.of_string_exn cascade_name in
-  let runtime_cascade_name = Cascade_name.of_string_exn cascade_name in
+  let error_cascade_name = cascade_name in
+  let runtime_cascade_name = cascade_name in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   (* Keeper-internal tools cannot degrade to a text-only CLI palette: the
      model would see no callable schema and emit misleading diagnostics. *)
@@ -177,12 +177,12 @@ let run_named
                reason;
              kept,
              ({ provider_label; reason }
-               : Cascade_error_classify.provider_rejection)
+               : Keeper_meta_contract.provider_rejection)
              :: rejected
            in
            match
              Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
-               ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt keeper_name)
+               ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt keeper_name)
                ~tool_requirement:`Required
                ~tools
                candidate
@@ -260,7 +260,7 @@ let run_named
   in
   (* RFC: MASC/OAS Error-Warn Reduction Goal — 2026-05-18 §P3.
      For each unhealthy endpoint, record the preflight-skip event in
-     [Cascade_preflight_state.global]. After N consecutive skips of
+     [Keeper_preflight_health_tracker.global]. After N consecutive skips of
      the same (cascade, endpoint, reason) fingerprint we escalate to
      ERROR once and register the endpoint in the in-process disabled
      list — subsequent identical skips return [`Already_disabled] and
@@ -273,11 +273,11 @@ let run_named
   List.iter
     (fun endpoint ->
       let outcome =
-        Cascade_preflight_state.record
-          Cascade_preflight_state.global
+        Keeper_preflight_health_tracker.record
+          Keeper_preflight_health_tracker.global
           ~cascade_name
           ~provider:endpoint
-          ~reason:Cascade_preflight_state.Health_check_failed_repeatedly
+          ~reason:Keeper_preflight_health_tracker.Health_check_failed_repeatedly
       in
       match outcome with
       | `First ->
@@ -286,16 +286,16 @@ let run_named
            provider dispatch: [%s] (reason=%s, first occurrence)"
           cascade_name
           endpoint
-          (Cascade_preflight_state.reason_slug
-             Cascade_preflight_state.Health_check_failed_repeatedly)
+          (Keeper_preflight_health_tracker.reason_slug
+             Keeper_preflight_health_tracker.Health_check_failed_repeatedly)
       | `Repeated n ->
         Log.Misc.warn
           "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
            provider dispatch: [%s] (reason=%s, consecutive=%d)"
           cascade_name
           endpoint
-          (Cascade_preflight_state.reason_slug
-             Cascade_preflight_state.Health_check_failed_repeatedly)
+          (Keeper_preflight_health_tracker.reason_slug
+             Keeper_preflight_health_tracker.Health_check_failed_repeatedly)
           n
       | `Threshold_disable n ->
         Log.Misc.error
@@ -305,8 +305,8 @@ let run_named
           cascade_name
           endpoint
           n
-          (Cascade_preflight_state.reason_slug
-             Cascade_preflight_state.Health_check_failed_repeatedly)
+          (Keeper_preflight_health_tracker.reason_slug
+             Keeper_preflight_health_tracker.Health_check_failed_repeatedly)
       | `Already_disabled ->
         (* Drop noise: this endpoint is in the disabled list and has
            already emitted its ERROR escalation. *)
@@ -319,12 +319,12 @@ let run_named
   List.iter
     (fun (url, healthy) ->
       if healthy
-         && Cascade_preflight_state.is_disabled
-              Cascade_preflight_state.global ~provider:url
+         && Keeper_preflight_health_tracker.is_disabled
+              Keeper_preflight_health_tracker.global ~provider:url
       then
         let recovered =
-          Cascade_preflight_state.reset_on_health_recovery
-            Cascade_preflight_state.global ~provider:url
+          Keeper_preflight_health_tracker.reset_on_health_recovery
+            Keeper_preflight_health_tracker.global ~provider:url
         in
         if recovered
         then
@@ -495,7 +495,7 @@ let run_named
             ; required_tool_names
             ; provider_rejections =
                 List.map
-                  (fun (r : Cascade_internal_error.provider_rejection) ->
+                  (fun (r : Keeper_meta_contract.provider_rejection) ->
                      (r.provider_label, r.reason))
                   provider_rejections
             }
@@ -516,7 +516,7 @@ let run_named
        | Some manifest_ctx, Some append ->
          let provider_rejection_reasons =
            provider_rejections
-           |> List.map (fun (r : Cascade_error_classify.provider_rejection) ->
+           |> List.map (fun (r : Keeper_meta_contract.provider_rejection) ->
                   r.reason)
            |> Json_util.dedupe_keep_order
          in
@@ -582,7 +582,7 @@ let run_named
   | _ ->
   let candidate_count = List.length candidates in
   let capture, _metrics =
-    Cascade_observation.cascade_metrics_for_candidates ~candidate_count ()
+    Keeper_observation.cascade_metrics_for_candidates ~candidate_count ()
   in
   let cascade_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -709,7 +709,7 @@ let run_named
     match Eio_context.get_clock_opt () with
     | Some clock ->
         let turn_budget = Keeper_runtime_resolved.turn_timeout_sec () in
-        Some (Cascade_deadline.of_seconds_from_now ~clock turn_budget)
+        Some (Runtime_deadline.of_seconds_from_now ~clock turn_budget)
     | None -> None
   in
   let try_cascade_ctx : Keeper_turn_driver_try_cascade.try_cascade_ctx = {
@@ -781,7 +781,7 @@ let run_named
   let _ = sw, net in
   let adapter = Cascade_runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
-    health = Cascade_health_tracker.global;
+    health = Keeper_binding_health.global;
     capacity = Cascade_capacity_probe.capacity;
     now = Unix.gettimeofday ();
     rand_int = Random.int;
@@ -805,12 +805,12 @@ let run_named
   in
   let cascade_exhausted_after_filter ~cycle =
     let observation =
-      Cascade_observation.cascade_observation_with_metrics
+      Keeper_observation.cascade_observation_with_metrics
         ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
         ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
     in
-    Cascade_observation.record_cascade ~keeper_name
+    Keeper_observation.record_cascade ~keeper_name
       ~cascade_name:error_cascade_name
       ~outcome:`Failure ~observation:(Some observation) ();
     Error
@@ -824,7 +824,7 @@ let run_named
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
     Cascade_strategy_trace.record {
       ts = Unix.gettimeofday ();
-      cascade_name = Cascade_name.of_string_exn cascade_name;
+      cascade_name = cascade_name;
       strategy = strategy_name;
       cycle;
       candidates_in = List.length candidates;
@@ -876,7 +876,7 @@ let run_named
          cycle_loop (n + 1))
   in
   let admission_cascade_name =
-    Cascade_name.of_string_exn cascade_name
+    cascade_name
   in
   match Admission_queue.with_permit ?wait_timeout_sec
     ~priority:queue_priority ~keeper_name:name ~cascade_name:admission_cascade_name

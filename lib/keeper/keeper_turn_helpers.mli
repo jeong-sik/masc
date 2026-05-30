@@ -67,7 +67,7 @@ val record_pre_dispatch_terminal_observation :
   config:Coord.config ->
   meta:keeper_meta ->
   generation:int ->
-  cascade_name:Cascade_name.t ->
+  cascade_name:string ->
   outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->
   activity_kind:string ->

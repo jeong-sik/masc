@@ -5,6 +5,6 @@
     context compaction). No routing/catalog state — pure named values. *)
 
 (** Context-window size assumed when a model declares none and discovery
-    yields nothing. Mirrors the deleted [Cascade_runtime.fallback_context_window].
+    yields nothing. Mirrors the deleted [Runtime_constants.fallback_context_window].
     128k is the conservative floor across the supported provider matrix. *)
 let fallback_context_window = 128_000

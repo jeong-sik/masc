@@ -82,7 +82,7 @@ let write_heartbeat_snapshot
   in
   let cascade_models =
     Cascade_runtime.models_of_cascade_name
-      (Cascade_name.of_string_exn (Keeper_meta_contract.cascade_name_of_meta meta_current))
+      ((Keeper_meta_contract.cascade_name_of_meta meta_current))
   in
   let max_cascade_context =
     let resolution =
@@ -477,7 +477,7 @@ let write_heartbeat_snapshot
          ~labels:[("keeper", meta_current.name)]
          ();
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
-    Cascade_events.publish_keeper_snapshot
+    Keeper_event_publisher.publish_keeper_snapshot
       ~keeper_name:meta_current.name
       ~generation:meta_current.runtime.generation
       ~context_ratio:context_ratio_v

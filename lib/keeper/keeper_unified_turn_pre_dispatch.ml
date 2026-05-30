@@ -27,7 +27,7 @@ let resolve_unified_max_tokens_fallback
 let build_cascade_execution
       ~(meta : keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : string)
   : ( Keeper_turn_cascade_budget.cascade_execution
     , Agent_sdk.Error.sdk_error )
     result
@@ -78,7 +78,7 @@ let build_cascade_execution
         with
         | Error err ->
           Error
-            (Cascade_error_classify.sdk_error_of_masc_internal_error err)
+            (Keeper_meta_contract.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->
           Ok
             { Keeper_turn_cascade_budget.cascade_name

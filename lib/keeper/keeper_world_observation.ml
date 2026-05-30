@@ -768,7 +768,7 @@ let keeper_cycle_decision
           if should_run
           then
             provider_cooldown_remaining_sec
-              ~cascade_name:(Cascade_name.of_string_exn cascade_name)
+              ~cascade_name:(cascade_name)
           else None
         in
         let provider_cooldown_fail_open =

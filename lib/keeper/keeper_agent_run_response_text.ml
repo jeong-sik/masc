@@ -6,9 +6,9 @@ type finalized = {
 }
 
 let stop_reason_label = function
-  | Cascade_runner.Completed -> "completed"
-  | Cascade_runner.TurnBudgetExhausted _ -> "budget_exhausted"
-  | Cascade_runner.MutationBoundaryReached { tool_name; _ } ->
+  | Runtime_agent.Completed -> "completed"
+  | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
+  | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
      | None -> "mutation_boundary")

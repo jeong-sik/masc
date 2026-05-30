@@ -12,7 +12,7 @@
 (* ================================================================ *)
 
 type cascade_observation = {
-  cascade_name : Cascade_name.t;
+  cascade_name : string;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
@@ -417,7 +417,7 @@ let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
 
 let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
   let cascade_name =
-    Cascade_name.to_string obs.cascade_name
+    obs.cascade_name
   in
   `Assoc
     [
@@ -460,7 +460,7 @@ let get_cascade_audit_store store_opt =
           (* Iter 47: tick counter so audit-subsystem health is
              observable.  Audit failure here disables the subsystem
              for the process lifetime — operators need to know. *)
-          Cascade_metrics.on_cascade_audit_failure ~stage:"store_creation";
+          Runtime_metrics.on_cascade_audit_failure ~stage:"store_creation";
           Log.Misc.warn "cascade audit store creation failed: %s"
             (Printexc.to_string exn);
           None)
@@ -490,7 +490,7 @@ let keeper_name_to_json keeper_name =
 
 let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
   let cascade_name =
-    Cascade_name.to_string cascade_name
+    cascade_name
   in
   `Assoc
     [
@@ -508,7 +508,7 @@ let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
 let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
     ~outcome =
   let cascade_name_string =
-    Cascade_name.to_string cascade_name
+    cascade_name
   in
   match store_opt with
   | None -> ()
@@ -523,7 +523,7 @@ let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
           (* Iter 47: tick counter per-record append failure rate
              alertable.  Single-event audit loss compounds over
              time for post-incident analysis. *)
-          Cascade_metrics.on_cascade_audit_failure ~stage:"append";
+          Runtime_metrics.on_cascade_audit_failure ~stage:"append";
           Log.Misc.warn "cascade audit append failed cascade=%s error=%s"
             cascade_name_string (Printexc.to_string exn))
 
@@ -558,7 +558,7 @@ let attempt_model_display (attempt : cascade_attempt) =
 type msg =
   | Record_cascade of {
       keeper_name : string option;
-      cascade_name : Cascade_name.t;
+      cascade_name : string;
       observation : cascade_observation option;
       outcome : [ `Success | `Failure | `Rejected ];
       now : float;
@@ -575,7 +575,7 @@ let stream = Eio.Stream.create 1024
 
 let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
   let cascade_name_string =
-    Cascade_name.to_string cascade_name
+    cascade_name
   in
   let counters = state.counters in
   let counter, counters, evicted =
@@ -635,7 +635,7 @@ let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
          alertable.  WARN log already prints per-eviction detail
          (cascade name, age, etc.); metric makes rate aggregation
          tractable. *)
-      Cascade_metrics.on_cascade_metrics_eviction ();
+      Runtime_metrics.on_cascade_metrics_eviction ();
       Log.Misc.warn
         "cascade metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
         candidate.name candidate.calls candidate.last_used_at cascade_name_string

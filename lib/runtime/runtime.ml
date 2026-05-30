@@ -98,3 +98,11 @@ let get_default_runtime_id () =
       "Runtime.get_default_runtime_id: default runtime not initialized; \
        Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
 ;;
+
+(* Path to the runtime config TOML (re-homed from deleted
+   [Runtime.config_path]). Delegates to the surviving
+   [Config_dir_resolver]; the file is still [cascade.toml] (rename deferred). *)
+let config_path () : string option =
+  Config_dir_resolver.log_warnings ~context:"Runtime" ();
+  Config_dir_resolver.cascade_path_opt ()
+;;

@@ -444,7 +444,7 @@ let required_keeper_internal_tool : Agent_sdk.Tool.t =
 let provider_required_keeper_internal_tool_issue provider_cfg =
   let resolved =
     try
-      Cascade_runner.resolve_tool_lane_for_oas_tools
+      Runtime_agent.resolve_tool_lane_for_oas_tools
         ~agent_name:doctor_keeper_agent_name
         ~tool_requirement:`Required
         ~provider_cfg

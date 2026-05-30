@@ -37,7 +37,7 @@ let provider_effective_max_turns _kind requested = requested
    removed. *)
 
 (** Resolve a model label string to an OAS Provider.config.
-    Uses MASC [Cascade_config.parse_model_string] (with Provider_registry as SSOT).
+    Uses MASC [Runtime_model_string.parse_model_string] (with Provider_registry as SSOT).
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)

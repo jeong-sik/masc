@@ -203,7 +203,7 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
       let started = Time_compat.now () in
       let model_label = model_label_for_pool ~model_id runtime_pool in
       match
-        Cascade_config.parse_model_string ~max_tokens model_label
+        Runtime_model_string.parse_model_string ~max_tokens model_label
       with
       | None ->
           ( { success = false; latency_ms = 0; error = Some ("invalid model label: " ^ model_label) },

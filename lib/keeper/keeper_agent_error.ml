@@ -318,8 +318,8 @@ let terminal_reason_code_of_sdk_error = function
   | Agent_sdk.Error.Orchestration _ -> "orchestration_error"
   | Agent_sdk.Error.A2a _ -> "a2a_error"
   | Agent_sdk.Error.Internal msg -> (
-    match Cascade_error_classify.classify_masc_internal_error_of_string msg with
-    | Some err -> Cascade_error_classify.kind_of_masc_internal_error err
+    match Keeper_meta_contract.classify_masc_internal_error_of_string msg with
+    | Some err -> Keeper_meta_contract.kind_of_masc_internal_error err
     | None -> "internal_error")
 ;;
 
@@ -366,7 +366,7 @@ let checkpoint_persistence_error ~keeper_name ~detail =
 
 let cascade_outcome_of_observation
     : _ -> Keeper_execution_receipt.cascade_outcome = function
-  | Some (obs : Cascade_observation.cascade_observation) when obs.fallback_applied ->
+  | Some (obs : Keeper_observation.cascade_observation) when obs.fallback_applied ->
     Keeper_execution_receipt.Cascade_passed_to_next_model
   | Some _ -> Keeper_execution_receipt.Cascade_completed
   | None -> Keeper_execution_receipt.Cascade_not_observed

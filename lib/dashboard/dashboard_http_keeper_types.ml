@@ -15,7 +15,7 @@ let runtime_warning_ctx_ratio =
    ([Keeper_cascade_profile.resolve_live]) were removed in the §3.3
    sunset closeout. *)
 let live_keeper_cascade_name_result (raw : string) :
-    (Cascade_name.t, [ `Unresolved of string ]) result =
+    (string, [ `Unresolved of string ]) result =
   Keeper_cascade_profile.resolve_live_result raw
 
 let compute_health_score

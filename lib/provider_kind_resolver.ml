@@ -9,7 +9,7 @@ type resolution =
   | Custom_url of { model_id : string; base_url : string }
   | Unknown of string
 
-(* Reuse the same split semantics as Cascade_config.split_provider_model
+(* Reuse the same split semantics as Runtime_model_string.split_provider_model
    so that both paths agree on what "provider:model" means. Duplicated
    here (rather than imported) to avoid a circular dependency between
    this module and Cascade_config, which delegates to us. *)
@@ -36,7 +36,7 @@ let resolve (spec : string) : resolution =
          "malformed spec %S: expected \"provider:model\" or \"custom:model@url\""
          spec)
   | Some ("custom", rest) ->
-    let model_id, base_url = Cascade_model_resolve.parse_custom_model rest in
+    let model_id, base_url = Runtime_model_resolve.parse_custom_model rest in
     if model_id = "" then
       Unknown
         (Printf.sprintf "malformed custom spec %S: empty model id" spec)

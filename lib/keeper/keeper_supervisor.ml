@@ -342,7 +342,7 @@ let sweep_and_recover (ctx : _ context) =
        let last_fr_str =
          Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason
        in
-       Cascade_events.publish_keeper_dead
+       Keeper_event_publisher.publish_keeper_dead
          ~keeper_name:entry.name
          ~reason:msg
          ~restart_count:entry.restart_count

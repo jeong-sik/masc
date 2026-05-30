@@ -81,8 +81,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   let cascade_profile =
     match result.cascade_observation with
     | Some observation ->
-      Cascade_name.to_string
-        observation.Cascade_observation.cascade_name
+              observation.Keeper_observation.cascade_name
     | None -> (cascade_name_of_meta meta)
   in
   (* #9933: same latency bucket, split by provider/model/cascade.

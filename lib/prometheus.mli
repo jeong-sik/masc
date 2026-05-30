@@ -195,7 +195,7 @@ val metric_oas_bus_capacity : string
 (** Counter: OAS [Agent_sdk.Event_bus.payload] variants that the
     cascade event bridge did not have an explicit arm for and
     degraded to a kind-only SSE payload via the catch-all in
-    [Cascade_event_bridge.native_event_to_json].  Labels: [kind]
+    [Keeper_event_bridge.native_event_to_json].  Labels: [kind]
     carries [Agent_sdk.Event_bus.payload_kind other] (snake_case,
     one-to-one with the upstream OAS payload constructor name —
     cardinality is bounded by the OAS variant set and grows only
@@ -203,7 +203,7 @@ val metric_oas_bus_capacity : string
 
     A non-zero rate means an OAS pin bump shipped a new payload
     variant before the masc-mcp consumer was migrated.  The catch-all
-    is deliberate (see [Cascade_event_bridge.native_event_to_json])
+    is deliberate (see [Keeper_event_bridge.native_event_to_json])
     but degrades SSE subscribers to a kind-only payload, so this
     counter is the per-process signal that an explicit arm needs
     to be added.  Fix: extend the explicit match in

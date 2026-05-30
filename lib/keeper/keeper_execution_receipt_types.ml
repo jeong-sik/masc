@@ -261,8 +261,8 @@ let decode_contract_violation_reason (wire : string)
 ;;
 
 type cascade_rotation_attempt =
-  { from_cascade : Cascade_name.t
-  ; to_cascade : Cascade_name.t
+  { from_cascade : string
+  ; to_cascade : string
   ; reason : Keeper_error_classify.degraded_retry_reason
   ; outcome : cascade_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
@@ -301,17 +301,17 @@ type t =
   ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
-  ; cascade_name : Cascade_name.t
+  ; cascade_name : string
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : cascade_outcome
   ; oas_internal_cascade_allowed : bool
   ; degraded_retry_applied : bool
-  ; degraded_retry_cascade : Cascade_name.t option
+  ; degraded_retry_cascade : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
-  ; stop_reason : Cascade_runner.stop_reason option
+  ; stop_reason : Runtime_agent.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option
   ; started_at : string
@@ -326,10 +326,10 @@ type t =
   }
 
 let stop_reason_to_string = function
-  | Cascade_runner.Completed -> "completed"
-  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
+  | Runtime_agent.Completed -> "completed"
+  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
     Printf.sprintf "turn_budget_exhausted:%d/%d" turns_used limit
-  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
+  | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary:%s:%d" tool turns_used
      | None -> Printf.sprintf "mutation_boundary:%d" turns_used)

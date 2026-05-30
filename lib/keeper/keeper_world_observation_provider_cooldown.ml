@@ -25,7 +25,7 @@ let fallback_cascade_for_provider_cooldown
   else Some (Keeper_config.default_cascade_name ())
 
 let provider_cooldown_remaining_sec_for_cascade
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : string)
   : int option
   =
   let runtime_health_keys =
@@ -38,8 +38,8 @@ let provider_cooldown_remaining_sec_for_cascade
     let provider_infos =
       List.map
         (fun provider_key ->
-           Cascade_health_tracker.provider_info
-             Cascade_health_tracker.global
+           Keeper_binding_health.provider_info
+             Keeper_binding_health.global
              ~provider_key)
         runtime_health_keys
     in
@@ -50,13 +50,13 @@ let provider_cooldown_remaining_sec_for_cascade
       if
         not
           (List.for_all
-             (fun info -> info.Cascade_health_tracker.in_cooldown)
+             (fun info -> info.Keeper_binding_health.in_cooldown)
              provider_infos)
       then None
       else (
         let now = Time_compat.now () in
         provider_infos
-        |> List.filter_map (fun info -> info.Cascade_health_tracker.cooldown_expires_at)
+        |> List.filter_map (fun info -> info.Keeper_binding_health.cooldown_expires_at)
         |> List.map (fun expires_at ->
           int_of_float (Float.max 0.0 (Float.ceil (expires_at -. now))))
         |> function
@@ -75,7 +75,7 @@ let provider_capacity_blocked_task_count
     let cascade_name = cascade_name_of_meta meta in
     match
       provider_cooldown_remaining_sec
-        ~cascade_name:(Cascade_name.of_string_exn cascade_name)
+        ~cascade_name:(cascade_name)
     with
     | Some _
       when Option.is_none

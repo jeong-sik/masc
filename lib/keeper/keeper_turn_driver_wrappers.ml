@@ -40,7 +40,7 @@ let run_model_by_label
     ?sw
     ?net
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     Cascade_config_builder.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
@@ -52,8 +52,8 @@ let run_model_by_label
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match Cascade_oas_runner.require_eio ?sw ?net () with
-  | Error e -> Error (Cascade_oas_runner.eio_context_error_to_sdk_error e)
+  match Runtime_oas_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Runtime_oas_runner.eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -62,7 +62,7 @@ let run_model_by_label
       let config = { config with transport = transport_resolved } in
       match
         let admission_cascade_name =
-          Cascade_name.of_string_exn model_label
+          model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
@@ -73,7 +73,7 @@ let run_model_by_label
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
-                match Cascade_runner.run ~sw ~net ~config ?on_event  goal with
+                match Runtime_agent.run ~sw ~net ~config ?on_event  goal with
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
                     Error
@@ -133,7 +133,7 @@ let run_named_with_masc_tools
     ?sw
     ?net
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
@@ -177,7 +177,7 @@ let run_model_with_masc_tools
     ?sw
     ?net
     ()
-  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     Cascade_config_builder.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
@@ -187,8 +187,8 @@ let run_model_with_masc_tools
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match Cascade_oas_runner.require_eio ?sw ?net () with
-  | Error e -> Error (Cascade_oas_runner.eio_context_error_to_sdk_error e)
+  match Runtime_oas_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Runtime_oas_runner.eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -197,7 +197,7 @@ let run_model_with_masc_tools
       let config = { config with raw_trace; transport = transport_resolved } in
       match
         let admission_cascade_name =
-          Cascade_name.of_string_exn model_label
+          model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
@@ -208,7 +208,7 @@ let run_model_with_masc_tools
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->
-                Cascade_runner.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch  ?on_event
+                Runtime_agent.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch  ?on_event
                   goal))
       with
       | Ok result -> result

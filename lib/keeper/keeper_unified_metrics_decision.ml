@@ -260,8 +260,7 @@ let append_decision_record
                 match r.cascade_observation with
                 | Some co ->
                     let cascade_name =
-                      Cascade_name.to_string
-                        co.cascade_name
+                                              co.cascade_name
                     in
                     [
                       ("cascade_name", `String cascade_name);
@@ -308,10 +307,10 @@ let append_decision_record
               in
                 let stop_reason_str =
                   match r.stop_reason with
-                  | Cascade_runner.Completed -> "completed"
-                  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
+                  | Runtime_agent.Completed -> "completed"
+                  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
                       Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
-                  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
+                  | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with
                        | Some tool ->
                            Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool

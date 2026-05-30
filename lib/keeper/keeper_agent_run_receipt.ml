@@ -25,12 +25,12 @@ let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
       ; "route." ^ trimmed
       ]
     in
+    (* RFC-0206: a runtime id is a raw string (no cascade-name prefix
+       validation / re-qualification). Accept the first non-empty candidate. *)
     let rec first_valid = function
       | [] -> None
       | candidate :: rest ->
-        (match Cascade_name.of_string candidate with
-         | Ok cascade -> Some cascade
-         | Error _ -> first_valid rest)
+        if String.trim candidate = "" then first_valid rest else Some candidate
     in
     match first_valid candidates with
     | Some _ as parsed -> parsed
@@ -143,7 +143,7 @@ let finalize
       Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
       |> Keeper_turn_terminal_code.to_wire
   in
-  let cascade_observation : Cascade_observation.cascade_observation option =
+  let cascade_observation : Keeper_observation.cascade_observation option =
     !receipt_cascade_observation_ref
   in
   let ( extra_system_context_digest
@@ -248,7 +248,7 @@ let finalize
             (Keeper_execution_receipt.outcome_kind_to_string receipt.outcome) );
         ("terminal_reason_code", `String receipt.terminal_reason_code);
         ( "cascade_name",
-          `String (Cascade_name.to_string receipt.cascade_name) );
+          `String (receipt.cascade_name) );
         ("cascade_attempt_count", `Int receipt.cascade_attempt_count);
         ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);
         ( "cascade_outcome",
@@ -296,7 +296,7 @@ let finalize
       ~trace_id:receipt.trace_id ~generation:receipt.generation
       ~keeper_turn_id:manifest_keeper_turn_id ~event
       ?oas_turn_count
-      ~cascade_name:(Cascade_name.to_string receipt.cascade_name)
+      ~cascade_name:(receipt.cascade_name)
       ~status ~decision ~receipt_path ?tool_call_log_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

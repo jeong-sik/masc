@@ -73,7 +73,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : string)
       ?world_observation
       ?(turn_affordances = [])
       ?(required_tool_names = [])
@@ -139,7 +139,7 @@ let run_turn
   Eio.Switch.run @@ fun turn_sw ->
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
-  let cascade_name_string = Cascade_name.to_string cascade_name in
+  let cascade_name_string = cascade_name in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx =
@@ -171,12 +171,12 @@ let run_turn
     | Error internal_error ->
       let detail =
         Option.value
-          ~default:(Cascade_error_classify.kind_of_masc_internal_error internal_error)
-          (Cascade_error_classify.summary_of_masc_internal_error internal_error)
+          ~default:(Keeper_meta_contract.kind_of_masc_internal_error internal_error)
+          (Keeper_meta_contract.summary_of_masc_internal_error internal_error)
       in
       Log.Keeper.error "%s: %s" meta.name detail;
       ( ctx.max_tokens,
-        Some (Cascade_error_classify.sdk_error_of_masc_internal_error internal_error) )
+        Some (Keeper_meta_contract.sdk_error_of_masc_internal_error internal_error) )
   in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
@@ -560,7 +560,7 @@ let run_turn
                  | None -> None)
             ; cli_subprocess_idle_sec
             }
-            : Cascade_runner.cli_transport_overrides)
+            : Runtime_agent.cli_transport_overrides)
        in
        Keeper_agent_run_phase0_telemetry.record_if_enabled
          ~meta

@@ -171,7 +171,7 @@ val oas_provider_of_label :
   string -> (Agent_sdk.Provider.config, string) result
 (** Parses a model label (e.g. ["openai:gpt-4.1"]) into an
     {!Agent_sdk.Provider.config}.  Errors when
-    {!Cascade_config.parse_model_string} returns [None]. *)
+    {!Runtime_model_string.parse_model_string} returns [None]. *)
 
 val resolve_oas_provider_of_label :
   string -> (Agent_sdk.Provider.config * string, string) result

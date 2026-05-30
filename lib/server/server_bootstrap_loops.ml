@@ -270,8 +270,8 @@ let start_keeper_loops
   in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
-  Cascade_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
-  Cascade_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:masc_event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:masc_event_bus;
   (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
      persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
      with rolling 14-day retention (override via

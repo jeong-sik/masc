@@ -430,7 +430,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          is fatal — the server cannot route turns without a default Runtime, so
          booting into a half-configured state only defers the failure to the
          first turn (cascade→Runtime vision: no silent fallback). *)
-      (match Cascade_runtime.cascade_config_path () with
+      (match Runtime.config_path () with
        | Some config_path ->
          (match Runtime.init_default ~config_path with
           | Ok () ->

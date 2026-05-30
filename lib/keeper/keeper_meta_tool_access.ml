@@ -109,6 +109,7 @@ let tool_preset_of_string raw =
   | "research" -> Some Research
   | "delivery" -> Some Delivery
   | "full" -> Some Full
+  | "coding" -> Some Full (* backward-compat alias: coding preset removed, map to full *)
   | _ -> None
 ;;
 
@@ -179,10 +180,15 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
 ;;
 
 let default_tool_access_of_meta_json () =
+  (* tool_execute excluded from the default blocklist: keepers need it for
+     shell commands, file reads, git ops, and cascade tool filtering requires
+     it. Only file-mutation writes (edit/write_file) are blocked by default.
+     See fleet deadlock Layer 2 analysis (2026-05-30). *)
+  let non_default_writes = [ "tool_edit_file"; "tool_write_file" ] in
   let tools =
     Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
     |> List.filter (fun name ->
-           not (List.exists (String.equal name) write_tools))
+           not (List.exists (String.equal name) non_default_writes))
   in
   Custom (normalize_tool_names tools)
 ;;
@@ -224,6 +230,14 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         | Ok tools -> Ok (normalize_tool_access (Custom tools))
         | Error msg -> Error msg)
      | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
-     | None -> Error "keeper tool_access.kind required")
-  | _ -> Error "keeper tool_access must be an object"
+     | None ->
+       (* Empty tool_access: {} — missing kind field.
+          Safe to default: ensure_keeper_meta resyncs from TOML on bootstrap.
+          Without this, meta_of_json fails and recovery via
+          load_or_materialize_boot_meta also fails (handle_keeper_up calls
+          read_meta which hits the same parse error). *)
+       Ok (default_tool_access_of_meta_json ()))
+  | _ ->
+    (* tool_access missing or not an object — same recovery rationale. *)
+    Ok (default_tool_access_of_meta_json ())
 ;;

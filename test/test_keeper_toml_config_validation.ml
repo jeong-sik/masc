@@ -571,82 +571,6 @@ target = "cascade.ollama_cloud_primary"
     (Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name
        ~config_path:cascade_path "cascade.ollama_cloud_primary")
 
-let test_catalog_validator_surfaces_adapter_errors () =
-  (* A binding on a Messages_api provider (protocol provider_a-http) cannot be
-     materialized: provider_kind_for_http_provider returns None for Messages_api,
-     so resolve_binding_config emits a [Binding_resolution_failed] adapter error.
-     (This replaced the legacy [cascade.X] member-resolution trigger.) *)
-  let cascade_toml =
-    {|
-[providers.provider_a]
-protocol = "provider_a-http"
-endpoint = "https://api.provider_a.example"
-
-[models.qwen3]
-api-name = "qwen3:8b"
-max-context = 32768
-tools-support = true
-
-[provider_a.qwen3]
-max-concurrent = 1
-
-[routes.keeper_turn]
-target = "provider_a.qwen3"
-|}
-  in
-  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
-  let issues =
-    Masc_mcp.Cascade_catalog_validator.diagnose_catalog
-      ~config_path:cascade_path
-  in
-  let has_adapter_error =
-    List.exists
-      (fun (issue : Masc_mcp.Cascade_catalog_validator.issue) ->
-         match issue.severity with
-         | Masc_mcp.Cascade_catalog_validator.Catalog_warn -> false
-         | Masc_mcp.Cascade_catalog_validator.Catalog_error ->
-             contains
-               ~needle:"Declarative cascade adapter error"
-               issue.message
-             && contains ~needle:"Binding_resolution_failed" issue.message)
-      issues
-  in
-  check bool "adapter error is surfaced as catalog error" true has_adapter_error
-
-let test_catalog_validator_surfaces_declarative_parse_errors () =
-  (* RFC-0058: an unknown provider protocol is a declarative parse error
-     (strategy validation was retired with the tier concept). *)
-  let cascade_toml =
-    {|
-[providers.broken]
-protocol = "not_a_protocol"
-command = "x"
-
-[models.qwen3]
-api-name = "qwen3:8b"
-max-context = 32768
-tools-support = true
-|}
-  in
-  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
-  let issues =
-    Masc_mcp.Cascade_catalog_validator.diagnose_catalog
-      ~config_path:cascade_path
-  in
-  let has_parse_error =
-    List.exists
-      (fun (issue : Masc_mcp.Cascade_catalog_validator.issue) ->
-         match issue.severity with
-         | Masc_mcp.Cascade_catalog_validator.Catalog_warn -> false
-         | Masc_mcp.Cascade_catalog_validator.Catalog_error ->
-             contains
-               ~needle:"Declarative cascade parse error"
-               issue.message
-             && contains ~needle:"providers.broken.protocol" issue.message)
-      issues
-  in
-  check bool "parse error is surfaced as catalog error" true has_parse_error
-
 let rejection_error_messages rejection =
   let json = Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection in
   Yojson.Safe.Util.member "errors" json
@@ -857,10 +781,6 @@ let () =
             test_cascade_name_accepts_unrouted_assignable_catalog_entry;
           test_case "keeper runtime ignores non-keeper route target" `Quick
             test_keeper_runtime_declared_name_ignores_non_keeper_route_target;
-          test_case "surfaces declarative adapter errors" `Quick
-            test_catalog_validator_surfaces_adapter_errors;
-          test_case "surfaces declarative parse errors" `Quick
-            test_catalog_validator_surfaces_declarative_parse_errors;
           test_case "runtime rejects declarative parse errors" `Quick
             test_runtime_validation_rejects_declarative_parse_errors;
           test_case "runtime rejects declarative adapter errors" `Quick

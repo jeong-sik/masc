@@ -39,16 +39,6 @@ type t = {
   sandbox_preflight : Yojson.Safe.t option;
 }
 
-type catalog_issue_severity = Cascade_catalog_validator.severity =
-  | Catalog_warn
-  | Catalog_error
-
-type catalog_issue = Cascade_catalog_validator.issue = {
-  profile : string option;
-  severity : catalog_issue_severity;
-  message : string;
-}
-
 let trim_opt = Env_config_core.trim_opt
 
 let init_state_to_string = function
@@ -112,89 +102,6 @@ let repo_config_seed_path (inputs : inputs) =
   | first :: _ -> Some first
   | [] -> None
 
-type cascade_diagnosis = {
-  issues : catalog_issue list;
-  missing_source : bool;
-}
-
-let diagnose_cascade_catalog ~active_config_root =
-  let config_path =
-    Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
-  in
-  if not (Env_config_core.existing_file config_path) then
-    {
-      missing_source = true;
-      issues =
-        [
-          {
-            profile = None;
-            severity = Catalog_error;
-            message =
-              Printf.sprintf
-                "Cascade catalog source is missing: %s. Runtime cascade \
-                 resolution requires cascade.toml."
-                config_path;
-          };
-        ];
-    }
-  else
-    let profiles =
-      Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path
-    in
-    let validator_issues =
-      Cascade_catalog_validator.diagnose_catalog_for_diagnostics ~config_path
-    in
-    let issues = validator_issues in
-    if issues = [] then
-      { issues = []; missing_source = false }
-    else
-      let error_count =
-        issues
-        |> List.filter (fun issue -> issue.severity = Catalog_error)
-        |> List.length
-      in
-      let warn_count = List.length issues - error_count in
-      let summary = {
-        profile = None;
-        severity = if error_count > 0 then Catalog_error else Catalog_warn;
-        message =
-          Printf.sprintf
-            "Cascade catalog check scanned %d preset(s): %d error, %d \
-             warn."
-            (List.length profiles)
-            error_count
-            warn_count;
-      } in
-      { issues = summary :: issues; missing_source = false }
-
-let cascade_catalog_next_actions ~config_path { issues; missing_source } =
-  if issues = [] then
-    []
-  else
-    let has_errors =
-      List.exists (fun issue -> issue.severity = Catalog_error) issues
-    in
-    let primary_action =
-      if missing_source then
-        Printf.sprintf
-          "Create or bootstrap cascade.toml at %s before assigning keepers or \
-           starting the server."
-          config_path
-      else if has_errors then
-        Printf.sprintf
-          "Fix or disable the broken cascade preset entries in %s before \
-           assigning keepers to them."
-          config_path
-      else
-        Printf.sprintf
-          "Clean up the degraded cascade preset metadata in %s so doctor \
-           and runtime see the same routing intent."
-          config_path
-    in
-    [
-      primary_action;
-      "Rerun `masc-mcp doctor config` after editing cascade.toml.";
-    ]
 
 let current_inputs ~base_path_input ~default_base_path () =
   let normalized_base_path =
@@ -313,13 +220,6 @@ let analyze_with (inputs : inputs) =
       ~effective_masc_root:runtime_data_root
       ()
   in
-  let cascade_diagnosis =
-    diagnose_cascade_catalog ~active_config_root
-  in
-  let cascade_catalog_issues = cascade_diagnosis.issues in
-  let cascade_config_path =
-    Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
-  in
   let warnings =
     [
       (if explicit_config_invalid then
@@ -367,15 +267,7 @@ let analyze_with (inputs : inputs) =
       path_diag.warning;
     ]
     |> List.filter_map (fun warning -> warning)
-    |> fun base_warnings ->
-    base_warnings
-    @ List.map (fun issue -> issue.message) cascade_catalog_issues
     |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
-  in
-  let cascade_actions =
-    cascade_catalog_next_actions
-      ~config_path:cascade_config_path
-      cascade_diagnosis
   in
   let next_actions =
     match init_state with
@@ -445,23 +337,14 @@ let analyze_with (inputs : inputs) =
            | _ ->
                "No further action needed.");
         ]
-    |> fun base_actions ->
-    base_actions
-    @ cascade_actions
     |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
-  in
-  let has_catalog_errors =
-    List.exists
-      (fun issue -> issue.severity = Catalog_error)
-      cascade_catalog_issues
   in
   let status =
     match init_state with
     | Invalid_env | Missing_init -> Error
     | Shadowed -> Warn
     | Initialized ->
-        if has_catalog_errors then Error
-        else if warnings = [] then Ok else Warn
+        if warnings = [] then Ok else Warn
   in
   {
     status;

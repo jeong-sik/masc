@@ -5,7 +5,7 @@
 # transit-only envelope to single-source decision substrate.
 # Plan SSOT: ~/me/memory/shell-ir-first-class-promotion-todo-2026-05-23.html
 #
-# G1-G7 KPIs measured:
+# G1-G8 KPIs measured:
 #   G1  Bash.parse_string caller count (lib/, non-test)
 #   G2  is_write_operation / is_destructive_bash_operation signature
 #       (string vs Shell_ir.t) — heuristic via grep
@@ -16,6 +16,8 @@
 #   G5  validate_shell_ir_paths caller count (target: 4 keeper ops)
 #   G6  specs/shell-ir-first-class/ShellIRFirstClass.tla existence
 #   G7  shell_word_values + Bash_words.stages parallel-parser callers
+#   G8  Typed coverage guard: GADT constructors vs risk_of_typed arms
+#       (constructors must have 1:1 risk classification, Generic ≤ 1)
 #
 # Output modes:
 #   default      Human-readable metric table.
@@ -192,6 +194,22 @@ g7_shell_word_values=$(count_code_refs 'shell_word_values')
 g7_bash_words_stages=$(count_code_refs 'Bash_words\.stages')
 g7_total=$(( g7_shell_word_values + g7_bash_words_stages ))
 
+# ---- G8: typed coverage guard ----
+# GADT constructors in shell_ir_typed_types.mli must have 1:1 corresponding
+# risk_of_typed arms in shell_ir_risk.ml. Generic is the intentional escape
+# hatch (untyped commands); new constructors must NOT route through Generic.
+#
+# Guard: if gadt_constructors > risk_arms, a constructor was added without
+# risk classification (compiler catches this too, but CI catches it earlier).
+# If generic_arms > 1, someone expanded the escape hatch instead of typing.
+g8_gadt_constructors=$(rg -c '^\s*\| [A-Z]\w+' lib/exec/shell_ir_typed_types.mli 2>/dev/null || echo 0)
+# Count | W (...) arms only within risk_of_typed function (between its
+# definition and the ;; terminator).
+g8_risk_arms=$(sed -n '/^let risk_of_typed/,/^;;/p' lib/exec/shell_ir_risk.ml 2>/dev/null \
+  | grep -c '| W ' || echo 0)
+g8_generic_arms=$(sed -n '/^let risk_of_typed/,/^;;/p' lib/exec/shell_ir_risk.ml 2>/dev/null \
+  | grep -c 'Generic _' || echo 0)
+
 # ---- IR constructor count (Simple / Pipeline) — non-G but informative ----
 ir_constructors=$(rg -c 'Shell_ir\.Simple|Shell_ir\.Pipeline' lib/ 2>/dev/null \
   | rg -v '/test/' \
@@ -220,6 +238,9 @@ emit_json() {
   "g7_shell_word_values_refs": ${g7_shell_word_values},
   "g7_bash_words_stages_refs": ${g7_bash_words_stages},
   "g7_parallel_parser_total": ${g7_total},
+  "g8_gadt_constructors": ${g8_gadt_constructors},
+  "g8_risk_of_typed_arms": ${g8_risk_arms},
+  "g8_generic_arms": ${g8_generic_arms},
   "info_ir_constructors_nontest": ${ir_constructors},
   "allowed_exceptions": {
     "g1_parse_string": [${allowed_json}]
@@ -257,6 +278,11 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
   G7  Parallel parser refs (shell_word_values + Bash_words.stages, non-test)
         shell_word_values: ${g7_shell_word_values}, Bash_words.stages: ${g7_bash_words_stages}
         total: ${g7_total}                             (target: 0)
+
+  G8  Typed coverage guard (GADT constructors vs risk_of_typed arms)
+        constructors: ${g8_gadt_constructors}, risk arms: ${g8_risk_arms}
+        generic (escape hatch): ${g8_generic_arms}
+                                                       (target: arms ≥ constructors, generic ≤ 1)
 
   info  Shell_ir.(Simple|Pipeline) constructor refs (non-test)
         ${ir_constructors}
@@ -299,6 +325,23 @@ diff_against_baseline() {
     echo "REGRESS G4 (phantom envelope): ${b_g4} → ${c_g4}"
     regressions=$((regressions + 1))
   fi
+  # G8: risk_of_typed arms must keep pace with GADT constructors
+  local b_g8a c_g8a b_g8g c_g8g
+  b_g8a=$(jq -r '.g8_risk_of_typed_arms // 0' "$baseline_file")
+  c_g8a=$(echo "$current_json" | jq -r '.g8_risk_of_typed_arms')
+  local b_g8c c_g8c
+  b_g8c=$(jq -r '.g8_gadt_constructors // 0' "$baseline_file")
+  c_g8c=$(echo "$current_json" | jq -r '.g8_gadt_constructors')
+  if [[ "$c_g8c" -gt "$b_g8c" && "$c_g8a" -le "$b_g8a" ]]; then
+    echo "REGRESS G8 (constructors ${b_g8c}→${c_g8c} but risk arms ${b_g8a}→${c_g8a}): new constructor without risk classification"
+    regressions=$((regressions + 1))
+  fi
+  b_g8g=$(jq -r '.g8_generic_arms // 0' "$baseline_file")
+  c_g8g=$(echo "$current_json" | jq -r '.g8_generic_arms')
+  if [[ "$c_g8g" -gt "$b_g8g" ]]; then
+    echo "REGRESS G8 (generic arms ${b_g8g}→${c_g8g}): escape hatch expanded instead of typing"
+    regressions=$((regressions + 1))
+  fi
   # Unclassified G1 sites — any file not in allowed_exceptions
   if [[ ${#g1_unclassified[@]} -gt 0 ]]; then
     echo "UNCLASSIFIED G1 (new parse_string caller files):"
@@ -311,7 +354,7 @@ diff_against_baseline() {
     echo "RFC-0160 baseline regressed in ${regressions} metric(s)" >&2
     exit 1
   fi
-  echo "OK (RFC-0160 ratchet: no G1/G7 regression, no unclassified sites)"
+  echo "OK (RFC-0160 ratchet: no G1/G7/G8 regression, no unclassified sites)"
 }
 
 case "$mode" in

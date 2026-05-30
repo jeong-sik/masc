@@ -2798,6 +2798,56 @@ let test_long_form_value_consuming_flags () =
    | w -> Alcotest.failf "Tail --lines 10: expected lines=10, got %a" pp w)
 ;;
 
+let test_eq_form_value_consuming_flags () =
+  let base cmd =
+    { Shell_ir.bin = bin_ok cmd
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let lit s = Shell_ir.Lit (s, Shell_ir.default_meta) in
+  let of_simple s = Shell_ir_typed.of_simple s in
+  let pp fmt w = Shell_ir_typed.pp fmt w in
+  (* Sort: --field-separator=, *)
+  let sort =
+    of_simple { (base "sort") with args = [ lit "--field-separator=,"; lit "file.txt" ] }
+  in
+  (match sort with
+   | W (Sort { file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sort --field-separator=,: expected file=file.txt, got %a" pp w);
+  (* Grep: --regexp=pattern file.txt *)
+  let grep =
+    of_simple { (base "grep") with args = [ lit "--regexp=foo"; lit "file.txt" ] }
+  in
+  (match grep with
+   | W (Grep { pattern = "foo"; path = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --regexp=foo: expected pattern=foo, got %a" pp w);
+  (* Git_commit: --message=msg *)
+  let gc =
+    of_simple { (base "git") with args = [ lit "commit"; lit "--message=hello world" ] }
+  in
+  (match gc with
+   | W (Git_commit { message = "hello world"; _ }) -> ()
+   | w -> Alcotest.failf "Git_commit --message=hello world: expected msg, got %a" pp w);
+  (* Head: --lines=5 file.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "--lines=5"; lit "file.txt" ] }
+  in
+  (match head with
+   | W (Head { lines = 5; path = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines=5: expected lines=5, got %a" pp w);
+  (* Tail: --lines=10 file.txt *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "--lines=10"; lit "file.txt" ] }
+  in
+  (match tail with
+   | W (Tail { lines = 10; path = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Tail --lines=10: expected lines=10, got %a" pp w)
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -2873,6 +2923,10 @@ let () =
             "Long-form value-consuming flags (--field-separator, --regexp, --message, --expression, --file, --lines)"
             `Quick
             test_long_form_value_consuming_flags
+        ; Alcotest.test_case
+            "eq-form value-consuming flags (--field-separator=, --regexp=P, --message=M, --lines=N)"
+            `Quick
+            test_eq_form_value_consuming_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

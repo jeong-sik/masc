@@ -764,7 +764,7 @@ let run (ctx : ctx)
         ; is_retry = false
         ; allow_degraded_wall_clock_retry_budget = false
         ; attempted_cascades =
-            [                 initial_execution.cascade_name
+            [ initial_execution.cascade_name
             ]
         })
   with

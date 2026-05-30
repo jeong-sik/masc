@@ -122,7 +122,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
 	                  ; _
 	                  }) ->
             let cascade_name =
-              Cascade_name.to_string cascade_name
+              cascade_name
             in
             Prometheus.inc_counter
               Keeper_metrics.(to_string NoToolProvider)

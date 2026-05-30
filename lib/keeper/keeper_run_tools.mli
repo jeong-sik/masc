@@ -124,7 +124,7 @@ val prepare_agent_setup
   -> start_turn_count:int
   -> generation:int
   -> max_turns:int
-  -> cascade_name:Cascade_name.t
+  -> cascade_name:string
   -> is_retry:bool
   -> turn_affordances:string list
   -> required_tool_names:string list

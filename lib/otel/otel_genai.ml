@@ -83,7 +83,7 @@ let keeper_turn_attrs
       ~is_retry
       ~current_task_id
   =
-  let cascade_name = Cascade_name.to_string cascade_name in
+  let cascade_name = cascade_name in
   let optional_attrs =
     match current_task_id with
     | None -> []

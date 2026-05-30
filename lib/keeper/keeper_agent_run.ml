@@ -73,7 +73,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : string)
       ?world_observation
       ?(turn_affordances = [])
       ?(required_tool_names = [])
@@ -139,7 +139,7 @@ let run_turn
   Eio.Switch.run @@ fun turn_sw ->
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
-  let cascade_name_string = Cascade_name.to_string cascade_name in
+  let cascade_name_string = cascade_name in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx =

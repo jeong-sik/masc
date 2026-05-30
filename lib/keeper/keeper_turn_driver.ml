@@ -100,8 +100,8 @@ let run_named
   let cascade_name =
     Keeper_cascade_profile.normalize_declared_name cascade_name
   in
-  let error_cascade_name = Cascade_name.of_string_exn cascade_name in
-  let runtime_cascade_name = Cascade_name.of_string_exn cascade_name in
+  let error_cascade_name = cascade_name in
+  let runtime_cascade_name = cascade_name in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   (* Keeper-internal tools cannot degrade to a text-only CLI palette: the
      model would see no callable schema and emit misleading diagnostics. *)
@@ -824,7 +824,7 @@ let run_named
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
     Cascade_strategy_trace.record {
       ts = Unix.gettimeofday ();
-      cascade_name = Cascade_name.of_string_exn cascade_name;
+      cascade_name = cascade_name;
       strategy = strategy_name;
       cycle;
       candidates_in = List.length candidates;
@@ -876,7 +876,7 @@ let run_named
          cycle_loop (n + 1))
   in
   let admission_cascade_name =
-    Cascade_name.of_string_exn cascade_name
+    cascade_name
   in
   match Admission_queue.with_permit ?wait_timeout_sec
     ~priority:queue_priority ~keeper_name:name ~cascade_name:admission_cascade_name

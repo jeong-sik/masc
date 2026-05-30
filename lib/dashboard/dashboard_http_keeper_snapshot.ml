@@ -252,7 +252,7 @@ let keeper_config_json (config : Coord.config) (name : string)
       let selected_cascade_canonical_json =
         match live_keeper_cascade_name_result cascade_name with
         | Ok runtime ->
-          `String (Cascade_name.to_string runtime)
+          `String (runtime)
         | Error (`Unresolved _) -> `Null
       in
       let execution =

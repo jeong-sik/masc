@@ -62,7 +62,7 @@ let run_model_by_label
       let config = { config with transport = transport_resolved } in
       match
         let admission_cascade_name =
-          Cascade_name.of_string_exn model_label
+          model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
@@ -197,7 +197,7 @@ let run_model_with_masc_tools
       let config = { config with raw_trace; transport = transport_resolved } in
       match
         let admission_cascade_name =
-          Cascade_name.of_string_exn model_label
+          model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive

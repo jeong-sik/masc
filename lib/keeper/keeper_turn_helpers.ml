@@ -201,7 +201,7 @@ let record_pre_dispatch_terminal_observation
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(generation : int)
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : string)
       ~(outcome : Keeper_execution_receipt.outcome_kind)
       ~(terminal_reason_code : string)
       ~(activity_kind : string)
@@ -213,7 +213,7 @@ let record_pre_dispatch_terminal_observation
   : unit
   =
   let cascade_name_string =
-    Cascade_name.to_string cascade_name
+    cascade_name
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in

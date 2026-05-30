@@ -25,7 +25,7 @@ let prepare_agent_setup
       ~(start_turn_count : int)
       ~(generation : int)
       ~(max_turns : int)
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
       ~(required_tool_names : string list)
@@ -43,7 +43,7 @@ let prepare_agent_setup
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
-  let cascade_name_string = Cascade_name.to_string cascade_name in
+  let cascade_name_string = cascade_name in
   let manifest_keeper_turn_id =
     match runtime_manifest_context with
     | Some ctx -> ctx.Keeper_runtime_manifest.manifest_keeper_turn_id

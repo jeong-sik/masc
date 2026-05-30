@@ -41,7 +41,7 @@ val provider_rejection_for_required_tool_unsupported :
   Keeper_meta_contract.provider_rejection
 
 val no_tool_capable_provider_of_pre_dispatch_rejections :
-  cascade_name:Cascade_name.t ->
+  cascade_name:string ->
   configured_labels:string list ->
   runtime_manifest_required_tool_names:string list ->
   runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->

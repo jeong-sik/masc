@@ -79,8 +79,8 @@ val decode_tool_list : string -> string list option
 val decode_contract_violation_reason :
   string -> (string * string list * string list) option
 type cascade_rotation_attempt = {
-  from_cascade : Cascade_name.t;
-  to_cascade : Cascade_name.t;
+  from_cascade : string;
+  to_cascade : string;
   reason : Keeper_error_classify.degraded_retry_reason;
   outcome : cascade_rotation_outcome;
   slot_release_at_phase : slot_release_phase option;
@@ -118,14 +118,14 @@ type t = {
   network_mode : Keeper_types_profile_sandbox.network_mode;
   approval_profile : string option;
   approval_profile_derived : bool;
-  cascade_name : Cascade_name.t;
+  cascade_name : string;
   cascade_selected_model : string option;
   cascade_attempt_count : int;
   cascade_fallback_applied : bool;
   cascade_outcome : cascade_outcome;
   oas_internal_cascade_allowed : bool;
   degraded_retry_applied : bool;
-  degraded_retry_cascade : Cascade_name.t option;
+  degraded_retry_cascade : string option;
   fallback_reason :
     Keeper_error_classify.degraded_retry_reason option;
   cascade_rotation_attempts : cascade_rotation_attempt list;

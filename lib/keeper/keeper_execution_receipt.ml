@@ -29,8 +29,8 @@ let last_tool_name receipt =
 
 let cascade_rotation_attempt_to_json attempt =
   `Assoc
-    [ "from_cascade", `String (Cascade_name.to_string attempt.from_cascade)
-    ; "to_cascade", `String (Cascade_name.to_string attempt.to_cascade)
+    [ "from_cascade", `String (attempt.from_cascade)
+    ; "to_cascade", `String (attempt.to_cascade)
     ; ( "reason"
       , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
     ; "outcome", `String (cascade_rotation_outcome_to_string attempt.outcome)
@@ -477,7 +477,7 @@ let to_json (receipt : t) =
       ~required_tools:receipt.tool_surface.required_tools
       ~required_tool_candidates:receipt.tool_surface.required_tool_candidates
       ~missing_required_tools:receipt.tool_surface.missing_required_tools
-      ~cascade_profile:(Cascade_name.to_string receipt.cascade_name)
+      ~cascade_profile:(receipt.cascade_name)
       ()
   in
   let action_radius =
@@ -563,7 +563,7 @@ let to_json (receipt : t) =
           ] )
     ; ( "cascade"
       , `Assoc
-          [ "name", `String (Cascade_name.to_string receipt.cascade_name)
+          [ "name", `String (receipt.cascade_name)
           ; "selected_model", `Null
           ; "attempt_count", `Int receipt.cascade_attempt_count
           ; "fallback_applied", `Bool receipt.cascade_fallback_applied
@@ -572,7 +572,7 @@ let to_json (receipt : t) =
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
           ; ( "degraded_retry_cascade"
             , match receipt.degraded_retry_cascade with
-              | Some value -> `String (Cascade_name.to_string value)
+              | Some value -> `String (value)
               | None -> `Null )
           ; ( "fallback_reason"
             , match receipt.fallback_reason with
@@ -726,7 +726,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
-    ; "cascade_name", `String (Cascade_name.to_string receipt.cascade_name)
+    ; "cascade_name", `String (receipt.cascade_name)
     ; "cascade_outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
     ; ( "tool_contract_result"
       , `String (tool_contract_result_to_string receipt.tool_contract_result) )
@@ -928,7 +928,7 @@ let stale_broadcast_payload
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = Cascade_name.to_string cascade_name in
+  let cascade_name_string = cascade_name in
   let failure_reason_text = stale_broadcast_failure_reason_text failure_reason in
   let failure_reason_cohort = stale_broadcast_failure_cohort failure_reason in
   `Assoc
@@ -965,7 +965,7 @@ let emit_stale_keeper_broadcast
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = Cascade_name.to_string cascade_name in
+  let cascade_name_string = cascade_name in
   let payload =
     stale_broadcast_payload
       ~keeper_name

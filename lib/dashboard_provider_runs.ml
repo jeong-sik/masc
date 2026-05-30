@@ -520,8 +520,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
                provider)
         else (
           let inference_cascade_name =
-            Cascade_name.of_string_exn
-              (Runtime.get_default_runtime_id ())
+                          (Runtime.get_default_runtime_id ())
           in
           match
             Masc_oas_bridge.run_with_caller

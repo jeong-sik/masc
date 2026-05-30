@@ -539,8 +539,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                      ~keeper_name:meta.name
                      ~agent_name:meta.agent_name
                      ~cascade_name:
-                       (Cascade_name.of_string_exn
-                          (Keeper_meta_contract.cascade_name_of_meta meta))
+                       (                          (Keeper_meta_contract.cascade_name_of_meta meta))
                      ~trace_id:
                        (Keeper_id.Trace_id.to_string
                           entry.meta.runtime.trace_id)

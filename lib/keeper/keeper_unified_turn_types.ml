@@ -144,13 +144,13 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
              Printf.sprintf
                "no tool-capable provider found (cascade=%s labels=[%s] \
                 required_tools=[%s]%s)"
-               (Cascade_name.to_string ntcp_cascade_name)
+               (ntcp_cascade_name)
                (String.concat ", " detail.configured_labels)
                (String.concat ", " detail.required_tool_names)
                rejection_summary
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
+         ; cascade_name = Some (ntcp_cascade_name)
          })
   | Some
       (Keeper_meta_contract.Cascade_exhausted
@@ -164,7 +164,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = "no tool-capable provider found"
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
+         ; cascade_name = Some (ntcp_cascade_name)
          })
   (* Generic Cascade_exhausted catch-all — after No_tool_capable specifics *)
   | Some (Keeper_meta_contract.Cascade_exhausted { reason; cascade_name }) ->
@@ -174,7 +174,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (Cascade_name.to_string cascade_name)
+         ; cascade_name = Some (cascade_name)
          })
   | Some (Keeper_meta_contract.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
@@ -380,7 +380,7 @@ let record_streaming_cancelled_observation
       ~(config : Coord.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : string)
       ~(keeper_turn_id : int)
       ()
   : unit

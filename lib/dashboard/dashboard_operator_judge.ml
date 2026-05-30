@@ -256,22 +256,20 @@ let compute_judgments
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let should_backoff ~sw ~net =
-  let cascade_name =
-    Runtime.get_default_runtime_id ()
-  in
-  try
-    let capacity =
-      Cascade_runtime.local_capacity_for_selections ~sw ~net
-        [ cascade_name ]
-    in
-    capacity.all_discovered && capacity.endpoints_found > 0
-    && capacity.process_available <= 0
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Dashboard.warn
-      "operator: capacity check failed in should_backoff: %s"
-      (Printexc.to_string exn);
-    false
+let should_backoff ~sw:_ ~net:_ =
+  (* RFC-0206 single-binding: the deleted
+     [Cascade_runtime.local_capacity_for_selections] probed local-runtime
+     endpoint queues live. Under single-binding the runtime pool tracks lease
+     saturation directly, so back off when every configured concurrency slot on
+     a healthy runtime is already leased.
+     NB: this reads MASC's own lease accounting ([allocated_slots]), not the
+     server-reported queue depth ([process_available]) the old probe used — a
+     documented semantic shift, not a removal. Restoring a true live server-queue
+     probe is RFC-shaped follow-up. *)
+  let configured = Local_runtime_pool.configured_capacity () in
+  configured > 0
+  && Local_runtime_pool.healthy_runtime_count () > 0
+  && Local_runtime_pool.allocated_slots () >= configured
 
 let refresh_once ~sw ~net
     ~(masc_tools : Masc_domain.tool_schema list)

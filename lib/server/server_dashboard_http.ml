@@ -637,8 +637,18 @@ let dashboard_bootstrap_http_json
     slice "execution" (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
   in
   let planning =
+    (* Share the standalone /api/v1/dashboard/planning cache (same key + ttl) so
+       a page that loads bootstrap and the planning panel computes the planning
+       slice once. Previously bootstrap called the compute path directly,
+       bypassing Dashboard_cache and re-reading goals/backlog on every load. *)
     slice "planning" (fun () ->
-      dashboard_planning_http_json ~config:state.Mcp_server.room_config)
+      let cache_key =
+        Printf.sprintf "planning:%s" state.Mcp_server.room_config.base_path
+      in
+      Dashboard_cache.get_or_compute cache_key
+        ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            dashboard_planning_http_json ~config:state.Mcp_server.room_config)))
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
@@ -652,8 +662,15 @@ let dashboard_bootstrap_http_json
         ~state ~sw ~clock request)
   in
   let goals =
+    (* Share the standalone /api/v1/dashboard/goals cache (same key + ttl). *)
     slice "goals" (fun () ->
-      dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config)
+      let cache_key =
+        Printf.sprintf "goals_tree:%s" state.Mcp_server.room_config.base_path
+      in
+      Dashboard_cache.get_or_compute cache_key
+        ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config)))
   in
   let goal_loop_status =
     slice "goal_loop_status" (fun () ->

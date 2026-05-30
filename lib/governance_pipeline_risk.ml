@@ -83,9 +83,10 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input 
 
 (* Former [risk_overrides] (9 entries) is removed: eight were corrections
    for substring false-positives on registered tools and are now folded
-   into [risk_of_*] typed tables (RFC-0193 / Issue #19032); the one
-   non-typed name lives in [residual_risk_overrides]. The patterns below
-   classify transition-action verbs and unknown (non-[Tool_name]) names. *)
+   into [risk_of_*] typed tables (RFC-0193 / Issue #19032); the last
+   ([masc_a2a_query_skill]) was dead code for a non-existent feature.
+   [residual_risk_overrides] is now empty. The patterns below classify
+   transition-action verbs and unknown (non-[Tool_name]) names. *)
 
 let critical_patterns =
   [ "delete"; "remove"; "drop"; "force"; "reset"; "kill"; "destroy"; "purge" ]
@@ -135,9 +136,8 @@ let classify_name name =
    Values reproduce the prior (substring + override) verdict exactly,
    so the eight typed entries of the former [risk_overrides] list are
    folded into the tier they belong to (e.g. [Goal_upsert -> Medium],
-   [Memory_write -> Low]) rather than patched at runtime. The one
-   non-typed override ([masc_a2a_query_skill], absent from [Tool_name])
-   survives in [residual_risk_overrides] below.
+   [Memory_write -> Low]) rather than patched at runtime.
+   [residual_risk_overrides] is now empty (all overrides resolved).
 
    [Goal_transition] / [Transition] sit in [Low] only for totality;
    [baseline_risk] intercepts both before they reach these tables, since
@@ -198,9 +198,8 @@ let risk_of_typed : Tool_name.t -> risk_level = function
 
 (* Non-typed names absent from [Tool_name] keep an explicit override; the
    substring path would misclassify them (e.g. "query_skill" contains
-   "kill" -> Critical). Candidate for a [Tool_name] enum entry. *)
-let residual_risk_overrides : (string * risk_level) list =
-  [ ("masc_a2a_query_skill", Low) ]
+   "kill" -> Critical). Empty = all known names are in [Tool_name]. *)
+let residual_risk_overrides : (string * risk_level) list = []
 
 let transition_action input =
   match input with

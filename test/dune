@@ -29,6 +29,7 @@
 
 (tests
  (names
+  test_board_activity_cache
   test_attribution
   test_attribution_tagged
   test_dashboard_attribution
@@ -347,6 +348,7 @@
   test_alignment_score
   test_blocker_class_exhaustiveness)
  (modules
+  test_board_activity_cache
   test_attribution
   test_attribution_tagged
   test_dashboard_attribution

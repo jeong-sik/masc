@@ -149,31 +149,92 @@ let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
 
 (** {1 Board Counting} *)
 
-(** Count board posts and comments authored by an agent from JSONL files. *)
+(* Board activity counts feed contributor-quality on the board dashboard,
+   where [compute_reputation] is invoked once per unique post author in a
+   single render. The previous implementation re-read and re-parsed
+   board_posts.jsonl (~3.4MB) and board_comments.jsonl (~1.6MB) on every
+   call, making one board render O(authors x full-file-parse) — measured at
+   ~1.7s for ~50 authors against the live runtime.
+
+   We parse each file once and project an author -> (posts, comments) count
+   table, refreshed only when a source file's mtime changes. One [stat] per
+   call (microseconds) gates the cache, so the per-author calls in a render
+   and warm refresh loops reuse the parse. mtime gating (rather than a
+   file-watch daemon) keeps the projection correct under external multi-agent
+   appends without adding load to fseventsd. *)
+type board_activity_counts = {
+  dir : string;
+  posts_sig : float * int;
+  comments_sig : float * int;
+  by_author : (string, int * int) Hashtbl.t; (* author -> (posts, comments) *)
+}
+
+let board_activity_cache : board_activity_counts option Atomic.t =
+  Atomic.make None
+
+(* Cache-invalidation signature for a source file: (mtime, size). Size catches
+   same-second appends that a coarse-resolution mtime clock would miss (board
+   JSONL files are append-only, so size grows monotonically on every write);
+   mtime catches rewrites or truncations that leave the size unchanged. A
+   missing file maps to a distinct sentinel so its appearance also invalidates. *)
+let file_sig path : float * int =
+  ( (match Fs_compat.file_mtime path with Some m -> m | None -> 0.0),
+    (match Fs_compat.file_size path with Some s -> s | None -> -1) )
+
+let build_board_activity_counts ~posts_path ~comments_path :
+    (string, int * int) Hashtbl.t =
+  let by_author : (string, int * int) Hashtbl.t = Hashtbl.create 256 in
+  let tally select rows =
+    List.iter
+      (fun json ->
+        let author = Safe_ops.json_string ~default:"" "author" json in
+        let posts, comments =
+          Hashtbl.find_opt by_author author |> Option.value ~default:(0, 0)
+        in
+        Hashtbl.replace by_author author (select (posts, comments)))
+      rows
+  in
+  tally (fun (p, c) -> (p + 1, c)) (load_jsonl_safe posts_path);
+  tally (fun (p, c) -> (p, c + 1)) (load_jsonl_safe comments_path);
+  by_author
+
+(* Return the cached author -> (posts, comments) projection, rebuilding it when
+   the board directory or either source file's mtime changes. The table is
+   published via [Atomic] and never mutated after publication, so a benign race
+   between two renders only repeats idempotent work. *)
+let board_activity_table board_dir : (string, int * int) Hashtbl.t =
+  let posts_path = Filename.concat board_dir "board_posts.jsonl" in
+  let comments_path = Filename.concat board_dir "board_comments.jsonl" in
+  let posts_sig = file_sig posts_path in
+  let comments_sig = file_sig comments_path in
+  match Atomic.get board_activity_cache with
+  | Some c
+    when String.equal c.dir board_dir
+         && c.posts_sig = posts_sig
+         && c.comments_sig = comments_sig ->
+      c.by_author
+  | _ ->
+      let by_author = build_board_activity_counts ~posts_path ~comments_path in
+      Atomic.set board_activity_cache
+        (Some { dir = board_dir; posts_sig; comments_sig; by_author });
+      by_author
+
+(** Count board posts and comments authored by an agent under [board_dir].
+
+    Served from an mtime-gated projection of board_posts.jsonl and
+    board_comments.jsonl (see {!board_activity_table}). The result is identical
+    to filtering each file by [author = agent_name] but amortizes the parse
+    across every author queried while the files are unchanged. Exposed without
+    the [Coord.config] indirection so the projection can be tested directly. *)
+let count_board_activity_in_dir ~(board_dir : string) ~(agent_name : string) :
+    int * int =
+  Hashtbl.find_opt (board_activity_table board_dir) agent_name
+  |> Option.value ~default:(0, 0)
+
+(** Count board posts and comments authored by an agent. *)
 let count_board_activity (config : Coord.config) ~(agent_name : string)
     : int * int =
-  let board_dir = Coord.masc_dir config in
-  (* Board posts JSONL *)
-  let posts_path = Filename.concat board_dir "board_posts.jsonl" in
-  let posts_rows = load_jsonl_safe posts_path in
-  let post_count =
-    posts_rows
-    |> List.filter (fun json ->
-        let author = Safe_ops.json_string ~default:"" "author" json in
-        String.equal author agent_name)
-    |> List.length
-  in
-  (* Board comments JSONL *)
-  let comments_path = Filename.concat board_dir "board_comments.jsonl" in
-  let comments_rows = load_jsonl_safe comments_path in
-  let comment_count =
-    comments_rows
-    |> List.filter (fun json ->
-        let author = Safe_ops.json_string ~default:"" "author" json in
-        String.equal author agent_name)
-    |> List.length
-  in
-  (post_count, comment_count)
+  count_board_activity_in_dir ~board_dir:(Coord.masc_dir config) ~agent_name
 
 (** {1 Mention Counting} *)
 

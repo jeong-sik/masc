@@ -5477,13 +5477,8 @@ let rec parse flags positional dd = function
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cp { source = src; dest = dst; recursive; force; preserve }))
      | _ -> None)
   | "--" :: rest -> parse flags positional true rest
-  | arg :: rest when not dd && (arg = "-r" || arg = "-R" || arg = "-f" || arg = "-p" || arg = "-rf" || arg = "-fp" || arg = "-pf" || arg = "-pr" || arg = "-rp" || arg = "-rfp" || arg = "-rpf" || arg = "-frp" || arg = "-fpr" || arg = "-prf" || arg = "-pfr") ->
-    let rec extract acc i =
-      if i >= String.length arg then acc
-      else extract (("-" ^ String.make 1 arg.[i]) :: acc) (i + 1)
-    in
-    let new_flags = extract [] 1 in
-    parse (new_flags @ flags) positional dd rest
+  | arg :: rest when not dd && (arg = "-r" || arg = "-R" || arg = "-f" || arg = "-p") ->
+    parse (arg :: flags) positional dd rest
   | arg :: rest when not dd && arg = "--no-preserve=all" ->
     parse flags positional dd rest
   | arg :: rest when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] <> '-' ->
@@ -5492,7 +5487,7 @@ let rec parse flags positional dd = function
     parse flags (positional @ [ arg ]) dd rest
 in
 parse [] [] false args|}
-    ; no_expand_combined = true
+    ; no_expand_combined = false
     }
   ; { name = "Mv"
     ; anon_pattern = "Mv { source; dest; force; no_clobber }"
@@ -5526,20 +5521,15 @@ let rec parse flags positional dd = function
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mv { source = src; dest = dst; force; no_clobber }))
      | _ -> None)
   | "--" :: rest -> parse flags positional true rest
-  | arg :: rest when not dd && (arg = "-f" || arg = "-n" || arg = "-fn" || arg = "-nf" || arg = "-i" || arg = "-fi" || arg = "-if" || arg = "-ni" || arg = "-in") ->
-    let rec extract acc i =
-      if i >= String.length arg then acc
-      else extract (("-" ^ String.make 1 arg.[i]) :: acc) (i + 1)
-    in
-    let new_flags = extract [] 1 in
-    parse (new_flags @ flags) positional dd rest
+  | arg :: rest when not dd && (arg = "-f" || arg = "-n" || arg = "-i") ->
+    parse (arg :: flags) positional dd rest
   | arg :: rest when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] <> '-' ->
     parse flags positional dd rest
   | arg :: rest ->
     parse flags (positional @ [ arg ]) dd rest
 in
 parse [] [] false args|}
-    ; no_expand_combined = true
+    ; no_expand_combined = false
     }
   ; { name = "Ln"
     ; anon_pattern = "Ln { target; link_name; symbolic; force }"
@@ -5573,13 +5563,8 @@ let rec parse flags positional dd = function
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ln { target = tgt; link_name = link; symbolic; force }))
      | _ -> None)
   | "--" :: rest -> parse flags positional true rest
-  | arg :: rest when not dd && (arg = "-s" || arg = "-f" || arg = "-sf" || arg = "-fs" || arg = "-n" || arg = "-sn" || arg = "-ns") ->
-    let rec extract acc i =
-      if i >= String.length arg then acc
-      else extract (("-" ^ String.make 1 arg.[i]) :: acc) (i + 1)
-    in
-    let new_flags = extract [] 1 in
-    parse (new_flags @ flags) positional dd rest
+  | arg :: rest when not dd && (arg = "-s" || arg = "-f" || arg = "-n") ->
+    parse (arg :: flags) positional dd rest
   | arg :: rest when not dd && arg = "--symbolic" ->
     parse ("-s" :: flags) positional dd rest
   | arg :: rest when not dd && arg = "--force" ->
@@ -5590,7 +5575,7 @@ let rec parse flags positional dd = function
     parse flags (positional @ [ arg ]) dd rest
 in
 parse [] [] false args|}
-    ; no_expand_combined = true
+    ; no_expand_combined = false
     }
   ; { name = "Touch"
     ; anon_pattern = "Touch { files; no_create; time }"
@@ -6002,7 +5987,7 @@ let emit_of_simple buf spec =
     ; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
     ; "Curl"; "Wget"; "Sudo"; "Su"; "Dd"; "Mkfs"
     ; "Find"
-    ; "Cp"; "Mv"; "Ln"; "Touch"; "Tee"; "Awk"; "Xargs"
+    ; "Touch"; "Tee"; "Awk"; "Xargs"
     ]
   in
   List.iter

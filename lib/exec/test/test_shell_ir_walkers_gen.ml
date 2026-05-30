@@ -2950,6 +2950,151 @@ let test_eq_form_value_consuming_flags () =
    | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
    | w -> Alcotest.failf "Sed --expression/--file eq-form: expected expression=script.sed, file=input.txt, got %a" pp w)
 ;;
+(* Batch 17: comprehensive edge-case coverage for the 12 purely generic
+   subcommand_args_ctor parsers (no value_flags).  Tests POSIX --,
+   eq-form flags, combined short flags, empty args, and round-trip. *)
+let test_generic_subcommand_args_edge_cases () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* --- Cmake: POSIX -- stops option parsing (consumed, not preserved) --- *)
+  let w =
+    of_simple { (base "cmake") with args = [ lit "--build"; lit "."; lit "--"; lit "--target"; lit "clean" ] }
+  in
+  (match w with
+   | W (Cmake { subcommand = "--build"; args = [ "."; "--target"; "clean" ] }) -> ()
+   | w -> Alcotest.failf "Cmake POSIX --: got %a" pp w);
+  (* --- Cmake: eq-form flag passes through as arg --- *)
+  let w2 =
+    of_simple { (base "cmake") with args = [ lit "-S"; lit "."; lit "-B"; lit "build"; lit "-DCMAKE_BUILD_TYPE=Debug" ] }
+  in
+  (match w2 with
+   | W (Cmake { subcommand = "-S"; args = [ "."; "-B"; "build"; "-DCMAKE_BUILD_TYPE=Debug" ] }) -> ()
+   | w -> Alcotest.failf "Cmake eq-form: got %a" pp w);
+  (* --- Java: -cp flag + main class --- *)
+  let w3 =
+    of_simple { (base "java") with args = [ lit "-cp"; lit "lib.jar"; lit "com.example.Main"; lit "--port"; lit "8080" ] }
+  in
+  (match w3 with
+   | W (Java { subcommand = "-cp"; args = [ "lib.jar"; "com.example.Main"; "--port"; "8080" ] }) -> ()
+   | w -> Alcotest.failf "Java -cp: got %a" pp w);
+  (* --- Java: -- (end of options, -- consumed, not preserved) --- *)
+  let w4 =
+    of_simple { (base "java") with args = [ lit "-jar"; lit "app.jar"; lit "--"; lit "-arg1"; lit "-arg2" ] }
+  in
+  (match w4 with
+   | W (Java { subcommand = "-jar"; args = [ "app.jar"; "-arg1"; "-arg2" ] }) -> ()
+   | w -> Alcotest.failf "Java --: got %a" pp w);
+  (* --- Javac: -d out + source file --- *)
+  let w5 =
+    of_simple { (base "javac") with args = [ lit "-d"; lit "build/"; lit "src/Main.java" ] }
+  in
+  (match w5 with
+   | W (Javac { subcommand = "-d"; args = [ "build/"; "src/Main.java" ] }) -> ()
+   | w -> Alcotest.failf "Javac -d: got %a" pp w);
+  (* --- Dd: key=value style args (all passed through) --- *)
+  let w6 =
+    of_simple { (base "dd") with args = [ lit "if=/dev/zero"; lit "of=/tmp/zeros"; lit "bs=1M"; lit "count=10" ] }
+  in
+  (match w6 with
+   | W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=10" ] }) -> ()
+   | w -> Alcotest.failf "Dd key=value: got %a" pp w);
+  (* --- Dd: POSIX -- stops option parsing (consumed, not preserved) --- *)
+  let w7 =
+    of_simple { (base "dd") with args = [ lit "if=/dev/zero"; lit "--"; lit "of=/tmp/out" ] }
+  in
+  (match w7 with
+   | W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/out" ] }) -> ()
+   | w -> Alcotest.failf "Dd --: got %a" pp w);
+  (* --- Osascript: -e with inline script --- *)
+  let w8 =
+    of_simple { (base "osascript") with args = [ lit "-e"; lit "display dialog \"hello\"" ] }
+  in
+  (match w8 with
+   | W (Osascript { subcommand = "-e"; args = [ "display dialog \"hello\"" ] }) -> ()
+   | w -> Alcotest.failf "Osascript -e: got %a" pp w);
+  (* --- Ffplay: combined short flags --- *)
+  let w9 =
+    of_simple { (base "ffplay") with args = [ lit "-nodisp"; lit "-autoexit"; lit "clip.mp4" ] }
+  in
+  (match w9 with
+   | W (Ffplay { subcommand = "-nodisp"; args = [ "-autoexit"; "clip.mp4" ] }) -> ()
+   | w -> Alcotest.failf "Ffplay flags: got %a" pp w);
+  (* --- Mpg123: --list with value (no value_flags, so it's a positional) --- *)
+  let w10 =
+    of_simple { (base "mpg123") with args = [ lit "-q"; lit "--list"; lit "playlist.m3u"; lit "song.mp3" ] }
+  in
+  (match w10 with
+   | W (Mpg123 { subcommand = "-q"; args = [ "--list"; "playlist.m3u"; "song.mp3" ] }) -> ()
+   | w -> Alcotest.failf "Mpg123 --list: got %a" pp w);
+  (* --- Open: -a Safari + URL --- *)
+  let w11 =
+    of_simple { (base "open") with args = [ lit "-a"; lit "Safari"; lit "https://example.com" ] }
+  in
+  (match w11 with
+   | W (Open { subcommand = "-a"; args = [ "Safari"; "https://example.com" ] }) -> ()
+   | w -> Alcotest.failf "Open -a: got %a" pp w);
+  (* --- Dune_local_sh: empty args (binary name is "dune-local.sh") --- *)
+  let w12 =
+    of_simple { (base "dune-local.sh") with args = [ lit "build" ] }
+  in
+  (match w12 with
+   | W (Dune_local_sh { subcommand = "build"; args = [] }) -> ()
+   | w -> Alcotest.failf "Dune empty args: got %a" pp w);
+  (* --- Play: empty args --- *)
+  let w13 =
+    of_simple { (base "play") with args = [ lit "recording.wav" ] }
+  in
+  (match w13 with
+   | W (Play { subcommand = "recording.wav"; args = [] }) -> ()
+   | w -> Alcotest.failf "Play empty args: got %a" pp w);
+  (* --- Rec: with rate arg --- *)
+  let w14 =
+    of_simple { (base "rec") with args = [ lit "output.wav"; lit "rate"; lit "44100" ] }
+  in
+  (match w14 with
+   | W (Rec { subcommand = "output.wav"; args = [ "rate"; "44100" ] }) -> ()
+   | w -> Alcotest.failf "Rec rate: got %a" pp w);
+  (* --- Ocamlfind: -package flag (no value_flags, so treated as positional) --- *)
+  let w15 =
+    of_simple { (base "ocamlfind") with args = [ lit "query"; lit "-package"; lit "eio"; lit "-predicates"; lit "byte" ] }
+  in
+  (match w15 with
+   | W (Ocamlfind { subcommand = "query"; args = [ "-package"; "eio"; "-predicates"; "byte" ] }) -> ()
+   | w -> Alcotest.failf "Ocamlfind -package: got %a" pp w);
+  (* --- Round-trip for all 12: of_simple ∘ to_simple = id --- *)
+  let rt_cases =
+    [ W (Ocamlfind { subcommand = "query"; args = [ "-package"; "eio" ] })
+    ; W (Java { subcommand = "-cp"; args = [ "lib.jar"; "Main" ] })
+    ; W (Javac { subcommand = "-d"; args = [ "out"; "Main.java" ] })
+    ; W (Cmake { subcommand = "--build"; args = [ "."; "--target"; "install" ] })
+    ; W (Dune_local_sh { subcommand = "runtest"; args = [ "-f" ] })
+    ; W (Osascript { subcommand = "-e"; args = [ "display dialog \"hello\"" ] })
+    ; W (Play { subcommand = "recording.wav"; args = [] })
+    ; W (Rec { subcommand = "output.wav"; args = [ "rate"; "44100" ] })
+    ; W (Ffplay { subcommand = "clip.mp4"; args = [ "-nodisp"; "-autoexit" ] })
+    ; W (Mpg123 { subcommand = "podcast.mp3"; args = [ "-q"; "--list"; "playlist.m3u" ] })
+    ; W (Open { subcommand = "-a"; args = [ "Safari"; "https://example.com" ] })
+    ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=10" ] })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = to_simple cmd in
+       let back = of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "generic round-trip failed for %a" pp w)
+    rt_cases
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -3033,6 +3178,10 @@ let () =
             "eq-form value-consuming flags (--field-separator=, --regexp=P, --message=M, --lines=N)"
             `Quick
             test_eq_form_value_consuming_flags
+        ; Alcotest.test_case
+            "Batch17 generic subcommand_args_ctor edge cases (Cmake/Java/Javac/Dd/Osascript/Ffplay/Mpg123/Open/Dune/Play/Rec/Ocamlfind)"
+            `Quick
+            test_generic_subcommand_args_edge_cases
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

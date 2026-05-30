@@ -15,6 +15,17 @@ open Keeper_context_runtime
 
 let string_contains_substring = String_util.string_contains_substring
 
+(** Detect JSON parser error signatures in free-form error text.
+    Each needle targets a specific parser error family to avoid false
+    positives on generic messages like "Service closing". *)
+let is_json_parse_error_text (text : string) : bool =
+  let lower = String.lowercase_ascii text in
+  string_contains_substring ~needle:"can't find closing" lower
+  || string_contains_substring ~needle:"find end of" lower
+  || string_contains_substring ~needle:"unexpected character in json" lower
+  || string_contains_substring ~needle:"unterminated" lower
+  || string_contains_substring ~needle:"parse error" lower
+
 (** {1 Retry & Side-Effect Safety}
 
     @boundary-contract
@@ -86,23 +97,10 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
   | Agent_sdk.Error.Api (InvalidRequest { message }) ->
-      let lower = String.lowercase_ascii message in
-      (* Compound patterns to avoid false positives on generic messages
-         like "Service closing" or "Can't find the specified tool".
-         Each pattern targets a specific JSON parser error family. *)
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
+      is_json_parse_error_text message
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.InvalidRequest { reason; _ }) ->
-      let lower = String.lowercase_ascii reason in
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
+      is_json_parse_error_text reason
   (* All other API error variants do not represent server-side parse failures. *)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (Overloaded _)

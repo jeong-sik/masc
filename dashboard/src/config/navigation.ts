@@ -96,7 +96,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: 'Monitor',
     icon: 'monitoring',
-    description: 'Keeper operations, tools, cascade, and evidence',
+    description: 'Keeper operations, tools, runtime, and evidence',
     defaultTab: 'monitoring',
     defaultParams: { section: 'agents' },
     tabs: ['monitoring'],
@@ -191,7 +191,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'observatory',
-      label: 'Evidence Timeline',
+      label: 'Observatory',
       description: 'Activity and runtime evidence.',
       params: { section: 'observatory' },
     },
@@ -370,8 +370,6 @@ type TabSectionKey = `${TabId}:${string}`
 export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   // RFC-MASC-006 Phase 0: sessions stub removed
   'monitoring:sessions': { section: 'agents' },
-  'monitoring:activity': { section: 'observatory' },
-  'monitoring:live': { section: 'observatory', view: 'live' },
 
   // Dashboard consolidation Phase 1: monitoring surface
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },

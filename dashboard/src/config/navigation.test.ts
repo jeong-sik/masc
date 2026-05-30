@@ -104,7 +104,7 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('agents')).toBe('Keeper Fleet')
     expect(labelFor('fleet-health')).toBe('Tool Monitor')
     expect(labelFor('runtime')).toBe('Runtime')
-    expect(labelFor('observatory')).toBe('Evidence Timeline')
+    expect(labelFor('observatory')).toBe('Observatory')
     expect(labelFor('transport-health')).toBeUndefined()
     expect(labelFor('feature-health')).toBeUndefined()
     expect(labelFor('cognition')).toBeUndefined()
@@ -239,22 +239,22 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(result.view).toBe('event-log')
   })
 
-  it('redirects legacy activity URL to observatory and upgrades ag_range to range', () => {
+  it('falls back invalid activity section to default agents and upgrades ag_range to range', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'activity',
       ag_range: '6h',
       keeper: 'nova',
     })
-    expect(result.section).toBe('observatory')
+    expect(result.section).toBe('agents')
     expect(result.range).toBe('6h')
     expect(result.ag_range).toBeUndefined()
     expect(result.keeper).toBe('nova')
   })
 
-  it('redirects live collaboration to the observatory live view', () => {
+  it('falls back invalid live section to default agents', () => {
     const result = normalizeRouteParams('monitoring', { section: 'live' })
-    expect(result.section).toBe('observatory')
-    expect(result.view).toBe('live')
+    expect(result.section).toBe('agents')
+    expect(result.view).toBeUndefined()
   })
 
   it('redirects standalone runtime diagnostics into runtime views', () => {
@@ -280,12 +280,12 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(result.view).toBe('attribution')
   })
 
-  it('drops unsupported legacy all-range when redirecting activity to observatory', () => {
+  it('falls back invalid activity with unsupported all-range to default agents', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'activity',
       ag_range: 'all',
     })
-    expect(result.section).toBe('observatory')
+    expect(result.section).toBe('agents')
     expect(result.range).toBeUndefined()
     expect(result.ag_range).toBeUndefined()
   })
@@ -294,10 +294,6 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
 describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
   it('exposes the sessions → agents redirect as reference contract', () => {
     expect(SECTION_REDIRECTS['monitoring:sessions']).toEqual({ section: 'agents' })
-  })
-
-  it('exposes the activity → observatory redirect as reference contract', () => {
-    expect(SECTION_REDIRECTS['monitoring:activity']).toEqual({ section: 'observatory' })
   })
 
   it('is the single source of truth for legacy section remaps', () => {
@@ -365,13 +361,13 @@ describe('normalizeRouteParams query param preservation', () => {
     expect(result.session_id).toBe('s-9')
   })
 
-  it('preserves keeper filter through the activity → observatory redirect', () => {
+  it('preserves keeper filter through invalid activity fallback to agents', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'activity',
       keeper: 'nova',
       ag_range: '24h',
     })
-    expect(result.section).toBe('observatory')
+    expect(result.section).toBe('agents')
     expect(result.keeper).toBe('nova')
     expect(result.range).toBe('24h')
   })

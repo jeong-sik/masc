@@ -193,15 +193,6 @@ let metric_oas_bridge_unmigrated_payload_kind =
   "masc_oas_bridge_unmigrated_payload_kind_total"
 ;;
 
-(* [Cascade_attempt_fsm.provider_label] receives an empty/blank string
-   and falls back to the literal "unknown" so metric labels do not
-   carry an empty value.  A non-zero rate here means an upstream
-   call site is emitting metrics without a real provider name —
-   the helper paints over the symptom; the counter surfaces it so
-   the source can be found and fixed. *)
-  "masc_cascade_attempt_empty_provider_label_total"
-;;
-
 (* Per-tool-result compaction events emitted by
    [Keeper_context_core.sanitize_checkpoint_message] when a tool
    result exceeds the per-message count cap, the aggregate byte

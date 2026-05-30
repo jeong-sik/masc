@@ -174,9 +174,7 @@ let cli_runtime_config_json_for_provider (provider_cfg : Llm_provider.Provider_c
   | Some model_name, Some _, Some (binding, api_base_url) ->
     let provider_name = binding.Agent_sdk.Provider_runtime_binding.id in
     let max_context_size =
-      Cascade_config.resolve_provider_model_max_context
-        ~provider_name
-        model_name
+      Runtime.default_max_context ()
     in
     let config_json =
       `Assoc

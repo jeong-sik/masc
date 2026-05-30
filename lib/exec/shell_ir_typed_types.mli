@@ -253,6 +253,12 @@ and (_, _, _, _) command =
   | Make :
       { target : string option
       ; jobs : int option
+      ; directory : string option
+      ; makefile : string option
+      ; dry_run : bool
+      ; keep_going : bool
+      ; silent : bool
+      ; always_make : bool
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Diff :

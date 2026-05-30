@@ -35,11 +35,6 @@ let oas_error_cascade_name raw =
   |> Cascade_name.of_string_exn
 ;;
 
-let phase_buffer_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Phase_buffer
-;;
-
 let phase_recovery_cascade_name () =
   Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
     Masc_mcp.Keeper_cascade_profile.Phase_recovery
@@ -6151,101 +6146,9 @@ let runtime_url_of_label label =
   | None -> fail ("expected model label to resolve to runtime URL: " ^ label)
 ;;
 
-let test_decide_phase_buffer_liveness_keeps_non_local_effective () =
-  match
-    UT.decide_phase_buffer_liveness
-      ~resolve_runtime_url:(fun _ -> fail "resolver should not run")
-      ~base_cascade:"keeper_unified"
-      ~effective_cascade:"default"
-      [ "not-a-real-label" ]
-  with
-  | UT.Keep_effective_cascade cascade ->
-    check string "keeps selected cascade" (KC.default_cascade_name ()) cascade
-  | UT.Probe_phase_buffer_urls _ -> fail "unexpected local-only probe decision"
-;;
-
-let test_decide_phase_buffer_liveness_keeps_explicit_local_only () =
-  match
-    UT.decide_phase_buffer_liveness
-      ~resolve_runtime_url:(fun _ -> fail "resolver should not run")
-      ~base_cascade:"local_only"
-      ~effective_cascade:"local_only"
-      [ "not-a-real-label" ]
-  with
-  | UT.Keep_effective_cascade cascade ->
-    check
-      string
-      "removed local_only alias stays raw"
-      "local_only"
-      cascade
-  | UT.Probe_phase_buffer_urls _ -> fail "unexpected local-only probe decision"
-;;
-
-let test_decide_phase_buffer_liveness_keeps_phase_buffer_route () =
-  let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
-  match
-    UT.decide_phase_buffer_liveness
-      ~base_cascade:"scoring"
-      ~effective_cascade:(KC.default_cascade_name ())
-      [ label; label ]
-  with
-  | UT.Keep_effective_cascade cascade ->
-    check
-      string
-      "phase-buffer route is not probed as a local-only lane"
-      (phase_buffer_cascade_name ())
-      cascade
-  | UT.Probe_phase_buffer_urls _ -> fail "unexpected local-only probe decision"
-;;
-
-let test_fail_open_local_only_when_probe_fails () =
-  let cascade =
-    UT.fail_open_phase_buffer_when_unavailable
-      ~probe_base_url:(fun _ -> false)
-      ~base_cascade:"scoring"
-      ~effective_cascade:(KC.default_cascade_name ())
-      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
-  in
-  check
-    string
-    "keeps configured phase-buffer route"
-    (phase_buffer_cascade_name ())
-    cascade
-;;
-
-let test_fail_open_local_only_preserves_explicit_local_only_base () =
-  let probe_calls = ref 0 in
-  let cascade =
-    UT.fail_open_phase_buffer_when_unavailable
-      ~probe_base_url:(fun _ ->
-        incr probe_calls;
-        false)
-      ~base_cascade:"local_only"
-      ~effective_cascade:"local_only"
-      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
-  in
-  check int "probe not called" 0 !probe_calls;
-  check
-    string
-    "removed local_only alias stays raw"
-    "local_only"
-    cascade
-;;
-
-let test_fail_open_local_only_preserves_healthy_local_only () =
-  let cascade =
-    UT.fail_open_phase_buffer_when_unavailable
-      ~probe_base_url:(fun _ -> true)
-      ~base_cascade:"scoring"
-      ~effective_cascade:(KC.default_cascade_name ())
-      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
-  in
-  check
-    string
-    "healthy ollama keeps phase-buffer route"
-    (phase_buffer_cascade_name ())
-    cascade
-;;
+(* cascade→Runtime 숙청: phase-buffer liveness probe 테스트 6종 제거
+   (decide_phase_buffer_liveness / fail_open_phase_buffer_when_unavailable —
+   Keeper_turn_liveness 에서 적출된 죽은 probe 기계). *)
 
 let wrapped_claude_limit_error () =
   Agent_sdk.Error.Api
@@ -11776,30 +11679,7 @@ let () =
             "async keeper_msg preflight surfaces discovery failure"
             `Quick
             test_keeper_msg_async_failure_surface
-        ; test_case
-            "local_only liveness decision keeps non-local route"
-            `Quick
-            test_decide_phase_buffer_liveness_keeps_non_local_effective
-        ; test_case
-            "local_only liveness decision keeps explicit local base"
-            `Quick
-            test_decide_phase_buffer_liveness_keeps_explicit_local_only
-        ; test_case
-            "local_only liveness decision keeps phase-buffer route"
-            `Quick
-            test_decide_phase_buffer_liveness_keeps_phase_buffer_route
-        ; test_case
-            "local_only fail-open falls back when ollama is down"
-            `Quick
-            test_fail_open_local_only_when_probe_fails
-        ; test_case
-            "explicit local_only does not fail-open"
-            `Quick
-            test_fail_open_local_only_preserves_explicit_local_only_base
-        ; test_case
-            "healthy local_only stays selected"
-            `Quick
-            test_fail_open_local_only_preserves_healthy_local_only
+        (* cascade→Runtime 숙청: phase-buffer liveness probe 테스트 등록 6종 제거. *)
         ; test_case
             "hard quota degraded retry uses local_recovery"
             `Quick

@@ -11,37 +11,10 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-(** Deterministic decision for the phase-buffer fallback boundary. This
-    does not probe runtime liveness; it only decides whether the selected
-    labels resolve to runtime URLs that [Cascade_capacity_probe.can_probe]
-    before preserving the canonical phase-buffer route. The provider/model
-    label resolver stays behind [Cascade_runtime_candidate]. *)
-type phase_buffer_liveness_decision =
-  | Keep_effective_cascade of string
-  | Probe_phase_buffer_urls of
-      { effective_cascade : string
-      ; fallback_cascade : string
-      ; probeable_base_urls : string list
-      }
-
-val decide_phase_buffer_liveness
-  :  ?resolve_runtime_url:(string -> string option)
-  -> base_cascade:string
-  -> effective_cascade:string
-  -> string list
-  -> phase_buffer_liveness_decision
-
-(** When phase routing temporarily forces the phase-buffer route, fail open to the
-    keeper's configured base cascade if no registered local-capable probe
-    reports the endpoint as serving. Only the canonical phase-buffer route
-    is treated as the phase routing boundary. *)
-val fail_open_phase_buffer_when_unavailable
-  :  ?resolve_runtime_url:(string -> string option)
-  -> ?probe_base_url:(string -> bool)
-  -> base_cascade:string
-  -> effective_cascade:string
-  -> string list
-  -> string
+(* cascade→Runtime 숙청: phase-buffer liveness probe 기계
+   (phase_buffer_liveness_decision / decide_phase_buffer_liveness /
+   fail_open_phase_buffer_when_unavailable) 제거. 단일 runtime 에서 effective ==
+   base 라 probe 분기가 죽은 코드였다. *)
 
 (** Configurable livelock detection max attempts. *)
 val turn_livelock_max_attempts : unit -> int

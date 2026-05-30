@@ -1,7 +1,5 @@
 (** See {!Keeper_cascade_profile} interface for rationale. *)
 
-open Cascade_ref
-
 (** Per RFC-0041 cascade routing SSOT, the live cascade catalog
     (cascade.toml) is the only source of truth for cascade profile
     names.  There is no compile-time enum here — anything that needs to
@@ -12,7 +10,7 @@ open Cascade_ref
     gate that rejects keeper boot, so a missing catalog never reaches
     these helpers. *)
 
-type logical_use = Cascade_ref.logical_use =
+type logical_use = Cascade_routes.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer

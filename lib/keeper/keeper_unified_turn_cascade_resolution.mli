@@ -18,7 +18,6 @@ type cascade_resolution =
 val resolve_cascade
   :  meta:Keeper_meta_contract.keeper_meta
   -> phase_opt:Keeper_state_machine.phase option
-  -> selected_item:(string * Cascade_ref.cascade_item) option
   -> append_cascade_routed_manifest:
        (cascade_name:string -> decision:Yojson.Safe.t -> unit)
   -> cascade_resolution

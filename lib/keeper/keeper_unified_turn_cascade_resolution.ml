@@ -19,7 +19,6 @@ type cascade_resolution =
 let resolve_cascade
       ~(meta : keeper_meta)
       ~(phase_opt : Keeper_state_machine.phase option)
-      ~(selected_item : (string * Cascade_ref.cascade_item) option)
       ~(append_cascade_routed_manifest :
          cascade_name:string -> decision:Yojson.Safe.t -> unit)
   =

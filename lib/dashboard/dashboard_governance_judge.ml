@@ -648,8 +648,7 @@ let compute_judgments
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~build_facts =
   let cascade_name =
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Governance_judge
+    Runtime.get_default_runtime_id ()
   in
   match
     (* build_facts() is moved inside the bridge so a deadlock in
@@ -734,8 +733,7 @@ let append_judgments base_path judgments =
 
 let should_backoff ~sw ~net =
   let cascade_name =
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Governance_judge
+    Runtime.get_default_runtime_id ()
   in
   try
     let capacity =

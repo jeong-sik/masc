@@ -1,0 +1,12 @@
+; Keeper_name leaf extraction — mirror of Cascade_name.
+; Pure canonical-name validation with no external dependencies
+; (stdlib only). Extracted from lib/keeper/ to allow test code
+; to reference Keeper_name via re_export without pulling the full
+; masc_mcp library.
+
+(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_name)
+ (public_name masc_mcp.keeper_name)
+ (wrapped false))

@@ -102,7 +102,7 @@ let mk_receipt
   ; network_mode = Masc_mcp.Keeper_types_profile_sandbox.Network_none
   ; approval_profile = None
   ; approval_profile_derived = false
-  ; cascade_name = Cascade_name.of_string_exn "cascade.default"
+  ; cascade_name = Keeper_name.of_string_exn "cascade.default"
   ; cascade_selected_model = None
   ; cascade_attempt_count = 1
   ; cascade_fallback_applied
@@ -675,7 +675,7 @@ let test_stale_broadcast_payload_uses_low_cardinality_stale_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "cascade.primary")
+      ~cascade_name:(Keeper_name.of_string_exn "cascade.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:None
@@ -721,7 +721,7 @@ let test_stale_broadcast_payload_preserves_provider_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "cascade.primary")
+      ~cascade_name:(Keeper_name.of_string_exn "cascade.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)
@@ -764,7 +764,7 @@ let test_stale_broadcast_payload_preserves_required_tool_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "cascade.primary")
+      ~cascade_name:(Keeper_name.of_string_exn "cascade.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)
@@ -804,7 +804,7 @@ let test_stale_broadcast_payload_preserves_timeout_budget_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "cascade.primary")
+      ~cascade_name:(Keeper_name.of_string_exn "cascade.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)

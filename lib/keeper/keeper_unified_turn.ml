@@ -167,7 +167,7 @@ let run_keeper_cycle
          let profile_defaults =
            Keeper_types_profile.load_keeper_profile_defaults meta.name
          in
-         let effective_cascade_runtime_name = Cascade_name.of_string_exn effective_cascade_name in
+         let effective_cascade_runtime_name = Keeper_name.of_string_exn effective_cascade_name in
          (match
             Keeper_unified_turn_pre_dispatch.build_cascade_execution
               ~meta
@@ -204,12 +204,12 @@ let run_keeper_cycle
                      ; _
                      }) ->
                 Keeper_turn_fsm.Failure_no_tool_capable_provider
-                  { cascade_name = Cascade_name.to_string cascade_name
+                  { cascade_name = Keeper_name.to_string cascade_name
                   ; detail = error_message
                   }
               | _ when EC.is_cascade_exhausted_error err ->
                 Keeper_turn_fsm.Failure_cascade_unavailable
-                  { base = Cascade_name.to_string effective_cascade_runtime_name
+                  { base = Keeper_name.to_string effective_cascade_runtime_name
                   ; resolved = None
                   }
               | _ ->
@@ -400,7 +400,7 @@ let run_keeper_cycle
                      ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
-                     ~(from_cascade : Cascade_name.t)
+                     ~(from_cascade : Keeper_name.t)
                      ~(retry : EC.degraded_retry)
                      ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
                      (err : Agent_sdk.Error.sdk_error)
@@ -671,7 +671,7 @@ let run_keeper_cycle
                                 ; _
                                 }) ->
                            Keeper_turn_fsm.Failure_no_tool_capable_provider
-                             { cascade_name = Cascade_name.to_string cascade_name
+                             { cascade_name = Keeper_name.to_string cascade_name
                              ; detail = short_preview e_str
                              }
                          | _ ->
@@ -692,7 +692,7 @@ let run_keeper_cycle
                     "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s latency=%dms%s error=%s"
                     meta.name
-                    (Cascade_name.to_string final_execution.cascade_name)
+                    (Keeper_name.to_string final_execution.cascade_name)
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget

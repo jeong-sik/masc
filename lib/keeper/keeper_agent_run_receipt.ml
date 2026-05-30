@@ -28,7 +28,7 @@ let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
     let rec first_valid = function
       | [] -> None
       | candidate :: rest ->
-        (match Cascade_name.of_string candidate with
+        (match Keeper_name.of_string candidate with
          | Ok cascade -> Some cascade
          | Error _ -> first_valid rest)
     in
@@ -248,7 +248,7 @@ let finalize
             (Keeper_execution_receipt.outcome_kind_to_string receipt.outcome) );
         ("terminal_reason_code", `String receipt.terminal_reason_code);
         ( "cascade_name",
-          `String (Cascade_name.to_string receipt.cascade_name) );
+          `String (Keeper_name.to_string receipt.cascade_name) );
         ("cascade_attempt_count", `Int receipt.cascade_attempt_count);
         ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);
         ( "cascade_outcome",
@@ -296,7 +296,7 @@ let finalize
       ~trace_id:receipt.trace_id ~generation:receipt.generation
       ~keeper_turn_id:manifest_keeper_turn_id ~event
       ?oas_turn_count
-      ~cascade_name:(Cascade_name.to_string receipt.cascade_name)
+      ~cascade_name:(Keeper_name.to_string receipt.cascade_name)
       ~status ~decision ~receipt_path ?tool_call_log_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

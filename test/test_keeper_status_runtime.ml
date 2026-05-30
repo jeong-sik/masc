@@ -561,7 +561,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
   KR.clear ();
   let payload =
     OWN.Cascade_exhausted
-      { cascade_name = Cascade_name.of_string_exn "tool_required"
+      { cascade_name = Keeper_name.of_string_exn "tool_required"
       ; reason = Keeper_meta_contract.No_tool_capable (Some
           { configured_labels = [ "agent_code"; "provider_c" ]
           ; required_tool_names = [ "tool_execute"; "tool_search_files" ]
@@ -692,7 +692,7 @@ let test_status_bridge_does_not_fabricate_resumable_cli_session_blocker () =
       (OWN.Resumable_cli_session
          {
            cascade_name =
-             Cascade_name.of_string_exn (Masc_mcp.Keeper_config.default_cascade_name ());
+             Keeper_name.of_string_exn (Masc_mcp.Keeper_config.default_cascade_name ());
            detail;
            exit_code = Some 75;
          })

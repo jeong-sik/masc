@@ -4,10 +4,10 @@ val fallback_cascade_for_provider_cooldown :
   string option
 
 val provider_cooldown_remaining_sec_for_cascade :
-  cascade_name:Cascade_name.t -> int option
+  cascade_name:Keeper_name.t -> int option
 
 val provider_capacity_blocked_task_count :
-  ?provider_cooldown_remaining_sec:(cascade_name:Cascade_name.t -> int option) ->
+  ?provider_cooldown_remaining_sec:(cascade_name:Keeper_name.t -> int option) ->
   meta:Keeper_meta_contract.keeper_meta ->
   claimable_task_count:int ->
   unit ->

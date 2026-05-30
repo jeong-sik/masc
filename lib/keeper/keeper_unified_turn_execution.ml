@@ -57,7 +57,7 @@ type ctx =
       : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
       -> ?productive_phase_elapsed_ms:int
       -> ?retry_phase_elapsed_ms:int
-      -> from_cascade:Cascade_name.t
+      -> from_cascade:Keeper_name.t
       -> retry:EC.degraded_retry
       -> outcome:Keeper_execution_receipt.cascade_rotation_outcome
       -> Agent_sdk.Error.sdk_error
@@ -82,7 +82,7 @@ let run (ctx : ctx)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
-      ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> cascade_name:Cascade_name.t -> keeper_turn_id:int -> unit -> unit)
+      ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> cascade_name:Keeper_name.t -> keeper_turn_id:int -> unit -> unit)
       ~(active_fail_open_rotation_cascades : unit -> string list option)
       ~(cascade_name_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
@@ -228,7 +228,7 @@ let run (ctx : ctx)
       input
     in
     let execution_cascade_name =
-      Cascade_name.to_string execution.cascade_name
+      Keeper_name.to_string execution.cascade_name
     in
     let mark_terminal_error err =
       match EC.extract_input_required err with
@@ -501,7 +501,7 @@ let run (ctx : ctx)
                ~meta
                ~profile_defaults
                ~cascade_name:
-                 (Cascade_name.of_string_or
+                 (Keeper_name.of_string_or
                     ~fallback:execution.cascade_name
                     degraded_retry.next_cascade)
            with
@@ -534,7 +534,7 @@ let run (ctx : ctx)
              Error fail_open_err
            | Ok next_execution ->
              let next_execution_cascade_name =
-               Cascade_name.to_string next_execution.cascade_name
+               Keeper_name.to_string next_execution.cascade_name
              in
              if Option.is_none !retry_phase_started_at
              then retry_phase_started_at := Some (Eio.Time.now clock);
@@ -767,7 +767,7 @@ let run (ctx : ctx)
         ; is_retry = false
         ; allow_degraded_wall_clock_retry_budget = false
         ; attempted_cascades =
-            [ Cascade_name.to_string
+            [ Keeper_name.to_string
                 initial_execution.cascade_name
             ]
         })

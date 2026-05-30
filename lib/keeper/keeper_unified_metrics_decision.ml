@@ -260,7 +260,7 @@ let append_decision_record
                 match r.cascade_observation with
                 | Some co ->
                     let cascade_name =
-                      Cascade_name.to_string
+                      Keeper_name.to_string
                         co.cascade_name
                     in
                     [

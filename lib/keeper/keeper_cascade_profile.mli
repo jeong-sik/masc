@@ -119,7 +119,7 @@ val canonicalize_with_catalog : catalog:string list -> string -> string
 (** Resolves dynamic profiles against an explicit live catalog. *)
 
 val resolve_live_with_catalog_result :
-  catalog:string list -> string -> (Cascade_name.t, [ `Unresolved of string ]) result
+  catalog:string list -> string -> (Keeper_name.t, [ `Unresolved of string ]) result
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
     Returns [Ok normalized] when [raw] either matches the
@@ -140,7 +140,7 @@ val resolve_live_with_catalog_result :
     @since RFC-0149 Phase 1 *)
 
 val resolve_live_result :
-  ?config_path:string -> string -> (Cascade_name.t, [ `Unresolved of string ]) result
+  ?config_path:string -> string -> (Keeper_name.t, [ `Unresolved of string ]) result
 (** Result-returning resolver that reads the active catalog from the
     resolved cascade config path.  Wraps {!resolve_live_with_catalog_result}
     with the catalog loaded from [config_path].

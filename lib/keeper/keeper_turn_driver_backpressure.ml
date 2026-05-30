@@ -6,7 +6,7 @@
     @since God file decomposition *)
 
 open Cascade_internal_error
-open Cascade_name
+open Keeper_name
 
 (* Synthetic backoff default for paths where the upstream provides no
    [retry_after] hint.  Carried as [Synthetic_default] so provenance is

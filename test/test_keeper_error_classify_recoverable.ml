@@ -22,8 +22,8 @@ module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
 
-(* #19327 cascade purge: Cascade_name is now a plain string alias. *)
-let cascade_name raw = Cascade_name.of_string_exn (String.trim raw)
+(* #19327 cascade purge: Keeper_name is now a plain string alias. *)
+let cascade_name raw = Keeper_name.of_string_exn (String.trim raw)
 ;;
 
 let test_cascade = cascade_name "cascade.test_cascade"

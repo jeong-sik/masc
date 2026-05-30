@@ -9,8 +9,8 @@ open Alcotest
 
 module AQ = Masc_mcp.Admission_queue
 
-(* #19327 cascade purge: Cascade_name is a plain string alias now. *)
-let cascade_name raw = Cascade_name.of_string_exn raw
+(* #19327 cascade purge: Keeper_name is a plain string alias now. *)
+let cascade_name raw = Keeper_name.of_string_exn raw
 
 (* ============================================================
    Passthrough Contract

@@ -22,7 +22,7 @@ let cascade_resilience_of_name raw_name =
   let model_labels, error =
     match
       Cascade_runtime.models_of_cascade_name_result
-        (Cascade_name.of_string_exn cascade_name)
+        (Keeper_name.of_string_exn cascade_name)
     with
     | Ok models -> models, None
     | Error err -> [], Some err

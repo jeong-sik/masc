@@ -3,7 +3,7 @@ let build
       ?slot_release_at_phase
       ?productive_phase_elapsed_ms
       ?retry_phase_elapsed_ms
-      ~(from_cascade : Cascade_name.t)
+      ~(from_cascade : Keeper_name.t)
       ~(retry : Keeper_error_classify.degraded_retry)
       ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
       (err : Agent_sdk.Error.sdk_error)
@@ -11,7 +11,7 @@ let build
   =
   { from_cascade
   ; to_cascade =
-      (match Cascade_name.of_string retry.next_cascade with
+      (match Keeper_name.of_string retry.next_cascade with
        | Ok t -> t
        | Error (`Invalid_prefix | `Empty) ->
          Log.Misc.warn

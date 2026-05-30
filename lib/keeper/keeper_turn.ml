@@ -150,15 +150,15 @@ let preflight_keeper_msg ctx args : (unit, string) result =
         (match
            Keeper_cascade_resilience.cascade_resilience_error_message
              (Keeper_cascade_resilience.cascade_resilience_of_name
-                (Cascade_name.to_string turn_cascade_name))
+                (Keeper_name.to_string turn_cascade_name))
          with
          | Some e -> Error e
          | None ->
         let effective_models =
           if direct_reply then
             Cascade_runtime.models_of_cascade_name
-              (Cascade_name.of_string_exn
-                 (Cascade_name.to_string turn_cascade_name))
+              (Keeper_name.of_string_exn
+                 (Keeper_name.to_string turn_cascade_name))
           else
             effective_model_labels_for_turn meta
         in
@@ -230,7 +230,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       (match
          Keeper_cascade_resilience.cascade_resilience_error_message
            (Keeper_cascade_resilience.cascade_resilience_of_name
-              (Cascade_name.to_string turn_cascade_name))
+              (Keeper_name.to_string turn_cascade_name))
        with
        | Some e ->
          Progress.stop_tracking turn_task_id;
@@ -252,8 +252,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let effective_models =
         if direct_reply then
           Cascade_runtime.models_of_cascade_name
-            (Cascade_name.of_string_exn
-               (Cascade_name.to_string turn_cascade_name))
+            (Keeper_name.of_string_exn
+               (Keeper_name.to_string turn_cascade_name))
               else
           effective_model_labels_for_turn meta
       in
@@ -498,8 +498,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~build_turn_prompt
                     ~user_message:message
                     ~cascade_name:
-                      (Cascade_name.of_string_exn
-                         (Cascade_name.to_string turn_cascade_name))
+                      (Keeper_name.of_string_exn
+                         (Keeper_name.to_string turn_cascade_name))
                     ~world_observation
                     ~turn_affordances
                     ~required_tool_names

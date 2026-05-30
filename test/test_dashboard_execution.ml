@@ -517,7 +517,7 @@ let append_execution_receipt
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =
-        Cascade_name.of_string_exn (Lib.Keeper_meta_contract.cascade_name_of_meta meta);
+        Keeper_name.of_string_exn (Lib.Keeper_meta_contract.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
@@ -525,17 +525,17 @@ let append_execution_receipt
       degraded_retry_applied = true;
       degraded_retry_cascade =
         Some
-          (Cascade_name.of_string_exn
+          (Keeper_name.of_string_exn
              Lib.Keeper_config.phase_recovery_cascade_name);
       fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
       cascade_rotation_attempts =
         [
           {
             from_cascade =
-              Cascade_name.of_string_exn
+              Keeper_name.of_string_exn
                 Lib.(Keeper_config.default_cascade_name ());
             to_cascade =
-              Cascade_name.of_string_exn
+              Keeper_name.of_string_exn
                 Lib.Keeper_config.phase_recovery_cascade_name;
             reason = Lib.Keeper_error_classify.Turn_timeout;
             outcome = Lib.Keeper_execution_receipt.Rotation_retry_scheduled;

@@ -11,7 +11,7 @@ open Keeper_context_runtime
 module EC = Keeper_error_classify
 
 type cascade_execution = {
-  cascade_name : Cascade_name.t;
+  cascade_name : Keeper_name.t;
   max_context_resolution : max_context_resolution;
   max_context : int;
   temperature : float;

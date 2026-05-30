@@ -238,7 +238,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   let structured =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = Cascade_name.of_string_exn "tool_use_strict"
+         { cascade_name = Keeper_name.of_string_exn "tool_use_strict"
          ; detail
          ; exit_code = Some 75
          })
@@ -261,7 +261,7 @@ let test_sdk_error_is_resumable_cli_session_detects_structured_error () =
   let err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = Cascade_name.of_string_exn "governance_judge"
+         { cascade_name = Keeper_name.of_string_exn "governance_judge"
          ; detail =
              "CLI JSON-stream transport reported a resumable session (exit 1). \
               Resumable session available via -r."
@@ -298,7 +298,7 @@ let test_fallback_class_does_not_label_resumable_cli_session () =
   let err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = Cascade_name.of_string_exn "primary"
+         { cascade_name = Keeper_name.of_string_exn "primary"
          ; detail =
              "CLI JSON-stream transport reported a resumable session (exit 1). \
               Resumable session available via -r."

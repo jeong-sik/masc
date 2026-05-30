@@ -27,7 +27,7 @@ let fallback_cascade_for_provider_cooldown
   else Some (Keeper_config.default_cascade_name ())
 
 let provider_cooldown_remaining_sec_for_cascade
-      ~(cascade_name : Cascade_name.t)
+      ~(cascade_name : Keeper_name.t)
   : int option
   =
   let runtime_health_keys =
@@ -77,7 +77,7 @@ let provider_capacity_blocked_task_count
     let cascade_name = cascade_name_of_meta meta in
     match
       provider_cooldown_remaining_sec
-        ~cascade_name:(Cascade_name.of_string_exn cascade_name)
+        ~cascade_name:(Keeper_name.of_string_exn cascade_name)
     with
     | Some _
       when Option.is_none

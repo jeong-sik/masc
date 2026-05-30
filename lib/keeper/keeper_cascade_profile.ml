@@ -439,7 +439,7 @@ let normalize_keeper_runtime_declared_name ?config_path raw =
    raw)].  The unresolved branch is isolated to a single [Error] arm so
    the sunset path stays mechanical. *)
 let resolve_live_with_catalog_result ~catalog raw :
-    (Cascade_name.t, [ `Unresolved of string ]) result =
+    (Keeper_name.t, [ `Unresolved of string ]) result =
   let trimmed = String.trim raw in
   let normalized =
     match canonical_member_of_lookup_catalog ~catalog trimmed with
@@ -459,9 +459,9 @@ let resolve_live_with_catalog_result ~catalog raw :
     | None -> normalized
   in
   (* Catalog members are canonical by construction; verify with
-     [Cascade_name.of_string] so the result is typed. *)
+     [Keeper_name.of_string] so the result is typed. *)
   if List.mem normalized catalog then
-    match Cascade_name.of_string normalized with
+    match Keeper_name.of_string normalized with
     | Ok cn -> Ok cn
     | Error _ -> Error (`Unresolved raw)
   else Error (`Unresolved raw)
@@ -473,7 +473,7 @@ let resolve_live_with_catalog_result ~catalog raw :
    [resolve_live_with_catalog] entry points + their counter + WARN-once
    Hashtbl were removed as part of the §3.3 sunset closeout. *)
 let resolve_live_result ?config_path raw :
-    (Cascade_name.t, [ `Unresolved of string ]) result =
+    (Keeper_name.t, [ `Unresolved of string ]) result =
   resolve_live_with_catalog_result
     ~catalog:(catalog_lookup_names ?config_path ()) raw
 

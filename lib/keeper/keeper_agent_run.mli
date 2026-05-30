@@ -91,7 +91,7 @@ val run_turn
   -> build_turn_prompt:
        (base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
   -> user_message:string
-  -> cascade_name:Cascade_name.t
+  -> cascade_name:Keeper_name.t
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
   -> ?required_tool_names:string list

@@ -8,7 +8,7 @@
     @since God file decomposition *)
 
 open Result.Syntax
-open Cascade_name
+open Keeper_name
 
 include Cascade_error_classify
 include Cascade_attempt_fsm
@@ -183,7 +183,7 @@ let provider_attempt_provenance = base_provider_attempt_provenance
 type try_cascade_ctx =
   { (* Cascade identity *)
     cascade_name : string
-  ; error_cascade_name : Cascade_name.t
+  ; error_cascade_name : Keeper_name.t
   ; keeper_name : string
   ; name : string
   ; (* Candidates *)
@@ -220,7 +220,7 @@ type try_cascade_ctx =
   ; (* Cascade accept predicate *)
     accept : Agent_sdk_response.api_response -> bool
   ; (* Error cascade name for backpressure *)
-    error_cascade_name_for_backpressure : Cascade_name.t
+    error_cascade_name_for_backpressure : Keeper_name.t
   ; (* Provider health recording *)
     record_provider_health_result :
       Cascade_runtime_candidate.t -> success:bool -> http_status:int option -> unit

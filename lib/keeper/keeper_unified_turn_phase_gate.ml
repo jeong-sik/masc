@@ -53,7 +53,7 @@ let decide_and_record
       ~meta
       ~generation
       ~cascade_name:
-        (Cascade_name.of_string_exn
+        (Keeper_name.of_string_exn
            (cascade_name_of_meta meta))
       ~outcome:`Cancelled
       ~terminal_reason_code:"supervisor_stop"
@@ -94,7 +94,7 @@ let decide_and_record
         ~meta
         ~generation
         ~cascade_name:
-          (Cascade_name.of_string_exn
+          (Keeper_name.of_string_exn
              (cascade_name_of_meta meta))
         ~outcome:`Skipped
         ~terminal_reason_code
@@ -131,7 +131,7 @@ let decide_and_record
         ~meta
         ~generation
         ~cascade_name:
-          (Cascade_name.of_string_exn
+          (Keeper_name.of_string_exn
              (cascade_name_of_meta meta))
         ~outcome:`Error
         ~terminal_reason_code

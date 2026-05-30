@@ -2,7 +2,7 @@
 
 type try_provider_ctx =
   { cascade_name : string
-  ; error_cascade_name : Cascade_name.t
+  ; error_cascade_name : Keeper_name.t
   ; keeper_name : string
   ; name : string
   ; goal : string

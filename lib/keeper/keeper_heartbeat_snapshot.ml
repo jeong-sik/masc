@@ -82,7 +82,7 @@ let write_heartbeat_snapshot
   in
   let cascade_models =
     Cascade_runtime.models_of_cascade_name
-      (Cascade_name.of_string_exn (Keeper_meta_contract.cascade_name_of_meta meta_current))
+      (Keeper_name.of_string_exn (Keeper_meta_contract.cascade_name_of_meta meta_current))
   in
   let max_cascade_context =
     let resolution =

@@ -159,7 +159,7 @@ let append_keeper_receipt
       network_mode = meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name = Cascade_name.of_string_exn (Keeper_meta_contract.cascade_name_of_meta meta);
+      cascade_name = Keeper_name.of_string_exn (Keeper_meta_contract.cascade_name_of_meta meta);
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;

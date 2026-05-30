@@ -271,11 +271,11 @@ val effective_scheduled_autonomous_cooldown :
   ?consecutive_noop_count:int -> unit -> int
 
 val provider_cooldown_remaining_sec_for_cascade :
-  cascade_name:Cascade_name.t -> int option
+  cascade_name:Keeper_name.t -> int option
 
 val provider_capacity_blocked_task_count :
   ?provider_cooldown_remaining_sec:
-    (cascade_name:Cascade_name.t -> int option) ->
+    (cascade_name:Keeper_name.t -> int option) ->
   meta:Keeper_meta_contract.keeper_meta ->
   claimable_task_count:int ->
   unit ->
@@ -294,12 +294,12 @@ val should_inject_entropic_oscillation :
 
 val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:
-    (cascade_name:Cascade_name.t -> int option) ->
+    (cascade_name:Keeper_name.t -> int option) ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val unified_turn_decision :
   ?provider_cooldown_remaining_sec:
-    (cascade_name:Cascade_name.t -> int option) ->
+    (cascade_name:Keeper_name.t -> int option) ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val should_run_keeper_cycle :

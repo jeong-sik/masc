@@ -214,9 +214,6 @@ let event_date_string ts =
     tm.Unix.tm_mday
 ;;
 
-let iso8601_of_unix = Masc_domain.iso8601_of_unix_seconds
-;;
-
 let claim_event_of_json json =
   match json_string_opt "event_type" json with
   | Some "claim_created" ->

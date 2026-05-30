@@ -86,14 +86,7 @@ let output_text record =
   | _ -> ""
 
 let compact_text ?(limit = 240) text =
-  let trimmed =
-    text
-    |> String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c)
-    |> String.trim
-  in
-  if String.length trimmed > limit then
-    String.sub trimmed 0 limit ^ "..."
-  else trimmed
+  String_util.compact_text ~max_len:limit text
 
 let compact_category text =
   let key = compact_text ~limit:120 text in

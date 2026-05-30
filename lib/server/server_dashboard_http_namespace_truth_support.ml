@@ -809,15 +809,15 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
       ],
     `List (take_n 10 (base_events @ keeper_events)) )
 
-let json_int_value_opt = function
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
 let runtime_count_authority_json ~runtime_count ~shell_counts
     ~configured_keepers =
   let live_keepers = json_int_field "keepers" shell_counts ~default:0 in
-  let configured_keepers_count = json_int_value_opt configured_keepers in
+  let configured_keepers_count =
+    match configured_keepers with
+    | `Int v -> Some v
+    | `Intlit s -> int_of_string_opt s
+    | _ -> None
+  in
   let configured_minus_live =
     Option.map
       (fun configured -> max 0 (configured - live_keepers))

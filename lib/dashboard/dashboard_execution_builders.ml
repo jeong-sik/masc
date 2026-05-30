@@ -237,11 +237,12 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
     else infinity
   in
-  let autonomous_action_count = int_field "autonomous_action_count" keeper in
-  let autonomous_turn_count = int_field "autonomous_turn_count" keeper in
-  let noop_turn_count = int_field "noop_turn_count" keeper in
-  let turn_count = int_field "turn_count" keeper in
-  let generation = int_field "generation" keeper in
+  let int_field_default key json = Option.value ~default:0 (Json_util.assoc_int_opt key json) in
+  let autonomous_action_count = int_field_default "autonomous_action_count" keeper in
+  let autonomous_turn_count = int_field_default "autonomous_turn_count" keeper in
+  let noop_turn_count = int_field_default "noop_turn_count" keeper in
+  let turn_count = int_field_default "turn_count" keeper in
+  let generation = int_field_default "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
     if Dashboard_utils.is_keeper_offline status then Lc_offline

@@ -20,7 +20,7 @@ let add_unique_non_empty value values =
   if value = "" then values else add_unique value values
 
 let option_string_default default = function
-  | Some value when String.trim value <> "" -> value
+  | Some value when Option.is_some (String_util.trim_to_option value) -> value
   | Some _ | None -> default
 
 let option_int_string = function
@@ -128,7 +128,7 @@ let runtime_lens_clock_groups_json scan =
   in
   let add_if_present edge group_type field =
     match edge_string field edge with
-    | Some group_id when String.trim group_id <> "" -> update_group group_type group_id edge
+    | Some group_id when Option.is_some (String_util.trim_to_option group_id) -> update_group group_type group_id edge
     | Some _ | None -> ()
   in
   Server_dashboard_http_keeper_runtime_lens_clock_edges.clock_edge_jsons scan
@@ -184,7 +184,7 @@ let clock_group_open_gap ~code ~severity ~lane ~label groups =
     groups
     |> List.filter_map (fun group ->
       match Json_util.get_bool group "closed", Json_util.get_string group "group_id" with
-      | Some false, Some group_id when String.trim group_id <> "" -> Some group_id
+      | Some false, Some group_id -> String_util.trim_to_option group_id
       | _ -> None)
   in
   match open_ids with

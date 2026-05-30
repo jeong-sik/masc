@@ -90,7 +90,7 @@ let mentions_of_message (msg : Masc_domain.message) =
   in
   let direct =
     match msg.mention with
-    | Some value when String.trim value <> "" -> [ String.trim value ]
+    | Some value -> Option.to_list (String_util.trim_to_option value)
     | _ -> []
   in
   unique_preserving_order (direct @ body_mentions)

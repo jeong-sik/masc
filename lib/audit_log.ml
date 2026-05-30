@@ -296,8 +296,6 @@ let audit_entry_id ~timestamp ~agent_id ~action =
                                            ^ Printf.sprintf "%.6f" timestamp)) in
   Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
 
-let format_iso8601 ts = Masc_domain.iso8601_of_unix_seconds ts
-
 (** Map outcome + action to O2 severity string. *)
 let audit_severity ~action ~outcome =
   match outcome with
@@ -377,7 +375,7 @@ let audit_event_json (entry : audit_entry) =
   let fields =
     [
       ("id", `String id);
-      ("ts", `String (format_iso8601 entry.timestamp));
+      ("ts", `String (Masc_domain.iso8601_of_unix_seconds entry.timestamp));
       ("actor", `String entry.agent_id);
       ("kind", `String kind);
       ("summary", `String (audit_summary ~action:entry.action ~details:entry.details));
@@ -461,7 +459,7 @@ let log_action
   append_entry config entry;
   (* Publish to the MASC event bus for real-time SSE streaming. *)
   let id = audit_entry_id ~timestamp:entry.timestamp ~agent_id ~action in
-  let ts = format_iso8601 entry.timestamp in
+  let ts = Masc_domain.iso8601_of_unix_seconds entry.timestamp in
   let kind = action_to_string action in
   let severity = audit_severity ~action ~outcome in
   let summary = audit_summary ~action ~details in

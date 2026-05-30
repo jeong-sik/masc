@@ -15,14 +15,13 @@
     cascade-visible.  The remaining helpers are keeper-internal
     and refactor-free:
 
-    - 9 JSON field accessors ([session_payload_json],
-      [session_meta_json], [session_summary_json],
-      [session_team_health_json],
-      [session_communication_json],
-      [session_status_string],
-      [session_recent_events],
-      [event_detail_json],
-      [event_summary]).
+    - 8 JSON field accessors now in {!Dashboard_utils}
+      ([session_payload_json], [session_meta_json],
+      [session_summary_json], [session_team_health_json],
+      [session_communication_json], [session_status_string],
+      [session_recent_events], [event_detail_json]),
+      re-exported via {!Dashboard_execution_helpers}.
+      [event_summary] stays private here.
     - [session_severity] (severity classification).
     - [build_session_seed] / [session_operation_links] /
       [build_session_contexts] (session aggregation).

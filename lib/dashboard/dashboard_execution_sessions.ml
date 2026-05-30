@@ -5,41 +5,10 @@
 
 include Dashboard_execution_helpers
 
-let session_payload_json session_json =
-  match member_assoc "status" session_json with
-  | `Assoc _ as payload -> payload
-  | _ -> session_json
-
-let session_meta_json session_json =
-  session_payload_json session_json |> member_assoc "session"
-
-let session_summary_json session_json =
-  session_payload_json session_json |> member_assoc "summary"
-
-let session_team_health_json session_json =
-  session_payload_json session_json |> member_assoc "team_health"
-
-let session_communication_json session_json =
-  session_payload_json session_json |> member_assoc "communication_metrics"
-
-let session_status_string session_json =
-  let summary = session_summary_json session_json in
-  let meta = session_meta_json session_json in
-  match String_util.trim_to_option (string_field "status" summary) with
-  | Some value -> value
-  | None -> (
-      match String_util.trim_to_option (string_field "status" meta) with
-      | Some value -> value
-      | None ->
-          String_util.trim_to_option (string_field "status" session_json)
-          |> Option.value
-               ~default:"<missing status field in summary / meta / session>")
-
-let session_recent_events session_json =
-  list_field "recent_events" session_json
-
-let event_detail_json event_json =
-  member_assoc "detail" event_json
+(* session_payload_json, session_meta_json, session_summary_json,
+   session_team_health_json, session_communication_json,
+   session_status_string, session_recent_events, event_detail_json
+   are provided by Dashboard_utils (via include chain). *)
 
 let event_summary event_json =
   let detail = event_detail_json event_json in
@@ -154,9 +123,9 @@ let build_session_seed session_json _cards =
       String_util.trim_to_option (string_field "mode" communication)
       |> Option.value ~default:"mode n/a"
     in
-    let broadcast_count = int_field "broadcast_count" communication in
-    let portal_count = int_field "portal_count" communication in
-    let seen_count = int_field "seen_agents_count" summary in
+    let broadcast_count = Option.value ~default:0 (Json_util.assoc_int_opt "broadcast_count" communication) in
+    let portal_count = Option.value ~default:0 (Json_util.assoc_int_opt "portal_count" communication) in
+    let seen_count = Option.value ~default:0 (Json_util.assoc_int_opt "seen_agents_count" summary) in
     let member_names =
       dedup_strings
         (Dashboard_utils.string_list_of_json (member_assoc "agent_names" meta)
@@ -210,10 +179,10 @@ let build_session_seed session_json _cards =
         communication_summary =
           Printf.sprintf "%s · broadcast %d · portal %d" mode broadcast_count
             portal_count;
-        active_count = int_field "active_agents_count" team_health;
+        active_count = Option.value ~default:0 (Json_util.assoc_int_opt "active_agents_count" team_health);
         seen_count;
         planned_count;
-        required_count = int_field ~default:1 "required_agents" team_health;
+        required_count = Option.value ~default:1 (Json_util.assoc_int_opt "required_agents" team_health);
         counts_basis;
         runtime_blocker;
         worker_gap_summary;

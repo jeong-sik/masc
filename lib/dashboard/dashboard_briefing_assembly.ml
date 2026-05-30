@@ -12,8 +12,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let keeper_name =
     match member_assoc "name" keeper with
     | `String n ->
-        let trimmed = String.trim n in
-        if trimmed <> "" then trimmed else agent_name
+        (match String_util.trim_to_option n with Some v -> v | None -> agent_name)
     | _ -> agent_name
   in
   let fallback_allowed =
@@ -30,12 +29,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let fallback_latest =
     Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)
   in
-  let fallback_count =
-    match member_assoc "latest_tool_call_count" keeper with
-    | `Int value -> Some value
-    | `Intlit raw -> (int_of_string_opt (raw))
-    | _ -> None
-  in
+  let fallback_count = Json_util.assoc_int_opt "latest_tool_call_count" keeper in
   let fallback_source =
     match String_util.trim_to_option (string_field "tool_audit_source" keeper) with
     | Some _ as value -> value
@@ -85,7 +79,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
               let latest_at = List.fold_left (fun acc (_, e) ->
                 max acc e.Keeper_types.last_used_at) 0.0 tracked in
               let at_str = if latest_at > 0.0
-                then Some (Dashboard_utils.iso_of_unix latest_at) else None in
+                then Some (Masc_domain.iso8601_of_unix_seconds latest_at) else None in
               (fallback_allowed, names, Some total, None, Some "keeper_dispatch", at_str)
             else
               ( fallback_allowed,

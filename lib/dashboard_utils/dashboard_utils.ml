@@ -1,5 +1,3 @@
-let iso_of_unix unix_ts = Masc_domain.iso8601_of_unix_seconds unix_ts
-
 let parse_iso_opt = function
   | Some raw when String.trim raw <> "" -> (
       try Some (Masc_domain.parse_iso8601 raw) with Failure _ -> None)
@@ -37,13 +35,6 @@ let member_assoc key json =
   | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
   | _ -> `Null
 
-let int_field ?(default = 0) key json =
-  match member_assoc key json with
-  | `Int v -> v
-  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
-  | `Float v -> int_of_float v
-  | _ -> default
-
 let string_field ?(default = "") key json =
   match member_assoc key json with
   | `String v -> v
@@ -74,6 +65,49 @@ let compact_text = String_util.compact_text
 
 let normalized_text_key text =
   compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii
+
+(** {1 Session JSON accessors}
+
+    Canonical accessors for the nested session payload structure.
+    A session JSON may carry its detail inside a ["status"] sub-object
+    (when the status field is itself an [`Assoc]) or directly at the
+    top level.  [session_payload_json] normalises this. *)
+
+let session_payload_json session_json =
+  match member_assoc "status" session_json with
+  | `Assoc _ as payload -> payload
+  | _ -> session_json
+
+let session_meta_json session_json =
+  session_payload_json session_json |> member_assoc "session"
+
+let session_summary_json session_json =
+  session_payload_json session_json |> member_assoc "summary"
+
+let session_team_health_json session_json =
+  session_payload_json session_json |> member_assoc "team_health"
+
+let session_communication_json session_json =
+  session_payload_json session_json |> member_assoc "communication_metrics"
+
+let session_status_string session_json =
+  let summary = session_summary_json session_json in
+  let meta = session_meta_json session_json in
+  match String_util.trim_to_option (string_field "status" summary) with
+  | Some value -> value
+  | None -> (
+      match String_util.trim_to_option (string_field "status" meta) with
+      | Some value -> value
+      | None ->
+          String_util.trim_to_option (string_field "status" session_json)
+          |> Option.value
+               ~default:"<missing status field in summary / meta / session>")
+
+let session_recent_events session_json =
+  list_field "recent_events" session_json
+
+let event_detail_json event_json =
+  member_assoc "detail" event_json
 
 (** Health severity level — ordered from worst to best.
     Parsed from dashboard/operator JSON at the call site via

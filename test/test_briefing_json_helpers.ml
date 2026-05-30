@@ -164,28 +164,6 @@ let test_float_json_other_uses_default () =
   assert (B.float_json ~default:8.0 `Null = `Float 8.0);
   assert (B.float_json ~default:0.0 (`String "1.0") = `Float 0.0)
 
-(* ─── int_field ────────────────────────────────────────────── *)
-
-let test_int_field_int () =
-  let j = `Assoc [ ("count", `Int 5) ] in
-  assert (B.int_field "count" j = 5)
-
-let test_int_field_intlit_parses () =
-  let j = `Assoc [ ("count", `Intlit "12345") ] in
-  assert (B.int_field "count" j = 12345)
-
-let test_int_field_intlit_garbage_uses_default () =
-  let j = `Assoc [ ("count", `Intlit "gibberish") ] in
-  assert (B.int_field ~default:99 "count" j = 99)
-
-let test_int_field_float_truncates () =
-  let j = `Assoc [ ("count", `Float 2.9) ] in
-  assert (B.int_field "count" j = 2)
-
-let test_int_field_missing () =
-  let j = `Assoc [] in
-  assert (B.int_field ~default:42 "missing" j = 42)
-
 (* ─── take ─────────────────────────────────────────────────── *)
 
 let test_take_zero () =
@@ -256,11 +234,6 @@ let () =
   test_float_json_intlit_parses ();
   test_float_json_intlit_garbage_uses_default ();
   test_float_json_other_uses_default ();
-  test_int_field_int ();
-  test_int_field_intlit_parses ();
-  test_int_field_intlit_garbage_uses_default ();
-  test_int_field_float_truncates ();
-  test_int_field_missing ();
   test_take_zero ();
   test_take_negative ();
   test_take_more_than_length ();

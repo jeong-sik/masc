@@ -24,8 +24,6 @@ module Float = Stdlib.Float
 module CC = Cascade_config
 module StringSet = Set_util.StringSet
 
-let now_iso () = Masc_domain.now_iso ()
-
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc
     [ "model", `String c.model_string
@@ -75,7 +73,7 @@ let invalid_profiles_with_internal_names profiles =
 ;;
 
 let qualified_profile_candidates name =
-  [ String.trim name ]
+  Option.to_list (String_util.trim_to_option name)
 ;;
 
 let invalid_assignment_reasons ~known_internal_profiles ~invalid_profiles name =
@@ -105,41 +103,15 @@ let invalid_assignments_for_public_profiles ~known_internal_profiles
     | None -> None)
 ;;
 
-let member = Yojson.Safe.Util.member
-
-(* Restored after PR #19471 removed these two helpers but left external
-   call sites (dashboard_cascade_config.ml, dashboard_cascade_audit_runs.ml,
-   which [open Dashboard_cascade_helpers]) referencing them -> broken main.
-   They are kept rather than migrated to [Yojson.Safe.Util.member] /
-   [Json_util] because both are *total* (return `Null / [] on non-object),
-   whereas [Yojson.Safe.Util.member] raises on a non-object input -- the
-   audit-run parser relies on that totality for absent/Null sub-objects.
-   Root resolution: a total member/string-list accessor in a leaf module
-   shared by both the helpers and Json_util (RFC candidate). *)
-let json_assoc_member key = function
-  | `Assoc fields -> Option.value (List.assoc_opt key fields) ~default:`Null
-  | _ -> `Null
-;;
-
-let json_string_list = function
-  | `List values ->
-    List.filter_map
-      (function
-        | `String value -> Some value
-        | _ -> None)
-      values
-  | _ -> []
-;;
-
 let invalid_profiles_of_rejection_json rejection_json =
-  match member "profiles" rejection_json with
-  | `List profiles ->
+  match Json_util.get_array rejection_json "profiles" with
+  | Some (`List profiles) ->
     List.filter_map
       (fun profile_json ->
-         match member "name" profile_json with
-         | `String name ->
+         match Json_util.assoc_string_opt "name" profile_json with
+         | Some name ->
            Some (name, Json_util.get_string_list profile_json "errors")
-         | _ -> None)
+         | None -> None)
       profiles
     |> invalid_profiles_with_internal_names
   | _ -> []

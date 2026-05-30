@@ -119,7 +119,6 @@ let list_specs () =
       | c -> c)
 ;;
 
-let iso_of_unix_time = Dashboard_utils.iso_of_unix
 ;;
 
 let entry_to_json e : Yojson.Safe.t =
@@ -129,7 +128,7 @@ let entry_to_json e : Yojson.Safe.t =
     ; "category", `String e.category
     ; "has_clean_cfg", `Bool e.has_clean_cfg
     ; "has_buggy_cfg", `Bool e.has_buggy_cfg
-    ; "mtime_iso", `String (iso_of_unix_time e.mtime)
+    ; "mtime_iso", `String (Masc_domain.iso8601_of_unix_seconds e.mtime)
     ]
 ;;
 
@@ -145,7 +144,7 @@ let specs_json () : Yojson.Safe.t =
   let root = specs_dir () in
   let entries = list_specs () in
   `Assoc
-    [ "updated_at", `String (iso_of_unix_time (Unix.gettimeofday ()))
+    [ "updated_at", `String (Masc_domain.now_iso ())
     ; "specs_dir", specs_dir_json root
     ; "count", `Int (List.length entries)
     ; "entries", `List (List.map entry_to_json entries)
@@ -295,7 +294,7 @@ let list_tlc_results () =
 
 
 let option_time_json = function
-  | Some v -> `String (iso_of_unix_time v)
+  | Some v -> `String (Masc_domain.iso8601_of_unix_seconds v)
   | None -> `Null
 ;;
 
@@ -318,7 +317,7 @@ let tlc_results_json () : Yojson.Safe.t =
   let results_dir = tlc_results_dir () in
   let entries = list_tlc_results () in
   `Assoc
-    [ "updated_at", `String (iso_of_unix_time (Unix.gettimeofday ()))
+    [ "updated_at", `String (Masc_domain.now_iso ())
     ; ( "results_dir"
       , if is_directory_safe results_dir
         then (

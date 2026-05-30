@@ -8,18 +8,10 @@
 
 open Dashboard_cascade_helpers
 
-let json_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List values -> values
-  | _ -> []
-;;
-
 let first_nonempty values =
   List.find_map (fun v ->
     match v with
-    | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some trimmed
+    | Some raw -> String_util.trim_to_option raw
     | None -> None)
     values
 
@@ -100,9 +92,14 @@ let last_attempt_error attempts =
 ;;
 
 let audit_run_json_of_record json =
-  let observation = Yojson.Safe.Util.member "observation" json in
-  let attempts = json_list_member "attempts" observation in
-  let fallback_events = json_list_member "fallback_events" observation in
+  let observation = Option.value ~default:`Null (Json_util.assoc_member_opt "observation" json) in
+  let get_array_or_empty key json =
+    match Json_util.get_array json key with
+    | Some (`List values) -> values
+    | _ -> []
+  in
+  let attempts = get_array_or_empty "attempts" observation in
+  let fallback_events = get_array_or_empty "fallback_events" observation in
   let selected_attempt_index = Json_util.assoc_int_opt "selected_index" observation in
   let cascade =
     first_nonempty
@@ -185,7 +182,7 @@ let audit_runs_json ?(dashboard_surface = "/api/v1/cascade/audit_runs") ~base_pa
     | x :: xs -> x :: take (n - 1) xs
   in
   let runs = take limit runs in
-  let generated_at = now_iso () in
+  let generated_at = Masc_domain.now_iso () in
   `Assoc
     [ "updated_at", `String generated_at
     ; "generated_at_iso", `String generated_at

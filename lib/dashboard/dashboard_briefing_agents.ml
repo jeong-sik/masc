@@ -5,8 +5,8 @@
 
 include Dashboard_utils
 
-let event_detail_json event_json =
-  member_assoc "detail" event_json
+(* event_detail_json and session_recent_events are provided by
+   Dashboard_utils (included above). *)
 
 let event_summary event_json =
   let detail = event_detail_json event_json in
@@ -37,8 +37,6 @@ let event_summary event_json =
   | None, None, Some value, _ -> value
   | None, None, None, Some value -> value
   | None, None, None, None -> String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
-
-let session_recent_events session_json = list_field "recent_events" session_json
 
 (* Types duplicated from Dashboard_briefing to avoid circular dependency. *)
 type session_context = {

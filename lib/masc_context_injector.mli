@@ -43,7 +43,8 @@ val render_temporal_summary : Agent_sdk.Context.t -> string option
     Format: [[Temporal] time=<ISO8601> elapsed=<N>s tools=<N> last=<name>(<outcome>)] *)
 
 val iso8601_of_float : float -> string
-(** Format a Unix timestamp as ISO 8601 UTC string. *)
+(** Format a Unix timestamp as ISO 8601 UTC string.
+    Delegates to {!Masc_domain.iso8601_of_unix_seconds}. *)
 
 (** {2 Context keys}
 

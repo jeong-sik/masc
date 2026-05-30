@@ -361,8 +361,6 @@ let serve_bonsai_index _request reqd =
     This endpoint must stay scoped to the live server [base_path]; returning
     static fixture rows here makes Bonsai look like an SSOT while showing a
     different keeper universe than the operator dashboard. *)
-let iso8601_utc_now () = Masc_domain.now_iso ()
-
 let bonsai_keeper_status_of_phase phase =
   let module K = Masc_dashboard_api_types.Keepers in
   let open Keeper_state_machine in
@@ -434,7 +432,7 @@ let keepers_summary_from_registry ~base_path
     keepers;
     cycle;
     room = Some (Filename.basename base_path);
-    generated_at = iso8601_utc_now ();
+    generated_at = Masc_domain.now_iso ();
   }
 
 let bonsai_api_keepers_summary request reqd =

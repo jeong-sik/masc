@@ -24,8 +24,6 @@ type t =
   }
 [@@deriving yojson { strict = false }]
 
-let iso8601_of_unix = Masc_domain.iso8601_of_unix_seconds
-
 let rec find_git_root dir =
   let git_marker = Filename.concat dir ".git" in
   if Sys.file_exists git_marker
@@ -304,7 +302,7 @@ let age_seconds ~now ts_opt =
 ;;
 
 let started_at_unix = Unix.gettimeofday ()
-let started_at_iso = iso8601_of_unix started_at_unix
+let started_at_iso = Masc_domain.iso8601_of_unix_seconds started_at_unix
 let resolved_executable_path = executable_path ()
 let resolved_executable_dir = Filename.dirname resolved_executable_path
 

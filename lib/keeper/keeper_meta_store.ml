@@ -222,8 +222,6 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   read_candidate requested_name
 ;;
 
-let current_utc_timestamp () = Masc_domain.now_iso ()
-
 let is_missing_progress_file_error exn =
   match exn with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> true
@@ -237,7 +235,7 @@ let refresh_progress_updated_line config name =
   let progress_path = Keeper_types_support.keeper_progress_path config name in
   if Fs_compat.file_exists progress_path then try
     let content = Fs_compat.load_file progress_path in
-    let now_str = current_utc_timestamp () in
+    let now_str = Masc_domain.now_iso () in
     let updated =
       String.split_on_char '\n' content
       |> List.map (fun line ->

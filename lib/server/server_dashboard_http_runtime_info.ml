@@ -294,7 +294,7 @@ let parse_ahead_behind raw =
     |> String.trim
     |> String.split_on_char '\t'
     |> List.concat_map (String.split_on_char ' ')
-    |> List.filter (fun part -> String.trim part <> "")
+    |> List.filter_map String_util.trim_to_option
   with
   | [ ahead; behind ] ->
     (match int_of_string_opt ahead, int_of_string_opt behind with

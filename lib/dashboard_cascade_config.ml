@@ -12,8 +12,7 @@ open Dashboard_cascade_helpers
 
 let sorted_unique_strings values =
   values
-  |> List.map String.trim
-  |> List.filter (fun value -> not (String.equal value ""))
+  |> List.filter_map String_util.trim_to_option
   |> List.sort_uniq String.compare
 ;;
 
@@ -355,7 +354,7 @@ let config_json ?base_path () =
       List.map (profile_json_raw ~config_path ~keeper_assignable_names) names
   in
   let fields =
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String (Masc_domain.now_iso ())
     ; ( "config_path", Json_util.string_opt_to_json config_path )
     ]
     @ source_json_fields source
@@ -429,7 +428,7 @@ let raw_config_json_compute () =
          "", Some msg)
   in
   `Assoc
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String (Masc_domain.now_iso ())
     ; "source_kind", `String (Cascade_toml_materializer.source_kind_to_string source.kind)
     ; "source_path", `String source.source_path
     ; "source_editable", `Bool (Option.is_none !source_read_error)

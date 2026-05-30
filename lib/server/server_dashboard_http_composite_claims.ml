@@ -435,10 +435,10 @@ let composite_runtime_attention ~snapshot ~execution =
     else if composite_execution_claim_no_eligible execution
     then Some "claim_scope_no_eligible"
     else match json_string "operator_disposition_reason" execution with
-    | Some value when String.trim value <> "" -> Some value
+    | Some value -> String_util.trim_to_option value
     | _ ->
       (match json_string "terminal_reason_code" execution with
-       | Some value when String.trim value <> "" -> Some value
+       | Some value -> String_util.trim_to_option value
        | _ when needs_attention && composite_execution_config_drift execution ->
          Some "keeper_cascade_override_drift"
        | _ when blocked -> Some "runtime_blocked"

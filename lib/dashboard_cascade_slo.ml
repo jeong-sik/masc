@@ -49,7 +49,7 @@ let slo_json_compute () =
     else "ok"
   in
   `Assoc
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String (Masc_domain.now_iso ())
     ; "window_sample_size", `Int slo_sample_limit
     ; ( "targets"
       , `Assoc

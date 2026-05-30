@@ -32,7 +32,7 @@ let oas_checkpoint_summary_json
     ; ( "system_prompt_present"
       , `Bool
           (match checkpoint.system_prompt with
-           | Some prompt -> String.trim prompt <> ""
+           | Some prompt -> Option.is_some (String_util.trim_to_option prompt)
            | None -> false) )
     ; ( "latest_preview", Json_util.string_opt_to_json (latest_preview_of_messages messages) )
     ; ( "continuity_summary", Json_util.string_opt_to_json continuity_summary )

@@ -209,19 +209,32 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
-  | Some session_id when String.trim session_id <> "" ->
-    Dashboard_briefing.session_json
-      ?actor:
-        (dashboard_actor_for_request
-           ~base_path:state.Mcp_server.room_config.base_path
-           request)
-      ~session_id:(String.trim session_id)
-      ~config:state.Mcp_server.room_config
-      ~sw
-      ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr
-      ()
-  | _ ->
+  | Some session_id ->
+    (match String_util.trim_to_option session_id with
+     | Some trimmed_id ->
+       Dashboard_briefing.session_json
+         ?actor:
+           (dashboard_actor_for_request
+              ~base_path:state.Mcp_server.room_config.base_path
+              request)
+         ~session_id:trimmed_id
+         ~config:state.Mcp_server.room_config
+         ~sw
+         ~clock
+         ~proc_mgr:state.Mcp_server.proc_mgr
+         ()
+     | None ->
+       `Assoc
+         [ "generated_at", `String (Masc_domain.now_iso ())
+         ; "session_id", `Null
+         ; "session", `Null
+         ; "timeline", `List []
+         ; "participants", `List []
+         ; "operations", `List []
+         ; "keepers", `List []
+         ; "error", `String "session_id is required"
+         ])
+  | None ->
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
       ; "session_id", `Null

@@ -223,10 +223,6 @@ let read_attempt_record ~base_path id =
       None)
 ;;
 
-let isoish_now () = Masc_domain.now_iso ()
-
-let isoish_at ts = Masc_domain.iso8601_of_unix_seconds ts
-
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
     tries to rename into it. *)
 let ensure_parent_dir path =
@@ -275,7 +271,7 @@ let write_desired_record ?updated_at ~base_path ~id ~updated_by desired_state =
     ; desired_state
     ; generation
     ; updated_by
-    ; updated_at = Option.value updated_at ~default:(isoish_now ())
+    ; updated_at = Option.value updated_at ~default:(Masc_domain.now_iso ())
     }
   in
   let path = sidecar_desired_path ~base_path id in
@@ -345,8 +341,8 @@ let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
 ;;
 
 let reconcile_desired_once
-      ?(now = isoish_now ())
-      ?(next_retry_at = isoish_at (Unix.time () +. retry_backoff_seconds ()))
+      ?(now = Masc_domain.now_iso ())
+      ?(next_retry_at = Masc_domain.iso8601_of_unix_seconds (Unix.time () +. retry_backoff_seconds ()))
       ?previous_attempt
       ?(write_attempt = fun (_ : attempt_record) -> Ok ())
       ~current_generation
@@ -377,7 +373,7 @@ let reconcile_desired_once
 let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_state =
   match record.desired_state, observed_state with
   | Desired_running, Observed_unavailable ->
-    let now = Option.value now ~default:(isoish_now ()) in
+    let now = Option.value now ~default:(Masc_domain.now_iso ()) in
     (match previous_attempt with
      | Some attempt
        when attempt.generation = record.generation && retry_backoff_active ~now attempt ->
@@ -462,7 +458,7 @@ let sidecar_status_metadata_fields ~base_path ~id ~status_path =
   [ "dashboard_surface", `String sidecar_status_dashboard_surface
   ; "source", `String sidecar_status_source
   ; "retention", sidecar_status_retention_json ~base_path ~id ~status_path
-  ; "generated_at_iso", `String (isoish_now ())
+  ; "generated_at_iso", `String (Masc_domain.now_iso ())
   ]
 ;;
 

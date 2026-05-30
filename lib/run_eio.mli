@@ -54,8 +54,6 @@ val log_path : Coord_utils.config -> string -> string
 (** Create {!run_dir} and parents if missing. *)
 val ensure_run_dir : Coord_utils.config -> string -> unit
 
-val now_iso : unit -> string
-
 (** [""] when the file does not exist. *)
 val read_text_file : string -> string
 

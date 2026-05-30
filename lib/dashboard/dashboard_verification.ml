@@ -138,7 +138,7 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
        unassigned rather than inventing a value. *)
     ("keeper", Json_util.string_opt_to_json req.verifier);
     ("status", `String status);
-    ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
+    ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
     ("submitted_by", `String req.worker);
     ("approved_by", Json_util.string_opt_to_json approved_by);
     ("completion_contract",
@@ -233,7 +233,7 @@ let rejection_row_json (req : V.verification_request) : Yojson.Safe.t =
     ("task_title", `String task_title);
     ("keeper", Json_util.string_opt_to_json approved_by);
     ("verdict_reason", `String verdict_reason);
-    ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
+    ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
   ]
 
 let is_rejected (req : V.verification_request) : bool =

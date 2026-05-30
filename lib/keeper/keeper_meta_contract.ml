@@ -6,6 +6,8 @@
 
 include Keeper_meta_tool_access
 
+let now_iso () = Masc_domain.now_iso ()
+
 (* -- Policy types (remain in keeper_meta top-level) -- *)
 
 type compaction_policy =

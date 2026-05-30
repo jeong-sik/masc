@@ -45,7 +45,7 @@ let client_capacity_json_compute () =
          | n -> n)
       entries
   in
-  let generated_at = now_iso () in
+  let generated_at = Masc_domain.now_iso () in
   `Assoc
     [ "updated_at", `String generated_at
     ; "generated_at_iso", `String generated_at
@@ -92,7 +92,7 @@ let history_event_to_json (ev : Cascade_client_capacity_history.event) : Yojson.
 
 let client_capacity_history_json ?limit ?kind ?since_ts () =
   let events = Cascade_client_capacity_history.snapshot ?limit ?kind ?since_ts () in
-  let generated_at = now_iso () in
+  let generated_at = Masc_domain.now_iso () in
   `Assoc
     [ "updated_at", `String generated_at
     ; "generated_at_iso", `String generated_at

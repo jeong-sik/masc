@@ -173,5 +173,6 @@ let count_where items predicate =
     so this is the SSOT — Dashboard_governance_judge and
     Dashboard_operator_judge previously each carried an identical fork. *)
 let normalize_text raw =
-  raw |> String.trim |> String.split_on_char '\n' |> List.map String.trim
-  |> List.filter (fun item -> item <> "") |> String.concat " " |> String.trim
+  raw |> String.trim |> String.split_on_char '\n'
+  |> List.filter_map String_util.trim_to_option
+  |> String.concat " " |> String.trim

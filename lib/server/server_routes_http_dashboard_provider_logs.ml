@@ -25,7 +25,7 @@ let expand_provider_log_path raw =
 
 let provider_log_parse_errors_json errors =
   errors
-  |> List.map (fun (err : Cascade_declarative_parser.parse_error) ->
+  |> List.map (fun (err : Runtime_toml.parse_error) ->
          Printf.sprintf "%s: %s" err.path err.message)
   |> String.concat "; "
 
@@ -43,7 +43,7 @@ let load_provider_log_config () =
   match Runtime.config_path () with
   | None -> Error "cascade config path unavailable"
   | Some path -> (
-      match Cascade_declarative_parser.parse_file path with
+      match Runtime_toml.parse_file path with
       | Ok cfg -> Ok (path, cfg)
       | Error errors -> Error (provider_log_parse_errors_json errors))
 

@@ -129,6 +129,109 @@ let test_variant_count () =
   check int "blocker_class variant count" expected_variant_count count
 ;;
 
+(* ── SDK error → blocker_class mapping exhaustiveness ────────────── *)
+
+module SdkE = Agent_sdk.Error
+module SdkRetry = Agent_sdk.Retry
+module KSB = Masc_mcp.Keeper_status_bridge_blocker
+
+(** Every [Agent_sdk.Error.Agent _] sub-variant must map to a [Some blocker_class]
+    through the two-layer pipeline in [blocker_class_of_sdk_error]:
+    1. [classify_masc_internal_error] — for cascade-layer structured errors
+    2. Direct SDK pattern match — for Agent sub-variants
+
+    When a new Agent sub-variant is added to the SDK, this test forces the
+    developer to decide: map it to a blocker_class or explicitly document why
+    [None] is correct. *)
+
+let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
+  [ ( "CompletionContractViolation"
+    , SdkE.Agent
+        (SdkE.CompletionContractViolation
+           { contract = Agent_sdk.Completion_contract_id.Require_tool_use
+           ; reason = "test"
+           ; violation_detail = None
+           }) )
+  ; ( "AgentExecutionTimeout"
+    , SdkE.Agent
+        (SdkE.AgentExecutionTimeout
+           { elapsed_sec = 10.0; timeout_sec = 5.0; turn_count = 3; max_turns = 10 })
+    )
+  ; ( "MaxTurnsExceeded"
+    , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
+  ; ( "TokenBudgetExceeded"
+    , SdkE.Agent (SdkE.TokenBudgetExceeded { kind = "token"; used = 4096; limit = 4096 }) )
+  ; ( "CostBudgetExceeded"
+    , SdkE.Agent (SdkE.CostBudgetExceeded { spent_usd = 0.42; limit_usd = 0.40 }) )
+  ; ( "CostBudgetUnenforceable"
+    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "m"; limit_usd = 0.40 }) )
+  ; ( "UnrecognizedStopReason"
+    , SdkE.Agent (SdkE.UnrecognizedStopReason { reason = "abrupt" }) )
+  ; ( "IdleDetected"
+    , SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 }) )
+  ; ( "ToolRetryExhausted"
+    , SdkE.Agent (SdkE.ToolRetryExhausted { attempts = 3; limit = 3; detail = "rate limited" }) )
+  ; ( "GuardrailViolation"
+    , SdkE.Agent (SdkE.GuardrailViolation { validator = "content_filter"; reason = "toxic" }) )
+  ; ( "TripwireViolation"
+    , SdkE.Agent (SdkE.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }) )
+  ; ( "ExitConditionMet"
+    , SdkE.Agent (SdkE.ExitConditionMet { turn = 5 }) )
+  ; ( "InputRequired"
+    , SdkE.Agent
+        (SdkE.InputRequired
+           { request_id = "req-1"
+           ; participant_name = Some "user"
+           ; question = "What should I do?"
+           ; schema = None
+           ; timeout_s = None
+           ; created_at = 0.0
+           }) )
+  ]
+;;
+
+let test_all_agent_variants_map_to_blocker_class () =
+  List.iter
+    (fun (label, sdk_error) ->
+       match KSB.blocker_class_of_sdk_error sdk_error with
+       | Some _ -> ()
+       | None ->
+         failf
+           "Agent sub-variant %S returned None from blocker_class_of_sdk_error — \
+            either map it to a blocker_class or document why None is correct"
+           label)
+    all_sdk_agent_variants
+;;
+
+(** Pin the Agent sub-variant count so additions are visible in diffs.
+    When the SDK adds a new [Agent] sub-variant, bump this number and add it
+    to [all_sdk_agent_variants]. *)
+let expected_agent_variant_count = 13
+
+let test_agent_variant_count_pin () =
+  let count = List.length all_sdk_agent_variants in
+  check int
+    "Agent sub-variant count (pin — bump when SDK adds new Agent variants)"
+    expected_agent_variant_count count
+;;
+
+let test_structural_timeout_maps_to_oas_timeout () =
+  let structural =
+    SdkE.Api
+      (SdkRetry.Timeout
+         { message =
+             "Turn wall-clock budget exhausted during cascade attempt \
+              (budget=554.9s)" })
+  in
+  match KSB.blocker_class_of_sdk_error structural with
+  | Some klass ->
+    check string
+      "structural timeout maps to oas_agent_execution_timeout"
+      "oas_agent_execution_timeout"
+      (blocker_class_to_string klass)
+  | None -> fail "structural timeout should map to Some blocker_class"
+;;
+
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
@@ -140,6 +243,13 @@ let () =
         ; test_case "string uniqueness" `Quick test_string_uniqueness
         ; test_case "unknown string returns None" `Quick test_unknown_string
         ; test_case "variant count pin" `Quick test_variant_count
+        ] )
+    ; ( "sdk_error_mapping"
+      , [ test_case "all Agent variants map to blocker_class" `Quick
+            test_all_agent_variants_map_to_blocker_class
+        ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
+        ; test_case "structural timeout → oas_agent_execution_timeout" `Quick
+            test_structural_timeout_maps_to_oas_timeout
         ] )
     ]
 ;;

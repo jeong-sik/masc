@@ -155,11 +155,8 @@ let preflight_keeper_msg ctx args : (unit, string) result =
          | Some e -> Error e
          | None ->
         let effective_models =
-          if direct_reply then
-            Cascade_runtime.models_of_cascade_name
-              (                 (turn_cascade_name))
-          else
-            effective_model_labels_for_turn meta
+          if direct_reply then Runtime_model_labels.models ()
+          else effective_model_labels_for_turn meta
         in
         match Keeper_types_support.ensure_api_keys_for_labels effective_models with
         | Error e -> Error e
@@ -249,11 +246,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~generation:meta.runtime.generation ()
       in
       let effective_models =
-        if direct_reply then
-          Cascade_runtime.models_of_cascade_name
-            (               (turn_cascade_name))
-              else
-          effective_model_labels_for_turn meta
+        if direct_reply then Runtime_model_labels.models ()
+        else effective_model_labels_for_turn meta
       in
       Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();
       (match Keeper_types_support.ensure_api_keys_for_labels effective_models with

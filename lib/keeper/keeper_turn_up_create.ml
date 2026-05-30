@@ -48,13 +48,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some ids -> ids
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
-  let selected_cascade_name =
-    (* WORKAROUND (#19327 follow-up): cascade_name→model field rename. *)
-    match p.cascade_name_opt, p.profile_defaults.model with
-    | Some name, _ -> name
-    | None, Some name -> name
-    | None, None -> Keeper_config.default_cascade_name ()
-  in
   let active_goal_ids_error =
     match p.active_goal_ids_opt with
     | None -> None
@@ -282,10 +275,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~fallback_message:env_message_gate
                   ~fallback_token:env_token_gate
               in
-              let cascade_models =
-                Cascade_runtime.models_of_cascade_name
-                  (selected_cascade_name)
-              in
+              (* RFC-0206: default-always, no cascade_name catalog. *)
+              let cascade_models = Runtime_model_labels.models () in
               (match
                  Keeper_turn_helpers.ensure_local_discovery_ready
                    cascade_models
@@ -309,10 +300,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 match p.max_context_override_opt with
                 | Some v -> v
                 | None ->
-                    let resolved =
-                      Cascade_runtime.resolve_max_cascade_context cascade_models
-                    in
-                    resolved
+                    Runtime_model_labels.resolve_max_context cascade_models
               in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in

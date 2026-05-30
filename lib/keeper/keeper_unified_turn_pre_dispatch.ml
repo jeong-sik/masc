@@ -66,10 +66,7 @@ let build_cascade_execution
                 ~meta_name:meta.name
                 ~profile_defaults)
        in
-       let max_output_ceiling =
-         Cascade_runtime.max_output_tokens_ceiling_of_cascade_name
-           cascade_name
-       in
+       let max_output_ceiling = Runtime_model_labels.max_output_tokens_ceiling () in
        (match
           Cascade_inference.validate_max_tokens_within_ceiling
             ~cascade_name

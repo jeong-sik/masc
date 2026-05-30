@@ -123,10 +123,9 @@ let parse_cascade_name_opt args =
       if normalized = "" then Error "cascade_name must not be empty"
       else
         (* keeper-assignable guardrail removed 2026-05-28 — validate existence only. *)
-        match
-          Cascade_runtime.models_of_cascade_name_result
-            (normalized)
-        with
+        (* RFC-0206: no catalog to validate existence against; any non-empty
+           name is accepted. *)
+        match Runtime_model_labels.models_result () with
         | Ok _ -> Ok (Some normalized)
         | Error detail ->
             Error (Printf.sprintf "invalid cascade_name '%s': %s" raw detail)

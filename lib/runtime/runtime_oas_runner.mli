@@ -1,19 +1,25 @@
-(** Runtime_oas_runner — Eio context, cascade resolution, runtime MCP policy.
+(** Runtime_oas_runner — Eio context validation and runtime MCP policy.
 
     Extracted from oas_worker_named.ml (God file decomposition).
-    Provides cascade profile defaults, Eio context validation,
-    provider resolution, and tool-support filtering.
+    Provides execution-model defaults, Eio context validation, and
+    runtime-MCP policy derivation.
+
+    RFC-0206: the multi-candidate provider filter / dual-track swap machinery
+    (and its [Cascade_*] dependencies) is annihilated — a single Runtime has
+    no candidate list to filter. Model resolution delegates to
+    {!Runtime_model_labels}.
 
     This module is [include]d by {!Keeper_turn_driver}; all bindings are
     re-exported by the facade.  @since God file decomposition *)
 
-(** {1 Cascade profile defaults} *)
+(** {1 Execution-model defaults} *)
 
 val default_config_path : unit -> string option
 (** Alias for [Runtime.config_path]. *)
 
-val default_model_strings : cascade_name:string -> string list
-(** Alias for [Cascade_runtime.default_model_strings]. *)
+val default_model_strings : unit -> string list
+(** Alias for {!Runtime_model_labels.default_model_strings} (default-always;
+    no cascade_name). *)
 
 (** {1 Eio context validation} *)
 
@@ -29,19 +35,10 @@ val eio_context_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
     error with field ["eio_context"]. *)
 
 val cascade_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
-(** Lift a cascade-catalog diagnostic into an [Agent_sdk.Error.Config]
+(** Lift a runtime-resolution diagnostic into an [Agent_sdk.Error.Config]
     error with field ["cascade_name"]. *)
 
-(** {1 Provider resolution} *)
-
-val resolve_cascade_providers :
-  ?provider_filter:string list ->
-  ?require_tool_choice_support:bool ->
-  ?require_tool_support:bool ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:string -> unit ->
-  (Llm_provider.Provider_config.t list, string) result
-(** Resolve cascade provider configs via MASC Cascade_config. *)
+(** {1 Runtime MCP policy} *)
 
 val keeper_agent_name_opt : string -> string option
 (** Derive the agent name from a keeper name; [None] when the name is empty. *)
@@ -78,59 +75,3 @@ val cli_tool_a_cannot_carry_keeper_bound_runtime_mcp :
 (** [true] when the provider is cli_tool_a and the policy includes tools that
     require a bound-actor (keeper-scoped) runtime MCP — cli_tool_a cannot
     carry these across its CLI subprocess boundary. *)
-
-(** {1 Provider filter rejection classification} *)
-
-type filter_rejection_reason =
-  | Capability_profile_mismatch of string
-  | Codex_keeper_bound_actor_required
-  | Tool_lane_unsupported
-  | Required_tool_use of Provider_tool_support.rejection_reason
-(** Why a provider was rejected by the cascade filter.  Order mirrors the
-    filter's short-circuit priority. *)
-
-val filter_rejection_reason_label : filter_rejection_reason -> string
-
-val classify_filter_rejection :
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  ?tools:Agent_sdk.Tool.t list ->
-  ?required_capability_profile:string ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  Llm_provider.Provider_config.t ->
-  filter_rejection_reason option
-(** Classify why a single provider would be rejected by the tool-use gate.
-    When [required_capability_profile] is provided, the provider must
-    satisfy the named profile via {!Cascade_capability_profile} or it is
-    rejected with [Capability_profile_mismatch]. *)
-
-val filter_candidate_providers_for_tool_support :
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  ?tools:Agent_sdk.Tool.t list ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  ?required_capability_profile:string ->
-  ?secondary_resolver:
-    (int ->
-     Llm_provider.Provider_config.t ->
-     Llm_provider.Provider_config.t option) ->
-  label:string ->
-  Llm_provider.Provider_config.t list ->
-  Llm_provider.Provider_config.t list
-(** Filter provider candidates through the tool-use gate.  When the gate
-    empties the list, emits a deduplicated diagnostic (ERROR on first
-    occurrence per signature, DEBUG on repeats).
-
-    @param required_capability_profile When set, providers whose
-    declared capabilities do not satisfy the named profile are rejected
-    before any other gate checks.
-    @param secondary_resolver RFC-0027 PR-9b dual-track callback. When
-    set, each rejected primary is offered to the resolver; if it returns
-    a [Some secondary] candidate that itself passes the tool-use gate,
-    the secondary replaces the primary in the kept list. The function
-    is invoked at most once per rejected primary, with the primary's
-    zero-based position in the original candidate list, after the initial
-    classification, so it does not affect the hot path when no entries
-    have a [secondary] declaration. *)

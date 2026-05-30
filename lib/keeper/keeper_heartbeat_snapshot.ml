@@ -80,10 +80,8 @@ let write_heartbeat_snapshot
   let metrics_store =
     Keeper_types_support.keeper_metrics_store ctx.config meta_current.name
   in
-  let cascade_models =
-    Cascade_runtime.models_of_cascade_name
-      ((Keeper_meta_contract.cascade_name_of_meta meta_current))
-  in
+  (* RFC-0206: default-always, no cascade_name catalog. *)
+  let cascade_models = Runtime_model_labels.models () in
   let max_cascade_context =
     let resolution =
       Keeper_context_runtime.resolve_max_context_resolution

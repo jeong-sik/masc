@@ -611,7 +611,7 @@ and resume_worker_via_oas
   in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
   let* resume_provider =
-    oas_provider_of_label (Cascade_runtime.local_model_label resume_model_id)
+    oas_provider_of_label (Runtime_model_labels.local_model_label resume_model_id)
     |> Result.map_error (fun e ->
       Printf.sprintf "checkpoint resume (model %S): %s" resume_model_id e)
   in

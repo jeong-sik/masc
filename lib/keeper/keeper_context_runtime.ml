@@ -341,11 +341,11 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
     max min_keeper_context local_clamped
   in
   let primary_budget =
-    Cascade_runtime.resolve_primary_max_context labels
+    Runtime_model_labels.resolve_primary_max_context labels
     |> clamp
   in
   let cascade_budget =
-    Cascade_runtime.resolve_max_cascade_context labels
+    Runtime_model_labels.resolve_max_context labels
     |> clamp
   in
   let turn_budget =

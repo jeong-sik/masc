@@ -28,8 +28,7 @@ let resolve ~sw ~net ?provider_filter ~cascade_name ~runtime_cascade_name () =
     | Error _ -> None
   in
   {
-    configured_labels_result =
-      Cascade_runtime.models_of_cascade_name_result runtime_cascade_name;
+    configured_labels_result = Runtime_model_labels.models_result ();
     candidate_cfgs_result;
     secondary_resolver;
   }

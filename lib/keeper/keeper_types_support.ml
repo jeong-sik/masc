@@ -17,9 +17,9 @@ let session_base_dir_ (config : Coord.config) =
   ensure_dir_ d
 
 (** Check API key availability using model label strings.
-    Delegates to Cascade_runtime which owns MASC cascade resolution. *)
+    Delegates to {!Runtime_model_labels} (RFC-0206 cascade->Runtime). *)
 let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
-  Cascade_runtime.ensure_api_keys_for_labels labels
+  Runtime_model_labels.ensure_api_keys_for_labels labels
 
 (** Single-file metrics path kept for fallback reads. *)
 let keeper_metrics_path config name =

@@ -256,22 +256,11 @@ let compute_judgments
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let should_backoff ~sw ~net =
-  let cascade_name =
-    Runtime.get_default_runtime_id ()
-  in
-  try
-    let capacity =
-      Cascade_runtime.local_capacity_for_selections ~sw ~net
-        [ cascade_name ]
-    in
-    capacity.all_discovered && capacity.endpoints_found > 0
-    && capacity.process_available <= 0
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Dashboard.warn
-      "operator: capacity check failed in should_backoff: %s"
-      (Printexc.to_string exn);
-    false
+let should_backoff ~sw:_ ~net:_ =
+  (* RFC-0206: the cascade local-capacity tracking
+     (Cascade_runtime.local_capacity_for_selections) is annihilated along with
+     the multi-candidate runtime layer. No capacity-based backoff remains. *)
+  false
 
 let refresh_once ~sw ~net
     ~(masc_tools : Masc_domain.tool_schema list)

@@ -457,6 +457,13 @@ let keeper_decisions_log_json
     ]
 ;;
 
+(* Per-keeper memory-bank feed cache, mirroring [decisions_feed_cache]: the
+   transformed (ts_unix, entry) list per source file, keyed by
+   (path, per_keeper_limit) so output is identical to the uncached path. *)
+let memory_feed_cache :
+    (float * Yojson.Safe.t) list Jsonl_mtime_projection.t =
+  Jsonl_mtime_projection.create ()
+
 let keeper_memory_log_json
     ~(config : Coord.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
@@ -471,7 +478,11 @@ let keeper_memory_log_json
         let path = Keeper_types_support.keeper_memory_bank_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
-        else (
+        else
+          Jsonl_mtime_projection.get memory_feed_cache
+            ~key:(path ^ "#" ^ string_of_int per_keeper_limit)
+            ~sources:[ path ]
+            ~build:(fun () ->
           let lines =
             Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_memory_log"
               path

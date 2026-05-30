@@ -116,6 +116,13 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Su { subcommand = "root"; args = [] })
   ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=10" ] })
   ; W (Mkfs { subcommand = "/dev/sdb1"; args = [] })
+  ; W (Cp { source = "/tmp/a"; dest = "/tmp/b"; recursive = false; force = false; preserve = false })
+  ; W (Mv { source = "/tmp/a"; dest = "/tmp/b"; force = false; no_clobber = false })
+  ; W (Ln { target = "/usr/bin/python3"; link_name = "/usr/local/bin/python"; symbolic = true; force = false })
+  ; W (Touch { files = [ "/tmp/newfile" ]; no_create = false; time = None })
+  ; W (Tee { files = [ "/tmp/output.log" ]; append = false })
+  ; W (Awk { program = "{print $1}"; files = [ "/tmp/data.txt" ] })
+  ; W (Xargs { command = "echo"; args = []; null_terminated = false; max_args = None })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -197,15 +204,15 @@ let test_to_simple_parallel_equivalence () =
 ;;
 
 let test_constructor_count () =
-  (* Baseline: 93 constructors as of 2026-05-29. If this fails, either
+  (* Baseline: 100 constructors as of 2026-05-30. If this fails, either
      a constructor was added to shell_ir_typed.ml without updating the
      spec in bin/gen_shell_ir_walkers.ml (regression) or the count is
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    93
+    100
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 93 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 100 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -320,6 +327,13 @@ let test_of_simple_round_trip () =
     ; W (Su { subcommand = "root"; args = [ "whoami" ] })
     ; W (Dd { subcommand = "if=/dev/zero"; args = [ "of=/tmp/zeros"; "bs=1M"; "count=1" ] })
     ; W (Mkfs { subcommand = "/dev/sdc1"; args = [] })
+    ; W (Cp { source = "src/"; dest = "dst/"; recursive = true; force = true; preserve = false })
+    ; W (Mv { source = "old.txt"; dest = "new.txt"; force = true; no_clobber = false })
+    ; W (Ln { target = "/usr/bin/python3"; link_name = "python"; symbolic = true; force = true })
+    ; W (Touch { files = [ "a.txt"; "b.txt" ]; no_create = true; time = Some `Access })
+    ; W (Tee { files = [ "out.log"; "err.log" ]; append = true })
+    ; W (Awk { program = "{print NR, $0}"; files = [ "input.txt"; "data.csv" ] })
+    ; W (Xargs { command = "rm"; args = [ "-rf" ]; null_terminated = true; max_args = Some 10 })
     ]
   in
   List.iter
@@ -378,9 +392,9 @@ let test_of_simple_generic_fallback () =
     (match w_var with
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false);
-  (* unknown binary kind — `awk` is NOT in Exec_program.known, must fall through *)
+  (* unknown binary kind — `xyzzy` is NOT in Exec_program.known, must fall through *)
   let w_unknown =
-    Shell_ir_typed.of_simple { base with bin = bin_ok "awk"; args = [ lit "{print $1}" ] }
+    Shell_ir_typed.of_simple { base with bin = bin_ok "xyzzy"; args = [ lit "arg1" ] }
   in
   Alcotest.(check bool)
     "unknown bin fallback"
@@ -2487,6 +2501,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Java"; "Javac"; "Mvn"; "Cmake"; "Dune_local_sh"
     ; "Osascript"; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
     ; "Su"; "Dd"; "Mkfs"
+    ; "Cp"; "Mv"; "Ln"; "Touch"; "Tee"; "Awk"; "Xargs"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

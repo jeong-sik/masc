@@ -519,5 +519,29 @@ let pp fmt = function
   | W (Mkfs { subcommand; args }) ->
     Format.fprintf fmt "Mkfs(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
+  | W (Cp { source; dest; recursive; force; preserve }) ->
+    Format.fprintf fmt "Cp(source=%s, dest=%s, recursive=%b, force=%b, preserve=%b)"
+      source dest recursive force preserve
+  | W (Mv { source; dest; force; no_clobber }) ->
+    Format.fprintf fmt "Mv(source=%s, dest=%s, force=%b, no_clobber=%b)"
+      source dest force no_clobber
+  | W (Ln { target; link_name; symbolic; force }) ->
+    Format.fprintf fmt "Ln(target=%s, link_name=%s, symbolic=%b, force=%b)"
+      target link_name symbolic force
+  | W (Touch { files; no_create; time }) ->
+    let time_str = match time with Some `Access -> "Access" | Some `Modify -> "Modify" | None -> "None" in
+    Format.fprintf fmt "Touch(files=%a, no_create=%b, time=%s)"
+      (Format.pp_print_list Format.pp_print_string) files no_create time_str
+  | W (Tee { files; append }) ->
+    Format.fprintf fmt "Tee(files=%a, append=%b)"
+      (Format.pp_print_list Format.pp_print_string) files append
+  | W (Awk { program; files }) ->
+    Format.fprintf fmt "Awk(program=%s, files=%a)" program
+      (Format.pp_print_list Format.pp_print_string) files
+  | W (Xargs { command; args; null_terminated; max_args }) ->
+    Format.fprintf fmt "Xargs(command=%s, args=%a, null_terminated=%b, max_args=%a)" command
+      (Format.pp_print_list Format.pp_print_string) args
+      null_terminated
+      (Format.pp_print_option Format.pp_print_int) max_args
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

@@ -2124,8 +2124,8 @@ let rec parse human_readable summary max_depth = function
       (Shell_ir_typed_types.W
          (Shell_ir_typed_types.Du
             { path = None; human_readable; summary; max_depth }))
-  | "-h" :: rest -> parse true summary max_depth rest
-  | "-s" :: rest -> parse human_readable true max_depth rest
+  | "-h" :: rest | "--human-readable" :: rest -> parse true summary max_depth rest
+  | "-s" :: rest | "--summarize" :: rest -> parse human_readable true max_depth rest
   | "--max-depth" :: n :: rest ->
     (match int_of_string_opt n with
      | Some d -> parse human_readable summary (Some d) rest
@@ -2214,8 +2214,8 @@ let rec parse human_readable fs_type = function
       (Shell_ir_typed_types.W
          (Shell_ir_typed_types.Df
             { path = None; human_readable; filesystem_type = fs_type }))
-  | "-h" :: rest -> parse true fs_type rest
-  | "-t" :: t :: rest -> parse human_readable (Some t) rest
+  | "-h" :: rest | "--human-readable" :: rest -> parse true fs_type rest
+  | "-t" :: t :: rest | "--type" :: t :: rest -> parse human_readable (Some t) rest
   (* POSIX end-of-options: next non-empty arg is the path *)
   | "--" :: rest ->
     let remaining = List.filter (fun a -> String.length a > 0) rest in
@@ -3058,6 +3058,11 @@ let rec parse in_place ext_re suppress expr file dd = function
     (match rest with
      | "" :: rest' -> parse true ext_re suppress expr file dd rest'   (* -i '' — macOS empty suffix *)
      | _ -> parse true ext_re suppress expr file dd rest)              (* -i at end or GNU style *)
+  | "--in-place" :: rest when not dd ->
+    (* GNU sed --in-place[=SUFFIX]. If next arg looks like a suffix (non-flag, non-expression), skip it. *)
+    (match rest with
+     | s :: rest' when String.length s > 0 && s.[0] <> '-' -> parse true ext_re suppress expr file dd rest'  (* --in-place=SUFFIX equivalent *)
+     | _ -> parse true ext_re suppress expr file dd rest)
   | "-e" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
   | "-f" :: f :: rest when not dd -> parse in_place ext_re suppress (Some f) file dd rest  (* script file → expression *)
   | "-E" :: rest | "--regexp-extended" :: rest when not dd -> parse in_place true suppress expr file dd rest
@@ -4363,8 +4368,8 @@ let rec parse subcmd v x dd = function
      | Some s ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Pytest { subcommand = s; verbose = v; exitfirst = x; rest = [] }))
      | None -> None)
-  | "-v" :: rest when not dd -> parse subcmd true x dd rest
-  | "-x" :: rest when not dd -> parse subcmd v true dd rest
+  | "-v" :: rest | "--verbose" :: rest when not dd -> parse subcmd true x dd rest
+  | "-x" :: rest | "--exitfirst" :: rest when not dd -> parse subcmd v true dd rest
   (* Value-consuming flags: skip flag + value *)
   | arg :: _val :: rest
     when not dd && String.length arg > 0 && arg.[0] = '-'
@@ -4412,6 +4417,7 @@ let rec parse title message = function
      | Some t, Some m ->
        Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Terminal_notifier { title = t; message = m }))
      | _ -> None)
+  | "--" :: rest -> parse_pos title message rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse title message rest
@@ -4420,6 +4426,18 @@ let rec parse title message = function
           | Some _ -> (match message with
                        | None -> parse title (Some arg) rest
                        | Some _ -> None))
+and parse_pos title message = function
+  | [] ->
+    (match title, message with
+     | Some t, Some m ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Terminal_notifier { title = t; message = m }))
+     | _ -> None)
+  | arg :: rest ->
+    (match title with
+     | None -> parse_pos (Some arg) message rest
+     | Some _ -> (match message with
+                  | None -> parse_pos title (Some arg) rest
+                  | Some _ -> None))
 in
 parse None None args|}
     ; no_expand_combined = false

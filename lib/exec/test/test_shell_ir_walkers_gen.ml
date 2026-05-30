@@ -2700,6 +2700,48 @@ let test_batch4_posix_end_of_options () =
    | w -> Alcotest.failf "test -- -f file: expected Test, got %a" pp w)
 ;;
 
+let test_long_form_boolean_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Du: --human-readable --summarize /tmp *)
+  let du =
+    of_simple { (base "du") with args = [ lit "--human-readable"; lit "--summarize"; lit "/tmp" ] }
+  in
+  (match du with
+   | W (Du { human_readable = true; summary = true; path = Some "/tmp"; _ }) -> ()
+   | w -> Alcotest.failf "Du --human-readable --summarize: expected h=true s=true, got %a" pp w);
+  (* Df: --human-readable / *)
+  let df =
+    of_simple { (base "df") with args = [ lit "--human-readable"; lit "/" ] }
+  in
+  (match df with
+   | W (Df { human_readable = true; path = Some "/"; _ }) -> ()
+   | w -> Alcotest.failf "Df --human-readable: expected h=true, got %a" pp w);
+  (* Sed: --in-place -E 's/foo/bar/g' input.txt *)
+  let sed =
+    of_simple { (base "sed") with args = [ lit "--in-place"; lit "-E"; lit "s/foo/bar/g"; lit "input.txt" ] }
+  in
+  (match sed with
+   | W (Sed { in_place = true; extended_regex = true; expression = "s/foo/bar/g"; file = "input.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --in-place: expected in_place=true, got %a" pp w);
+  (* Pytest: --verbose --exitfirst tests/ *)
+  let py =
+    of_simple { (base "pytest") with args = [ lit "--verbose"; lit "--exitfirst"; lit "tests/" ] }
+  in
+  (match py with
+   | W (Pytest { verbose = true; exitfirst = true; subcommand = "tests/"; _ }) -> ()
+   | w -> Alcotest.failf "Pytest --verbose --exitfirst: expected v=true x=true, got %a" pp w)
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -2767,6 +2809,10 @@ let () =
             "Batch 4: POSIX -- end-of-options for Sudo/Echo/Which/Printenv/Printf/Test"
             `Quick
             test_batch4_posix_end_of_options
+        ; Alcotest.test_case
+            "Long-form boolean flags (--human-readable, --summarize, --in-place, --verbose, --exitfirst)"
+            `Quick
+            test_long_form_boolean_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

@@ -41,7 +41,7 @@ let make_capacity_backpressure ?(source = Owne.Client_capacity)
          cascade_name = test_cascade;
          source;
          detail;
-         retry_after = Masc_mcp.Cascade_internal_error.No_retry_hint;
+         retry_after = Masc_mcp.Keeper_internal_error.No_retry_hint;
        })
 
 let make_no_tool_capable () =

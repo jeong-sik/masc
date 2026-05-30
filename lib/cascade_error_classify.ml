@@ -1,9 +1,9 @@
 (** Cascade_error_classify — SDK error parser and substring classifier on top of
-    the {!Cascade_internal_error} ADT.
+    the {!Keeper_internal_error} ADT.
 
     RFC-0142 Phase 2 PR-1: the [masc_internal_error] ADT, its JSON codec, the
     Prometheus accounting, and the per-variant kind/cascade_name labels were
-    moved to {!Cascade_internal_error}.  This module now owns only:
+    moved to {!Keeper_internal_error}.  This module now owns only:
 
     - {!admission_wait_timeout_error} — construction-site helper that logs
       and returns the [Admission_queue_timeout] variant as a [result];
@@ -17,7 +17,7 @@
       substring SSOT for "server rejected the request body".  Substring use
       here is unavoidable because the upstream payload is a raw SDK string.
 
-    The {!Cascade_internal_error} surface (types, [masc_internal_error_to_json],
+    The {!Keeper_internal_error} surface (types, [masc_internal_error_to_json],
     [sdk_error_of_masc_internal_error], summaries, labels, metric name) is
     re-exported via [include] so callers that reference
     [Cascade_error_classify.masc_internal_error], [Cascade_error_classify.Cascade_exhausted],
@@ -27,7 +27,7 @@
 
 open Result.Syntax
 
-include Cascade_internal_error
+include Keeper_internal_error
 
 let admission_wait_timeout_error
     ~(keeper_name : string)
@@ -111,10 +111,10 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                in
                let retry_after =
                  match float_opt_of_assoc "retry_after_sec" json with
-                 | None -> Cascade_internal_error.No_retry_hint
+                 | None -> Keeper_internal_error.No_retry_hint
                  | Some s when retry_after_synthetic ->
-                   Cascade_internal_error.Synthetic_default s
-                 | Some s -> Cascade_internal_error.Explicit s
+                   Keeper_internal_error.Synthetic_default s
+                 | Some s -> Keeper_internal_error.Explicit s
                in
                Some
                  (Capacity_backpressure

@@ -13,7 +13,7 @@ open Cascade_declarative_types
 open Cascade_declarative_parser
 
 module Adapter = Masc_mcp.Cascade_declarative_adapter
-module Hotpath = Masc_mcp.Cascade_declarative_hotpath
+module Hotpath = Masc_mcp.Keeper_declarative_hotpath
 
 (* --- Helpers --- *)
 

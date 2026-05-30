@@ -2173,13 +2173,13 @@ let test_sse_ping_does_not_refresh_progress_observation () =
 
 let test_registry_progress_wrapper_survives_liveness_off () =
   with_env "MASC_CASCADE_ATTEMPT_LIVENESS" "off" @@ fun () ->
-  Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test ();
+  Masc_mcp.Keeper_attempt_liveness_config.reset_cache_for_test ();
   Fun.protect
-    ~finally:Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test
+    ~finally:Masc_mcp.Keeper_attempt_liveness_config.reset_cache_for_test
   @@ fun () ->
   check string "liveness mode" "off"
-    (Masc_mcp.Cascade_attempt_liveness_config.mode_label
-       (Masc_mcp.Cascade_attempt_liveness_config.current_mode ()));
+    (Masc_mcp.Keeper_attempt_liveness_config.mode_label
+       (Masc_mcp.Keeper_attempt_liveness_config.current_mode ()));
   let stamped = ref [] in
   let on_event =
     Masc_mcp.Keeper_agent_run.For_testing.registry_progress_on_event

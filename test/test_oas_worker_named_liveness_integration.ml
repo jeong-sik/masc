@@ -5,13 +5,13 @@
     live OAS attempt loop with a mock SSE server, which lands as the
     PR-3 e2e fixture. Instead we pin the observable wiring contract:
 
-    1. The env-flag bridge ([Cascade_attempt_liveness_config.current_mode])
+    1. The env-flag bridge ([Keeper_attempt_liveness_config.current_mode])
        reads the same MASC_CASCADE_ATTEMPT_LIVENESS variable that
        try_provider consults — preventing a future rename from
        silently splitting the call sites.
 
     2. The observer module is reachable through the
-       [Cascade_attempt_liveness_observer.{create, wrap_on_event,
+       [Keeper_attempt_liveness_observer.{create, wrap_on_event,
        register_attempt_switch, finalize}] surface that try_provider
        depends on, with the expected mode contract (Off pass-through;
        Observe wraps; Enforce wraps + scopes cancellation to the provider
@@ -22,8 +22,8 @@
        will produce. *)
 
 open Masc_mcp
-module Cfg = Cascade_attempt_liveness_config
-module Obs = Cascade_attempt_liveness_observer
+module Cfg = Keeper_attempt_liveness_config
+module Obs = Keeper_attempt_liveness_observer
 
 let env_var = "MASC_CASCADE_ATTEMPT_LIVENESS"
 
@@ -153,7 +153,7 @@ let test_enforce_registered_switch_kills_attempt_without_tick_clock () =
                 Eio.Fiber.yield ())
           with
           | Obs.Liveness_kill failure ->
-              raised := Some (Cascade_attempt_liveness.failure_kind_label failure)
+              raised := Some (Keeper_attempt_liveness.failure_kind_label failure)
           | exn ->
               Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)));
   Alcotest.(check (option string))

@@ -67,7 +67,7 @@ include Keeper_turn_cascade_budget_provider_timeout
      change is the natural typed boundary expansion. *)
 
 type retry_admission_denial =
-  Cascade_internal_error.retry_admission_denial =
+  Keeper_internal_error.retry_admission_denial =
   | Retry_budget_below_min of {
       projected_usable_budget_s : float;
       min_required_s : float;
@@ -88,7 +88,7 @@ type attempt_kind = Keeper_turn_cascade_budget_admission.attempt_kind =
 let attempt_kind_is_retry =
   Keeper_turn_cascade_budget_admission.attempt_kind_is_retry
 let retry_admission_denial_to_yojson =
-  Cascade_internal_error.retry_admission_denial_to_yojson
+  Keeper_internal_error.retry_admission_denial_to_yojson
 
 let decide_retry_admission_for_turn
     ~(remaining_turn_budget_s : float)

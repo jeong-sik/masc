@@ -322,7 +322,7 @@ let has_recovery_evidence candidate =
       && info.success_rate > 0.0)
 
 let local_runtime_attempt_timeout_floor_s =
-  Cascade_attempt_liveness.bootstrap.attempt_wall_max
+  Keeper_attempt_liveness.bootstrap.attempt_wall_max
 
 type attempt_timeout_resolution =
   { timeout_s : float option
@@ -390,14 +390,14 @@ let tool_filter_rejection_label
     ~require_tool_support
     candidate
   =
-  Cascade_oas_runner.classify_filter_rejection
+  Keeper_oas_runner.classify_filter_rejection
     ~keeper_name
     ?runtime_mcp_policy
     ~tools
     ~require_tool_choice_support
     ~require_tool_support
     candidate.provider_cfg
-  |> Option.map Cascade_oas_runner.filter_rejection_reason_label
+  |> Option.map Keeper_oas_runner.filter_rejection_reason_label
 
 let capacity_key candidate = candidate.capacity_key
 let capacity_keys candidates = List.map capacity_key candidates

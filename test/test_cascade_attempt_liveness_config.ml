@@ -1,12 +1,12 @@
-(** Tests for [Cascade_attempt_liveness_config] (RFC-0022 PR-2/4 §2).
+(** Tests for [Keeper_attempt_liveness_config] (RFC-0022 PR-2/4 §2).
 
     Covers: env-flag parsing (unset defaults to Enforce; explicit values are
     canonical only), cache invalidation via reset_cache_for_test, and living
     success-history budget selection. *)
 
 open Masc_mcp
-module Cfg = Cascade_attempt_liveness_config
-module L = Cascade_attempt_liveness
+module Cfg = Keeper_attempt_liveness_config
+module L = Keeper_attempt_liveness
 
 let env_var = "MASC_CASCADE_ATTEMPT_LIVENESS"
 

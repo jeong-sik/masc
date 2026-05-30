@@ -388,7 +388,7 @@ let render_toml_to_yojson toml =
         then (
           (* RFC-0058: capability profile definitions — parsed into
                  a JSON "profiles" namespace consumed by
-                 [Cascade_capability_profile]. *)
+                 [Keeper_capability_profile]. *)
           match profiles_json ~path:"profiles" value with
           | Ok profiles -> loop ([ "profiles", profiles ] :: acc) rest
           | Error _ as err -> err)

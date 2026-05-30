@@ -5,7 +5,7 @@
    concurrent, selection trace).  All of these are pure over a
    snapshot — they do not mutate the cache or re-validate. *)
 
-open Cascade_catalog_runtime_cache
+open Keeper_catalog_runtime_cache
 module Resolve = Cascade_catalog_runtime_resolve
 
 let candidate_key_of_cfg (cfg : Llm_provider.Provider_config.t) =

@@ -140,9 +140,9 @@ let test_roundtrip_capacity_backpressure () =
        (legacy default), preserving the seconds *)
     let retry_after_sec =
       match retry_after with
-      | Masc_mcp.Cascade_internal_error.Explicit s
-      | Masc_mcp.Cascade_internal_error.Synthetic_default s -> Some s
-      | Masc_mcp.Cascade_internal_error.No_retry_hint -> None
+      | Masc_mcp.Keeper_internal_error.Explicit s
+      | Masc_mcp.Keeper_internal_error.Synthetic_default s -> Some s
+      | Masc_mcp.Keeper_internal_error.No_retry_hint -> None
     in
     Alcotest.(check (option (float 0.001)))
       "retry_after preserved"

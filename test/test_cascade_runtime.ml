@@ -1,7 +1,7 @@
 open Alcotest
 
 let test_oas_http_error_classification_is_typed () =
-  let module H = Masc_mcp.Cascade_health_filter in
+  let module H = Masc_mcp.Keeper_health_filter in
   let context_overflow =
     Llm_provider.Http_client.HttpError
       { code = 400; body = "maximum context length exceeded" }
@@ -29,7 +29,7 @@ let test_oas_http_error_classification_is_typed () =
     | _ -> false)
 
 let test_oas_failure_classification_keeps_terminal_branches_non_cascading () =
-  let module H = Masc_mcp.Cascade_health_filter in
+  let module H = Masc_mcp.Keeper_health_filter in
   let terminal_http =
     Llm_provider.Http_client.HttpError
       { code = 418; body = "terminal provider refusal" }

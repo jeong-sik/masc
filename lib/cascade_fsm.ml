@@ -33,7 +33,7 @@ let decide ~accept_on_exhaustion ~is_last outcome =
     else
       Try_next { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
   | Call_err err ->
-    let should_cascade = Cascade_health_filter.should_cascade_to_next err in
+    let should_cascade = Keeper_health_filter.should_cascade_to_next err in
     if should_cascade then
       Try_next { last_err = Some err }
     else
@@ -121,7 +121,7 @@ let decide_and_record ~cascade_name ~accept_on_exhaustion ~is_last outcome =
          match outcome with
          | Accept_rejected _ -> "accept_rejected"
          | Call_err err ->
-             if Cascade_health_filter.should_cascade_to_next err then
+             if Keeper_health_filter.should_cascade_to_next err then
                "call_err_cascadeable"
              else
                "call_err_non_cascadeable"

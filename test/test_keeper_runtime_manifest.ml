@@ -2151,9 +2151,9 @@ let test_successful_provider_turn_links_runtime_artifacts () =
       with_env "MASC_BASE_PATH" base_dir @@ fun () ->
       with_env "MASC_CDAL_ENABLED" "false" @@ fun () ->
       with_env "MASC_CASCADE_ATTEMPT_LIVENESS" "off" @@ fun () ->
-      Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test ();
+      Masc_mcp.Keeper_attempt_liveness_config.reset_cache_for_test ();
       Fun.protect
-        ~finally:Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test
+        ~finally:Masc_mcp.Keeper_attempt_liveness_config.reset_cache_for_test
         (fun () ->
       with_eio @@ fun ~sw ~net ~clock:_ ->
       let port =
@@ -2580,9 +2580,9 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
       with_env "MASC_BASE_PATH" base_dir @@ fun () ->
       with_env "MASC_CDAL_ENABLED" "false" @@ fun () ->
       with_env "MASC_CASCADE_ATTEMPT_LIVENESS" "off" @@ fun () ->
-      Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test ();
+      Masc_mcp.Keeper_attempt_liveness_config.reset_cache_for_test ();
       Fun.protect
-        ~finally:Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test
+        ~finally:Masc_mcp.Keeper_attempt_liveness_config.reset_cache_for_test
         (fun () ->
           with_eio @@ fun ~sw ~net ~clock ->
           let port =
@@ -3561,7 +3561,7 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits "lib/cascade/cascade_runtime_candidate.mli" "oas_provider_config";
   check_source_omits
     "lib/keeper/keeper_turn_driver.mli"
-    "include module type of Cascade_oas_runner";
+    "include module type of Keeper_oas_runner";
   check_source_omits
     "lib/keeper/keeper_turn_driver.mli"
     "include module type of Cascade_attempt_fsm";

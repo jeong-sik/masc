@@ -43,7 +43,7 @@ let run_model_by_label
   : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    Cascade_config_builder.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
+    Keeper_config_builder.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer ?memory
       ?tool_retry_policy
@@ -52,8 +52,8 @@ let run_model_by_label
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match Cascade_oas_runner.require_eio ?sw ?net () with
-  | Error e -> Error (Cascade_oas_runner.eio_context_error_to_sdk_error e)
+  match Keeper_oas_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Keeper_oas_runner.eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -69,7 +69,7 @@ let run_model_by_label
           ~keeper_name:"oas-label-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            Cascade_config_builder.with_cli_preflight
+            Keeper_config_builder.with_cli_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
@@ -180,15 +180,15 @@ let run_model_with_masc_tools
   : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    Cascade_config_builder.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
+    Keeper_config_builder.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ?stream_idle_timeout_s ?guardrails ?hooks ?memory ?tool_retry_policy ?enable_thinking
       ?compact_ratio
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match Cascade_oas_runner.require_eio ?sw ?net () with
-  | Error e -> Error (Cascade_oas_runner.eio_context_error_to_sdk_error e)
+  match Keeper_oas_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Keeper_oas_runner.eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -204,7 +204,7 @@ let run_model_with_masc_tools
           ~keeper_name:"oas-explicit-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            Cascade_config_builder.with_cli_preflight
+            Keeper_config_builder.with_cli_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->

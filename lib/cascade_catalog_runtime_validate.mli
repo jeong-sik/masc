@@ -26,8 +26,8 @@ val validate_path_result :
   route_data:route_data ->
   config_path:string ->
   unit ->
-  ( Cascade_catalog_runtime_cache.validation_result,
-    Cascade_catalog_runtime_cache.rejection )
+  ( Keeper_catalog_runtime_cache.validation_result,
+    Keeper_catalog_runtime_cache.rejection )
   result
 
 val validate_path :
@@ -37,5 +37,5 @@ val validate_path :
   route_data:route_data ->
   config_path:string ->
   unit ->
-  (Cascade_catalog_runtime_cache.snapshot, Cascade_catalog_runtime_cache.rejection)
+  (Keeper_catalog_runtime_cache.snapshot, Keeper_catalog_runtime_cache.rejection)
   result

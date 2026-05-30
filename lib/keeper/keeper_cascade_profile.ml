@@ -38,7 +38,7 @@ let cascade_name_for_use = Cascade_routes_resolve.cascade_name_for_use
 let strip_declarative_profile_prefix name = name
 
 let qualified_names_of_declarative_snapshot snapshot =
-  Cascade_declarative_hotpath.decl_snapshot_profile_names snapshot
+  Keeper_declarative_hotpath.decl_snapshot_profile_names snapshot
   |> List.sort_uniq String.compare
 
 let public_names_of_declarative_snapshot snapshot =
@@ -102,7 +102,7 @@ let declarative_public_catalog_names ?config_path () =
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
   | Some path -> (
-      match Cascade_declarative_hotpath.try_load_partial path with
+      match Keeper_declarative_hotpath.try_load_partial path with
       | Some { snapshot; errors } ->
           log_partial_catalog_errors ~path ~mtime:snapshot.mtime errors;
           let names = public_names_of_declarative_snapshot snapshot in
@@ -120,7 +120,7 @@ let declarative_catalog_lookup_names ?config_path () =
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
   | Some path -> (
-      match Cascade_declarative_hotpath.try_load_partial path with
+      match Keeper_declarative_hotpath.try_load_partial path with
       | Some { snapshot; errors } ->
           log_partial_catalog_errors ~path ~mtime:snapshot.mtime errors;
           let names =
@@ -478,12 +478,12 @@ let resolve_live_result ?config_path raw :
     ~catalog:(catalog_lookup_names ?config_path ()) raw
 
 let required_capability_profile_of_cascade_name name =
-  Cascade_catalog_runtime_cache.with_cache_lock (fun () ->
-    match !Cascade_catalog_runtime_cache.cache.active_snapshot with
+  Keeper_catalog_runtime_cache.with_cache_lock (fun () ->
+    match !Keeper_catalog_runtime_cache.cache.active_snapshot with
     | None -> None
     | Some snapshot -> (
       match
-        Cascade_catalog_runtime_cache.profile_lookup snapshot.profiles name
+        Keeper_catalog_runtime_cache.profile_lookup snapshot.profiles name
       with
       | None -> None
       | Some profile -> profile.required_capability_profile))

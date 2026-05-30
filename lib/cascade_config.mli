@@ -388,7 +388,7 @@ val resolve_api_key_env :
 (** {1 Discovery-Aware Health Filtering} *)
 
 type health_filter_rejection =
-  Cascade_health_filter.health_filter_rejection =
+  Keeper_health_filter.health_filter_rejection =
   | All_missing_api_key of int
   | All_local_unhealthy of { local_count : int; cloud_count : int }
 

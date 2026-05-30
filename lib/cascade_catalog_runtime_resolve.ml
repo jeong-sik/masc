@@ -6,7 +6,7 @@
    profile getters live in [Cascade_catalog_runtime_named_providers]
    on top of the [lookup_active_profile] entry point exported here. *)
 
-open Cascade_catalog_runtime_cache
+open Keeper_catalog_runtime_cache
 module Validate = Cascade_catalog_runtime_validate
 
 let config_path_opt = Validate.config_path_opt

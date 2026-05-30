@@ -104,12 +104,12 @@ let next_fail_open_cascade_for_turn
         | None -> true
         | Some profile_name -> (
           match
-            Cascade_capability_profile.resolve_required_capabilities
+            Keeper_capability_profile.resolve_required_capabilities
               profile_name
           with
           | None -> true
           | Some reqs ->
-            reqs.inline_tool_choice = Cascade_capability_profile.Required)
+            reqs.inline_tool_choice = Keeper_capability_profile.Required)
       in
       if tr_has_required_tool_choice then
         Some (dedupe_keep_order [ base_cascade; tr_cascade ])

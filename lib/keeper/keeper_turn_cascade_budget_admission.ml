@@ -2,15 +2,15 @@
     cascade budget reasoner.
 
     RFC-0158 Phase A: the [retry_admission_denial] type and its JSON codec
-    now live in [Cascade_internal_error] (cascade layer) to avoid a
-    dependency cycle — [Cascade_internal_error] references this type in the
+    now live in [Keeper_internal_error] (cascade layer) to avoid a
+    dependency cycle — [Keeper_internal_error] references this type in the
     [Retry_admission_denied] variant of [masc_internal_error], so the type
     must be defined below the keeper layer.  This module re-exports via
     transparent alias so [Keeper_turn_cascade_budget] and its callers are
     unchanged. *)
 
 type retry_admission_denial =
-  Cascade_internal_error.retry_admission_denial =
+  Keeper_internal_error.retry_admission_denial =
   | Retry_budget_below_min of {
       projected_usable_budget_s : float;
       min_required_s : float;
@@ -31,4 +31,4 @@ let attempt_kind_is_retry = function
   | Retry_attempt -> true
 
 let retry_admission_denial_to_yojson =
-  Cascade_internal_error.retry_admission_denial_to_yojson
+  Keeper_internal_error.retry_admission_denial_to_yojson

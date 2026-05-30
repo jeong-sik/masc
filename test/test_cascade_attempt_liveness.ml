@@ -1,11 +1,11 @@
-(** Tests for [Cascade_attempt_liveness] (RFC-0022 PR-1/4).
+(** Tests for [Keeper_attempt_liveness] (RFC-0022 PR-1/4).
 
     Mirrors RFC §4.5 decision table exhaustively + property tests
     from §8 that are decidable on the pure FSM (the caller-wiring
     properties — L1 lockstep, cancellation cleanup — land with PR-2). *)
 
 open Masc_mcp
-module L = Cascade_attempt_liveness
+module L = Keeper_attempt_liveness
 module C = L.Stream_chunk
 
 let check_state =
@@ -292,7 +292,7 @@ let test_heartbeat_advances_clock () =
 
 let () =
   let case name f = Alcotest.test_case name `Quick f in
-  Alcotest.run "Cascade_attempt_liveness"
+  Alcotest.run "Keeper_attempt_liveness"
     [
       ( "decision_table",
         [

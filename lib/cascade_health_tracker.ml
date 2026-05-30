@@ -14,26 +14,26 @@
 
     @since 0.137.0 *)
 
-let window_sec = Cascade_health_tracker_config.window_sec
-let cooldown_threshold = Cascade_health_tracker_config.cooldown_threshold
-let cooldown_sec = Cascade_health_tracker_config.cooldown_sec
-let hard_quota_cooldown_sec = Cascade_health_tracker_config.hard_quota_cooldown_sec
+let window_sec = Keeper_health_tracker_config.window_sec
+let cooldown_threshold = Keeper_health_tracker_config.cooldown_threshold
+let cooldown_sec = Keeper_health_tracker_config.cooldown_sec
+let hard_quota_cooldown_sec = Keeper_health_tracker_config.hard_quota_cooldown_sec
 let terminal_failure_cooldown_sec =
-  Cascade_health_tracker_config.terminal_failure_cooldown_sec
+  Keeper_health_tracker_config.terminal_failure_cooldown_sec
 
 let soft_rate_limit_cooldown_sec =
-  Cascade_health_tracker_config.soft_rate_limit_cooldown_sec
+  Keeper_health_tracker_config.soft_rate_limit_cooldown_sec
 
 let soft_rate_limit_max_clamp_sec =
-  Cascade_health_tracker_config.soft_rate_limit_max_clamp_sec
+  Keeper_health_tracker_config.soft_rate_limit_max_clamp_sec
 
 let default_capacity_backpressure_backoff_sec =
-  Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec
+  Keeper_health_tracker_config.default_capacity_backpressure_backoff_sec
 
-let latency_ring_size = Cascade_health_tracker_config.latency_ring_size
-let confidence_ring_size = Cascade_health_tracker_config.confidence_ring_size
-let cost_ring_size = Cascade_health_tracker_config.cost_ring_size
-let cooldown_config_for = Cascade_health_tracker_config.cooldown_config_for
+let latency_ring_size = Keeper_health_tracker_config.latency_ring_size
+let confidence_ring_size = Keeper_health_tracker_config.confidence_ring_size
+let cost_ring_size = Keeper_health_tracker_config.cost_ring_size
+let cooldown_config_for = Keeper_health_tracker_config.cooldown_config_for
 
 
 (* ── Types ────────────────────────────────────── *)

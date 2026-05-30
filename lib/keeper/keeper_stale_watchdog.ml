@@ -712,7 +712,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                                recovery probe should not declare the
                                cascade healthy. *)
                             (match
-                               Cascade_health_filter.filter_healthy_strict
+                               Keeper_health_filter.filter_healthy_strict
                                  ~sw:ctx.sw ~net candidates
                              with
                              | Error _rejection -> false

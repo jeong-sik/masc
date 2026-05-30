@@ -237,7 +237,7 @@ val on_discovery_refresh_exception : unit -> unit
 val on_profile_registration_failure : unit -> unit
 (** Tick the profile-registration-failure counter when declarative
     catalog loading calls
-    [Cascade_capability_profile.register_declared_profiles_from_json]
+    [Keeper_capability_profile.register_declared_profiles_from_json]
     returns an Error.  The Error is logged but the catalog
     continues loading without the declared profiles; this counter
     surfaces the silent registration gap. *)

@@ -13,7 +13,7 @@
 (** {1 MASC/OAS structured errors}
 
     Re-exported from {!Cascade_error_classify} (which itself includes
-    {!Cascade_internal_error}). Using [include module type of] instead of a
+    {!Keeper_internal_error}). Using [include module type of] instead of a
     manual type copy so the interface stays structurally identical to the
     implementation's [include Cascade_error_classify]. *)
 

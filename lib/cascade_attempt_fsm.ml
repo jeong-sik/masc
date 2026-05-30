@@ -142,9 +142,9 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
        on the next pass. *)
     let retry_after_sec =
       match retry_after with
-      | Cascade_internal_error.Explicit s -> Some s
-      | Cascade_internal_error.Synthetic_default _
-      | Cascade_internal_error.No_retry_hint -> None
+      | Keeper_internal_error.Explicit s -> Some s
+      | Keeper_internal_error.Synthetic_default _
+      | Keeper_internal_error.No_retry_hint -> None
     in
     Some
       (Cascade_fsm.Call_err
@@ -298,7 +298,7 @@ let resolve_provider_api_key_env_name ~cascade_name ~provider_cfg =
        | Some env_name -> env_name
        | None -> fallback_env)
   in
-  match Cascade_oas_runner.default_config_path () with
+  match Keeper_oas_runner.default_config_path () with
   | Some config_path ->
     let overrides =
       Cascade_config.resolve_api_key_env ~config_path ~name:cascade_name
@@ -894,11 +894,11 @@ let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some (Cascade_error_classify.Capacity_backpressure { retry_after; _ }) ->
     (match retry_after with
-     | Cascade_internal_error.Explicit s when s > 0.0 -> Some (Cbr_explicit s)
-     | Cascade_internal_error.Explicit _ ->
+     | Keeper_internal_error.Explicit s when s > 0.0 -> Some (Cbr_explicit s)
+     | Keeper_internal_error.Explicit _ ->
        Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec)
-     | Cascade_internal_error.Synthetic_default s -> Some (Cbr_synthetic_default s)
-     | Cascade_internal_error.No_retry_hint ->
+     | Keeper_internal_error.Synthetic_default s -> Some (Cbr_synthetic_default s)
+     | Keeper_internal_error.No_retry_hint ->
        Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec))
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)

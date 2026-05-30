@@ -3,7 +3,7 @@
    the corresponding Prometheus counters/gauges.  Probe results are
    advisory: they never reject a validated catalog. *)
 
-open Cascade_catalog_runtime_cache
+open Keeper_catalog_runtime_cache
 
 let provider_kind_string (cfg : Llm_provider.Provider_config.t) =
   Llm_provider.Provider_config.string_of_provider_kind cfg.kind

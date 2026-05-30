@@ -70,13 +70,13 @@ let test_decide_call_err () =
 
 let test_should_cascade () =
   Alcotest.(check bool) "429 cascadeable" true
-    (Masc_mcp.Cascade_health_filter.should_cascade_to_next
+    (Masc_mcp.Keeper_health_filter.should_cascade_to_next
        (Llm_provider.Http_client.HttpError { code = 429; body = "" }));
   Alcotest.(check bool) "400 non-cascadeable" false
-    (Masc_mcp.Cascade_health_filter.should_cascade_to_next
+    (Masc_mcp.Keeper_health_filter.should_cascade_to_next
        (Llm_provider.Http_client.HttpError { code = 400; body = "" }));
   Alcotest.(check bool) "AcceptRejected non-cascadeable" false
-    (Masc_mcp.Cascade_health_filter.should_cascade_to_next
+    (Masc_mcp.Keeper_health_filter.should_cascade_to_next
        (Llm_provider.Http_client.AcceptRejected { reason = "t" }))
 ;;
 

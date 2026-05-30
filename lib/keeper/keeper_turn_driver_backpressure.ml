@@ -5,7 +5,7 @@
 
     @since God file decomposition *)
 
-open Cascade_internal_error
+open Keeper_internal_error
 open Keeper_name
 
 (* Synthetic backoff default for paths where the upstream provides no
@@ -13,7 +13,7 @@ open Keeper_name
    preserved: telemetry shows the value with a synthetic flag rather than a
    laundered explicit hint. *)
 let synthetic_retry_after_sec =
-  Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec
+  Keeper_health_tracker_config.default_capacity_backpressure_backoff_sec
 
 let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.NetworkError

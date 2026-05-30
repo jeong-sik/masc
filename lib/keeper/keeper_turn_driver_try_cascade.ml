@@ -426,7 +426,7 @@ let rec run
            Float.max 0.0
              (Float.min
                 (min_expiry -. now)
-                Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec)
+                Keeper_health_tracker_config.default_capacity_backpressure_backoff_sec)
          in
          if wait_sec > 0.0 then (
            Log.Misc.info
@@ -446,7 +446,7 @@ let rec run
       let provider_label = Cascade_runtime_candidate.provider_label candidate in
       match
         Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
-          ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt ctx.keeper_name)
+          ?agent_name:(Keeper_oas_runner.keeper_agent_name_opt ctx.keeper_name)
           ~tool_requirement:`Required
           ~tools:ctx.tools
           candidate
@@ -637,8 +637,8 @@ let rec run
           , (* a computed client-capacity cooldown is a real backoff, not a
                blind synthetic default *)
             (match retry_after_s with
-             | Some s -> Cascade_internal_error.Explicit s
-             | None -> Cascade_internal_error.No_retry_hint) )
+             | Some s -> Keeper_internal_error.Explicit s
+             | None -> Keeper_internal_error.No_retry_hint) )
         ctx rest last_err
     | (`No_client_capacity | `Acquired _) as capacity_slot ->
     let capacity_release =
@@ -666,33 +666,33 @@ let rec run
            | None -> timeout_resolution.timeout_s)
       | _ -> timeout_resolution.timeout_s
     in
-    let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
+    let liveness_mode = Keeper_attempt_liveness_config.current_mode () in
     let liveness_observer_attached =
       match liveness_mode with
-      | Cascade_attempt_liveness_config.Off -> false
-      | Cascade_attempt_liveness_config.Observe
-      | Cascade_attempt_liveness_config.Enforce ->
+      | Keeper_attempt_liveness_config.Off -> false
+      | Keeper_attempt_liveness_config.Observe
+      | Keeper_attempt_liveness_config.Enforce ->
         true
     in
     let attempt_watchdog_source =
       match liveness_mode, pp_timeout with
-      | Cascade_attempt_liveness_config.Enforce, _ ->
+      | Keeper_attempt_liveness_config.Enforce, _ ->
         "liveness_observer_enforce"
-      | Cascade_attempt_liveness_config.Observe, Some _ ->
+      | Keeper_attempt_liveness_config.Observe, Some _ ->
         "legacy_outer_wall_observe_liveness"
-      | Cascade_attempt_liveness_config.Observe, None ->
+      | Keeper_attempt_liveness_config.Observe, None ->
         "oas_max_execution_time_observe_liveness"
-      | Cascade_attempt_liveness_config.Off, Some _ -> "legacy_outer_wall"
-      | Cascade_attempt_liveness_config.Off, None -> "oas_max_execution_time"
+      | Keeper_attempt_liveness_config.Off, Some _ -> "legacy_outer_wall"
+      | Keeper_attempt_liveness_config.Off, None -> "oas_max_execution_time"
     in
     let liveness_budget_source =
       if liveness_observer_attached then (
         let resolved_budget =
-          Cascade_attempt_liveness_config.budget_for_candidate
-            ~candidate_key:Cascade_attempt_liveness_config.runtime_candidate_key
+          Keeper_attempt_liveness_config.budget_for_candidate
+            ~candidate_key:Keeper_attempt_liveness_config.runtime_candidate_key
         in
         Some
-          (Cascade_attempt_liveness_config.budget_source_label
+          (Keeper_attempt_liveness_config.budget_source_label
              resolved_budget.source))
       else
         None
@@ -705,7 +705,7 @@ let rec run
       ; started_attempt_timeout_source = timeout_resolution.source
       ; started_attempt_watchdog_source = attempt_watchdog_source
       ; started_liveness_mode =
-          Cascade_attempt_liveness_config.mode_label liveness_mode
+          Keeper_attempt_liveness_config.mode_label liveness_mode
       ; started_liveness_budget_source = liveness_budget_source
       }
     in
@@ -803,7 +803,7 @@ let rec run
            available, so a single hung provider can no longer hold the
            whole cascade hostage. On timeout we synthesize the same
            [Error (Api Timeout)] result tuple that the inner
-           [Cascade_attempt_liveness_config.outer_wall_for_attempt]
+           [Keeper_attempt_liveness_config.outer_wall_for_attempt]
            layer would return when active — the cascade run loop then
            moves on to the next candidate (RFC-0197 §"Layer 2" describes
            why the inner layer is None in Enforce mode and why fallback
@@ -930,7 +930,7 @@ let rec run
       match liveness_success_sample with
       | None -> ()
       | Some (candidate_key, sample) ->
-        Cascade_attempt_liveness_config.record_success_sample
+        Keeper_attempt_liveness_config.record_success_sample
           ~candidate_key
           sample
     in

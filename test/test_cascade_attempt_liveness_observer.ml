@@ -1,4 +1,4 @@
-(** Tests for [Cascade_attempt_liveness_observer] (RFC-0022 PR-2/4 §4-6).
+(** Tests for [Keeper_attempt_liveness_observer] (RFC-0022 PR-2/4 §4-6).
 
     Coverage:
     - Counter increments per outcome (kill_total + observed_total).
@@ -10,9 +10,9 @@
       without a terminal stream event (Eio resource ledger). *)
 
 open Masc_mcp
-module L = Cascade_attempt_liveness
-module Cfg = Cascade_attempt_liveness_config
-module Obs = Cascade_attempt_liveness_observer
+module L = Keeper_attempt_liveness
+module Cfg = Keeper_attempt_liveness_config
+module Obs = Keeper_attempt_liveness_observer
 
 (* -- helpers ------------------------------------------------------- *)
 

@@ -5,7 +5,7 @@ val inspect_active :
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
-  (Cascade_catalog_runtime_cache.state, Cascade_catalog_runtime_cache.rejection)
+  (Keeper_catalog_runtime_cache.state, Keeper_catalog_runtime_cache.rejection)
   result
 
 val lookup_active_profile :
@@ -13,9 +13,9 @@ val lookup_active_profile :
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   string ->
-  ( Cascade_catalog_runtime_cache.snapshot
+  ( Keeper_catalog_runtime_cache.snapshot
     * Cascade_name.t
-    * Cascade_catalog_runtime_cache.profile_snapshot,
+    * Keeper_catalog_runtime_cache.profile_snapshot,
     string )
   result
 

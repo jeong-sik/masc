@@ -3,7 +3,7 @@
 
    Implementation lives in submodules under [lib/cascade/]:
 
-   - [Cascade_catalog_runtime_cache]            types + singleton cache state
+   - [Keeper_catalog_runtime_cache]            types + singleton cache state
    - [Cascade_catalog_runtime_probe]            provider liveness probes
    - [Cascade_catalog_runtime_json]             boot-log serialization
    - [Cascade_catalog_runtime_validate]         validate_path_result boot path
@@ -19,13 +19,13 @@
 (* === Types (transparent re-exports) =================================== *)
 
 type candidate_probe_status =
-  Cascade_catalog_runtime_cache.candidate_probe_status =
+  Keeper_catalog_runtime_cache.candidate_probe_status =
   | Probe_ok
   | Probe_skipped of string
   | Probe_not_applicable of string
   | Probe_error of string
 
-type candidate_probe = Cascade_catalog_runtime_cache.candidate_probe = {
+type candidate_probe = Keeper_catalog_runtime_cache.candidate_probe = {
   model_string : string;
   provider_kind : string;
   model_id : string;
@@ -33,13 +33,13 @@ type candidate_probe = Cascade_catalog_runtime_cache.candidate_probe = {
   status : candidate_probe_status;
 }
 
-type candidate_runtime = Cascade_catalog_runtime_cache.candidate_runtime = {
+type candidate_runtime = Keeper_catalog_runtime_cache.candidate_runtime = {
   model_string : string;
   provider_cfg : Llm_provider.Provider_config.t;
   provider_override : Provider_tool_support.runtime_capabilities_override option;
 }
 
-type profile_build = Cascade_catalog_runtime_cache.profile_build = {
+type profile_build = Keeper_catalog_runtime_cache.profile_build = {
   name : string;
   weighted_entries : Cascade_config_loader.weighted_entry list;
   inference_params : Cascade_config_loader.inference_params;
@@ -52,7 +52,7 @@ type profile_build = Cascade_catalog_runtime_cache.profile_build = {
   required_capability_profile : string option;
 }
 
-type snapshot = Cascade_catalog_runtime_cache.snapshot = {
+type snapshot = Keeper_catalog_runtime_cache.snapshot = {
   source_path : string;
   mtime : float;
   validated_at : float;
@@ -60,9 +60,9 @@ type snapshot = Cascade_catalog_runtime_cache.snapshot = {
   default_profile_name : string;
 }
 
-type rejection = Cascade_catalog_runtime_cache.rejection
+type rejection = Keeper_catalog_runtime_cache.rejection
 
-type state = Cascade_catalog_runtime_cache.state =
+type state = Keeper_catalog_runtime_cache.state =
   | Validated of snapshot
   | Validated_with_rejections of {
       snapshot : snapshot;
@@ -136,11 +136,11 @@ let rejection_to_yojson = Cascade_catalog_runtime_json.rejection_to_yojson
 let state_to_yojson = Cascade_catalog_runtime_json.state_to_yojson
 let candidate_probe_to_yojson = Cascade_catalog_runtime_json.candidate_probe_to_yojson
 
-let invalidate_path = Cascade_catalog_runtime_cache.invalidate_path
+let invalidate_path = Keeper_catalog_runtime_cache.invalidate_path
 
 (* #19327/#19340 follow-up: [runtime_required_profile_names] removed (dead). *)
 
 let install_snapshot_for_tests =
-  Cascade_catalog_runtime_cache.install_snapshot_for_tests
+  Keeper_catalog_runtime_cache.install_snapshot_for_tests
 
-let reset_cache_for_tests = Cascade_catalog_runtime_cache.reset_cache_for_tests
+let reset_cache_for_tests = Keeper_catalog_runtime_cache.reset_cache_for_tests

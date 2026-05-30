@@ -198,7 +198,7 @@ let run_try_provider
   let config_result =
     match
       Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
-        ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt ctx.keeper_name)
+        ?agent_name:(Keeper_oas_runner.keeper_agent_name_opt ctx.keeper_name)
         ~tool_requirement:
           (if ctx.require_tool_choice_support || ctx.require_tool_support
            then `Required
@@ -352,15 +352,15 @@ let run_try_provider
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
-    let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
+    let liveness_mode = Keeper_attempt_liveness_config.current_mode () in
     (* MASC stores one neutral runtime-lane budget; concrete provider/model
        identities remain on the OAS side.  Prometheus receives only the public,
        bounded provider bucket for TTFT/inter-chunk grouping. *)
-    let candidate_key = Cascade_attempt_liveness_config.runtime_candidate_key in
+    let candidate_key = Keeper_attempt_liveness_config.runtime_candidate_key in
     let provider_label = Cascade_runtime_candidate.provider_label candidate in
     let liveness_observer_opt =
       match liveness_mode with
-      | Cascade_attempt_liveness_config.Off ->
+      | Keeper_attempt_liveness_config.Off ->
         (* RFC-0095 Phase 0 diagnostic trace — capture Off-mode turns. Combined with
            the existing Observe/Enforce-branch log below, this gives full visibility
            into whether the streaming master switch is the gating factor for
@@ -372,23 +372,23 @@ let run_try_provider
           provider_label
           candidate_key;
         None
-      | Cascade_attempt_liveness_config.Observe | Cascade_attempt_liveness_config.Enforce
+      | Keeper_attempt_liveness_config.Observe | Keeper_attempt_liveness_config.Enforce
         ->
         let resolved_budget =
-          Cascade_attempt_liveness_config.budget_for_candidate ~candidate_key
+          Keeper_attempt_liveness_config.budget_for_candidate ~candidate_key
         in
         Log.Misc.debug
           "cascade_attempt_liveness: candidate=%s provider=%s budget_source=%s ttft=%.1fs \
            inter_chunk=%.1fs wall=%.1fs"
           candidate_key
           provider_label
-          (Cascade_attempt_liveness_config.budget_source_label
+          (Keeper_attempt_liveness_config.budget_source_label
              resolved_budget.source)
-          resolved_budget.budget.Cascade_attempt_liveness.ttft_max
-          resolved_budget.budget.Cascade_attempt_liveness.inter_chunk_max
-          resolved_budget.budget.Cascade_attempt_liveness.attempt_wall_max;
+          resolved_budget.budget.Keeper_attempt_liveness.ttft_max
+          resolved_budget.budget.Keeper_attempt_liveness.inter_chunk_max
+          resolved_budget.budget.Keeper_attempt_liveness.attempt_wall_max;
         let obs =
-          Cascade_attempt_liveness_observer.create
+          Keeper_attempt_liveness_observer.create
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
             ~cascade_label:ctx.cascade_name
@@ -405,16 +405,16 @@ let run_try_provider
     let finalize_liveness () =
       match liveness_observer_opt with
       | None -> ()
-      | Some obs -> Cascade_attempt_liveness_observer.finalize obs
+      | Some obs -> Keeper_attempt_liveness_observer.finalize obs
     in
     let liveness_success_sample () =
       match liveness_observer_opt with
       | None -> None
       | Some obs ->
-        Cascade_attempt_liveness_observer.success_sample_for_candidate obs
+        Keeper_attempt_liveness_observer.success_sample_for_candidate obs
     in
     let liveness_timeout_error failure =
-      let kind = Cascade_attempt_liveness.failure_kind_label failure in
+      let kind = Keeper_attempt_liveness.failure_kind_label failure in
       Agent_sdk.Error.Api
         (Timeout
            { message =
@@ -428,20 +428,20 @@ let run_try_provider
       let stop_liveness_tick () =
         match liveness_observer_opt with
         | None -> ()
-        | Some obs -> Cascade_attempt_liveness_observer.stop_tick_fiber obs
+        | Some obs -> Keeper_attempt_liveness_observer.stop_tick_fiber obs
       in
       let run_attempt () =
         try
           Eio.Switch.run (fun attempt_sw ->
             (match liveness_observer_opt with
              | Some obs ->
-               Cascade_attempt_liveness_observer.register_attempt_switch
+               Keeper_attempt_liveness_observer.register_attempt_switch
                  obs
                  ~sw:attempt_sw
              | None -> ());
             (match liveness_observer_opt, Eio_context.get_clock_opt () with
              | Some obs, Some clock ->
-               Cascade_attempt_liveness_observer.start_tick_fiber
+               Keeper_attempt_liveness_observer.start_tick_fiber
                  obs
                  ~sw:attempt_sw
                  ~clock
@@ -451,7 +451,7 @@ let run_try_provider
               match liveness_observer_opt with
               | None -> ctx.on_event
               | Some obs ->
-                Cascade_attempt_liveness_observer.wrap_on_event obs ctx.on_event
+                Keeper_attempt_liveness_observer.wrap_on_event obs ctx.on_event
             in
             match f ~attempt_sw ~liveness_on_event with
             | result ->
@@ -462,7 +462,7 @@ let run_try_provider
               stop_liveness_tick ();
               Printexc.raise_with_backtrace exn bt)
         with
-        | Cascade_attempt_liveness_observer.Liveness_kill failure ->
+        | Keeper_attempt_liveness_observer.Liveness_kill failure ->
           Error (liveness_timeout_error failure)
         | Eio.Cancel.Cancelled _ as e -> raise e
       in
@@ -476,7 +476,7 @@ let run_try_provider
         Printexc.raise_with_backtrace exn bt
     in
     (match
-       Cascade_config_builder.with_cli_preflight
+       Keeper_config_builder.with_cli_preflight
          ~scope:(Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
          ~config
          ~goal:ctx.goal
@@ -502,7 +502,7 @@ let run_try_provider
                     ctx.goal
                 in
                 let outer_wall_for_provider =
-                  Cascade_attempt_liveness_config.outer_wall_for_attempt
+                  Keeper_attempt_liveness_config.outer_wall_for_attempt
                     ~mode:liveness_mode
                     ~observer_attached:(Option.is_some liveness_observer_opt)
                     ~per_provider_timeout_s

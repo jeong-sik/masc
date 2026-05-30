@@ -13,7 +13,7 @@ open Keeper_name
 (* Sub-module includes (God file decomposition).
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
-include Cascade_oas_runner
+include Keeper_oas_runner
 include Cascade_error_classify
 include Cascade_attempt_fsm
 include Keeper_turn_driver_helpers
@@ -182,7 +182,7 @@ let run_named
            in
            match
              Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
-               ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt keeper_name)
+               ?agent_name:(Keeper_oas_runner.keeper_agent_name_opt keeper_name)
                ~tool_requirement:`Required
                ~tools
                candidate
@@ -495,7 +495,7 @@ let run_named
             ; required_tool_names
             ; provider_rejections =
                 List.map
-                  (fun (r : Cascade_internal_error.provider_rejection) ->
+                  (fun (r : Keeper_internal_error.provider_rejection) ->
                      (r.provider_label, r.reason))
                   provider_rejections
             }

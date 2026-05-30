@@ -97,7 +97,7 @@ let test_keeper_runtime_declared_name_preserves_logical_use_route () =
     (normalize_keeper_runtime_declared_name "tool_required")
 ;;
 
-let safe_lane_cascade_name = Masc_mcp.Cascade_capability_profile.safe_lane_cascade_name
+let safe_lane_cascade_name = Masc_mcp.Keeper_capability_profile.safe_lane_cascade_name
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")

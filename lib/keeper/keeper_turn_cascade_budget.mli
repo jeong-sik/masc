@@ -127,7 +127,7 @@ val provider_retry_budget_available_for_turn :
     ([Retry_admission_denied]) is RFC-deferred. *)
 
 type retry_admission_denial =
-  Cascade_internal_error.retry_admission_denial =
+  Keeper_internal_error.retry_admission_denial =
   | Retry_budget_below_min of {
       projected_usable_budget_s : float;
       min_required_s : float;

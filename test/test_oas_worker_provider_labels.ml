@@ -122,7 +122,7 @@ let check_timeout_opt label expected actual =
 ;;
 
 let local_runtime_timeout_floor_s =
-  Cascade_attempt_liveness.bootstrap.attempt_wall_max
+  Keeper_attempt_liveness.bootstrap.attempt_wall_max
 ;;
 
 let provider_timeout ?(is_last = false) ?configured provider_cfg =

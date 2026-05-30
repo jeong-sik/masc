@@ -5,7 +5,7 @@
     attempts before the liveness observer's attempt-wall could fire.
 
     This module verifies the new contract enforced by
-    {!Cascade_attempt_liveness_config.outer_wall_for_attempt}.
+    {!Keeper_attempt_liveness_config.outer_wall_for_attempt}.
 
     With [Enforce + observer] the outer wall returns [None], and the
     observer drives cancellation. With [Observe / Off + observer] the
@@ -13,8 +13,8 @@
     knob cannot kill a healthy slow stream. *)
 
 open Masc_mcp
-module Cfg = Cascade_attempt_liveness_config
-module L = Cascade_attempt_liveness
+module Cfg = Keeper_attempt_liveness_config
+module L = Keeper_attempt_liveness
 
 let f = Alcotest.float 1e-6
 let opt_f = Alcotest.option f

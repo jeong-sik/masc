@@ -5,11 +5,11 @@
    the [validation_result] and decides whether to install or fall back
    to LKG. *)
 
-open Cascade_catalog_runtime_cache
+open Keeper_catalog_runtime_cache
 module Probe = Cascade_catalog_runtime_probe
 
 type declarative_catalog_info = {
-  declarative_snapshot : Cascade_declarative_hotpath.decl_snapshot option;
+  declarative_snapshot : Keeper_declarative_hotpath.decl_snapshot option;
   declarative_profile_names : string list;
   declarative_parse_errors : Cascade_declarative_parser.parse_error list;
   declarative_errors : Cascade_declarative_adapter.adapter_error list;
@@ -74,7 +74,7 @@ let load_declarative_catalog_info ~config_path =
   | Ok cfg ->
       let catalog = Cascade_declarative_adapter.adapt_config cfg in
       let snapshot =
-        Cascade_declarative_hotpath.adapted_catalog_to_snapshot
+        Keeper_declarative_hotpath.adapted_catalog_to_snapshot
           ~source_path:config_path catalog
       in
       let declarative_parse_errors =
@@ -83,7 +83,7 @@ let load_declarative_catalog_info ~config_path =
       let profile_names =
         match snapshot with
         | Some snap ->
-            Cascade_declarative_hotpath.decl_snapshot_profile_names snap
+            Keeper_declarative_hotpath.decl_snapshot_profile_names snap
         | None -> []
       in
       Some
@@ -95,7 +95,7 @@ let load_declarative_catalog_info ~config_path =
         }
 
 (* RFC-0066 §3.1 Phase 1: profile name discovery flows through the
-   declarative adapter ({!Cascade_declarative_hotpath.try_load_declarative})
+   declarative adapter ({!Keeper_declarative_hotpath.try_load_declarative})
    reading [cascade.toml] as the sole SSOT (RFC-0058 §9.4). *)
 let discover_profile_names ~config_path ~json : string list =
   match load_declarative_catalog_info ~config_path with
@@ -139,7 +139,7 @@ let discover_profile_names ~config_path ~json : string list =
         errs;
       Cascade_metrics.on_profile_discovery
         ~path:"declarative_partial_boot";
-      Cascade_declarative_hotpath.decl_snapshot_profile_names snap
+      Keeper_declarative_hotpath.decl_snapshot_profile_names snap
       |> List.sort_uniq String.compare
   | Some { declarative_errors = errs; _ } ->
       (* Declarative parser ran but produced adapter errors.  Do not fall
@@ -195,10 +195,10 @@ let active_source_state ~config_path =
   Cascade_toml_materializer.source_state ~config_path
 
 let profile_build_of_declarative_profile
-    (profile : Cascade_declarative_hotpath.profile) =
+    (profile : Keeper_declarative_hotpath.profile) =
   let candidates =
     List.map
-      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+      (fun (candidate : Keeper_declarative_hotpath.candidate) ->
         {
           model_string = candidate.model_string;
           provider_cfg = candidate.provider_cfg;
@@ -223,10 +223,10 @@ let validate_profile_static ?declarative_snapshot ~config_path name :
     (profile_build, profile_rejection) result =
   let (_ : string) = config_path in
   match declarative_snapshot with
-  | Some (snapshot : Cascade_declarative_hotpath.decl_snapshot) -> (
+  | Some (snapshot : Keeper_declarative_hotpath.decl_snapshot) -> (
       match
         List.find_opt
-          (fun (profile : Cascade_declarative_hotpath.profile) ->
+          (fun (profile : Keeper_declarative_hotpath.profile) ->
             String.equal profile.name name)
           snapshot.profiles
       with
@@ -247,10 +247,10 @@ let validate_profile_static ?declarative_snapshot ~config_path name :
         }
 
 let profile_build_of_declarative
-    (profile : Cascade_declarative_hotpath.profile) : profile_build =
+    (profile : Keeper_declarative_hotpath.profile) : profile_build =
   let candidates =
     List.map
-      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+      (fun (candidate : Keeper_declarative_hotpath.candidate) ->
         {
           model_string = candidate.model_string;
           provider_cfg = candidate.provider_cfg;
@@ -531,7 +531,7 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                    |> List.sort_uniq String.compare
                  in
                  let decl_names =
-                   Cascade_declarative_hotpath.decl_snapshot_profile_names
+                   Keeper_declarative_hotpath.decl_snapshot_profile_names
                      decl_snap
                  in
                  if json_names <> decl_names then (

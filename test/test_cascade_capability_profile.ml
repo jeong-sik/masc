@@ -3,7 +3,7 @@
     @since RFC-0058 migrated from closed variant to config-driven strings *)
 
 open Alcotest
-module CP = Masc_mcp.Cascade_capability_profile
+module CP = Masc_mcp.Keeper_capability_profile
 module PTS = Masc_mcp.Provider_tool_support
 
 (* Defensive: open the module so record disambiguation picks
@@ -143,7 +143,7 @@ let test_system_cascade_name_predicate () =
     (CP.is_system_cascade_name "")
 
 let () =
-  run "Cascade_capability_profile"
+  run "Keeper_capability_profile"
     [
       ( "string round-trip",
         [

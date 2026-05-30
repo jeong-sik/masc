@@ -1,7 +1,7 @@
 (** D12 — Provenance-preserving typed backoff for [Capacity_backpressure].
 
     A MASC-internal [Capacity_backpressure] carries a typed
-    [Cascade_internal_error.capacity_retry_after]:
+    [Keeper_internal_error.capacity_retry_after]:
 
       - [Explicit s]            a concrete backoff to trust (upstream
                                 Retry-After or a real computed local wait)
@@ -23,7 +23,7 @@
 
 module FSM = Masc_mcp.Cascade_attempt_fsm
 module Classify = Masc_mcp.Cascade_error_classify
-module Internal = Masc_mcp.Cascade_internal_error
+module Internal = Masc_mcp.Keeper_internal_error
 module HT = Masc_mcp.Cascade_health_tracker
 
 let pp_hint fmt = function

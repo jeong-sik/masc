@@ -34,7 +34,7 @@ let split_provider_model (s : string) : (string * string) option =
         if model_id = "" then None else Some (provider_name, model_id)
 
 type declarative_diagnostics = {
-  snapshot : Cascade_declarative_hotpath.decl_snapshot option;
+  snapshot : Keeper_declarative_hotpath.decl_snapshot option;
   parse_errors : Cascade_declarative_parser.parse_error list;
   adapter_errors : Cascade_declarative_adapter.adapter_error list;
 }
@@ -46,7 +46,7 @@ let declarative_diagnostics_for_config_path config_path =
       let catalog = Cascade_declarative_adapter.adapt_config cfg in
       {
         snapshot =
-          Cascade_declarative_hotpath.adapted_catalog_to_snapshot
+          Keeper_declarative_hotpath.adapted_catalog_to_snapshot
             ~source_path:config_path catalog;
         parse_errors = [];
         adapter_errors = catalog.errors;
@@ -219,7 +219,7 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
         }
       in
       (match
-         Cascade_capability_profile.provider_satisfies_named_profile
+         Keeper_capability_profile.provider_satisfies_named_profile
            ~name:required_profile
            dummy_caps
        with
@@ -234,7 +234,7 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
                     [profiles] in cascade.toml."
                    profile
                    required_profile
-                   (Cascade_capability_profile
+                   (Keeper_capability_profile
                     .named_profile_lookup_error_to_string err)
              } ]
        | Ok _ ->
@@ -248,7 +248,7 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
                           Provider_tool_support.capabilities_of_config cfg
                         in
                         (match
-                           Cascade_capability_profile
+                           Keeper_capability_profile
                            .provider_satisfies_named_profile
                              ~name:required_profile
                              caps
@@ -296,10 +296,10 @@ let snapshot_profile_for ~config_path ~profile =
      | _ -> None)
 
 let runtime_profile_of_declarative_profile
-    (p : Cascade_declarative_hotpath.profile) =
+    (p : Keeper_declarative_hotpath.profile) =
   let candidates =
     List.map
-      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+      (fun (candidate : Keeper_declarative_hotpath.candidate) ->
          { Cascade_catalog_runtime.model_string = candidate.model_string
          ; provider_cfg = candidate.provider_cfg
          ; provider_override = candidate.provider_override
@@ -320,9 +320,9 @@ let runtime_profile_of_declarative_profile
 
 let profile_from_declarative_snapshot snapshot ~profile =
   List.find_opt
-    (fun (p : Cascade_declarative_hotpath.profile) ->
+    (fun (p : Keeper_declarative_hotpath.profile) ->
        String.equal p.name profile)
-    snapshot.Cascade_declarative_hotpath.profiles
+    snapshot.Keeper_declarative_hotpath.profiles
   |> Option.map runtime_profile_of_declarative_profile
 
 let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry

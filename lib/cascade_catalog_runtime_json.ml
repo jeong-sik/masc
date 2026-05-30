@@ -10,7 +10,7 @@
    the boot log emits real [model_string], [provider_kind], [model_id]
    and [base_url] values from the probe record. *)
 
-open Cascade_catalog_runtime_cache
+open Keeper_catalog_runtime_cache
 
 
 

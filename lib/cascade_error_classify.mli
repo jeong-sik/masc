@@ -3,7 +3,7 @@
 
     RFC-0142 Phase 2 PR-1: the [masc_internal_error] ADT, its JSON codec, the
     Prometheus accounting, and the per-variant kind/cascade_name labels live in
-    {!Cascade_internal_error}.  This module [include]s that surface so callers
+    {!Keeper_internal_error}.  This module [include]s that surface so callers
     that reference [Cascade_error_classify.masc_internal_error],
     [Cascade_error_classify.Cascade_exhausted], etc. continue to compile
     unchanged.
@@ -12,7 +12,7 @@
 
 (** {1 Re-exported [masc_internal_error] surface} *)
 
-include module type of Cascade_internal_error
+include module type of Keeper_internal_error
 
 (** {1 Construction helpers} *)
 

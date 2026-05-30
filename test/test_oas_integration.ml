@@ -235,7 +235,7 @@ let test_event_bus_keeper_lifecycle_includes_phase () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Cascade_events.publish_keeper_lifecycle
+  Masc_mcp.Keeper_lifecycle_events.publish_keeper_lifecycle
     ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
               { verb = Masc_mcp.Keeper_lifecycle_events.Started;
                 phase = Some Masc_mcp.Keeper_state_machine.Running })
@@ -263,7 +263,7 @@ let test_keeper_snapshot_envelope_agent_name () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Cascade_events.publish_keeper_snapshot
+  Masc_mcp.Keeper_lifecycle_events.publish_keeper_snapshot
     ~keeper_name:"sojin"
     ~generation:4
     ~context_ratio:0.25
@@ -292,7 +292,7 @@ let test_keeper_lifecycle_envelope_agent_name () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Cascade_events.publish_keeper_lifecycle
+  Masc_mcp.Keeper_lifecycle_events.publish_keeper_lifecycle
     ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
               { verb = Masc_mcp.Keeper_lifecycle_events.Started;
                 phase = Some Masc_mcp.Keeper_state_machine.Running })
@@ -383,7 +383,7 @@ let test_oas_event_bridge_broadcasts_lifecycle_to_observers () =
                       "coordinator-lifecycle" ~last_event_id:0);
             Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
-            Cascade_events.publish_keeper_lifecycle
+            Masc_mcp.Keeper_lifecycle_events.publish_keeper_lifecycle
               ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
                         { verb = Masc_mcp.Keeper_lifecycle_events.Started;
                           phase = Some Masc_mcp.Keeper_state_machine.Running })

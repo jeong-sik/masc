@@ -27,7 +27,7 @@ val all_event_names : string list
 
 (** {1 Unified lifecycle event sum type (#8856)}
 
-    Wire vocabulary for [Cascade_events.publish_keeper_lifecycle]. The
+    Wire vocabulary for [publish_keeper_lifecycle]. The
     [Custom_event] case carries an optional phase context that the
     legacy [?phase] argument used to provide; [Phase_event] is the case
     where the wire event name IS the phase name. *)
@@ -38,3 +38,30 @@ type lifecycle_event =
 val lifecycle_event_to_string : lifecycle_event -> string
 val lifecycle_event_phase :
   lifecycle_event -> Keeper_state_machine.phase option
+
+(** {1 Event Bus Publishers}
+
+    Moved from [Cascade_events] to decouple keeper lifecycle observability
+    from the cascade module surface. *)
+
+val publish_keeper_lifecycle :
+  event:lifecycle_event ->
+  keeper_name:string ->
+  detail:string ->
+  unit ->
+  unit
+
+val publish_keeper_dead :
+  keeper_name:string ->
+  reason:string ->
+  restart_count:int ->
+  last_failure_reason:string option ->
+  unit ->
+  unit
+
+val publish_keeper_snapshot :
+  keeper_name:string ->
+  generation:int ->
+  context_ratio:float ->
+  message_count:int ->
+  unit

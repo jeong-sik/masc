@@ -1,9 +1,9 @@
 (** Issue #8575: SSOT for the [event] string emitted by
-    {!Cascade_events.publish_keeper_lifecycle}.
+    {!publish_keeper_lifecycle}.
 
     The supervisor and keepalive together emit twelve distinct event
     names through that function. The docstring on
-    [Cascade_events.publish_keeper_lifecycle] previously listed only five
+    [publish_keeper_lifecycle] previously listed only five
     of them, so operators reading the doc subscribed to the
     phase-derived events ([started] / [stopped] / [crashed] /
     [restarted] / [dead]) and silently missed the cleanup /
@@ -90,7 +90,7 @@ let all_event_names : string list =
     This sum type unifies the two pre-existing typed vocabularies
     ([t] for the custom verbs, [Keeper_state_machine.phase] for the
     4 phase-derived names) so the wire string is computed inside
-    [Cascade_events.publish_keeper_lifecycle] from a fully-typed argument.
+    [publish_keeper_lifecycle] from a fully-typed argument.
     A typo at the call site is now a build error.
 
     Note: importing [Keeper_state_machine] here breaks the
@@ -117,3 +117,62 @@ let lifecycle_event_to_string = function
 let lifecycle_event_phase = function
   | Custom_event { phase; _ } -> phase
   | Phase_event p -> Some p
+
+(** {1 Event Bus Publishers}
+
+    Moved from [Cascade_events] to decouple keeper lifecycle observability
+    from the cascade module surface. Routes through [Masc_event_bus] so the
+    OAS/MASC boundary is preserved. *)
+
+let masc_publish event =
+  match Masc_event_bus.get () with
+  | Some mb -> Agent_sdk_metrics_bridge.publish mb event
+  | None -> ()
+
+(** Publish a keeper keepalive lifecycle event. *)
+let publish_keeper_lifecycle
+    ~(event : lifecycle_event)
+    ~keeper_name ~detail () =
+  let phase_json =
+    match lifecycle_event_phase event with
+    | Some phase ->
+      `String (Keeper_state_machine.phase_to_string phase)
+    | None -> `Null
+  in
+  let event_str = lifecycle_event_to_string event in
+  let payload = `Assoc [
+    ("event", `String event_str);
+    ("keeper_name", `String keeper_name);
+    ("phase", phase_json);
+    ("detail", `String detail);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  masc_publish
+    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
+
+(** Publish a structured keeper-Dead event. *)
+let publish_keeper_dead
+    ~keeper_name ~reason ~restart_count ~last_failure_reason () =
+  let last_failure_json = Json_util.string_opt_to_json last_failure_reason in
+  let payload = `Assoc [
+    ("keeper_name", `String keeper_name);
+    ("reason", `String reason);
+    ("restart_count", `Int restart_count);
+    ("last_failure_reason", last_failure_json);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  masc_publish
+    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.dead", payload)))
+
+(** Publish a keeper snapshot event. *)
+let publish_keeper_snapshot ~keeper_name
+    ~generation ~context_ratio ~message_count =
+  let payload = `Assoc [
+    ("keeper_name", `String keeper_name);
+    ("generation", `Int generation);
+    ("context_ratio", `Float context_ratio);
+    ("message_count", `Int message_count);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  masc_publish
+    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.snapshot", payload)))

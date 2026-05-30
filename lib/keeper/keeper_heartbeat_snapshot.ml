@@ -477,7 +477,7 @@ let write_heartbeat_snapshot
          ~labels:[("keeper", meta_current.name)]
          ();
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
-    Cascade_events.publish_keeper_snapshot
+    Keeper_lifecycle_events.publish_keeper_snapshot
       ~keeper_name:meta_current.name
       ~generation:meta_current.runtime.generation
       ~context_ratio:context_ratio_v

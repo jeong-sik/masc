@@ -998,7 +998,21 @@ let test_posix_end_of_options () =
    | W (Gh { subcommand = "pr"; action = Some "create"; draft = true; rest; _ }) ->
      if not (List.mem "--extra-flag" rest)
      then Alcotest.failf "Gh --: expected --extra-flag in rest, got rest=[%s]" (String.concat "; " rest)
-   | w -> Alcotest.failf "Gh --: expected subcommand=pr action=create draft=true, got %a" pp w)
+   | w -> Alcotest.failf "Gh --: expected subcommand=pr action=create draft=true, got %a" pp w);
+  (* Terminal_notifier: -- title msg — after --, all args are positional *)
+  let tn =
+    of_simple { (base "terminal-notifier") with args = [ lit "-flag"; lit "--"; lit "real-title"; lit "real-msg" ] }
+  in
+  (match tn with
+   | W (Terminal_notifier { title = "real-title"; message = "real-msg"; _ }) -> ()
+   | w -> Alcotest.failf "Terminal_notifier --: expected title=real-title message=real-msg, got %a" pp w);
+  (* Terminal_notifier: -- -dash-title msg — title starts with - after -- *)
+  let tn_dash =
+    of_simple { (base "terminal-notifier") with args = [ lit "--"; lit "-dash-title"; lit "msg" ] }
+  in
+  (match tn_dash with
+   | W (Terminal_notifier { title = "-dash-title"; message = "msg"; _ }) -> ()
+   | w -> Alcotest.failf "Terminal_notifier -- dash: expected title=-dash-title message=msg, got %a" pp w)
 ;;
 
 (* Rg: value-consuming flags (--type, --glob, --max-depth, etc.) *)

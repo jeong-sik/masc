@@ -149,31 +149,69 @@ let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
 
 (** {1 Board Counting} *)
 
-(** Count board posts and comments authored by an agent from JSONL files. *)
+(* Board activity counts feed contributor-quality on the board dashboard,
+   where [compute_reputation] is invoked once per unique post author in a
+   single render. The previous implementation re-read and re-parsed
+   board_posts.jsonl (~3.4MB) and board_comments.jsonl (~1.6MB) on every
+   call, making one board render O(authors x full-file-parse) — measured at
+   ~1.7s for ~50 authors against the live runtime.
+
+   We parse each file once and project an author -> (posts, comments) count
+   table, refreshed only when a source file's mtime changes. One [stat] per
+   call (microseconds) gates the cache, so the per-author calls in a render
+   and warm refresh loops reuse the parse. mtime gating (rather than a
+   file-watch daemon) keeps the projection correct under external multi-agent
+   appends without adding load to fseventsd. *)
+let board_activity_cache :
+    (string, int * int) Hashtbl.t Jsonl_mtime_projection.t =
+  Jsonl_mtime_projection.create ()
+
+let build_board_activity_counts ~posts_path ~comments_path :
+    (string, int * int) Hashtbl.t =
+  let by_author : (string, int * int) Hashtbl.t = Hashtbl.create 256 in
+  let tally select rows =
+    List.iter
+      (fun json ->
+        let author = Safe_ops.json_string ~default:"" "author" json in
+        let posts, comments =
+          Hashtbl.find_opt by_author author |> Option.value ~default:(0, 0)
+        in
+        Hashtbl.replace by_author author (select (posts, comments)))
+      rows
+  in
+  tally (fun (p, c) -> (p + 1, c)) (load_jsonl_safe posts_path);
+  tally (fun (p, c) -> (p, c + 1)) (load_jsonl_safe comments_path);
+  by_author
+
+(* Return the author -> (posts, comments) projection, rebuilding only when a
+   source file's (mtime, size) signature changes. Keyed on the board directory;
+   the shared [Jsonl_mtime_projection] performs the stat-gated reuse and is the
+   appropriate tool here because the board JSONL files change rarely relative to
+   render volume (unlike the streamed keeper feeds, which use the incremental
+   projection). *)
+let board_activity_table board_dir : (string, int * int) Hashtbl.t =
+  let posts_path = Filename.concat board_dir "board_posts.jsonl" in
+  let comments_path = Filename.concat board_dir "board_comments.jsonl" in
+  Jsonl_mtime_projection.get board_activity_cache ~key:board_dir
+    ~sources:[ posts_path; comments_path ]
+    ~build:(fun () -> build_board_activity_counts ~posts_path ~comments_path)
+
+(** Count board posts and comments authored by an agent under [board_dir].
+
+    Served from an mtime-gated projection of board_posts.jsonl and
+    board_comments.jsonl (see {!board_activity_table}). The result is identical
+    to filtering each file by [author = agent_name] but amortizes the parse
+    across every author queried while the files are unchanged. Exposed without
+    the [Coord.config] indirection so the projection can be tested directly. *)
+let count_board_activity_in_dir ~(board_dir : string) ~(agent_name : string) :
+    int * int =
+  Hashtbl.find_opt (board_activity_table board_dir) agent_name
+  |> Option.value ~default:(0, 0)
+
+(** Count board posts and comments authored by an agent. *)
 let count_board_activity (config : Coord.config) ~(agent_name : string)
     : int * int =
-  let board_dir = Coord.masc_dir config in
-  (* Board posts JSONL *)
-  let posts_path = Filename.concat board_dir "board_posts.jsonl" in
-  let posts_rows = load_jsonl_safe posts_path in
-  let post_count =
-    posts_rows
-    |> List.filter (fun json ->
-        let author = Safe_ops.json_string ~default:"" "author" json in
-        String.equal author agent_name)
-    |> List.length
-  in
-  (* Board comments JSONL *)
-  let comments_path = Filename.concat board_dir "board_comments.jsonl" in
-  let comments_rows = load_jsonl_safe comments_path in
-  let comment_count =
-    comments_rows
-    |> List.filter (fun json ->
-        let author = Safe_ops.json_string ~default:"" "author" json in
-        String.equal author agent_name)
-    |> List.length
-  in
-  (post_count, comment_count)
+  count_board_activity_in_dir ~board_dir:(Coord.masc_dir config) ~agent_name
 
 (** {1 Mention Counting} *)
 

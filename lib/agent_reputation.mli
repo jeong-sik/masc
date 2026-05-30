@@ -76,6 +76,14 @@ val default_reputation : agent_name:string -> agent_reputation
 val compute_reputation : Coord.config -> agent_name:string -> agent_reputation
 (** Compute reputation by reading tasks, mentions, and board data. *)
 
+val count_board_activity_in_dir :
+  board_dir:string -> agent_name:string -> int * int
+(** [(posts, comments)] authored by [agent_name], read from board_posts.jsonl
+    and board_comments.jsonl under [board_dir] through an mtime-gated
+    projection: each file is parsed once and reused until its mtime changes.
+    Exposed for tests; the per-render board dashboard reaches this through
+    {!compute_reputation}. *)
+
 val reputation_to_json : agent_reputation -> Yojson.Safe.t
 (** Alias for {!agent_reputation_to_yojson}. *)
 

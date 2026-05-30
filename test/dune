@@ -29,6 +29,10 @@
 
 (tests
  (names
+  test_board_activity_cache
+  test_jsonl_mtime_projection
+  test_jsonl_incremental_projection
+  test_keeper_decision_event
   test_attribution
   test_attribution_tagged
   test_dashboard_attribution
@@ -325,6 +329,10 @@
   test_alignment_score
   test_blocker_class_exhaustiveness)
  (modules
+  test_board_activity_cache
+  test_jsonl_mtime_projection
+  test_jsonl_incremental_projection
+  test_keeper_decision_event
   test_attribution
   test_attribution_tagged
   test_dashboard_attribution

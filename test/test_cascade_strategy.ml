@@ -16,7 +16,7 @@ module CH = Masc_mcp.Keeper_client_capacity_history
 module ST = Masc_mcp.Keeper_strategy_trace
 module Kcp = Masc_mcp.Keeper_turn_profile
 module T = Masc_mcp.Keeper_throttle
-module Cascade_state = Masc_mcp.Cascade_state
+module Cascade_state = Masc_mcp.Keeper_state
 module DC = Masc_mcp.Dashboard_cascade
 module Json = Yojson.Safe.Util
 

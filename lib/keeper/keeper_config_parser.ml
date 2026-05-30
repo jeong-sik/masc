@@ -328,7 +328,7 @@ let maybe_rotate_auto_models ?rotation_scope ~spec models =
   match rotation_scope, models with
   | Some scope, _ :: _ :: _ ->
     let cursor =
-      Cascade_state.rotate_round_robin
+      Keeper_state.rotate_round_robin
         ~cascade:(Printf.sprintf "auto-expand:%s:%s"
                     scope (String.lowercase_ascii spec))
         ~bound:(List.length models)
@@ -345,7 +345,7 @@ let maybe_rotate_weighted_entries
         (fun (e : Keeper_config_loader.weighted_entry) -> e.weight = 1)
         entries ->
     let cursor =
-      Cascade_state.rotate_round_robin
+      Keeper_state.rotate_round_robin
         ~cascade:(Printf.sprintf "entry-order:%s" scope)
         ~bound:(List.length entries)
     in

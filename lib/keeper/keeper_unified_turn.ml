@@ -31,7 +31,6 @@ let run_keeper_cycle
       ?(semaphore_wait_ms = 0)
       ?turn_slot_control
       ?shared_context
-      ?selected_item
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
   =
@@ -149,7 +148,6 @@ let run_keeper_cycle
         Keeper_unified_turn_cascade_resolution.resolve_cascade
           ~meta
           ~phase_opt
-          ~selected_item
           ~append_cascade_routed_manifest:(fun ~cascade_name ~decision ->
             append_manifest ~site:"cascade_routed"
               ~cascade_name
@@ -586,19 +584,6 @@ let run_keeper_cycle
                    (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
                    degraded_retry_info
                in
-               (* RFC-0041 Phase B3: record per-item health after turn completion. *)
-               (match selected_item with
-                | Some (_group, item) ->
-                  let success =
-                    match run_result with
-                    | Ok _ -> true
-                    | Error _ -> false
-                  in
-                  Keeper_health_probe.record_item_result
-                    ~keeper_name:meta.name
-                    ~item_id:item.Cascade_ref.id
-                    ~success
-                | None -> ());
                (match run_result with
                 | Error err when EC.is_input_required_error err ->
                   (* InputRequired: special stop condition (not a failure).

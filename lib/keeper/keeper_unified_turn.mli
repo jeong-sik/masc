@@ -281,7 +281,6 @@ val run_keeper_cycle
   -> ?semaphore_wait_ms:int
   -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> ?shared_context:Agent_sdk.Context.t
-  -> ?selected_item:string * Cascade_ref.cascade_item
   -> unit
   -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
 

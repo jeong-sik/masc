@@ -20,9 +20,7 @@ let fallback_cascade_for_provider_cooldown
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
-  else if
-    String.equal normalized_effective Keeper_config.phase_buffer_cascade_name
-    || String.equal normalized_effective (Keeper_config.default_cascade_name ())
+  else if String.equal normalized_effective (Keeper_config.default_cascade_name ())
   then None
   else Some (Keeper_config.default_cascade_name ())
 

@@ -374,7 +374,7 @@ let normalize_cascade_name raw =
     | _ -> []
   in
   let known =
-    Keeper_config.phase_routing_cascade_names
+    [ Keeper_config.default_cascade_name () ]
     @ catalog
   in
   if List.mem (String.lowercase_ascii normalized) known

@@ -36,8 +36,8 @@ let decide_phase_buffer_liveness
     Keeper_cascade_profile.normalize_declared_name effective_cascade
   in
   if
-    (not (String.equal normalized_effective Keeper_config.phase_buffer_cascade_name))
-    || String.equal normalized_base Keeper_config.phase_buffer_cascade_name
+    (not (String.equal normalized_effective (Keeper_config.default_cascade_name ())))
+    || String.equal normalized_base (Keeper_config.default_cascade_name ())
   then Keep_effective_cascade normalized_effective
   else (
     let probeable_urls =

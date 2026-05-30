@@ -155,7 +155,7 @@ let risk_of_keeper (k : Tool_name.Keeper.t) : risk_level =
   | Tasks_list | Time_now | Tool_search | Tools_list | Voice_agent
   | Voice_listen | Voice_session_end | Voice_sessions | Voice_speak -> Low
   | Task_claim | Task_create | Voice_session_start -> Medium
-  | Board_sub_board_create | Board_sub_board_update | Fs_edit -> High
+  | Board_sub_board_create | Board_sub_board_update | Fs_edit | Fs_write -> High
   | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
 ;;
 

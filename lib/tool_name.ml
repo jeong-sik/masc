@@ -42,6 +42,7 @@ module Keeper = struct
     | Broadcast
     | Context_status
     | Fs_edit
+    | Fs_write
     | Fs_read
     | Ide_annotate
     | Handoff
@@ -89,6 +90,7 @@ module Keeper = struct
     | Broadcast -> "keeper_broadcast"
     | Context_status -> "keeper_context_status"
     | Fs_edit -> "tool_edit_file"
+    | Fs_write -> "tool_write_file"
     | Fs_read -> "tool_read_file"
     | Ide_annotate -> "keeper_ide_annotate"
     | Handoff -> "keeper_handoff"
@@ -136,7 +138,8 @@ module Keeper = struct
     | "keeper_board_sub_board_update" -> Some Board_sub_board_update
     | "keeper_broadcast" -> Some Broadcast
     | "keeper_context_status" -> Some Context_status
-    | "tool_edit_file" | "tool_write_file" -> Some Fs_edit
+    | "tool_edit_file" -> Some Fs_edit
+    | "tool_write_file" -> Some Fs_write
     | "tool_read_file" -> Some Fs_read
     | "keeper_ide_annotate" -> Some Ide_annotate
     | "keeper_handoff" -> Some Handoff

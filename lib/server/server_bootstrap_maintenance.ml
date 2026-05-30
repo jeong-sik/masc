@@ -44,7 +44,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      object per tick to base_path/cascade_trust/YYYY-MM/DD.jsonl.  Phase 1
      (in-memory trust_score) consumes these snapshots offline to calibrate
      reward / decay defaults instead of magic numbers. *)
-  Cascade_trust_persist.start_snapshot_fiber
+  Keeper_trust_persist.start_snapshot_fiber
     ~sw
     ~clock
     ~base_path:state.room_config.base_path;

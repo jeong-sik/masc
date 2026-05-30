@@ -56,8 +56,8 @@ let agent_config_of_worker_meta
   ; max_tokens = Some max_tokens
   ; max_turns = effective_max_turns meta
   ; temperature = Some Llm_provider.Constants.Inference_profile.worker_default.temperature
-  ; top_p = Some Cascade_worker_defaults.top_p
-  ; top_k = Some Cascade_worker_defaults.top_k
+  ; top_p = Some Keeper_worker_defaults.top_p
+  ; top_k = Some Keeper_worker_defaults.top_k
   ; (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
        cloud providers (Groq, GLM) reject the field itself with
        "Invalid request: property 'min_p' is unsupported". OAS capability
@@ -158,7 +158,7 @@ let build_agent
     | None ->
       { Agent_sdk.Guardrails.tool_filter = AllowList tool_names
       ; max_tool_calls_per_turn =
-          Some Cascade_worker_defaults.max_tool_calls_per_turn
+          Some Keeper_worker_defaults.max_tool_calls_per_turn
       }
   in
   let builder =
@@ -171,8 +171,8 @@ let build_agent
     | None -> b)
     |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_temperature Llm_provider.Constants.Inference_profile.worker_default.temperature
-    |> Agent_sdk.Builder.with_top_p Cascade_worker_defaults.top_p
-    |> Agent_sdk.Builder.with_top_k Cascade_worker_defaults.top_k
+    |> Agent_sdk.Builder.with_top_p Keeper_worker_defaults.top_p
+    |> Agent_sdk.Builder.with_top_k Keeper_worker_defaults.top_k
     (* with_min_p intentionally omitted — see agent_config_of_worker_meta
        above for the reason. min_p of 0.0 is a no-op and cloud providers
        (Groq, GLM) reject the field itself. *)

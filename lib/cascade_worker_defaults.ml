@@ -1,3 +1,2 @@
-let top_p = 0.95
-let top_k = 20
-let max_tool_calls_per_turn = 12
+(** Re-export from Keeper_worker_defaults. @deprecated Use Keeper_worker_defaults directly. *)
+include Keeper_worker_defaults

@@ -106,11 +106,11 @@ val parse_weighted_entries :
 (** Typed failure modes from {!parse_model_string_result}.
 
     Replaces the previous [string] error payload so downstream callers
-    (notably {!Cascade_catalog_validator}) can match the
+    (notably {!Keeper_catalog_validator}) can match the
     [Provider_unavailable] case structurally rather than via a
     "unavailable" substring scan on the error message — the RFC-0088
     §"String/Substring 분류기" anti-pattern that was the original reason
-    for {!Cascade_catalog_validator.is_provider_unavailable_error}.
+    for {!Keeper_catalog_validator.is_provider_unavailable_error}.
 
     Use {!parse_error_to_string} when a human-facing message is needed
     (e.g. surfacing through an MCP tool boundary). *)

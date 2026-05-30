@@ -1,10 +1,10 @@
-(** Unit tests for [Masc_mcp.Cascade_saturation_signal].
+(** Unit tests for [Masc_mcp.Keeper_saturation_signal].
 
     RFC-0153 Phase A.1. Phase A.1 단독 module은 행동 변경이 없으므로
     test는 *직렬화 + equality + exhaustive kind* 검증만 수행. caller
     integration 은 Phase A.2 의 별도 test 가 다룬다. *)
 
-module S = Masc_mcp.Cascade_saturation_signal
+module S = Masc_mcp.Keeper_saturation_signal
 
 let s = Alcotest.testable S.pp S.equal
 

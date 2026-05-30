@@ -67,13 +67,13 @@ let recommendation_rationale ~provider_key ~trust_score ~events ~top_count actio
 (* Classifier — see RFC-0009 §"Phase 2a".
 
    The provider_info record no longer stores a raw [trust_score], so this
-   derives it from the live tracker snapshot using [Cascade_trust.trust_score].
+   derives it from the live tracker snapshot using [Keeper_trust.trust_score].
    Recommendations stay observation-only: this module never mutates config. *)
 let classify_recommendation (info : Health.provider_info) : recommendation option =
   if info.events_in_window <= 0
   then None
   else (
-    let trust_score = Cascade_trust.trust_score info in
+    let trust_score = Keeper_trust.trust_score info in
     let top_fingerprint, same_fingerprint_count =
       match top_failure_fingerprint info with
       | Some (fingerprint, count) -> Some fingerprint, count

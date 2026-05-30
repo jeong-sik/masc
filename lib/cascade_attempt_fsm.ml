@@ -794,11 +794,11 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
 
 let classify_saturation_signal_kind
     (err : Agent_sdk.Error.sdk_error) :
-    Cascade_saturation_signal.kind option =
+    Keeper_saturation_signal.kind option =
   let typed_kind =
     match Cascade_error_classify.classify_masc_internal_error err with
     | Some (Cascade_error_classify.Provider_timeout _) ->
-        Some Cascade_saturation_signal.K_time_cap_fired
+        Some Keeper_saturation_signal.K_time_cap_fired
     | _ -> None
   in
   match typed_kind with
@@ -806,7 +806,7 @@ let classify_saturation_signal_kind
   | None -> (
     match err with
     | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
-        Some Cascade_saturation_signal.K_provider_rate_limited
+        Some Keeper_saturation_signal.K_provider_rate_limited
     | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
@@ -837,7 +837,7 @@ let maybe_emit_cascade_saturation_signal ~cascade_name ~provider:_ err =
           Keeper_metrics.(to_string CascadeSaturationSignal)
           ~labels:
             [
-              (label_kind, Cascade_saturation_signal.kind_to_string kind);
+              (label_kind, Keeper_saturation_signal.kind_to_string kind);
               (label_cascade, cascade_name_str);
             ]
           ()

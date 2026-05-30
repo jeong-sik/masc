@@ -1,6 +1,6 @@
 (** Cascade configuration facade — inlined from sub-modules. *)
 
-include Cascade_model_resolve
+include Keeper_model_resolve
 include Keeper_config_loader
 include Keeper_config_provider_binding
 include Keeper_config_parser

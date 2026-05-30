@@ -7,7 +7,7 @@
 
 open Alcotest
 
-module Model_resolve = Masc_mcp.Cascade_model_resolve
+module Model_resolve = Masc_mcp.Keeper_model_resolve
 
 let with_provider_catalog json f =
   match Llm_provider.Provider_catalog.of_json (Yojson.Safe.from_string json) with

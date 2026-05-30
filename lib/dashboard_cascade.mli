@@ -228,7 +228,7 @@ val zero_provider_info : string -> Cascade_health_tracker.provider_info
     *_latency_ms, request_count) from
     {!Model_inference_metrics.provider_rollup}; otherwise those fields
     are [null].  [trust_score] is derived from
-    {!Cascade_trust.trust_score}; [health_score] is the rounded
+    {!Keeper_trust.trust_score}; [health_score] is the rounded
     percentage form used by the dashboard. *)
 val provider_entry_to_json
   :  declared:bool
@@ -342,7 +342,7 @@ val declared_provider_schemes_of_config : ?config_path:string -> unit -> string 
     @since 0.9.9 *)
 val client_capacity_json : unit -> Yojson.Safe.t
 
-(** JSON snapshot of the {!Cascade_client_capacity_history} ring
+(** JSON snapshot of the {!Keeper_client_capacity_history} ring
     buffer — per-event transitions (acquire / release / capacity-full
     rejection) recorded by the client-capacity semaphore.
 

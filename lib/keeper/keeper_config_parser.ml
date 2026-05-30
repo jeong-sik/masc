@@ -33,7 +33,7 @@ let split_provider_model (s : string) : (string * string) option =
 (** Build a {!Llm_provider.Provider_config.t} for "custom:model@url" specs. *)
 let make_custom_config ~temperature ~max_tokens ?system_prompt
     ?supports_tool_choice_override ?keep_alive ?num_ctx model_id =
-  let actual_model, base_url = Cascade_model_resolve.parse_custom_model model_id in
+  let actual_model, base_url = Keeper_model_resolve.parse_custom_model model_id in
   if actual_model = "" then None
   else Some (Llm_provider.Provider_config.make
                ~kind:Provider_d_compat
@@ -124,7 +124,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   in
   let headers = Binding.headers_with_auth ~kind:defaults.kind ~api_key in
   (* Keep runtime model selection on the same resolution path as the
-     provenance helpers in [Cascade_model_resolve]. Local providers still
+     provenance helpers in [Keeper_model_resolve]. Local providers still
      inject provider-specific discovery so routing stays isolated by
      endpoint (e.g. ollama:auto must not pick up llama-server models). *)
   let discover =
@@ -138,8 +138,8 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
     else None
   in
   let model_resolution =
-    Cascade_model_resolve.resolve_auto_model ?discover provider_name
-      (Cascade_model_resolve.model_selector_of_string model_id)
+    Keeper_model_resolve.resolve_auto_model ?discover provider_name
+      (Keeper_model_resolve.model_selector_of_string model_id)
   in
   let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =
@@ -361,7 +361,7 @@ let expand_auto_model_string ?rotation_scope (s : string) : string list =
   match split_provider_model trimmed with
   | Some (provider_name, model_id)
     when String_util.equals_ci model_id "auto" -> (
-      match Cascade_model_resolve.auto_models_for_cascade_prefix provider_name with
+      match Keeper_model_resolve.auto_models_for_cascade_prefix provider_name with
       | Some models when models <> [] ->
           expand_provider_auto ?rotation_scope ~spec:trimmed provider_name models
       | _ -> [ trimmed ])

@@ -2,7 +2,7 @@
 
     Projects the per-URL/sentinel slot table maintained by
     {!Keeper_client_capacity} and the ring buffer of acquire/release
-    events from {!Cascade_client_capacity_history} into dashboard JSON. *)
+    events from {!Keeper_client_capacity_history} into dashboard JSON. *)
 
 open Dashboard_cascade_helpers
 
@@ -76,12 +76,12 @@ let client_capacity_json () =
 (* ── Client capacity history projection ─────────────────── *)
 
 let event_kind_to_string = function
-  | Cascade_client_capacity_history.Acquired -> "acquired"
+  | Keeper_client_capacity_history.Acquired -> "acquired"
   | Released -> "released"
   | Rejected_full -> "rejected_full"
 ;;
 
-let history_event_to_json (ev : Cascade_client_capacity_history.event) : Yojson.Safe.t =
+let history_event_to_json (ev : Keeper_client_capacity_history.event) : Yojson.Safe.t =
   `Assoc
     [ "ts", `Float ev.ts
     ; "key", `String ev.key
@@ -91,7 +91,7 @@ let history_event_to_json (ev : Cascade_client_capacity_history.event) : Yojson.
 ;;
 
 let client_capacity_history_json ?limit ?kind ?since_ts () =
-  let events = Cascade_client_capacity_history.snapshot ?limit ?kind ?since_ts () in
+  let events = Keeper_client_capacity_history.snapshot ?limit ?kind ?since_ts () in
   let generated_at = Masc_domain.now_iso () in
   `Assoc
     [ "updated_at", `String generated_at
@@ -101,9 +101,9 @@ let client_capacity_history_json ?limit ?kind ?since_ts () =
     ; ( "retention"
       , retention_json
           ~scope:"cascade_client_capacity_history"
-          ~producer:"Cascade_client_capacity_history.record"
+          ~producer:"Keeper_client_capacity_history.record"
           ~store_kind:"process_ring_buffer"
-          ~ring_capacity:(Cascade_client_capacity_history.capacity ())
+          ~ring_capacity:(Keeper_client_capacity_history.capacity ())
           ~cache_policy:"uncached; reads the newest entries from the process ring buffer"
           () )
     ; ( "query"

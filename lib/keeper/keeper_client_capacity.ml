@@ -89,7 +89,7 @@ let try_acquire url =
       let current = Atomic.get e.active in
       if current >= e.max_concurrent then begin
         (* Slot full: record for observability before returning. *)
-        Cascade_client_capacity_history.record {
+        Keeper_client_capacity_history.record {
           ts = Unix.gettimeofday ();
           key = url;
           kind = Rejected_full;
@@ -98,7 +98,7 @@ let try_acquire url =
         Full { retry_after_s = Some default_retry_after_sec }
       end
       else if Atomic.compare_and_set e.active current (current + 1) then (
-        Cascade_client_capacity_history.record {
+        Keeper_client_capacity_history.record {
           ts = Unix.gettimeofday ();
           key = url;
           kind = Acquired;
@@ -110,7 +110,7 @@ let try_acquire url =
             (* Decrement once, ensure no underflow from double release
                even though the flag guards us. *)
             let prev = Atomic.fetch_and_add e.active (-1) in
-            Cascade_client_capacity_history.record {
+            Keeper_client_capacity_history.record {
               ts = Unix.gettimeofday ();
               key = url;
               kind = Released;

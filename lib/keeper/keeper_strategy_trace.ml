@@ -35,7 +35,7 @@ let resolve_capacity () =
   in
   max min_capacity (min max_capacity from_env)
 
-(* Ring buffer: same invariants as Cascade_client_capacity_history. *)
+(* Ring buffer: same invariants as Keeper_client_capacity_history. *)
 
 let cap_ref = ref 0
 let buf : event option array ref = ref [||]

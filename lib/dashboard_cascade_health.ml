@@ -69,7 +69,7 @@ let provider_entry_to_json
       (info : Health.provider_info)
   : Yojson.Safe.t
   =
-  let trust_score = Cascade_trust.trust_score info in
+  let trust_score = Keeper_trust.trust_score info in
   let health_score =
     let score = Float.max 0.0 (Float.min 1.0 trust_score) in
     int_of_float (floor ((score *. 100.0) +. 0.5))

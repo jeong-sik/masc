@@ -39,11 +39,11 @@ type t = {
   sandbox_preflight : Yojson.Safe.t option;
 }
 
-type catalog_issue_severity = Cascade_catalog_validator.severity =
+type catalog_issue_severity = Keeper_catalog_validator.severity =
   | Catalog_warn
   | Catalog_error
 
-type catalog_issue = Cascade_catalog_validator.issue = {
+type catalog_issue = Keeper_catalog_validator.issue = {
   profile : string option;
   severity : catalog_issue_severity;
   message : string;
@@ -139,10 +139,10 @@ let diagnose_cascade_catalog ~active_config_root =
     }
   else
     let profiles =
-      Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path
+      Keeper_catalog_validator.discover_profiles_for_diagnostics ~config_path
     in
     let validator_issues =
-      Cascade_catalog_validator.diagnose_catalog_for_diagnostics ~config_path
+      Keeper_catalog_validator.diagnose_catalog_for_diagnostics ~config_path
     in
     let issues = validator_issues in
     if issues = [] then

@@ -18,7 +18,7 @@
     - Drop-oldest on overflow: recording into a full ring overwrites
       the oldest slot in place, no allocation on steady state.
     - [record] and [snapshot] are thread-safe via a plain stdlib
-      [Mutex] (same pattern as {!Cascade_client_capacity_history}).
+      [Mutex] (same pattern as {!Keeper_client_capacity_history}).
     - [snapshot] returns events newest-first so the dashboard can
       render without a reverse pass.
 

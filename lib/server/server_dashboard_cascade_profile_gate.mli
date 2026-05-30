@@ -2,7 +2,7 @@
     profiles are assignable to a keeper.
 
     Pure derivation pipeline over [Cascade_catalog_runtime] (preferred)
-    + [Cascade_catalog_validator] (fallback on snapshot unavailability)
+    + [Keeper_catalog_validator] (fallback on snapshot unavailability)
     + [Keeper_turn_profile.keeper_catalog_names] (keeper-assignable
     filter). *)
 

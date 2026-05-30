@@ -4,7 +4,7 @@
     boundary contract without pinning real vendor model catalogs. *)
 
 open Alcotest
-module R = Masc_mcp.Cascade_model_resolve
+module R = Masc_mcp.Keeper_model_resolve
 module C = Masc_mcp.Cascade_config
 module State = Masc_mcp.Cascade_state
 module H = Masc_mcp.Cascade_health_tracker
@@ -395,7 +395,7 @@ let test_order_weighted_entries_cooldown_is_provider_scoped () =
 let () =
   install_synthetic_catalog ();
   run
-    "Cascade_model_resolve"
+    "Keeper_model_resolve"
     [ ( "generic auto"
       , [ test_case "api auto binding default" `Quick test_api_auto_uses_binding_default
         ; test_case "api env default provenance" `Quick test_api_env_default_provenance

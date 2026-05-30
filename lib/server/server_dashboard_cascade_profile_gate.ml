@@ -16,7 +16,7 @@
     profile-classification pipeline that feeds the dashboard cascade
     assignment UI; runtime snapshot ([Cascade_catalog_runtime]) is
     consulted first, with a fallback to the on-disk validator
-    ([Cascade_catalog_validator]) when the snapshot is unavailable. *)
+    ([Keeper_catalog_validator]) when the snapshot is unavailable. *)
 
 type t = {
   valid_profiles : string list;
@@ -37,7 +37,7 @@ let compute () : t =
     match config_path with
     | None -> []
     | Some path ->
-        Cascade_catalog_validator.error_messages_by_profile
+        Keeper_catalog_validator.error_messages_by_profile
           ~config_path:path
   in
   match Cascade_catalog_runtime.known_profile_names () with
@@ -62,7 +62,7 @@ let compute () : t =
         (match config_path with
          | None -> raw_validated_profiles
          | Some path ->
-             Cascade_catalog_validator.discover_profiles_for_diagnostics
+             Keeper_catalog_validator.discover_profiles_for_diagnostics
                ~config_path:path)
         |> List.sort_uniq String.compare
       in
@@ -90,7 +90,7 @@ let compute () : t =
         (match config_path with
          | None -> []
          | Some path ->
-             Cascade_catalog_validator.discover_profiles_for_diagnostics
+             Keeper_catalog_validator.discover_profiles_for_diagnostics
                ~config_path:path)
         |> List.sort_uniq String.compare
       in

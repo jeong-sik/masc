@@ -90,7 +90,7 @@ type cascade_capabilities =
           **Current data flow (parsed-only for this field).** The
           tool/event support cutover (#14659) is now complete, but this
           field remains parsed-only.
-          [Cascade_catalog_validator.codex_with_bound_actor_only_issue]
+          [Keeper_catalog_validator.codex_with_bound_actor_only_issue]
           still reads the local provider-tool support projection.
 
           A follow-up cutover will route provider-tool policy for this

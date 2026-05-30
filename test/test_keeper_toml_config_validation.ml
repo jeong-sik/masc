@@ -614,15 +614,15 @@ target = "provider_a.qwen3"
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   let issues =
-    Masc_mcp.Cascade_catalog_validator.diagnose_catalog
+    Masc_mcp.Keeper_catalog_validator.diagnose_catalog
       ~config_path:cascade_path
   in
   let has_adapter_error =
     List.exists
-      (fun (issue : Masc_mcp.Cascade_catalog_validator.issue) ->
+      (fun (issue : Masc_mcp.Keeper_catalog_validator.issue) ->
          match issue.severity with
-         | Masc_mcp.Cascade_catalog_validator.Catalog_warn -> false
-         | Masc_mcp.Cascade_catalog_validator.Catalog_error ->
+         | Masc_mcp.Keeper_catalog_validator.Catalog_warn -> false
+         | Masc_mcp.Keeper_catalog_validator.Catalog_error ->
              contains
                ~needle:"Declarative cascade adapter error"
                issue.message
@@ -648,15 +648,15 @@ tools-support = true
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   let issues =
-    Masc_mcp.Cascade_catalog_validator.diagnose_catalog
+    Masc_mcp.Keeper_catalog_validator.diagnose_catalog
       ~config_path:cascade_path
   in
   let has_parse_error =
     List.exists
-      (fun (issue : Masc_mcp.Cascade_catalog_validator.issue) ->
+      (fun (issue : Masc_mcp.Keeper_catalog_validator.issue) ->
          match issue.severity with
-         | Masc_mcp.Cascade_catalog_validator.Catalog_warn -> false
-         | Masc_mcp.Cascade_catalog_validator.Catalog_error ->
+         | Masc_mcp.Keeper_catalog_validator.Catalog_warn -> false
+         | Masc_mcp.Keeper_catalog_validator.Catalog_error ->
              contains
                ~needle:"Declarative cascade parse error"
                issue.message

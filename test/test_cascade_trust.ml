@@ -1,4 +1,4 @@
-(** Regression tests for Cascade_trust — kill switch + trust computation.
+(** Regression tests for Keeper_trust — kill switch + trust computation.
 
     Tests the trust score formula with controlled provider_info records,
     verifying that:
@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module CT = Masc_mcp.Cascade_trust
+module CT = Masc_mcp.Keeper_trust
 module HT = Masc_mcp.Cascade_health_tracker
 
 let info ?(success_rate = 1.0) ?(consecutive_failures = 0)

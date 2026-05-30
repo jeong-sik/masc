@@ -234,7 +234,7 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
 let invalid_profiles_of_config_path = function
   | None -> []
   | Some path ->
-    Cascade_catalog_validator.error_messages_by_profile ~config_path:path
+    Keeper_catalog_validator.error_messages_by_profile ~config_path:path
     |> invalid_profiles_with_internal_names
 ;;
 
@@ -324,7 +324,7 @@ let config_json ?base_path () =
       match config_path with
       | None -> []
       | Some path ->
-        Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path:path
+        Keeper_catalog_validator.discover_profiles_for_diagnostics ~config_path:path
     in
     let add_profile_name (acc, seen) name =
       let canonical = Keeper_turn_profile.canonicalize name in

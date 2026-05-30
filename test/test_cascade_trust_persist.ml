@@ -1,4 +1,4 @@
-(** Unit tests for [Cascade_trust_persist].
+(** Unit tests for [Keeper_trust_persist].
 
     Verifies the snapshot-to-JSONL contract without spinning a real
     fiber: each test creates a temp base_path, mutates the global
@@ -12,7 +12,7 @@
 
 open Alcotest
 module H = Masc_mcp.Cascade_health_tracker
-module P = Masc_mcp.Cascade_trust_persist
+module P = Masc_mcp.Keeper_trust_persist
 
 let kind value = H.error_kind_of_string value
 

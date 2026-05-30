@@ -95,13 +95,13 @@ val has_blocking_warning : t -> bool
 
 (** {1 Catalog issue re-exports} *)
 
-type catalog_issue_severity = Cascade_catalog_validator.severity =
+type catalog_issue_severity = Keeper_catalog_validator.severity =
   | Catalog_warn
   | Catalog_error
 (** Severity grade for cascade catalog issues.  Re-exported with
     type identity preserved. *)
 
-type catalog_issue = Cascade_catalog_validator.issue = {
+type catalog_issue = Keeper_catalog_validator.issue = {
   profile : string option;
   severity : catalog_issue_severity;
   message : string;

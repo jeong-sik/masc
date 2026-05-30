@@ -36,7 +36,7 @@ let resolve (spec : string) : resolution =
          "malformed spec %S: expected \"provider:model\" or \"custom:model@url\""
          spec)
   | Some ("custom", rest) ->
-    let model_id, base_url = Cascade_model_resolve.parse_custom_model rest in
+    let model_id, base_url = Keeper_model_resolve.parse_custom_model rest in
     if model_id = "" then
       Unknown
         (Printf.sprintf "malformed custom spec %S: empty model id" spec)

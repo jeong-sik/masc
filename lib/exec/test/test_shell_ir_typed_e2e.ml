@@ -366,6 +366,80 @@ let test_privileged_commands () =
     ]
 ;;
 
+let test_file_operations () =
+  List.iter
+    (fun (cmd, expected) -> check_ctor cmd expected)
+    [ "cp file1 file2", "Cp"
+    ; "cp -r dir1 dir2", "Cp"
+    ; "cp -rf src dst", "Cp"
+    ; "cp -p file1 file2", "Cp"
+    ; "mv old new", "Mv"
+    ; "mv -f old new", "Mv"
+    ; "mv -n old new", "Mv"
+    ; "ln -s target link", "Ln"
+    ; "ln -sf target link", "Ln"
+    ; "touch file.txt", "Touch"
+    ; "touch -c file.txt", "Touch"
+    ; "touch -a file.txt", "Touch"
+    ; "tee output.log", "Tee"
+    ; "tee -a output.log", "Tee"
+    ; "awk '{print $1}' file.txt", "Awk"
+    ; "xargs rm", "Xargs"
+    ; "xargs -n 1 echo", "Xargs"
+    ]
+;;
+
+let test_cp_field_values () =
+  let check_cp cmd ~expected_recursive ~expected_force ~expected_preserve =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Cp { recursive; force; preserve; _ }) ->
+      check bool (Printf.sprintf "\"%s\" → recursive" cmd) expected_recursive recursive;
+      check bool (Printf.sprintf "\"%s\" → force" cmd) expected_force force;
+      check bool (Printf.sprintf "\"%s\" → preserve" cmd) expected_preserve preserve
+    | _ -> failf "expected Cp for: %s" cmd
+  in
+  check_cp "cp a b" ~expected_recursive:false ~expected_force:false ~expected_preserve:false;
+  check_cp "cp -r a b" ~expected_recursive:true ~expected_force:false ~expected_preserve:false;
+  check_cp "cp -rf a b" ~expected_recursive:true ~expected_force:true ~expected_preserve:false;
+  check_cp "cp -rfp a b" ~expected_recursive:true ~expected_force:true ~expected_preserve:true;
+  check_cp "cp -R a b" ~expected_recursive:true ~expected_force:false ~expected_preserve:false
+;;
+
+let test_mv_field_values () =
+  let check_mv cmd ~expected_force ~expected_no_clobber =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Mv { force; no_clobber; _ }) ->
+      check bool (Printf.sprintf "\"%s\" → force" cmd) expected_force force;
+      check bool (Printf.sprintf "\"%s\" → no_clobber" cmd) expected_no_clobber no_clobber
+    | _ -> failf "expected Mv for: %s" cmd
+  in
+  check_mv "mv a b" ~expected_force:false ~expected_no_clobber:false;
+  check_mv "mv -f a b" ~expected_force:true ~expected_no_clobber:false;
+  check_mv "mv -n a b" ~expected_force:false ~expected_no_clobber:true;
+  check_mv "mv -fn a b" ~expected_force:true ~expected_no_clobber:true
+;;
+
+let test_ln_field_values () =
+  let check_ln cmd ~expected_symbolic ~expected_force =
+    let simple = parse_simple cmd in
+    let typed = Shell_ir_typed.of_simple simple in
+    match typed with
+    | Shell_ir_typed.W (Shell_ir_typed.Ln { symbolic; force; _ }) ->
+      check bool (Printf.sprintf "\"%s\" → symbolic" cmd) expected_symbolic symbolic;
+      check bool (Printf.sprintf "\"%s\" → force" cmd) expected_force force
+    | _ -> failf "expected Ln for: %s" cmd
+  in
+  check_ln "ln target link" ~expected_symbolic:false ~expected_force:false;
+  check_ln "ln -s target link" ~expected_symbolic:true ~expected_force:false;
+  check_ln "ln -sf target link" ~expected_symbolic:true ~expected_force:true;
+  check_ln "ln --symbolic target link" ~expected_symbolic:true ~expected_force:false;
+  check_ln "ln --force target link" ~expected_symbolic:false ~expected_force:true
+;;
+
 let test_system_tools () =
   List.iter
     (fun (cmd, expected) -> check_ctor cmd expected)
@@ -556,6 +630,27 @@ let test_round_trip_e2e () =
     ; "git pull --rebase"
     ; "git status -s"
     ; "git status --porcelain"
+    (* File operations round-trip *)
+    ; "cp file1 file2"
+    ; "cp -r dir1 dir2"
+    ; "cp -rf src dst"
+    ; "cp -rfp a b"
+    ; "cp -R a b"
+    ; "mv old new"
+    ; "mv -f old new"
+    ; "mv -n old new"
+    ; "mv -fn a b"
+    ; "ln target link"
+    ; "ln -s target link"
+    ; "ln -sf target link"
+    ; "touch file.txt"
+    ; "touch -c file.txt"
+    ; "touch -a file.txt"
+    ; "tee output.log"
+    ; "tee -a output.log"
+    ; "awk '{print $1}' file.txt"
+    ; "xargs rm"
+    ; "xargs -n 1 echo"
     ]
 ;;
 
@@ -1293,6 +1388,12 @@ let suite =
     , [ test_case "field values" `Quick test_ssh_identity_file ] )
   ; ( "E2E: Curl -o/-L/-k"
     , [ test_case "field values" `Quick test_curl_flags ] )
+  ; ( "E2E: File operations"
+    , [ test_case "constructor" `Quick test_file_operations
+      ; test_case "Cp fields" `Quick test_cp_field_values
+      ; test_case "Mv fields" `Quick test_mv_field_values
+      ; test_case "Ln fields" `Quick test_ln_field_values
+      ] )
   ]
 
 let () = run "shell_ir_typed_e2e" suite

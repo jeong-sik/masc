@@ -24,6 +24,7 @@ module Keeper : sig
     | Broadcast
     | Context_status
     | Fs_edit
+    | Fs_write
     | Fs_read
     | Ide_annotate
     | Handoff

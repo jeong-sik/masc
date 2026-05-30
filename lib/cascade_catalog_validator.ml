@@ -36,14 +36,14 @@ let split_provider_model (s : string) : (string * string) option =
 type declarative_diagnostics = {
   snapshot : Keeper_declarative_hotpath.decl_snapshot option;
   parse_errors : Cascade_declarative_parser.parse_error list;
-  adapter_errors : Cascade_declarative_adapter.adapter_error list;
+  adapter_errors : Keeper_declarative_adapter.adapter_error list;
 }
 
 let declarative_diagnostics_for_config_path config_path =
   match Cascade_declarative_parser.parse_file config_path with
   | Error errors -> { snapshot = None; parse_errors = errors; adapter_errors = [] }
   | Ok cfg ->
-      let catalog = Cascade_declarative_adapter.adapt_config cfg in
+      let catalog = Keeper_declarative_adapter.adapt_config cfg in
       {
         snapshot =
           Keeper_declarative_hotpath.adapted_catalog_to_snapshot
@@ -70,7 +70,7 @@ let parse_error_issues ~config_path errors =
 
 let adapter_error_issues ~config_path errors =
   errors
-  |> List.map Cascade_declarative_adapter.show_adapter_error
+  |> List.map Keeper_declarative_adapter.show_adapter_error
   |> List.sort_uniq String.compare
   |> List.map (fun message ->
          {
@@ -102,8 +102,8 @@ let discover_profiles_from_materialized_json json =
 let discover_profiles_impl ~emit_telemetry ~config_path =
   let load_catalog_source =
     if emit_telemetry
-    then Cascade_config_loader.load_catalog_source
-    else Cascade_config_loader.load_catalog_source_for_diagnostics
+    then Keeper_config_loader.load_catalog_source
+    else Keeper_config_loader.load_catalog_source_for_diagnostics
   in
   match load_catalog_source config_path with
   | Ok json -> discover_profiles_from_materialized_json json
@@ -343,7 +343,7 @@ let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
     match snapshot_profile with
     | Some (p : Cascade_catalog_runtime.profile_build) ->
       List.map
-        (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
+        (fun (entry : Keeper_config_loader.weighted_entry) -> entry.model)
         p.weighted_entries
     | None -> []
   in
@@ -411,8 +411,8 @@ let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
 let diagnose_catalog_impl ~emit_telemetry ~config_path =
   let load_catalog_source =
     if emit_telemetry
-    then Cascade_config_loader.load_catalog_source
-    else Cascade_config_loader.load_catalog_source_for_diagnostics
+    then Keeper_config_loader.load_catalog_source
+    else Keeper_config_loader.load_catalog_source_for_diagnostics
   in
   match load_catalog_source config_path with
   | Error msg ->

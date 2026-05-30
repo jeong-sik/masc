@@ -33,13 +33,13 @@ let weighted_random_int bound =
 
 let weighted_shuffle
     ?(rand_int = weighted_random_int)
-    (entries : Cascade_config_loader.weighted_entry list)
-    : Cascade_config_loader.weighted_entry list =
+    (entries : Keeper_config_loader.weighted_entry list)
+    : Keeper_config_loader.weighted_entry list =
   match entries with
   | [] | [_] -> entries
   | first :: rest ->
     let total_weight =
-      List.fold_left (fun acc (e : Cascade_config_loader.weighted_entry) ->
+      List.fold_left (fun acc (e : Keeper_config_loader.weighted_entry) ->
           acc + e.weight) 0 entries
     in
     if total_weight <= 0 then entries
@@ -50,7 +50,7 @@ let weighted_shuffle
       let rec find_selected cumulative = function
         | [] -> (* fallback: first entry *)
           (default_selected, default_remaining)
-        | (e : Cascade_config_loader.weighted_entry) :: rest ->
+        | (e : Keeper_config_loader.weighted_entry) :: rest ->
           let cumulative' = cumulative + e.weight in
           if r < cumulative' then (e, rest)
           else
@@ -63,8 +63,8 @@ let weighted_shuffle
          among equal-weight entries (stable sort). *)
       let indexed = List.mapi (fun i e -> (i, e)) remaining in
       let sorted_remaining =
-        List.sort (fun (i1, (a : Cascade_config_loader.weighted_entry))
-                       (i2, (b : Cascade_config_loader.weighted_entry)) ->
+        List.sort (fun (i1, (a : Keeper_config_loader.weighted_entry))
+                       (i2, (b : Keeper_config_loader.weighted_entry)) ->
             let cmp = compare b.weight a.weight in
             if cmp <> 0 then cmp else compare i1 i2
           ) indexed
@@ -88,18 +88,18 @@ let order_weighted_entries
     ?(rand_int = weighted_random_int)
     ?rotation_scope
     ?cascade
-    (entries : Cascade_config_loader.weighted_entry list) =
+    (entries : Keeper_config_loader.weighted_entry list) =
   let entries = Parser.maybe_rotate_weighted_entries ?rotation_scope entries in
   let entries = Parser.expand_weighted_auto_entries ?rotation_scope entries in
   let has_weights = List.exists
-      (fun (e : Cascade_config_loader.weighted_entry) -> e.weight <> 1)
+      (fun (e : Keeper_config_loader.weighted_entry) -> e.weight <> 1)
       entries
   in
   if not has_weights then entries
   else
     let health = Cascade_health_tracker.global in
     let health_adjusted = List.map
-        (fun (e : Cascade_config_loader.weighted_entry) ->
+        (fun (e : Keeper_config_loader.weighted_entry) ->
            let provider_key = provider_key_of_model_string e.model in
            let ew = Cascade_health_tracker.effective_weight health
                ~provider_key ~config_weight:e.weight in
@@ -108,7 +108,7 @@ let order_weighted_entries
     in
     (* Filter out zero-weight (cooled-down) providers, but keep at least one *)
     let active = List.filter
-        (fun (e : Cascade_config_loader.weighted_entry) -> e.weight > 0)
+        (fun (e : Keeper_config_loader.weighted_entry) -> e.weight > 0)
         health_adjusted
     in
     let effective =
@@ -157,7 +157,7 @@ let runtime_kind_of_provider_name provider_name =
 (** Build a [candidate_info] for a model string given its config weight.
     Reads current health tracker state for [success_rate] / [in_cooldown]
     / [effective_weight], so the trace reflects state at call time. *)
-let candidate_info_of_weighted (e : Cascade_config_loader.weighted_entry) =
+let candidate_info_of_weighted (e : Keeper_config_loader.weighted_entry) =
   let health = Cascade_health_tracker.global in
   let expanded_raw_models = Parser.expand_auto_model_string e.model in
   let provider_keys = List.map provider_key_of_model_string expanded_raw_models in

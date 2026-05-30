@@ -1,7 +1,7 @@
 (** Resolve a cascade name to its ordered list of model strings.
 
     Owns the materialized-JSON traversal used to pull weighted entries out
-    of {!Cascade_config_loader.load_catalog_source}, plus the selection-
+    of {!Keeper_config_loader.load_catalog_source}, plus the selection-
     trace builder consumed by dashboards.
 
     Extracted from [cascade_config.ml]. {!cascade_source} and
@@ -26,7 +26,7 @@ type selection_trace = {
 val configured_weighted_entries_from_materialized_json :
   Yojson.Safe.t ->
   name:string ->
-  Cascade_config_loader.weighted_entry list
+  Keeper_config_loader.weighted_entry list
 
 val resolve_model_strings :
   ?config_path:string ->
@@ -51,7 +51,7 @@ val resolve_model_strings_with_trace :
 
 val selection_trace_of_weighted_entries :
   ?source:cascade_source ->
-  Cascade_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list ->
   selection_trace
 
 val expand_model_strings_for_execution :

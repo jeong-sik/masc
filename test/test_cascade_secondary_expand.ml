@@ -12,7 +12,7 @@
 
 open Alcotest
 
-module Loader = Masc_mcp.Cascade_config_loader
+module Loader = Masc_mcp.Keeper_config_loader
 module Cfg = Masc_mcp.Cascade_config
 
 let entry ?(weight = 1) ?supports_tool_choice ?secondary

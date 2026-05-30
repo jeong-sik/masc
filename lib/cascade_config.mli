@@ -83,7 +83,7 @@ type weighted_entry_drop =
   | Drop_invalid_syntax of string
 
 
-(** Parse a {!Cascade_config_loader.weighted_entry} into a
+(** Parse a {!Keeper_config_loader.weighted_entry} into a
     {!Llm_provider.Provider_config.t}, preserving the reason a
     candidate was rejected ({!weighted_entry_drop}) so callers can
     surface actionable validation errors.  Used by
@@ -98,7 +98,7 @@ val parse_weighted_entry_diag :
   ?api_key_env_overrides:(string * string) list ->
   ?keep_alive:string ->
   ?num_ctx:int ->
-  Cascade_config_loader.weighted_entry ->
+  Keeper_config_loader.weighted_entry ->
   (Llm_provider.Provider_config.t, weighted_entry_drop) result
 
 (** Resolve-path wrapper around {!parse_weighted_entry_diag} that
@@ -115,7 +115,7 @@ val parse_weighted_entry_with_drop_metric :
   ?keep_alive:string ->
   ?num_ctx:int ->
   cascade:string ->
-  Cascade_config_loader.weighted_entry ->
+  Keeper_config_loader.weighted_entry ->
   Llm_provider.Provider_config.t option
 
 (** Parse a list of weighted entries, dropping ones that cannot produce a
@@ -140,15 +140,15 @@ val parse_weighted_entries :
   ?system_prompt:string ->
   ?api_key_env_overrides:(string * string) list ->
   ?cascade_name:string ->
-  Cascade_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list ->
   Llm_provider.Provider_config.t list
 
 val order_weighted_entries :
   ?rand_int:(int -> int) ->
   ?rotation_scope:string ->
   ?cascade:string ->
-  Cascade_config_loader.weighted_entry list ->
-  Cascade_config_loader.weighted_entry list
+  Keeper_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list
 (** Order weighted entries using the same health-adjusted runtime logic as
     {!resolve_model_strings}. Exposed so runtime-authoritative catalog
     snapshots can preserve dynamic health ordering without rereading raw
@@ -188,8 +188,8 @@ val expand_auto_models : string list -> string list
 
 val expand_weighted_auto_entries :
   ?rotation_scope:string ->
-  Cascade_config_loader.weighted_entry list ->
-  Cascade_config_loader.weighted_entry list
+  Keeper_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list
 (** Like {!expand_auto_models} but for weighted entries. Each
     [provider:auto] entry expands into one entry per concrete model,
     preserving the original [weight], [supports_tool_choice], and
@@ -308,7 +308,7 @@ type selection_trace = {
     @since 0.150.4 *)
 val selection_trace_of_weighted_entries :
   ?source:cascade_source ->
-  Cascade_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list ->
   selection_trace
 
 (** Like {!resolve_model_strings_traced} but also returns per-candidate

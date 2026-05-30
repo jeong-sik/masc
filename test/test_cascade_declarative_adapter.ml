@@ -12,7 +12,7 @@
 open Alcotest
 open Cascade_declarative_types
 open Cascade_declarative_parser
-module Adapter = Masc_mcp.Cascade_declarative_adapter
+module Adapter = Masc_mcp.Keeper_declarative_adapter
 module Cascade_strategy = Masc_mcp.Cascade_strategy
 
 (* Re-export for convenience *)

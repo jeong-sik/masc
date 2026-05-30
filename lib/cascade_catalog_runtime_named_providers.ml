@@ -20,7 +20,7 @@ let candidate_key_of_cfg (cfg : Llm_provider.Provider_config.t) =
 
 let direct_candidates_ordered_by_entries
     (profile : profile_snapshot)
-    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+    (ordered_entries : Keeper_config_loader.weighted_entry list) =
   match profile.candidates with
   | [] -> []
   | candidates ->
@@ -52,7 +52,7 @@ let direct_candidates_ordered_by_entries
       in
       let ordered =
         List.filter_map
-          (fun (entry : Cascade_config_loader.weighted_entry) ->
+          (fun (entry : Keeper_config_loader.weighted_entry) ->
             take_candidate entry.model)
           ordered_entries
       in
@@ -61,13 +61,13 @@ let direct_candidates_ordered_by_entries
 
 let direct_candidate_providers_ordered_by_entries
     (profile : profile_snapshot)
-    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+    (ordered_entries : Keeper_config_loader.weighted_entry list) =
   direct_candidates_ordered_by_entries profile ordered_entries
   |> List.map (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
 
 let candidates_with_overrides_of_ordered_entries ~(profile : profile_snapshot)
     ~cascade_name:_
-    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+    (ordered_entries : Keeper_config_loader.weighted_entry list) =
   direct_candidates_ordered_by_entries profile ordered_entries
   |> List.map (fun (c : candidate_runtime) -> (c.provider_cfg, c.provider_override))
 

@@ -377,7 +377,7 @@ let load_raw_config_string path =
 ;;
 
 let invalidate_cascade_config config_path =
-  Cascade_config_loader.invalidate_cache_entry config_path;
+  Keeper_config_loader.invalidate_cache_entry config_path;
   Cascade_catalog_runtime.invalidate_path config_path
 ;;
 
@@ -469,7 +469,7 @@ let save_raw_config_json raw_json =
        match save_config_file source.source_path raw_json with
        | Error msg -> Error msg
        | Ok () ->
-         (* [Cascade_config_loader.load_toml_in_memory] and
+         (* [Keeper_config_loader.load_toml_in_memory] and
             [Cascade_catalog_runtime] both key their caches on
             [source.source_path] (the TOML path). *)
          invalidate_cascade_config source.source_path;

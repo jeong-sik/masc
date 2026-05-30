@@ -31,7 +31,7 @@ let id_of_binding (b : cascade_binding) : string =
 let of_binding (cfg : cascade_config) (b : cascade_binding) : t option =
   match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
   | Some provider, Some model ->
-    (match Cascade_declarative_adapter.binding_to_provider_config cfg b with
+    (match Keeper_declarative_adapter.binding_to_provider_config cfg b with
      | Ok provider_config ->
        Some { id = id_of_binding b; provider; model; binding = b; provider_config }
      | Error _ -> None)

@@ -62,7 +62,7 @@ module Partial_warn_dedup = struct
 
   let key_of_errors errors =
     errors
-    |> List.map Cascade_declarative_adapter.show_adapter_error
+    |> List.map Keeper_declarative_adapter.show_adapter_error
     |> List.sort String.compare
     |> String.concat "|"
 
@@ -84,7 +84,7 @@ module Partial_warn_dedup = struct
 end
 
 let log_partial_catalog_errors ~path ~mtime
-    (errors : Cascade_declarative_adapter.adapter_error list) =
+    (errors : Keeper_declarative_adapter.adapter_error list) =
   if errors <> [] then
     Partial_warn_dedup.observe_once ~path ~mtime ~errors
       (fun rendered ->
@@ -262,7 +262,7 @@ type catalog_unavailable_reason =
       (** The config-dir resolver returned no cascade.toml path.
           Typical on first-boot installs before [masc init] runs. *)
   | Catalog_load_failed of string
-      (** [Cascade_config_loader.load_catalog_source_for_diagnostics]
+      (** [Keeper_config_loader.load_catalog_source_for_diagnostics]
           surfaced an I/O or TOML/JSON parse error. The string is the
           loader's diagnostic, including any [Sys_error] / [Unix_error]
           / [Yojson.Json_error] / [End_of_file] message. *)
@@ -297,7 +297,7 @@ let catalog_metadata_query ?config_path () =
         message = "cascade catalog path is not resolved";
       }
   | Some path -> (
-      match Cascade_config_loader.load_catalog_source_for_diagnostics path with
+      match Keeper_config_loader.load_catalog_source_for_diagnostics path with
       | Error msg ->
         Catalog_unavailable
           { reason = Catalog_load_failed msg; message = msg }

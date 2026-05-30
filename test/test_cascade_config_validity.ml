@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module Adapter = Masc_mcp.Cascade_declarative_adapter
+module Adapter = Masc_mcp.Keeper_declarative_adapter
 module Parser = Cascade_declarative_parser
 module Types = Cascade_declarative_types
 module Validator = Cascade_declarative_validator

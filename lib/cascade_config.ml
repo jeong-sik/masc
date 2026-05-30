@@ -1,7 +1,7 @@
 (** Cascade configuration facade — inlined from sub-modules. *)
 
 include Cascade_model_resolve
-include Cascade_config_loader
+include Keeper_config_loader
 include Cascade_config_provider_binding
 include Cascade_config_parser
 include Cascade_config_selection

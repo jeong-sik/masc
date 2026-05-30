@@ -1,6 +1,6 @@
 (** Cascade strategy + concurrency resolution.
 
-    Pulls {!Cascade_config_loader.strategy_config} fields and turns them
+    Pulls {!Keeper_config_loader.strategy_config} fields and turns them
     into a typed {!Cascade_strategy.t} value.
 
     Extracted from [cascade_config.ml]. {!Cascade_config} re-exports

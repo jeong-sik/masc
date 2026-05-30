@@ -12,7 +12,7 @@ type declarative_catalog_info = {
   declarative_snapshot : Keeper_declarative_hotpath.decl_snapshot option;
   declarative_profile_names : string list;
   declarative_parse_errors : Cascade_declarative_parser.parse_error list;
-  declarative_errors : Cascade_declarative_adapter.adapter_error list;
+  declarative_errors : Keeper_declarative_adapter.adapter_error list;
 }
 
 let render_declarative_parse_error
@@ -24,11 +24,11 @@ let render_declarative_parse_error
 
 let render_declarative_adapter_error error =
   Printf.sprintf "declarative cascade adapter error: %s"
-    (Cascade_declarative_adapter.show_adapter_error error)
+    (Keeper_declarative_adapter.show_adapter_error error)
 
 let deprecated_logical_profile_name_error ~kind name :
     Cascade_declarative_parser.parse_error option =
-  if Cascade_config_loader.is_deprecated_logical_profile_name name then
+  if Keeper_config_loader.is_deprecated_logical_profile_name name then
     Some
       {
         path = Printf.sprintf "%s.%s" kind name;
@@ -72,7 +72,7 @@ let load_declarative_catalog_info ~config_path =
           declarative_errors = [];
         }
   | Ok cfg ->
-      let catalog = Cascade_declarative_adapter.adapt_config cfg in
+      let catalog = Keeper_declarative_adapter.adapt_config cfg in
       let snapshot =
         Keeper_declarative_hotpath.adapted_catalog_to_snapshot
           ~source_path:config_path catalog
@@ -162,7 +162,7 @@ let discover_profile_names ~config_path ~json : string list =
 
 let validate_strategy ~config_path ~name =
   let cfg =
-    Cascade_config_loader.resolve_strategy_config ~config_path ~name
+    Keeper_config_loader.resolve_strategy_config ~config_path ~name
   in
   let strategy_errors =
     match cfg.kind with
@@ -328,7 +328,7 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                ]
              ~profiles:[])
     | Some source_mtime -> (
-    match Cascade_config_loader.load_catalog_source config_path with
+    match Keeper_config_loader.load_catalog_source config_path with
     | Error msg ->
         Error
           (rejection_of_path ~config_path:source_path ~attempted_mtime
@@ -562,7 +562,7 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                      (fun e ->
                        Log.Misc.warn
                          "[CascadeDeclarative] adapter error: %s"
-                         (Cascade_declarative_adapter.show_adapter_error
+                         (Keeper_declarative_adapter.show_adapter_error
                             e))
                      declarative_errors
                  end
@@ -573,7 +573,7 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
                    (fun e ->
                      Log.Misc.warn
                        "[CascadeDeclarative] adapter error: %s"
-                       (Cascade_declarative_adapter.show_adapter_error e))
+                       (Keeper_declarative_adapter.show_adapter_error e))
                    declarative_errors
                | None ->
                  Cascade_metrics.on_parallel_validation

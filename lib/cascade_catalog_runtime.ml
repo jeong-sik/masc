@@ -41,8 +41,8 @@ type candidate_runtime = Keeper_catalog_runtime_cache.candidate_runtime = {
 
 type profile_build = Keeper_catalog_runtime_cache.profile_build = {
   name : string;
-  weighted_entries : Cascade_config_loader.weighted_entry list;
-  inference_params : Cascade_config_loader.inference_params;
+  weighted_entries : Keeper_config_loader.weighted_entry list;
+  inference_params : Keeper_config_loader.inference_params;
   api_key_env_overrides : (string * string) list;
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;

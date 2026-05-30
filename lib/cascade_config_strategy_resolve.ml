@@ -35,7 +35,7 @@ let parse_kind_or_default ~name ~default_kind = function
       warn_unknown_strategy ~name ~raw ~msg ~fallback_kind:default_kind;
       default_kind
 
-let cycle_policy_from_loader (cfg : Cascade_config_loader.strategy_config) =
+let cycle_policy_from_loader (cfg : Keeper_config_loader.strategy_config) =
   let d = Cascade_strategy.default_cycle_policy in
   let max_cycles = match cfg.max_cycles with
     | Some n when n >= 1 -> n
@@ -66,7 +66,7 @@ let resolve_strategy ?config_path ~name () =
   | None -> Cascade_strategy.failover
   | Some path ->
     let default_kind = default_strategy_kind ~config_path:path ~name () in
-    let cfg = Cascade_config_loader.resolve_strategy_config
+    let cfg = Keeper_config_loader.resolve_strategy_config
                 ~config_path:path ~name in
     let parsed_kind =
       parse_kind_or_default ~name ~default_kind cfg.kind
@@ -86,7 +86,7 @@ let resolve_ollama_max_concurrent ?config_path ~name () =
   match config_path with
   | None -> None
   | Some path ->
-    let cfg = Cascade_config_loader.resolve_strategy_config
+    let cfg = Keeper_config_loader.resolve_strategy_config
                 ~config_path:path ~name in
     cfg.ollama_max_concurrent
 
@@ -94,6 +94,6 @@ let resolve_cli_max_concurrent ?config_path ~name () =
   match config_path with
   | None -> None
   | Some path ->
-    let cfg = Cascade_config_loader.resolve_strategy_config
+    let cfg = Keeper_config_loader.resolve_strategy_config
                 ~config_path:path ~name in
     cfg.cli_max_concurrent

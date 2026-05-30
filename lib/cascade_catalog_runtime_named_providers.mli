@@ -56,7 +56,7 @@ val resolve_inference_params :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   name:string ->
   unit ->
-  (Cascade_config_loader.inference_params, string) result
+  (Keeper_config_loader.inference_params, string) result
 
 val resolve_strategy :
   ?sw:Eio.Switch.t ->

@@ -253,7 +253,7 @@ let parse_weighted_entry_diag
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt ?(api_key_env_overrides = [])
     ?keep_alive ?num_ctx
-    (entry : Cascade_config_loader.weighted_entry)
+    (entry : Keeper_config_loader.weighted_entry)
   : (Llm_provider.Provider_config.t, weighted_entry_drop) result =
   let raw = String.trim entry.model in
   match split_provider_model raw with
@@ -292,7 +292,7 @@ let parse_weighted_entry_with_drop_metric
     ?system_prompt ?(api_key_env_overrides = [])
     ?keep_alive ?num_ctx
     ~cascade
-    (entry : Cascade_config_loader.weighted_entry)
+    (entry : Keeper_config_loader.weighted_entry)
   : Llm_provider.Provider_config.t option =
   match
     parse_weighted_entry_diag
@@ -338,11 +338,11 @@ let maybe_rotate_auto_models ?rotation_scope ~spec models =
 
 let maybe_rotate_weighted_entries
     ?rotation_scope
-    (entries : Cascade_config_loader.weighted_entry list) =
+    (entries : Keeper_config_loader.weighted_entry list) =
   match rotation_scope, entries with
   | Some scope, _ :: _ :: _
     when List.for_all
-        (fun (e : Cascade_config_loader.weighted_entry) -> e.weight = 1)
+        (fun (e : Keeper_config_loader.weighted_entry) -> e.weight = 1)
         entries ->
     let cursor =
       Cascade_state.rotate_round_robin
@@ -372,9 +372,9 @@ let expand_auto_models (strs : string list) : string list =
 
 let expand_weighted_auto_entries
     ?rotation_scope
-    (entries : Cascade_config_loader.weighted_entry list) =
+    (entries : Keeper_config_loader.weighted_entry list) =
   List.concat_map
-    (fun (entry : Cascade_config_loader.weighted_entry) ->
+    (fun (entry : Keeper_config_loader.weighted_entry) ->
        expand_auto_model_string ?rotation_scope entry.model
        |> List.map (fun model -> { entry with model }))
     entries
@@ -391,7 +391,7 @@ let parse_weighted_entries
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt ?(api_key_env_overrides = [])
     ?(cascade_name = "")
-    (entries : Cascade_config_loader.weighted_entry list)
+    (entries : Keeper_config_loader.weighted_entry list)
   : Llm_provider.Provider_config.t list =
   let entries = expand_weighted_auto_entries entries in
   let parsed, unregistered, unavailable, invalid =

@@ -13,8 +13,8 @@ val weighted_random_int : int -> int
 
 val weighted_shuffle :
   ?rand_int:(int -> int) ->
-  Cascade_config_loader.weighted_entry list ->
-  Cascade_config_loader.weighted_entry list
+  Keeper_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list
 
 val provider_key_of_model_string : string -> string
 
@@ -22,8 +22,8 @@ val order_weighted_entries :
   ?rand_int:(int -> int) ->
   ?rotation_scope:string ->
   ?cascade:string ->
-  Cascade_config_loader.weighted_entry list ->
-  Cascade_config_loader.weighted_entry list
+  Keeper_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list
 
 type candidate_info = {
   model_string : string;
@@ -39,6 +39,6 @@ type candidate_info = {
 }
 
 val candidate_info_of_weighted :
-  Cascade_config_loader.weighted_entry -> candidate_info
+  Keeper_config_loader.weighted_entry -> candidate_info
 
 val display_model_string : string -> string

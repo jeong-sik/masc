@@ -33,8 +33,8 @@ type candidate_runtime = {
    latest probe evidence observed during validation. *)
 type profile_build = {
   name : string;
-  weighted_entries : Cascade_config_loader.weighted_entry list;
-  inference_params : Cascade_config_loader.inference_params;
+  weighted_entries : Keeper_config_loader.weighted_entry list;
+  inference_params : Keeper_config_loader.inference_params;
   api_key_env_overrides : (string * string) list;
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;

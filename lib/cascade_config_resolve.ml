@@ -114,7 +114,7 @@ let weighted_entry_of_materialized_member json member =
         | Some model ->
           Some
             {
-              Cascade_config_loader.model = model;
+              Keeper_config_loader.model = model;
               weight = 1;
               supports_tool_choice = None;
               secondary = None;
@@ -133,7 +133,7 @@ let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
-    (match Cascade_config_loader.load_catalog_source path with
+    (match Keeper_config_loader.load_catalog_source path with
      | Error msg -> (defaults, Load_failed msg)
      | Ok json ->
        let from_file_weighted =
@@ -146,7 +146,7 @@ let resolve_model_strings_traced_with
          in
          let models =
            List.map
-             (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
+             (fun (e : Keeper_config_loader.weighted_entry) -> e.model)
              ordered
          in
          (models, Named)
@@ -181,7 +181,7 @@ let resolve_model_strings_traced_with
            in
            let models =
              List.map
-               (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
+               (fun (e : Keeper_config_loader.weighted_entry) -> e.model)
                ordered
            in
            (models, Default_fallback)
@@ -200,7 +200,7 @@ let resolve_model_strings ?config_path ~name ~defaults () =
 
 let selection_trace_of_weighted_entries
     ?(source = Named)
-    (entries : Cascade_config_loader.weighted_entry list) : selection_trace =
+    (entries : Keeper_config_loader.weighted_entry list) : selection_trace =
   let ordered = Selection.order_weighted_entries entries in
   let candidates = List.map Selection.candidate_info_of_weighted ordered in
   { candidates; source }
@@ -208,12 +208,12 @@ let selection_trace_of_weighted_entries
 let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
-    (match Cascade_config_loader.load_catalog_source path with
+    (match Keeper_config_loader.load_catalog_source path with
      | Error msg ->
        let candidates =
          List.map (fun m ->
            Selection.candidate_info_of_weighted
-             { Cascade_config_loader.model = m; weight = 1; supports_tool_choice = None;
+             { Keeper_config_loader.model = m; weight = 1; supports_tool_choice = None;
                secondary = None; secondary_supports_tool_choice = None })
            defaults
        in
@@ -226,7 +226,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
         Selection.order_weighted_entries ~cascade:name from_file_weighted
       in
       let models = List.map
-          (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
+          (fun (e : Keeper_config_loader.weighted_entry) -> e.model) ordered in
       let candidates = List.map Selection.candidate_info_of_weighted ordered in
       (models, { candidates; source = Named })
     else
@@ -255,14 +255,14 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
             ~cascade:fallback_profile fallback_weighted
         in
         let models = List.map
-            (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
+            (fun (e : Keeper_config_loader.weighted_entry) -> e.model) ordered in
         let candidates = List.map Selection.candidate_info_of_weighted ordered in
         (models, { candidates; source = Default_fallback })
       else
         let candidates =
           List.map (fun m ->
             Selection.candidate_info_of_weighted
-              { Cascade_config_loader.model = m; weight = 1; supports_tool_choice = None;
+              { Keeper_config_loader.model = m; weight = 1; supports_tool_choice = None;
                secondary = None; secondary_supports_tool_choice = None })
             defaults
         in
@@ -271,7 +271,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     let candidates =
       List.map (fun m ->
         Selection.candidate_info_of_weighted
-          { Cascade_config_loader.model = m; weight = 1; supports_tool_choice = None;
+          { Keeper_config_loader.model = m; weight = 1; supports_tool_choice = None;
                secondary = None; secondary_supports_tool_choice = None })
         defaults
     in

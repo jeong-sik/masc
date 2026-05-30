@@ -287,12 +287,12 @@ let resolve_declared_name ?sw ?net ?clock ~raw_name () =
   | Error _ as e -> e
 
 let expand_weighted_entries ~cascade
-    (entries : Cascade_config_loader.weighted_entry list) :
-    Cascade_config_loader.weighted_entry list =
+    (entries : Keeper_config_loader.weighted_entry list) :
+    Keeper_config_loader.weighted_entry list =
   let input_count = List.length entries in
   let expanded =
     List.concat_map
-      (fun (entry : Cascade_config_loader.weighted_entry) ->
+      (fun (entry : Keeper_config_loader.weighted_entry) ->
         Cascade_config.expand_auto_models [ entry.model ]
         |> List.map (fun model -> { entry with model }))
       entries
@@ -309,7 +309,7 @@ let models_of_cascade_name ?sw ?net ?clock raw_name =
       Ok
         (expand_weighted_entries ~cascade:(Cascade_name.to_string normalized)
            profile.weighted_entries
-        |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
+        |> List.map (fun (entry : Keeper_config_loader.weighted_entry) ->
                entry.model))
 
 let known_profile_names ?sw ?net ?clock () =

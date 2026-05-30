@@ -29,8 +29,8 @@ type candidate_runtime = {
 
 type profile_build = {
   name : string;
-  weighted_entries : Cascade_config_loader.weighted_entry list;
-  inference_params : Cascade_config_loader.inference_params;
+  weighted_entries : Keeper_config_loader.weighted_entry list;
+  inference_params : Keeper_config_loader.inference_params;
   api_key_env_overrides : (string * string) list;
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;
@@ -189,7 +189,7 @@ val resolve_inference_params :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   name:string ->
   unit ->
-  (Cascade_config_loader.inference_params, string) result
+  (Keeper_config_loader.inference_params, string) result
 
 val resolve_strategy :
   ?sw:Eio.Switch.t ->

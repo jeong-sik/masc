@@ -1,7 +1,7 @@
 (** Cascade model-string parsing + provider config construction.
 
     Extracted from [cascade_config.ml]. Owns the path from a raw
-    ["provider:model"] (or [{!Cascade_config_loader.weighted_entry}])
+    ["provider:model"] (or [{!Keeper_config_loader.weighted_entry}])
     string to a {!Llm_provider.Provider_config.t}.
 
     Diagnostic types ({!weighted_entry_drop}) are defined here and aliased
@@ -61,7 +61,7 @@ val parse_weighted_entry_diag :
   ?api_key_env_overrides:(string * string) list ->
   ?keep_alive:string ->
   ?num_ctx:int ->
-  Cascade_config_loader.weighted_entry ->
+  Keeper_config_loader.weighted_entry ->
   (Llm_provider.Provider_config.t, weighted_entry_drop) result
 
 val parse_weighted_entry_with_drop_metric :
@@ -72,7 +72,7 @@ val parse_weighted_entry_with_drop_metric :
   ?keep_alive:string ->
   ?num_ctx:int ->
   cascade:string ->
-  Cascade_config_loader.weighted_entry ->
+  Keeper_config_loader.weighted_entry ->
   Llm_provider.Provider_config.t option
 
 val expand_auto_model_string :
@@ -82,13 +82,13 @@ val expand_auto_models : string list -> string list
 
 val expand_weighted_auto_entries :
   ?rotation_scope:string ->
-  Cascade_config_loader.weighted_entry list ->
-  Cascade_config_loader.weighted_entry list
+  Keeper_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list
 
 val maybe_rotate_weighted_entries :
   ?rotation_scope:string ->
-  Cascade_config_loader.weighted_entry list ->
-  Cascade_config_loader.weighted_entry list
+  Keeper_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list
 (** Round-robin rotation across uniform-weight entries when
     [rotation_scope] is supplied. Exposed so {!Cascade_config_selection}
     can apply the same rotate-then-expand sequence as the original
@@ -100,7 +100,7 @@ val parse_weighted_entries :
   ?system_prompt:string ->
   ?api_key_env_overrides:(string * string) list ->
   ?cascade_name:string ->
-  Cascade_config_loader.weighted_entry list ->
+  Keeper_config_loader.weighted_entry list ->
   Llm_provider.Provider_config.t list
 
 (** Typed failure modes from {!parse_model_string_result}.

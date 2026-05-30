@@ -9,8 +9,8 @@
 
     @stability Internal *)
 
-open Cascade_declarative_adapter
-module Loader = Cascade_config_loader
+open Keeper_declarative_adapter
+module Loader = Keeper_config_loader
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 (* --- Lightweight mirror types (no Cascade_catalog_runtime dependency) --- *)

@@ -11,8 +11,7 @@
 let default_config_path = Runtime.config_path
 
 let default_model_strings ~cascade_name =
-  Cascade_runtime.default_model_strings
-    ~cascade_name:(cascade_name)
+  Provider_runtime_projection.default_execution_model_strings cascade_name
 
 (* Named model execution *)
 

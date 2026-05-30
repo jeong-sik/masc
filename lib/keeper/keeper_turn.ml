@@ -156,7 +156,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
          | None ->
         let effective_models =
           if direct_reply then
-            Cascade_runtime.models_of_cascade_name
+            Provider_runtime_projection.default_execution_model_strings
               (                 (turn_cascade_name))
           else
             effective_model_labels_for_turn meta
@@ -250,7 +250,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       in
       let effective_models =
         if direct_reply then
-          Cascade_runtime.models_of_cascade_name
+          Provider_runtime_projection.default_execution_model_strings
             (               (turn_cascade_name))
               else
           effective_model_labels_for_turn meta

@@ -16,10 +16,13 @@ let session_base_dir_ (config : Coord.config) =
   let d = Filename.concat (Coord.masc_root_dir config) "traces" in
   ensure_dir_ d
 
-(** Check API key availability using model label strings.
-    Delegates to Cascade_runtime which owns MASC cascade resolution. *)
-let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
-  Cascade_runtime.ensure_api_keys_for_labels labels
+(** RFC-0206 single-binding: API keys for the default runtime are resolved at
+    startup, so there is no per-label key check. Retained as a total no-op so
+    callers keep their result-shaped contract.
+    Runtime behavior changed: per-label key availability is no longer probed;
+    verify keeper turn startup at deploy. *)
+let ensure_api_keys_for_labels (_labels : string list) : (unit, string) result =
+  Ok ()
 
 (** Single-file metrics path kept for fallback reads. *)
 let keeper_metrics_path config name =

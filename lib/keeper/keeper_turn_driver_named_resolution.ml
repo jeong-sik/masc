@@ -29,7 +29,7 @@ let resolve ~sw ~net ?provider_filter ~cascade_name ~runtime_cascade_name () =
   in
   {
     configured_labels_result =
-      Cascade_runtime.models_of_cascade_name_result runtime_cascade_name;
+      Provider_runtime_projection.default_execution_model_strings_result runtime_cascade_name;
     candidate_cfgs_result;
     secondary_resolver;
   }

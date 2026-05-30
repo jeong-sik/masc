@@ -283,7 +283,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~fallback_token:env_token_gate
               in
               let cascade_models =
-                Cascade_runtime.models_of_cascade_name
+                Provider_runtime_projection.default_execution_model_strings
                   (selected_cascade_name)
               in
               (match

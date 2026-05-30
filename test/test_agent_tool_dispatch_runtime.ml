@@ -163,7 +163,7 @@ let test_malformed_json_like_payload_detected () =
 
 let test_execute_with_outcome_policy_gate_is_failure () =
   with_exec_fixture
-    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_tools_list" ])
+    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Tools_list ])
     "agent_tool_dispatch_runtime_policy_gate"
     (fun ~config ~meta ~ctx_work ->
       let result =
@@ -195,7 +195,7 @@ let test_tool_not_allowed_increments_counter () =
   let tool = "tool_read_file" in
   let reason = "not_in_allow_set" in
   with_exec_fixture
-    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_tools_list" ])
+    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Tools_list ])
     "agent_tool_dispatch_runtime_not_allowed_counter"
     (fun ~config ~meta ~ctx_work ->
       let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
@@ -229,7 +229,7 @@ let test_tool_not_allowed_denied_by_policy_counter () =
           ; ("allowed_paths", `List [ `String "*" ])
           ; ( "tool_access"
             , Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
-                (Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_board_post" ]) )
+                (Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Board_post ]) )
           ; ( "tool_denylist"
             , `List [ `String "keeper_board_post" ] )
           ])
@@ -268,7 +268,7 @@ let test_tool_not_allowed_reason_label_is_bounded () =
   (* Verify that the reason label written into the JSON payload is one
      of the three bounded vocabulary values, not a free-form string. *)
   with_exec_fixture
-    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "keeper_tools_list" ])
+    ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Tools_list ])
     "agent_tool_dispatch_runtime_reason_bounded"
     (fun ~config ~meta ~ctx_work ->
       let result =
@@ -290,13 +290,13 @@ let test_keeper_tools_list_json_uses_typed_groups () =
       ~policy_voice_enabled:true
       ~tool_access:
         (Masc_mcp.Keeper_meta_tool_access.Custom
-           [ "keeper_board_post";
-             "keeper_board_fake";
-             "keeper_voice_speak";
-             "keeper_task_claim";
-             "tool_search_files";
-             "tool_read_file";
-             "keeper_memory_search";
+           [ Masc_mcp.Tool_name.Keeper.Board_post;
+             Masc_mcp.Tool_name.Keeper.Board_comment;
+             Masc_mcp.Tool_name.Keeper.Voice_speak;
+             Masc_mcp.Tool_name.Keeper.Task_claim;
+             Masc_mcp.Tool_name.Keeper.Search_files;
+             Masc_mcp.Tool_name.Keeper.Fs_read;
+             Masc_mcp.Tool_name.Keeper.Memory_search;
            ])
       ()
   in

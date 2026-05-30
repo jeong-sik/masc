@@ -149,17 +149,17 @@ let test_inject_stores_filtered_masc () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_meta_tool_access.Custom
-           [ "masc_status"; "masc_broadcast"; "masc_messages" ])
+           [ Masc_mcp.Tool_name.Keeper.Time_now; Masc_mcp.Tool_name.Keeper.Tools_list ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "only keeper-compatible masc tools remain" 1
+  Alcotest.(check int) "masc tools not in keeper allowlist" 0
     (List.length names);
-  Alcotest.(check bool) "keeps masc_status" true
+  Alcotest.(check bool) "no masc_status" false
     (List.mem "masc_status" names);
-  Alcotest.(check bool) "filters masc_broadcast" false
+  Alcotest.(check bool) "no masc_broadcast" false
     (List.mem "masc_broadcast" names);
-  Alcotest.(check bool) "filters masc_messages" false
+  Alcotest.(check bool) "no masc_messages" false
     (List.mem "masc_messages" names);
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
@@ -200,16 +200,16 @@ let test_custom_opens_specific_tools_only () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_meta_tool_access.Custom
-           [ "masc_status"; "masc_tasks"; "masc_join" ])
+           [ Masc_mcp.Tool_name.Keeper.Time_now; Masc_mcp.Tool_name.Keeper.Tools_list ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "only keeper-compatible tools allowed" 2
+  Alcotest.(check int) "masc tools not in keeper allowlist" 0
     (List.length names);
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_tasks" true
+  Alcotest.(check bool) "no masc_status" false (List.mem "masc_status" names);
+  Alcotest.(check bool) "no masc_tasks" false
     (List.mem "masc_tasks" names);
-  Alcotest.(check bool) "filters masc_join" false
+  Alcotest.(check bool) "no masc_join" false
     (List.mem "masc_join" names);
   Alcotest.(check bool) "no masc_board_post" false
     (List.mem "masc_board_post" names)
@@ -220,13 +220,13 @@ let test_deny_overrides_allow () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_meta_tool_access.Custom
-           [ "masc_status"; "masc_tasks"; "masc_join" ])
-      ~tool_denylist:[ "masc_tasks" ] ()
+           [ Masc_mcp.Tool_name.Keeper.Time_now; Masc_mcp.Tool_name.Keeper.Tools_list; Masc_mcp.Tool_name.Keeper.Task_claim ])
+      ~tool_denylist:[ "keeper_tools_list" ] ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "1 after deny" 1 (List.length names);
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "no masc_tasks (denied)" false
+  Alcotest.(check int) "masc tools not in keeper allowlist" 0 (List.length names);
+  Alcotest.(check bool) "no masc_status" false (List.mem "masc_status" names);
+  Alcotest.(check bool) "no masc_tasks" false
     (List.mem "masc_tasks" names)
 
 let test_custom_empty_blocks_all () =
@@ -260,7 +260,7 @@ let test_custom_keeps_registered_inline_board_tool () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_meta_tool_access.Custom
-           [ "keeper_board_post"; "masc_who" ])
+           [ Masc_mcp.Tool_name.Keeper.Board_post; Masc_mcp.Tool_name.Keeper.Board_comment ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -275,7 +275,7 @@ let with_masc_schema_ref schemas f =
   KET.with_masc_schemas_for_test schemas f
 
 let test_dashboard_tool_count_uses_schema_ssot () =
-  let bridge_name = "mcp__masc__masc_status" in
+  let bridge_name = "keeper_time_now" in
   let schema : Masc_domain.tool_schema =
     { name = bridge_name; description = ""; input_schema = `Assoc [] }
   in
@@ -283,7 +283,7 @@ let test_dashboard_tool_count_uses_schema_ssot () =
       let meta =
         make_meta
           ~tool_access:
-            (Masc_mcp.Keeper_meta_tool_access.Custom [ bridge_name ])
+            (Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Time_now ])
           ()
       in
       let allowed = KET.keeper_allowed_tool_names meta in
@@ -590,13 +590,13 @@ let test_allowlist_gates_shard_tools () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_meta_tool_access.Custom
-           [ "masc_status"; "masc_tasks" ])
+           [ Masc_mcp.Tool_name.Keeper.Time_now; Masc_mcp.Tool_name.Keeper.Tools_list ])
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_tasks" true
-    (List.mem "masc_tasks" names);
+  Alcotest.(check bool) "has keeper_time_now" true (List.mem "keeper_time_now" names);
+  Alcotest.(check bool) "has keeper_tools_list" true
+    (List.mem "keeper_tools_list" names);
   Alcotest.(check bool) "tool_read_file blocked by custom policy" false
     (List.mem "tool_read_file" names)
 
@@ -615,7 +615,7 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
       let config = Coord.default_config dir in
       let meta =
         make_meta
-          ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "masc_approval_pending" ])
+          ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Time_now ])
           ()
       in
       with_registered_keeper ~config meta (fun () ->
@@ -652,7 +652,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
           make_meta
             ~name:"masc-improver"
             ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
-            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_read_file" ])
+            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Fs_read ])
             ()
         in
         with_registered_keeper ~config meta (fun () ->
@@ -711,7 +711,7 @@ let test_write_preflight_accepts_docker_container_repo_path () =
           make_meta
             ~name:"sangsu"
             ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
-            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_edit_file" ])
+            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Fs_edit ])
             ()
         in
         with_registered_keeper ~config meta (fun () ->
@@ -778,7 +778,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
           make_meta
             ~name:keeper_name
             ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
-            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_edit_file" ])
+            ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ Masc_mcp.Tool_name.Keeper.Fs_edit ])
             ()
         in
         ignore (Masc_mcp.Keeper_registry.register ~base_path:dir keeper_name meta);
@@ -815,7 +815,7 @@ let test_schemas_match_names () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_meta_tool_access.Custom
-           [ "masc_status"; "masc_join"; "masc_tasks" ])
+           [ Masc_mcp.Tool_name.Keeper.Time_now; Masc_mcp.Tool_name.Keeper.Tools_list; Masc_mcp.Tool_name.Keeper.Task_claim ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in

@@ -617,7 +617,7 @@ tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_transition"]
 [keeper.tool_access]
 kind = "preset"
 preset = "delivery"
-also_allow = ["masc_tasks", "masc_transition"]
+also_allow = ["keeper_tasks_list", "keeper_task_claim"]
 |};
       write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
@@ -684,8 +684,8 @@ also_allow = ["masc_tasks", "masc_transition"]
           check
             (list string)
             "tool allowlist resynced"
-            [ "masc_tasks"; "masc_transition" ]
-            (match meta.tool_access with Custom lst -> lst);
+            [ "keeper_tasks_list"; "keeper_task_claim" ]
+            (match meta.tool_access with Custom lst -> List.map Tool_name.Keeper.to_string lst);
           check
             (option (float 0.0001))
             "per provider timeout resynced"

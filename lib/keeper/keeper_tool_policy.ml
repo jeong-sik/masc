@@ -265,7 +265,7 @@ let last_turn_safe_tool_names () =
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =
     match meta.tool_access with
-    | Custom allowlist -> Tool_access_policy.Names allowlist
+    | Custom allowlist -> Tool_access_policy.Names (List.map Tool_name.Keeper.to_string allowlist)
   in
   {
     Tool_access_policy.allow;
@@ -439,6 +439,7 @@ let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
   in
   let from_preset =
     preset_tools
+    |> List.map Tool_name.Keeper.to_string
     |> List.filter (fun name ->
          StringSet.mem name lookup.candidate_set
          && not (StringSet.mem name lookup.deny_set))

@@ -356,21 +356,19 @@ let () =
         check_access "minimal stays quiet by default" false
           (Custom []);
         check_access "minimal board opt-in listens" true
-          (Custom ["keeper_board_post"]);
-        check_access "minimal fake keeper board prefix stays quiet" false
-          (Custom ["keeper_board_fake"]);
+          (Custom [Masc_mcp.Tool_name.Keeper.Board_post]);
+        check_access "minimal non-board tool stays quiet" false
+          (Custom [Masc_mcp.Tool_name.Keeper.Time_now]);
         check_access "delivery listens to board by default" true
           (Custom []);
         check_access "messaging listens to board by default" true
           (Custom []);
         check_access "custom without board stays quiet" false
-          (Custom [ "keeper_time_now" ]);
-        check_access "custom masc board allowlist listens" true
-          (Custom [ "masc_board_post" ]);
-        check_access "custom fake masc board prefix stays quiet" false
-          (Custom [ "masc_board_fake" ]);
+          (Custom [Masc_mcp.Tool_name.Keeper.Time_now]);
+        check_access "custom non-board tool stays quiet" false
+          (Custom [Masc_mcp.Tool_name.Keeper.Tools_list]);
         check_access "custom board allowlist listens" true
-          (Custom [ "keeper_board_post" ]));
+          (Custom [Masc_mcp.Tool_name.Keeper.Board_post]));
     ];
     "operator_view_ssot", [
       (* Issue #8471: tool_operator view enum was missing 'sessions'

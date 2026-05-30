@@ -669,7 +669,7 @@ let test_registered_inline_board_tool_survives_filter () =
   Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let base = make_gate_test_meta ~name:"test-board-inline" () in
   let meta = { base with
-    tool_access = Custom [ "keeper_board_post"; "masc_who" ];
+    tool_access = Custom [ Tool_name.Keeper.Board_post; Tool_name.Keeper.Board_comment ];
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in

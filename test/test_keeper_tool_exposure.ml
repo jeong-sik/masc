@@ -157,18 +157,18 @@ let test_custom_empty_blocks_all_tools () =
   check int "custom empty blocks every tool" 0 (List.length tools)
 ;;
 
-let test_custom_unknown_tool_names_are_dropped () =
+let test_custom_allowlist_respected () =
   Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let meta =
     make_meta
       ~tool_access:
-        (Keeper_meta_tool_access.Custom [ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
+        (Keeper_meta_tool_access.Custom [ Tool_name.Keeper.Time_now; Tool_name.Keeper.Tools_list ])
       ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  check bool "keeps known keeper tool" true (has_tool "keeper_time_now" tools);
-  check bool "keeps known masc tool" true (has_tool "masc_status" tools);
-  check bool "drops unknown tool" false (has_tool "totally_unknown_tool" tools)
+  check bool "keeps listed keeper tool" true (has_tool "keeper_time_now" tools);
+  check bool "keeps second listed tool" true (has_tool "keeper_tools_list" tools);
+  check bool "drops unlisted tool" false (has_tool "keeper_task_claim" tools)
 ;;
 
 (* ============================================================
@@ -1205,9 +1205,9 @@ let () =
             `Quick
             test_custom_empty_blocks_all_tools
         ; test_case
-            "custom unknown tool names are dropped"
+            "custom allowlist respected"
             `Quick
-            test_custom_unknown_tool_names_are_dropped
+            test_custom_allowlist_respected
         ] )
     ; ( "search_files_tools"
       , [ test_case
@@ -1454,14 +1454,14 @@ let () =
             let json =
               `Assoc
                 [ "kind", `String "custom"
-                ; "tools", `List [ `String "masc_status"; `String "masc_broadcast" ]
+                ; "tools", `List [ `String "keeper_time_now"; `String "keeper_tools_list" ]
                 ]
             in
             let outer = `Assoc [ "tool_access", json ] in
             match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Ok (Custom tools) ->
-              check bool "has masc_status" true (List.mem "masc_status" tools);
-              check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
+              check bool "has keeper_time_now" true (List.mem Tool_name.Keeper.Time_now tools);
+              check bool "has keeper_tools_list" true (List.mem Tool_name.Keeper.Tools_list tools)
             | Error msg -> fail ("unexpected error: " ^ msg))
         ; test_case "null tools field returns error" `Quick (fun () ->
             let json = `Assoc [ "kind", `String "custom"; "tools", `Null ] in

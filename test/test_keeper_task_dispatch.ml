@@ -1128,13 +1128,13 @@ let test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool () =
       | Error msg -> fail msg
     in
     let meta =
-      { (make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ]) with
+      { (make_meta_with_tools [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Tasks_list ]) with
         active_goal_ids = [ scoped_goal.id ]
       }
     in
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "tool_execute" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Execute ]))
         ~goal_id:scoped_goal.id
         config
         ~title:"Scoped task needing bash"
@@ -1196,7 +1196,7 @@ let test_claim_does_not_cross_goal_when_all_scoped_tasks_unavailable () =
       | Error msg -> fail msg
     in
     let meta =
-      { (make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ]) with
+      { (make_meta_with_tools [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Tasks_list ]) with
         active_goal_ids = [ scoped_goal.id ]
       }
     in
@@ -1240,7 +1240,7 @@ let test_claim_does_not_cross_goal_when_all_scoped_tasks_unavailable () =
       ();
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "tool_execute" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Execute ]))
         ~goal_id:scoped_goal.id
         config
         ~title:"Scoped task needing bash"
@@ -1350,13 +1350,13 @@ let test_claim_no_eligible_scoped_reports_scope_truth () =
       | Error msg -> fail msg
     in
     let meta =
-      { (make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ]) with
+      { (make_meta_with_tools [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Tasks_list ]) with
         active_goal_ids = [ scoped_goal.id ]
       }
     in
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "tool_execute" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Execute ]))
         ~goal_id:scoped_goal.id
         config
         ~title:"Scoped task needing bash"
@@ -1365,7 +1365,7 @@ let test_claim_no_eligible_scoped_reports_scope_truth () =
     in
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "tool_edit_file" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Fs_edit ]))
         ~goal_id:product_goal.id
         config
         ~title:"Fallback task also missing tools"
@@ -1418,10 +1418,10 @@ let test_claim_no_eligible_scoped_reports_scope_truth () =
 
 let test_claim_skips_required_tools_without_access () =
   with_room (fun config ->
-    let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ] in
+    let meta = make_meta_with_tools [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Tasks_list ] in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "tool_execute" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Execute ]))
         config
         ~title:"Needs bash"
         ~priority:1
@@ -1449,11 +1449,11 @@ let test_board_only_claim_rejects_required_execution_tool_task () =
   with_room (fun config ->
     let meta =
       make_meta_with_tools
-        [ "keeper_task_claim"; "keeper_board_post"; "keeper_board_comment" ]
+        [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Board_post; Tool_name.Keeper.Board_comment ]
     in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "tool_execute" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Execute ]))
         config
         ~title:"Needs execution"
         ~priority:1
@@ -1472,17 +1472,17 @@ let test_board_only_claim_rejects_required_execution_tool_task () =
       bool
       "missing tool_execute named"
       true
-      (contains_substring message "tool_execute"))
+      (contains_substring message (Tool_name.Keeper.to_string Tool_name.Keeper.Execute)))
 ;;
 
 let test_claim_allows_required_tools_with_access () =
   with_room (fun config ->
     let meta =
-      make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "tool_execute" ]
+      make_meta_with_tools [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Tasks_list; Tool_name.Keeper.Execute ]
     in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "tool_execute" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Execute ]))
         config
         ~title:"Needs bash"
         ~priority:1
@@ -1511,37 +1511,37 @@ let test_required_tool_matching_canonicalizes_public_aliases () =
     (list string)
     "public Execute satisfies tool_execute"
     []
-    (Coord.missing_required_tools ~allowed:[ "Execute" ] [ "tool_execute" ]);
+    (Coord.missing_required_tools ~allowed:[ "Execute" ] [ Tool_name.Keeper.to_string Tool_name.Keeper.Execute ]);
   check
     (list string)
     "internal tool_execute satisfies public Execute"
     []
-    (Coord.missing_required_tools ~allowed:[ "tool_execute" ] [ "Execute" ]);
+    (Coord.missing_required_tools ~allowed:[ Tool_name.Keeper.to_string Tool_name.Keeper.Execute ] [ "Execute" ]);
   check
     (list string)
     "prefixed public Execute satisfies tool_execute"
     []
-    (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ "tool_execute" ]);
+    (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ Tool_name.Keeper.to_string Tool_name.Keeper.Execute ]);
   check
     (list string)
     "public Write does not satisfy internal tool_write_file"
-    [ "tool_write_file" ]
-    (Coord.missing_required_tools ~allowed:[ "Write" ] [ "tool_write_file" ]);
+    [ Tool_name.Keeper.to_string Tool_name.Keeper.Fs_edit ]
+    (Coord.missing_required_tools ~allowed:[ Tool_name.Keeper.to_string Tool_name.Keeper.Fs_edit ] [ Tool_name.Keeper.to_string Tool_name.Keeper.Fs_edit ]);
   check
     bool
     "claim scheduler accepts public Execute alias"
     true
     (Coord_task_schedule.required_tools_allowed
        ~agent_tool_names:[ "Execute" ]
-       [ "tool_execute" ])
+       [ Tool_name.Keeper.to_string Tool_name.Keeper.Execute ])
 ;;
 
 let test_claim_does_not_treat_write_alias_as_tool_write_file () =
   with_room (fun config ->
-    let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "Write" ] in
+    let meta = make_meta_with_tools [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Tasks_list; Tool_name.Keeper.Fs_edit ] in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "tool_write_file" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Fs_edit ]))
         config
         ~title:"Needs masc code write"
         ~priority:1
@@ -1569,11 +1569,11 @@ let test_claim_does_not_treat_write_alias_as_tool_write_file () =
 let test_claim_allows_tool_write_file_with_access () =
   with_room (fun config ->
     let meta =
-      make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "tool_write_file" ]
+      make_meta_with_tools [ Tool_name.Keeper.Task_claim; Tool_name.Keeper.Tasks_list; Tool_name.Keeper.Fs_edit ]
     in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "tool_write_file" ])
+        ~contract:(contract_requiring_tools (List.map Tool_name.Keeper.to_string [ Tool_name.Keeper.Fs_edit ]))
         config
         ~title:"Needs masc code write"
         ~priority:1

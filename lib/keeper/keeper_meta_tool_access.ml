@@ -6,15 +6,10 @@
 
 open Keeper_types_profile
 
-type tool_access = Custom of string list
+type tool_access = Custom of Tool_name.Keeper.t list
 
 let tool_names_include_board name_list =
-  List.exists
-    (fun name ->
-       match Tool_name.of_string name with
-       | Some tool -> Tool_name.is_board tool
-       | None -> false)
-    name_list
+  List.exists Tool_name.Keeper.is_board name_list
 ;;
 
 let tool_access_default_room_signal_prompt_enabled ~default = function
@@ -28,44 +23,25 @@ let normalize_tool_names names =
   |> dedupe_keep_order
 ;;
 
-let write_tools =
-  [ "tool_edit_file"; "tool_write_file"; "tool_execute" ]
+(** Convert a raw string list (from TOML/JSON) into a typed [tool_access].
+    Unknown names are silently dropped. *)
+let tool_access_of_string_list names =
+  Custom (names |> normalize_tool_names |> List.filter_map Tool_name.Keeper.of_string)
 ;;
 
-let legacy_keeper_internal_tool_names =
-  (* Keep legacy masc coordination defaults explicit in
-     [legacy_session_min_tool_names]; new [masc_*] internal tools should not
-     silently expand missing [tool_access] migrations.
-     Write tools are excluded so that keepers without explicit [tool_access]
-     cannot claim write-intent tasks.  Keepers that need write access must
-     use [Custom] with explicit write tool names. *)
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-  |> List.filter (fun name ->
-         not (String.starts_with ~prefix:"masc_" name)
-         && not (List.exists (String.equal name) write_tools))
+let normalize_tool_names_variant names =
+  names |> dedupe_keep_order
 ;;
 
-let legacy_session_min_tool_names =
-  (* Legacy keepers historically received canonical masc_* coordination tools,
-     not the SDK alias-heavy Session_min surface. Keep this compatibility list
-     explicit so missing tool_access migration remains stable after tier removal. *)
-  List.map
-    Tool_name.Masc.to_string
-    Tool_name.Masc.
-      [ Status; Tasks; Claim_next; Plan_set_task; Transition; Add_task; Broadcast ]
-;;
 
-let migrate_legacy_restricted_tools names =
-  Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
-;;
+let normalize_tool_access (Custom names) = Custom (normalize_tool_names_variant names)
 
-let normalize_tool_access (Custom names) = Custom (normalize_tool_names names)
-
-let tool_access_custom_allowlist (Custom names) = names
+let tool_access_custom_allowlist (Custom names) =
+  List.map Tool_name.Keeper.to_string names
 
 let tool_access_to_json (Custom names) =
   `Assoc
-    [ "kind", `String "custom"; "tools", `List (List.map (fun s -> `String s) names) ]
+    [ "kind", `String "custom"; "tools", `List (List.map (fun s -> `String (Tool_name.Keeper.to_string s)) names) ]
 ;;
 
 let json_member_present key (json : Yojson.Safe.t) =
@@ -105,13 +81,15 @@ let default_tool_access_of_meta_json () =
      shell commands, file reads, git ops, and cascade tool filtering requires
      it. Only file-mutation writes (edit/write_file) are blocked by default.
      See fleet deadlock Layer 2 analysis (2026-05-30). *)
-  let non_default_writes = [ "tool_edit_file"; "tool_write_file" ] in
   let tools =
     Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-    |> List.filter (fun name ->
-           not (List.exists (String.equal name) non_default_writes))
+    |> List.filter_map Tool_name.Keeper.of_string
+    |> List.filter (fun k ->
+           match k with
+           | Tool_name.Keeper.Fs_edit -> false
+           | _ -> true)
   in
-  Custom (normalize_tool_names tools)
+  Custom (normalize_tool_names_variant tools)
 ;;
 
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
@@ -134,7 +112,8 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
             ~label:"tool_access.tools"
             access_json
         with
-        | Ok tools -> Ok (normalize_tool_access (Custom tools))
+        | Ok tools ->
+          Ok (normalize_tool_access (Custom (List.filter_map Tool_name.Keeper.of_string tools)))
         | Error msg -> Error msg)
      | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
      | None ->

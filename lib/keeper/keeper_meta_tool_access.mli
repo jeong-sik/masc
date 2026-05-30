@@ -4,11 +4,11 @@
     keeper meta JSON.  Named presets have been removed; keepers declare
     an explicit [Custom] tool list. *)
 
-type tool_access = Custom of string list
+type tool_access = Custom of Tool_name.Keeper.t list
 
-(** Returns true if any name in the list resolves to a [Tool_name.is_board]
-    tool. Used to detect implicit board surface. *)
-val tool_names_include_board : string list -> bool
+(** Returns true if any name in the list resolves to a board tool.
+    Used to detect implicit board surface. *)
+val tool_names_include_board : Tool_name.Keeper.t list -> bool
 
 (** Decide whether a [tool_access] should keep [room_signal_prompt] on:
     Custom → true when the list contains any board tool (or [default] is
@@ -18,6 +18,10 @@ val tool_access_default_room_signal_prompt_enabled :
 
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)
 val normalize_tool_names : string list -> string list
+
+(** Convert a raw string list into a typed [tool_access].
+    Unknown tool names are silently dropped. *)
+val tool_access_of_string_list : string list -> tool_access
 
 (** Sort Custom lists for stable comparison and hash. *)
 val normalize_tool_access : tool_access -> tool_access

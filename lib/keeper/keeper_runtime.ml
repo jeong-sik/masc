@@ -153,7 +153,7 @@ let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
   match defaults.tool_custom_list with
-  | Some tools -> Custom (normalize_tool_names tools)
+  | Some tools -> tool_access_of_string_list tools
   | None -> meta.tool_access
 
 let ensure_keeper_meta config name =

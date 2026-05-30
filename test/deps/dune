@@ -33,7 +33,6 @@
    (re_export masc_mcp.http_client)
    (re_export masc_log)
    (re_export masc_mcp)
-   (re_export masc_mcp.oas_compat)
    (re_export masc_mcp.activity_graph)
    ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /
    ;; Execution_mode / Risk_contract from agent_sdk into this sub-library;

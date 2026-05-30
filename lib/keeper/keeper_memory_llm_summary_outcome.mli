@@ -22,7 +22,7 @@ type t =
           completed.  Counter increment + warn already exists. *)
   | Http_error
       (** Provider returned a non-2xx response or transport-level
-          failure (deserialised by [Oas_compat.Http_client]). *)
+          failure (deserialised by [Llm_provider.Http_client]). *)
   | Empty_response
       (** Provider returned 2xx but [response_text] collapsed to
           empty after trim — usually a model that produced only

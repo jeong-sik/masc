@@ -26,7 +26,6 @@ let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.NetworkError _
   | Llm_provider.Http_client.TimeoutError _
   | Llm_provider.Http_client.AcceptRejected _
-  | Llm_provider.Http_client.CliTransportRequired _
   | Llm_provider.Http_client.ProviderTerminal _
   | Llm_provider.Http_client.ProviderFailure _ ->
     None
@@ -72,7 +71,6 @@ let capacity_backpressure_of_http_error ?source ~cascade_name last_err =
       | Llm_provider.Http_client.NetworkError _
       | Llm_provider.Http_client.TimeoutError _
       | Llm_provider.Http_client.AcceptRejected _
-      | Llm_provider.Http_client.CliTransportRequired _
       | Llm_provider.Http_client.ProviderTerminal _
       | Llm_provider.Http_client.ProviderFailure _)
   | None ->

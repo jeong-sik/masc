@@ -513,7 +513,6 @@
    ;; with identically-named types in the main library.
    ;; RFC-0163 Phase D1 — Cascade_name leaf extraction (lib/cascade_name/).
    ;; Pure canonical-name validation, stdlib-only.
-   masc_mcp.oas_compat
 
    uri
    tls

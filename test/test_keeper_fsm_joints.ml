@@ -376,18 +376,14 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
 (* ============================================================
    Section 4 — KDP → KCL join via Keeper_cascade_routing.
 
-   Enumerate every keeper phase and assert select_cascade returns the
-   profile mandated by the cascade routing contract (mli lines 22-26).
-   This pins down the gating rules so a future change has to update
-   both the routing function AND this golden table.
+   Enumerate every keeper phase and assert select_cascade returns
+   base_cascade. cascade→Runtime 숙청 후 single runtime 계약: per-phase
+   override 가 제거되어 모든 phase 가 base_cascade 로 collapse 된다.
+   This pins the contract so a future change has to update both the
+   routing function AND this golden table.
    ============================================================ *)
 
-let expected_routing (phase : SM.phase) ~base : string =
-  match phase with
-  | SM.Failing -> Keeper_config.phase_recovery_cascade_name
-  | SM.Compacting | SM.HandingOff -> Keeper_config.phase_buffer_cascade_name
-  | SM.Running | SM.Draining | SM.Paused | SM.Overflowed
-  | SM.Offline | SM.Stopped | SM.Crashed | SM.Restarting | SM.Dead | SM.Zombie -> base
+let expected_routing (_phase : SM.phase) ~base : string = base
 
 let test_kdp_kcl_join_routing_table () =
   let base = "keeper_unified" in

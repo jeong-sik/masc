@@ -12,8 +12,8 @@ async function flushUi(): Promise<void> {
 
 async function loadOps() {
   vi.resetModules()
-  vi.doMock('./quick-intervene', () => ({
-    QuickIntervene: () => html`<div data-testid="quick-intervene">QuickIntervene</div>`,
+  vi.doMock('../board/composer-v2', () => ({
+    ComposerV2: () => html`<div data-testid="composer-v2">ComposerV2</div>`,
   }))
   vi.doMock('../flow-control/flow-control-panel', () => ({
     FlowControlPanel: () => html`<div data-testid="flow-control-panel">FlowControlPanel</div>`,
@@ -51,7 +51,7 @@ describe('Ops surface', () => {
     vi.useRealTimers()
     vi.resetModules()
     vi.clearAllMocks()
-    vi.doUnmock('./quick-intervene')
+    vi.doUnmock('../board/composer-v2')
     vi.doUnmock('../flow-control/flow-control-panel')
   })
 
@@ -121,7 +121,7 @@ describe('Ops surface', () => {
     await flushUi()
 
     expect(container.textContent).toContain('Recent Activity')
-    expect(container.textContent).toContain('QuickIntervene')
+    expect(container.textContent).toContain('ComposerV2')
     expect(container.textContent).toContain('FlowControlPanel')
 
     // Placeholder-heavy review queue surface is gone — Live Judge + Keeper HITL
@@ -220,7 +220,7 @@ describe('Ops surface', () => {
     render(html`<${Ops} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('QuickIntervene')
+    expect(container.textContent).toContain('ComposerV2')
     expect(container.textContent).toContain('FlowControlPanel')
     expect(container.textContent).toContain('Recent Activity')
 

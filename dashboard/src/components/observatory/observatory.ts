@@ -13,9 +13,7 @@
 
 import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
-import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useRef } from 'preact/hooks'
-import { replaceRoute, route } from '../../router'
 import {
   currentKeeperFilter,
   currentTimeRangeFilter,
@@ -40,22 +38,9 @@ import { ToolCallTrack } from './tool-call-track'
 import { CrossSignalReadout } from './cross-signal-readout'
 import { DetailPane } from './detail-pane'
 import { cursorPosition } from './cursor-store'
-import { LoadingState } from '../common/feedback-state'
 
 const DEFAULT_RANGE: TimeRangePreset = '1h'
 const observatoryRefreshVersion = signal(0)
-type ObservatoryView = 'timeline' | 'activity' | 'live'
-
-const LazyLive = lazy(async () => ({
-  default: (await import('../live')).Live,
-}))
-const LazyObservatoryActivityPanels = lazy(async () => ({
-  default: (await import('../activity-graph')).ObservatoryActivityPanels,
-}))
-
-function lazyObservatoryFallback(label: string) {
-  return html`<${LoadingState}>${label} 불러오는 중...<//>`
-}
 
 // --- Observatory state ---
 
@@ -146,53 +131,7 @@ function RangeSelector() {
   `
 }
 
-function ViewSelector({
-  current,
-  onSelect,
-}: {
-  current: ObservatoryView
-  onSelect: (view: ObservatoryView) => void
-}) {
-  return html`
-    <div class="flex flex-wrap items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
-      ${([
-        { key: 'timeline', label: 'Timeline' },
-        { key: 'activity', label: 'Activity Graph' },
-        { key: 'live', label: 'Live' },
-      ] as const).map(view => html`
-        <button
-          type="button"
-          class="rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
-            current === view.key
-              ? 'bg-[var(--accent-20)] text-accent-fg'
-              : 'text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'
-          }"
-          onClick=${() => onSelect(view.key)}
-          aria-pressed=${current === view.key}
-        >
-          ${view.label}
-        </button>
-      `)}
-    </div>
-  `
-}
-
 // --- Main container ---
-
-const LIVE_INTERVAL_MS = 30_000
-
-function observatoryViewFromParam(value: string | undefined): ObservatoryView {
-  if (value === 'live') return 'live'
-  if (value === 'activity' || value === 'graph') return 'activity'
-  return 'timeline'
-}
-
-function updateObservatoryView(view: ObservatoryView): void {
-  const params: Record<string, string> = { ...route.value.params, section: 'observatory' }
-  if (view === 'timeline') delete params.view
-  else params.view = view
-  replaceRoute('monitoring', params)
-}
 
 export function refreshObservatorySurface(): void {
   observatoryRefreshVersion.value += 1
@@ -200,29 +139,14 @@ export function refreshObservatorySurface(): void {
 
 export function Observatory() {
   const state = useSignal<ObservatoryData>(emptyData())
-  const liveMode = useSignal(false)
-  const refreshTick = useSignal(0)
-  const activeView = observatoryViewFromParam(route.value.params.view)
   const activeController = useRef<AbortController | null>(null)
   const latestRequestId = useRef(0)
-
-  useEffect(() => {
-    if (activeView !== 'timeline' || !liveMode.value) return
-    const id = setInterval(() => { refreshTick.value++ }, LIVE_INTERVAL_MS)
-    return () => clearInterval(id)
-  }, [activeView, liveMode.value])
 
   useEffect(() => registerActivityRefresh(() => {
     refreshObservatorySurface()
   }), [])
 
   useEffect(() => {
-    if (activeView !== 'timeline') {
-      activeController.current?.abort()
-      activeController.current = null
-      return
-    }
-
     const keeper = currentKeeperFilter() ?? undefined
     const range = currentTimeRangeFilter() ?? DEFAULT_RANGE
 
@@ -278,7 +202,7 @@ export function Observatory() {
     })
 
     return () => { controller.abort() }
-  }, [activeView, currentKeeperFilter(), currentTimeRangeFilter(), refreshTick.value, observatoryRefreshVersion.value])
+  }, [currentKeeperFilter(), currentTimeRangeFilter(), observatoryRefreshVersion.value])
 
   const data = state.value
 
@@ -286,103 +210,55 @@ export function Observatory() {
     <div class="flex flex-col gap-5">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="flex flex-col gap-0.5">
-          <h3 class="text-sm font-semibold text-text-strong">Evidence Timeline</h3>
+          <h3 class="text-sm font-semibold text-text-strong">Observatory</h3>
           <p class="text-2xs text-text-dim">
-            ${activeView === 'timeline'
-              ? html`
-                  ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
-                  · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
-                  · ${data.totalMatchingEvents} events
-                  ${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}
-                  ${data.loading ? ' · loading' : ''}
-                  ${liveMode.value ? ' · 30s 자동 갱신' : ''}
-                `
-              : activeView === 'activity'
-                ? 'Activity Graph'
-                : 'Live stream'}
+            ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
+            · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
+            · ${data.totalMatchingEvents} events
+            ${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}
+            ${data.loading ? ' · loading' : ''}
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <${ViewSelector}
-            current=${activeView}
-            onSelect=${updateObservatoryView}
-          />
-          ${activeView === 'timeline' ? html`
-            <${RangeSelector} />
-            <button
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2.5 py-1 text-2xs font-medium transition-colors ${
-                liveMode.value
-                  ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-                  : 'border-card-border text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'
-              }"
-              onClick=${() => {
-                liveMode.value = !liveMode.value
-                if (liveMode.value) refreshTick.value++
-              }}
-              aria-pressed=${liveMode.value}
-            >
-              ${liveMode.value ? html`
-                <span class="relative flex h-2 w-2" aria-hidden="true">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-[var(--r-0)] bg-[var(--ok-10)] opacity-75"></span>
-                  <span class="relative inline-flex rounded-full h-2 w-2 bg-[var(--ok-10)]"></span>
-                </span>
-                자동 갱신
-              ` : '자동 갱신'}
-            </button>
-          ` : null}
+          <${RangeSelector} />
         </div>
       </div>
 
-      ${activeView === 'timeline' && data.error ? html`
+      ${data.error ? html`
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}
 
-      ${activeView === 'live'
-        ? html`
-            <${Suspense} fallback=${lazyObservatoryFallback('라이브 모니터')}>
-              <${LazyLive} variant="observatory" />
-            <//>
-          `
-        : activeView === 'activity'
-        ? html`
-            <${Suspense} fallback=${lazyObservatoryFallback('활동 분석 패널')}>
-              <${LazyObservatoryActivityPanels} />
-            <//>
-          `
-        : html`
-            <div class="flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
-              <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
-              <${EventTrack}
-                events=${data.events}
-                windowStart=${data.windowStart}
-                windowEnd=${data.windowEnd}
-              />
-              <${ToolCallTrack}
-                events=${data.events}
-                windowStart=${data.windowStart}
-                windowEnd=${data.windowEnd}
-              />
-              <${MetricTrack}
-                points=${data.hourlyTrend}
-                windowStart=${data.windowStart}
-                windowEnd=${data.windowEnd}
-              />
-              ${cursorPosition.value === null ? html`
-                <div class="mt-1 h-1" aria-hidden="true"></div>
-              ` : null}
-            </div>
+      <div class="flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
+        <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
+        <${EventTrack}
+          events=${data.events}
+          windowStart=${data.windowStart}
+          windowEnd=${data.windowEnd}
+        />
+        <${ToolCallTrack}
+          events=${data.events}
+          windowStart=${data.windowStart}
+          windowEnd=${data.windowEnd}
+        />
+        <${MetricTrack}
+          points=${data.hourlyTrend}
+          windowStart=${data.windowStart}
+          windowEnd=${data.windowEnd}
+        />
+        ${cursorPosition.value === null ? html`
+          <div class="mt-1 h-1" aria-hidden="true"></div>
+        ` : null}
+      </div>
 
-            <${CrossSignalReadout}
-              events=${data.events}
-              hourlyTrend=${data.hourlyTrend}
-              eventWindowMs=${Math.max(30_000, (data.windowEnd - data.windowStart) * 0.05)}
-            />
+      <${CrossSignalReadout}
+        events=${data.events}
+        hourlyTrend=${data.hourlyTrend}
+        eventWindowMs=${Math.max(30_000, (data.windowEnd - data.windowStart) * 0.05)}
+      />
 
-            <${DetailPane} />
-          `}
+      <${DetailPane} />
     </div>
   `
 }

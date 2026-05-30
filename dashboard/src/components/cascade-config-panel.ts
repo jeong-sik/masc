@@ -118,7 +118,7 @@ function sourceTone(source: CascadeProfile['source']): string {
 }
 
 function catalogSourceSummary(config: CascadeConfigResponse): string {
-  const sourcePath = config.source_path ?? 'cascade.toml'
+  const sourcePath = config.source_path ?? 'runtime.toml'
   return `SSOT: ${sourcePath}`
 }
 
@@ -138,14 +138,14 @@ function rawConfigModeSummary(
   const sourcePath = raw?.source_path ?? 'cascade.toml'
   const editable = raw !== null && raw.source_editable !== false
   return {
-    title: 'Active Cascade Source',
+    title: 'Active Runtime Source',
     primary:
       editable
         ? `현재 active source는 ${sourcePath} 입니다.`
         : `현재 active source는 ${sourcePath} 이지만 읽기 전용 상태입니다.`,
     secondary:
       editable
-        ? '수정 후 저장하면 서버가 TOML을 검증하고 cascade snapshot을 다시 불러옵니다.'
+        ? '수정 후 저장하면 서버가 TOML을 검증하고 runtime snapshot을 다시 불러옵니다.'
         : '소스 파일을 읽을 수 없어 프로필, 후보 label, weight, health, validation 상태만 노출됩니다.',
     saveLabel: editable ? '저장' : '저장 비활성',
   }
@@ -270,13 +270,13 @@ function validationLabel(status: CascadeValidationStatus): string {
 function validationDescription(status: CascadeValidationStatus): string {
   switch (status) {
     case 'validated':
-      return '현재 cascade catalog 이 정상 검증되었습니다.'
+      return '현재 runtime catalog 이 정상 검증되었습니다.'
     case 'serving_valid_subset':
-      return '현재 cascade.toml 일부 profile 이 검증에 실패해 invalid profile 은 제외하고 유효한 subset 만 계속 서빙 중입니다.'
+      return '현재 runtime.toml 일부 profile 이 검증에 실패해 invalid profile 은 제외하고 유효한 subset 만 계속 서빙 중입니다.'
     case 'serving_last_known_good':
-      return '새 cascade.toml 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
+      return '새 runtime.toml 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
     case 'invalid':
-      return '현재 cascade.toml 검증에 실패했습니다. 서버와 dashboard 는 degraded 로 계속 동작하지만 유효하지 않은 profile 은 라우팅에서 제외될 수 있습니다.'
+      return '현재 runtime.toml 검증에 실패했습니다. 서버와 dashboard 는 degraded 로 계속 동작하지만 유효하지 않은 profile 은 라우팅에서 제외될 수 있습니다.'
   }
 }
 
@@ -782,7 +782,7 @@ function HealthTable({
     ${isFiltering && filtered.length === 0
       ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${health.providers.length} runtimes)</div>`
       : html`
-        <table class="w-full text-xs" aria-label="cascade runtime 상태">
+        <table class="w-full text-xs" aria-label="runtime 상태">
           <thead>
             <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
               <th scope="col" class="text-left py-1 w-4"></th>
@@ -986,7 +986,7 @@ function StrategyTraceTable({
   searchQuery,
 }: { trace: CascadeStrategyTraceResponse; searchQuery: { value: string } }) {
   if (trace.events.length === 0) {
-    return html`<${EmptyState}>최근 strategy decision 이 없습니다. (cascade 호출이 아직 발생하지 않음)<//>`
+    return html`<${EmptyState}>최근 strategy decision 이 없습니다. (runtime 호출이 아직 발생하지 않음)<//>`
   }
   const query = searchQuery.value.trim().toLowerCase()
   const filtered = query
@@ -1059,7 +1059,7 @@ function ClientCapacityHistoryTable({
 
 function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResponse }) {
   if (capacity.entries.length === 0) {
-    return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 runtime lane 미사용)<//>`
+    return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (runtime이 한 번도 호출되지 않았거나 runtime lane 미사용)<//>`
   }
   return html`
     <table class="w-full text-xs" aria-label="client capacity 슬롯">
@@ -1483,10 +1483,10 @@ export function CascadeConfigPanel() {
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
 
       ${current.loading && !config && !rawConfig && !health
-        ? html`<${LoadingState}>cascade snapshot 불러오는 중...<//>`
+        ? html`<${LoadingState}>runtime snapshot 불러오는 중...<//>`
         : null}
 
-      <${SectionCard} label="캐스케이드 라우팅">
+      <${SectionCard} label="런타임 라우팅">
         ${config
           ? (() => {
               const keeperGroups = groupKeepersByCanonicalCascade(config.keeper_profiles)
@@ -1510,7 +1510,7 @@ export function CascadeConfigPanel() {
                   <${StatCell}
                     label="키퍼"
                     value=${config.keeper_profiles.length}
-                    detail="cascade_name 등록됨"
+                    detail="runtime_name 등록됨"
                   />
                   <${StatCell}
                     label="드리프트"
@@ -1519,7 +1519,7 @@ export function CascadeConfigPanel() {
                   />
                 </div>
                 ${config.profiles.length === 0
-                  ? html`<${EmptyState}>표시할 유효 cascade profile 이 없습니다.<//>`
+                  ? html`<${EmptyState}>표시할 유효 runtime profile 이 없습니다.<//>`
                   : html`
                     <div class="grid min-w-0 gap-3 md:grid-cols-2 mb-3">
                       ${config.profiles.map(p => html`

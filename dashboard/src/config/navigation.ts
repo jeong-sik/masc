@@ -185,8 +185,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'runtime',
-      label: 'Cascade & Runtime',
-      description: 'Cascade and provider health.',
+      label: 'Runtime',
+      description: 'Runtime provider health.',
       params: { section: 'runtime' },
     },
     {
@@ -197,8 +197,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'cascade-config',
-      label: 'Cascade Config',
-      description: 'Cascade providers, models and rules.',
+      label: 'Runtime Config',
+      description: 'Runtime providers, models and rules.',
       params: { section: 'cascade-config' },
       hidden: true,
     },
@@ -383,7 +383,6 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:metrics':      { section: 'runtime' },
   'monitoring:cascade-inspector': { section: 'runtime', view: 'inspector' },
   'monitoring:cost': { section: 'runtime', view: 'cost' },
-  'monitoring:cascade': { section: 'cascade-config' },
 
   // Dashboard consolidation Phase 1+6: command surface
   'command:intervene':    { section: 'operations' },

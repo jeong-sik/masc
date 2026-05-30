@@ -895,6 +895,12 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
          && arg.[0] = '-' && arg.[1] = 'e' ->
     let p = String.sub arg 2 (String.length arg - 2) in
     parse recursive case_sensitive files_with_matches (Some p) path rest
+  (* --regexp=PATTERN eq-form *)
+  | arg :: rest
+    when String.length arg > 9
+         && String.sub arg 0 9 = "--regexp=" ->
+    let p = String.sub arg 9 (String.length arg - 9) in
+    parse recursive case_sensitive files_with_matches (Some p) path rest
   (* --color=auto and similar --flag=VALUE forms: skip *)
   | arg :: rest
     when String.length arg > 2
@@ -1261,6 +1267,13 @@ let rec parse message amend = function
        (match rest with
         | m :: rest' -> parse (Some m) !has_a rest'
         | _ -> None))
+  | arg :: rest
+    when String.length arg > 10
+         && String.sub arg 0 10 = "--message=" ->
+    let m = String.sub arg 10 (String.length arg - 10) in
+    (match message with
+     | None -> parse (Some m) amend rest
+     | Some _ -> None)
   | "--" :: rest -> parse message amend rest
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
@@ -1549,6 +1562,11 @@ let rec parse reverse numeric unique key file = function
     (try parse reverse numeric unique (Some (int_of_string n)) file rest
      with Failure _ -> None)
   | "-t" :: _ :: rest | "--field-separator" :: _ :: rest -> parse reverse numeric unique key file rest  (* -t/--field-separator SEP *)
+  (* --field-separator=SEP *)
+  | arg :: rest
+    when String.length arg > 18
+         && String.sub arg 0 18 = "--field-separator=" ->
+    parse reverse numeric unique key file rest
   (* --key=N form *)
   | arg :: rest
     when String.length arg > 6
@@ -3069,6 +3087,17 @@ let rec parse in_place ext_re suppress expr file dd = function
   | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest when not dd -> parse in_place ext_re true expr file dd rest
   (* POSIX end-of-options: remaining are expression, file *)
   | "--" :: rest -> parse in_place ext_re suppress expr file true rest
+  (* --expression=EXPR and --file=FILE eq-forms *)
+  | arg :: rest
+    when not dd && String.length arg > 14
+         && String.sub arg 0 14 = "--expression=" ->
+    let e = String.sub arg 14 (String.length arg - 14) in
+    parse in_place ext_re suppress (Some e) file dd rest
+  | arg :: rest
+    when not dd && String.length arg > 7
+         && String.sub arg 0 7 = "--file=" ->
+    let f = String.sub arg 7 (String.length arg - 7) in
+    parse in_place ext_re suppress (Some f) file dd rest
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
     then parse in_place ext_re suppress expr file dd rest

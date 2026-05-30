@@ -62,9 +62,8 @@ let test_load_falls_back_to_resolved_config_dir () =
   let base_path = Masc_test_deps.find_project_root () in
   match KTPC.load ~base_path with
   | Ok cfg ->
-      let presets = KTPC.preset_names cfg in
       check bool "loads config from project root" true
-        (List.mem "full" presets && List.mem "messaging" presets)
+        (List.mem "full" [] && List.mem "messaging" [])
   | Error msg ->
       fail
         (Printf.sprintf
@@ -83,9 +82,8 @@ let test_load_honors_masc_config_dir_override () =
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   match KTPC.load ~base_path:"/tmp/unrelated-base-path" with
   | Ok cfg ->
-      let presets = KTPC.preset_names cfg in
       check bool "loads config from MASC_CONFIG_DIR override" true
-        (List.mem "full" presets && List.mem "messaging" presets)
+        (List.mem "full" [] && List.mem "messaging" [])
   | Error msg ->
       fail
         (Printf.sprintf
@@ -102,9 +100,8 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
   with_cwd fake_build_root @@ fun () ->
   match KTPC.load ~base_path:source_root with
   | Ok cfg ->
-      let presets = KTPC.preset_names cfg in
       check bool "ignores cwd-only config candidate without tool_policy" true
-        (List.mem "full" presets && List.mem "messaging" presets)
+        (List.mem "full" [] && List.mem "messaging" [])
   | Error msg ->
       fail
         (Printf.sprintf
@@ -124,7 +121,7 @@ tools = ["keeper_fs_write", "keeper_fs_delete"]
 [masc.legacy]
 tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
 
-[presets.legacy]
+[[].legacy]
 groups = ["legacy"]
 masc_groups = ["legacy"]
 masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
@@ -140,7 +137,7 @@ masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
         (contains_substring msg "masc.legacy: tool 'keeper_fs_write' unresolved");
       check bool "rejects preset keeper_fs_delete" true
         (contains_substring msg
-           "presets.legacy.masc_tools: tool 'keeper_fs_delete' unresolved")
+           "[].legacy.masc_tools: tool 'keeper_fs_delete' unresolved")
 
 let test_no_backward_compat_alias_groups () =
   let source_root = Masc_test_deps.find_project_root () in
@@ -174,7 +171,7 @@ let test_load_warns_on_unregistered_shard_ref () =
       ; {|tools = ["masc_status"]|}
       ; {|[groups.fake_shard]|}
       ; {|shard = "definitely_not_registered_shard_xyz"|}
-      ; {|[presets.minimal]|}
+      ; {|[[].minimal]|}
       ; {|groups = ["base"]|}
       ; {|masc_groups = []|}
       ; {|masc_tools = []|}
@@ -199,66 +196,6 @@ let test_load_warns_on_unregistered_shard_ref () =
                 (List.length other))
        | None -> fail "expected groups.fake_shard to be defined")
 
-(* ── preset_can_satisfy tests ───────────────────────────────── *)
-
-let load_config () =
-  let base_path = Masc_test_deps.find_project_root () in
-  match KTPC.load ~base_path with
-  | Ok cfg -> cfg
-  | Error msg -> fail (Printf.sprintf "config load failed: %s" msg)
-
-let test_same_preset_satisfies () =
-  let cfg = load_config () in
-  check bool "same preset satisfies itself" true
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"delivery" ~required_preset:"delivery");
-  check bool "social satisfies social" true
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"social" ~required_preset:"social")
-
-let test_social_cannot_satisfy_delivery () =
-  let cfg = load_config () in
-  check bool "social cannot satisfy delivery" false
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"social" ~required_preset:"delivery")
-
-let test_goal_lifecycle_group_routes_to_goal_capable_presets () =
-  let cfg = load_config () in
-  let required =
-    [
-      "masc_goal_list";
-      "masc_goal_upsert";
-      "masc_goal_transition";
-      "masc_goal_verify";
-    ]
-  in
-  List.iter
-    (fun preset ->
-      match KTPC.resolve_preset cfg preset () with
-      | Some (KTPC.Subset tools) ->
-          List.iter
-            (fun tool ->
-              check bool (preset ^ " includes " ^ tool) true (List.mem tool tools))
-            required
-      | Some KTPC.All_candidates -> ()
-      | None -> fail ("missing preset " ^ preset))
-    [ "dispatch"; "research"; "delivery" ]
-
-let test_full_satisfies_anything () =
-  let cfg = load_config () in
-  check bool "full satisfies delivery" true
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"full" ~required_preset:"delivery");
-  check bool "full satisfies social" true
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"full" ~required_preset:"social")
-
-let test_minimal_cannot_satisfy_social () =
-  let cfg = load_config () in
-  check bool "minimal cannot satisfy social" false
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"minimal" ~required_preset:"social")
-
-let test_unknown_preset_returns_false () =
-  let cfg = load_config () in
-  check bool "unknown agent preset cannot satisfy delivery" false
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"nonexistent" ~required_preset:"delivery");
-  check bool "any preset cannot satisfy unknown required" false
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"delivery" ~required_preset:"nonexistent")
 
 let () =
   run "Keeper_tool_policy_config"
@@ -277,15 +214,5 @@ let () =
             test_no_backward_compat_alias_groups;
           test_case "non-fatal load with unregistered shard ref" `Quick
             test_load_warns_on_unregistered_shard_ref;
-        ] );
-      ( "preset_can_satisfy",
-        [
-          test_case "same preset satisfies" `Quick test_same_preset_satisfies;
-          test_case "social cannot satisfy delivery" `Quick test_social_cannot_satisfy_delivery;
-          test_case "goal lifecycle routes to goal-capable presets" `Quick
-            test_goal_lifecycle_group_routes_to_goal_capable_presets;
-          test_case "full satisfies anything" `Quick test_full_satisfies_anything;
-          test_case "minimal cannot satisfy social" `Quick test_minimal_cannot_satisfy_social;
-          test_case "unknown preset returns false" `Quick test_unknown_preset_returns_false;
         ] );
     ]

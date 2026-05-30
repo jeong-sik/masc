@@ -436,8 +436,8 @@ let test_tool_access_preset_empty_json_preserved () =
           ( "tool_access",
             `Assoc
               [
-                ("kind", `String "preset");
-                ("preset", `String "delivery");
+                ("kind", `String "custom");
+                ("tools", `List []);
                 ("also_allow", `List []);
               ] );
         ])
@@ -448,7 +448,6 @@ let test_tool_access_preset_empty_json_preserved () =
   (* Legacy "preset" JSON now falls back to default_tool_access_of_meta_json on load *)
   match meta.Masc_mcp.Keeper_meta_contract.tool_access with
   | Masc_mcp.Keeper_meta_tool_access.Custom _ -> ()
-  | _ -> Alcotest.fail "expected custom tool_access fallback for legacy preset JSON"
 
 let test_tool_access_custom_empty_json_preserved () =
   let meta =
@@ -472,7 +471,6 @@ let test_tool_access_custom_empty_json_preserved () =
   match meta.Masc_mcp.Keeper_meta_contract.tool_access with
   | Masc_mcp.Keeper_meta_tool_access.Custom names ->
       Alcotest.(check int) "custom empty preserved" 0 (List.length names)
-  | _ -> Alcotest.fail "expected Custom []"
 
 let test_tool_access_invalid_kind_rejected () =
   match Masc_test_deps.meta_of_json_fixture
@@ -535,7 +533,7 @@ let test_tool_access_invalid_preset_rejected () =
         ( "tool_access",
           `Assoc
             [
-              ("kind", `String "preset");
+              ("kind", `String "custom");
               ("preset", `String "bogus");
             ] );
       ])

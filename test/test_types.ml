@@ -374,11 +374,11 @@ let () =
       Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->
         let open Masc_mcp.Keeper_meta_tool_access in
         Alcotest.(check bool) "social present" true
-          (List.mem "social" valid_tool_preset_strings);
+          (List.mem "social" []);
         Alcotest.(check bool) "dispatch present" true
-          (List.mem "dispatch" valid_tool_preset_strings);
+          (List.mem "dispatch" []);
         Alcotest.(check bool) "delivery present" true
-          (List.mem "delivery" valid_tool_preset_strings));
+          (List.mem "delivery" []));
     ];
     "operator_view_ssot", [
       (* Issue #8471: tool_operator view enum was missing 'sessions'

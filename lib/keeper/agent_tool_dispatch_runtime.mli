@@ -28,10 +28,10 @@ val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 (** Preset-scoped universe: preset allowlist + core_always - denied.
     Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
     to reduce candidate pool size per keeper preset.  See #4637. *)
-val keeper_preset_universe_tool_names : keeper_meta -> string list
+val keeper_tool_search_scope : keeper_meta -> string list
 
 (** Preset-scoped model tool schemas for BM25 indexing. *)
-val keeper_preset_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
+val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Core tools that bypass preset filtering and seed the disclosure floor.
     Runtime gating/pruning can still narrow their visibility on a given turn. *)

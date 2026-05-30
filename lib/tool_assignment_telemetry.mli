@@ -30,7 +30,6 @@ type tool_event =
       assignment_id : assignment_id;
       agent_id : string;
       profile : string;
-      preset : string option;
       tool_list : string list;
       allow_set : string list;
       deny_set : string list;
@@ -65,7 +64,6 @@ val event_of_json : Yojson.Safe.t -> (tool_event, string) Result.t
 val emit_assigned :
   agent_id:string ->
   profile:string ->
-  ?preset:string ->
   tool_list:string list ->
   ?allow_set:string list ->
   ?deny_set:string list ->

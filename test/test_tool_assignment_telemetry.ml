@@ -60,7 +60,6 @@ let test_assigned_snapshot_has_all_fields () =
       Tool_assignment_telemetry.emit_assigned
         ~agent_id:"agent-1"
         ~profile:"keeper"
-        ~preset:"board_comment"
         ~tool_list:[ "bash"; "read" ]
         ~allow_set:[ "bash"; "read" ]
         ~deny_set:[]

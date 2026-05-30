@@ -95,12 +95,11 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
   | _ ->
       let* agent_id = string_small in
       let* profile = string_small in
-      let* preset = opt_string in
       let* tool_count = nat_small in
       let* assignment_id = string_small in
       return
         (Telemetry_eio.Tool_assigned
-           { agent_id; profile; preset; tool_count; assignment_id })
+           { agent_id; profile; tool_count; assignment_id })
 
 let gen_record : Telemetry_eio.event_record QCheck.Gen.t =
   let open QCheck.Gen in

@@ -681,9 +681,6 @@ git_identity_mode = "repo_cli_identity"
 base = "base.toml"
 persona_name = "sangsu"
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
 |};
       match KTP.load_keeper_toml child_path with
       | Error e -> fail e
@@ -968,14 +965,8 @@ let test_persona_resolver_defaults_to_research_tool_access () =
   | Error e -> fail ("resolver failed: " ^ e)
   | Ok (_, resolved) ->
       let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
-      check string "persona default tool_access kind" "preset"
-        (Yojson.Safe.Util.member "kind" tool_access |> Yojson.Safe.Util.to_string);
-      check string "persona default tool_access preset" "research"
-        (Yojson.Safe.Util.member "preset" tool_access |> Yojson.Safe.Util.to_string);
-      check bool "legacy tool_preset omitted" false
-        (match Yojson.Safe.Util.member "tool_preset" resolved with
-         | `String _ -> true
-         | _ -> false)
+      check string "persona default tool_access kind" "custom"
+        (Yojson.Safe.Util.member "kind" tool_access |> Yojson.Safe.Util.to_string)
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1184,11 +1175,7 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
              List.filter_map
                (function `String value -> Some value | _ -> None)
                items
-         | _ -> []);
-      check bool "tool_preset omitted with canonical tool_access" false
-        (match Yojson.Safe.Util.member "tool_preset" resolved with
-         | `String _ -> true
-         | _ -> false)
+         | _ -> [])
 
 let test_persona_resolver_renders_durable_keeper_toml () =
   let resolved =
@@ -1210,8 +1197,8 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ( "tool_access",
           `Assoc
             [
-              ("kind", `String "preset");
-              ("preset", `String "research");
+              ("kind", `String "custom");
+              ("tools", `List []);
               ("also_allow", `List [ `String "masc_status" ]);
             ] );
         ("tool_denylist", `List [ `String "masc_keeper_reset" ]);
@@ -1240,10 +1227,6 @@ let test_persona_resolver_renders_durable_keeper_toml () =
                 [ "probe"; "@probe" ] defaults.mention_targets;
               check (option (list string)) "allowed_paths"
                 (Some [ "/tmp/probe" ]) defaults.allowed_paths;
-              check (option string) "tool_preset" (Some "research")
-                defaults.tool_preset;
-              check (option (list string)) "tool_also_allow"
-                (Some [ "masc_status" ]) defaults.tool_also_allow;
               check (option (list string)) "tool_denylist"
                 (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
 
@@ -1287,8 +1270,6 @@ let test_persona_authoring_schema_explains_effects () =
   let rendered = Yojson.Safe.to_string json in
   check bool "documents keeper.goal" true
     (contains_substring rendered "keeper.goal");
-  check bool "omits legacy tool_preset" false
-    (contains_substring rendered "tool_preset");
   check bool "documents archetype axes" true
     (contains_substring rendered "archetype_axes");
   check bool "documents alignment axis" true
@@ -1362,8 +1343,6 @@ let test_persona_authoring_axes_validate () =
       let rendered_effects = Yojson.Safe.to_string selected_effects in
       check bool "selected effects include alignment" true
         (contains_substring rendered_effects "alignment");
-      check bool "selected effects omit default preset" false
-        (contains_substring rendered_effects "default_tool_preset");
       check bool "selected effects expose generated fields" true
         (contains_substring rendered_effects "keeper.instructions")
 
@@ -1395,11 +1374,7 @@ let test_persona_authoring_normalizes_keeper_defaults () =
       check (list string) "mention target defaults to handle" [ "probe" ]
         (Yojson.Safe.Util.member "mention_targets" keeper
          |> Yojson.Safe.Util.to_list
-         |> List.map Yojson.Safe.Util.to_string);
-      check bool "legacy tool_preset omitted" false
-        (match Yojson.Safe.Util.member "tool_preset" keeper with
-         | `String _ -> true
-         | _ -> false)
+         |> List.map Yojson.Safe.Util.to_string)
 
 let test_persona_authoring_rejects_unknown_keeper_fields () =
   let profile =
@@ -1477,9 +1452,6 @@ repo_cli_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
 also_allow = ["x"]
 |} in
   match TL.parse_toml input with
@@ -1508,9 +1480,6 @@ let test_detect_unknown_keys_accepts_tool_access_table () =
 [keeper]
 goal = "g"
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e

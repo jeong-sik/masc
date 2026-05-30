@@ -7053,10 +7053,7 @@ let test_prompt_includes_board_activity_section () =
   let board_meta =
     { minimal_meta with
       tool_access =
-        Preset
-          { preset = Social
-          ; also_allow = []
-          }
+        Custom []
     }
   in
   let sys, user =

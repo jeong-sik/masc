@@ -33,7 +33,6 @@ type tool_event =
       assignment_id : assignment_id;
       agent_id : string;
       profile : string;
-      preset : string option;
       tool_list : string list;
       allow_set : string list;
       deny_set : string list;
@@ -61,14 +60,13 @@ type tool_event =
 
 let event_to_json = function
   | Assigned
-      { assignment_id; agent_id; profile; preset; tool_list; allow_set; deny_set;
+      { assignment_id; agent_id; profile; tool_list; allow_set; deny_set;
         config_hash; reason; timestamp } ->
       `Assoc
         [ ("event_type", `String "Assigned")
         ; ("assignment_id", `String assignment_id)
         ; ("agent_id", `String agent_id)
         ; ("profile", `String profile)
-        ; ("preset", Json_util.string_opt_to_json preset)
         ; ("tool_list", `List (List.map (fun s -> `String s) tool_list))
         ; ("allow_set", `List (List.map (fun s -> `String s) allow_set))
         ; ("deny_set", `List (List.map (fun s -> `String s) deny_set))
@@ -105,7 +103,6 @@ let event_of_json json : (tool_event, string) Result.t =
   try
     match Json_util.get_string_with_default json ~key:"event_type" ~default:"" with
     | "Assigned" ->
-        let preset = Json_util.get_string json "preset" in
         let string_list field =
           (match Json_util.get_array json field with
            | Some (`List items) -> items
@@ -117,7 +114,6 @@ let event_of_json json : (tool_event, string) Result.t =
              { assignment_id = Json_util.get_string_with_default json ~key:"assignment_id" ~default:""
              ; agent_id = Json_util.get_string_with_default json ~key:"agent_id" ~default:""
              ; profile = Json_util.get_string_with_default json ~key:"profile" ~default:""
-             ; preset
              ; tool_list = string_list "tool_list"
              ; allow_set = string_list "allow_set"
              ; deny_set = string_list "deny_set"
@@ -227,7 +223,6 @@ let default_config_hash ~profile ~tool_list ~allow_set ~deny_set =
 let emit_assigned
     ~agent_id
     ~profile
-    ?preset
     ~tool_list
     ?(allow_set = [])
     ?(deny_set = [])
@@ -247,7 +242,6 @@ let emit_assigned
       { assignment_id
       ; agent_id
       ; profile
-      ; preset
       ; tool_list
       ; allow_set
       ; deny_set

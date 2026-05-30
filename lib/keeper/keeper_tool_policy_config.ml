@@ -1,6 +1,6 @@
 (** Keeper_tool_policy_config — load tool policy from config/tool_policy.toml.
 
-    Replaces hardcoded preset definitions with declarative configuration.
+    Groups define named tool lists for the keeper candidate set.
 
     @since 2.236.0 *)
 
@@ -10,21 +10,9 @@ type group_source =
   | Static of string list        (** Explicit tool name list *)
   | Shard_ref of string          (** Resolve from Tool_shard at runtime *)
 
-type preset_resolution =
-  | All_candidates        (** Use the entire candidate tool set *)
-  | Subset of string list (** Use exactly this list of tool names *)
-
-type preset_def = {
-  groups : string list;          (** Group names to include *)
-  masc_groups : string list;     (** MASC group names to include *)
-  masc_tools : string list;      (** Individual MASC tool names *)
-  all_candidates : bool;         (** true = include all candidate tools *)
-}
-
 type t = {
   groups : (string, group_source) Hashtbl.t;
   masc_groups : (string, string list) Hashtbl.t;
-  presets : (string, preset_def) Hashtbl.t;
 }
 
 (* ── TOML parsing helpers ─────────────────────────────────────────── *)
@@ -110,26 +98,6 @@ let parse_masc_groups (doc : Keeper_toml_loader.toml_doc) : (string, string list
   ) names;
   tbl
 
-let parse_presets
-    (doc : Keeper_toml_loader.toml_doc)
-  : (string, preset_def) Hashtbl.t =
-  let tbl = Hashtbl.create 8 in
-  let names = collect_table_names doc ~prefix:"presets" in
-  List.iter (fun name ->
-    let groups = toml_string_list_at doc "presets" (name ^ ".groups") in
-    let masc_groups = toml_string_list_at doc "presets" (name ^ ".masc_groups") in
-    let masc_tools =
-      toml_string_list_at doc "presets" (name ^ ".masc_tools")
-      |> dedupe_tool_names
-    in
-    let all_candidates =
-      Option.value ~default:false
-        (toml_bool_at doc "presets" (name ^ ".all_candidates"))
-    in
-    Hashtbl.replace tbl name { groups; masc_groups; masc_tools; all_candidates }
-  ) names;
-  tbl
-
 let unresolved_tool_message ~label ~name =
   match Keeper_tool_resolution.resolve name with
   | Keeper_tool_resolution.Resolved _ | Keeper_tool_resolution.Alias_to _ -> None
@@ -187,96 +155,52 @@ let load ~base_path : (t, string) result =
       | Error msg -> Error (Printf.sprintf "tool policy config group error in %s: %s" path msg)
       | Ok groups ->
         let masc_groups = parse_masc_groups doc in
-        let presets = parse_presets doc in
-        (* Validate that each preset's group references are defined *)
-        let ref_errors =
-          Hashtbl.fold (fun preset_name (def : preset_def) acc ->
-            let bad_groups =
-              List.filter (fun g -> not (Hashtbl.mem groups g)) def.groups
-              |> List.rev_map (fun g ->
-                Printf.sprintf "presets.%s: group '%s' is not defined" preset_name g)
-            in
-            let bad_masc_groups =
-              List.filter (fun g -> not (Hashtbl.mem masc_groups g)) def.masc_groups
-              |> List.rev_map (fun g ->
-                Printf.sprintf "presets.%s: masc_group '%s' is not defined" preset_name g)
-            in
-            List.rev_append bad_groups (List.rev_append bad_masc_groups acc)
-          ) presets []
+        let unknown_static_tools =
+          Hashtbl.fold (fun group_name (group : group_source) acc ->
+            match group with
+            | Static tools ->
+                List.filter_map (fun t ->
+                  unresolved_tool_message ~label:(Printf.sprintf "groups.%s" group_name) ~name:t
+                ) tools
+                |> List.rev_append acc
+            | Shard_ref _ -> acc
+          ) groups []
         in
-        let all_errors = ref_errors in
-        (match all_errors with
-        | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
+        let unknown_shard_refs =
+          Hashtbl.fold (fun group_name (group : group_source) acc ->
+            match group with
+            | Static _ -> acc
+            | Shard_ref shard_name ->
+              (match Tool_shard.get_shard shard_name with
+               | Some _ -> acc
+               | None ->
+                 Printf.sprintf
+                   "groups.%s: shard '%s' is not registered in Tool_shard"
+                   group_name shard_name
+                 :: acc)
+          ) groups []
+        in
+        let unknown_masc_tools =
+          Hashtbl.fold (fun group_name tools acc ->
+            List.filter_map (fun t ->
+              unresolved_tool_message ~label:(Printf.sprintf "masc.%s" group_name) ~name:t
+            ) tools
+            |> List.rev_append acc
+          ) masc_groups []
+        in
+        (match unknown_shard_refs with
+        | _ :: _ ->
+            Log.Keeper.warn "tool_policy_config: %d unknown shard refs in %s"
+              (List.length unknown_shard_refs) path;
+            List.iter (fun e -> Log.Keeper.warn "  %s" e) unknown_shard_refs
+        | [] -> ());
+        (match unknown_static_tools @ unknown_masc_tools with
+        | _ :: _ as errors ->
+            Error (Printf.sprintf "in %s: %s" path (String.concat "; " errors))
         | [] ->
-          (* Validate tool names against the keeper-facing policy surface.
-             [Static] tools must resolve now; stale names are config errors.
-             [Shard_ref] tools resolve from [Tool_shard] at runtime, but we
-             validate the shard name at load time so stale [Shard_ref]s surface
-             as load-time warnings rather than per-resolution "shard 'X' not
-             found, returning empty" noise (observed ~31k WARN/day from one
-             stale ref). *)
-          let unknown_static_tools =
-            Hashtbl.fold (fun group_name (group : group_source) acc ->
-              match group with
-              | Static tools ->
-                  List.filter_map (fun t ->
-                    unresolved_tool_message ~label:(Printf.sprintf "groups.%s" group_name) ~name:t
-                  ) tools
-                  |> List.rev_append acc
-              | Shard_ref _ -> acc
-            ) groups []
-          in
-          let unknown_shard_refs =
-            Hashtbl.fold (fun group_name (group : group_source) acc ->
-              match group with
-              | Static _ -> acc
-              | Shard_ref shard_name ->
-                (match Tool_shard.get_shard shard_name with
-                 | Some _ -> acc
-                 | None ->
-                   Printf.sprintf
-                     "groups.%s: shard '%s' is not registered in Tool_shard"
-                     group_name shard_name
-                   :: acc)
-            ) groups []
-          in
-          let unknown_masc_tools =
-            Hashtbl.fold (fun group_name tools acc ->
-              List.filter_map (fun t ->
-                unresolved_tool_message ~label:(Printf.sprintf "masc.%s" group_name) ~name:t
-              ) tools
-              |> List.rev_append acc
-            ) masc_groups []
-          in
-          let unknown_preset_tools =
-            Hashtbl.fold (fun preset_name (def : preset_def) acc ->
-              List.filter_map (fun t ->
-                unresolved_tool_message
-                  ~label:(Printf.sprintf "presets.%s.masc_tools" preset_name)
-                  ~name:t
-              ) def.masc_tools
-              |> List.rev_append acc
-            ) presets []
-          in
-          let fatal_tool_errors =
-            unknown_static_tools @ unknown_masc_tools @ unknown_preset_tools
-          in
-          (match unknown_shard_refs with
-          | _ :: _ ->
-              Log.Keeper.warn "tool_policy_config: %d unknown shard refs in %s"
-                (List.length unknown_shard_refs) path;
-              List.iter (fun e -> Log.Keeper.warn "  %s" e) unknown_shard_refs
-          | [] -> ());
-          (match fatal_tool_errors with
-          | _ :: _ ->
-              Error
-                (Printf.sprintf "in %s: %s" path
-                   (String.concat "; " fatal_tool_errors))
-          | [] ->
-              Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
-                (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-              Ok { groups; masc_groups; presets })
-        )
+            Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups from %s"
+              (Hashtbl.length groups) (Hashtbl.length masc_groups) path;
+            Ok { groups; masc_groups })
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
 
@@ -299,41 +223,6 @@ let resolve_group (config : t) (name : string) : string list option =
   | Some source -> Some (resolve_group_source source)
   | None -> None
 
-let resolve_preset
-    (config : t)
-    (preset_name : string)
-    ?(masc_filter = fun _ -> true)
-    ()
-  : preset_resolution option =
-  match Hashtbl.find_opt config.presets preset_name with
-  | None -> None
-  | Some (def : preset_def) ->
-    if def.all_candidates then
-      Some All_candidates
-    else
-      let group_tools =
-        def.groups
-        |> List.concat_map (fun group_name ->
-          match Hashtbl.find_opt config.groups group_name with
-          | Some group -> resolve_group_source group
-          | None -> [])
-      in
-      let masc_from_groups =
-        def.masc_groups
-        |> List.concat_map (fun mg_name ->
-          match Hashtbl.find_opt config.masc_groups mg_name with
-          | Some tools -> List.filter masc_filter tools
-          | None -> [])
-      in
-      let masc_individual =
-        def.masc_tools |> List.filter masc_filter
-      in
-      Some (Subset (group_tools @ masc_from_groups @ masc_individual))
-
-let preset_names (config : t) : string list =
-  Hashtbl.fold (fun name _ acc -> name :: acc) config.presets []
-  |> List.sort String.compare
-
 let group_names (config : t) : string list =
   Hashtbl.fold (fun name _ acc -> name :: acc) config.groups []
   |> List.sort String.compare
@@ -348,21 +237,4 @@ let all_group_tools (config : t) : string list =
 let all_masc_tools (config : t) : string list =
   Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []
 
-(** Check if [agent_preset]'s resolved tool set covers [required_preset]'s.
-    Derived from config — adding a new preset to tool_policy.toml automatically
-    updates the subsumption graph.  No hardcoded hierarchy. *)
-let preset_can_satisfy (config : t) ~(agent_preset : string) ~(required_preset : string) : bool =
-  if String.equal agent_preset required_preset then true
-  else
-    let resolve name =
-      match resolve_preset config name ~masc_filter:(fun _ -> true) () with
-      | Some All_candidates -> `Full
-      | Some (Subset tools) -> `Tools (List.sort_uniq String.compare tools)
-      | None -> `Unknown
-    in
-    match resolve agent_preset, resolve required_preset with
-    | `Unknown, _ | _, `Unknown -> false  (* unknown preset — can't verify, reject *)
-    | `Full, _ -> true                     (* agent has full access *)
-    | _, `Full -> false                    (* required is full, agent isn't *)
-    | `Tools agent_tools, `Tools req_tools ->
-      List.for_all (fun t -> List.mem t agent_tools) req_tools
+

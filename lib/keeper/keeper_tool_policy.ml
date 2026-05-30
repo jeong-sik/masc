@@ -105,19 +105,11 @@ let init_policy_config ~base_path =
   match Keeper_tool_policy_config.load ~base_path with
   | Ok cfg ->
     policy_config := Some cfg;
-    Log.Keeper.info "tool policy config loaded: %d presets, %d groups"
-      (List.length (Keeper_tool_policy_config.preset_names cfg))
+    Log.Keeper.info "tool policy config loaded: %d groups"
       (List.length (Keeper_tool_policy_config.group_names cfg));
     Ok ()
   | Error msg ->
     Error msg
-
-(* ── Group subsumption (config-driven) ──────────────────────── *)
-
-let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =
-  with_policy_config_or ~accessor:"preset_can_satisfy" ~default:false
-    (fun cfg ->
-      Keeper_tool_policy_config.preset_can_satisfy cfg ~agent_preset ~required_preset)
 
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 

@@ -5,6 +5,3 @@ base = "base.toml"
 autoboot_enabled = true
 persona_name = "ramarama"
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"

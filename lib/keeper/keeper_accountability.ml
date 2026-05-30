@@ -716,7 +716,28 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
   | other -> other
 ;;
 
-let accountability_summary_lookup (config : Coord_query.config) =
+type accountability_snapshot = {
+  snap_now : float;
+  by_agent : (string, claim_snapshot list) Hashtbl.t;
+  by_keeper : (string, claim_snapshot list) Hashtbl.t;
+}
+
+let accountability_snapshot_cache :
+    (string, float * accountability_snapshot) Hashtbl.t =
+  Hashtbl.create 4
+
+(* compute_reputation calls accountability_summary_json once per unique post
+   author in a board render; rebuilding the windowed claim aggregation
+   (read_window_entries + materialize_claims + bucketing) per author was
+   O(authors x window). The aggregation is a pure function of the window files,
+   so memoizing it per base path collapses a render's per-author calls (and
+   back-to-back renders) to a single build, at the cost of <= TTL staleness in
+   the accountability bands. The per-keeper decision activity below stays per
+   call; it is per-keeper and cheap relative to the window scan. *)
+let accountability_snapshot_ttl_s = 3.0
+
+let build_accountability_snapshot (config : Coord_query.config) :
+    accountability_snapshot =
   let now = Time_compat.now () in
   let cutoff = summary_cutoff now in
   let by_agent : (string, claim_snapshot list) Hashtbl.t = Hashtbl.create 32 in
@@ -729,14 +750,30 @@ let accountability_summary_lookup (config : Coord_query.config) =
     in
     Hashtbl.replace table key (snapshot :: existing)
   in
-  (* Request-local pre-aggregation: the dashboard rebuilds this lookup per
-     render, so the next request naturally refreshes the window contents. *)
   materialize_claims (read_window_entries config)
   |> List.iter (fun snapshot ->
     if created_at_unix snapshot.claim >= cutoff
     then (
       add_snapshot by_agent snapshot.claim.agent_name snapshot;
       add_snapshot by_keeper snapshot.claim.keeper_name snapshot));
+  { snap_now = now; by_agent; by_keeper }
+
+let cached_accountability_snapshot (config : Coord_query.config) :
+    accountability_snapshot =
+  let key = config.base_path in
+  let now = Time_compat.now () in
+  match Hashtbl.find_opt accountability_snapshot_cache key with
+  | Some (built_at, snap) when now -. built_at < accountability_snapshot_ttl_s ->
+      snap
+  | _ ->
+      let snap = build_accountability_snapshot config in
+      Hashtbl.replace accountability_snapshot_cache key (now, snap);
+      snap
+
+let accountability_summary_lookup (config : Coord_query.config) =
+  let { snap_now = now; by_agent; by_keeper } =
+    cached_accountability_snapshot config
+  in
   fun ~keeper_name ~agent_name ->
     let keeper_name = normalize_keeper_name keeper_name in
     let source, snapshots =

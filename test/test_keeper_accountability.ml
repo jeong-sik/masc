@@ -624,7 +624,12 @@ let test_summary_lookup_reads_window_once_for_multiple_agents () =
       in
       check int "window read count" 1 read_count)
 
-let test_summary_json_rereads_window_per_agent () =
+(* compute_reputation calls accountability_summary_json once per post author in
+   a board render. After the per-render memoization fix the windowed claim
+   aggregation is built once per base path (short TTL) and reused, so two
+   back-to-back calls for different agents read the window once, not once per
+   agent. This pins the fix (previously this asserted 2). *)
+let test_summary_json_memoizes_window_across_agents () =
   with_room (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
@@ -664,7 +669,7 @@ let test_summary_json_rereads_window_per_agent () =
                  ~agent_name:"keeper-json-b-agent");
             Keeper_accountability.window_read_count_for_testing ())
       in
-      check int "window read count" 2 read_count)
+      check int "window read count" 1 read_count)
 
 (* --- Attribution tests --- *)
 
@@ -780,8 +785,8 @@ let () =
             test_synthetic_claims_do_not_dilute_unsupported_rate;
           test_case "summary lookup reads window once" `Quick
             test_summary_lookup_reads_window_once_for_multiple_agents;
-          test_case "summary json rereads window per agent" `Quick
-            test_summary_json_rereads_window_per_agent;
+          test_case "summary json memoizes window across agents" `Quick
+            test_summary_json_memoizes_window_across_agents;
         ] );
       ( "attribution",
         [

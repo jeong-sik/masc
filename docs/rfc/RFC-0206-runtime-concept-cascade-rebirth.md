@@ -107,4 +107,38 @@ cascade 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selectio
 - P6: fail-fast mutation-test (default 누락/오류 시 반드시 Error)
 - 최종: full build green + `rg -w 'Cascade_[A-Za-z_]+' lib bin` = 0
 
+## 9. P4/P5 범위 정밀 측정 (2026-05-30, measured)
+
+P1-P3(자립 schema/parser/adapter + runtime.ml 재배선 + `tool_strict` 제거)은 완료·격리 컴파일 검증(scratch EXIT=0)·커밋됨. P4/P5 진입 전 dangling 범위를 정밀 측정해 초기 추정(844/122)을 교정했다.
+
+### 9.1 surviving vs dangling 분류 (결정적)
+
+`rg 'Cascade_[A-Za-z_]+'`의 862 occurrence는 dangling 여부 무관 집계였다. 64개 distinct 심볼을 생존-정의 여부로 분류:
+
+- **21 심볼 = keeper 소유 variant 생성자**(생존 keeper 모듈에 정의, 컴파일 정상). `Cascade_idle/selecting/trying/done/exhausted`(keeper_registry_types/keeper_composite_observer/keeper_meta_contract), `Cascade_routed`(keeper_runtime_manifest_types), `Cascade_admitted/backpressured`(keeper_heartbeat_loop), `Cascade_attempts_exhausted`(keeper_turn_disposition) 등. **마이그레이션 대상 아님.** RFC §4대로 `keeper_meta_contract.Cascade_exhausted`는 frozen seam(operator 대시보드 파싱)이라 보존. rename(Cascade_idle→Turn_idle)은 P6 선택 polish.
+- **30+ 심볼 = dangling 모듈 참조**(삭제된 cascade 모듈). 이것만이 컴파일 차단. **진짜 범위: 120 파일 / 507 모듈-접근 occurrence** (lib/keeper 83, lib 17, dashboard 9, server 4, otel/local/config/operator 7).
+
+### 9.2 dispatch 부분그래프 = restore-rename (rewrite 아님)
+
+최대 비용은 dispatch cluster. `Cascade_runner`(61 ref) 소비 심볼의 35/61은 **타입 참조**(`stop_reason`/`run_result`/`response`/`cli_transport_overrides` — 전부 `Cascade_agent_context`/`Cascade_transport` 별칭), 실함수 호출은 `run`/`run_with_masc_tools`/`resolve_tool_lane` ~4건.
+
+전이 폐쇄: cascade_runner(785줄) + cascade_agent_context(390) + cascade_transport(407) + cascade_oas_runner(500) + cascade_transport_*(~14 하위모듈) + cascade_wire_overlay ≈ 2500줄. **그러나 측정 결과 이 부분그래프는 routing/strategy/health/selection 의존이 0**(cascade_transport는 자기 하위모듈 + `Cascade_config` + circular `Cascade_runner`만 의존). cascade_runner.run body의 selection 오염은 `Cascade_observation` 단 2건.
+
+→ RFC §5 INHERIT(transport + api_format 3-variant dispatch 보존)와 부합. dispatch substrate = transport/dispatch/config 부분그래프를 `Runtime_*` 네임스페이스로 **restore + 결정론적 rename**(내부 `Cascade_config`→Runtime_schema, `Cascade_observation` 2건 외과 처리). 2500줄 재작성이 아니라 mechanical rename이라 workflow fan-out 적합.
+
+### 9.3 cluster별 전략 (P4/P5 application)
+
+| cluster | dangling 모듈 | 전략 |
+|---------|--------------|------|
+| dispatch | Cascade_runner/oas_runner/agent_context/transport(+14 sub)/wire_overlay | **restore-rename → Runtime_***; selection 2건 외과 제거 |
+| catalog-config-types | Cascade_catalog_runtime/runtime/runtime_candidate/config/decl/declarative_* | 이미 구축된 lib/runtime(Runtime/Runtime_schema/Runtime_toml/Runtime_adapter)로 mechanical 치환 |
+| error-events | Cascade_error_classify/internal_error/event_bridge/events/inference | 생존 keeper_meta_contract 재사용 / 일부 re-home |
+| health-capacity-obs | Cascade_health_tracker/observation/saturation_signal/capacity_probe/slot | DISCARD 싱글톤, observation→single attempt metadata demote |
+| fsm-liveness-preflight | Cascade_fsm/attempt_fsm/preflight_state/attempt_liveness*/deadline | keeper_turn_phase substrate / delete |
+| routing | Cascade_routing/routes/strategy | DISCARD callsite |
+| naming | Cascade_name | raw string id |
+| misc | Cascade_worker_defaults/agent_context/trust_persist | per-symbol 분류 |
+
+세부 file-level 매핑은 Phase U 워크플로(8-cluster understand) 산출.
+
 RFC-WAIVED 근거(상위 #19536): 사용자 명시 지시에 따른 cascade→Runtime 재탄생. 본 RFC가 그 구현 단계의 설계 SSOT를 제공한다.

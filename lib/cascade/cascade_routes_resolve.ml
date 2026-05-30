@@ -10,5 +10,11 @@
     this module.  Callers that only need the configured route target
     without catalog cross-check use {!Cascade_routes} directly. *)
 
-let cascade_name_for_use ?config_path:_ _use =
-  Runtime.get_default_runtime_id ()
+let cascade_name_for_use ?config_path use =
+  let route_key = Cascade_routes.logical_use_key use in
+  let bindings = Cascade_routes.configured_route_bindings ?config_path () in
+  match List.assoc_opt route_key bindings with
+  | Some target when not (String.equal target "") ->
+      target
+  | _ ->
+      Runtime.get_default_runtime_id ()

@@ -115,9 +115,8 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
         | `Assoc _ -> base
         | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> base
       in
-      let content = Yojson.Safe.pretty_to_string scrubbed in
-      (try
-         Fs_compat.save_file path content;
+      (match Keeper_fs.save_json_atomic path scrubbed with
+       | Ok () ->
          Log.Keeper.info
            "scrubbed legacy keeper meta fields for %s: %s%s"
            path
@@ -125,17 +124,15 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
            (if migrate_legacy_disabled_keepalive
             then " (migrated presence_keepalive=false to paused=true)"
             else "")
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
+       | Error msg ->
          Prometheus.inc_counter
            Keeper_metrics.(to_string MetaJsonFailures)
            ~labels:[("site", "scrub")]
            ();
          Log.Keeper.warn
-           "failed to scrub removed keeper meta fields for %s: %s"
+           "failed to atomically scrub removed keeper meta fields for %s: %s"
            path
-           (Printexc.to_string exn));
+           msg);
       scrubbed, true)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ as j -> j, false
 ;;

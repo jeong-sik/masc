@@ -21,20 +21,25 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
   if not (Fs_compat.file_exists path)
   then Ok None
   else (
-    match Safe_ops.read_json_file_safe path with
-    | Error e -> Error e
-    | Ok json ->
-      let json, _scrubbed = Keeper_meta_json_scrub.scrub_persisted_keeper_meta_json ~path json in
-      warn_unknown_keeper_meta_keys ~path json;
-      (match meta_of_json json with
-       | Ok meta -> Ok (Some meta)
-       | Error e ->
-         Prometheus.inc_counter
-           Keeper_metrics.(to_string MetaReadFailures)
-           ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
-           ();
-         Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
-         Error e))
+    match Fs_compat.file_size path with
+    | Some 0 ->
+      Log.Keeper.warn "keeper meta is 0 bytes, treating as missing: %s" path;
+      Ok None
+    | _ ->
+      match Safe_ops.read_json_file_safe path with
+      | Error e -> Error e
+      | Ok json ->
+        let json, _scrubbed = Keeper_meta_json_scrub.scrub_persisted_keeper_meta_json ~path json in
+        warn_unknown_keeper_meta_keys ~path json;
+        (match meta_of_json json with
+         | Ok meta -> Ok (Some meta)
+         | Error e ->
+           Prometheus.inc_counter
+             Keeper_metrics.(to_string MetaReadFailures)
+             ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
+             ();
+           Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
+           Error e))
 ;;
 
 (** Sidecar stem suffixes (without the trailing .json).

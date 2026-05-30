@@ -174,38 +174,8 @@ val ensure_local_discovery_ready
   -> string list
   -> (unit, string) result
 
-(** Deterministic decision for the phase-buffer fallback boundary. This
-    does not probe runtime liveness; it only decides whether the selected
-    labels resolve to a probeable runtime URL before preserving the configured
-    [routes.phase_buffer] target. Removed route aliases are left as raw
-    names; only canonical route keys resolve through routes before this
-    decision. *)
-type phase_buffer_liveness_decision =
-  | Keep_effective_cascade of string
-  | Probe_phase_buffer_urls of
-      { effective_cascade : string
-      ; fallback_cascade : string
-      ; probeable_base_urls : string list
-      }
-
-val decide_phase_buffer_liveness
-  :  ?resolve_runtime_url:(string -> string option)
-  -> base_cascade:string
-  -> effective_cascade:string
-  -> string list
-  -> phase_buffer_liveness_decision
-
-(** When phase routing temporarily forces the phase-buffer route, fail open to the
-    keeper's configured base cascade if the probeable runtime endpoint is
-    unavailable. Removed route aliases are not treated as phase-buffer
-    targets. Exposed for targeted tests. *)
-val fail_open_phase_buffer_when_unavailable
-  :  ?resolve_runtime_url:(string -> string option)
-  -> ?probe_base_url:(string -> bool)
-  -> base_cascade:string
-  -> effective_cascade:string
-  -> string list
-  -> string
+(* cascade→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
+   (Keeper_turn_liveness 에서 적출됨 — 단일 runtime 에서 죽은 코드). *)
 
 (** Pure merge step for runtime-owned fail-open rotation candidates. The
     active path feeds this from the live cascade catalog: catalog order is

@@ -309,6 +309,17 @@ let keeper_decisions_json
     ]
 ;;
 
+(* Per-keeper decision-log feed cache: the transformed (ts_unix, event) list
+   for a source file, keyed by (path, per_keeper_limit) so a different requested
+   limit gets its own entry and the cached output is byte-identical to the
+   uncached path. Gated on the decision-log file's (mtime, size) — keeper turn
+   spans are streamed, so the size component is what catches same-second
+   appends. The per-request [generated_at] and the global sort/take below stay
+   outside the cache, so freshness metadata remains live. *)
+let decisions_feed_cache :
+    (float * Yojson.Safe.t) list Jsonl_mtime_projection.t =
+  Jsonl_mtime_projection.create ()
+
 let keeper_decisions_log_json
     ~(config : Coord.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
@@ -323,7 +334,11 @@ let keeper_decisions_log_json
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
-        else (
+        else
+          Jsonl_mtime_projection.get decisions_feed_cache
+            ~key:(path ^ "#" ^ string_of_int per_keeper_limit)
+            ~sources:[ path ]
+            ~build:(fun () ->
           let lines =
             Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_turn_spans"
               path

@@ -1,4 +1,4 @@
-(** Regression test for [Cascade_catalog_runtime.candidate_probe_to_yojson].
+(** Regression test for [Keeper_catalog_runtime.candidate_probe_to_yojson].
 
     Pins the post-PR-#15070 behaviour: the boot-log JSON serializer for
     catalog candidates emits the *real* identity fields ([model_string],
@@ -13,7 +13,7 @@
     reapplies the lens at this serializer, this test fails first. *)
 
 open Masc_mcp
-module C = Cascade_catalog_runtime
+module C = Keeper_catalog_runtime
 
 let probe ?(status = C.Probe_ok) ~model_string ~provider_kind ~model_id ~base_url
     () : C.candidate_probe =

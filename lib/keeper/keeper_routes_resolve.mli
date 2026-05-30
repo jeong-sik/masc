@@ -1,7 +1,7 @@
 (** Catalog-aware variant of route → cascade name resolution.
 
     Extracted from {!Keeper_routes} in the #19327/#19340 follow-up to
-    break the Keeper_routes ↔ Cascade_catalog_runtime module-level cycle.
+    break the Keeper_routes ↔ Keeper_catalog_runtime module-level cycle.
 
     @stability Internal *)
 

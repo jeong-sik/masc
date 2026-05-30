@@ -1,11 +1,11 @@
 (** Declarative catalog -> runtime snapshot conversion (RFC-0058 Phase 3).
 
     Converts an {!adapted_catalog} into a lightweight declarative snapshot
-    consumed by {!Cascade_catalog_runtime}.
+    consumed by {!Keeper_catalog_runtime}.
 
-    This module deliberately does NOT depend on {!Cascade_catalog_runtime}
+    This module deliberately does NOT depend on {!Keeper_catalog_runtime}
     to avoid a dependency cycle.  It defines its own mirror types and
-    {!Cascade_catalog_runtime} bridges them at the call site.
+    {!Keeper_catalog_runtime} bridges them at the call site.
 
     @stability Internal *)
 
@@ -13,7 +13,7 @@ open Keeper_declarative_adapter
 module Loader = Keeper_config_loader
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
-(* --- Lightweight mirror types (no Cascade_catalog_runtime dependency) --- *)
+(* --- Lightweight mirror types (no Keeper_catalog_runtime dependency) --- *)
 
 type candidate = {
   model_string : string;

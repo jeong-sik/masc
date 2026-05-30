@@ -31,7 +31,7 @@ type route_spec = {
    spec (cascade.toml [routes] + fallback_cascade) decides routing and
    the runtime cascade chain handles try/fail/next-cascade.  If the
    catalog is empty at runtime,
-   [Cascade_catalog_runtime.validate_path_result] already rejects keeper
+   [Keeper_catalog_runtime.validate_path_result] already rejects keeper
    boot; the canonical-key empty fallback only keeps module init and
    focused test executables from depending on historical aliases. *)
 
@@ -207,4 +207,4 @@ let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
 
 (* #19327/#19340 follow-up: [cascade_name_for_use] moved to
    {!Keeper_routes_resolve} so this module no longer depends on
-   {!Cascade_catalog_runtime} — that dep closed a module-level cycle. *)
+   {!Keeper_catalog_runtime} — that dep closed a module-level cycle. *)

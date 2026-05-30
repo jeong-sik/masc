@@ -1239,7 +1239,7 @@ let test_keeper_direct_reply_contracts () =
      suppression (checked below). *)
   check bool "keeper manual turns resolve declared cascade through runtime catalog" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
-       "Cascade_catalog_runtime.resolve_declared_name ~raw_name");
+       "Keeper_catalog_runtime.resolve_declared_name ~raw_name");
   check bool "keeper turn suppresses skill route headers for direct reply" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "let effective_no_skill_route = no_skill_route || direct_reply");

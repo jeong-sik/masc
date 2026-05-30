@@ -36,7 +36,7 @@ val known_route_keys : string list
 
 (** #19327/#19340 follow-up: [cascade_name_for_use] moved to
     {!Keeper_routes_resolve} so this module no longer depends on
-    {!Cascade_catalog_runtime}.  Callers that need catalog cross-check use
+    {!Keeper_catalog_runtime}.  Callers that need catalog cross-check use
     the new module; callers that only need configured route data use
     {!configured_route_bindings} / {!configured_route_targets} here. *)
 

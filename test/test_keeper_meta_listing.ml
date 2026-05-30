@@ -514,7 +514,7 @@ let test_autoboot_policy_resync_from_declarative_toml () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Cascade_catalog_runtime.reset_cache_for_tests ();
+      Keeper_catalog_runtime.reset_cache_for_tests ();
       Config_dir_resolver.reset ();
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
@@ -528,7 +528,7 @@ let test_autoboot_policy_resync_from_declarative_toml () =
       write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
-      Cascade_catalog_runtime.install_snapshot_for_tests
+      Keeper_catalog_runtime.install_snapshot_for_tests
         ~source_path:cascade_path
         ~profile_names:[ (Keeper_config.default_cascade_name ()) ];
       write_keeper_meta_exn

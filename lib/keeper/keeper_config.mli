@@ -8,7 +8,7 @@
 (** {1 Core Constants} *)
 
 (** Default cascade name for keeper turns. Resolved each call against
-    the live [Cascade_catalog_runtime] snapshot so the answer reflects
+    the live [Keeper_catalog_runtime] snapshot so the answer reflects
     the currently-installed catalog rather than module-init state. Falls
     back to [Keeper_routes.cascade_name_for_use Keeper_turn] when the
     snapshot is not yet available (early boot).

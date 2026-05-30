@@ -699,7 +699,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    match ctx.net with
                    | None -> false
                    | Some net ->
-                       (match Cascade_catalog_runtime.resolve_named_providers_strict
+                       (match Keeper_catalog_runtime.resolve_named_providers_strict
                                 ~sw:ctx.sw ~net ~cascade_name:(Keeper_meta_contract.cascade_name_of_meta meta) () with
                         | Error _ -> false
                         | Ok candidates ->

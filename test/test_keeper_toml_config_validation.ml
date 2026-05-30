@@ -384,7 +384,7 @@ let with_temp_config_dir cascade_toml f =
   write_file cascade_path cascade_toml;
   let reset () =
     Config_dir_resolver.reset ();
-    Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ()
+    Masc_mcp.Keeper_catalog_runtime.reset_cache_for_tests ()
   in
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
@@ -666,7 +666,7 @@ tools-support = true
   check bool "parse error is surfaced as catalog error" true has_parse_error
 
 let rejection_error_messages rejection =
-  let json = Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection in
+  let json = Masc_mcp.Keeper_catalog_runtime.rejection_to_yojson rejection in
   Yojson.Safe.Util.member "errors" json
   |> Yojson.Safe.Util.to_list
   |> List.filter_map (function
@@ -691,8 +691,8 @@ tools-support = true
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   match
     (* #19327/#19340 follow-up: validate_path now takes ~route_data. *)
-    Masc_mcp.Cascade_catalog_runtime.validate_path
-      ~route_data:Masc_mcp.Cascade_catalog_runtime.empty_route_data
+    Masc_mcp.Keeper_catalog_runtime.validate_path
+      ~route_data:Masc_mcp.Keeper_catalog_runtime.empty_route_data
       ~config_path:cascade_path ()
   with
   | Ok _ -> fail "runtime validation should reject declarative parse errors"
@@ -730,8 +730,8 @@ target = "provider_a.qwen3"
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   match
     (* #19327/#19340 follow-up: validate_path now takes ~route_data. *)
-    Masc_mcp.Cascade_catalog_runtime.validate_path
-      ~route_data:Masc_mcp.Cascade_catalog_runtime.empty_route_data
+    Masc_mcp.Keeper_catalog_runtime.validate_path
+      ~route_data:Masc_mcp.Keeper_catalog_runtime.empty_route_data
       ~config_path:cascade_path ()
   with
   | Ok _ -> fail "runtime validation should reject declarative adapter errors"

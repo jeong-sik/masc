@@ -38,8 +38,8 @@ let declared_provider_schemes_set ?(config_path : string option) () : StringSet.
   | Some path ->
     (* #19327/#19340 follow-up cycle resolution: build [route_data] from
        Keeper_routes at the dashboard layer (which sits above both
-       Keeper_routes and Cascade_catalog_runtime) and inject. *)
-    let route_data : Cascade_catalog_runtime.route_data =
+       Keeper_routes and Keeper_catalog_runtime) and inject. *)
+    let route_data : Keeper_catalog_runtime.route_data =
       { keeper_turn_target =
           Some
             (Keeper_routes_resolve.cascade_name_for_use ~config_path:path
@@ -51,14 +51,14 @@ let declared_provider_schemes_set ?(config_path : string option) () : StringSet.
       }
     in
     (match
-       Cascade_catalog_runtime.validate_path ~route_data ~config_path:path ()
+       Keeper_catalog_runtime.validate_path ~route_data ~config_path:path ()
      with
      | Error _ -> StringSet.empty
      | Ok snapshot ->
        List.fold_left
-         (fun acc (profile : Cascade_catalog_runtime.profile_build) ->
+         (fun acc (profile : Keeper_catalog_runtime.profile_build) ->
             List.fold_left
-              (fun acc (candidate : Cascade_catalog_runtime.candidate_runtime) ->
+              (fun acc (candidate : Keeper_catalog_runtime.candidate_runtime) ->
                  StringSet.add
                    (provider_scheme_of_model_string candidate.model_string)
                    acc)

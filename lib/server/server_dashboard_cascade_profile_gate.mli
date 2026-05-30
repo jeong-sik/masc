@@ -1,7 +1,7 @@
 (** Dashboard cascade profile gate — determines which cascade
     profiles are assignable to a keeper.
 
-    Pure derivation pipeline over [Cascade_catalog_runtime] (preferred)
+    Pure derivation pipeline over [Keeper_catalog_runtime] (preferred)
     + [Keeper_catalog_validator] (fallback on snapshot unavailability)
     + [Keeper_turn_profile.keeper_catalog_names] (keeper-assignable
     filter). *)

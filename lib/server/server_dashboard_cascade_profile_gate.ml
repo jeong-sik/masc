@@ -14,7 +14,7 @@
     Extracted from [server_routes_http_routes_dashboard.ml] (lines
     14-184) as part of the godfile decomp campaign. Owns the pure
     profile-classification pipeline that feeds the dashboard cascade
-    assignment UI; runtime snapshot ([Cascade_catalog_runtime]) is
+    assignment UI; runtime snapshot ([Keeper_catalog_runtime]) is
     consulted first, with a fallback to the on-disk validator
     ([Keeper_catalog_validator]) when the snapshot is unavailable. *)
 
@@ -40,13 +40,13 @@ let compute () : t =
         Keeper_catalog_validator.error_messages_by_profile
           ~config_path:path
   in
-  match Cascade_catalog_runtime.known_profile_names () with
+  match Keeper_catalog_runtime.known_profile_names () with
   | Ok raw_validated_profiles ->
       let validated_profiles =
         raw_validated_profiles |> List.sort_uniq String.compare
       in
       let invalid_profiles =
-        (Cascade_catalog_runtime.invalid_profile_errors ()
+        (Keeper_catalog_runtime.invalid_profile_errors ()
          @ fallback_invalid_profiles)
         |> Dashboard_cascade.invalid_profiles_with_internal_names
       in

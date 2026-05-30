@@ -2,7 +2,7 @@
    cascade catalog runtime.  These types and the singleton cache live
    in a dedicated module so the validate/probe/json/resolve submodules
    can share them without duplicating record definitions or pulling in
-   the full facade.  The parent [Cascade_catalog_runtime] re-exports
+   the full facade.  The parent [Keeper_catalog_runtime] re-exports
    every type below transparently so caller field/constructor access
    remains source-compatible. *)
 

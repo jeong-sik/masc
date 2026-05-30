@@ -494,22 +494,22 @@ type live_catalog_outcome =
   | Live_catalog_invalid
 
 let live_catalog_summary = function
-  | Stdlib.Ok (Cascade_catalog_runtime.Validated snapshot) ->
+  | Stdlib.Ok (Keeper_catalog_runtime.Validated snapshot) ->
       ( Live_catalog_valid,
         None,
-        Cascade_catalog_runtime.state_to_yojson
-          (Cascade_catalog_runtime.Validated snapshot) )
+        Keeper_catalog_runtime.state_to_yojson
+          (Keeper_catalog_runtime.Validated snapshot) )
   | Stdlib.Ok
-      (Cascade_catalog_runtime.Validated_with_rejections _ as state) ->
+      (Keeper_catalog_runtime.Validated_with_rejections _ as state) ->
       ( Live_catalog_partial,
         Some
           "Live cascade catalog validation kept the usable profile subset and rejected some presets.",
-        Cascade_catalog_runtime.state_to_yojson state )
-  | Stdlib.Ok (Cascade_catalog_runtime.Serving_last_known_good _ as state) ->
+        Keeper_catalog_runtime.state_to_yojson state )
+  | Stdlib.Ok (Keeper_catalog_runtime.Serving_last_known_good _ as state) ->
       ( Live_catalog_serving_last_known_good,
         Some
           "Live cascade catalog validation rejected the current file; runtime is serving last-known-good.",
-        Cascade_catalog_runtime.state_to_yojson state )
+        Keeper_catalog_runtime.state_to_yojson state )
   | Stdlib.Error rejection ->
       ( Live_catalog_invalid,
         Some
@@ -520,21 +520,21 @@ let live_catalog_summary = function
             ("serving_last_known_good", `Bool false);
             ("snapshot", `Null);
             ( "rejected_update",
-              Cascade_catalog_runtime.rejection_to_yojson rejection );
+              Keeper_catalog_runtime.rejection_to_yojson rejection );
           ] )
 
 let live_catalog_snapshot = function
-  | Stdlib.Ok (Cascade_catalog_runtime.Validated snapshot) -> Some snapshot
+  | Stdlib.Ok (Keeper_catalog_runtime.Validated snapshot) -> Some snapshot
   | Stdlib.Ok
-      (Cascade_catalog_runtime.Validated_with_rejections { snapshot; _ })
+      (Keeper_catalog_runtime.Validated_with_rejections { snapshot; _ })
   | Stdlib.Ok
-      (Cascade_catalog_runtime.Serving_last_known_good { snapshot; _ }) ->
+      (Keeper_catalog_runtime.Serving_last_known_good { snapshot; _ }) ->
       Some snapshot
   | Stdlib.Error _ -> None
 
-let find_live_profile (snapshot : Cascade_catalog_runtime.snapshot) name =
+let find_live_profile (snapshot : Keeper_catalog_runtime.snapshot) name =
   List.find_opt
-    (fun (profile : Cascade_catalog_runtime.profile_build) ->
+    (fun (profile : Keeper_catalog_runtime.profile_build) ->
        String.equal profile.name name)
     snapshot.profiles
 
@@ -624,7 +624,7 @@ let keeper_internal_tool_route_issue route_key target candidates =
          required_keeper_internal_tool_name)
 
 let forced_tool_route_issue
-    (snapshot : Cascade_catalog_runtime.snapshot)
+    (snapshot : Keeper_catalog_runtime.snapshot)
     (use : Keeper_routes.logical_use)
   =
   let route_key = Keeper_routes.logical_use_key use in
@@ -653,7 +653,7 @@ let forced_tool_route_issue
       | Some profile ->
           let candidates =
             List.map
-              (fun (candidate : Cascade_catalog_runtime.candidate_runtime) ->
+              (fun (candidate : Keeper_catalog_runtime.candidate_runtime) ->
                  candidate.provider_cfg)
               profile.candidates
           in
@@ -722,7 +722,7 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
     | None -> (None, [], true)
   in
   let live_state_result =
-    Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
+    Keeper_catalog_runtime.inspect_active ~sw ~net ~clock ()
   in
   let live_outcome, live_warning, catalog_validation =
     match live_catalog_summary live_state_result with

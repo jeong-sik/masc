@@ -207,7 +207,7 @@ let configure_direct_test_environment () =
   Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Unix.putenv "MASC_CONFIG_DIR" config_dir;
   Config_dir_resolver.reset ();
-  Cascade_catalog_runtime.reset_cache_for_tests ();
+  Keeper_catalog_runtime.reset_cache_for_tests ();
   test_process_base_path := Some base;
   at_exit (fun () -> Option.iter cleanup_dir !test_process_base_path)
 ;;
@@ -392,7 +392,7 @@ let with_temp_masc_config cascade_toml f =
   let prev_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let prev_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Config_dir_resolver.reset ();
-  Cascade_catalog_runtime.reset_cache_for_tests ();
+  Keeper_catalog_runtime.reset_cache_for_tests ();
   Unix.putenv "MASC_BASE_PATH" base;
   Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Unix.putenv "MASC_CONFIG_DIR" config_dir;
@@ -408,7 +408,7 @@ let with_temp_masc_config cascade_toml f =
        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
       Config_dir_resolver.reset ();
-      Cascade_catalog_runtime.reset_cache_for_tests ();
+      Keeper_catalog_runtime.reset_cache_for_tests ();
       cleanup_dir base)
     f
 ;;
@@ -741,7 +741,7 @@ let test_default_config_path () =
   let old_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   Config_dir_resolver.reset ();
-  Cascade_catalog_runtime.reset_cache_for_tests ();
+  Keeper_catalog_runtime.reset_cache_for_tests ();
   Unix.putenv "MASC_CONFIG_DIR" masc_config_dir;
   Unix.putenv "MASC_BASE_PATH" "";
   Fun.protect
@@ -756,7 +756,7 @@ let test_default_config_path () =
               which env_opt treats as absent. *)
          Unix.putenv "MASC_BASE_PATH" "");
       Config_dir_resolver.reset ();
-      Cascade_catalog_runtime.reset_cache_for_tests ();
+      Keeper_catalog_runtime.reset_cache_for_tests ();
       cleanup_dir base)
     (fun () ->
        match Keeper_oas_runner.default_config_path () with
@@ -1336,7 +1336,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
     @@ fun () ->
     let resolved =
       match
-        Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict
+        Masc_mcp.Keeper_catalog_runtime.resolve_named_providers_strict
           ~sw
           ~net:(require_test_net ())
           ~cascade_name:"breaker_probe_13318"

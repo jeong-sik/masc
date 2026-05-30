@@ -178,7 +178,7 @@ let validate_strategy ~config_path ~name =
   else
     (* Bypass Cascade_config facade.  Calling through it would create the
        Cascade_config → Keeper_config_resolve → Keeper_routes →
-       Cascade_catalog_runtime → Keeper_catalog_runtime_validate →
+       Keeper_catalog_runtime → Keeper_catalog_runtime_validate →
        Cascade_config cycle. *)
     Ok
       ( Keeper_config_strategy_resolve.resolve_strategy ~config_path ~name (),

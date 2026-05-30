@@ -1,7 +1,7 @@
 (** Catalog-aware variant of route → cascade name resolution.
 
     Split out of {!Keeper_routes} in the #19327/#19340 follow-up so that
-    {!Keeper_routes} no longer depends on {!Cascade_catalog_runtime}.
+    {!Keeper_routes} no longer depends on {!Keeper_catalog_runtime}.
     Keeping the dep in [Keeper_routes] closed a module-level cycle that
     transitively reached back to [Keeper_routes] through validate, leaving
     every cascade refactor since #19327 unable to build.

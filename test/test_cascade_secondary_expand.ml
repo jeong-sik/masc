@@ -2,7 +2,7 @@
     overrides on every expanded weighted entry.
 
     The dual-track resolver in
-    {!Masc_mcp.Cascade_catalog_runtime.resolve_secondary_provider_for_primary}
+    {!Masc_mcp.Keeper_catalog_runtime.resolve_secondary_provider_for_primary}
     matches a parsed primary [Provider_config] back to its weighted entry
     by walking the *expanded* entries (one per concrete model after
     [provider:auto] expansion). For the lookup to find the secondary

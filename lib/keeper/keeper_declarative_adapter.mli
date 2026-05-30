@@ -2,7 +2,7 @@
 
     Converts a parsed {!Cascade_declarative_types.cascade_config} (the 5-layer
     TOML schema from Phase 1) into an {!adapted_catalog} that mirrors the
-    shape consumed by the cascade runtime ({!Cascade_catalog_runtime}).
+    shape consumed by the cascade runtime ({!Keeper_catalog_runtime}).
 
     @stability Internal *)
 

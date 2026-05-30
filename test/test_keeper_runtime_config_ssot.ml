@@ -82,7 +82,7 @@ let with_config_dir f =
       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
       Config_dir_resolver.reset ();
-      Cascade_catalog_runtime.reset_cache_for_tests ())
+      Keeper_catalog_runtime.reset_cache_for_tests ())
     (fun () ->
       write_file
         cascade_path
@@ -108,7 +108,7 @@ target = "cascade.primary"
 |};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
-      Cascade_catalog_runtime.install_snapshot_for_tests
+      Keeper_catalog_runtime.install_snapshot_for_tests
         ~source_path:cascade_path
         ~profile_names:[ (Keeper_config.default_cascade_name ()) ];
       f config_dir)

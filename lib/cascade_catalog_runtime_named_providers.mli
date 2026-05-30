@@ -1,4 +1,4 @@
-(** Named-provider resolution helpers for {!Cascade_catalog_runtime}. *)
+(** Named-provider resolution helpers for {!Keeper_catalog_runtime}. *)
 
 val resolve_named_providers :
   ?sw:Eio.Switch.t ->

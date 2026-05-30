@@ -4,9 +4,9 @@
     (cascade.toml) is the only source of truth for cascade profile
     names.  There is no compile-time enum here — anything that needs to
     know "what profiles are available" reads them from
-    [Cascade_catalog_runtime] / [catalog_names_*] below.  If
+    [Keeper_catalog_runtime] / [catalog_names_*] below.  If
     the catalog is empty at runtime,
-    [Cascade_catalog_runtime.validate_path_result] is the boot-time
+    [Keeper_catalog_runtime.validate_path_result] is the boot-time
     gate that rejects keeper boot, so a missing catalog never reaches
     these helpers. *)
 
@@ -141,7 +141,7 @@ let catalog_names ?config_path () =
        | Ok names -> names
        | Error _ -> [])
   | None ->
-      (match Cascade_catalog_runtime.known_profile_names () with
+      (match Keeper_catalog_runtime.known_profile_names () with
        | Ok names when names <> [] ->
            names |> List.map strip_declarative_profile_prefix
            |> List.sort_uniq String.compare
@@ -154,7 +154,7 @@ let catalog_names_result ?config_path () =
   match config_path with
   | Some _ -> declarative_public_catalog_names ?config_path ()
   | None ->
-      (match Cascade_catalog_runtime.known_profile_names () with
+      (match Keeper_catalog_runtime.known_profile_names () with
        | Ok names when names <> [] ->
            Ok
              (names |> List.map strip_declarative_profile_prefix
@@ -168,7 +168,7 @@ let catalog_lookup_names ?config_path () =
        | Ok names -> names
        | Error _ -> [])
   | None ->
-      (match Cascade_catalog_runtime.known_profile_names () with
+      (match Keeper_catalog_runtime.known_profile_names () with
        | Ok names when names <> [] -> lookup_names_of_qualified_names names
        | Ok _ | Error _ ->
            (match declarative_catalog_lookup_names () with

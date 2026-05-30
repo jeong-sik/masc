@@ -357,7 +357,7 @@ let run_named
     in
     let cli_max_concurrent =
       optional_capacity_override ~knob:"cli_max_concurrent" (fun () ->
-        Cascade_catalog_runtime.resolve_cli_max_concurrent
+        Keeper_catalog_runtime.resolve_cli_max_concurrent
           ~sw
           ~net
           ~name:cascade_name
@@ -374,7 +374,7 @@ let run_named
     let http_probe_max_concurrent =
       match
         optional_capacity_override ~knob:"ollama_max_concurrent" (fun () ->
-          Cascade_catalog_runtime.resolve_ollama_max_concurrent
+          Keeper_catalog_runtime.resolve_ollama_max_concurrent
             ~sw
             ~net
             ~name:cascade_name
@@ -774,7 +774,7 @@ let run_named
   let* strategy =
     profile_knob_or_default ~knob:"strategy"
       ~default:Cascade_strategy.failover
-      (fun () -> Cascade_catalog_runtime.resolve_strategy ~name:cascade_name ())
+      (fun () -> Keeper_catalog_runtime.resolve_strategy ~name:cascade_name ())
   in
   let strategy_name = Cascade_strategy.kind_to_string strategy.kind in
   let () = cascade_strategy_name_ref := Some strategy_name in

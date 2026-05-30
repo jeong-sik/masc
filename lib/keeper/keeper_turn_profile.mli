@@ -6,7 +6,7 @@
     know "what profiles are available" reads them through
     {!catalog_names} / {!catalog_names_result} /
     {!catalog_names_for_validation}; the boot-time gate at
-    [Cascade_catalog_runtime.validate_path_result] rejects keeper boot
+    [Keeper_catalog_runtime.validate_path_result] rejects keeper boot
     when the catalog is empty so a missing catalog never reaches the
     helpers below.
 

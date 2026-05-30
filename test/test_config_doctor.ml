@@ -147,7 +147,7 @@ let list_contains_substring ~needle values =
 let with_config_dir config_root f =
   let reset () =
     Config_dir_resolver.reset ();
-    Cascade_catalog_runtime.reset_cache_for_tests ()
+    Keeper_catalog_runtime.reset_cache_for_tests ()
   in
   with_env "MASC_BASE_PATH" "" @@ fun () ->
   with_env "MASC_CONFIG_DIR" config_root @@ fun () ->

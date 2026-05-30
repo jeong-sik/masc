@@ -154,7 +154,7 @@ let resolve_model_strings_traced_with
          let fallback_profile =
            (* #19327/#19340 follow-up: bypass the catalog-aware
               [Keeper_routes_resolve.cascade_name_for_use] (which would
-              re-introduce the Keeper_routes ↔ Cascade_catalog_runtime
+              re-introduce the Keeper_routes ↔ Keeper_catalog_runtime
               cycle through this module) and resolve directly from route
               bindings, falling back to the canonical route name. *)
            let route_key =
@@ -232,7 +232,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     else
       let fallback_profile =
         (* #19327/#19340 follow-up: bypass catalog-aware resolver to avoid
-           the Keeper_routes ↔ Cascade_catalog_runtime cycle. *)
+           the Keeper_routes ↔ Keeper_catalog_runtime cycle. *)
         let route_key =
           Keeper_routes.logical_use_key Keeper_routes.Keeper_turn
         in

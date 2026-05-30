@@ -444,28 +444,28 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           "%s: %s"
           label
           (Yojson.Safe.to_string
-             (Cascade_catalog_runtime.rejection_to_yojson rejection))
+             (Keeper_catalog_runtime.rejection_to_yojson rejection))
       in
       let catalog_validation_error =
-        match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
-        | Ok (Cascade_catalog_runtime.Validated snapshot) ->
+        match Keeper_catalog_runtime.inspect_active ~sw ~net ~clock () with
+        | Ok (Keeper_catalog_runtime.Validated snapshot) ->
             Log.Server.info
               "Validated active cascade catalog: %s"
               (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.snapshot_to_yojson snapshot));
+                 (Keeper_catalog_runtime.snapshot_to_yojson snapshot));
             None
         | Ok
-            (Cascade_catalog_runtime.Validated_with_rejections
+            (Keeper_catalog_runtime.Validated_with_rejections
                { snapshot; rejected_update }) ->
             Log.Server.warn
               "Validated active cascade catalog with rejected profiles: snapshot=%s rejected_update=%s"
               (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.snapshot_to_yojson snapshot))
+                 (Keeper_catalog_runtime.snapshot_to_yojson snapshot))
               (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.rejection_to_yojson rejected_update));
+                 (Keeper_catalog_runtime.rejection_to_yojson rejected_update));
             None
         | Ok
-            (Cascade_catalog_runtime.Serving_last_known_good
+            (Keeper_catalog_runtime.Serving_last_known_good
                { rejected_update; _ }) ->
             Some
               (format_catalog_validation_error

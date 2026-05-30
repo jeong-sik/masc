@@ -100,7 +100,7 @@ let direct_turn_observation ~(config : Coord.config) (meta : keeper_meta) :
 
 let resolve_turn_cascade_name (meta : keeper_meta) =
   let raw_name = String.trim (Keeper_meta_contract.cascade_name_of_meta meta) in
-  match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
+  match Keeper_catalog_runtime.resolve_declared_name ~raw_name () with
   | Ok cascade_name -> Ok cascade_name
   | Error detail ->
       Error

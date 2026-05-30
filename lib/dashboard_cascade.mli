@@ -6,7 +6,7 @@
 
     Contracts:
     - {!config_json} reads the validated runtime snapshot from
-      {!Cascade_catalog_runtime}; rejected hot reloads do not change the
+      {!Keeper_catalog_runtime}; rejected hot reloads do not change the
       advertised profile set.
     - {!health_json} reads the global health tracker singleton.
     - Both return JSON suitable for dashboard consumption; callers are

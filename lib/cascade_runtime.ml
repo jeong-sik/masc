@@ -268,7 +268,7 @@ let cascade_config_path () : string option =
 
 let models_of_cascade_name_result cascade_name :
     (string list, string) result =
-  Cascade_catalog_runtime.models_of_cascade_name
+  Keeper_catalog_runtime.models_of_cascade_name
     (cascade_name_to_string cascade_name)
 
 let models_of_cascade_name cascade_name =
@@ -408,7 +408,7 @@ let resolve_named_providers_result ?provider_filter
     Keeper_turn_profile.normalize_declared_name cascade_name_string
   in
   match
-    Cascade_catalog_runtime.resolve_named_providers ?provider_filter
+    Keeper_catalog_runtime.resolve_named_providers ?provider_filter
       ?runtime_mcp_policy ~require_tool_choice_support:false
       ~cascade_name:cascade_name_string ()
   with
@@ -430,7 +430,7 @@ let resolve_named_providers_result_strict ?provider_filter
     Keeper_turn_profile.normalize_declared_name cascade_name_string
   in
   match
-    Cascade_catalog_runtime.resolve_named_providers_strict ?provider_filter
+    Keeper_catalog_runtime.resolve_named_providers_strict ?provider_filter
       ?runtime_mcp_policy ~require_tool_choice_support:false
       ~cascade_name:cascade_name_string ()
   with
@@ -479,7 +479,7 @@ let empty_capacity = {
 
 let local_urls_of_named_selection ~sw ~net selection =
   match
-    Cascade_catalog_runtime.resolve_named_providers
+    Keeper_catalog_runtime.resolve_named_providers
       ~sw
       ~net
       ~cascade_name:selection
@@ -496,7 +496,7 @@ let local_urls_of_named_selection ~sw ~net selection =
            else None)
 
 (* [?config_path] was previously exposed but discarded — the downstream
-   [Cascade_catalog_runtime.resolve_named_providers] resolves against the
+   [Keeper_catalog_runtime.resolve_named_providers] resolves against the
    process-global active catalog ([lookup_active_profile]) and has no
    path-override entry point, so a non-default argument silently routed
    capacity probes to the wrong catalog. No caller actually passes the

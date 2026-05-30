@@ -58,7 +58,7 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
     Returns [empty] on any error (malformed config, read failure). *)
 let for_cascade ~(name : string) : t =
   let name = Keeper_turn_profile.normalize_declared_name name in
-  match Cascade_catalog_runtime.resolve_inference_params ~name () with
+  match Keeper_catalog_runtime.resolve_inference_params ~name () with
   | Ok params ->
       { temperature = params.temperature; max_tokens = params.max_tokens;
         thinking_enabled = params.thinking_enabled;

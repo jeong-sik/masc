@@ -3,7 +3,7 @@
     Converts an {!Keeper_declarative_adapter.adapted_catalog} into a
     lightweight {!decl_snapshot} used by the active cascade runtime.
 
-    This module does NOT depend on {!Cascade_catalog_runtime} to avoid
+    This module does NOT depend on {!Keeper_catalog_runtime} to avoid
     a dependency cycle.  Mirror types are defined locally and the runtime
     module bridges them at the call site.
 
@@ -96,7 +96,7 @@ val try_load_declarative :
     a partial result to [Error] when any error is present, otherwise
     returns [Ok snapshot]. Retained for boot-gate callers that require
     all-or-nothing semantics (e.g.
-    [Cascade_catalog_runtime.validate_path_result]).
+    [Keeper_catalog_runtime.validate_path_result]).
 
     Returns:
     - [Some (Ok snapshot)] — 5-layer TOML found and fully converted

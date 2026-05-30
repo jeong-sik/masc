@@ -13,7 +13,7 @@ type t = {
 
 let resolve ~sw ~net ?provider_filter ~cascade_name ~runtime_cascade_name () =
   let named_resolution =
-    Cascade_catalog_runtime
+    Keeper_catalog_runtime
     .resolve_named_providers_strict_with_secondary_resolver
       ~sw ~net ?provider_filter ~cascade_name ()
   in

@@ -160,7 +160,7 @@ let profile_json_of_trace ~keeper_assignable name (trace : CC.selection_trace) =
 ;;
 
 let profile_json_runtime ~keeper_assignable_names name =
-  match Cascade_catalog_runtime.resolve_selection_trace ~name () with
+  match Keeper_catalog_runtime.resolve_selection_trace ~name () with
   | Ok trace ->
     Some
       (profile_json_of_trace
@@ -241,7 +241,7 @@ let invalid_profiles_of_config_path = function
 let validation_summary_json ?config_path () =
   let fallback_invalid_profiles = invalid_profiles_of_config_path config_path in
   let of_rejection ~status rejection =
-    let rejection_json = Cascade_catalog_runtime.rejection_to_yojson rejection in
+    let rejection_json = Keeper_catalog_runtime.rejection_to_yojson rejection in
     let invalid_profiles =
       match invalid_profiles_of_rejection_json rejection_json with
       | [] -> fallback_invalid_profiles
@@ -254,15 +254,15 @@ let validation_summary_json ?config_path () =
     ; "invalid_profiles", `List (List.map invalid_profile_to_json invalid_profiles)
     ]
   in
-  match Cascade_catalog_runtime.inspect_active () with
-  | Ok (Cascade_catalog_runtime.Validated _) ->
+  match Keeper_catalog_runtime.inspect_active () with
+  | Ok (Keeper_catalog_runtime.Validated _) ->
     [ "validation_status", `String "validated"
     ; "validation_errors", `List []
     ; "invalid_profiles", `List []
     ]
-  | Ok (Cascade_catalog_runtime.Validated_with_rejections { rejected_update; _ }) ->
+  | Ok (Keeper_catalog_runtime.Validated_with_rejections { rejected_update; _ }) ->
     of_rejection ~status:"validated" rejected_update
-  | Ok (Cascade_catalog_runtime.Serving_last_known_good { rejected_update; _ }) ->
+  | Ok (Keeper_catalog_runtime.Serving_last_known_good { rejected_update; _ }) ->
     of_rejection ~status:"serving_last_known_good" rejected_update
   | Error rejection -> of_rejection ~status:"invalid" rejection
 ;;
@@ -315,7 +315,7 @@ let config_json ?base_path () =
       []
   in
   let profiles =
-    match Cascade_catalog_runtime.known_profile_names () with
+    match Keeper_catalog_runtime.known_profile_names () with
     | Ok names -> List.filter_map (profile_json_runtime ~keeper_assignable_names) names
   | Error detail ->
     Log.Keeper.warn "dashboard cascade config: validated catalog unavailable: %s" detail;
@@ -378,7 +378,7 @@ let load_raw_config_string path =
 
 let invalidate_cascade_config config_path =
   Keeper_config_loader.invalidate_cache_entry config_path;
-  Cascade_catalog_runtime.invalidate_path config_path
+  Keeper_catalog_runtime.invalidate_path config_path
 ;;
 
 let save_config_file path content =
@@ -470,7 +470,7 @@ let save_raw_config_json raw_json =
        | Error msg -> Error msg
        | Ok () ->
          (* [Keeper_config_loader.load_toml_in_memory] and
-            [Cascade_catalog_runtime] both key their caches on
+            [Keeper_catalog_runtime] both key their caches on
             [source.source_path] (the TOML path). *)
          invalidate_cascade_config source.source_path;
          Dashboard_cache.invalidate raw_config_cache_key;

@@ -1,5 +1,5 @@
 (** Shared cache state and transparent data types for
-    {!Cascade_catalog_runtime}. *)
+    {!Keeper_catalog_runtime}. *)
 
 type candidate_probe_status =
   | Probe_ok

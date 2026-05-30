@@ -278,19 +278,19 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
                } ])
 
 let snapshot_profile_for ~config_path ~profile =
-  match Cascade_catalog_runtime.inspect_active () with
+  match Keeper_catalog_runtime.inspect_active () with
   | Error _ -> None
   | Ok state ->
     let snap_opt =
       match state with
-      | Cascade_catalog_runtime.Validated snapshot -> Some snapshot
+      | Keeper_catalog_runtime.Validated snapshot -> Some snapshot
       | Validated_with_rejections { snapshot; _ } -> Some snapshot
       | Serving_last_known_good { snapshot; _ } -> Some snapshot
     in
     (match snap_opt with
      | Some snapshot when String.equal snapshot.source_path config_path ->
        List.find_opt
-         (fun (p : Cascade_catalog_runtime.profile_build) ->
+         (fun (p : Keeper_catalog_runtime.profile_build) ->
            String.equal p.name profile)
          snapshot.profiles
      | _ -> None)
@@ -300,13 +300,13 @@ let runtime_profile_of_declarative_profile
   let candidates =
     List.map
       (fun (candidate : Keeper_declarative_hotpath.candidate) ->
-         { Cascade_catalog_runtime.model_string = candidate.model_string
+         { Keeper_catalog_runtime.model_string = candidate.model_string
          ; provider_cfg = candidate.provider_cfg
          ; provider_override = candidate.provider_override
          })
       p.candidates
   in
-  { Cascade_catalog_runtime.name = p.name
+  { Keeper_catalog_runtime.name = p.name
   ; weighted_entries = p.weighted_entries
   ; inference_params = p.inference_params
   ; api_key_env_overrides = []
@@ -341,7 +341,7 @@ let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
   in
   let model_specs =
     match snapshot_profile with
-    | Some (p : Cascade_catalog_runtime.profile_build) ->
+    | Some (p : Keeper_catalog_runtime.profile_build) ->
       List.map
         (fun (entry : Keeper_config_loader.weighted_entry) -> entry.model)
         p.weighted_entries
@@ -349,16 +349,16 @@ let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
   in
   let candidate_model_strings =
     match snapshot_profile with
-    | Some (p : Cascade_catalog_runtime.profile_build) ->
+    | Some (p : Keeper_catalog_runtime.profile_build) ->
       List.map
-        (fun (candidate : Cascade_catalog_runtime.candidate_runtime) ->
+        (fun (candidate : Keeper_catalog_runtime.candidate_runtime) ->
           candidate.model_string)
         p.candidates
     | None -> []
   in
   let required_profile_opt =
     match snapshot_profile with
-    | Some (p : Cascade_catalog_runtime.profile_build) ->
+    | Some (p : Keeper_catalog_runtime.profile_build) ->
       p.required_capability_profile
     | None -> None
   in

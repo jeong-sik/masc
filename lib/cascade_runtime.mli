@@ -86,7 +86,7 @@ val local_capacity_for_selections :
     candidates. Direct model-string parsing is intentionally not a fallback.
 
     Resolution always uses the process-global active catalog (via
-    [Cascade_catalog_runtime.resolve_named_providers] →
+    [Keeper_catalog_runtime.resolve_named_providers] →
     [lookup_active_profile]); path-scoped override is not supported here.
     A previous [?config_path] argument was silently discarded — removed
     to avoid the footgun of an override that pretended to apply. *)

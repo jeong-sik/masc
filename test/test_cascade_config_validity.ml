@@ -73,7 +73,7 @@ let with_env key value f =
 
 let reset_runtime_config_caches () =
   Config_dir_resolver.reset ();
-  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ()
+  Masc_mcp.Keeper_catalog_runtime.reset_cache_for_tests ()
 ;;
 
 let test_cascade_toml_runtime_validates_without_rejected_profiles () =
@@ -85,20 +85,20 @@ let test_cascade_toml_runtime_validates_without_rejected_profiles () =
     ~finally:reset_runtime_config_caches
     (fun () ->
        reset_runtime_config_caches ();
-       match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
-       | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) -> ()
-       | Ok (Masc_mcp.Cascade_catalog_runtime.Validated_with_rejections { rejected_update; _ })
-       | Ok (Masc_mcp.Cascade_catalog_runtime.Serving_last_known_good { rejected_update; _ })
+       match Masc_mcp.Keeper_catalog_runtime.inspect_active () with
+       | Ok (Masc_mcp.Keeper_catalog_runtime.Validated _) -> ()
+       | Ok (Masc_mcp.Keeper_catalog_runtime.Validated_with_rejections { rejected_update; _ })
+       | Ok (Masc_mcp.Keeper_catalog_runtime.Serving_last_known_good { rejected_update; _ })
          ->
          failf
            "checked-in cascade.toml should not produce rejected runtime profiles: %s"
            (Yojson.Safe.to_string
-              (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejected_update))
+              (Masc_mcp.Keeper_catalog_runtime.rejection_to_yojson rejected_update))
        | Error rejection ->
          failf
            "checked-in cascade.toml should validate at runtime: %s"
            (Yojson.Safe.to_string
-              (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection)))
+              (Masc_mcp.Keeper_catalog_runtime.rejection_to_yojson rejection)))
 ;;
 
 let test_cascade_json_absent () =

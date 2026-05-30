@@ -470,17 +470,6 @@ let ensure_keeper_meta config name =
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
         social_model = target_social_model;
-        (* RFC-0041: cascade_ref is the SSOT after step 4 (B7). When
-           cascade_changed flips, materialize a fresh cascade_ref;
-           otherwise preserve [meta.cascade_ref] verbatim so an unrelated
-           reconcile never canonicalizes routing silently. *)
-        cascade_ref =
-          if cascade_changed then
-            Some Cascade_ref.{
-              group = resolved_target_cascade_name;
-              item = None;
-            }
-          else meta.cascade_ref;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;

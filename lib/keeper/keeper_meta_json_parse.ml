@@ -19,7 +19,6 @@ type parsed_keeper_identity =
   ; pk_long_goal : string
   ; pk_social_model : string
   ; pk_cascade_name : string
-  ; pk_cascade_ref : Cascade_ref.cascade_ref option
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -136,13 +135,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_long_goal
       ; pk_social_model
       ; pk_cascade_name
-      ; pk_cascade_ref =
-        (match Json_util.assoc_member_opt "cascade_ref" json with
-         | Some `Null | Some (`Assoc []) | None -> None
-         | Some ref_json ->
-             (match Cascade_ref.cascade_ref_of_json ref_json with
-              | Some ref -> Some ref
-              | None -> Cascade_ref.cascade_ref_of_string pk_cascade_name))
       ; pk_will
       ; pk_needs
       ; pk_desires
@@ -587,30 +579,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                  not (validate_name (Keeper_id.Trace_id.to_string identity.pk_trace_id))
                then Error "invalid keeper meta (bad trace_id)"
                else
-                 let cascade_ref_result =
-                   match identity.pk_cascade_ref with
-                   | Some _ as ref_ -> Ok ref_
-                   | None ->
-                       let raw_cascade_name =
-                         String.trim identity.pk_cascade_name
-                       in
-                       if String.equal raw_cascade_name ""
-                       then Ok None
-                       else
-                         match Cascade_name.of_string raw_cascade_name with
-                         | Ok cn -> Ok (Some Cascade_ref.{ group = cn; item = None })
-                         | Error `Empty -> Ok None
-                         | Error `Invalid_prefix ->
-                             Error
-                               (Printf.sprintf
-                                  "invalid keeper meta cascade_name %S: expected \
-                                   canonical cascade prefix route."
-                                  identity.pk_cascade_name)
-                 in
-                 (match cascade_ref_result with
-                  | Error _ as e -> e
-                  | Ok cascade_ref ->
-                    Ok
+                 Ok
                    { id = None
                    ; name = identity.pk_name
                    ; agent_name =
@@ -622,7 +591,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; mid_goal = identity.pk_mid_goal
                    ; long_goal = identity.pk_long_goal
                    ; social_model = identity.pk_social_model
-                   ; cascade_ref
                    ; models = []
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs
@@ -687,7 +655,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (match Safe_ops.json_int_opt "meta_version" json with
                         | Some v -> v
                         | None -> 0)
-                   })))))
+                   }))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

@@ -70,4 +70,22 @@ let load_list ~(config_path : string) : (t list * t, string) result =
                config_path
                did
                (List.length runtimes))))
+
+(* ---- Lazy default runtime singleton ---- *)
+
+let default_runtime_ref : t option ref = ref None
+
+let init_default ~config_path =
+  match load_list ~config_path with
+  | Ok (_, rt) ->
+    default_runtime_ref := Some rt;
+    Ok ()
+  | Error _ as e -> e
+
+let get_default_runtime () = !default_runtime_ref
+
+let get_default_runtime_id () =
+  match !default_runtime_ref with
+  | Some rt -> rt.id
+  | None -> "tool_strict"
 ;;

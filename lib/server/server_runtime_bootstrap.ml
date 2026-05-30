@@ -422,6 +422,20 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
           ~fs ~env ()
       in
+      (* Initialize the default Runtime singleton from cascade TOML.
+         Must happen after Config_dir_resolver is set up (inside
+         create_server_state) and before any cascade name resolution. *)
+      (match Cascade_runtime.cascade_config_path () with
+       | Some config_path ->
+         (match Runtime.init_default ~config_path with
+          | Ok () ->
+            Log.Server.info "Runtime default initialized: %s"
+              (Runtime.get_default_runtime_id ())
+          | Error msg ->
+            Log.Server.error "Runtime.init_default failed: %s" msg)
+       | None ->
+         Log.Server.warn
+           "No cascade config path; Runtime default not initialized");
       let provider_health = Provider_health.create state.room_config in
       Provider_health.set_active provider_health;
       Provider_health.start_probe_fiber ~sw ~env provider_health;

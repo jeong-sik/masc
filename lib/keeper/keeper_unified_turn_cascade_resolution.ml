@@ -26,13 +26,7 @@ let resolve_cascade
   (* RFC-0041 Phase B4: when a specific item was selected by the
      proactive router, override (cascade_name_of_meta meta) so downstream
      cascade resolution uses the item's group. *)
-  let meta =
-    match selected_item with
-    | Some (group, item) ->
-      let cascade_ref = Some Cascade_ref.{ group = Cascade_name.of_string_exn group; item = Some item.id } in
-      { meta with cascade_ref }
-    | None -> meta
-  in
+  (* cascade_ref removed — Runtime model replaces cascade routing. *)
   let phase =
     match phase_opt with
     | Some p -> p
@@ -51,9 +45,8 @@ let resolve_cascade
     Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[ "edge", "ksm_to_kcl_routing" ]
     ();
-  let routed_meta = set_cascade_name routing.effective_cascade meta in
   let routed_labels =
-    Keeper_model_labels.configured_model_labels_of_meta routed_meta
+    Keeper_model_labels.configured_model_labels_of_meta meta
   in
   let resolved_cascade =
     Keeper_turn_liveness.fail_open_phase_buffer_when_unavailable
@@ -90,4 +83,4 @@ let resolve_cascade
        ])
   in
   append_cascade_routed_manifest ~cascade_name:resolved_cascade ~decision;
-  { resolved_meta = routed_meta; resolved_cascade }
+  { resolved_meta = meta; resolved_cascade }

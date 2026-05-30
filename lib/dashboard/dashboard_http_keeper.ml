@@ -640,10 +640,6 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("models", `List []);
               ("models_resolved", `List []);
               ("primary_model", `Null);
-              ( "cascade_ref",
-                (match m.cascade_ref with
-                 | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
-                 | None -> `Null) );
               ("active_model", `Null);
               ("next_model_hint", `Null);
               ("sandbox_profile",

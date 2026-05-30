@@ -326,7 +326,6 @@ type keeper_meta = {
   long_goal : string;
   social_model : string;
   models : string list;
-  cascade_ref : Cascade_ref.cascade_ref option;
   will : string;
   needs : string;
   desires : string;
@@ -382,23 +381,8 @@ type keeper_meta = {
 (** {1 Cascade name derivation} *)
 
 val cascade_name_of_meta : keeper_meta -> string
-(** [cascade_name_of_meta m] is the canonical cascade name for the keeper.
-
-    Resolution order:
-    1. If [m.cascade_ref] is [Some] and [.group] is non-empty, return [.group].
-    2. Otherwise return the current keeper default route. *)
-
-val set_cascade_name : string -> keeper_meta -> keeper_meta
-(** [set_cascade_name name m] returns a meta where [cascade_ref] is pinned
-    to [name]. The cascade_ref takes the
-    form [{ group = name; item = None }] so the group's traversal
-    strategy decides item selection at routing time.
-
-    Use this helper for every write that intends to change the keeper's
-    cascade routing target. For record-literal initialization (full
-    keeper_meta construction) callers must still set [cascade_ref]
-    explicitly; this helper applies only to update-style writes
-    ([{ m with ... }]). *)
+(** [cascade_name_of_meta m] returns the default runtime id.
+    Ignores [m] — kept for signature compatibility. *)
 
 (** {1 Outcome <-> string} *)
 

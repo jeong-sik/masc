@@ -718,7 +718,7 @@ let rec parse lines path = function
     (match path with
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Head { path = p; lines }))
      | None -> None)
-  | "-n" :: n :: rest ->
+  | "-n" :: n :: rest | "--lines" :: n :: rest ->
     (match int_of_string_opt n with
      | Some l -> parse l path rest
      | None -> None)
@@ -787,7 +787,7 @@ let rec parse lines path = function
     (match path with
      | Some p -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tail { path = p; lines }))
      | None -> None)
-  | "-n" :: n :: rest ->
+  | "-n" :: n :: rest | "--lines" :: n :: rest ->
     (match int_of_string_opt n with
      | Some l -> parse l path rest
      | None -> None)
@@ -886,8 +886,8 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
           | None -> collect (Some a) path tl
           | Some _ -> collect pattern (Some a) tl)
     in collect pattern path rest
-  (* -e PATTERN: explicit pattern (allows patterns starting with -) *)
-  | "-e" :: p :: rest ->
+  (* -e/--regexp PATTERN: explicit pattern (allows patterns starting with -) *)
+  | "-e" :: p :: rest | "--regexp" :: p :: rest ->
     parse recursive case_sensitive files_with_matches (Some p) path rest
   (* -ePATTERN combined form *)
   | arg :: rest
@@ -1220,7 +1220,7 @@ let rec parse message amend = function
      | Some m -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_commit { message = m; amend }))
      | None -> None)
   | "--amend" :: rest -> parse message true rest
-  | "-m" :: m :: rest ->
+  | "-m" :: m :: rest | "--message" :: m :: rest ->
     (match message with
      | None -> parse (Some m) amend rest
      | Some _ -> None)
@@ -1301,7 +1301,7 @@ parse None false args|}
 let git_push_value_flags_no_eq =
   [ "--repo"; "--receive-pack"; "--upload-pack"; "--exec"
   ; "--set-upstream-to"
-  ; "-o"   (* push option *)
+  ; "-o"; "--push-option"   (* push option *)
   ]
 in
 let rec parse force force_with_lease set_upstream remote branch = function
@@ -1393,7 +1393,7 @@ parse false false false None None args|}
 let git_pull_value_flags_no_eq =
   [ "--repo"; "--upload-pack"; "--receive-pack"; "--depth"
   ; "--jobs"
-  ; "-o"   (* transport option *)
+  ; "-o"; "--option"   (* transport option *)
   ]
 in
 (* git pull boolean flags that do NOT consume a value *)
@@ -1548,7 +1548,7 @@ let rec parse reverse numeric unique key file = function
   | "-k" :: n :: rest | "--key" :: n :: rest ->
     (try parse reverse numeric unique (Some (int_of_string n)) file rest
      with Failure _ -> None)
-  | "-t" :: _ :: rest -> parse reverse numeric unique key file rest  (* -t SEP — consume separator *)
+  | "-t" :: _ :: rest | "--field-separator" :: _ :: rest -> parse reverse numeric unique key file rest  (* -t/--field-separator SEP *)
   (* --key=N form *)
   | arg :: rest
     when String.length arg > 6
@@ -2520,8 +2520,8 @@ let wget_value_flags =
   ; "--user-agent"; "--referer"
   ; "--certificate"; "--private-key"; "--ca-certificate"
   ; "--quota"; "--max-redirect"; "--max-filename-length"
-  ; "-i"   (* input file *)
-  ; "-B"   (* base URL *)
+  ; "-i"; "--input-file"   (* input file *)
+  ; "-B"; "--base"         (* base URL *)
   ; "-P"   (* directory prefix *)
   ; "-A"   (* accept pattern *)
   ; "-R"   (* reject pattern *)
@@ -3063,8 +3063,8 @@ let rec parse in_place ext_re suppress expr file dd = function
     (match rest with
      | s :: rest' when String.length s > 0 && s.[0] <> '-' -> parse true ext_re suppress expr file dd rest'  (* --in-place=SUFFIX equivalent *)
      | _ -> parse true ext_re suppress expr file dd rest)
-  | "-e" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
-  | "-f" :: f :: rest when not dd -> parse in_place ext_re suppress (Some f) file dd rest  (* script file → expression *)
+  | "-e" :: e :: rest | "--expression" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
+  | "-f" :: f :: rest | "--file" :: f :: rest when not dd -> parse in_place ext_re suppress (Some f) file dd rest  (* script file → expression *)
   | "-E" :: rest | "--regexp-extended" :: rest when not dd -> parse in_place true suppress expr file dd rest
   | "-n" :: rest | "--quiet" :: rest | "--silent" :: rest when not dd -> parse in_place ext_re true expr file dd rest
   (* POSIX end-of-options: remaining are expression, file *)

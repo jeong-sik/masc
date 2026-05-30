@@ -2742,6 +2742,62 @@ let test_long_form_boolean_flags () =
    | w -> Alcotest.failf "Pytest --verbose --exitfirst: expected v=true x=true, got %a" pp w)
 ;;
 
+let test_long_form_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Sort: --field-separator : -k3 file.txt *)
+  let sort =
+    of_simple { (base "sort") with args = [ lit "--field-separator"; lit ":"; lit "-k3"; lit "file.txt" ] }
+  in
+  (match sort with
+   | W (Sort { key = Some 3; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sort --field-separator: expected key=3, got %a" pp w);
+  (* Grep: --regexp PATTERN file.txt *)
+  let grep =
+    of_simple { (base "grep") with args = [ lit "--regexp"; lit "foo"; lit "file.txt" ] }
+  in
+  (match grep with
+   | W (Grep { pattern = "foo"; path = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --regexp: expected pattern=foo, got %a" pp w);
+  (* Git_commit: --message "msg" *)
+  let gc =
+    of_simple { (base "git") with args = [ lit "commit"; lit "--message"; lit "hello" ] }
+  in
+  (match gc with
+   | W (Git_commit { message = "hello"; _ }) -> ()
+   | w -> Alcotest.failf "Git_commit --message: expected msg=hello, got %a" pp w);
+  (* Sed: --expression 's/foo/bar/' --file script.sed input.txt *)
+  let sed =
+    of_simple { (base "sed") with args = [ lit "--expression"; lit "s/foo/bar/"; lit "--file"; lit "script.sed"; lit "input.txt" ] }
+  in
+  (match sed with
+   | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --expression --file: expected expr=s/foo/bar/, got %a" pp w);
+  (* Head: --lines 5 file.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "--lines"; lit "5"; lit "file.txt" ] }
+  in
+  (match head with
+   | W (Head { lines = 5; path = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines 5: expected lines=5, got %a" pp w);
+  (* Tail: --lines 10 file.txt *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "--lines"; lit "10"; lit "file.txt" ] }
+  in
+  (match tail with
+   | W (Tail { lines = 10; path = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Tail --lines 10: expected lines=10, got %a" pp w)
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -2813,6 +2869,10 @@ let () =
             "Long-form boolean flags (--human-readable, --summarize, --in-place, --verbose, --exitfirst)"
             `Quick
             test_long_form_boolean_flags
+        ; Alcotest.test_case
+            "Long-form value-consuming flags (--field-separator, --regexp, --message, --expression, --file, --lines)"
+            `Quick
+            test_long_form_value_consuming_flags
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

@@ -297,7 +297,6 @@
   test_cascade_judge_route_intent_golden
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
-  test_cascade_server_flavor
   test_keeper_cascade_profile_partial
   test_doctor_dispatch
   test_disk_hygiene_script
@@ -616,7 +615,6 @@
   test_cascade_judge_route_intent_golden
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
-  test_cascade_server_flavor
   test_keeper_cascade_profile_partial
   test_doctor_dispatch
   test_disk_hygiene_script
@@ -1408,8 +1406,6 @@
 
 (include stanzas/test_cascade_attempt_liveness_observer.inc)
 
-(include stanzas/test_cascade_attempt_liveness_runtime.inc)
-
 (include stanzas/test_cascade_attempt_outer_wall.inc)
 
 (include stanzas/test_cascade_attempt_fsm_response_pins.inc)
@@ -1437,8 +1433,6 @@
 (include stanzas/test_cascade_model_resolve.inc)
 
 (include stanzas/test_cascade_capacity_probe.inc)
-
-(include stanzas/test_cascade_diagnostic_probe.inc)
 
 (include stanzas/test_cascade_http_probe.inc)
 

@@ -377,41 +377,6 @@ let register
      of grpc_events_delivered; the difference between scanned-lines and replayed-events \
      isolates wasted scan cost."
     `Counter;
-  (* RFC-0022 §9 attempt-liveness gate metrics. *)
-  add
-    metric_cascade_attempt_liveness_kill
-    "Counts would-be (Observe) and actual (Enforce) liveness kills broken down by \
-     failure class. Labels: [kind, mode, cascade, provider] where provider is a \
-     bounded public provider bucket."
-    `Counter;
-  add
-    metric_cascade_attempt_liveness_observed
-    "Per-attempt finalizer counter regardless of outcome (success | kill | wire_error). \
-     Useful for the kill-rate ratio. Labels: [cascade, provider, outcome] where provider \
-     is a bounded public provider bucket."
-    `Counter;
-  add metric_cascade_strategy_decisions "Cascade strategy decisions by outcome." `Counter;
-  add metric_cascade_capacity_events "Cascade capacity events by type." `Counter;
-  add
-    metric_cascade_pre_dispatch_required_tool_filtered
-    "Required-tool candidates filtered before provider dispatch. Labels: [provider, \
-     missing_count]."
-    `Counter;
-  add
-    metric_cascade_ttfb_seconds
-    "Time from cascade attempt start to first non-Done chunk (TTFT). Labels: [cascade, \
-     provider] where provider is a bounded public provider bucket."
-    `Histogram;
-  add
-    metric_cascade_inter_chunk_seconds
-    "Inter-chunk gap during streaming (TBT). Labels: [cascade, provider] where provider \
-     is a bounded public provider bucket."
-    `Histogram;
-  add
-    metric_cascade_provider_health_score
-    "Composite health score per cascade provider. success_rate * speed_score * \
-     cost_score in [0.0, 1.0]. Labels: [provider_key]."
-    `Gauge;
   add
     metric_oas_context_overflow_ratio
     "Context overflow ratio (estimated_tokens / limit_tokens) when \

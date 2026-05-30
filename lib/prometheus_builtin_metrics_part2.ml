@@ -112,26 +112,6 @@ let register
     "Total fallback events across the LLM cascade pipeline, labeled by kind \
      (cascade_empty|capability_drop|cli_unsupported|...) and detail"
     `Counter;
-  (* Cascade FSM metrics — emitted by cascade_metrics.ml. *)
-  add
-    metric_cascade_decisions
-    "Total cascade routing decisions, labeled by \
-     decision=accept|accept_on_exhaustion|try_next|exhausted"
-    `Counter;
-  add
-    metric_cascade_fallbacks
-    "Total cascade fallback events, labeled by \
-     reason=call_err|accept_rejected|health_filter"
-    `Counter;
-  add
-    metric_cascade_providers_exhausted
-    "Total provider exhaustion events (all providers in cascade failed)"
-    `Counter;
-  add
-    metric_cascade_routing_phase_overrides
-    "Total phase-based cascade routing overrides, labeled by phase and from_cascade / \
-     to_cascade"
-    `Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
      never registered.  Auto-create still works, but registering here
      gives them a HELP description in /metrics output and a zero-value

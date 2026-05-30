@@ -780,9 +780,6 @@ let build_info_locked ~now ~key state =
       ~p95_latency_ms_opt:p95_latency_ms
       ~cost_score_opt
   in
-  Prometheus.set_gauge Prometheus.metric_cascade_provider_health_score
-    ~labels:[ ("provider_key", key) ]
-    health_score;
   {
     provider_key = key;
     success_rate = rate;

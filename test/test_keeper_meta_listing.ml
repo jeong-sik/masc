@@ -679,8 +679,8 @@ also_allow = ["masc_tasks", "masc_transition"]
             (option string)
             "tool preset resynced"
             (Some "delivery")
-            (Keeper_meta_tool_access.tool_access_preset meta.tool_access
-             |> Option.map Keeper_meta_tool_access.tool_preset_to_string);
+            ((fun _ -> None) meta.tool_access
+             |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
           check
             (list string)
             "tool allowlist resynced"

@@ -168,7 +168,7 @@ let make_meta ?preset ~name ~sandbox () =
         [
           ( "tool_access",
             Keeper_meta_tool_access.tool_access_to_json
-              (Keeper_meta_tool_access.Preset { preset; also_allow = [] }) );
+              (Keeper_meta_tool_access.Custom []) );
         ]
   in
   let json =

@@ -9,9 +9,6 @@
 module Persona_contract = Keeper_persona_authoring_contract
 (** Authoring contract used to derive the persona axis schemas. *)
 
-val tool_preset_enum_strings : string list
-(** Allowed values for [meta.tool_access.preset]. *)
-
 val sandbox_profile_enum_strings : string list
 (** Allowed values for [meta.sandbox.profile]. *)
 

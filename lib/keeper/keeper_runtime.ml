@@ -152,23 +152,8 @@ let effective_declarative_cascade_name
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  let current_preset =
-    match meta.tool_access with
-    | Preset { preset; _ } -> Some preset
-    | Custom _ -> None
-  in
-  let current_also_allow = tool_access_also_allowlist meta.tool_access in
-  let target_preset =
-    match defaults.tool_preset with
-    | Some raw -> tool_preset_of_string raw
-    | None -> current_preset
-  in
-  let target_also_allow =
-    apply_default defaults.tool_also_allow current_also_allow
-  in
-  match target_preset with
-  | Some preset ->
-      Preset { preset; also_allow = target_also_allow }
+  match defaults.tool_custom_list with
+  | Some tools -> Custom (normalize_tool_names tools)
   | None -> meta.tool_access
 
 let ensure_keeper_meta config name =
@@ -241,12 +226,6 @@ let ensure_keeper_meta config name =
         Log.Keeper.error "%s" msg;
         Error msg
     | Ok resolved_target_cascade_name ->
-    let target_tool_preset_source =
-      match defaults.tool_preset_source with
-      | Some _ as s -> s
-      | None -> meta.tool_preset_source
-    in
-
     (* --- Personality --- *)
     let target_goal = apply_default defaults.goal meta.goal in
     let target_short_goal = apply_default defaults.short_goal meta.short_goal in
@@ -389,7 +368,6 @@ let ensure_keeper_meta config name =
       || meta.mention_targets <> target_mention_targets
       || meta.active_goal_ids <> target_active_goal_ids
       || meta.tool_access <> target_tool_access
-      || meta.tool_preset_source <> target_tool_preset_source
       || meta.sandbox_profile <> target_sandbox_profile
       || meta.network_mode <> target_network_mode
       || meta.allowed_paths <> target_allowed_paths
@@ -482,7 +460,6 @@ let ensure_keeper_meta config name =
         mention_targets = target_mention_targets;
         active_goal_ids = target_active_goal_ids;
         tool_access = target_tool_access;
-        tool_preset_source = target_tool_preset_source;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;

@@ -51,8 +51,7 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
     match tool_access with
     | Some value -> value
     | None ->
-        Masc_mcp.Keeper_meta_tool_access.Preset
-          { preset = Masc_mcp.Keeper_meta_tool_access.Full; also_allow = [] }
+        Masc_mcp.Keeper_meta_tool_access.Custom []
   in
   match
     Masc_test_deps.meta_of_json_fixture

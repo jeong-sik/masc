@@ -12,14 +12,6 @@ open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_up_args
 
-(* #8605 family: warn-and-default parser for profile_defaults.tool_preset
-   lifted to [Keeper_preset_defaults] so this file and
-   [agent_tool_persona_runtime] share one SSOT instead of two diverging copies
-   (#8923). *)
-let preset_of_defaults defaults =
-  Keeper_preset_defaults.preset_of_defaults_warn
-    ~call_site:"keeper_turn_up_create"
-    ~defaults_tool_preset:defaults.tool_preset
 
 (* #9749: bootstrap can race a heartbeat/supervisor meta write after
    crash recovery. Retry on CAS conflict while keeping heartbeat-owned
@@ -192,17 +184,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 match p.tool_access_opt with
                 | Some access -> access
                 | None ->
-                    let tool_preset =
-                      Option.value ~default:Research
-                        (Dashboard_utils.first_some p.tool_preset_opt
-                           (preset_of_defaults p.profile_defaults))
-                    in
-                    let tool_also_allow =
-                      resolve_tool_name_list
-                        ~preferred:p.tool_also_allow_opt
-                        ~fallback:p.profile_defaults.tool_also_allow
-                    in
-                    Preset { preset = tool_preset; also_allow = tool_also_allow }
+                    (match p.profile_defaults.tool_custom_list with
+                     | Some tools -> Custom (normalize_tool_names tools)
+                     | None -> default_tool_access_of_meta_json ())
               in
               let room_signal_prompt_enabled =
                 match keeper_room_signal_prompt_enabled_override () with
@@ -441,7 +425,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         network_mode;
         allowed_paths;
         tool_access;
-        tool_preset_source = p.profile_defaults.tool_preset_source;
         tool_denylist;
         mention_targets;
         room_signal_prompt_enabled;

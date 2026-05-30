@@ -47,7 +47,7 @@ let resolved_keeper_args_to_json
     ~allowed_paths_opt
     ~autoboot_enabled_opt
     ~tool_access_opt
-    ~tool_preset ~tool_also_allow ~tool_denylist
+    ~tool_denylist
     ~proactive_enabled ~shards
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
   let base =
@@ -84,7 +84,7 @@ let resolved_keeper_args_to_json
     let tool_access =
       match tool_access_opt with
       | Some tool_access -> tool_access
-      | None -> Preset { preset = tool_preset; also_allow = tool_also_allow }
+      | None -> default_tool_access_of_meta_json ()
     in
     [("tool_access", tool_access_to_json tool_access)]
   in
@@ -425,29 +425,7 @@ let resolved_keeper_args_from_persona args :
                Keeper_turn_up_args.parse_present_string_list_opt args "allowed_paths"
              with
             | Error err, _ | _, Error err -> Error err
-            | Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt), Ok allowed_paths_opt ->
-                 (* #8605 family: warn-and-default via shared helper
-                    [Keeper_preset_defaults.preset_of_defaults_warn].
-                    Lifted from this file + keeper_turn_up_create to a
-                    single SSOT (#8923) so a future third preset-source
-                    path cannot diverge. *)
-                 let tool_preset =
-                   match tool_preset_opt with
-                   | Some preset -> preset
-                   | None -> (
-                       match tool_access_opt with
-                       | Some _ -> Research
-                       | None ->
-                           Keeper_preset_defaults.preset_of_defaults_warn
-                             ~call_site:"agent_tool_persona_runtime"
-                             ~defaults_tool_preset:defaults.tool_preset
-                           |> Option.value ~default:Research)
-                 in
-                 let tool_also_allow =
-                   match tool_also_allow_opt with
-                   | Some xs -> xs
-                   | None -> Option.value ~default:[] defaults.tool_also_allow
-                 in
+            | Ok tool_access_opt, Ok allowed_paths_opt ->
                  let tool_denylist =
                    match get_string_list args "tool_denylist" with
                    | _ :: _ as xs -> xs
@@ -482,7 +460,7 @@ let resolved_keeper_args_from_persona args :
                      ~allowed_paths_opt:allowed_paths
                      ~autoboot_enabled_opt:autoboot_enabled
                      ~tool_access_opt
-                     ~tool_preset ~tool_also_allow ~tool_denylist
+                     ~tool_denylist
                      ~proactive_enabled ~shards
                      ~auto_handoff ~handoff_threshold
                      ~handoff_cooldown_sec

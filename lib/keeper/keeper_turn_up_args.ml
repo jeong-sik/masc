@@ -32,8 +32,6 @@ type parsed_args = {
   compaction_token_gate_opt : int option;
   continuity_compaction_cooldown_sec_opt : int option;
   tool_access_opt : tool_access option;
-  tool_preset_opt : tool_preset option;
-  tool_also_allow_opt : string list option;
   tool_denylist_opt : string list option;
   auto_handoff_opt : bool option;
   handoff_threshold_opt : float option;
@@ -146,7 +144,7 @@ let reject_legacy_tool_access_kind access_json =
   | _ -> Ok ()
 
 let parse_tool_access_input (args : Yojson.Safe.t) :
-    (tool_access option * tool_preset option * string list option, string) result =
+    (tool_access option, string) result =
   let removed_tool_policy_keys =
     present_json_keys
       [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist" ]
@@ -158,25 +156,20 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
          "removed keeper tool policy args: %s. Use canonical tool_access."
          (String.concat ", " removed_tool_policy_keys))
   else
-    let tool_access_opt =
-      match Json_util.assoc_member_opt "tool_access" args with
-      | Some ((`Assoc _) as access_json) -> (
-          match reject_legacy_tool_access_kind access_json with
-          | Error msg -> Error msg
-          | Ok () -> (
-              match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-              | Ok access -> Ok (Some access)
-              | Error msg -> Error msg))
-      | Some `Null -> Ok None
-      | Some other ->
-          Error
-            (Printf.sprintf "tool_access must be an object (received %s)"
-               (Json_util.kind_name other))
-      | None -> Ok None
-    in
-    match tool_access_opt with
-    | Error msg -> Error msg
-    | Ok tool_access_opt -> Ok (tool_access_opt, None, None)
+    match Json_util.assoc_member_opt "tool_access" args with
+    | Some ((`Assoc _) as access_json) -> (
+        match reject_legacy_tool_access_kind access_json with
+        | Error msg -> Error msg
+        | Ok () -> (
+            match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+            | Ok access -> Ok (Some access)
+            | Error msg -> Error msg))
+    | Some `Null -> Ok None
+    | Some other ->
+        Error
+          (Printf.sprintf "tool_access must be an object (received %s)"
+             (Json_util.kind_name other))
+    | None -> Ok None
 
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
@@ -214,7 +207,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     | _, _, _, _, Error e, _
     | _, _, _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
-      Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt),
+      Ok tool_access_opt,
       Ok allowed_paths_opt,
       Ok active_goal_ids_opt,
       Ok sandbox_profile_opt,
@@ -302,8 +295,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       compaction_token_gate_opt;
       continuity_compaction_cooldown_sec_opt;
       tool_access_opt;
-      tool_preset_opt;
-      tool_also_allow_opt;
       tool_denylist_opt;
       auto_handoff_opt;
       handoff_threshold_opt;

@@ -1,51 +1,31 @@
 (** Keeper tool-access policy types and JSON helpers.
 
-    Defines the canonical [tool_preset] and [tool_access] ADTs and
-    parsers for persisted keeper meta JSON. *)
+    Defines the canonical [tool_access] ADT and parsers for persisted
+    keeper meta JSON.  Named presets have been removed; keepers declare
+    an explicit [Custom] tool list. *)
 
-type tool_preset =
-  | Minimal
-  | Social
-  | Messaging
-  | Dispatch
-  | Research
-  | Delivery
-  | Full
-
-type tool_access =
-  | Preset of
-      { preset : tool_preset
-      ; also_allow : string list
-      }
-  | Custom of string list
+type tool_access = Custom of string list
 
 (** Returns true if any name in the list resolves to a [Tool_name.is_board]
     tool. Used to detect implicit board surface. *)
 val tool_names_include_board : string list -> bool
 
 (** Decide whether a [tool_access] should keep [room_signal_prompt] on:
-    Minimal-with-board-also-allow → check [also_allow]; other Preset →
-    true; Custom → check tool list. *)
+    Custom → true when the list contains any board tool (or [default] is
+    true). *)
 val tool_access_default_room_signal_prompt_enabled :
   default:bool -> tool_access -> bool
 
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)
 val normalize_tool_names : string list -> string list
 
-val tool_preset_to_string : tool_preset -> string
-val all_tool_presets : tool_preset list
-val valid_tool_preset_strings : string list
-val tool_preset_of_string : string -> tool_preset option
-
-(** Sort [also_allow] / Custom lists for stable comparison and hash. *)
+(** Sort Custom lists for stable comparison and hash. *)
 val normalize_tool_access : tool_access -> tool_access
 
-val tool_access_preset : tool_access -> tool_preset option
-val tool_access_custom_allowlist : tool_access -> string list option
-val tool_access_also_allowlist : tool_access -> string list
+val tool_access_custom_allowlist : tool_access -> string list
 
 (** Encode a [tool_access] as the canonical
-    [{ "kind": "preset" | "custom", ... }] JSON object. *)
+    [{ "kind": "custom", "tools": [...] }] JSON object. *)
 val tool_access_to_json : tool_access -> Yojson.Safe.t
 
 (** True if [json] has a non-null member at [key] (top level). *)
@@ -71,7 +51,8 @@ val string_list_field_opt_result :
     [Keeper_internal] surface with write tools excluded. *)
 val default_tool_access_of_meta_json : unit -> tool_access
 
-(** Parse [tool_access] from persisted meta JSON, accepting only the
-    canonical "preset" / "custom" kinds (legacy kinds rejected). *)
+(** Parse [tool_access] from persisted meta JSON, accepting "custom" kind.
+    Legacy "preset" kind falls back to [default_tool_access_of_meta_json]
+    with a deprecation warning. *)
 val tool_access_of_meta_json :
   Yojson.Safe.t -> (tool_access, string) result

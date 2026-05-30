@@ -344,54 +344,7 @@ let () =
             (List.mem expected valid_agent_role_strings)
         ) ["worker"; "admin"]);
     ];
-    "tool_preset_ssot", [
-      (* Issue #8430: witness covers all 7 variants — adding an 8th
-         constructor will fail to compile here AND in
-         tool_preset_to_string. *)
-      Alcotest.test_case "witness covers all variants" `Quick (fun () ->
-        let open Masc_mcp.Keeper_meta_tool_access in
-        let witness s =
-          let actual = tool_preset_to_string s in
-          if not (List.mem actual valid_tool_preset_strings) then
-            Alcotest.failf "tool_preset_to_string %S not in valid_tool_preset_strings" actual
-        in
-        witness Minimal; witness Social; witness Messaging; witness Dispatch; witness Research;
-        witness Delivery; witness Full;
-        Alcotest.(check int) "count" 7 (List.length valid_tool_preset_strings));
-      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
-        (* Keeper_schema.tool_preset_enum_strings is a hand-mirrored copy
-           of Keeper_meta_tool_access.valid_tool_preset_strings (cycle-avoidance).
-           If they ever diverge this test fails and a silently-dropped
-           schema enum constructor is caught immediately. *)
-        Alcotest.(check (list string)) "schema mirror == variant SSOT"
-          Masc_mcp.Keeper_meta_tool_access.valid_tool_preset_strings
-          Masc_mcp.Keeper_schema.tool_preset_enum_strings);
-      Alcotest.test_case "TOML parser mirror stays in sync" `Quick (fun () ->
-        (* Keeper_types_profile cannot depend on Keeper_types because
-           Keeper_types includes it, so the raw TOML allow-list is mirrored
-           there and guarded here. *)
-        Alcotest.(check (list string)) "profile mirror == variant SSOT"
-          Masc_mcp.Keeper_meta_tool_access.valid_tool_preset_strings
-          Masc_mcp.Keeper_types_profile.valid_tool_preset_raw_strings);
-      Alcotest.test_case "tool_access schema mirror stays in sync" `Quick (fun () ->
-        let open Yojson.Safe.Util in
-        let schema = Masc_mcp.Keeper_schema.tool_access_schema "test" in
-        let preset_shape =
-          match schema |> member "oneOf" |> to_list with
-          | preset_shape :: _ -> preset_shape
-          | [] -> Alcotest.fail "missing tool_access preset schema"
-        in
-        let enum =
-          preset_shape
-          |> member "properties"
-          |> member "preset"
-          |> member "enum"
-          |> to_list
-          |> List.map to_string
-        in
-      Alcotest.(check (list string)) "tool_access enum == variant SSOT"
-        Masc_mcp.Keeper_meta_tool_access.valid_tool_preset_strings
-        enum);
+    "tool_access_ssot", [
       Alcotest.test_case "room signal defaults follow keeper tool access" `Quick (fun () ->
         let open Masc_mcp.Keeper_meta_tool_access in
         let check_access label expected access =
@@ -401,15 +354,15 @@ let () =
                access)
         in
         check_access "minimal stays quiet by default" false
-          (Preset { preset = Minimal; also_allow = [] });
+          (Custom []);
         check_access "minimal board opt-in listens" true
-          (Preset { preset = Minimal; also_allow = [ "keeper_board_post" ] });
+          (Custom ["keeper_board_post"]);
         check_access "minimal fake keeper board prefix stays quiet" false
-          (Preset { preset = Minimal; also_allow = [ "keeper_board_fake" ] });
+          (Custom ["keeper_board_fake"]);
         check_access "delivery listens to board by default" true
-          (Preset { preset = Delivery; also_allow = [] });
+          (Custom []);
         check_access "messaging listens to board by default" true
-          (Preset { preset = Messaging; also_allow = [] });
+          (Custom []);
         check_access "custom without board stays quiet" false
           (Custom [ "keeper_time_now" ]);
         check_access "custom masc board allowlist listens" true

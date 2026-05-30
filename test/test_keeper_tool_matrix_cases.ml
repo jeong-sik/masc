@@ -92,8 +92,7 @@ let make_meta ?(name = "keeper-tool-matrix") () =
           ("allowed_paths", `List [ `String "*" ]);
           ( "tool_access",
             Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
-              (Masc_mcp.Keeper_meta_tool_access.Preset
-                 { preset = Masc_mcp.Keeper_meta_tool_access.Full; also_allow = [] } ) );
+              (Masc_mcp.Keeper_meta_tool_access.Custom [] ) );
         ])
   with
   | Ok meta -> meta

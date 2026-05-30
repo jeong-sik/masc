@@ -112,40 +112,12 @@ let init_policy_config ~base_path =
   | Error msg ->
     Error msg
 
-let preset_name_of_tool_preset = function
-  | Minimal -> "minimal"
-  | Social -> "social"
-  | Messaging -> "messaging"
-  | Dispatch -> "dispatch"
-  | Research -> "research"
-  | Delivery -> "delivery"
-  | Full -> "full"
-
-(* ── Privileged operation gates ------------------------------------ *)
-
-let preset_allows_privileged_operations = function
-  | Delivery | Full -> true
-  | Minimal | Social | Messaging | Dispatch | Research -> false
-
-let allows_workflow_for_preset (preset : tool_preset) : bool =
-  preset_allows_privileged_operations preset
-
-let allows_shell_write_for_preset (preset : tool_preset) : bool =
-  preset_allows_privileged_operations preset
-
-(* ── Preset subsumption (config-driven) ──────────────────────── *)
+(* ── Group subsumption (config-driven) ──────────────────────── *)
 
 let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =
   with_policy_config_or ~accessor:"preset_can_satisfy" ~default:false
     (fun cfg ->
       Keeper_tool_policy_config.preset_can_satisfy cfg ~agent_preset ~required_preset)
-
-(** Return configured preset names (excluding "full") for schema enum generation. *)
-let configured_preset_names () : string list =
-  with_policy_config_or ~accessor:"configured_preset_names" ~default:[]
-    (fun cfg ->
-      Keeper_tool_policy_config.preset_names cfg
-      |> List.filter (fun n -> not (String.equal n "full")))
 
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
@@ -290,41 +262,10 @@ let last_turn_safe_tool_names () =
                 "tool_execute"; "masc_web_search"; "masc_web_fetch" ]
     "last_turn_safe"
 
-(* ── Presets (config-driven) ───────────────────────────────────── *)
-
-let preset_allowlist preset =
-  let name = preset_name_of_tool_preset preset in
-  with_policy_config_or ~accessor:("preset_allowlist." ^ name) ~default:[]
-    ~on_none:(fun () ->
-      Prometheus.inc_counter
-        Keeper_metrics.(to_string ToolPolicyFailures)
-        ~labels:[("site", Keeper_tool_policy_failure_site.(to_label Policy_config_not_loaded)); ("preset", name)]
-        ();
-      Log.Keeper.error
-        "tool policy config not loaded; preset '%s' returns empty. \
-         Call init_policy_config at startup." name)
-    (fun cfg ->
-      let injected = injected_masc_tool_names () in
-      let injected_lookup = Hashtbl.create (List.length injected) in
-      List.iter (fun n -> Hashtbl.replace injected_lookup n ()) injected;
-      let masc_filter tool_name = Hashtbl.mem injected_lookup tool_name in
-      match Keeper_tool_policy_config.resolve_preset cfg name ~masc_filter () with
-      | Some Keeper_tool_policy_config.All_candidates ->
-        (* all_candidates = true: return full candidate set *)
-        keeper_base_candidate_tool_names ()
-      | Some (Keeper_tool_policy_config.Subset tools) -> dedupe_tool_names tools
-      | None ->
-        Log.Keeper.warn "preset '%s' not defined in config/tool_policy.toml, returning empty" name;
-        [])
-
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =
     match meta.tool_access with
-    | Preset { preset; also_allow } ->
-        Tool_access_policy.Names
-          (preset_allowlist preset @ keeper_safe_inline_tools @ also_allow)
-    | Custom allowlist ->
-        Tool_access_policy.Names allowlist
+    | Custom allowlist -> Tool_access_policy.Names allowlist
   in
   {
     Tool_access_policy.allow;
@@ -494,8 +435,6 @@ let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
   let preset_tools =
     match meta.tool_access with
-    | Preset { preset; also_allow } ->
-        preset_allowlist preset @ also_allow
     | Custom allowlist -> allowlist
   in
   let from_preset =

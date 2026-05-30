@@ -30,9 +30,7 @@ type keeper_profile_defaults = {
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   repo_cli_identity : string option;
   git_identity_mode : string option;
-  tool_preset : string option;
-  tool_preset_source : string option;
-  tool_also_allow : string list option;
+  tool_custom_list : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;

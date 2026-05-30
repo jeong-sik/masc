@@ -381,13 +381,8 @@ let set_room_cursor meta room_id seq =
 let room_ids_for_meta _config (_meta : keeper_meta) : string list =
   [ "default" ]
 
-let keeper_room_capabilities (meta : keeper_meta) =
-  let preset_cap =
-    match Keeper_meta_contract.tool_access_preset meta.tool_access with
-    | Some p -> [ "preset:" ^ Keeper_meta_contract.tool_preset_to_string p ]
-    | None -> []
-  in
-  [ "keeper" ] @ preset_cap
+let keeper_room_capabilities (_meta : keeper_meta) =
+  [ "keeper" ]
 
 let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities =
   let agent_file =

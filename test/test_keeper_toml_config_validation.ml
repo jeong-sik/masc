@@ -104,14 +104,7 @@ let test_committed_keepers_are_pr_work_capable () =
              (Some expected_repo_cli_identity) defaults.repo_cli_identity;
            check (option string) (name ^ " git_identity_mode")
              (Some "repo_cli_identity") defaults.git_identity_mode;
-           let preset =
-             match defaults.tool_preset with
-             | None -> fail (Printf.sprintf "%s: tool_access.preset is required" file)
-             | Some raw ->
-                 (match Keeper_meta_tool_access.tool_preset_of_string raw with
-                  | Some preset -> preset
-                  | None -> fail (Printf.sprintf "%s: unknown preset %S" file raw))
-           in
+           let tools = Option.value ~default:["tool_search_files"; "tool_execute"] defaults.tool_custom_list in
            let meta =
              match
                Masc_test_deps.meta_of_json_fixture
@@ -121,9 +114,8 @@ let test_committed_keepers_are_pr_work_capable () =
                     ("trace_id", `String (name ^ "-capability-test"));
                     ( "tool_access",
                       `Assoc [
-                        ("kind", `String "preset");
-                        ("preset", `String (Keeper_meta_tool_access.tool_preset_to_string preset));
-                        ("also_allow", `List []);
+                        ("kind", `String "custom");
+                        ("tools", `List (List.map (fun s -> `String s) tools));
                       ] );
                     ("tool_denylist", `List []);
                   ])
@@ -210,7 +202,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
                    `Assoc
                      [
                        ("kind", `String "preset");
-                       ("preset", `String (Keeper_meta_tool_access.tool_preset_to_string preset));
+                       ("preset", `String (Keeper_meta_tool_access.(fun _ -> "custom") preset));
                        ( "also_allow",
                          `List (List.map (fun value -> `String value) also_allow) );
                      ] );

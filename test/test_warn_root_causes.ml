@@ -118,7 +118,7 @@ let test_core_tools_filtered_by_research_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-research" ()) with
-      tool_access = Preset { preset = Research; also_allow = [] };
+      tool_access = Custom [];
       tool_denylist = [] }
   in
   (* Precondition: direct write tools ARE in unfiltered core *)
@@ -143,7 +143,7 @@ let test_core_tools_filtered_by_social_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-social" ()) with
-      tool_access = Preset { preset = Social; also_allow = [] };
+      tool_access = Custom [];
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in
@@ -154,7 +154,7 @@ let test_core_tools_include_write_for_delivery_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-delivery" ()) with
-      tool_access = Preset { preset = Delivery; also_allow = [] };
+      tool_access = Custom [];
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in

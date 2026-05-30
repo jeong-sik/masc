@@ -24,8 +24,6 @@ let ensure_wildcard_repo_mapping config keeper_name =
 
 let make_test_meta
       ?(name = "test-keeper")
-      ?(preset = Keeper_meta_tool_access.Full)
-      ?(also_allow = [])
       ?(allowed_paths = [ "*" ])
       ?tool_access
       ()
@@ -34,7 +32,7 @@ let make_test_meta
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Preset { preset; also_allow }
+    | None -> Keeper_meta_tool_access.Custom []
   in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -908,7 +906,7 @@ let make_research_meta ?tool_access () : Keeper_meta_contract.keeper_meta =
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Preset { preset = Keeper_meta_tool_access.Research; also_allow = [] }
+    | None -> Keeper_meta_tool_access.Custom []
   in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -933,7 +931,7 @@ let make_learned_meta () : Keeper_meta_contract.keeper_meta =
           ; "trace_id", `String "test-trace-learned"
           ; ( "tool_access"
             , Keeper_meta_tool_access.tool_access_to_json
-                (Keeper_meta_tool_access.Preset { preset = Keeper_meta_tool_access.Full; also_allow = [] }) )
+                (Keeper_meta_tool_access.Custom []) )
           ])
   with
   | Ok meta -> meta

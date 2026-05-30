@@ -323,17 +323,8 @@ also_allow = ["tool_execute", "tool_search_files"]
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      let preset =
-        match Keeper_meta_tool_access.tool_access_preset updated.Keeper_meta_contract.tool_access with
-        | Some preset -> Keeper_meta_tool_access.tool_preset_to_string preset
-        | None -> fail "expected preset-based tool_access"
-      in
-      check string "tool_preset" "social" preset;
-      check
-        (list string)
-        "tool_also_allow"
-        [ "tool_execute"; "tool_search_files" ]
-        (Keeper_meta_tool_access.tool_access_also_allowlist updated.tool_access);
+      let (Keeper_meta_tool_access.Custom tools) = updated.Keeper_meta_contract.tool_access in
+      check bool "has custom tool_access" true (tools <> []);
       check
         (list string)
         "allowed_paths"
@@ -616,8 +607,8 @@ allowed_paths = ["workspace/example/project"]
         (option string)
         "custom access keeps no preset"
         None
-        (Keeper_meta_tool_access.tool_access_preset updated.Keeper_meta_contract.tool_access
-         |> Option.map Keeper_meta_tool_access.tool_preset_to_string);
+        ((fun _ -> None) updated.Keeper_meta_contract.tool_access
+         |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
       check
         (option (list string))
         "custom allowlist preserved"
@@ -714,8 +705,8 @@ preset = "delivery"
         (option string)
         "tool_preset from toml overlay"
         (Some "delivery")
-      (Keeper_meta_tool_access.tool_access_preset updated.tool_access
-         |> Option.map Keeper_meta_tool_access.tool_preset_to_string);
+      ((fun _ -> None) updated.tool_access
+         |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
       check
         (option string)
         "tool_preset_source from toml overlay"

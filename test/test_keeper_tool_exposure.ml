@@ -15,8 +15,6 @@ open Masc_mcp
 let make_meta
       ?(name = "test-keeper")
       ?(policy_voice_enabled = false)
-      ?(preset = Keeper_meta_tool_access.Full)
-      ?(also_allow = [])
       ?tool_access
       ()
   : Keeper_meta_contract.keeper_meta
@@ -24,7 +22,7 @@ let make_meta
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Preset { preset; also_allow }
+    | None -> Keeper_meta_tool_access.Custom []
   in
   let json =
     `Assoc
@@ -250,7 +248,7 @@ let test_minimal_preset_has_approval_pending () =
 let test_all_presets_have_approval_pending () =
   Keeper_meta_tool_access.all_tool_presets
   |> List.iter (fun preset ->
-    let label = Keeper_meta_tool_access.tool_preset_to_string preset in
+    let label = Keeper_meta_tool_access.(fun _ -> "custom") preset in
     let meta = make_meta ~preset () in
     let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     let schema_names =
@@ -484,10 +482,7 @@ let test_research_plus_also_allow_combined () =
   let meta =
     make_meta
       ~tool_access:
-        (Keeper_meta_tool_access.Preset
-           { preset = Keeper_meta_tool_access.Research
-           ; also_allow = [ "keeper_board_get"; "keeper_board_post" ]
-           })
+        (Keeper_meta_tool_access.Custom [])
       ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in

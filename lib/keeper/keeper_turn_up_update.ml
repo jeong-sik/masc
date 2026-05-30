@@ -42,11 +42,6 @@ let paused_state_requires_approval (old : keeper_meta) =
   || blocker_requires_continue_gate old
 
 let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
-  match p.tool_access_opt, old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
-  | None, Custom _, None, Some _ ->
-      tool_result_error
-        "tool_also_allow requires a preset-based keeper policy; set tool_preset first"
-  | _ ->
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
   | Ok active_goal_ids ->
@@ -132,42 +127,13 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
-  let profile_tool_preset =
-    Option.bind p.profile_defaults.tool_preset tool_preset_of_string
-  in
   let tool_access =
     match p.tool_access_opt with
     | Some access -> access
     | None ->
-        match old.tool_access with
-        | Preset current ->
-            let preset =
-              match p.tool_preset_opt with
-              | Some preset -> preset
-              | None -> (
-                  match profile_tool_preset with
-                  | Some preset -> preset
-                  | None -> current.preset)
-            in
-            let also_allow =
-              resolve_tool_name_list
-                ~preferred:p.tool_also_allow_opt
-                ~fallback:
-                  (match p.profile_defaults.tool_also_allow with
-                   | Some _ as profile -> profile
-                   | None -> Some current.also_allow)
-            in
-            Preset { preset; also_allow }
-        | Custom names -> (
-            match Dashboard_utils.first_some p.tool_preset_opt profile_tool_preset with
-            | Some preset ->
-                let also_allow =
-                  resolve_tool_name_list
-                    ~preferred:p.tool_also_allow_opt
-                    ~fallback:p.profile_defaults.tool_also_allow
-                in
-                Preset { preset; also_allow }
-            | None -> Custom names)
+        (match p.profile_defaults.tool_custom_list with
+         | Some tools -> Custom (normalize_tool_names tools)
+         | None -> old.tool_access)
   in
   let room_signal_prompt_enabled =
     match keeper_room_signal_prompt_enabled_override () with
@@ -285,7 +251,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     network_mode;
     tool_access;
     tool_denylist;
-    tool_preset_source = p.profile_defaults.tool_preset_source;
     autoboot_enabled;
     active_goal_ids;
     paused = if resume_paused_keeper then false else old.paused;

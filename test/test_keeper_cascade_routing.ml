@@ -1,11 +1,11 @@
 (** test_keeper_cascade_routing — State-aware cascade profile selection.
 
-    Verifies TLA+ KeeperCoreTriad safety invariants in OCaml:
-    - S1: Blocked/non-executable phases still map to base_cascade in the helper;
-          actual turn blocking happens upstream in keeper_unified_turn
-    - S2: Failing phase selects phase_recovery
-    - S3: Compacting/HandingOff select phase_buffer
-    - Running selects base_cascade unchanged *)
+    cascade→Runtime 숙청 후 계약: select_cascade 는 모든 phase 에 대해
+    base_cascade 를 반환한다 (single runtime — per-phase override 제거).
+    이전의 Failing -> phase_recovery / Compacting,HandingOff -> phase_buffer
+    분기는 phase_recovery_cascade_name == phase_buffer_cascade_name ==
+    base_cascade 로 수렴하여 죽은 추상화가 되었으므로 항등으로 collapse 됨.
+    phase 는 reason 진단용으로만 유지. *)
 
 open Alcotest
 module Routing = Masc_mcp.Keeper_cascade_routing
@@ -27,20 +27,17 @@ let test_running_uses_base () =
   let r = select SM.Running in
   check string "Running -> base" base r.effective_cascade
 
-let test_failing_uses_phase_recovery () =
+let test_failing_uses_base () =
   let r = select SM.Failing in
-  check string "Failing -> phase_recovery"
-    Masc_mcp.Keeper_config.phase_recovery_cascade_name r.effective_cascade
+  check string "Failing -> base (single runtime, no override)" base r.effective_cascade
 
-let test_compacting_uses_phase_buffer () =
+let test_compacting_uses_base () =
   let r = select SM.Compacting in
-  check string "Compacting -> phase_buffer"
-    Masc_mcp.Keeper_config.phase_buffer_cascade_name r.effective_cascade
+  check string "Compacting -> base (single runtime, no override)" base r.effective_cascade
 
-let test_handing_off_uses_phase_buffer () =
+let test_handing_off_uses_base () =
   let r = select SM.HandingOff in
-  check string "HandingOff -> phase_buffer"
-    Masc_mcp.Keeper_config.phase_buffer_cascade_name r.effective_cascade
+  check string "HandingOff -> base (single runtime, no override)" base r.effective_cascade
 
 let test_overflowed_uses_base () =
   let r = select SM.Overflowed in
@@ -76,11 +73,10 @@ let test_restarting_uses_base () =
 
 (* ── Edge cases ───────────────────────────────────────── *)
 
-let test_failing_with_phase_buffer_base () =
-  let r = Routing.select_cascade
-    ~base_cascade:Masc_mcp.Keeper_config.phase_buffer_cascade_name ~phase:SM.Failing in
-  check string "Failing overrides even phase_buffer base"
-    Masc_mcp.Keeper_config.phase_recovery_cascade_name r.effective_cascade
+let test_failing_preserves_custom_base () =
+  let r = Routing.select_cascade ~base_cascade:"custom_secondary" ~phase:SM.Failing in
+  check string "Failing keeps base (no per-phase override)"
+    "custom_secondary" r.effective_cascade
 
 let test_running_with_custom_base () =
   let r = Routing.select_cascade ~base_cascade:"custom_primary" ~phase:SM.Running in
@@ -122,9 +118,9 @@ let () =
   run "keeper_cascade_routing" [
     "phase_routing", [
       test_case "Running uses base"       `Quick test_running_uses_base;
-      test_case "Failing uses phase_recovery" `Quick test_failing_uses_phase_recovery;
-      test_case "Compacting uses phase_buffer"  `Quick test_compacting_uses_phase_buffer;
-      test_case "HandingOff uses phase_buffer"  `Quick test_handing_off_uses_phase_buffer;
+      test_case "Failing uses base"       `Quick test_failing_uses_base;
+      test_case "Compacting uses base"    `Quick test_compacting_uses_base;
+      test_case "HandingOff uses base"    `Quick test_handing_off_uses_base;
       test_case "Overflowed uses base"    `Quick test_overflowed_uses_base;
       test_case "Draining uses base"      `Quick test_draining_uses_base;
       test_case "Paused uses base"        `Quick test_paused_uses_base;
@@ -135,7 +131,7 @@ let () =
       test_case "Restarting uses base"    `Quick test_restarting_uses_base;
     ];
     "edge_cases", [
-      test_case "Failing overrides phase_buffer base" `Quick test_failing_with_phase_buffer_base;
+      test_case "Failing preserves custom base" `Quick test_failing_preserves_custom_base;
       test_case "Running preserves custom base"     `Quick test_running_with_custom_base;
       test_case "Required tool turn preserves routed cascade" `Quick
         test_tool_required_turn_preserves_routed_cascade;

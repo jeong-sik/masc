@@ -15,8 +15,6 @@
     \[init_state]), \[dedupe_keep_order],
     \[canonicalize_path], \[runtime_data_root],
     \[repo_config_seed_path] (path resolvers), \[option_field],
-    \[diagnose_cascade_catalog] /
-    \[cascade_catalog_next_actions] (cascade catalog scanner),
     \[current_inputs] (Eio-aware inputs builder), the [Live_catalog_*]
     enum used in {!analyze_live}'s status grading, and pure
     \[analyze] (the lower-level entry behind {!analyze_with} +
@@ -92,22 +90,6 @@ val has_blocking_warning : t -> bool
 (** [has_blocking_warning report] treats [Error] reports as blocking and
     [Warn] reports as blocking only when at least one warning needs operator
     action before another diagnostic should proceed. *)
-
-(** {1 Catalog issue re-exports} *)
-
-type catalog_issue_severity = Cascade_catalog_validator.severity =
-  | Catalog_warn
-  | Catalog_error
-(** Severity grade for cascade catalog issues.  Re-exported with
-    type identity preserved. *)
-
-type catalog_issue = Cascade_catalog_validator.issue = {
-  profile : string option;
-  severity : catalog_issue_severity;
-  message : string;
-}
-(** Cascade catalog validation issue.  Re-exported with type
-    identity preserved. *)
 
 (** {1 Path resolution} *)
 

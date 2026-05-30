@@ -174,6 +174,30 @@ P1-P3(자립 schema/parser/adapter + runtime.ml 재배선 + `tool_strict` 제거
 
 L0+L1 위로 재배선. mechanical(naming Cascade_name→string 49파일, error→Keeper_meta_contract, misc 상수) + semantic(dispatch run_result destructure 25파일, catalog DELETE-CALLSITE, fsm). naming은 batch 가능, semantic은 파일별.
 
+### L0 substrate ADDITION (semantic 경계 매핑, measured 2026-05-30)
+
+restored substrate + 120 consumer가 참조하는 semantic 심볼의 확정 매핑:
+
+| 삭제 심볼 | refs | 대체 |
+|-----------|------|------|
+| `Cascade_config.parse_model_string` | 10 | **신규** `Runtime.parse_model_string : string -> Provider_config.t option` (Runtime_adapter 경유, "provider/model" 파싱) |
+| `Cascade_config.split_provider_model` | 1 | inline `String.split_on_char '/'` 또는 Runtime helper |
+| `Cascade_config.filter_healthy_strict` / `health_filter_rejection_to_string` | 2 | keeper_binding_health 또는 discard (single binding = 필터 불요) |
+| `Cascade_config.resolve_strategy` | 1 | DISCARD (routing) |
+| `Cascade_runtime.models_of_cascade_name(_result)` | 8 | single-binding collapse: `[ (get_default_runtime ()).model ]` (multi-candidate 리스트→단일) |
+| `Cascade_runtime.fallback_context_window` | 5 | **신규** `Runtime_constants.fallback_context_window = 128000` |
+| `Cascade_runtime.cascade_config_path` | 5 | **신규** `Runtime.config_path : unit -> string option` |
+| `Cascade_runtime.{local_model_label,default_model_strings,resolve_*_context,max_output_tokens_ceiling*,local_capacity_for_selections,ensure_api_keys_for_labels}` | ~15 | Runtime.t/Runtime_schema 조회로 collapse (single binding) |
+| `Cascade_metrics.on_{provider_cooldown,cascade_audit_failure,resolve_live_fallback,cascade_metrics_eviction}` | 9 | **신규** `Runtime_metrics.on_*` prometheus emitter (오염 cascade_metrics 미복원; 순수 카운터만) |
+| `Cascade_capability_profile.{provider_satisfies_profile,is_system_cascade_name}` | 2 | DISCARD/predicate (profile 제거) |
+| `Cascade_observation` (substrate 내) | 4 | `Keeper_observation` (L1 restored) |
+| `Cascade_runner` (substrate 내) | 2 | `Runtime_agent` (L0 rename 누락분) |
+| `Cascade_name` (substrate 내) | 11 | `string` (type), 호출 제거(to_string/of_string_exn) |
+| `Cascade_tier_wait_scheduler` | 1 | DISCARD (tier 제거됨 #19436) |
+| `Cascade_error_classify` (substrate 내) | 1 | `Keeper_meta_contract` |
+
+신규 substrate addition 모듈: `runtime_constants`(fallback_context_window), `runtime_metrics`(on_* emitter), `Runtime`에 `parse_model_string`/`config_path`/model-resolution 헬퍼 추가.
+
 ### 검증 순서
 
 L0 scratch 컴파일 → L1 (keeper_meta_contract 링크 필요, 전체 lib 빌드) → L2 후 full build green + `rg -w 'Cascade_[a-z][A-Za-z_]*\.' lib bin` = 0 (생존 variant 생성자 `Cascade_idle` 등은 잔존 허용, P6 rename).

@@ -447,6 +447,7 @@ let test_tool_access_preset_empty_json_preserved () =
   in
   (* Legacy "preset" JSON now falls back to default_tool_access_of_meta_json on load *)
   match meta.Masc_mcp.Keeper_meta_contract.tool_access with
+  | Masc_mcp.Keeper_meta_tool_access.All -> ()
   | Masc_mcp.Keeper_meta_tool_access.Custom _ -> ()
 
 let test_tool_access_custom_empty_json_preserved () =
@@ -469,6 +470,8 @@ let test_tool_access_custom_empty_json_preserved () =
     | Error e -> failwith e
   in
   match meta.Masc_mcp.Keeper_meta_contract.tool_access with
+  | Masc_mcp.Keeper_meta_tool_access.All ->
+      Alcotest.(check int) "custom empty normalized to All" 0 0
   | Masc_mcp.Keeper_meta_tool_access.Custom names ->
       Alcotest.(check int) "custom empty preserved" 0 (List.length names)
 

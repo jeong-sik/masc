@@ -257,6 +257,7 @@ let last_turn_safe_tool_names () =
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =
     match meta.tool_access with
+    | All -> Tool_access_policy.All
     | Custom allowlist -> Tool_access_policy.Names allowlist
   in
   {
@@ -427,6 +428,7 @@ let keeper_tool_search_scope (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
   let preset_tools =
     match meta.tool_access with
+    | All -> lookup.candidate_names
     | Custom allowlist -> allowlist
   in
   let from_preset =

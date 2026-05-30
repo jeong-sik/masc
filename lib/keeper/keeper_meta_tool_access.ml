@@ -6,7 +6,7 @@
 
 open Keeper_types_profile
 
-type tool_access = Custom of string list
+type tool_access = All | Custom of string list
 
 let tool_names_include_board name_list =
   List.exists
@@ -18,6 +18,7 @@ let tool_names_include_board name_list =
 ;;
 
 let tool_access_default_room_signal_prompt_enabled ~default = function
+  | All -> default
   | Custom tool_names -> default || tool_names_include_board tool_names
 ;;
 
@@ -59,13 +60,23 @@ let migrate_legacy_restricted_tools names =
   Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
 ;;
 
-let normalize_tool_access (Custom names) = Custom (normalize_tool_names names)
+let normalize_tool_access = function
+  | All -> All
+  | Custom names -> Custom (normalize_tool_names names)
+;;
 
-let tool_access_custom_allowlist (Custom names) = names
+let tool_access_custom_allowlist = function
+  | All -> []
+  | Custom names -> names
+;;
 
-let tool_access_to_json (Custom names) =
-  `Assoc
-    [ "kind", `String "custom"; "tools", `List (List.map (fun s -> `String s) names) ]
+let tool_access_to_json = function
+  | All ->
+      `Assoc
+        [ "kind", `String "custom"; "tools", `List [] ]
+  | Custom names ->
+      `Assoc
+        [ "kind", `String "custom"; "tools", `List (List.map (fun s -> `String s) names) ]
 ;;
 
 let json_member_present key (json : Yojson.Safe.t) =
@@ -101,29 +112,24 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
 ;;
 
 let default_tool_access_of_meta_json () =
-  (* Full Keeper_internal surface: keepers without explicit tool_access get the
-     complete tool set so cascade filtering can find providers with required tools
-     like masc_transition. Write-intent restrictions are handled by task contract
-     gating, not by default tool access exclusion.
-     See fleet deadlock Layer 2 analysis (2026-05-30) + cascade provider
-     gap analysis (2026-05-30). *)
-  Custom (normalize_tool_names
-    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal))
+  (* Empty tools list means "all" — no restriction.  This replaces the
+     previous default that enumerated Keeper_internal surface explicitly.
+     See fleet deadlock Layer 2 analysis (2026-05-30). *)
+  All
 ;;
 
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Json_util.assoc_member_opt "tool_access" json with
-  | Some `Null -> Ok (default_tool_access_of_meta_json ())
+  | Some `Null -> Ok All
   | Some (`Assoc _ as access_json) ->
     let kind = Json_util.get_string access_json "kind" in
     (match kind with
      | Some "preset" ->
-       (* Legacy preset entries: fall back to default access.
-          Keeper bootstrap resyncs from TOML which now requires explicit custom lists. *)
+       (* Legacy preset entries: fall back to all-access. *)
        Log.Keeper.warn
          "keeper meta has deprecated tool_access.kind='preset'; \
-          defaulting to keeper_internal surface until next bootstrap";
-       Ok (default_tool_access_of_meta_json ())
+          defaulting to all-access until next bootstrap";
+       Ok All
      | Some "custom" ->
        (match
           string_list_field_result
@@ -131,17 +137,11 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
             ~label:"tool_access.tools"
             access_json
         with
-        | Ok tools -> Ok (normalize_tool_access (Custom tools))
+        | Ok tools ->
+            let normalized = normalize_tool_names tools in
+            if normalized = [] then Ok All else Ok (Custom normalized)
         | Error msg -> Error msg)
      | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
-     | None ->
-       (* Empty tool_access: {} — missing kind field.
-          Safe to default: ensure_keeper_meta resyncs from TOML on bootstrap.
-          Without this, meta_of_json fails and recovery via
-          load_or_materialize_boot_meta also fails (handle_keeper_up calls
-          read_meta which hits the same parse error). *)
-       Ok (default_tool_access_of_meta_json ()))
-  | _ ->
-    (* tool_access missing or not an object — same recovery rationale. *)
-    Ok (default_tool_access_of_meta_json ())
+     | None -> Ok All)
+  | _ -> Ok All
 ;;

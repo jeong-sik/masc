@@ -4,7 +4,7 @@
     keeper meta JSON.  Named presets have been removed; keepers declare
     an explicit [Custom] tool list. *)
 
-type tool_access = Custom of string list
+type tool_access = All | Custom of string list
 
 (** Returns true if any name in the list resolves to a [Tool_name.is_board]
     tool. Used to detect implicit board surface. *)

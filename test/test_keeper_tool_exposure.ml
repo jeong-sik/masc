@@ -1507,6 +1507,7 @@ let () =
             | Ok (Custom tools) ->
               check bool "has masc_status" true (List.mem "masc_status" tools);
               check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
+            | Ok All -> fail "unexpected All for custom tools"
             | Error msg -> fail ("unexpected error: " ^ msg))
         ; test_case "null tools field returns error" `Quick (fun () ->
             let json = `Assoc [ "kind", `String "custom"; "tools", `Null ] in

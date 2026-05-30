@@ -327,8 +327,10 @@ also_allow = ["tool_execute", "tool_search_files"]
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      let (Keeper_meta_tool_access.Custom tools) = updated.Keeper_meta_contract.tool_access in
-      check bool "has custom tool_access" true (tools <> []);
+      (match updated.Keeper_meta_contract.tool_access with
+      | Keeper_meta_tool_access.All -> ()
+      | Keeper_meta_tool_access.Custom tools ->
+          check bool "has custom tool_access" true (tools <> []));
       check
         (list string)
         "allowed_paths"

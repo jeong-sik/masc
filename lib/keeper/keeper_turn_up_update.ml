@@ -132,7 +132,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     | Some access -> access
     | None ->
         (match p.profile_defaults.tool_custom_list with
-         | Some tools -> Custom (normalize_tool_names tools)
+         | Some tools ->
+             let normalized = normalize_tool_names tools in
+             if normalized = [] then All else Custom normalized
          | None -> old.tool_access)
   in
   let room_signal_prompt_enabled =

@@ -322,8 +322,10 @@ let handle_tool_execute
       args
   in
   let write_enabled =
-    let (Custom names) = meta.tool_access in
-    List.exists (fun n -> n = "tool_edit_file" || n = "tool_write_file") names
+    match meta.tool_access with
+    | All -> true
+    | Custom names ->
+        List.exists (fun n -> n = "tool_edit_file" || n = "tool_write_file") names
   in
   if has_typed_execute_input_key args
   then

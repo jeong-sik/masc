@@ -25,7 +25,7 @@ let registry_clear () =
 (* ── Cache ──────────────────────────────────────────────────── *)
 
 type cache_entry =
-  { capacity : Cascade_throttle.capacity_info
+  { capacity : Keeper_throttle.capacity_info
   ; recorded_at : float
   }
 
@@ -68,7 +68,7 @@ let parse_response json =
        (match Json_util.assoc_member_opt "data" json with
         | Some (`List items) when List.length items > 0 ->
           Some
-            { Cascade_throttle.total = 1
+            { Keeper_throttle.total = 1
             ; process_active = 0
             ; process_available = 1
             ; process_queue_length = 0

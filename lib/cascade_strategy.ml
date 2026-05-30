@@ -2,7 +2,7 @@
 
 type signal_ctx = {
   health : Cascade_health_tracker.t;
-  capacity : string -> Cascade_throttle.capacity_info option;
+  capacity : string -> Keeper_throttle.capacity_info option;
   now : float;
   rand_int : int -> int;
   keeper_name : string;
@@ -86,7 +86,7 @@ type 'a adapter = {
 
 let key_is_full ctx key =
   match ctx.capacity key with
-  | Some info -> info.Cascade_throttle.process_available <= 0
+  | Some info -> info.Keeper_throttle.process_available <= 0
   | None -> false
 
 let dedupe_full_capacity_keys adapter ctx cands =

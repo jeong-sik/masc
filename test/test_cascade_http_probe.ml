@@ -1,4 +1,4 @@
-(** Unit tests for [Cascade_http_probe].
+(** Unit tests for [Keeper_http_probe].
 
     The HTTP probe path itself is intentionally not unit-tested
     here — it depends on a live ollama daemon and is covered by
@@ -12,8 +12,8 @@
       behaviour. *)
 
 open Alcotest
-module P = Masc_mcp.Cascade_http_probe
-module Throttle = Masc_mcp.Cascade_throttle
+module P = Masc_mcp.Keeper_http_probe
+module Throttle = Masc_mcp.Keeper_throttle
 
 (* ── URL canonicalization ───────────────────────────────────── *)
 

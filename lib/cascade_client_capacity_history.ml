@@ -13,7 +13,7 @@ type event = {
       capacity-probe adapter into this ring buffer module. *)
 let classify_key url =
   if Masc_network_defaults.is_cli_sentinel_url url then "cli"
-  else if Cascade_http_probe.is_registered ~url then "http_probe"
+  else if Keeper_http_probe.is_registered ~url then "http_probe"
   else "other"
 
 (* ── Ring buffer configuration ─────────────────────────────── *)

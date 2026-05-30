@@ -522,22 +522,22 @@ let local_capacity_for_selections ~sw ~net selections =
   if local_urls = [] then empty_capacity
   else begin
     let need_probe =
-      List.filter (fun url -> Cascade_throttle.lookup url = None) local_urls
+      List.filter (fun url -> Keeper_throttle.lookup url = None) local_urls
     in
     if need_probe <> [] then begin
       let statuses =
         Llm_provider.Discovery.discover ~sw ~net ~endpoints:need_probe
       in
-      Cascade_throttle.populate statuses
+      Keeper_throttle.populate statuses
     end;
     let infos =
-      List.filter_map (fun url -> Cascade_throttle.capacity url) local_urls
+      List.filter_map (fun url -> Keeper_throttle.capacity url) local_urls
     in
     match infos with
     | [] -> empty_capacity
     | _ ->
       List.fold_left
-        (fun acc (info : Cascade_throttle.capacity_info) ->
+        (fun acc (info : Keeper_throttle.capacity_info) ->
            { total = acc.total + info.total
            ; process_active = acc.process_active + info.process_active
            ; process_available =

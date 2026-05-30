@@ -5,7 +5,7 @@
 
 open Alcotest
 module Cp = Masc_mcp.Keeper_capacity_probe
-module Throttle = Masc_mcp.Cascade_throttle
+module Throttle = Masc_mcp.Keeper_throttle
 
 (* ── Mock probe ─────────────────────────────────────────────── *)
 

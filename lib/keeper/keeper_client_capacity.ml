@@ -36,7 +36,7 @@ let snapshot () =
       Hashtbl.fold
         (fun url e acc ->
            let active = Atomic.get e.active in
-           let info : Cascade_throttle.capacity_info =
+           let info : Keeper_throttle.capacity_info =
              { total = e.max_concurrent;
                process_active = active;
                process_available = max 0 (e.max_concurrent - active);
@@ -63,7 +63,7 @@ let capacity url =
     let available = max 0 (e.max_concurrent - active) in
     Some
       {
-        Cascade_throttle.total = e.max_concurrent;
+        Keeper_throttle.total = e.max_concurrent;
         process_active = active;
         process_available = available;
         process_queue_length = 0;

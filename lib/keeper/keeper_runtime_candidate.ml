@@ -478,7 +478,7 @@ let register_http_probe_capable ~max_concurrent candidate =
           Keeper_client_capacity.register ~url:cap_key ~max_concurrent;
       (match candidate.provider_cfg.kind with
        | Llm_provider.Provider_config.Ollama ->
-           Cascade_http_probe.register_url ~url:probe_url
+           Keeper_http_probe.register_url ~url:probe_url
        | _ ->
            Keeper_openai_probe.register_url ~url:probe_url)
 

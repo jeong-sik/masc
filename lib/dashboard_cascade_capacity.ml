@@ -18,7 +18,7 @@ let classify_capacity_key url =
   else "other"
 ;;
 
-let client_capacity_entry_to_json ((url, info) : string * Cascade_throttle.capacity_info)
+let client_capacity_entry_to_json ((url, info) : string * Keeper_throttle.capacity_info)
   : Yojson.Safe.t
   =
   `Assoc

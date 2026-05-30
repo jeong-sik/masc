@@ -15,7 +15,7 @@ val registered_count : unit -> int
 
 (* ── Cache ──────────────────────────────────────────────────── *)
 
-val cached_capacity : ?now:float -> string -> Cascade_throttle.capacity_info option
+val cached_capacity : ?now:float -> string -> Keeper_throttle.capacity_info option
 val cache_size : unit -> int
 
 (* ── Probe adapter ───────────────────────────────────────────── *)
@@ -33,9 +33,9 @@ module Openai_probe : sig
     -> url:string
     -> ?timeout_s:float
     -> unit
-    -> Cascade_throttle.capacity_info option
+    -> Keeper_throttle.capacity_info option
 
-  val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
+  val cached : url:string -> ?now:float -> unit -> Keeper_throttle.capacity_info option
 
   val refresh_many
     :  sw:Eio.Switch.t

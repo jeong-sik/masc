@@ -1,7 +1,7 @@
 (** Client-declared per-endpoint capacity for providers that do not
     expose a slot/capacity probe (ollama HTTP, CLI transports, etc.).
 
-    [Cascade_throttle] is Discovery-driven and currently only speaks
+    [Keeper_throttle] is Discovery-driven and currently only speaks
     to llama-server via [/slots].  Ollama on port 11434 has no slot
     concept, but users nonetheless want at most one concurrent call
     so two keepers don't trash the GPU.  This module is the MASC-side
@@ -39,7 +39,7 @@ val register : url:string -> max_concurrent:int -> unit
 val registered_urls : unit -> string list
 (** Snapshot of currently-registered URLs.  Test helper. *)
 
-val snapshot : unit -> (string * Cascade_throttle.capacity_info) list
+val snapshot : unit -> (string * Keeper_throttle.capacity_info) list
 (** Atomic snapshot of every registered URL paired with the current
     [capacity_info] (total, active, available).  Used by the
     dashboard projection to surface client-declared semaphores
@@ -90,8 +90,8 @@ val auto_register_cli_with_override :
 
 (** {1 Capacity query} *)
 
-val capacity : string -> Cascade_throttle.capacity_info option
-(** [capacity url] returns the current [Cascade_throttle.capacity_info]
+val capacity : string -> Keeper_throttle.capacity_info option
+(** [capacity url] returns the current [Keeper_throttle.capacity_info]
     for a client-declared URL.  Returns [None] if [url] was never
     registered.  The [source] field is always
     [Llm_provider.Provider_throttle.Fallback] (no Discovery input).

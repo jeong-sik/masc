@@ -7,7 +7,7 @@
 
     Resolution chain (identical semantics to the previous hardcoded chain):
     {ol
-     {- [Cascade_throttle.capacity url]}
+     {- [Keeper_throttle.capacity url]}
      {- Registered probes' [cached ~url]}
      {- [Keeper_client_capacity.capacity url]}}
     @since 0.10.0  *)
@@ -27,10 +27,10 @@ module type Probe = sig
     -> url:string
     -> ?timeout_s:float
     -> unit
-    -> Cascade_throttle.capacity_info option
+    -> Keeper_throttle.capacity_info option
 
   (** [cached ~url ?now ()] reads the probe's cache.  Pure: no IO. *)
-  val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
+  val cached : url:string -> ?now:float -> unit -> Keeper_throttle.capacity_info option
 
   (** [refresh_many ~sw ~net ~urls ?timeout_s ()] probes every URL in [urls]
       that [can_probe] accepts and whose cache entry has expired. *)
@@ -83,7 +83,7 @@ let cached ~url ?now () =
 ;;
 
 let capacity url =
-  match Cascade_throttle.capacity url with
+  match Keeper_throttle.capacity url with
   | Some _ as v -> v
   | None ->
     (match cached ~url () with
@@ -124,5 +124,5 @@ end
 
 (* ── Built-in probe registration ─────────────────────────────── *)
 
-let () = register (module Cascade_http_probe.Http_probe)
+let () = register (module Keeper_http_probe.Http_probe)
 let () = register (module Keeper_openai_probe.Openai_probe)

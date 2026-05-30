@@ -22,7 +22,7 @@ type signal_ctx = {
   health : Cascade_health_tracker.t;
   (** Health tracker for success_rate, cooldown, effective_weight. *)
 
-  capacity : string -> Cascade_throttle.capacity_info option;
+  capacity : string -> Keeper_throttle.capacity_info option;
   (** Per-capacity-domain probe keyed by the adapter capacity key.  Returns
       [None] when the domain is not in the throttle table (CLI providers,
       unprobed HTTP providers).  The strategy must treat [None] as

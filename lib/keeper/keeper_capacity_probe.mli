@@ -13,9 +13,9 @@ module type Probe = sig
     -> url:string
     -> ?timeout_s:float
     -> unit
-    -> Cascade_throttle.capacity_info option
+    -> Keeper_throttle.capacity_info option
 
-  val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
+  val cached : url:string -> ?now:float -> unit -> Keeper_throttle.capacity_info option
 
   val refresh_many
     :  sw:Eio.Switch.t
@@ -45,13 +45,13 @@ val can_probe : url:string -> bool
 
 (** [cached ~url ?now ()] reads the first registered probe's cache that
     recognises [url].  Pure: no IO. *)
-val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
+val cached : url:string -> ?now:float -> unit -> Keeper_throttle.capacity_info option
 
 (** [capacity url] is the 3-level resolution chain:
-    [Cascade_throttle] → registered probes' cache →
+    [Keeper_throttle] → registered probes' cache →
     [Keeper_client_capacity].  Identical semantics to the previous
     per-caller hardcoded chain. *)
-val capacity : string -> Cascade_throttle.capacity_info option
+val capacity : string -> Keeper_throttle.capacity_info option
 
 (** [probe ~sw ~net ~url ?timeout_s ()] performs a live probe via the
     first registered probe that recognises [url]. *)
@@ -61,7 +61,7 @@ val probe
   -> url:string
   -> ?timeout_s:float
   -> unit
-  -> Cascade_throttle.capacity_info option
+  -> Keeper_throttle.capacity_info option
 
 (** [refresh_many ~sw ~net ~urls ?timeout_s ()] delegates to every
     registered probe's [refresh_many].  Each probe internally filters

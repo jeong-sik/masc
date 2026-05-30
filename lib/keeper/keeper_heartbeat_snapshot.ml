@@ -81,7 +81,7 @@ let write_heartbeat_snapshot
     Keeper_types_support.keeper_metrics_store ctx.config meta_current.name
   in
   let cascade_models =
-    Cascade_runtime.models_of_cascade_name
+    Provider_runtime_projection.default_execution_model_strings
       ((Keeper_meta_contract.cascade_name_of_meta meta_current))
   in
   let max_cascade_context =

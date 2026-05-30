@@ -124,7 +124,7 @@ let parse_cascade_name_opt args =
       else
         (* keeper-assignable guardrail removed 2026-05-28 — validate existence only. *)
         match
-          Cascade_runtime.models_of_cascade_name_result
+          Provider_runtime_projection.default_execution_model_strings_result
             (normalized)
         with
         | Ok _ -> Ok (Some normalized)

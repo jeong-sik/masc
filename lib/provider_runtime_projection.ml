@@ -266,3 +266,18 @@ let preferred_execution_model_labels () =
         |> List.filter participates_in_auto_detection
         |> List.filter_map auto_label_for_binding))
 ;;
+
+(* RFC-0206 single-binding: cascade routing removed. Model strings come
+   directly from the projection; the deleted [Cascade_runtime] layer only
+   wrapped this with cascade-name canonicalization + metrics. The
+   [_cascade_name] argument is retained at call sites but no longer selects
+   a model set — every keeper uses the default runtime. *)
+let default_execution_model_strings _cascade_name =
+  match preferred_execution_model_labels () with
+  | [] -> [ default_local_fallback_label () ]
+  | labels -> labels
+;;
+
+let default_execution_model_strings_result cascade_name =
+  Ok (default_execution_model_strings cascade_name)
+;;

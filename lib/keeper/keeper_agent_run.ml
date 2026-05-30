@@ -158,7 +158,7 @@ let run_turn
   let meta = ctx.meta in
   let temperature = ctx.temperature in
   let max_output_ceiling =
-    Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name
+    None
   in
   let max_tokens, pre_dispatch_max_tokens_error =
     match

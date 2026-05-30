@@ -117,9 +117,8 @@ let finalize_runtime_breakdown json =
         ]
   | _ -> json
 
-let default_local_model_id () =
-  let _label, model_id = Cascade_runtime.default_local_model_label_and_id () in
-  model_id
+(* RFC-0206 single-binding: bench the default runtime's model directly. *)
+let default_local_model_id () = Runtime.default_model_api_name ()
 
 let is_oas_managed_runtime_pool = function
   | None -> true
@@ -157,7 +156,7 @@ let model_label_for_pool ~model_id runtime_pool =
   | Some pool ->
       let trimmed = String.trim pool in
       if is_oas_managed_runtime_pool (Some trimmed) then
-        Cascade_runtime.local_model_label model_id
+        model_id
       else
         let base_url =
           if
@@ -169,7 +168,7 @@ let model_label_for_pool ~model_id runtime_pool =
             runtime_base_url_for_pool runtime_pool
         in
         Printf.sprintf "custom:%s@%s" model_id base_url
-  | None -> Cascade_runtime.local_model_label model_id
+  | None -> model_id
 
 let ensure_runtime_reachable ?runtime_pool ~timeout_sec () =
   let base_url = runtime_base_url_for_pool runtime_pool |> String.trim in

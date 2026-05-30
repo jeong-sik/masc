@@ -371,14 +371,7 @@ let () =
           (Custom [ "masc_board_fake" ]);
         check_access "custom board allowlist listens" true
           (Custom [ "keeper_board_post" ]));
-      Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->
-        let open Masc_mcp.Keeper_meta_tool_access in
-        Alcotest.(check bool) "social present" true
-          (List.mem "social" valid_tool_preset_strings);
-        Alcotest.(check bool) "dispatch present" true
-          (List.mem "dispatch" valid_tool_preset_strings);
-        Alcotest.(check bool) "delivery present" true
-          (List.mem "delivery" valid_tool_preset_strings));
+      (* Preset string tests removed: tool_preset type deleted by #19499 *)
     ];
     "operator_view_ssot", [
       (* Issue #8471: tool_operator view enum was missing 'sessions'

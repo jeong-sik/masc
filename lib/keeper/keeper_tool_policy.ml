@@ -289,15 +289,23 @@ let tool_name_set names =
 let tool_access_lookup_of_meta (meta : keeper_meta) =
   (* keeper_base_candidate_tool_names pulls [groups.voice] from
      tool_policy.toml via all_group_tools — voice tools are present iff
-     the keeper's preset includes the voice group. No per-keeper gate. *)
+     the keeper's preset includes the voice group. No per-keeper gate.
+     injected_masc_tool_names() is always unioned into allow_set so that
+     runtime-registered masc_* coordination tools (masc_transition, masc_status,
+     etc.) are always visible regardless of Custom allowlist content.
+     Without this, keepers with restrictive Custom allowlists cannot find
+     cascade providers requiring masc_* tools → fleet deadlock.
+     See fleet deadlock Layer 2 analysis (2026-05-30). *)
   let base = keeper_base_candidate_tool_names () in
   let candidate_names = dedupe_tool_names base in
   let candidate_set = tool_name_set candidate_names in
+  let injected = injected_masc_tool_names () in
   let allow_names =
     Tool_access_policy.resolve
       ~candidates:candidate_names
       (tool_policy_of_meta meta)
     |> List.filter (fun name -> StringSet.mem name candidate_set)
+    |> (fun resolved -> resolved @ injected)
     |> dedupe_tool_names
   in
   {

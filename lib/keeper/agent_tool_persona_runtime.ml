@@ -183,22 +183,26 @@ let tool_access_toml_section json =
   match Safe_ops.json_member_opt "tool_access" json with
   | Some (`Assoc _ as tool_access) -> (
       match Safe_ops.json_string_opt "kind" tool_access with
-      | Some "preset" -> (
-          match Safe_ops.json_string_opt "preset" tool_access with
-          | Some preset ->
-              let fields = [ toml_string preset |> Printf.sprintf "preset = %s" ] in
-              let fields =
-                match Safe_ops.json_member_opt "also_allow" tool_access with
-                | Some (`List _) ->
-                    append_string_list_field fields "also_allow"
-                      (Safe_ops.json_string_list "also_allow" tool_access)
-                | Some _ | None -> fields
-              in
-              Ok ("[keeper.tool_access]" :: "kind = \"preset\"" :: List.rev fields)
-          | None -> Error "tool_access.preset is required for durable TOML")
       | Some "custom" ->
+          let tools =
+            match Safe_ops.json_member_opt "tools" tool_access with
+            | Some (`List _) ->
+                Safe_ops.json_string_list "tools" tool_access
+            | _ -> []
+          in
+          let fields =
+            [ "kind = \"custom\"" ]
+          in
+          let fields =
+            if tools <> [] then
+              append_string_list_field fields "tools" tools
+            else fields
+          in
+          Ok ("[keeper.tool_access]" :: List.rev fields)
+      | Some "preset" ->
           Error
-            "tool_access.kind=custom cannot be persisted to keeper TOML yet; use a preset-based tool_access policy for persona-backed durable keepers"
+            "tool_access.kind=\"preset\" is no longer supported. \
+             Use kind=\"custom\" with an explicit tools list."
       | Some other ->
           Error (Printf.sprintf "invalid tool_access.kind for durable TOML: %s" other)
       | None -> Error "tool_access.kind is required for durable TOML")

@@ -63,13 +63,31 @@ actionable signal 처리:
 - 순수 idle/no-work 턴에서만 keeper_stay_silent를 사용한다.
 """
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
-also_allow = [
+tool_custom_list = [
   "masc_tasks",
   "masc_transition",
   "masc_task_history",
   "masc_plan_get",
   "masc_plan_get_task",
+  "masc_status",
+  "masc_claim_next",
+  "masc_plan_set_task",
+  "masc_add_task",
+  "masc_broadcast",
+  "keeper_tasks_list",
+  "keeper_allowed_tool_names",
+  "masc_goal_list",
+  "masc_goal_upsert",
+  "masc_goal_transition",
+  "masc_goal_verify",
+  "masc_keeper_list",
+  "masc_keeper_status",
+  "masc_keeper_msg",
+  "masc_keeper_msg_result",
+  "masc_board_post",
+  "masc_board_list",
+  "masc_board_get",
+  "masc_board_comment",
+  "tool_read_file",
+  "tool_search_files",
 ]

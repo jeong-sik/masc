@@ -567,30 +567,7 @@ let test_preset_universe_includes_core () =
   check bool "masc_broadcast excluded from scoped" false
     (List.mem "masc_broadcast" scoped)
 
-let test_preset_universe_sizes () =
-  init_keeper_tool_registry ();
-  let make preset =
-    let base = make_gate_test_meta () in
-    { base with
-      tool_access = Custom [];
-      tool_denylist = [];
-    }
-  in
-  let minimal_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Minimal)) in
-  let messaging_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Messaging)) in
-  let delivery_size =
-    List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Delivery))
-  in
-  let full_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Full)) in
-  check bool
-    (Printf.sprintf "Minimal(%d) < Messaging(%d)" minimal_size messaging_size)
-    true (minimal_size < messaging_size);
-  check bool
-    (Printf.sprintf "Messaging(%d) < Delivery(%d)" messaging_size delivery_size)
-    true (messaging_size < delivery_size);
-  check bool
-    (Printf.sprintf "Delivery(%d) <= Full(%d)" delivery_size full_size)
-    true (delivery_size <= full_size)
+(* test_preset_universe_sizes removed: Preset/Messaging/Delivery/Full constructors deleted by #19499 *)
 
 let test_dispatch_preset_routes_pm_tools () =
   init_keeper_tool_registry ();
@@ -654,26 +631,21 @@ let test_delivery_preset_routes_coordination_read_models () =
 
 let test_coordination_presets_route_plan_history_reads () =
   init_keeper_tool_registry ();
-  List.iter
-    (fun (label, preset) ->
-      let base = make_gate_test_meta ~name:("test-" ^ label ^ "-coordination") () in
-      let meta =
-        {
-          base with
-          tool_access = Custom [];
-          tool_denylist = [];
-        }
-      in
-      let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-      check bool (label ^ " includes task history") true
-        (List.mem "masc_task_history" allowed);
-      check bool (label ^ " includes plan get") true
-        (List.mem "masc_plan_get" allowed);
-      check bool (label ^ " includes plan get task") true
-        (List.mem "masc_plan_get_task" allowed);
-      check bool (label ^ " does not include goal upsert") false
-        (List.mem "masc_goal_upsert" allowed))
-    [ ("social", Social); ("messaging", Messaging) ]
+  let base = make_gate_test_meta ~name:"test-coordination" () in
+  let meta =
+    {
+      base with
+      tool_access = Custom [];
+      tool_denylist = [];
+    }
+  in
+  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  check bool "coordination includes task history" true
+    (List.mem "masc_task_history" allowed);
+  check bool "coordination includes plan get" true
+    (List.mem "masc_plan_get" allowed);
+  check bool "coordination includes plan get task" true
+    (List.mem "masc_plan_get_task" allowed)
 
 let test_preset_universe_superset_of_policy () =
   init_keeper_tool_registry ();
@@ -867,8 +839,7 @@ let () =
             test_preset_universe_subset_of_global;
           test_case "scoped includes core" `Quick
             test_preset_universe_includes_core;
-          test_case "preset size ordering" `Quick
-            test_preset_universe_sizes;
+          (* "preset size ordering" removed: preset constructors deleted by #19499 *)
           test_case "scoped superset of policy" `Quick
             test_preset_universe_superset_of_policy;
         ] );

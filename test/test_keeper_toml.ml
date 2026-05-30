@@ -968,14 +968,17 @@ let test_persona_resolver_defaults_to_research_tool_access () =
   | Error e -> fail ("resolver failed: " ^ e)
   | Ok (_, resolved) ->
       let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
-      check string "persona default tool_access kind" "preset"
+      check string "persona default tool_access kind" "custom"
         (Yojson.Safe.Util.member "kind" tool_access |> Yojson.Safe.Util.to_string);
-      check string "persona default tool_access preset" "research"
-        (Yojson.Safe.Util.member "preset" tool_access |> Yojson.Safe.Util.to_string);
-      check bool "legacy tool_preset omitted" false
-        (match Yojson.Safe.Util.member "tool_preset" resolved with
-         | `String _ -> true
-         | _ -> false)
+      let tools =
+        Yojson.Safe.Util.member "tools" tool_access
+        |> Yojson.Safe.Util.to_list
+        |> List.map Yojson.Safe.Util.to_string
+      in
+      check bool "persona default includes masc_status" true
+        (List.exists (String.equal "masc_status") tools);
+      check bool "persona default includes masc_tasks" true
+        (List.exists (String.equal "masc_tasks") tools)
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1210,9 +1213,8 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ( "tool_access",
           `Assoc
             [
-              ("kind", `String "preset");
-              ("preset", `String "research");
-              ("also_allow", `List [ `String "masc_status" ]);
+              ("kind", `String "custom");
+              ("tools", `List [ `String "masc_status"; `String "masc_tasks" ]);
             ] );
         ("tool_denylist", `List [ `String "masc_keeper_reset" ]);
       ]
@@ -1240,14 +1242,13 @@ let test_persona_resolver_renders_durable_keeper_toml () =
                 [ "probe"; "@probe" ] defaults.mention_targets;
               check (option (list string)) "allowed_paths"
                 (Some [ "/tmp/probe" ]) defaults.allowed_paths;
-              check (option string) "tool_preset" (Some "research")
-                defaults.tool_preset;
-              check (option (list string)) "tool_also_allow"
-                (Some [ "masc_status" ]) defaults.tool_also_allow;
+              check (option (list string)) "tool_custom_list"
+                (Some [ "masc_status"; "masc_tasks" ])
+                defaults.tool_custom_list;
               check (option (list string)) "tool_denylist"
                 (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
 
-let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
+let test_persona_resolver_accepts_custom_tool_access_durable_toml () =
   let resolved =
     `Assoc
       [
@@ -1264,10 +1265,12 @@ let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
       ]
   in
   match KEP.render_keeper_toml_from_resolved_args resolved with
-  | Ok _ -> fail "expected custom tool_access durable TOML rejection"
-  | Error e ->
-      check bool "mentions custom tool_access" true
-        (contains_substring e "tool_access.kind=custom")
+  | Error e -> fail ("expected custom tool_access accepted, got: " ^ e)
+  | Ok toml ->
+      check bool "renders tool_access section" true
+        (contains_substring toml "kind = \"custom\"");
+      check bool "renders tools list" true
+        (contains_substring toml "masc_status")
 
 let authoring_minimal_profile =
   `Assoc
@@ -2060,7 +2063,7 @@ let () =
           test_case "persona resolver renders durable keeper TOML" `Quick
             test_persona_resolver_renders_durable_keeper_toml;
           test_case "persona resolver rejects custom tool_access durable TOML" `Quick
-            test_persona_resolver_rejects_custom_tool_access_durable_toml;
+            test_persona_resolver_accepts_custom_tool_access_durable_toml;
           test_case "persona authoring schema explains effects" `Quick
             test_persona_authoring_schema_explains_effects;
           test_case "persona authoring social_model choices follow variant SSOT" `Quick

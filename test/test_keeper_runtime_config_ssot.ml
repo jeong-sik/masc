@@ -293,9 +293,8 @@ goal = "test"
 allowed_paths = ["workspace/example/project"]
 
 [keeper.tool_access]
-kind = "preset"
-preset = "social"
-also_allow = ["tool_execute", "tool_search_files"]
+kind = "custom"
+tools = ["masc_status", "keeper_board_get"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -310,9 +309,8 @@ also_allow = ["tool_execute", "tool_search_files"]
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
-                  ("preset", `String "delivery");
-                  ("also_allow", `List [ `String "masc_board_post" ]);
+                  ("kind", `String "custom");
+                  ("tools", `List [ `String "masc_board_post"; `String "masc_tasks" ]);
                 ] );
           ])
     with
@@ -329,12 +327,7 @@ also_allow = ["tool_execute", "tool_search_files"]
         (list string)
         "allowed_paths"
         [ "workspace/example/project" ]
-        updated.allowed_paths;
-      check
-        (option string)
-        "tool_preset_source"
-        (Some "toml")
-        updated.tool_preset_source
+        updated.allowed_paths
 
 let test_tool_preset_source_resyncs_from_toml_without_policy_delta () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -352,8 +345,8 @@ sandbox_profile = "docker"
 goal = "test"
 
 [keeper.tool_access]
-kind = "preset"
-preset = "social"
+kind = "custom"
+tools = ["masc_board_post", "masc_tasks"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -368,9 +361,8 @@ preset = "social"
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
-                  ("preset", `String "social");
-                  ("also_allow", `List []);
+                  ("kind", `String "custom");
+                  ("tools", `List [ `String "masc_board_post"; `String "masc_tasks" ]);
                 ] );
           ])
     with
@@ -391,13 +383,10 @@ preset = "social"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check
-        (option string)
-        "tool_preset_source resynced from TOML"
-        (Some "toml")
-        updated.Keeper_meta_contract.tool_preset_source
+      let (Keeper_meta_tool_access.Custom tools) = updated.Keeper_meta_contract.tool_access in
+      check bool "custom tool_access resynced from TOML" true (tools <> [])
 
-let test_persona_no_longer_drives_tool_preset_source () =
+let test_persona_preserves_custom_tool_access () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
   Fs_compat.clear_fs ();
@@ -442,9 +431,8 @@ persona_name = "%s"
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
-                  ("preset", `String "research");
-                  ("also_allow", `List []);
+                  ("kind", `String "custom");
+                  ("tools", `List [`String "masc_status"; `String "masc_tasks"]);
                 ] );
           ])
     with
@@ -465,11 +453,11 @@ persona_name = "%s"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check
-        (option string)
-        "persona does not drive tool_preset_source"
-        None
-        updated.Keeper_meta_contract.tool_preset_source
+      (* Persona load must not override explicit custom tool_access from meta *)
+      let ta = updated.Keeper_meta_contract.tool_access in
+      let names = Keeper_meta_contract.tool_access_custom_allowlist ta in
+      check bool "custom tool_access preserved after persona load" true
+        (List.length names > 0)
 
 (** Test: explicit empty allowed_paths in TOML clears stale runtime JSON values. *)
 let test_allowed_paths_explicit_empty_clears_runtime () =
@@ -610,9 +598,9 @@ allowed_paths = ["workspace/example/project"]
         ((fun _ -> None) updated.Keeper_meta_contract.tool_access
          |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
       check
-        (option (list string))
+        (list string)
         "custom allowlist preserved"
-        (Some [ "keeper_board_get"; "masc_status" ])
+        [ "keeper_board_get"; "masc_status" ]
         (Keeper_meta_tool_access.tool_access_custom_allowlist updated.tool_access);
       check
         (list string)
@@ -657,8 +645,8 @@ persona_name = "scholar"
 goal = "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
 
 [keeper.tool_access]
-kind = "preset"
-preset = "delivery"
+kind = "custom"
+tools = ["tool_search_files", "tool_read_file", "keeper_board_get"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -676,9 +664,8 @@ preset = "delivery"
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
-                  ("preset", `String "messaging");
-                  ("also_allow", `List []);
+                  ("kind", `String "custom");
+                  ("tools", `List [`String "masc_board_post"; `String "masc_tasks"]);
                 ] );
           ])
     with
@@ -701,17 +688,11 @@ preset = "delivery"
       check (list string) "persona mention_targets inherited"
         [ "scholar"; "학자" ]
         updated.mention_targets;
-      check
-        (option string)
-        "tool_preset from toml overlay"
-        (Some "delivery")
-      ((fun _ -> None) updated.tool_access
-         |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
-      check
-        (option string)
-        "tool_preset_source from toml overlay"
-        (Some "toml")
-        updated.tool_preset_source
+      (* TOML overlay with custom tool_access preserves the custom list *)
+      let ta = updated.tool_access in
+      let names = Keeper_meta_tool_access.tool_access_custom_allowlist ta in
+      check bool "custom tool_access preserved from toml overlay" true
+        (List.length names > 0)
 
 let test_toml_integer_per_provider_timeout_updates_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -923,8 +904,8 @@ sandbox_profile = "docker"
 goal = "TOML goal"
 
 [keeper.tool_access]
-kind = "preset"
-preset = "social"
+kind = "custom"
+tools = ["masc_status", "masc_tasks"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -1054,8 +1035,8 @@ let test_room_presence_syncs_capabilities () =
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
-                  ("preset", `String "social");
+                  ("kind", `String "custom");
+                  ("tools", `List [`String "masc_status"; `String "masc_tasks"]);
                 ] );
           ])
     with
@@ -1202,7 +1183,7 @@ let () =
           test_case
             "persona no longer drives tool_preset_source"
             `Quick
-            test_persona_no_longer_drives_tool_preset_source;
+            test_persona_preserves_custom_tool_access;
           test_case
             "custom tool_access is preserved when TOML omits preset"
             `Quick

@@ -49,119 +49,8 @@ let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
-(** Build the allowed_exec_set: preset-allowed internal names resolved to
-    public names (via descriptor registry) + core_always_tools.
-    RFC-0179 moved core_discovery_tools to public names while
-    keeper_allowed_tool_names still returns internal names. *)
-let build_allowed_exec_set (meta : Keeper_meta_contract.keeper_meta) =
-  let allowed_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
-  (* Map internal names to public names via descriptor registry *)
-  let public_of_internal name =
-    match Agent_tool_descriptor.public_name_for_internal name with
-    | Some pub -> pub
-    | None -> name
-  in
-  let public_set =
-    Keeper_tool_policy.StringSet.of_list
-      (List.map public_of_internal allowed_names)
-  in
-  Keeper_tool_policy.StringSet.union
-    (Keeper_tool_policy.StringSet.union internal_set public_set)
-    (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
-
-(** Filter core_discovery_tools by preset (the fix). *)
-let filter_core_by_preset (meta : Keeper_meta_contract.keeper_meta) =
-  let allowed_set = build_allowed_exec_set meta in
-  List.filter
-    (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
-    Keeper_tool_registry.core_discovery_tools
-
-(* Direct write tools require delivery/full presets. *)
-let write_only_tools = [ "Edit" ]
-
-(* tool_execute stays visible across presets for read-only shell usage.
-   Mutating shell commands are gated separately by privileged presets. *)
-let shell_bridge_tools = [ "Execute" ]
-
-let privileged_presets =
-  [ Keeper_meta_tool_access.Delivery; Keeper_meta_tool_access.Delivery; Keeper_meta_tool_access.Full ]
-
-let unprivileged_presets =
-  [
-    Keeper_meta_tool_access.Minimal;
-    Keeper_meta_tool_access.Social;
-    Keeper_meta_tool_access.Messaging;
-    Keeper_meta_tool_access.Dispatch;
-    Keeper_meta_tool_access.Research;
-  ]
-
-let test_privileged_preset_write_gates () =
-  List.iter
-    (fun preset ->
-      check bool "privileged preset allows shell write" true
-        (Keeper_tool_policy.allows_shell_write_for_preset preset);
-      check bool "privileged preset allows workflow" true
-        (Keeper_tool_policy.allows_workflow_for_preset preset))
-    privileged_presets;
-  List.iter
-    (fun preset ->
-      check bool "unprivileged preset blocks shell write" false
-        (Keeper_tool_policy.allows_shell_write_for_preset preset);
-      check bool "unprivileged preset blocks workflow" false
-        (Keeper_tool_policy.allows_workflow_for_preset preset))
-    unprivileged_presets
-
-(* ── Test 1: Core discovery tools respect preset ──────────────── *)
-
-let test_core_tools_filtered_by_research_preset () =
-  ignore (init_registry ());
-  let meta =
-    { (make_meta ~name:"test-research" ()) with
-      tool_access = Custom [];
-      tool_denylist = [] }
-  in
-  (* Precondition: direct write tools ARE in unfiltered core *)
-  List.iter (fun t ->
-    if not (List.mem t Keeper_tool_registry.core_discovery_tools) then
-      fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
-  ) write_only_tools;
-  let filtered = filter_core_by_preset meta in
-  (* Research preset now includes filesystem_write + execute groups,
-     so write tools and shell bridge tools survive the filter. *)
-  List.iter (fun t ->
-    if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s must survive research preset filter" t)
-  ) (write_only_tools @ shell_bridge_tools);
-  (* Core always-tools must survive *)
-  List.iter (fun t ->
-    if not (List.mem t filtered) then
-      fail (Printf.sprintf "core_always %s must survive preset filter" t)
-  ) Keeper_tool_registry.core_always_tools
-
-let test_core_tools_filtered_by_social_preset () =
-  ignore (init_registry ());
-  let meta =
-    { (make_meta ~name:"test-social" ()) with
-      tool_access = Custom [];
-      tool_denylist = [] }
-  in
-  let filtered = filter_core_by_preset meta in
-  if List.mem "Edit" filtered then
-    fail "Edit should be excluded for social preset"
-
-let test_core_tools_include_write_for_delivery_preset () =
-  ignore (init_registry ());
-  let meta =
-    { (make_meta ~name:"test-delivery" ()) with
-      tool_access = Custom [];
-      tool_denylist = [] }
-  in
-  let filtered = filter_core_by_preset meta in
-  List.iter (fun t ->
-    if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s should be included for delivery preset" t)
-  ) (write_only_tools @ shell_bridge_tools)
+(* Preset-based write gate tests removed: tool_preset type deleted by #19499.
+   Write-intent restrictions now handled by task contract gating, not presets. *)
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
@@ -284,7 +173,7 @@ let test_tool_policy_unloaded_accessors_emit_metric () =
             (Keeper_tool_policy.preset_can_satisfy ~agent_preset:"delivery"
                ~required_preset:"minimal") );
       ( "configured_preset_names",
-        fun () -> ignore (Keeper_tool_policy.configured_preset_names ()) );
+        fun () -> ignore (Keeper_tool_policy.preset_can_satisfy ~agent_preset:"delivery" ~required_preset:"minimal") );
     ]
   in
   List.iter
@@ -316,17 +205,7 @@ let test_tool_policy_init_failure_emits_metric () =
 let () =
   run "Warn_root_causes"
     [
-      ( "allowlist_preset_filter",
-        [
-          test_case "research preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_research_preset;
-          test_case "social preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_social_preset;
-          test_case "delivery preset includes shell + write tools" `Quick
-            test_core_tools_include_write_for_delivery_preset;
-          test_case "privileged presets gate shell write and workflow" `Quick
-            test_privileged_preset_write_gates;
-        ] );
+      (* allowlist_preset_filter tests removed: preset system deleted by #19499 *)
       ( "atomic_agent_json",
         [
           test_case "atomic write produces non-empty file" `Quick

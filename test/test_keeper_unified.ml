@@ -7053,10 +7053,8 @@ let test_prompt_includes_board_activity_section () =
   let board_meta =
     { minimal_meta with
       tool_access =
-        Preset
-          { preset = Social
-          ; also_allow = []
-          }
+        Custom [ "keeper_board_post"; "masc_board_post"; "masc_board_list"
+               ; "masc_board_get"; "masc_board_comment" ]
     }
   in
   let sys, user =

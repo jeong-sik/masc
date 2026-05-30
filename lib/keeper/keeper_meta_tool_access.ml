@@ -101,17 +101,14 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
 ;;
 
 let default_tool_access_of_meta_json () =
-  (* tool_execute excluded from the default blocklist: keepers need it for
-     shell commands, file reads, git ops, and cascade tool filtering requires
-     it. Only file-mutation writes (edit/write_file) are blocked by default.
-     See fleet deadlock Layer 2 analysis (2026-05-30). *)
-  let non_default_writes = [ "tool_edit_file"; "tool_write_file" ] in
-  let tools =
-    Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-    |> List.filter (fun name ->
-           not (List.exists (String.equal name) non_default_writes))
-  in
-  Custom (normalize_tool_names tools)
+  (* Preset Full with all_candidates=true: keepers without explicit tool_access
+     get the complete tool set (keeper_* + config + injected masc_* tools).
+     This ensures cascade filtering can find providers with required tools like
+     masc_transition. Write-intent restrictions are handled by task contract
+     gating, not by default tool access exclusion.
+     See fleet deadlock Layer 2 analysis (2026-05-30) + cascade provider
+     gap analysis (2026-05-30). *)
+  Preset { preset = Full; also_allow = [] }
 ;;
 
 let tool_access_of_meta_json (json : Yojson.Safe.t) =

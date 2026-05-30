@@ -13,30 +13,26 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let has_raw key = List.mem_assoc key doc in
+  (* [keeper.tool_access] is a flat array of tool names: the allowlist IS
+     the policy. Legacy [keeper.tool_access] sub-table keys (kind/tools/
+     preset/also_allow) are rejected so stale config surfaces on boot. *)
   let tool_access_key key = k ("tool_access." ^ key) in
   let tool_access_defaults_result =
-    let kind_key = tool_access_key "kind" in
-    let tools_key = tool_access_key "tools" in
-    let preset_key = tool_access_key "preset" in
-    let also_allow_key = tool_access_key "also_allow" in
-    match Keeper_toml_loader.toml_string_opt doc kind_key with
-    | None
-      when has_raw preset_key || has_raw also_allow_key || has_raw tools_key ->
-        Error
-          "keeper.tool_access.kind is required when keeper.tool_access.* keys are present"
-    | None -> Ok None
-    | Some "preset" ->
-        Error
-          "keeper.tool_access.kind=\"preset\" is no longer supported. \
-           Use kind=\"custom\" with an explicit tools list."
-    | Some "custom" ->
-        let tools = Keeper_toml_loader.toml_string_list doc tools_key in
-        Ok (Some (normalize_name_list tools))
-    | Some raw ->
-        Error
-          (Printf.sprintf
-             "invalid keeper.tool_access.kind '%s' (allowed: custom)"
-             raw)
+    let legacy_subtable_keys =
+      [ "kind"; "tools"; "preset"; "also_allow" ]
+      |> List.map tool_access_key
+      |> List.filter has_raw
+    in
+    if legacy_subtable_keys <> [] then
+      Error
+        (Printf.sprintf
+           "legacy keeper.tool_access sub-table keys removed: %s. \
+            Use a flat array: tool_access = [\"tool_a\", \"tool_b\"]."
+           (String.concat ", " legacy_subtable_keys))
+    else if has "tool_access" then
+      Ok (Some (normalize_name_list (strs "tool_access")))
+    else
+      Ok None
   in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml
@@ -233,8 +229,7 @@ let parsed_field_key_names =
   ; "network_mode"
   ; "repo_cli_identity"
   ; "git_identity_mode"
-  ; "tool_access.kind"
-  ; "tool_access.tools"
+  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
@@ -280,8 +275,7 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "repo_cli_identity"
   ; "git_identity_mode"
-  ; "tool_access.kind"
-  ; "tool_access.tools"
+  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"

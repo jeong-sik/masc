@@ -78,14 +78,9 @@ val parse_enum_string_opt :
 val resolve_tool_name_list :
   preferred:string list option -> fallback:string list option -> string list
 
-(** Reject legacy [tool_access.kind = "restricted" | "unrestricted"]
-    payloads — the dashboard endpoint only accepts [preset] or
-    [custom]. *)
-val reject_legacy_tool_access_kind :
-  Yojson.Safe.t -> (unit, string) result
-
-(** Parse the canonical [tool_access] field.
-    Legacy top-level tool-policy args are rejected. *)
+(** Parse the canonical [tool_access] field: a flat array of tool names.
+    Legacy [{ "kind": ... }] objects are accepted for backward compat;
+    legacy top-level tool-policy args are rejected. *)
 val parse_tool_access_input :
   Yojson.Safe.t ->
   (string list option, string) result

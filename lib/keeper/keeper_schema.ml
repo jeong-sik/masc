@@ -3,15 +3,13 @@
 open Masc_domain
 module Persona_contract = Keeper_persona_authoring_contract
 
-(** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
-    [network_mode], . Same cycle constraint as
-    [tool_preset_enum_strings] above — Keeper_schema cannot depend on
-    Keeper_types_profile directly because the latter [include]s
-    Keeper_config and is otherwise downstream. The test
-    [test_types.ml :: keeper_profile_enum_ssot] asserts these mirrors
-    stay in sync with [valid_*_strings] so adding a constructor in
-    Keeper_types_profile fails the test instead of silently dropping
-    from the JSON Schema. *)
+(** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile]
+    and [network_mode], hand-mirrored here because Keeper_schema cannot depend
+    on Keeper_types_profile directly (the latter [include]s Keeper_config and
+    is otherwise downstream). The test [test_types.ml :: keeper_profile_enum_ssot]
+    asserts these mirrors stay in sync with [valid_*_strings] so adding a
+    constructor in Keeper_types_profile fails the test instead of silently
+    dropping from the JSON Schema. *)
 let sandbox_profile_enum_strings =
   [ "local"; "docker" ]
 let network_mode_enum_strings =
@@ -26,11 +24,6 @@ let network_mode_enum_strings =
 let tail_order_enum_strings =
   [ "oldest_first"; "newest_first" ]
 
-let string_array_schema =
-  `Assoc [
-    ("type", `String "array");
-    ("items", `Assoc [ ("type", `String "string") ]);
-  ]
 
 let persona_axis_schema (axis : Persona_contract.archetype_axis) =
   `Assoc
@@ -40,22 +33,12 @@ let persona_axis_schema (axis : Persona_contract.archetype_axis) =
     ]
 
 let tool_access_schema description =
-  let custom_shape =
-    `Assoc [
-      ("type", `String "object");
-      ("description", `String "Custom tool allowlist policy.");
-      ("properties", `Assoc [
-        ("kind", `Assoc [ ("const", `String "custom") ]);
-        ("tools", string_array_schema);
-      ]);
-      ("required", `List [ `String "kind"; `String "tools" ]);
-      ("additionalProperties", `Bool false);
-    ]
-  in
+  (* A keeper's tool access is a flat array of tool names — the allowlist
+     IS the policy. *)
   `Assoc [
-    ("type", `String "object");
+    ("type", `String "array");
     ("description", `String description);
-    ("oneOf", `List [ custom_shape ]);
+    ("items", `Assoc [ ("type", `String "string") ]);
   ]
 
 let keeper_schemas : tool_schema list = [
@@ -211,7 +194,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+            "Tool allowlist: a flat array of tool names the keeper may call, e.g. ['masc_status', 'tool_read_file'].");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -385,11 +368,11 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+            "Tool allowlist: a flat array of tool names the keeper may call, e.g. ['masc_status', 'tool_read_file'].");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tool names to remove after preset resolution.");
+          ("description", `String "Tool names to remove from the allowlist.");
         ]);
       ]);
       ("required", `List [`String "name"]);

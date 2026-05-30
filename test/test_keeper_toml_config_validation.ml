@@ -726,17 +726,32 @@ target = "provider_a.qwen3"
               && contains ~needle:"Binding_resolution_failed" message)
            errors)
 
-let test_tool_access_accepts_dispatch () =
+let test_tool_access_flat_array () =
   let result =
     with_temp_toml
-      "[keeper]\nname = \"taskmaster\"\n\n[keeper.tool_access]\nkind = \"preset\"\npreset = \"dispatch\"\n"
+      "[keeper]\nname = \"taskmaster\"\n\
+       tool_access = [\"masc_status\", \"tool_read_file\"]\n"
       KTP.load_keeper_toml
   in
   match result with
-  | Error e -> fail (Printf.sprintf "dispatch should be accepted: %s" e)
+  | Error e -> fail (Printf.sprintf "flat tool_access should be accepted: %s" e)
   | Ok (_loaded_name, defaults) ->
-      check bool "tool_custom_list is None (no tool_access in TOML)" true
-        (defaults.tool_custom_list = None)
+      check (option (list string)) "tool_custom_list is the flat array"
+        (Some [ "masc_status"; "tool_read_file" ])
+        defaults.tool_custom_list
+
+let test_tool_access_rejects_legacy_subtable () =
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"taskmaster\"\n\n[keeper.tool_access]\nkind = \"custom\"\ntools = [\"masc_status\"]\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> fail "legacy [keeper.tool_access] sub-table should be rejected"
+  | Error e ->
+      check bool "error mentions legacy sub-table removal" true
+        (contains ~needle:"legacy keeper.tool_access sub-table keys removed"
+           e)
 
 (** Reject [network_mode = "bogus"] at TOML load time so invalid strings
     do not silently fall back to persona defaults. *)
@@ -865,8 +880,10 @@ let () =
             test_runtime_validation_rejects_declarative_parse_errors;
           test_case "runtime rejects declarative adapter errors" `Quick
             test_runtime_validation_rejects_declarative_adapter_errors;
-          test_case "accepts dispatch tool_access preset" `Quick
-            test_tool_access_accepts_dispatch;
+          test_case "accepts flat tool_access array" `Quick
+            test_tool_access_flat_array;
+          test_case "rejects legacy tool_access sub-table" `Quick
+            test_tool_access_rejects_legacy_subtable;
         ] );
       ( "network_mode validation",
         [

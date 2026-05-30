@@ -1230,7 +1230,7 @@ let test_persona_resolver_renders_durable_keeper_toml () =
               check (option (list string)) "tool_denylist"
                 (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
 
-let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
+let test_persona_resolver_renders_tool_access_flat_array () =
   let resolved =
     `Assoc
       [
@@ -1238,19 +1238,27 @@ let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
         ("persona_name", `String "probe");
         ("goal", `String "test");
         ("mention_targets", `List [ `String "probe" ]);
-        ( "tool_access",
-          `Assoc
-            [
-              ("kind", `String "custom");
-              ("tools", `List [ `String "masc_status" ]);
-            ] );
+        ("tool_access", `List [ `String "masc_status"; `String "tool_read_file" ]);
       ]
   in
   match KEP.render_keeper_toml_from_resolved_args resolved with
-  | Ok _ -> fail "expected custom tool_access durable TOML rejection"
-  | Error e ->
-      check bool "mentions custom tool_access" true
-        (contains_substring e "tool_access.kind=custom")
+  | Error e -> fail (Printf.sprintf "flat tool_access should render: %s" e)
+  | Ok toml ->
+      check bool "renders tool_access key" true
+        (contains_substring toml "tool_access");
+      check bool "renders the tool names" true
+        (contains_substring toml "masc_status"
+         && contains_substring toml "tool_read_file");
+      (* round-trips through the parser as a flat array *)
+      (match TL.parse_toml toml with
+       | Error e -> fail (Printf.sprintf "rendered TOML did not parse: %s" e)
+       | Ok doc -> (
+           match KTP.profile_defaults_of_toml doc with
+           | Error e -> fail (Printf.sprintf "rendered TOML did not load: %s" e)
+           | Ok defaults ->
+               check (option (list string)) "tool_access round-trips"
+                 (Some [ "masc_status"; "tool_read_file" ])
+                 defaults.tool_custom_list))
 
 let authoring_minimal_profile =
   `Assoc
@@ -2028,8 +2036,8 @@ let () =
             test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
           test_case "persona resolver renders durable keeper TOML" `Quick
             test_persona_resolver_renders_durable_keeper_toml;
-          test_case "persona resolver rejects custom tool_access durable TOML" `Quick
-            test_persona_resolver_rejects_custom_tool_access_durable_toml;
+          test_case "persona resolver renders tool_access flat array" `Quick
+            test_persona_resolver_renders_tool_access_flat_array;
           test_case "persona authoring schema explains effects" `Quick
             test_persona_authoring_schema_explains_effects;
           test_case "persona authoring social_model choices follow variant SSOT" `Quick

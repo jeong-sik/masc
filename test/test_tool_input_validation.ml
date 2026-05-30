@@ -1430,48 +1430,23 @@ let test_oneof_null_const_matches_non_null_branch () =
 (* Production schema regression: Keeper_schema.tool_access_schema   *)
 (* ================================================================ *)
 
-let test_keeper_schema_tool_access_preset () =
+let test_keeper_schema_tool_access_is_string_array () =
+  (* tool_access schema is a flat array of tool-name strings. *)
   let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "preset"); ("preset", `String "minimal")] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> ()
-  | Error result ->
-    Alcotest.failf
-      "expected preset branch to pass: %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
-;;
-
-let test_keeper_schema_tool_access_custom () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "custom"); ("tools", `List [`String "rg"])] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> ()
-  | Error result ->
-    Alcotest.failf
-      "expected custom branch to pass: %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
-;;
-
-let test_keeper_schema_tool_access_rejects_missing_kind () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("preset", `String "minimal")] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected missing kind to fail"
-  | Error result ->
-    let msg = (Tool_result.message result) in
-    Alcotest.(check bool) "error mentions branches" true
-      (string_contains msg "exactly one of")
-;;
-
-let test_keeper_schema_tool_access_rejects_unknown_kind () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "unknown"); ("preset", `String "minimal")] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected unknown kind to fail"
-  | Error result ->
-    let msg = (Tool_result.message result) in
-    Alcotest.(check bool) "error mentions preset/custom branches" true
-      (string_contains msg "preset" && string_contains msg "custom")
+  match schema with
+  | `Assoc fields ->
+    Alcotest.(check string) "schema type is array" "array"
+      (match List.assoc_opt "type" fields with
+       | Some (`String s) -> s
+       | _ -> "<none>");
+    (match List.assoc_opt "items" fields with
+     | Some (`Assoc item_fields) ->
+       Alcotest.(check string) "items are strings" "string"
+         (match List.assoc_opt "type" item_fields with
+          | Some (`String s) -> s
+          | _ -> "<none>")
+     | _ -> Alcotest.fail "tool_access schema is missing string items")
+  | _ -> Alcotest.fail "tool_access schema must be a JSON object"
 ;;
 
 (* ================================================================ *)
@@ -1599,13 +1574,7 @@ let () =
         test_oneof_null_const_matches_non_null_branch;
     ]);
     ("keeper_schema_tool_access", [
-      Alcotest.test_case "preset branch passes" `Quick
-        test_keeper_schema_tool_access_preset;
-      Alcotest.test_case "custom branch passes" `Quick
-        test_keeper_schema_tool_access_custom;
-      Alcotest.test_case "missing kind rejected" `Quick
-        test_keeper_schema_tool_access_rejects_missing_kind;
-      Alcotest.test_case "unknown kind rejected" `Quick
-        test_keeper_schema_tool_access_rejects_unknown_kind;
+      Alcotest.test_case "schema is a string array" `Quick
+        test_keeper_schema_tool_access_is_string_array;
     ]);
   ]

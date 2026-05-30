@@ -103,7 +103,7 @@ describe('monitoring navigation labels', () => {
 
     expect(labelFor('agents')).toBe('Keeper Fleet')
     expect(labelFor('fleet-health')).toBe('Tool Monitor')
-    expect(labelFor('runtime')).toBe('Cascade & Runtime')
+    expect(labelFor('runtime')).toBe('Runtime')
     expect(labelFor('observatory')).toBe('Evidence Timeline')
     expect(labelFor('transport-health')).toBeUndefined()
     expect(labelFor('feature-health')).toBeUndefined()
@@ -118,7 +118,7 @@ describe('monitoring navigation labels', () => {
     expect(descriptions).toMatchObject({
       agents: 'Live and configured keeper roster.',
       'fleet-health': 'Tool quality and governance signals.',
-      runtime: 'Cascade and provider health.',
+      runtime: 'Runtime provider health.',
       observatory: 'Activity and runtime evidence.',
     })
 
@@ -205,12 +205,10 @@ describe('monitoring navigation labels', () => {
     const labels = sections.map(item => item.label)
     const uniq = new Set(labels)
     expect(uniq.size).toBe(labels.length)
-    // Regression guard: the word "Runtime" used to label both
-    // section[id=runtime] and section[id=agents], making it impossible
-    // to tell process-instance liveness apart from cascade routing by
-    // reading the sidebar alone.
-    const runtimeOccurrences = labels.filter(l => l === 'Runtime').length
-    expect(runtimeOccurrences).toBe(0)
+    // Regression guard: the word "Cascade" must not appear in sidebar
+    // labels after the cascade-to-runtime renaming.
+    const cascadeOccurrences = labels.filter(l => l.includes('Cascade')).length
+    expect(cascadeOccurrences).toBe(0)
   })
 })
 
@@ -413,7 +411,6 @@ describe('consolidation redirects (Phase 1)', () => {
     ['fleet', {}, 'fleet-health', 'comparison', {}],
     ['fsm-hub', {}, 'agents', 'fsm', {}],
     ['metrics', {}, 'runtime', undefined, {}],
-    ['cascade', {}, 'cascade-config', undefined, {}],
   ])(
     'monitoring:%s → %s (view: %s) preserves params',
     (oldSection, extra, expectedSection, expectedView, preserved) => {

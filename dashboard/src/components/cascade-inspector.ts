@@ -148,11 +148,11 @@ function CascadeFocusRail({
 }) {
   const active: CascadeInspectorChip = focus ?? DEFAULT_CASCADE_CHIP
   return html`
-    <div class="flex flex-col gap-2" aria-label="Cascade inspector focus" data-testid="cascade-focus-rail">
+    <div class="flex flex-col gap-2" aria-label="Runtime inspector focus" data-testid="cascade-focus-rail">
       <${FilterChips}
         chips=${[
           { key: DEFAULT_CASCADE_CHIP, label: 'Trace', count: traceCount, title: 'strategy trace와 runtime health' },
-          { key: 'deep-dive', label: 'Deep dive', count: traceCount, title: 'latest cascade decision detail' },
+          { key: 'deep-dive', label: 'Deep dive', count: traceCount, title: 'latest runtime decision detail' },
           { key: 'compare', label: 'Compare', count: traceCount, title: 'ordered vs filtered/exhausted decisions' },
         ]}
         value=${active}
@@ -175,7 +175,7 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
         <thead class="bg-[var(--color-bg-surface)] text-text-muted">
           <tr>
             <${ThBase}>시간</${ThBase}>
-            <${ThBase}>Cascade</${ThBase}>
+            <${ThBase}>Runtime</${ThBase}>
             <${ThBase}>전략</${ThBase}>
             <${ThRight}>Cycle</${ThRight}>
             <${ThRight}>후보</${ThRight}>
@@ -252,18 +252,18 @@ function CascadeEventCard({
 
 function CascadeDeepDivePanel({ events }: { events: CascadeStrategyTraceEvent[] }) {
   if (events.length === 0) {
-    return html`<${EmptyState} message="deep-dive에 표시할 cascade 전략 이벤트가 없습니다" compact />`
+    return html`<${EmptyState} message="deep-dive에 표시할 runtime 전략 이벤트가 없습니다" compact />`
   }
 
   const visible = events.slice(0, 6)
   const maxCandidates = Math.max(1, ...visible.map(e => e.candidates_in))
 
   return html`
-    <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="Cascade deep dive" data-testid="cascade-deep-dive">
+    <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="Runtime deep dive" data-testid="cascade-deep-dive">
       <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Deep dive</div>
-          <h3 class="mt-1 text-md font-semibold text-text-strong">최근 cascade 결정</h3>
+          <h3 class="mt-1 text-md font-semibold text-text-strong">최근 runtime 결정</h3>
         </div>
         <span class="text-2xs text-text-muted">${visible.length}/${events.length} events</span>
       </div>
@@ -342,7 +342,7 @@ function CascadeComparePanel({ events }: { events: CascadeStrategyTraceEvent[] }
   const attention = events.filter(e => e.kind !== 'ordered')
 
   return html`
-    <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="Cascade compare" data-testid="cascade-compare">
+    <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="Runtime compare" data-testid="cascade-compare">
       <div class="mb-3">
         <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Compare</div>
         <h3 class="mt-1 text-md font-semibold text-text-strong">정상 결정 vs 필터/고갈 결정</h3>
@@ -421,7 +421,7 @@ export function CascadeInspector() {
       <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5" aria-label="Cascade 검사기">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">Cascade 검사기</div>
+            <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">런타임 검사기</div>
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">
               전략 추적 · 런타임 건강도
             </h3>

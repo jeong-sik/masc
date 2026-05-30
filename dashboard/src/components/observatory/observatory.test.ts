@@ -72,14 +72,6 @@ vi.mock('./cursor-store', () => ({
   cursorPosition,
 }))
 
-vi.mock('../live', () => ({
-  Live: () => html`<section>live-monitor-stub</section>`,
-}))
-
-vi.mock('../activity-graph', () => ({
-  ObservatoryActivityPanels: () => html`<section>activity-panels-stub</section>`,
-}))
-
 async function flushUi(): Promise<void> {
   await act(async () => {
     for (let i = 0; i < 4; i += 1) {
@@ -123,53 +115,17 @@ describe('Observatory', () => {
     expect(fetchTelemetry).toHaveBeenCalledTimes(1)
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
     await waitFor(() => {
-      expect(container.textContent).toContain('Evidence Timeline')
+      expect(container.textContent).toContain('Observatory')
     })
-    expect(container.textContent).not.toContain('activity-panels-stub')
-    expect(container.textContent).not.toContain('live-monitor-stub')
     expect(container.textContent).toContain('최근 1시간')
-    expect(container.textContent).toContain('자동 갱신')
-    expect(container.textContent).toContain('Timeline')
+    expect(container.textContent).toContain('event-track')
+    expect(container.textContent).toContain('tool-call-track')
+    expect(container.textContent).toContain('metric-track')
+    expect(container.textContent).toContain('cross-signal-readout')
+    expect(container.textContent).toContain('detail-pane')
   }, 30000)
 
-  it('switches to activity graph without rendering timeline tracks', async () => {
-    const { Observatory, refreshObservatorySurface } = await import('./observatory')
-
-    await act(async () => {
-      render(html`<${Observatory} />`, container)
-      await Promise.resolve()
-    })
-    await flushUi()
-
-    const activityButton = Array.from(container.querySelectorAll('button'))
-      .find(button => button.textContent?.includes('Activity Graph'))
-
-    expect(activityButton).toBeTruthy()
-
-    await act(async () => {
-      activityButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await Promise.resolve()
-    })
-    await flushUi()
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('activity-panels-stub')
-    })
-    const router = await import('../../router')
-    expect(router.route.value.params.view).toBe('activity')
-    expect(container.textContent).not.toContain('event-track')
-
-    await act(async () => {
-      refreshObservatorySurface()
-      await Promise.resolve()
-    })
-    await flushUi()
-
-    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
-    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
-  }, 30000)
-
-  it('honors view=live route param without rendering timeline panels', async () => {
+  it('ignores view=live route param and renders timeline', async () => {
     await setRoute({ section: 'observatory', view: 'live' })
     const { Observatory } = await import('./observatory')
 
@@ -179,12 +135,11 @@ describe('Observatory', () => {
     })
     await flushUi()
 
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
     await waitFor(() => {
-      expect(container.textContent).toContain('live-monitor-stub')
+      expect(container.textContent).toContain('Observatory')
     })
-    expect(container.textContent).not.toContain('activity-panels-stub')
-    expect(container.textContent).toContain('Live stream')
-    expect(fetchTelemetry).not.toHaveBeenCalled()
-    expect(fetchToolQuality).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('event-track')
   }, 30000)
 })

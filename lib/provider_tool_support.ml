@@ -21,8 +21,6 @@ type tool_policy =
   ; tolerates_bound_actor_fallback : bool
   }
 
-module Decl = Cascade_declarative_types
-module Parser = Cascade_declarative_parser
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let default_tool_policy =
@@ -34,124 +32,6 @@ let default_tool_policy =
 ;;
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
-
-let normalize_provider_id_variant label ~map_char =
-  normalize_label label |> String.map map_char
-;;
-
-let provider_id_candidates label =
-  let raw = normalize_label label in
-  [ raw
-  ; normalize_provider_id_variant label ~map_char:(fun c ->
-      if c = '-' then '_' else c)
-  ; normalize_provider_id_variant label ~map_char:(fun c ->
-      if c = '_' then '-' else c)
-  ]
-  |> List.filter (fun value -> not (String.equal value ""))
-  |> List.sort_uniq String.compare
-;;
-
-let provider_id_candidates_of_config (provider_cfg : Llm_provider.Provider_config.t) =
-  let from_binding =
-    Runtime_binding.binding_for_provider_config provider_cfg
-    |> Option.map (fun binding -> binding.Runtime_binding.id)
-    |> Option.to_list
-  in
-  let from_registry =
-    [ Llm_provider.Provider_registry.provider_name_of_config provider_cfg ]
-  in
-  from_binding @ from_registry
-  |> List.concat_map provider_id_candidates
-  |> List.sort_uniq String.compare
-;;
-
-let provider_id_candidates_of_kind kind =
-  let provider_cfg =
-    Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
-  in
-  provider_id_candidates_of_config provider_cfg
-;;
-
-let rec repo_seed_cascade_path_from dir =
-  let candidate =
-    Filename.concat (Filename.concat dir "config") Config_dir_resolver.cascade_toml_filename
-  in
-  if Sys.file_exists candidate
-  then Some candidate
-  else (
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else repo_seed_cascade_path_from parent)
-;;
-
-let repo_seed_cascade_path () = repo_seed_cascade_path_from (Sys.getcwd ())
-
-let cascade_policy_path () =
-  match Config_dir_resolver.cascade_path_opt () with
-  | Some path -> Some path
-  | None -> repo_seed_cascade_path ()
-;;
-
-type cached_cascade =
-  { path : string
-  ; mtime : float
-  ; parsed : Decl.cascade_config option
-  }
-
-let cascade_cache : cached_cascade option ref = ref None
-
-let file_mtime path =
-  try Some (Unix.stat path).Unix.st_mtime with
-  | Unix.Unix_error _ -> None
-;;
-
-let parse_cascade_policy path =
-  match Parser.parse_file path with
-  | Ok cfg -> Some cfg
-  | Error _ -> None
-;;
-
-let cascade_policy_config () =
-  match cascade_policy_path () with
-  | None -> None
-  | Some path ->
-    (match file_mtime path with
-     | None -> None
-     | Some mtime ->
-       (match !cascade_cache with
-        | Some cached
-          when String.equal cached.path path && Float.equal cached.mtime mtime ->
-          cached.parsed
-        | _ ->
-          let parsed = parse_cascade_policy path in
-          cascade_cache := Some { path; mtime; parsed };
-          parsed))
-;;
-
-let tool_policy_of_decl_capabilities
-      (caps : Decl.cascade_capabilities option)
-  =
-  match caps with
-  | None -> default_tool_policy
-  | Some c ->
-    { supports_runtime_mcp_http_headers = c.supports_runtime_mcp_http_headers
-    ; requires_per_keeper_bridging_for_bound_actor_tools =
-        c.requires_per_keeper_bridging_for_bound_actor_tools
-    ; identity_runtime_mcp_header_keys = c.identity_runtime_mcp_header_keys
-    ; tolerates_bound_actor_fallback = c.tolerates_bound_actor_fallback
-    }
-;;
-
-let declarative_tool_policy_for_provider_ids provider_ids =
-  match cascade_policy_config () with
-  | None -> None
-  | Some cfg ->
-    provider_ids
-    |> List.find_map (fun provider_id ->
-      match Decl.provider_of_id cfg provider_id with
-      | None -> None
-      | Some provider ->
-        Some (tool_policy_of_decl_capabilities provider.Decl.capabilities))
-;;
 
 let binding_supports_runtime_mcp_http_headers (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
@@ -179,10 +59,9 @@ let fallback_tool_policy_for_config (provider_cfg : Llm_provider.Provider_config
     }
 ;;
 
-let tool_policy_for_config provider_cfg =
-  match declarative_tool_policy_for_provider_ids (provider_id_candidates_of_config provider_cfg) with
-  | Some policy -> policy
-  | None -> fallback_tool_policy_for_config provider_cfg
+(* RFC-0206: cascade-config tool-policy overrides removed. Under single-binding
+   the binding-derived policy is the sole source. *)
+let tool_policy_for_config provider_cfg = fallback_tool_policy_for_config provider_cfg
 ;;
 
 let fallback_tool_policy_for_kind kind =
@@ -192,10 +71,7 @@ let fallback_tool_policy_for_kind kind =
   fallback_tool_policy_for_config provider_cfg
 ;;
 
-let tool_policy_for_kind kind =
-  match declarative_tool_policy_for_provider_ids (provider_id_candidates_of_kind kind) with
-  | Some policy -> policy
-  | None -> fallback_tool_policy_for_kind kind
+let tool_policy_for_kind kind = fallback_tool_policy_for_kind kind
 ;;
 
 (** Whether the resolved provider config is a CLI runtime (Claude Code,

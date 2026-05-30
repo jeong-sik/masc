@@ -42,20 +42,28 @@ let cascade_catalog_error_to_sdk_error detail =
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
 let resolve_cascade_providers
-      ?provider_filter
+      ?provider_filter:_
       ?(require_tool_choice_support = false)
       ?(require_tool_support = false)
       ?runtime_mcp_policy
-      ~cascade_name
+      ~cascade_name:_
       ()
   =
-  Cascade_runtime.resolve_named_providers_result_strict
-    ?provider_filter
-    ?runtime_mcp_policy
-    ~require_tool_choice_support
-    ~require_tool_support
-    ~cascade_name
-    ()
+  (* RFC-0206 single-binding: cascade catalog resolution removed. The providers
+     are the default runtime's single provider_config, passed through the same
+     required tool-use gate so require_tool_support is honored (a non-tool
+     default is filtered out, not silently used). [provider_filter] is moot with
+     one provider. *)
+  match Runtime.get_default_runtime () with
+  | None -> Error "no default runtime configured"
+  | Some rt ->
+    Ok
+      (Provider_tool_support.apply_required_tool_use_filter
+         ?runtime_mcp_policy
+         ~require_tool_choice_support
+         ~require_tool_support
+         ~label:rt.Runtime.id
+         [ rt.Runtime.provider_config ])
 
 let keeper_agent_name_opt (keeper_name : string) =
   let keeper_name = String.trim keeper_name in

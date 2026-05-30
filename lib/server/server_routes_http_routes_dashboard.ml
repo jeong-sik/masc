@@ -36,7 +36,7 @@ let respond_dashboard_ok ?request reqd =
     (`Assoc [ ("ok", `Bool true) ])
     reqd
 
-let rec add_routes ~sw ~clock router =
+let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
@@ -997,91 +997,3 @@ let rec add_routes ~sw ~clock router =
 
   (* ── Agent API routes (extracted) ── *)
   |> Server_dashboard_http_agent_api.add_agent_api_routes
-  |> add_keeper_cascade_routes
-
-and add_keeper_cascade_routes router =
-  router
-  (* ── Keeper cascade config API ──────────────────────────────── *)
-
-  |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
-         with_public_read (fun _state _req reqd ->
-         let gate = cascade_profile_gate () in
-         Http.Response.json_value ~request:request
-           (`Assoc [
-             ("profiles", `List (List.map (fun s -> `String s) gate.valid_profiles));
-             ( "invalid_profiles",
-               `List
-                 (List.map
-                    (fun (name, errors) ->
-                      `Assoc
-                        [
-                          ("name", `String name);
-                          ("errors", `List (List.map (fun err -> `String err) errors));
-                        ])
-                    gate.invalid_profiles) );
-           ]) reqd
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/keeper/cascade" (fun request reqd ->
-       with_tool_auth
-         ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Status)
-         (fun state req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           match Yojson.Safe.from_string body_str with
-           | exception Yojson.Json_error _ ->
-             respond_dashboard_error ~request:req ~ok:false reqd "invalid JSON body"
-           | json ->
-             let keeper_name = Safe_ops.json_string_opt "keeper" json in
-             let cascade_name = Safe_ops.json_string_opt "cascade_name" json in
-             match keeper_name, cascade_name with
-             | None, _ | _, None ->
-               respond_dashboard_error ~request:req ~ok:false reqd
-                 "requires {\"keeper\":\"...\",\"cascade_name\":\"...\"}"
-             | Some name, Some cascade ->
-               let known = available_cascade_profiles () in
-               let invalid = invalid_cascade_assignment_profiles () in
-               (match List.assoc_opt cascade invalid with
-                | Some reasons ->
-                  respond_dashboard_error ~status:`Conflict ~request:req
-                    ~ok:false reqd
-                    (Printf.sprintf
-                       "cascade %s is invalid in active cascade.toml: %s"
-                       cascade
-                       (String.concat " | " reasons))
-                | None ->
-               if not (List.mem cascade known) then
-                 respond_dashboard_error ~request:req ~ok:false reqd
-                   (Printf.sprintf "unknown cascade %s. Available: %s"
-                      cascade (String.concat ", " known))
-               else
-               match Config_dir_resolver.keeper_toml_path_opt name with
-               | None ->
-                 respond_dashboard_error ~status:`Not_found ~request:req
-                   ~ok:false reqd
-                   (Printf.sprintf "no TOML config for keeper %s" name)
-               | Some toml_path ->
-                 match Keeper_toml_loader.update_keeper_toml_field
-                         ~path:toml_path ~key:"cascade_name" ~value:cascade with
-                 | Error e ->
-                   respond_dashboard_error ~status:`Internal_server_error
-                     ~request:req ~ok:false reqd e
-                 | Ok () ->
-                   let config = state.Mcp_server.room_config in
-                    (match sync_keeper_cascade_meta ~config ~name
-                            ~cascade_name:cascade with
-                    | Error e ->
-                      respond_dashboard_error ~status:`Internal_server_error
-                        ~request:req ~ok:false reqd e
-                    | Ok live_meta_synced ->
-                      Http.Response.json_value ~request:req
-                        (`Assoc
-                           [
-                             ("ok", `Bool true);
-                             ("keeper", `String name);
-                             ("cascade_name", `String cascade);
-                             ("source", `String "toml");
-                             ("live_meta_synced", `Bool live_meta_synced);
-                           ])
-                        reqd))
-         )
-       ) request reqd)

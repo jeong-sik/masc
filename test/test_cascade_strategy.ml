@@ -17,7 +17,6 @@ module ST = Masc_mcp.Cascade_strategy_trace
 module Kcp = Masc_mcp.Keeper_cascade_profile
 module T = Masc_mcp.Cascade_throttle
 module Cascade_state = Masc_mcp.Cascade_state
-module DC = Masc_mcp.Dashboard_cascade
 module Json = Yojson.Safe.Util
 
 (* ── Test fixture ────────────────────────────────────────────── *)
@@ -419,23 +418,6 @@ let test_snapshot_reflects_active_acquires () =
       check int "active counted" 1 info.process_active;
       check int "available decremented" 1 info.process_available
 
-let test_client_capacity_json_exposes_provenance () =
-  C.unregister_all ();
-  C.register ~url:"cli:cli_tool_a" ~max_concurrent:2;
-  let json = DC.client_capacity_json () in
-  check string "dashboard surface"
-    "/api/v1/cascade/client_capacity"
-    (json_string "dashboard_surface" json);
-  check string "source" "cascade_client_capacity_registry"
-    (json_string "source" json);
-  check_nonempty_string_field "generated_at_iso" json;
-  let retention = json_object "retention" json in
-  check string "retention scope" "cascade_client_capacity"
-    (json_string "scope" retention);
-  check string "store kind" "process_registry" (json_string "store_kind" retention)
-
-(* ── Cascade_state auto-rotation primitive ───────────────────── *)
-
 let test_cascade_state_round_robin_negative_bound () =
   Cascade_state.clear_all ();
   let v = Cascade_state.rotate_round_robin ~cascade:"x" ~bound:0 in
@@ -668,30 +650,6 @@ let test_history_prometheus_counter_increments () =
   check bool "http_probe/rejected_full counter advanced by >= 1"
     true (http_probe_rejected >= 1.0)
 
-let test_history_json_exposes_provenance () =
-  CH.clear ();
-  CH.record { ts = 10.0; key = "cli:cli_tool_a";
-              kind = Acquired; active_after = 1 };
-  let json = DC.client_capacity_history_json ~limit:1 ~kind:"cli" ~since_ts:1.0 () in
-  check string "dashboard surface"
-    "/api/v1/cascade/client_capacity/history"
-    (json_string "dashboard_surface" json);
-  check string "source" "cascade_client_capacity_history_ring"
-    (json_string "source" json);
-  check_nonempty_string_field "generated_at_iso" json;
-  let retention = json_object "retention" json in
-  check string "retention scope" "cascade_client_capacity_history"
-    (json_string "scope" retention);
-  check string "store kind" "process_ring_buffer"
-    (json_string "store_kind" retention);
-  check int "ring capacity" (CH.capacity ()) (json_int "ring_capacity" retention);
-  let query = json_object "query" json in
-  check int "query limit" 1 (json_int "limit" query);
-  check string "query kind" "cli" (json_string "kind" query);
-  check (float 0.0) "query since_ts" 1.0 (json_float "since_ts" query)
-
-(* ── Strategy decision trace (LT-5) ─────────────────── *)
-
 let mk_trace_event ?(ts = 0.0) ?(cascade_name = "cascade.primary")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered)
@@ -834,48 +792,6 @@ let test_trace_prometheus_counter_increments () =
   check bool "nick0cave/failover/filtered_empty >= 1"
     true (filtered >= 1.0)
 
-let test_strategy_trace_json_exposes_provenance () =
-  ST.clear ();
-  ST.record
-    (mk_trace_event ~cascade_name:"cascade.primary" ~strategy:"failover"
-       ~kind:ST.Ordered ());
-  let json = DC.strategy_trace_json ~limit:1 ~cascade:"cascade.primary" () in
-  check string "dashboard surface" "/api/v1/cascade/strategy_trace"
-    (json_string "dashboard_surface" json);
-  check string "source" "cascade_strategy_trace_ring" (json_string "source" json);
-  check_nonempty_string_field "generated_at_iso" json;
-  let retention = json_object "retention" json in
-  check string "retention scope" "cascade_strategy_trace"
-    (json_string "scope" retention);
-  check string "store kind" "process_ring_buffer"
-    (json_string "store_kind" retention);
-  check int "ring capacity" (ST.capacity ()) (json_int "ring_capacity" retention);
-  let query = json_object "query" json in
-  check int "query limit" 1 (json_int "limit" query);
-  check string "query cascade" "cascade.primary" (json_string "cascade" query)
-
-let test_audit_runs_json_exposes_provenance () =
-  let base_path =
-    Filename.concat (Filename.get_temp_dir_name ()) "masc-cascade-provenance-test"
-  in
-  let json =
-    DC.audit_runs_json ~base_path ~limit:2 ~cascade:"keeper_unified" ()
-  in
-  check string "dashboard surface" "/api/v1/cascade/audit_runs"
-    (json_string "dashboard_surface" json);
-  check string "source" "cascade_audit_jsonl" (json_string "source" json);
-  check_nonempty_string_field "generated_at_iso" json;
-  let retention = json_object "retention" json in
-  check string "retention scope" "cascade_audit_runs"
-    (json_string "scope" retention);
-  check string "store kind" "dated_jsonl" (json_string "store_kind" retention);
-  check string "durable store"
-    (Filename.concat (Filename.concat base_path ".masc") "cascade_audit")
-    (json_string "durable_store" retention);
-  let query = json_object "query" json in
-  check int "query limit" 2 (json_int "limit" query);
-  check string "query cascade" "keeper_unified" (json_string "cascade" query)
-
 let () =
   run "cascade_strategy" [
     "failover", [
@@ -926,8 +842,6 @@ let () =
         test_snapshot_returns_all_entries;
       test_case "snapshot reflects active acquires" `Quick
         test_snapshot_reflects_active_acquires;
-      test_case "dashboard JSON exposes provenance" `Quick
-        test_client_capacity_json_exposes_provenance;
     ];
     "cascade_state", [
       test_case "round_robin bound<=0 returns 0" `Quick
@@ -950,8 +864,6 @@ let () =
         test_try_acquire_full_then_release_then_acquire;
       test_case "record bumps Prometheus counter with label" `Quick
         test_history_prometheus_counter_increments;
-      test_case "dashboard JSON exposes provenance" `Quick
-        test_history_json_exposes_provenance;
     ];
     "strategy_trace", [
       test_case "record + snapshot newest-first" `Quick
@@ -966,9 +878,5 @@ let () =
         test_trace_kind_labels;
       test_case "record bumps Prometheus counter with labels" `Quick
         test_trace_prometheus_counter_increments;
-      test_case "dashboard JSON exposes provenance" `Quick
-        test_strategy_trace_json_exposes_provenance;
-      test_case "audit runs JSON exposes provenance" `Quick
-        test_audit_runs_json_exposes_provenance;
     ];
   ]

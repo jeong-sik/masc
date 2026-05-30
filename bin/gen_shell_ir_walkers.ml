@@ -1267,6 +1267,13 @@ let rec parse message amend = function
        (match rest with
         | m :: rest' -> parse (Some m) !has_a rest'
         | _ -> None))
+  | arg :: rest
+    when String.length arg > 10
+         && String.sub arg 0 10 = "--message=" ->
+    let m = String.sub arg 10 (String.length arg - 10) in
+    (match message with
+     | None -> parse (Some m) amend rest
+     | Some _ -> None)
   | "--" :: rest -> parse message amend rest
   (* --message=MSG eq-form *)
   | arg :: rest
@@ -1563,6 +1570,11 @@ let rec parse reverse numeric unique key file = function
     (try parse reverse numeric unique (Some (int_of_string n)) file rest
      with Failure _ -> None)
   | "-t" :: _ :: rest | "--field-separator" :: _ :: rest -> parse reverse numeric unique key file rest  (* -t/--field-separator SEP *)
+  (* --field-separator=SEP *)
+  | arg :: rest
+    when String.length arg > 18
+         && String.sub arg 0 18 = "--field-separator=" ->
+    parse reverse numeric unique key file rest
   (* --key=N form *)
   | arg :: rest
     when String.length arg > 6

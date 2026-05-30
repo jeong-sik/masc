@@ -2831,7 +2831,7 @@ let test_eq_form_value_consuming_flags () =
   in
   (match gc with
    | W (Git_commit { message = "hello world"; _ }) -> ()
-   | w -> Alcotest.failf "Git_commit --message=hello world: expected msg, got %a" pp w);
+   | w -> Alcotest.failf "Git_commit --message=hello world: expected msg=hello world, got %a" pp w);
   (* Head: --lines=5 file.txt *)
   let head =
     of_simple { (base "head") with args = [ lit "--lines=5"; lit "file.txt" ] }
@@ -2845,9 +2845,15 @@ let test_eq_form_value_consuming_flags () =
   in
   (match tail with
    | W (Tail { lines = 10; path = "file.txt"; _ }) -> ()
-   | w -> Alcotest.failf "Tail --lines=10: expected lines=10, got %a" pp w)
+   | w -> Alcotest.failf "Tail --lines=10: expected lines=10, got %a" pp w);
+  (* Sed: --expression / --file eq-forms *)
+  let sed =
+    of_simple { (base "sed") with args = [ lit "--expression=s/foo/bar/"; lit "--file=script.sed"; lit "input.txt" ] }
+  in
+  (match sed with
+   | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --expression/--file eq-form: expected expression=script.sed, file=input.txt, got %a" pp w)
 ;;
-
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"

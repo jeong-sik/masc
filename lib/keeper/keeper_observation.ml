@@ -460,7 +460,7 @@ let get_cascade_audit_store store_opt =
           (* Iter 47: tick counter so audit-subsystem health is
              observable.  Audit failure here disables the subsystem
              for the process lifetime — operators need to know. *)
-          Cascade_metrics.on_cascade_audit_failure ~stage:"store_creation";
+          Runtime_metrics.on_cascade_audit_failure ~stage:"store_creation";
           Log.Misc.warn "cascade audit store creation failed: %s"
             (Printexc.to_string exn);
           None)
@@ -523,7 +523,7 @@ let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
           (* Iter 47: tick counter per-record append failure rate
              alertable.  Single-event audit loss compounds over
              time for post-incident analysis. *)
-          Cascade_metrics.on_cascade_audit_failure ~stage:"append";
+          Runtime_metrics.on_cascade_audit_failure ~stage:"append";
           Log.Misc.warn "cascade audit append failed cascade=%s error=%s"
             cascade_name_string (Printexc.to_string exn))
 
@@ -635,7 +635,7 @@ let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
          alertable.  WARN log already prints per-eviction detail
          (cascade name, age, etc.); metric makes rate aggregation
          tractable. *)
-      Cascade_metrics.on_cascade_metrics_eviction ();
+      Runtime_metrics.on_cascade_metrics_eviction ();
       Log.Misc.warn
         "cascade metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
         candidate.name candidate.calls candidate.last_used_at cascade_name_string

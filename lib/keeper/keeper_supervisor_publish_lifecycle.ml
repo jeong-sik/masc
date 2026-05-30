@@ -32,7 +32,7 @@ let publish_lifecycle
   in
   (* #12798: record in the per-keeper lifecycle audit ring for dashboard. *)
   Keeper_lifecycle_audit.record ~keeper_name ~event_name ~phase ~detail;
-  Cascade_events.publish_keeper_lifecycle ~event ~keeper_name ~detail ()
+  Keeper_event_publisher.publish_keeper_lifecycle ~event ~keeper_name ~detail ()
 ;;
 
 (** Phase-event helper: the wire event name IS the phase name. *)

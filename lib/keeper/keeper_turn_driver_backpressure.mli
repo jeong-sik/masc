@@ -8,15 +8,15 @@
 (** Classify an HTTP error into a backpressure source, if applicable. *)
 val capacity_backpressure_source_of_http_error :
   Llm_provider.Http_client.http_error ->
-  Cascade_internal_error.capacity_backpressure_source option
+  Keeper_meta_contract.capacity_backpressure_source option
 
 (** Build a capacity-backpressure internal error from an HTTP error,
     when the error indicates capacity exhaustion. *)
 val capacity_backpressure_of_http_error :
-  ?source:Cascade_internal_error.capacity_backpressure_source ->
+  ?source:Keeper_meta_contract.capacity_backpressure_source ->
   cascade_name:Cascade_name.t ->
   Llm_provider.Http_client.http_error option ->
-  Cascade_internal_error.masc_internal_error option
+  Keeper_meta_contract.masc_internal_error option
 
 (** Build a capacity-backpressure internal error from a pending
     backpressure triple [(source, detail, retry_after)].  The retry-after
@@ -25,9 +25,9 @@ val capacity_backpressure_of_http_error :
     hint. *)
 val capacity_backpressure_of_pending :
   cascade_name:Cascade_name.t ->
-  (Cascade_internal_error.capacity_backpressure_source * string
-   * Cascade_internal_error.capacity_retry_after) option ->
-  Cascade_internal_error.masc_internal_error option
+  (Keeper_meta_contract.capacity_backpressure_source * string
+   * Keeper_meta_contract.capacity_retry_after) option ->
+  Keeper_meta_contract.masc_internal_error option
 
 (** Classify an SDK error into a capacity-backpressure error,
     when the error indicates provider capacity exhaustion or a
@@ -35,7 +35,7 @@ val capacity_backpressure_of_pending :
 val capacity_backpressure_of_sdk_error :
   cascade_name:Cascade_name.t ->
   message_looks_like_capacity_backpressure:(string -> bool) ->
-  sdk_error_of_masc_internal_error:(Cascade_internal_error.masc_internal_error ->
+  sdk_error_of_masc_internal_error:(Keeper_meta_contract.masc_internal_error ->
                                     Agent_sdk.Error.sdk_error) ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error option

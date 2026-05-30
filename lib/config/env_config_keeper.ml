@@ -414,7 +414,7 @@ module KeeperKeepalive = struct
 
   (** Maximum turns per single OAS Agent.run call.
       Keeper resumes via checkpoint in the next keepalive cycle when
-      {!Cascade_runner.TurnBudgetExhausted} is returned.
+      {!Runtime_agent.TurnBudgetExhausted} is returned.
       Previous default of 200 caused "ambiguous partial commit" errors:
       the 300s timeout would fire mid-turn after tools had already executed,
       leaving the keeper in an ambiguous state. With 30 turns per call and
@@ -479,7 +479,7 @@ module KeeperKeepalive = struct
       this catches the case where a single bulk read hangs without
       producing line breaks.
 
-      Opt-in: unset env leaves [None] so {!Cascade_agent_context} skips
+      Opt-in: unset env leaves [None] so {!Runtime_agent_context} skips
       the builder wiring. Set to a value strictly less than the effective
       OAS attempt cap for attempt-level fall-forward; set
       [<= stream_idle_timeout_sec] for a strict overall cap.

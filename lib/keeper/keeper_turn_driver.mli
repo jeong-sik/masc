@@ -128,7 +128,7 @@ val run_named :
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
   ?transport:Masc_grpc_transport.t ->
-  ?cli_transport_overrides:Cascade_runner.cli_transport_overrides ->
+  ?cli_transport_overrides:Runtime_agent.cli_transport_overrides ->
   ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
@@ -142,7 +142,7 @@ val run_named :
   ?enable_thinking:bool ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
-  ?exit_condition_result:(int -> Cascade_runner.stop_reason * string option) ->
+  ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
   ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?event_bus:Agent_sdk.Event_bus.t ->
@@ -153,7 +153,7 @@ val run_named :
   ?net:Eio_context.eio_net ->
   ?per_provider_timeout_s:float ->
   unit ->
-  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] call with MASC-driven cascade model fallback.
     MASC drives the cascade FSM directly: resolves cascade providers,
     tries each with OAS, and uses [Cascade_fsm.decide] on failure.

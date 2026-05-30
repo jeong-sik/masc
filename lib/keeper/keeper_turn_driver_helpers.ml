@@ -112,7 +112,7 @@ let provider_rejection_for_required_tool_unsupported ~provider_label
          provider_label
          (String.concat ", " missing_required_tools);
    }
-    : Cascade_error_classify.provider_rejection)
+    : Keeper_meta_contract.provider_rejection)
 
 let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
     ~configured_labels ~runtime_manifest_required_tool_names ~runtime_mcp_policy
@@ -133,13 +133,13 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
         ; required_tool_names
         ; provider_rejections =
             List.map
-              (fun (r : Cascade_error_classify.provider_rejection) ->
+              (fun (r : Keeper_meta_contract.provider_rejection) ->
                  (r.provider_label, r.reason))
               rejections
         }
       in
       Some
-        (Cascade_error_classify.Cascade_exhausted
+        (Keeper_meta_contract.Cascade_exhausted
            {
              cascade_name;
              reason = Keeper_meta_contract.No_tool_capable (Some detail);
@@ -188,7 +188,7 @@ let provider_rejections_for_no_tool_error
                   Cascade_runtime_candidate.provider_label candidate;
                 reason;
               }
-               : Cascade_error_classify.provider_rejection))
+               : Keeper_meta_contract.provider_rejection))
 
 let apply_stream_idle_timeout_default = function
   | Some _ as v -> v

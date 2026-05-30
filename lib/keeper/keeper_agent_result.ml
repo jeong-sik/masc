@@ -46,7 +46,7 @@ type run_result =
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics
-  ; cascade_observation : Cascade_observation.cascade_observation option
+  ; cascade_observation : Keeper_observation.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
@@ -56,7 +56,7 @@ type run_result =
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
-  ; stop_reason : Cascade_runner.stop_reason
+  ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   ; pre_dispatch_compacted : bool

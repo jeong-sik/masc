@@ -45,7 +45,7 @@ let provider_context_json ~(meta : keeper_meta)
         ]
 
 let redacted_cascade_attempt_to_json
-    (attempt : Cascade_observation.cascade_attempt) : Yojson.Safe.t =
+    (attempt : Keeper_observation.cascade_attempt) : Yojson.Safe.t =
   `Assoc
     [ "attempt_index", `Int attempt.attempt_index
     ; ( "latency_ms", Json_util.int_opt_to_json attempt.latency_ms )
@@ -54,12 +54,12 @@ let redacted_cascade_attempt_to_json
 ;;
 
 let redacted_cascade_fallback_event_to_json
-    (event : Cascade_observation.cascade_fallback_event) : Yojson.Safe.t =
+    (event : Keeper_observation.cascade_fallback_event) : Yojson.Safe.t =
   `Assoc [ "reason", `String event.reason ]
 ;;
 
 let redacted_cascade_observation_to_json
-    (obs : Cascade_observation.cascade_observation) : Yojson.Safe.t =
+    (obs : Keeper_observation.cascade_observation) : Yojson.Safe.t =
   let cascade_name =
     Cascade_name.to_string obs.cascade_name
   in

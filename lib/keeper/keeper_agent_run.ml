@@ -171,12 +171,12 @@ let run_turn
     | Error internal_error ->
       let detail =
         Option.value
-          ~default:(Cascade_error_classify.kind_of_masc_internal_error internal_error)
-          (Cascade_error_classify.summary_of_masc_internal_error internal_error)
+          ~default:(Keeper_meta_contract.kind_of_masc_internal_error internal_error)
+          (Keeper_meta_contract.summary_of_masc_internal_error internal_error)
       in
       Log.Keeper.error "%s: %s" meta.name detail;
       ( ctx.max_tokens,
-        Some (Cascade_error_classify.sdk_error_of_masc_internal_error internal_error) )
+        Some (Keeper_meta_contract.sdk_error_of_masc_internal_error internal_error) )
   in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
@@ -560,7 +560,7 @@ let run_turn
                  | None -> None)
             ; cli_subprocess_idle_sec
             }
-            : Cascade_runner.cli_transport_overrides)
+            : Runtime_agent.cli_transport_overrides)
        in
        Keeper_agent_run_phase0_telemetry.record_if_enabled
          ~meta

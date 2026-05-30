@@ -115,10 +115,10 @@ let cascade_exhaustion_reason_code
 ;;
 
 let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
-  match Cascade_error_classify.classify_masc_internal_error_of_string raw_error with
+  match Keeper_meta_contract.classify_masc_internal_error_of_string raw_error with
   (* No_tool_capable specific cases first — more specific than generic Cascade_exhausted *)
   | Some
-      (Cascade_error_classify.Cascade_exhausted
+      (Keeper_meta_contract.Cascade_exhausted
          { cascade_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
          ; _
@@ -153,7 +153,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
          })
   | Some
-      (Cascade_error_classify.Cascade_exhausted
+      (Keeper_meta_contract.Cascade_exhausted
          { cascade_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable None
          ; _
@@ -167,7 +167,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; cascade_name = Some (Cascade_name.to_string ntcp_cascade_name)
          })
   (* Generic Cascade_exhausted catch-all — after No_tool_capable specifics *)
-  | Some (Cascade_error_classify.Cascade_exhausted { reason; cascade_name }) ->
+  | Some (Keeper_meta_contract.Cascade_exhausted { reason; cascade_name }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = cascade_exhaustion_reason_code reason
@@ -176,7 +176,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; http_status = None
          ; cascade_name = Some (Cascade_name.to_string cascade_name)
          })
-  | Some (Cascade_error_classify.Capacity_backpressure { detail = capacity_detail; _ }) ->
+  | Some (Keeper_meta_contract.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = "capacity_backpressure"
@@ -186,23 +186,23 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; cascade_name = None
          })
   | Some
-      ( Cascade_error_classify.Resumable_cli_session _
-      | Cascade_error_classify.Accept_rejected _
-      | Cascade_error_classify.Admission_queue_timeout _
-      | Cascade_error_classify.Admission_queue_rejected _
-      | Cascade_error_classify.Turn_timeout _
-      | Cascade_error_classify.Provider_timeout _
-      | Cascade_error_classify.Max_tokens_ceiling_violation _
-      | Cascade_error_classify.Ambiguous_post_commit _
+      ( Keeper_meta_contract.Resumable_cli_session _
+      | Keeper_meta_contract.Accept_rejected _
+      | Keeper_meta_contract.Admission_queue_timeout _
+      | Keeper_meta_contract.Admission_queue_rejected _
+      | Keeper_meta_contract.Turn_timeout _
+      | Keeper_meta_contract.Provider_timeout _
+      | Keeper_meta_contract.Max_tokens_ceiling_violation _
+      | Keeper_meta_contract.Ambiguous_post_commit _
       (* RFC-0158: pre-dispatch admission denial is not a cascade-exhaustion
          reason; the keeper decided not to attempt a provider call. *)
-      | Cascade_error_classify.Retry_admission_denied _
+      | Keeper_meta_contract.Retry_admission_denied _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
          cascade-exhaustion reasons; they map to opaque
          internal-error events upstream. *)
-      | Cascade_error_classify.Internal_unhandled_exception _
-      | Cascade_error_classify.Internal_bridge_exception _
-      | Cascade_error_classify.Internal_contract_rejected _ )
+      | Keeper_meta_contract.Internal_unhandled_exception _
+      | Keeper_meta_contract.Internal_bridge_exception _
+      | Keeper_meta_contract.Internal_contract_rejected _ )
   | None -> None
 ;;
 

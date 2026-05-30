@@ -38,8 +38,8 @@ let provider_cooldown_remaining_sec_for_cascade
     let provider_infos =
       List.map
         (fun provider_key ->
-           Cascade_health_tracker.provider_info
-             Cascade_health_tracker.global
+           Keeper_binding_health.provider_info
+             Keeper_binding_health.global
              ~provider_key)
         runtime_health_keys
     in
@@ -50,13 +50,13 @@ let provider_cooldown_remaining_sec_for_cascade
       if
         not
           (List.for_all
-             (fun info -> info.Cascade_health_tracker.in_cooldown)
+             (fun info -> info.Keeper_binding_health.in_cooldown)
              provider_infos)
       then None
       else (
         let now = Time_compat.now () in
         provider_infos
-        |> List.filter_map (fun info -> info.Cascade_health_tracker.cooldown_expires_at)
+        |> List.filter_map (fun info -> info.Keeper_binding_health.cooldown_expires_at)
         |> List.map (fun expires_at ->
           int_of_float (Float.max 0.0 (Float.ceil (expires_at -. now))))
         |> function

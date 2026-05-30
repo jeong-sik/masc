@@ -304,19 +304,19 @@ let emit_usage_metrics_and_log
   =
   let outcome_str =
     match result.Keeper_agent_run.stop_reason with
-    | Cascade_runner.Completed -> "completed"
-    | Cascade_runner.TurnBudgetExhausted { turns_used; limit; _ } ->
+    | Runtime_agent.Completed -> "completed"
+    | Runtime_agent.TurnBudgetExhausted { turns_used; limit; _ } ->
       Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
-    | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
+    | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
       (match tool_name with
        | Some tool -> Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
        | None -> Printf.sprintf "mutation_boundary(%d)" turns_used)
   in
   let outcome_label =
     match result.stop_reason with
-    | Cascade_runner.Completed -> "success"
-    | Cascade_runner.TurnBudgetExhausted _ -> "budget_exhausted"
-    | Cascade_runner.MutationBoundaryReached _ -> "mutation_boundary"
+    | Runtime_agent.Completed -> "success"
+    | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
+    | Runtime_agent.MutationBoundaryReached _ -> "mutation_boundary"
   in
   Prometheus.inc_counter
     Keeper_metrics.(to_string Turns)
@@ -434,7 +434,7 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
 
 let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   match result.Keeper_agent_run.stop_reason with
-  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
+  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
     Log.Keeper.info
       "keeper:%s turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
       updated_meta.name
@@ -443,7 +443,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Keeper_registry.reset_turn_failures
       ~base_path:config.Coord.base_path
       updated_meta.name
-  | Cascade_runner.MutationBoundaryReached { tool_name; _ } ->
+  | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
     Log.Keeper.info
       "keeper:%s mutation boundary reached after %s, checkpoint saved — will resume next cycle"
       updated_meta.name
@@ -453,7 +453,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Keeper_registry.reset_turn_failures
       ~base_path:config.base_path
       updated_meta.name
-  | Cascade_runner.Completed ->
+  | Runtime_agent.Completed ->
     Keeper_registry.reset_turn_failures
       ~base_path:config.base_path
       updated_meta.name

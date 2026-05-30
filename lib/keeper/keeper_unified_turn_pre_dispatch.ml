@@ -78,7 +78,7 @@ let build_cascade_execution
         with
         | Error err ->
           Error
-            (Cascade_error_classify.sdk_error_of_masc_internal_error err)
+            (Keeper_meta_contract.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->
           Ok
             { Keeper_turn_cascade_budget.cascade_name

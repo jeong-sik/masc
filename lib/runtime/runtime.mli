@@ -36,5 +36,5 @@ val get_default_runtime_id : unit -> string
 
 val config_path : unit -> string option
 (** Path to the runtime config TOML, or [None] if unresolved. Re-homed from
-    deleted [Cascade_runtime.cascade_config_path] (delegates to
+    deleted [Runtime.config_path] (delegates to
     [Config_dir_resolver]). *)

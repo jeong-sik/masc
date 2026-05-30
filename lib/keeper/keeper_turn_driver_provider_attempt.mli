@@ -54,7 +54,7 @@ val success_selected_model_raw :
   Cascade_runtime_candidate.t -> string option
 
 val error_selected_model_raw : string option
-val health_error_kind : string -> Cascade_health_tracker.error_kind
+val health_error_kind : string -> Keeper_binding_health.error_kind
 
 val record_candidate_health_success :
   Cascade_runtime_candidate.t -> latency_ms:float -> unit

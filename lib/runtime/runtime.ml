@@ -100,7 +100,7 @@ let get_default_runtime_id () =
 ;;
 
 (* Path to the runtime config TOML (re-homed from deleted
-   [Cascade_runtime.cascade_config_path]). Delegates to the surviving
+   [Runtime.config_path]). Delegates to the surviving
    [Config_dir_resolver]; the file is still [cascade.toml] (rename deferred). *)
 let config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"Runtime" ();

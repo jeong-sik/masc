@@ -40,7 +40,7 @@ let provider_log_error_json ~surface message =
     ]
 
 let load_provider_log_config () =
-  match Cascade_runtime.cascade_config_path () with
+  match Runtime.config_path () with
   | None -> Error "cascade config path unavailable"
   | Some path -> (
       match Cascade_declarative_parser.parse_file path with

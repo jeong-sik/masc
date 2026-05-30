@@ -269,7 +269,7 @@ let pre_compact_event_of_json json =
       ; strategies = Safe_ops.json_string_list "strategies" json
       ; context_window =
           Safe_ops.json_int
-            ~default:Cascade_runtime.fallback_context_window
+            ~default:Runtime_constants.fallback_context_window
             "context_window"
             json
       ; is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json
@@ -356,7 +356,7 @@ let wake_payload_event_of_json json =
       ; model_id = public_runtime_model_id
       ; context_window =
           Safe_ops.json_int
-            ~default:Cascade_runtime.fallback_context_window
+            ~default:Runtime_constants.fallback_context_window
             "context_window"
             json
       ; approx_body_bytes = Safe_ops.json_int ~default:0 "approx_body_bytes" json

@@ -114,9 +114,9 @@ let default_registry = Llm_provider.Provider_registry.default ()
     Resolution order:
     1. Capabilities.for_model_id — per-model override (e.g. <provider>-<model> -> max_context)
     2. Provider_registry.find — provider-level default (e.g. <provider_slug> -> max_context)
-    3. {!Cascade_runtime.fallback_context_window} *)
+    3. {!Runtime_constants.fallback_context_window} *)
 let resolve_max_context model =
-  let fallback = Cascade_runtime.fallback_context_window in
+  let fallback = Runtime_constants.fallback_context_window in
   (* Layer 1: per-model capabilities (e.g. <provider>-<model> -> max_context) *)
   let from_caps =
     match Llm_provider.Capabilities.for_model_id model with

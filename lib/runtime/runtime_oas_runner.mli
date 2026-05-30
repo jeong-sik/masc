@@ -10,7 +10,7 @@
 (** {1 Cascade profile defaults} *)
 
 val default_config_path : unit -> string option
-(** Alias for [Cascade_runtime.cascade_config_path]. *)
+(** Alias for [Runtime.config_path]. *)
 
 val default_model_strings : cascade_name:string -> string list
 (** Alias for [Cascade_runtime.default_model_strings]. *)

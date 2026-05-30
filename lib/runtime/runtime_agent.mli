@@ -10,7 +10,7 @@
     diagnostics) are owned by {!Runtime_transport}.
 
     All model-selection and cascade logic lives in
-    {!Cascade_observation} and {!Keeper_turn_driver}.
+    {!Keeper_observation} and {!Keeper_turn_driver}.
 
     Internal helpers stay private at this boundary
     ([invalid_runtime_config],
@@ -131,7 +131,7 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  cascade_observation : Cascade_observation.cascade_observation option;
+  cascade_observation : Keeper_observation.cascade_observation option;
   stop_reason : stop_reason;
 }
 

@@ -378,7 +378,7 @@ let build_local_shell_tools ~room_config ~worker_name ~workdir =
     Returns Error when the label cannot be parsed. *)
 let oas_provider_of_label (label : string) :
     (Agent_sdk.Provider.config, string) result =
-  match Cascade_config.parse_model_string label with
+  match Runtime_model_string.parse_model_string label with
   | Some pc -> Ok (Agent_sdk.Provider.config_of_provider_config pc)
   | None ->
     let msg = Printf.sprintf "Cannot parse model label: %S (expected provider:model)" label in
@@ -389,7 +389,7 @@ let oas_provider_of_label (label : string) :
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
     (Agent_sdk.Provider.config * string, string) result =
-  match Cascade_config.parse_model_string label with
+  match Runtime_model_string.parse_model_string label with
   | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
   | Some pc ->
     Ok
@@ -467,8 +467,8 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       max_tokens = Some (local_worker_max_tokens ());
       max_turns;
       temperature = Some Llm_provider.Constants.Inference_profile.worker_default.temperature;
-      top_p = Some Cascade_worker_defaults.top_p;
-      top_k = Some Cascade_worker_defaults.top_k;
+      top_p = Some Llm_provider.Constants.Worker_sampling.top_p;
+      top_k = Some Llm_provider.Constants.Worker_sampling.top_k;
       (* min_p is effectively disabled (0.0) and some cloud providers
          reject the field itself even when the value is a no-op. *)
       min_p = None;
@@ -482,7 +482,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     | None ->
         { Agent_sdk.Guardrails.tool_filter =
             Agent_sdk.Guardrails.AllowList (oas_tool_names tools);
-          max_tool_calls_per_turn = Some Cascade_worker_defaults.max_tool_calls_per_turn;
+          max_tool_calls_per_turn = Some Llm_provider.Constants.Worker_sampling.max_tool_calls_per_turn;
         }
   in
   let options =

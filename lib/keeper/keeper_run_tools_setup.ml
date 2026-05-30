@@ -411,11 +411,11 @@ let prepare_agent_setup
   let actual_keeper_tool_names_ref : string list ref = ref [] in
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
-  let receipt_stop_reason_ref : Cascade_runner.stop_reason option ref =
+  let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
     ref None
   in
   let receipt_cascade_observation_ref
-    : Cascade_observation.cascade_observation option ref
+    : Keeper_observation.cascade_observation option ref
     =
     ref None
   in

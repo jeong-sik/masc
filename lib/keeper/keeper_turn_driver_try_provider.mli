@@ -29,7 +29,7 @@ type try_provider_ctx =
       Agent_sdk.Completion_contract.required_tool_satisfaction
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; transport_resolved : Masc_grpc_transport.t
-  ; cli_transport_overrides : Cascade_runner.cli_transport_overrides option
+  ; cli_transport_overrides : Runtime_agent.cli_transport_overrides option
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
@@ -44,7 +44,7 @@ type try_provider_ctx =
   ; enable_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
-  ; exit_condition_result : (int -> Cascade_runner.stop_reason * string option) option
+  ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; sw : Eio.Switch.t
@@ -67,9 +67,9 @@ val run_try_provider :
   ?resume_checkpoint:Agent_sdk.Checkpoint.t ->
   ?per_provider_timeout_s:float ->
   Cascade_runtime_candidate.t ->
-  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option
-  * (string * Cascade_attempt_liveness_config.success_sample) option
+  * (string * Keeper_attempt_liveness_config.success_sample) option
 
 module For_testing : sig
   val sanitize_runtime_mcp_external_tool_choice :

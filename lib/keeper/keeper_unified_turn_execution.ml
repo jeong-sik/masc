@@ -300,7 +300,7 @@ let run (ctx : ctx)
              ~estimated_input_tokens:prompt_timeout_estimate_tokens
              ~max_turns
          with
-        | Error (denial : Cascade_internal_error.retry_admission_denial) ->
+        | Error (denial : Keeper_meta_contract.retry_admission_denial) ->
           Error
             (Keeper_turn_driver.sdk_error_of_masc_internal_error
                (Keeper_turn_driver.Retry_admission_denied

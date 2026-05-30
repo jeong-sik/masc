@@ -143,7 +143,7 @@ let finalize
       Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
       |> Keeper_turn_terminal_code.to_wire
   in
-  let cascade_observation : Cascade_observation.cascade_observation option =
+  let cascade_observation : Keeper_observation.cascade_observation option =
     !receipt_cascade_observation_ref
   in
   let ( extra_system_context_digest

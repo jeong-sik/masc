@@ -114,7 +114,7 @@ let prepare_run_context
     in
     resolution.Config_dir_resolver.config_root.path
   in
-  let cascade_config_path = Cascade_runtime.cascade_config_path () in
+  let cascade_config_path = Runtime.config_path () in
   let gemini_mcp_disabled = keeper_oas_context.gemini_mcp_disabled in
   let approval_mode_effective = keeper_oas_context.gemini_approval_mode in
   let approval_mode_derived = keeper_oas_context.gemini_approval_mode_derived in

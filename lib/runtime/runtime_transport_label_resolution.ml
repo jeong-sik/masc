@@ -2,7 +2,7 @@
     cascade_transport.ml.
 
     Maps a string label to a {!Llm_provider.Provider_config.t} via
-    {!Cascade_config.parse_model_string}; unresolved labels become
+    {!Runtime_model_string.parse_model_string}; unresolved labels become
     [Error (Invalid_model_label _)] — execution never falls back to
     discovery-only models. *)
 
@@ -21,7 +21,7 @@ let label_resolution_error_to_sdk_error err =
 let resolve_provider_config_of_label (label : string)
   : (Llm_provider.Provider_config.t, label_resolution_error) result
   =
-  match Cascade_config.parse_model_string label with
+  match Runtime_model_string.parse_model_string label with
   | Some pc -> Ok pc
   | None ->
     Log.error

@@ -22,7 +22,7 @@ let finalize
     ~memory
     ~actual_keeper_tool_names
     ~actual_keeper_tool_names_ref
-    ~(result : Cascade_runner.run_result)
+    ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
     ?provider_filter

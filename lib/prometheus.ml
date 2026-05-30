@@ -184,7 +184,7 @@ let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_t
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
 let metric_oas_bus_capacity = "masc_oas_bus_capacity"
 
-(* Catch-all entries in [Cascade_event_bridge.native_event_to_json]
+(* Catch-all entries in [Keeper_event_bridge.native_event_to_json]
    for OAS payload variants that have not yet received an explicit
    arm in this consumer.  A non-zero rate per [kind] label means an
    upstream OAS pin bump shipped a new payload variant before the

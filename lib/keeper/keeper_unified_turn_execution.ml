@@ -83,7 +83,6 @@ let run (ctx : ctx)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
       ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> cascade_name:Cascade_name.t -> keeper_turn_id:int -> unit -> unit)
-      ~(active_fail_open_rotation_cascades : unit -> string list option)
       ~(cascade_name_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
   : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result
@@ -211,9 +210,6 @@ let run (ctx : ctx)
                ?shared_context
                ?event_bus:(Keeper_event_bus.get ())
                ()))
-  in
-  let fail_open_rotation_cascades =
-    active_fail_open_rotation_cascades ()
   in
   let rec retry_loop (input : retry_loop_input) =
     let { run_meta
@@ -482,7 +478,6 @@ let run (ctx : ctx)
       else (
         match
           next_fail_open_cascade_for_turn_with_budget
-            ?rotation_cascades:fail_open_rotation_cascades
             ~base_cascade:(cascade_name_of_meta meta)
             ~effective_cascade:execution_cascade_name
             ~tool_requirement:initial_tool_requirement

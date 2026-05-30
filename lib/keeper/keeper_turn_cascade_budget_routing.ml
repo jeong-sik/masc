@@ -6,82 +6,7 @@ open Keeper_types_profile
 open Keeper_context_runtime
 module EC = Keeper_error_classify
 
-let public_profile_name name = String.trim name
-
-let fail_open_rotation_cascades_from_catalog
-      ?(excluded_targets : string list = [])
-      ~(catalog_names : string list)
-      ~(keeper_assignable : string list)
-      ()
-  =
-  if catalog_names = []
-  then None
-  else (
-    let excluded_targets =
-      excluded_targets |> List.map public_profile_name |> dedupe_keep_order
-    in
-    let is_reserved_default name =
-      String.equal name (Keeper_config.default_cascade_name ())
-    in
-    let is_keeper_assignable name =
-      List.exists (String.equal name) keeper_assignable
-    in
-    let is_excluded name =
-      List.exists (String.equal (public_profile_name name)) excluded_targets
-    in
-    match
-      catalog_names
-      |> List.filter (fun name ->
-        (is_reserved_default name || is_keeper_assignable name)
-        && not (is_excluded name))
-      |> dedupe_keep_order
-    with
-    | [] -> None
-    | candidates -> Some candidates)
-
-let keeper_fail_open_route_uses =
-  [ Keeper_cascade_profile.Keeper_turn
-  ; Keeper_cascade_profile.Phase_recovery
-  ; Keeper_cascade_profile.Phase_buffer
-  ; Keeper_cascade_profile.Tool_required
-  ]
-
-let is_keeper_fail_open_route_use use =
-  List.exists (( = ) use) keeper_fail_open_route_uses
-
-let route_target_for_use use =
-  try Some (Keeper_cascade_profile.cascade_name_for_use use |> public_profile_name)
-  with
-  | Failure _ -> None
-
-let active_fail_open_excluded_route_targets () =
-  let keeper_route_targets =
-    keeper_fail_open_route_uses
-    |> List.filter_map route_target_for_use
-    |> dedupe_keep_order
-  in
-  Cascade_routes.all_logical_uses
-  |> List.filter (fun use -> not (is_keeper_fail_open_route_use use))
-  |> List.filter_map route_target_for_use
-  |> List.filter (fun target ->
-    not (List.exists (String.equal target) keeper_route_targets))
-  |> dedupe_keep_order
-
-let active_fail_open_rotation_cascades () =
-  fail_open_rotation_cascades_from_catalog
-    ~excluded_targets:(active_fail_open_excluded_route_targets ())
-    ~catalog_names:(Keeper_cascade_profile.catalog_names ())
-    ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
-    ()
-
-let tool_required_rotation_cascade_name () =
-  (* cascade→Runtime 숙청: cascade_name_for_use 는 use 무시하고 default
-     Runtime id 를 반환(raise 없음). tool_required 구분이 죽었으므로
-     default_cascade_name 으로 collapse. *)
-  Keeper_config.default_cascade_name ()
-
 let next_fail_open_cascade_for_turn
-      ?rotation_cascades
       ~(base_cascade : string)
       ~(effective_cascade : string)
       ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
@@ -92,33 +17,7 @@ let next_fail_open_cascade_for_turn
   let fallback_hint =
     Keeper_cascade_profile.fallback_cascade_for effective_cascade
   in
-  let rotation_cascades =
-    match tool_requirement, rotation_cascades with
-    | Keeper_agent_tool_surface.Required, Some _ ->
-      let tr_cascade = tool_required_rotation_cascade_name () in
-      let tr_has_required_tool_choice =
-        match
-          Keeper_cascade_profile.required_capability_profile_of_cascade_name
-            tr_cascade
-        with
-        | None -> true
-        | Some profile_name -> (
-          match
-            Cascade_capability_profile.resolve_required_capabilities
-              profile_name
-          with
-          | None -> true
-          | Some reqs ->
-            reqs.inline_tool_choice = Cascade_capability_profile.Required)
-      in
-      if tr_has_required_tool_choice then
-        Some (dedupe_keep_order [ base_cascade; tr_cascade ])
-      else
-        Some (dedupe_keep_order [ base_cascade ])
-    | _ -> rotation_cascades
-  in
   EC.degraded_rotation_after_recoverable_error
-    ?rotation_cascades
     ?fallback_hint
     ~base_cascade
     ~effective_cascade

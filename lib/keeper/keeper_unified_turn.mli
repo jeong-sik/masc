@@ -70,8 +70,7 @@ type degraded_retry_budget_decision =
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
 val next_fail_open_cascade_for_turn_with_budget
-  :  ?rotation_cascades:string list
-  -> base_cascade:string
+  :  base_cascade:string
   -> effective_cascade:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
   -> attempted_cascades:string list
@@ -177,17 +176,6 @@ val ensure_local_discovery_ready
 (* cascade→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
    (Keeper_turn_liveness 에서 적출됨 — 단일 runtime 에서 죽은 코드). *)
 
-(** Pure merge step for runtime-owned fail-open rotation candidates. The
-    active path feeds this from the live cascade catalog: catalog order is
-    preserved while retaining only reserved recovery profiles and
-    keeper-assignable profiles. *)
-val fail_open_rotation_cascades_from_catalog
-  :  ?excluded_targets:string list
-  -> catalog_names:string list
-  -> keeper_assignable:string list
-  -> unit
-  -> string list option
-
 (** Typed phase-gate output for the first turn pipeline boundary.
     [run_keeper_cycle] converts this record into the manifest
     [Phase_gate_decided] row and then dispatches the matching terminal or
@@ -218,12 +206,11 @@ val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
 
 (** Resolve the next cascade to try after an auto-recoverable failure.
     Uses the current effective cascade, the turn tool requirement, and
-    optionally a runtime/catalog-owned rotation order, then suppresses
-    suggestions that would loop back to a cascade already attempted during
-    the current turn. Exposed for targeted tests. *)
+    the default degraded rotation candidate, then suppresses suggestions
+    that would loop back to a cascade already attempted during the current
+    turn. Exposed for targeted tests. *)
 val next_fail_open_cascade_for_turn
-  :  ?rotation_cascades:string list
-  -> base_cascade:string
+  :  base_cascade:string
   -> effective_cascade:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
   -> attempted_cascades:string list

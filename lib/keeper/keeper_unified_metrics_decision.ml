@@ -260,7 +260,7 @@ let append_decision_record
                 match r.cascade_observation with
                 | Some co ->
                     let cascade_name =
-                                              co.cascade_name
+                      co.cascade_name
                     in
                     [
                       ("cascade_name", `String cascade_name);

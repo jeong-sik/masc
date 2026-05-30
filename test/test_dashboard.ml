@@ -46,35 +46,6 @@ let setup_room config =
   (* Use Coord.init to properly initialize MASC *)
   ignore (Lib.Coord.init config ~agent_name:(Some "test-agent"))
 
-let test_raw_cascade_config_exposes_editable_source () =
-  let dir = test_dir () in
-  let source_text = "comment = \"dashboard-visible-sentinel\"\n" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      write_file (Filename.concat dir "cascade.toml") source_text;
-      with_config_dir dir @@ fun () ->
-      let open Yojson.Safe.Util in
-      let json = Lib.Dashboard_cascade.raw_config_json () in
-      Alcotest.(check bool)
-        "source editable"
-        true
-        (json |> member "source_editable" |> to_bool);
-      Alcotest.(check string)
-        "source text"
-        source_text
-        (json |> member "source_text" |> to_string);
-      Alcotest.(check bool)
-        "raw JSON materialized from source"
-        true
-        (contains (json |> member "raw_json" |> to_string) "dashboard-visible-sentinel");
-      match json |> member "materialization_error" with
-      | `Null -> ()
-      | other ->
-        Alcotest.failf
-          "unexpected materialization_error: %s"
-          (Yojson.Safe.to_string other))
-
 (* ===== format_section Tests ===== *)
 
 let test_format_section () =
@@ -317,9 +288,6 @@ let section_tests = [
   "agents section empty", `Quick, test_agents_section_empty;
   "tasks section empty", `Quick, test_tasks_section_empty;
   "messages section empty", `Quick, test_messages_section_empty;
-  ( "raw cascade config exposes editable source",
-    `Quick,
-    test_raw_cascade_config_exposes_editable_source );
 ]
 
 let keepers_tests = [

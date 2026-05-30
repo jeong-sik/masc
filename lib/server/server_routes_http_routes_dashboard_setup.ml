@@ -11,21 +11,6 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
 
-(* Cascade profile gate extracted to
-   [Server_dashboard_cascade_profile_gate] (godfile decomp PR #18027).
-   PR #18027 deleted this surface but left 3 unqualified call sites in
-   the parent dashboard route file (lines 1173, 1208, 1209). Restored
-   via module alias + local function aliases that map the old
-   unqualified names to the new [_profile_gate] surface. *)
-module Cascade_profile_gate = Server_dashboard_cascade_profile_gate
-
-let cascade_profile_gate = Cascade_profile_gate.compute
-let available_cascade_profiles = Cascade_profile_gate.available_profiles
-let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
-let invalid_cascade_assignment_profiles =
-  Cascade_profile_gate.invalid_assignment_profiles
-
-
 (* Dashboard /logs JSON builder extracted to
    [Server_dashboard_logs_json] (godfile decomp). *)
 let dashboard_logs_store_path = Server_dashboard_logs_json.store_path
@@ -52,9 +37,6 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
-(* sync_keeper_cascade_meta extracted to
-   [Server_routes_http_routes_dashboard_cascade_meta] (godfile decomp). *)
-let sync_keeper_cascade_meta = Server_routes_http_routes_dashboard_cascade_meta.sync_keeper_cascade_meta
 (* Dashboard dev-token cluster extracted to
    [Server_routes_http_dashboard_dev_token] (godfile decomp). *)
 

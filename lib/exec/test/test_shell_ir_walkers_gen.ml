@@ -3474,6 +3474,484 @@ let test_make_edge_cases () =
     rt_cases
 ;;
 
+(* Batch 21: Sed parser edge cases — expression, file, -i (GNU/macOS), -E, -n,
+   eq-form, POSIX --, combined flags, unknown flag skipping. *)
+let test_sed_edge_cases () =
+  let open Shell_ir_typed in
+  let base =
+    { Shell_ir.bin = bin_ok "sed"
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* --- Basic: sed 's/foo/bar/' file.txt --- *)
+  let w = of_simple { base with args = [ lit "s/foo/bar/"; lit "file.txt" ] } in
+  (match w with
+   | W (Sed { expression = "s/foo/bar/"; file = "file.txt"; in_place = false; extended_regex = false; suppress_output = false }) -> ()
+   | w -> Alcotest.failf "Sed basic: got %a" pp w);
+  (* --- -e EXPR / --expression EXPR --- *)
+  let w2 = of_simple { base with args = [ lit "-e"; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w2 with
+   | W (Sed { expression = "s/a/b/"; _ }) -> ()
+   | w -> Alcotest.failf "Sed -e: got %a" pp w);
+  let w2b = of_simple { base with args = [ lit "--expression"; lit "s/x/y/"; lit "f.txt" ] } in
+  (match w2b with
+   | W (Sed { expression = "s/x/y/"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --expression: got %a" pp w);
+  (* --- --expression=EXPR eq-form --- *)
+  let w2c = of_simple { base with args = [ lit "--expression=s/1/2/"; lit "f.txt" ] } in
+  (match w2c with
+   | W (Sed { expression = "s/1/2/"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --expression=: got %a" pp w);
+  (* --- -f FILE / --file FILE (script file → expression) --- *)
+  let w3 = of_simple { base with args = [ lit "-f"; lit "script.sed"; lit "f.txt" ] } in
+  (match w3 with
+   | W (Sed { expression = "script.sed"; file = "f.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed -f: got %a" pp w);
+  let w3b = of_simple { base with args = [ lit "--file=myscript.sed"; lit "f.txt" ] } in
+  (match w3b with
+   | W (Sed { expression = "myscript.sed"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --file=: got %a" pp w);
+  (* --- -i (GNU in-place, no suffix) --- *)
+  let w4 = of_simple { base with args = [ lit "-i"; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w4 with
+   | W (Sed { in_place = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed -i: got %a" pp w);
+  (* --- -i '' (macOS empty suffix) --- *)
+  let w4b = of_simple { base with args = [ lit "-i"; lit ""; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w4b with
+   | W (Sed { in_place = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed -i '': got %a" pp w);
+  (* --- --in-place (GNU long form) --- *)
+  let w4c = of_simple { base with args = [ lit "--in-place"; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w4c with
+   | W (Sed { in_place = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed --in-place: got %a" pp w);
+  (* --- -E / --regexp-extended --- *)
+  let w5 = of_simple { base with args = [ lit "-E"; lit "s/(a)/\\1/"; lit "f.txt" ] } in
+  (match w5 with
+   | W (Sed { extended_regex = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed -E: got %a" pp w);
+  let w5b = of_simple { base with args = [ lit "--regexp-extended"; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w5b with
+   | W (Sed { extended_regex = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed --regexp-extended: got %a" pp w);
+  (* --- -n / --quiet / --silent --- *)
+  let w6 = of_simple { base with args = [ lit "-n"; lit "s/a/b/p"; lit "f.txt" ] } in
+  (match w6 with
+   | W (Sed { suppress_output = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed -n: got %a" pp w);
+  let w6b = of_simple { base with args = [ lit "--quiet"; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w6b with
+   | W (Sed { suppress_output = true; _ }) -> ()
+   | w -> Alcotest.failf "Sed --quiet: got %a" pp w);
+  (* --- POSIX -- end-of-options --- *)
+  let w7 = of_simple { base with args = [ lit "-i"; lit "--"; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w7 with
+   | W (Sed { in_place = true; expression = "s/a/b/"; file = "f.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --: got %a" pp w);
+  (* --- Unknown flags skipped --- *)
+  let w8 = of_simple { base with args = [ lit "-u"; lit "--unbuffered"; lit "s/a/b/"; lit "f.txt" ] } in
+  (match w8 with
+   | W (Sed { expression = "s/a/b/"; file = "f.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed unknown flags: got %a" pp w);
+  (* --- Combined: sed -iE 's/foo/bar/' file.txt --- *)
+  let w9 = of_simple { base with args = [ lit "-iE"; lit "s/foo/bar/"; lit "file.txt" ] } in
+  (match w9 with
+   | W (Sed { in_place = true; extended_regex = true; suppress_output = false; _ }) -> ()
+   | w -> Alcotest.failf "Sed -iE: got %a" pp w);
+  (* --- Round-trip tests --- *)
+  let rt_cases =
+    [ W (Sed { expression = "s/foo/bar/"; file = "input.txt"; in_place = false; extended_regex = false; suppress_output = false })
+    ; W (Sed { expression = "s/a/b/g"; file = "data.csv"; in_place = true; extended_regex = true; suppress_output = true })
+    ; W (Sed { expression = "/^$/d"; file = "log.txt"; in_place = true; extended_regex = false; suppress_output = false })
+    ; W (Sed { expression = "s/x/y/"; file = "f"; in_place = false; extended_regex = true; suppress_output = false })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = to_simple cmd in
+       let back = of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "Sed round-trip failed for %a" pp w)
+    rt_cases
+;;
+
+(* Batch 21: Rsync parser edge cases — archive, delete, dry_run, compress,
+   combined flags (-az/-anz), value-consuming flags, eq-form, POSIX --. *)
+let test_rsync_edge_cases () =
+  let open Shell_ir_typed in
+  let base =
+    { Shell_ir.bin = bin_ok "rsync"
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* --- Basic: rsync src dst --- *)
+  let w = of_simple { base with args = [ lit "/a/"; lit "/b/" ] } in
+  (match w with
+   | W (Rsync { source = "/a/"; dest = "/b/"; archive = false; delete = false; dry_run = false; compress = false; flags = [] }) -> ()
+   | w -> Alcotest.failf "Rsync basic: got %a" pp w);
+  (* --- -a / --archive --- *)
+  let w2 = of_simple { base with args = [ lit "-a"; lit "/a/"; lit "/b/" ] } in
+  (match w2 with
+   | W (Rsync { archive = true; _ }) -> ()
+   | w -> Alcotest.failf "Rsync -a: got %a" pp w);
+  let w2b = of_simple { base with args = [ lit "--archive"; lit "/a/"; lit "/b/" ] } in
+  (match w2b with
+   | W (Rsync { archive = true; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --archive: got %a" pp w);
+  (* --- --delete --- *)
+  let w3 = of_simple { base with args = [ lit "-a"; lit "--delete"; lit "/a/"; lit "/b/" ] } in
+  (match w3 with
+   | W (Rsync { archive = true; delete = true; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --delete: got %a" pp w);
+  (* --- --dry-run / -n --- *)
+  let w4 = of_simple { base with args = [ lit "-a"; lit "--dry-run"; lit "/a/"; lit "/b/" ] } in
+  (match w4 with
+   | W (Rsync { archive = true; dry_run = true; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --dry-run: got %a" pp w);
+  let w4b = of_simple { base with args = [ lit "-n"; lit "/a/"; lit "/b/" ] } in
+  (match w4b with
+   | W (Rsync { dry_run = true; _ }) -> ()
+   | w -> Alcotest.failf "Rsync -n: got %a" pp w);
+  (* --- -z / --compress --- *)
+  let w5 = of_simple { base with args = [ lit "-az"; lit "/a/"; lit "/b/" ] } in
+  (match w5 with
+   | W (Rsync { archive = true; compress = true; _ }) -> ()
+   | w -> Alcotest.failf "Rsync -az: got %a" pp w);
+  (* --- Combined: -anz --- *)
+  let w6 = of_simple { base with args = [ lit "-anz"; lit "/a/"; lit "/b/" ] } in
+  (match w6 with
+   | W (Rsync { archive = true; dry_run = true; compress = true; _ }) -> ()
+   | w -> Alcotest.failf "Rsync -anz: got %a" pp w);
+  (* --- Value-consuming: --exclude --- *)
+  let w7 = of_simple { base with args = [ lit "-a"; lit "--exclude"; lit "*.log"; lit "/a/"; lit "/b/" ] } in
+  (match w7 with
+   | W (Rsync { archive = true; flags = fl; _ }) when List.mem "*.log" fl && List.mem "--exclude" fl -> ()
+   | w -> Alcotest.failf "Rsync --exclude: got %a" pp w);
+  (* --- Value-consuming: -e (remote shell) --- *)
+  let w8 = of_simple { base with args = [ lit "-a"; lit "-e"; lit "ssh -p 2222"; lit "/a/"; lit "host:/b/" ] } in
+  (match w8 with
+   | W (Rsync { archive = true; flags = fl; _ }) when List.mem "ssh -p 2222" fl && List.mem "-e" fl -> ()
+   | w -> Alcotest.failf "Rsync -e: got %a" pp w);
+  (* --- Value-consuming eq-form: --exclude=PATTERN --- *)
+  let w9 = of_simple { base with args = [ lit "-a"; lit "--exclude=*.tmp"; lit "/a/"; lit "/b/" ] } in
+  (match w9 with
+   | W (Rsync { archive = true; flags = fl; _ }) when List.mem "*.tmp" fl && List.mem "--exclude" fl -> ()
+   | w -> Alcotest.failf "Rsync --exclude=: got %a" pp w);
+  (* --- POSIX -- end-of-options --- *)
+  let w10 = of_simple { base with args = [ lit "-a"; lit "--"; lit "/src/"; lit "/dst/" ] } in
+  (match w10 with
+   | W (Rsync { archive = true; source = "/src/"; dest = "/dst/"; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --: got %a" pp w);
+  (* --- Unknown flags go to flags list --- *)
+  let w11 = of_simple { base with args = [ lit "-a"; lit "--progress"; lit "--human-readable"; lit "/a/"; lit "/b/" ] } in
+  (match w11 with
+   | W (Rsync { archive = true; flags = fl; _ }) when List.mem "--progress" fl && List.mem "--human-readable" fl -> ()
+   | w -> Alcotest.failf "Rsync unknown flags: got %a" pp w);
+  (* --- Round-trip tests --- *)
+  let rt_cases =
+    [ W (Rsync { source = "/a/"; dest = "/b/"; archive = false; delete = false; dry_run = false; compress = false; flags = [] })
+    ; W (Rsync { source = "/src/"; dest = "host:/dst/"; archive = true; delete = true; dry_run = true; compress = true; flags = [ "--exclude"; "*.log" ] })
+    ; W (Rsync { source = "."; dest = "/backup/"; archive = true; delete = false; dry_run = false; compress = false; flags = [] })
+    ; W (Rsync { source = "/data/"; dest = "/mirror/"; archive = false; delete = true; dry_run = false; compress = true; flags = [ "-e"; "ssh -p 22" ] })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = to_simple cmd in
+       let back = of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "Rsync round-trip failed for %a" pp w)
+    rt_cases
+;;
+
+(* Batch 21: Grep parser edge cases — recursive, case_sensitive, files_with_matches,
+   -e/--regexp pattern, combined flags (-ri/-rli), value-consuming context flags,
+   eq-form, POSIX --. *)
+let test_grep_edge_cases () =
+  let open Shell_ir_typed in
+  let base =
+    { Shell_ir.bin = bin_ok "grep"
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* --- Basic: grep pattern file --- *)
+  let w = of_simple { base with args = [ lit "TODO"; lit "main.ml" ] } in
+  (match w with
+   | W (Grep { pattern = "TODO"; path = Some "main.ml"; recursive = false; case_sensitive = true; files_with_matches = false }) -> ()
+   | w -> Alcotest.failf "Grep basic: got %a" pp w);
+  (* --- -r / -R / --recursive --- *)
+  let w2 = of_simple { base with args = [ lit "-r"; lit "TODO"; lit "src/" ] } in
+  (match w2 with
+   | W (Grep { recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep -r: got %a" pp w);
+  let w2b = of_simple { base with args = [ lit "--recursive"; lit "TODO"; lit "src/" ] } in
+  (match w2b with
+   | W (Grep { recursive = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep --recursive: got %a" pp w);
+  (* --- -i / --ignore-case (case_sensitive becomes false) --- *)
+  let w3 = of_simple { base with args = [ lit "-i"; lit "todo"; lit "main.ml" ] } in
+  (match w3 with
+   | W (Grep { case_sensitive = false; _ }) -> ()
+   | w -> Alcotest.failf "Grep -i: got %a" pp w);
+  let w3b = of_simple { base with args = [ lit "--ignore-case"; lit "TODO"; lit "main.ml" ] } in
+  (match w3b with
+   | W (Grep { case_sensitive = false; _ }) -> ()
+   | w -> Alcotest.failf "Grep --ignore-case: got %a" pp w);
+  (* --- -l / --files-with-matches --- *)
+  let w4 = of_simple { base with args = [ lit "-l"; lit "TODO"; lit "src/" ] } in
+  (match w4 with
+   | W (Grep { files_with_matches = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep -l: got %a" pp w);
+  (* --- -e PATTERN / --regexp PATTERN (explicit pattern, allows patterns starting with -) --- *)
+  (* Note: pattern must be >4 chars or contain non-alpha to avoid expand_combined_short_flags *)
+  let w5 = of_simple { base with args = [ lit "-e"; lit "-foo-bar"; lit "main.ml" ] } in
+  (match w5 with
+   | W (Grep { pattern = "-foo-bar"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -e: got %a" pp w);
+  let w5b = of_simple { base with args = [ lit "--regexp"; lit "bar"; lit "main.ml" ] } in
+  (match w5b with
+   | W (Grep { pattern = "bar"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --regexp: got %a" pp w);
+  (* --- -ePATTERN combined form --- *)
+  let w5c = of_simple { base with args = [ lit "-e-pattern"; lit "main.ml" ] } in
+  (match w5c with
+   | W (Grep { pattern = "-pattern"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -ePATTERN: got %a" pp w);
+  (* --- --regexp=PATTERN eq-form --- *)
+  let w5d = of_simple { base with args = [ lit "--regexp=hello"; lit "main.ml" ] } in
+  (match w5d with
+   | W (Grep { pattern = "hello"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --regexp=: got %a" pp w);
+  (* --- Combined flags: -ri, -rli --- *)
+  let w6 = of_simple { base with args = [ lit "-ri"; lit "todo"; lit "src/" ] } in
+  (match w6 with
+   | W (Grep { recursive = true; case_sensitive = false; _ }) -> ()
+   | w -> Alcotest.failf "Grep -ri: got %a" pp w);
+  let w6b = of_simple { base with args = [ lit "-rli"; lit "todo"; lit "src/" ] } in
+  (match w6b with
+   | W (Grep { recursive = true; case_sensitive = false; files_with_matches = true; _ }) -> ()
+   | w -> Alcotest.failf "Grep -rli: got %a" pp w);
+  (* --- Value-consuming: -A/-B/-C/-m NUM (context/max-count, skipped) --- *)
+  let w7 = of_simple { base with args = [ lit "-C"; lit "3"; lit "TODO"; lit "main.ml" ] } in
+  (match w7 with
+   | W (Grep { pattern = "TODO"; path = Some "main.ml"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -C 3: got %a" pp w);
+  let w7b = of_simple { base with args = [ lit "-m"; lit "5"; lit "TODO"; lit "main.ml" ] } in
+  (match w7b with
+   | W (Grep { pattern = "TODO"; path = Some "main.ml"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -m 5: got %a" pp w);
+  (* --- Value-consuming: --include/--exclude (skipped) --- *)
+  let w8 = of_simple { base with args = [ lit "-r"; lit "--include"; lit "*.ml"; lit "TODO"; lit "src/" ] } in
+  (match w8 with
+   | W (Grep { recursive = true; pattern = "TODO"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --include: got %a" pp w);
+  (* --- --color=auto eq-form (skipped) --- *)
+  let w9 = of_simple { base with args = [ lit "--color=auto"; lit "TODO"; lit "main.ml" ] } in
+  (match w9 with
+   | W (Grep { pattern = "TODO"; path = Some "main.ml"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --color=auto: got %a" pp w);
+  (* --- POSIX -- end-of-options --- *)
+  let w10 = of_simple { base with args = [ lit "-r"; lit "--"; lit "pattern"; lit "dir/" ] } in
+  (match w10 with
+   | W (Grep { recursive = true; pattern = "pattern"; path = Some "dir/"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --: got %a" pp w);
+  (* --- Unknown flags skipped --- *)
+  let w11 = of_simple { base with args = [ lit "-r"; lit "--line-number"; lit "--with-filename"; lit "TODO"; lit "src/" ] } in
+  (match w11 with
+   | W (Grep { recursive = true; pattern = "TODO"; _ }) -> ()
+   | w -> Alcotest.failf "Grep unknown flags: got %a" pp w);
+  (* --- Round-trip tests --- *)
+  let rt_cases =
+    [ W (Grep { pattern = "TODO"; path = None; recursive = false; case_sensitive = true; files_with_matches = false })
+    ; W (Grep { pattern = "error"; path = Some "logs/"; recursive = true; case_sensitive = false; files_with_matches = true })
+    ; W (Grep { pattern = "-v"; path = Some "main.ml"; recursive = false; case_sensitive = true; files_with_matches = false })
+    ; W (Grep { pattern = "foo"; path = Some "src/"; recursive = true; case_sensitive = false; files_with_matches = false })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = to_simple cmd in
+       let back = of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "Grep round-trip failed for %a" pp w)
+    rt_cases
+;;
+
+let test_sort_cut_tr_tar_edge_cases () =
+  let base = base_simple "sort" in
+  (* Sort: -k3rn combined key+flags *)
+  let s1 = of_simple { base with args = [ lit "-k3rn"; lit "data.txt" ] } in
+  (match s1 with
+   | W (Sort { key = Some 3; reverse = true; numeric = true; file = Some "data.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sort -k3rn: got %a" pp w);
+  (* Sort: -k2 combined key only (no trailing flags) *)
+  let s2 = of_simple { base with args = [ lit "-k2"; lit "f" ] } in
+  (match s2 with
+   | W (Sort { key = Some 2; reverse = false; numeric = false; file = Some "f"; _ }) -> ()
+   | w -> Alcotest.failf "Sort -k2: got %a" pp w);
+  (* Sort: --key=5 eq-form *)
+  let s3 = of_simple { base with args = [ lit "--key=5"; lit "f" ] } in
+  (match s3 with
+   | W (Sort { key = Some 5; _ }) -> ()
+   | w -> Alcotest.failf "Sort --key=5: got %a" pp w);
+  (* Sort: -rn combined flags *)
+  let s4 = of_simple { base with args = [ lit "-rn"; lit "f" ] } in
+  (match s4 with
+   | W (Sort { reverse = true; numeric = true; unique = false; _ }) -> ()
+   | w -> Alcotest.failf "Sort -rn: got %a" pp w);
+  (* Sort: -rnu combined flags *)
+  let s5 = of_simple { base with args = [ lit "-rnu"; lit "f" ] } in
+  (match s5 with
+   | W (Sort { reverse = true; numeric = true; unique = true; _ }) -> ()
+   | w -> Alcotest.failf "Sort -rnu: got %a" pp w);
+  (* Sort: --field-separator=: eq-form (skipped, doesn't affect typed) *)
+  let s6 = of_simple { base with args = [ lit "-t"; lit ":"; lit "-k2"; lit "f" ] } in
+  (match s6 with
+   | W (Sort { key = Some 2; _ }) -> ()
+   | w -> Alcotest.failf "Sort -t : -k2: got %a" pp w);
+  (* Sort: -- end-of-options *)
+  let s7 = of_simple { base with args = [ lit "-r"; lit "--"; lit "-file" ] } in
+  (match s7 with
+   | W (Sort { reverse = true; file = Some "-file"; _ }) -> ()
+   | w -> Alcotest.failf "Sort -- -file: got %a" pp w);
+  (* Sort: round-trip for complex case *)
+  let rt_sort = W (Sort { reverse = true; numeric = true; unique = false; key = Some 3; file = Some "data.txt" }) in
+  (match rt_sort with W c ->
+     let simple = to_simple c in
+     let back = of_simple simple in
+     if not (rt_sort = back)
+     then Alcotest.failf "Sort round-trip failed: %a" pp back);
+  (* Cut: -d: combined delimiter *)
+  let c1 = of_simple { (base_simple "cut") with args = [ lit "-d:"; lit "-f1"; lit "data.csv" ] } in
+  (match c1 with
+   | W (Cut { delimiter = Some ":"; fields = "1"; file = Some "data.csv" }) -> ()
+   | w -> Alcotest.failf "Cut -d:: got %a" pp w);
+  (* Cut: -f1,3 combined field *)
+  let c2 = of_simple { (base_simple "cut") with args = [ lit "-f1,3"; lit "f" ] } in
+  (match c2 with
+   | W (Cut { fields = "1,3"; _ }) -> ()
+   | w -> Alcotest.failf "Cut -f1,3: got %a" pp w);
+  (* Cut: --delimiter=: eq-form *)
+  let c3 = of_simple { (base_simple "cut") with args = [ lit "--delimiter=:"; lit "-f2"; lit "f" ] } in
+  (match c3 with
+   | W (Cut { delimiter = Some ":"; fields = "2"; _ }) -> ()
+   | w -> Alcotest.failf "Cut --delimiter=:: got %a" pp w);
+  (* Cut: --fields=1,2 eq-form *)
+  let c4 = of_simple { (base_simple "cut") with args = [ lit "--fields=1,2"; lit "f" ] } in
+  (match c4 with
+   | W (Cut { fields = "1,2"; _ }) -> ()
+   | w -> Alcotest.failf "Cut --fields=1,2: got %a" pp w);
+  (* Cut: round-trip *)
+  let rt_cut = W (Cut { delimiter = Some ":"; fields = "1,3,5"; file = Some "/etc/passwd" }) in
+  (match rt_cut with W c ->
+     let simple_c = to_simple c in
+     let back_c = of_simple simple_c in
+     if not (rt_cut = back_c)
+     then Alcotest.failf "Cut round-trip failed: %a" pp back_c);
+  (* Tr: -ds combined flags *)
+  let t1 = of_simple { (base_simple "tr") with args = [ lit "-ds"; lit "' '"; lit "" ] } in
+  (match t1 with
+   | W (Tr { delete = true; squeeze = true; set1 = "' '"; set2 = Some ""; _ }) -> ()
+   | w -> Alcotest.failf "Tr -ds: got %a" pp w);
+  (* Tr: -sd combined flags *)
+  let t2 = of_simple { (base_simple "tr") with args = [ lit "-sd"; lit "a-z"; lit "A-Z" ] } in
+  (match t2 with
+   | W (Tr { delete = true; squeeze = true; set1 = "a-z"; set2 = Some "A-Z"; _ }) -> ()
+   | w -> Alcotest.failf "Tr -sd: got %a" pp w);
+  (* Tr: -- with dash-prefixed set *)
+  let t3 = of_simple { (base_simple "tr") with args = [ lit "-d"; lit "--"; lit "-x" ] } in
+  (match t3 with
+   | W (Tr { delete = true; squeeze = false; set1 = "-x"; set2 = None; _ }) -> ()
+   | w -> Alcotest.failf "Tr -- -x: got %a" pp w);
+  (* Tr: round-trip *)
+  let rt_tr = W (Tr { set1 = "a-z"; set2 = Some "A-Z"; delete = false; squeeze = true }) in
+  (match rt_tr with W c ->
+     let simple_t = to_simple c in
+     let back_t = of_simple simple_t in
+     if not (rt_tr = back_t)
+     then Alcotest.failf "Tr round-trip failed: %a" pp back_t);
+  (* Tar: -czf combined flags *)
+  let r1 = of_simple { (base_simple "tar") with args = [ lit "-czf"; lit "archive.tar.gz"; lit "src/" ] } in
+  (match r1 with
+   | W (Tar { action = `Create; compression = `Gzip; archive = "archive.tar.gz"; paths = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar -czf: got %a" pp w);
+  (* Tar: -xzf combined flags *)
+  let r2 = of_simple { (base_simple "tar") with args = [ lit "-xzf"; lit "archive.tar.gz" ] } in
+  (match r2 with
+   | W (Tar { action = `Extract; compression = `Gzip; archive = "archive.tar.gz"; paths = []; _ }) -> ()
+   | w -> Alcotest.failf "Tar -xzf: got %a" pp w);
+  (* Tar: -cjf bzip2 *)
+  let r3 = of_simple { (base_simple "tar") with args = [ lit "-cjf"; lit "archive.tar.bz2"; lit "data/" ] } in
+  (match r3 with
+   | W (Tar { action = `Create; compression = `Bzip2; archive = "archive.tar.bz2"; _ }) -> ()
+   | w -> Alcotest.failf "Tar -cjf: got %a" pp w);
+  (* Tar: -cJf xz *)
+  let r4 = of_simple { (base_simple "tar") with args = [ lit "-cJf"; lit "archive.tar.xz"; lit "data/" ] } in
+  (match r4 with
+   | W (Tar { action = `Create; compression = `Xz; archive = "archive.tar.xz"; _ }) -> ()
+   | w -> Alcotest.failf "Tar -cJf: got %a" pp w);
+  (* Tar: --file= eq-form *)
+  let r5 = of_simple { (base_simple "tar") with args = [ lit "-c"; lit "--file=archive.tar"; lit "src/" ] } in
+  (match r5 with
+   | W (Tar { action = `Create; archive = "archive.tar"; paths = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --file=: got %a" pp w);
+  (* Tar: --exclude=PATTERN eq-form (skipped) *)
+  let r6 = of_simple { (base_simple "tar") with args = [ lit "-czf"; lit "a.tar.gz"; lit "--exclude=*.o"; lit "src/" ] } in
+  (match r6 with
+   | W (Tar { action = `Create; compression = `Gzip; archive = "a.tar.gz"; paths = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --exclude=: got %a" pp w);
+  (* Tar: -tf list *)
+  let r7 = of_simple { (base_simple "tar") with args = [ lit "-tf"; lit "archive.tar" ] } in
+  (match r7 with
+   | W (Tar { action = `List; archive = "archive.tar"; compression = `None; paths = []; _ }) -> ()
+   | w -> Alcotest.failf "Tar -tf: got %a" pp w);
+  (* Tar: --zstd compression *)
+  let r8 = of_simple { (base_simple "tar") with args = [ lit "-c"; lit "--zstd"; lit "-f"; lit "a.tar.zst"; lit "d/" ] } in
+  (match r8 with
+   | W (Tar { action = `Create; compression = `Zstd; archive = "a.tar.zst"; _ }) -> ()
+   | w -> Alcotest.failf "Tar --zstd: got %a" pp w);
+  (* Tar: --strip-components=N eq-form (skipped) *)
+  let r9 = of_simple { (base_simple "tar") with args = [ lit "-xf"; lit "a.tar"; lit "--strip-components=1" ] } in
+  (match r9 with
+   | W (Tar { action = `Extract; archive = "a.tar"; paths = []; _ }) -> ()
+   | w -> Alcotest.failf "Tar --strip-components=: got %a" pp w);
+  (* Tar: -- end-of-options with dash-prefixed path *)
+  let r10 = of_simple { (base_simple "tar") with args = [ lit "-cf"; lit "a.tar"; lit "--"; lit "-weird-file" ] } in
+  (match r10 with
+   | W (Tar { action = `Create; archive = "a.tar"; paths = [ "-weird-file" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar -- -file: got %a" pp w);
+  (* Tar: round-trip for complex case *)
+  let rt_tar = W (Tar { action = `Create; archive = "backup.tar.gz"; paths = [ "src/"; "docs/" ]; compression = `Gzip }) in
+  (match rt_tar with W c ->
+     let simple_r = to_simple c in
+     let back_r = of_simple simple_r in
+     if not (rt_tar = back_r)
+     then Alcotest.failf "Tar round-trip failed: %a" pp back_r);
+  (* Sort: round-trip edge case: no key, no file *)
+  let rt_sort2 = W (Sort { reverse = false; numeric = false; unique = true; key = None; file = None }) in
+  (match rt_sort2 with W c ->
+     let simple_s2 = to_simple c in
+     let back_s2 = of_simple simple_s2 in
+     if not (rt_sort2 = back_s2)
+     then Alcotest.failf "Sort round-trip (minimal) failed: %a" pp back_s2)
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -3573,6 +4051,22 @@ let () =
             "Batch20 Make edge cases (target/jobs/dir/mkfile/-nksB/-jN/eq-form/--)"
             `Quick
             test_make_edge_cases
+        ; Alcotest.test_case
+            "Batch21 Sed edge cases (expr/file/-i(GNU+mac)/-E/-n/eq-form/combined/--)"
+            `Quick
+            test_sed_edge_cases
+        ; Alcotest.test_case
+            "Batch21 Rsync edge cases (archive/delete/dry-run/compress/-az/-anz/value-flags/eq-form/--)"
+            `Quick
+            test_rsync_edge_cases
+        ; Alcotest.test_case
+            "Batch21 Grep edge cases (-r/-i/-l/-e/--regexp/-ri/-rli/ctx-flags/eq-form/--)"
+            `Quick
+            test_grep_edge_cases
+        ; Alcotest.test_case
+            "Batch22 Sort/Cut/Tr/Tar edge cases (-k3rn/-d:/-ds/-czf/eq-form/--)"
+            `Quick
+            test_sort_cut_tr_tar_edge_cases
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

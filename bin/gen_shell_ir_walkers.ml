@@ -844,9 +844,14 @@ parse 10 None args|}
         @ (if case_sensitive then [] else [ "-i" ])
         @ (if files_with_matches then [ "-l" ] else [])
       in
+      let pat_args =
+        if String.length pattern > 0 && pattern.[0] = '-'
+        then [ "-e"; pattern ]
+        else [ pattern ]
+      in
       let args =
         flag_args
-        @ [ pattern ]
+        @ pat_args
         @ (match path with None -> [] | Some p -> [ p ])
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Grep
@@ -3151,10 +3156,7 @@ let rec parse in_place ext_re suppress expr file dd = function
      | "" :: rest' -> parse true ext_re suppress expr file dd rest'   (* -i '' — macOS empty suffix *)
      | _ -> parse true ext_re suppress expr file dd rest)              (* -i at end or GNU style *)
   | "--in-place" :: rest when not dd ->
-    (* GNU sed --in-place[=SUFFIX]. If next arg looks like a suffix (non-flag, non-expression), skip it. *)
-    (match rest with
-     | s :: rest' when String.length s > 0 && s.[0] <> '-' -> parse true ext_re suppress expr file dd rest'  (* --in-place=SUFFIX equivalent *)
-     | _ -> parse true ext_re suppress expr file dd rest)
+    parse true ext_re suppress expr file dd rest
   | "-e" :: e :: rest | "--expression" :: e :: rest when not dd -> parse in_place ext_re suppress (Some e) file dd rest  (* explicit expression *)
   | "-f" :: f :: rest | "--file" :: f :: rest when not dd -> parse in_place ext_re suppress (Some f) file dd rest  (* script file → expression *)
   | "-E" :: rest | "--regexp-extended" :: rest when not dd -> parse in_place true suppress expr file dd rest
@@ -3163,9 +3165,9 @@ let rec parse in_place ext_re suppress expr file dd = function
   | "--" :: rest -> parse in_place ext_re suppress expr file true rest
   (* --expression=EXPR and --file=FILE eq-forms *)
   | arg :: rest
-    when not dd && String.length arg > 14
-         && String.sub arg 0 14 = "--expression=" ->
-    let e = String.sub arg 14 (String.length arg - 14) in
+    when not dd && String.length arg > 13
+         && String.sub arg 0 13 = "--expression=" ->
+    let e = String.sub arg 13 (String.length arg - 13) in
     parse in_place ext_re suppress (Some e) file dd rest
   | arg :: rest
     when not dd && String.length arg > 7

@@ -1,0 +1,110 @@
+# RFC-0206: Runtime 개념 — cascade→Runtime 재탄생
+
+- Status: Draft
+- Date: 2026-05-30
+- Supersedes 라우팅 레이어: RFC-0038(routing-intent), RFC-0041(group-item-hierarchy), RFC-0058 §Layer-4/5(routes/aliases), RFC-0181(routes+phonebook dual-SSOT)
+- Builds on: RFC-0058(provider/model/binding 선언 스키마, Layers 1-3), keeper_meta_contract(HEAD; exhaustion 분류)
+- Context: PR #19536이 `lib/cascade*`(170+파일) 전면 삭제 + 빌드 의도적 broken. 본 RFC는 그 후속 "Runtime 구현 채우기"의 설계 SSOT.
+
+## 1. 동기
+
+cascade는 다중 provider failover 프레임워크였다: `cascade_name`/`routes`/`tier`/`profile` 간접 레이어로 코드 호출지점을 설정에 매핑하고, 여러 후보를 health/capacity 신호로 정렬해 순차 시도했다. 30개 RFC가 이 추상화를 키웠고 264파일이 강결합됐다.
+
+#19536은 이 개념을 코드베이스에서 제거했다. 남은 것은 소비자 쪽 844개 dangling `Cascade_*` 참조(122파일, keeper 82)와, 거의 빈 `lib/runtime`(2파일, 그마저 삭제된 `Cascade_declarative_types`에 의존해 컴파일 불가)이다.
+
+본 RFC는 cascade를 1:1 복구하지 않는다. **Runtime을 자립 개념으로 정의하고 구현을 채운다.**
+
+## 2. Runtime 개념
+
+Runtime은 하나의 완전히 materialize된 (Provider × Model × Binding) triple과, dispatch 대상인 hot-path `Llm_provider.Provider_config.t`다. resolution graph의 노드가 아니라 **독립 값**이다.
+
+- 시스템은 `config/cascade.toml`(파일명 rename은 deferred)을 flat `Runtime.t list` + 정확히 1개 default `Runtime.t`로 로드한다. default는 `[runtime].default = "provider.model"` 키로 선택한다.
+- `cascade_name` 없음, `routes`/`logical_use` enum 없음, tier escalation 없음, profile 간접 없음. 각 binding 셀이 곧 하나의 Runtime이며 `"provider.model"` 문자열 키로 식별된다.
+- 소비자는 list와 default를 직접 받아 `runtime.provider_config`를 LLM에 넘긴다. in-band routing 0.
+- 다중후보 failover(Selecting/Trying 루프, weighted-random, round-robin, fallback chain)는 제거된다. Runtime은 단일 사전선택 provider를 나타내며 atomic하게 성공/실패한다. cross-runtime 재시도가 필요하면 그것은 in-turn FSM이 아니라 명시적 상위 supervisor 결정이다.
+
+### 2.1 불변식: fail-fast
+
+`[runtime].default`가 없거나, default id가 resolvable binding 중에 없으면 load 시점에 `Error`이고 startup을 abort한다. silent fallback 없음. (현재 `runtime.ml`의 `"tool_strict"` 하드코딩 fallback은 Unknown→Permissive 안티패턴이므로 **제거**한다 — §6 R1.)
+
+## 3. 자립 타입 (P1)
+
+삭제된 `Cascade_declarative_types`를 `lib/runtime/runtime_schema.ml(.mli)`의 자립 타입으로 재구현한다. `Cascade_` 네임스페이스로 재성장시키지 않는다.
+
+| 타입 | 형태 | 대체 |
+|------|------|------|
+| `api_format` | `Messages_api \| Chat_completions_api \| Ollama_api` | `cascade_api_format` |
+| `transport` | `Http of string \| Cli of string` | `cascade_transport` |
+| `credential` | `Env of string \| File of string \| Inline of string` | `cascade_credential` |
+| `thinking_control_format` | `No_thinking_control \| Thinking_object \| Chat_template_kwargs` | `cascade_thinking_control_format` |
+| `capabilities` | 10-field provider 행동 record + `capabilities_default` | `cascade_capabilities` |
+| `model_capabilities` | 24-field record (`Llm_provider.Capabilities` 미러) + default | `cascade_model_capabilities` |
+| `provider` | Layer 1 record (id/display_name/protocol/api_format/transport/is_non_interactive/credentials/capabilities/headers). log·healthcheck sub-record는 v1에서 parse-and-ignore | `cascade_provider` |
+| `model_spec` | Layer 2 record (id/api_name/tools_support/max_context/thinking_support/max_thinking_budget/streaming/capabilities/match_prefixes) | `cascade_model_spec` |
+| `binding` | Layer 3 record (provider_id/model_id/is_default/max_concurrent/price_*/keep_alive/num_ctx) + `binding_key` | `cascade_binding` |
+| `config` | `{ providers; models; bindings; default_runtime_id }` — **routes/system_targets/profiles/aliases DROP** | `cascade_config` minus routing |
+
+조회 헬퍼 `provider_of_id : config -> string -> provider option`, `model_of_id : config -> string -> model_spec option`도 함께 자립화한다.
+
+## 4. FSM 추출 (routes/tiers 폐기)
+
+cascade 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selection FSM으로 살아남지 않는다. Selecting/Trying/round-robin/fallback은 single-binding 모델에서 소멸한다.
+
+그러나 keeper 소비자(`keeper_composite_observer`, `keeper_registry`의 packed state, 5개 invariant)가 이를 turn-observation/FSM-invariant로 매치한다. 재배치:
+
+- **keeper 소유 slimmed enum**: `keeper_turn_phase = Turn_idle | Turn_dispatching | Turn_done | Turn_exhausted`. `Trying → Turn_dispatching`, `Selecting`은 삭제(in-turn 선택 없음).
+- `Cascade_routed` event_kind, `Cascade_backpressured` 신호는 단일 dispatch 이벤트 + turn-terminal `Timeout`/`Admission_denied` 에러로 collapse(capacity 거부는 더 이상 provider-level backpressure가 아님).
+- **exhaustion 분류는 재생성 금지**: `keeper_meta_contract.cascade_exhaustion_reason`(10 variant: Connection_refused/Dns_failure/No_providers_available/All_providers_failed/Candidates_filtered_after_cycles/Max_turns_exceeded/Structural_attempt_timeout/Capacity_exhausted/No_tool_capable/Other_detail) + `blocker_class`(`Cascade_exhausted` carrier)는 HEAD에 이미 keeper-owned로 생존(`keeper_meta_contract.mli:139-196`). **그대로 재사용.** 이 표면은 operator 대시보드가 파싱하는 frozen seam이므로 rename 금지.
+- `check_no_cascade_before_measurement` 등 5개 invariant는 keeper concern으로 생존하되 `Turn_dispatching` gate로 retarget.
+
+## 5. 계승 / 폐기
+
+**계승(INHERIT):**
+- `keeper_meta_contract`의 exhaustion_reason + blocker_class (frozen, 재사용)
+- `Llm_provider.Provider_config.t`를 `Runtime.t.provider_config` hot-path 대상으로 (외부 OAS lib, 생존)
+- RFC-0058 절대 원칙: 코드는 provider/model 이름을 모른다 — provider 추가 = TOML 항목만, 재컴파일 없음
+- RFC-0058 §4.1 load-time validation = `Runtime.load_list`의 fail-fast gate
+- per-binding capacity slot(`binding.max_concurrent`)이 URL 기반 capacity registry 대체 (RFC-0058 §5)
+- api_format 3-variant dispatch를 provider 정체성과 분리
+
+**폐기(DISCARD):**
+- `Cascade_name.t` 문자열 wrapper(~90 ref) → raw string id, 검증은 TOML load 경계에서만
+- `Cascade_routes`/`cascade_routes_resolve`/`logical_use` enum
+- `Cascade_strategy` + strategy kind ADT + trace (single Failover)
+- `Cascade_fsm` 다중후보 `decide()`(Accept/Try_next/Exhausted) → atomic success/fail
+- round-robin cursor, fallback_events/hops, multi-tier escalation
+- `Cascade_observation` state-bearing record → 단일 attempt metadata(latency_ms/error/outcome)로 demote
+- 전역 `Cascade_health_tracker.global` 싱글톤(cascade-name 축) → per-runtime-key health를 명시 전달
+- `cascade_source` enum, weighted_entry_drop, route→catalog→profile 2단 resolution
+- `Cascade_phonebook_*`/`Cascade_routing_policy`/`Cascade_capability_profile` registry
+- Layer 4 per-use overrides(alias), route, system_targets, profile
+- `get_default_runtime_id`의 `"tool_strict"` 하드코딩 fallback
+
+## 6. 구현 단계
+
+| Phase | 목표 | 파일 | unblocks |
+|-------|------|------|----------|
+| **P1** | `runtime_schema.ml(.mli)` 10 type group + defaults + provider_of_id/model_of_id/binding_key. 삭제 모듈 의존 0. `open Cascade_declarative_types` 대체 | ~4 | Runtime.t가 자립 타입으로 컴파일; P2 타깃 스키마 확보 |
+| **P2** | `runtime_toml.ml`(Otoml→config), `runtime_adapter.ml`(binding→Provider_config.t). load_list/of_binding 배선. cascade.toml fixture + no-default fixture(Error) 검증 | ~7 | load_list end-to-end; init_default; startup fail-fast |
+| **P3** | singleton 경계 결정. ref 기반 유지 + `"tool_strict"` fallback 삭제(uninit→fail loud). eager-init crash 회피(lazy/explicit + test fixture) | ~5 | 90 사이트 안전 re-home |
+| **P4** | keeper 소비자 re-home(dominant 77파일). Cascade_name/runner/error_classify/catalog_runtime → raw id, get_default_runtime_id, keeper_meta_contract, keeper_turn_phase. 5파일 batch | ~16 batch | 844 dangling 대부분 해소 |
+| **P5** | 주변 소비자: config_doctor, dashboard runtime lens, admission_queue, server, otel, operator. dune deps에서 cascade lib 제거 | ~21 | full build green; dangling 0 |
+| **P6** | invariant retarget(`Turn_dispatching`), load_list fail-fast test(no-default→Error, bad-id→Error, subset filtering), mutation-test | ~6 | 검증 가능한 완료 기준 |
+
+## 7. 리스크
+
+- **R1 (silent-default landmine):** `"tool_strict"` fallback은 init 순서가 틀리면 90 사이트가 조작된 id를 받는다 — Unknown→Permissive 안티패턴. P3에서 삭제(Error/raise on uninit), 이월 금지.
+- **R2 (eager-init crash):** 메모리 2026-05-30 B3 `cascade_name_for_use` gut이 fail-fast raise + eager module-level binding으로 config-less 바이너리(테스트) startup crash 때문에 DEFER됨. Runtime 싱글톤도 동일 위험 — init을 lazy/explicit로 유지하고 test runtime fixture 제공.
+- **R3 (병렬 충돌):** 다른 세션이 동일 파일에서 cascade purge 진행 중(feat/cascade-name-cleanup 174파일, host load 110+). P4 전 `masc_broadcast` + in-flight PR scan 필수(broken-main race #19424 재발 방지).
+- **R4 (재성장):** runtime_toml/runtime_adapter를 minimal하게. aliases/routes/profiles 파싱 전면 drop, validator dual-mode·longest-prefix model matching은 binding이 실제 fuzzy resolution을 요구하기 전엔 포팅 금지.
+- **R5 (frozen seam):** `keeper_meta_contract`의 `blocker_class_to_string` literal을 operator 대시보드가 파싱. `Cascade_exhausted` rename은 alerting을 깬다. reuse, refactor 금지.
+- **R6 (CI surface gate):** `Detect Changed Surfaces`가 types-only P1을 no-surface로 오분류해 Build/Test skip한 전례(2026-05-28). gate가 `lib/runtime/`에 trigger되는지 검증.
+
+## 8. 검증
+
+- P1: `dune build lib/runtime/ --root .` 통과 (keeper broken 무관하게 runtime lib 자립 컴파일)
+- P2: cascade.toml fixture 로드 성공 + no-default fixture → `Error`
+- P6: fail-fast mutation-test (default 누락/오류 시 반드시 Error)
+- 최종: full build green + `rg -w 'Cascade_[A-Za-z_]+' lib bin` = 0
+
+RFC-WAIVED 근거(상위 #19536): 사용자 명시 지시에 따른 cascade→Runtime 재탄생. 본 RFC가 그 구현 단계의 설계 SSOT를 제공한다.

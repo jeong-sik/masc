@@ -76,24 +76,6 @@ let metric_coord_claim_post_provision_failures =
    intentional 120s/180s budgets in persona authoring / deep_review. *)
 include Prometheus_oas_metric_names
 
-(* Inlined from deleted Prometheus_cascade_metric_names (cascade purge). *)
-let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
-let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
-let metric_cascade_attempt_liveness_kill = "masc_cascade_attempt_liveness_kill_total"
-let metric_cascade_attempt_liveness_observed = "masc_cascade_attempt_liveness_observed_total"
-let metric_cascade_ttfb_seconds = "masc_cascade_ttfb_seconds"
-let metric_cascade_inter_chunk_seconds = "masc_cascade_inter_chunk_seconds"
-let metric_cascade_provider_health_score = "masc_cascade_provider_health_score"
-let metric_cascade_decisions = "masc_cascade_decisions_total"
-let metric_cascade_fallbacks = "masc_cascade_fallbacks_total"
-let metric_cascade_providers_exhausted = "masc_cascade_providers_exhausted_total"
-let metric_cascade_routing_phase_overrides = "masc_cascade_routing_phase_overrides_total"
-let metric_cascade_server_error_skip_total = "masc_cascade_server_error_skip_total"
-let metric_cascade_pre_dispatch_required_tool_filtered = "masc_cascade_pre_dispatch_required_tool_filtered_total"
-let metric_cascade_fallback_cycle_detected_total = "masc_cascade_fallback_cycle_detected_total"
-let metric_provider_health_probe_skipped = "masc_provider_health_probe_skipped_total"
-let metric_provider_actual_health_status = "masc_provider_actual_health_status"
-let metric_provider_health_probe_error = "masc_provider_health_probe_error_total"
 
 include Prometheus_runtime_metric_names
 
@@ -104,10 +86,7 @@ let metric_open_fds = "masc_process_open_fds"
 let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
 include Prometheus_core_metric_names
 
-(* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters.
-   Names are owned by [Pool_metrics] (lib/server/pool_metrics.ml).
-   Re-aliased here so [init] can register them in the central registry
-   without reaching into the masc_http_client library. *)
+(* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters. *)
 let metric_pool_idle_total = Pool_metrics.metric_idle_total
 let metric_pool_inflight_total = Pool_metrics.metric_inflight_total
 let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
@@ -117,15 +96,6 @@ let metric_pool_create_total = Pool_metrics.metric_create_total
 
 include Prometheus_policy_metric_names
 
-(* Increments each time [Keeper_turn_slot.force_release_holder_for] frees
-   a slot held by a zombie fiber (typically because the fiber is stuck
-   inside an LLM subprocess that did not honour cancellation). Without
-   this path the slot stays held until process restart, starving the
-   fleet behind the [reactive_turn_semaphore]. Labels: keeper, label
-   ([turn] / [autonomous] / [reactive]). A positive rate means the
-   force-release path is the only thing draining stuck slots, which is
-   itself a signal that the upstream subprocess kill-on-cancel is
-   incomplete and worth investigating. *)
 (* P0-2 (2026-05-07): observability for orphan turn loops.
    [_dropped] increments every time [Keeper_registry.update_entry] is
    called against a missing key (caller raced with deregistration).

@@ -23,36 +23,6 @@ let register
      fiber_stop/fiber_wakeup. Labeled by keeper."
     `Counter;
   add
-    metric_cascade_server_error_skip_total
-    "#12797 Total cascade label-ranking skips triggered by recent server error (5xx) \
-     score decay. Labeled by provider_key."
-    `Counter;
-  add
-    metric_cascade_fallback_cycle_detected_total
-    "Total cascade fallback_cascade cycles detected during load_catalog. A cycle means \
-     a provider stall propagates through the loop silently for 600s+ without escaping. \
-     Labeled by [cascade] (cycle entry point)."
-    `Counter;
-  add
-    metric_provider_health_probe_skipped
-    "Total bootstrap/runtime-catalog provider health probes intentionally skipped as \
-     advisory. Labels: provider_name, profile_name. Any non-zero value means provider \
-     liveness was not actually probed at catalog validation time."
-    `Counter;
-  add
-    metric_provider_actual_health_status
-    "Last advisory provider health status observed by runtime catalog validation. \
-     Values: 0=unknown/skipped, 1=healthy, 3=unhealthy. Labels: provider_name, \
-     profile_name, model_id."
-    `Gauge;
-  add
-    metric_provider_health_probe_error
-    "Total provider health probe errors observed during runtime catalog validation. \
-     `Counter complement to [metric_provider_actual_health_status] — the gauge only \
-     shows the last observed status, so a sustained probe failure rate is otherwise \
-     invisible.  Labels: provider_name, profile_name."
-    `Counter;
-  add
     Keeper_metrics.(to_string PassiveLoopDetectedTotal)
     "#12799 Total passive-loop detections: keeper issued only read-only tool calls for N \
      consecutive turns. Labeled by keeper."

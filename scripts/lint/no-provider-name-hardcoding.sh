@@ -42,7 +42,6 @@ cd "$ROOT"
 
 SCAN_FILES=(
   "lib/provider_runtime_projection.ml"
-  "lib/cascade/cascade_runtime.ml"
 )
 
 LITERAL_PATTERN='"(claude|codex|gemini|llama|llama\.cpp|llamacpp|openrouter|openai_compat|ollama|custom|auto)"'

@@ -87,41 +87,6 @@ val metric_pool_create_total : string
 
 include module type of Prometheus_policy_metric_names
 
-(* Inlined from deleted Prometheus_cascade_metric_names (cascade purge). *)
-val metric_cascade_strategy_decisions : string
-val metric_cascade_capacity_events : string
-val metric_cascade_attempt_liveness_kill : string
-val metric_cascade_attempt_liveness_observed : string
-val metric_cascade_ttfb_seconds : string
-val metric_cascade_inter_chunk_seconds : string
-val metric_cascade_provider_health_score : string
-val metric_cascade_decisions : string
-val metric_cascade_fallbacks : string
-val metric_cascade_providers_exhausted : string
-val metric_cascade_routing_phase_overrides : string
-val metric_cascade_server_error_skip_total : string
-val metric_cascade_pre_dispatch_required_tool_filtered : string
-val metric_cascade_fallback_cycle_detected_total : string
-val metric_provider_health_probe_skipped : string
-val metric_provider_actual_health_status : string
-val metric_provider_health_probe_error : string
-
-(** Counter incremented once per breach event when [update_entry] drops
-    cross [orphan_drop_threshold] inside [orphan_drop_window_sec] for a
-    given [name]. Edge-triggered: subsequent drops in the same window
-    bump only [metric_keeper_registry_update_dropped]. Labeled by [name]. *)
-
-(** PR-J: number of times the per-turn OAS event-bus drain helper ran,
-    labelled by call-site so operators can attribute drain pressure
-    (e.g. background poller vs. unsubscribe vs. retry path).
-    Labels: [site, outcome]. [outcome] is [drained] (events were
-    pulled) or [empty] (subscriber returned no pending events). *)
-
-(** Total keeper transitions to [Dead] phase after restart-budget exhaustion.
-    Labeled by [keeper] and [reason]. Operators should alert on any rate >0:
-    by construction Dead means the supervisor gave up and no further
-    restart will be attempted. *)
-
 (** Total keepers auto-resumed by the self-healing circuit breaker in
     [Keeper_supervisor.sweep_and_recover] after the per-keeper back-off
     timer elapsed.  Labeled by [keeper].  A positive rate indicates the

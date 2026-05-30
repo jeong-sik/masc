@@ -117,9 +117,8 @@ let observed_labels (t : t) ~outcome =
     ("outcome", outcome);
   ]
 
-let emit_kill_counter (t : t) (failure : L.failure) =
-  Prometheus.inc_counter Prometheus.metric_cascade_attempt_liveness_kill
-    ~labels:(kill_labels t failure) ()
+let emit_kill_counter (t : t) (_failure : L.failure) =
+  ()  (* cascade metric removed *)
 
 (* -- Event translation -------------------------------------------- *)
 
@@ -208,14 +207,10 @@ let observe_chunk_clock (t : t) ~(at : float) : unit =
   t.last_chunk_at := Some at
 
 let prometheus_recorder (t : t) : L.recorder =
-  let labels = [ ("cascade", t.cascade_label); ("provider", t.provider_label) ] in
+  let _labels = [ ("cascade", t.cascade_label); ("provider", t.provider_label) ] in
   {
-    L.record_ttft = (fun seconds ->
-        Prometheus.observe_histogram Prometheus.metric_cascade_ttfb_seconds
-          ~labels seconds);
-    record_inter_chunk = (fun seconds ->
-        Prometheus.observe_histogram Prometheus.metric_cascade_inter_chunk_seconds
-          ~labels seconds);
+    L.record_ttft = (fun _seconds -> ());
+    record_inter_chunk = (fun _seconds -> ());
     record_liveness_outcome = (fun _ -> ());
   }
 
@@ -398,9 +393,6 @@ let finalize (t : t) : unit =
                  ; wall_ms = (last_chunk_at -. t.started_at) *. 1000.0
                  } )
          | _ -> ());
-        Prometheus.inc_counter
-          Prometheus.metric_cascade_attempt_liveness_observed
-          ~labels:(observed_labels t ~outcome) ()
   end
 
 let success_sample_for_candidate (t : t) = !(t.success_sample)

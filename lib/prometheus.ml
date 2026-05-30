@@ -101,24 +101,6 @@ let metric_coord_claim_post_provision_failures =
    intentional 120s/180s budgets in persona authoring / deep_review. *)
 include Prometheus_oas_metric_names
 
-(* Inlined from deleted Prometheus_cascade_metric_names (cascade purge). *)
-let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
-let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
-let metric_cascade_attempt_liveness_kill = "masc_cascade_attempt_liveness_kill_total"
-let metric_cascade_attempt_liveness_observed = "masc_cascade_attempt_liveness_observed_total"
-let metric_cascade_ttfb_seconds = "masc_cascade_ttfb_seconds"
-let metric_cascade_inter_chunk_seconds = "masc_cascade_inter_chunk_seconds"
-let metric_cascade_provider_health_score = "masc_cascade_provider_health_score"
-let metric_cascade_decisions = "masc_cascade_decisions_total"
-let metric_cascade_fallbacks = "masc_cascade_fallbacks_total"
-let metric_cascade_providers_exhausted = "masc_cascade_providers_exhausted_total"
-let metric_cascade_routing_phase_overrides = "masc_cascade_routing_phase_overrides_total"
-let metric_cascade_server_error_skip_total = "masc_cascade_server_error_skip_total"
-let metric_cascade_pre_dispatch_required_tool_filtered = "masc_cascade_pre_dispatch_required_tool_filtered_total"
-let metric_cascade_fallback_cycle_detected_total = "masc_cascade_fallback_cycle_detected_total"
-let metric_provider_health_probe_skipped = "masc_provider_health_probe_skipped_total"
-let metric_provider_actual_health_status = "masc_provider_actual_health_status"
-let metric_provider_health_probe_error = "masc_provider_health_probe_error_total"
 
 include Prometheus_runtime_metric_names
 
@@ -209,16 +191,6 @@ let metric_oas_bus_capacity = "masc_oas_bus_capacity"
    kind-only placeholder payload until the explicit arm is added. *)
 let metric_oas_bridge_unmigrated_payload_kind =
   "masc_oas_bridge_unmigrated_payload_kind_total"
-;;
-
-(* [Cascade_attempt_fsm.provider_label] receives an empty/blank string
-   and falls back to the literal "unknown" so metric labels do not
-   carry an empty value.  A non-zero rate here means an upstream
-   call site is emitting metrics without a real provider name —
-   the helper paints over the symptom; the counter surfaces it so
-   the source can be found and fixed. *)
-let metric_cascade_attempt_empty_provider_label =
-  "masc_cascade_attempt_empty_provider_label_total"
 ;;
 
 (* Per-tool-result compaction events emitted by

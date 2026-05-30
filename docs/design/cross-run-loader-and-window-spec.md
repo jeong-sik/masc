@@ -3,7 +3,6 @@ status: reference
 last_verified: 2026-05-12
 code_refs:
   - lib/cdal/
-  - lib/cdal/proof_artifact_reader.ml
   - lib/keeper/keeper_agent_run.ml
 ---
 
@@ -168,7 +167,8 @@ Since the current schema remains at version 1 (with optional fields added via `[
 ## 11. Proof_store Read-Side API (OAS, Implemented)
 
 OAS now owns the `proof-store://` read side through `Agent_sdk.Proof_store`.
-MASC must consume that public surface through `lib/cdal/proof_artifact_reader.ml`
+MASC must consume that public surface through the OAS public
+`Agent_sdk.Proof_store` APIs.
 instead of reconstructing proof-store paths.
 
 Current public read surface in OAS `proof_store.mli`:

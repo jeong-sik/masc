@@ -5,7 +5,6 @@ code_refs:
   - lib/exec/exec_semantic.ml
   - lib/exec/exec_buffer.ml
   - lib/exec_core.ml
-  - lib/cdal/cdal_judge.ml
   - lib/exec/command_gate/shell_command_gate.ml
   - lib/worker_dev_tools.ml
   - lib/keeper/agent_tool_command_runtime.ml

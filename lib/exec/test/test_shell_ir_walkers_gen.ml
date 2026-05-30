@@ -48,6 +48,11 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Git_merge { no_ff = false; squash = false; branch = "main"; abort = false; continue_ = false })
   ; W (Git_branch { delete = None; list_all = false; rename = None })
   ; W (Git_checkout { new_branch = false; branch = "main" })
+  ; W (Git_fetch { remote = None; branch = None; prune = false; all = false })
+  ; W (Git_show { commit = "HEAD"; stat = false })
+  ; W (Git_reset { mode = `Mixed; target = None })
+  ; W (Git_blame { file = "x.ml"; range = None })
+  ; W (Git_add { paths = [ "." ]; force = false; update = false })
   ; W (Pwd ())
   ; W (Echo { args = [ "hello" ] })
   ; W (Which { names = [ "ocaml" ] })
@@ -215,9 +220,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    105
+    110
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 105 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 110 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -260,6 +265,11 @@ let test_of_simple_round_trip () =
     ; W (Git_merge { no_ff = true; squash = false; branch = "develop"; abort = false; continue_ = false })
     ; W (Git_branch { delete = Some "old-branch"; list_all = true; rename = Some "new-name" })
     ; W (Git_checkout { new_branch = true; branch = "feature-branch" })
+    ; W (Git_fetch { remote = Some "origin"; branch = Some "main"; prune = true; all = true })
+    ; W (Git_show { commit = "abc123"; stat = true })
+    ; W (Git_reset { mode = `Hard; target = Some "HEAD~1" })
+    ; W (Git_blame { file = "main.ml"; range = Some "10,20" })
+    ; W (Git_add { paths = [ "src/"; "lib/" ]; force = true; update = false })
     ; W (Pwd ())
     ; W (Echo { args = [ "hello"; "world" ] })
     ; W (Which { names = [ "ocaml"; "dune" ] })
@@ -1022,6 +1032,41 @@ let test_posix_end_of_options () =
   (match git_checkout with
    | W (Git_checkout { new_branch = true; branch = "feature-branch"; _ }) -> ()
    | w -> Alcotest.failf "Git_checkout -b: expected new_branch=true branch=feature-branch, got %a" pp w);
+  (* Git_fetch: --prune origin main *)
+  let git_fetch =
+    of_simple { (base "git") with args = [ lit "fetch"; lit "--prune"; lit "origin"; lit "main" ] }
+  in
+  (match git_fetch with
+   | W (Git_fetch { prune = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "Git_fetch --prune: expected prune=true remote=Some origin branch=Some main, got %a" pp w);
+  (* Git_show: --stat abc123 *)
+  let git_show =
+    of_simple { (base "git") with args = [ lit "show"; lit "--stat"; lit "abc123" ] }
+  in
+  (match git_show with
+   | W (Git_show { commit = "abc123"; stat = true; _ }) -> ()
+   | w -> Alcotest.failf "Git_show --stat: expected commit=abc123 stat=true, got %a" pp w);
+  (* Git_reset: --hard HEAD~1 *)
+  let git_reset =
+    of_simple { (base "git") with args = [ lit "reset"; lit "--hard"; lit "HEAD~1" ] }
+  in
+  (match git_reset with
+   | W (Git_reset { mode = `Hard; target = Some "HEAD~1"; _ }) -> ()
+   | w -> Alcotest.failf "Git_reset --hard: expected mode=Hard target=Some HEAD~1, got %a" pp w);
+  (* Git_blame: -L 10,20 main.ml *)
+  let git_blame =
+    of_simple { (base "git") with args = [ lit "blame"; lit "-L"; lit "10,20"; lit "main.ml" ] }
+  in
+  (match git_blame with
+   | W (Git_blame { file = "main.ml"; range = Some "10,20"; _ }) -> ()
+   | w -> Alcotest.failf "Git_blame -L: expected file=main.ml range=Some 10,20, got %a" pp w);
+  (* Git_add: --force src/ lib/ *)
+  let git_add =
+    of_simple { (base "git") with args = [ lit "add"; lit "--force"; lit "src/"; lit "lib/" ] }
+  in
+  (match git_add with
+   | W (Git_add { paths = [ "src/"; "lib/" ]; force = true; _ }) -> ()
+   | w -> Alcotest.failf "Git_add --force: expected paths=[src/;lib/] force=true, got %a" pp w);
   (* Git_diff: --stat -- -file1 -file2 *)
   let git_diff =
     of_simple { (base "git") with args = [ lit "diff"; lit "--stat"; lit "--"; lit "-file1"; lit "-file2" ] }
@@ -2543,6 +2588,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Find"; "Head"; "Tail"; "Grep"; "Mkdir"; "Wc"
     ; "Git_diff"; "Git_log"; "Git_commit"; "Git_push"; "Git_pull"
     ; "Git_stash"; "Git_rebase"; "Git_merge"; "Git_branch"; "Git_checkout"
+    ; "Git_fetch"; "Git_show"; "Git_reset"; "Git_blame"; "Git_add"
     ; "Pwd"; "Echo"; "Which"; "Sort"; "Cut"; "Tr"; "Date"
     ; "Env"; "Printenv"; "Uniq"; "Basename"; "Dirname"; "Test"; "Stat"; "Hostname"; "Whoami"
     ; "Du"; "Df"; "File"; "Printf"; "Uname"; "Ps"; "Tty"

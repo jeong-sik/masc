@@ -1653,6 +1653,175 @@ in
 parse false None args|}
     ; no_expand_combined = false
     }
+  ; { name = "Git_fetch"
+    ; anon_pattern = "Git_fetch _"
+    ; bind_pattern = "Git_fetch { remote; branch; prune; all }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "fetch" ] in
+      let parts = if prune then parts @ [ "--prune" ] else parts in
+      let parts = if all then parts @ [ "--all" ] else parts in
+      let parts = match remote with Some r -> parts @ [ r ] | None -> parts in
+      let parts = match branch with Some b -> parts @ [ b ] | None -> parts in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse prune all remote branch = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_fetch { remote; branch; prune; all }))
+  | "--prune" :: rest -> parse true all remote branch rest
+  | "--all" :: rest -> parse prune true remote branch rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse prune all remote branch rest
+  | arg :: rest ->
+    (match remote with
+     | None -> parse prune all (Some arg) branch rest
+     | Some _ -> parse prune all remote (Some arg) rest)
+in
+parse false false None None args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_show"
+    ; anon_pattern = "Git_show _"
+    ; bind_pattern = "Git_show { commit; stat }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "show" ] in
+      let parts = if stat then parts @ [ "--stat" ] else parts in
+      let parts = parts @ [ commit ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse stat commit = function
+  | [] ->
+    (match commit with
+     | Some c -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_show { commit = c; stat }))
+     | None -> None)
+  | "--stat" :: rest -> parse true commit rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse stat commit rest
+  | arg :: rest -> parse stat (Some arg) rest
+in
+parse false None args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_reset"
+    ; anon_pattern = "Git_reset _"
+    ; bind_pattern = "Git_reset { mode; target }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let mode_str = match mode with `Soft -> "--soft" | `Mixed -> "--mixed" | `Hard -> "--hard" in
+      let parts = [ "reset"; mode_str ] in
+      let parts = match target with Some t -> parts @ [ t ] | None -> parts in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse mode target = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_reset { mode; target }))
+  | "--soft" :: rest -> parse `Soft target rest
+  | "--mixed" :: rest -> parse `Mixed target rest
+  | "--hard" :: rest -> parse `Hard target rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse mode target rest
+  | arg :: rest -> parse mode (Some arg) rest
+in
+parse `Mixed None args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_blame"
+    ; anon_pattern = "Git_blame _"
+    ; bind_pattern = "Git_blame { file; range }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "blame" ] in
+      let parts = match range with Some r -> parts @ [ "-L"; r ] | None -> parts in
+      let parts = parts @ [ file ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse range file = function
+  | [] ->
+    (match file with
+     | Some f -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_blame { file = f; range }))
+     | None -> None)
+  | "-L" :: r :: rest -> parse (Some r) file rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse range file rest
+  | arg :: rest -> parse range (Some arg) rest
+in
+parse None None args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_add"
+    ; anon_pattern = "Git_add _"
+    ; bind_pattern = "Git_add { paths; force; update }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "add" ] in
+      let parts = if force then parts @ [ "--force" ] else parts in
+      let parts = if update then parts @ [ "-u" ] else parts in
+      let parts = parts @ paths in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse force update acc = function
+  | [] ->
+    (match acc with
+     | [] -> None
+     | _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_add { paths = List.rev acc; force; update })))
+  | "--force" :: rest | "-f" :: rest -> parse true update acc rest
+  | "-u" :: rest | "--update" :: rest -> parse force true acc rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse force update acc rest
+  | arg :: rest -> parse force update (arg :: acc) rest
+in
+parse false false [] args|}
+    ; no_expand_combined = false
+    }
   ; { name = "Pwd"
     ; anon_pattern = "Pwd _"
     ; bind_pattern = "Pwd ()"

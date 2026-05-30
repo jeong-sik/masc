@@ -214,6 +214,45 @@ let pp fmt = function
       "Git_checkout(new_branch=%b, branch=%s)"
       new_branch
       branch
+  | W (Git_fetch { remote; branch; prune; all }) ->
+    Format.fprintf
+      fmt
+      "Git_fetch(remote=%a, branch=%a, prune=%b, all=%b)"
+      (Format.pp_print_option Format.pp_print_string)
+      remote
+      (Format.pp_print_option Format.pp_print_string)
+      branch
+      prune
+      all
+  | W (Git_show { commit; stat }) ->
+    Format.fprintf
+      fmt
+      "Git_show(commit=%s, stat=%b)"
+      commit
+      stat
+  | W (Git_reset { mode; target }) ->
+    let mode_str = match mode with `Soft -> "soft" | `Mixed -> "mixed" | `Hard -> "hard" in
+    Format.fprintf
+      fmt
+      "Git_reset(mode=%s, target=%a)"
+      mode_str
+      (Format.pp_print_option Format.pp_print_string)
+      target
+  | W (Git_blame { file; range }) ->
+    Format.fprintf
+      fmt
+      "Git_blame(file=%s, range=%a)"
+      file
+      (Format.pp_print_option Format.pp_print_string)
+      range
+  | W (Git_add { paths; force; update }) ->
+    Format.fprintf
+      fmt
+      "Git_add(paths=%a, force=%b, update=%b)"
+      (Format.pp_print_list Format.pp_print_string)
+      paths
+      force
+      update
   | W (Pwd ()) -> Format.fprintf fmt "Pwd"
   | W (Echo { args }) ->
     Format.fprintf

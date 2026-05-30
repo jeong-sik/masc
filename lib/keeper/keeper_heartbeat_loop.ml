@@ -385,7 +385,6 @@ let run_keepalive_unified_turn
           ~channel:turn_decision.channel
           ~kind:Semaphore_wait_pending
           ();
-        let selected_item_opt = None in
         match
           Keeper_turn_slot.with_keeper_turn_slot_control
             ~cascade_profile:(cascade_name_of_meta meta_after_triage)
@@ -401,7 +400,6 @@ let run_keepalive_unified_turn
                  ~shared_context
                  ~semaphore_wait_ms
                  ~slot_control
-                 ?selected_item:selected_item_opt
                  ())
         with
         | Ok meta -> meta

@@ -7,32 +7,15 @@
 
 (** {1 Core Constants} *)
 
-(** Default cascade name for keeper turns. Resolved each call against
-    the live [Cascade_catalog_runtime] snapshot so the answer reflects
-    the currently-installed catalog rather than module-init state. Falls
-    back to [Cascade_routes.cascade_name_for_use Keeper_turn] when the
-    snapshot is not yet available (early boot).
+(** Default cascade name for keeper turns = the default Runtime's id.
+
+    cascade→Runtime 숙청: 이전의 phase_recovery / phase_buffer /
+    tool_required / phase_routing 구분은 모두 동일한 default Runtime 으로
+    수렴하는 죽은 추상화였으므로 이 단일 thunk 로 collapse 되었다.
     @since v2.128.0
     @since RFC-0066 Phase 1: changed from a string value to a thunk
     (issue #14624). *)
 val default_cascade_name : unit -> string
-
-(** Cascade name for recovery turns (Failing phase). In the two-profile
-    catalog this resolves to the canonical keeper cascade.
-    @since Core Triad *)
-val phase_recovery_cascade_name : string
-
-(** Cascade name for buffer operations (Compacting, HandingOff). In the
-    two-profile catalog this resolves to the canonical keeper cascade.
-    @since Core Triad *)
-val phase_buffer_cascade_name : string
-
-(** Cascade names that are selected by keeper phase-routing rather than by
-    keeper-assignable profile choice. *)
-val phase_routing_cascade_names : string list
-
-(** Cascade name for turns that must use a tool-capable provider lane. *)
-val tool_required_cascade_name : string
 
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int

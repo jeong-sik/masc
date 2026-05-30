@@ -35,11 +35,6 @@ let oas_error_cascade_name raw =
   |> Cascade_name.of_string_exn
 ;;
 
-let phase_buffer_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Phase_buffer
-;;
-
 let phase_recovery_cascade_name () =
   Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
     Masc_mcp.Keeper_cascade_profile.Phase_recovery
@@ -385,7 +380,7 @@ let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
 let minimal_meta : Masc_mcp.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
 let minimal_policy_meta =
-  { minimal_meta with tool_access = Custom [] }
+  { minimal_meta with tool_access = [] }
 ;;
 
 let room_signal_meta = { minimal_meta with room_signal_prompt_enabled = true }
@@ -3205,10 +3200,10 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
   Masc_mcp.Agent_tool_dispatch_runtime.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let module Guidance = Masc_mcp.Keeper_tool_guidance in
   let social_meta =
-    { minimal_meta with tool_access = Custom [] }
+    { minimal_meta with tool_access = [] }
   in
   let coding_meta =
-    { minimal_meta with tool_access = Custom [] }
+    { minimal_meta with tool_access = [] }
   in
   let social_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names social_meta in
   let coding_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names coding_meta in
@@ -4977,7 +4972,7 @@ let test_append_decision_record_persists_tool_calls () =
            ~latency_ms:42
            ~outcome:"success"
            ~degraded_retry_applied:true
-           ~degraded_retry_cascade:KC.phase_recovery_cascade_name
+           ~degraded_retry_cascade:(KC.default_cascade_name ())
            ~fallback_reason:"turn_timeout"
            ~turn_mode:UM.Tool_use
            ~result:(Some result)
@@ -5049,7 +5044,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          (option string)
          "degraded retry cascade persisted"
-         (Some KC.phase_recovery_cascade_name)
+         (Some (KC.default_cascade_name ()))
          Yojson.Safe.Util.(json |> member "degraded_retry_cascade" |> to_string_option);
        check
          (option string)
@@ -6151,101 +6146,9 @@ let runtime_url_of_label label =
   | None -> fail ("expected model label to resolve to runtime URL: " ^ label)
 ;;
 
-let test_decide_phase_buffer_liveness_keeps_non_local_effective () =
-  match
-    UT.decide_phase_buffer_liveness
-      ~resolve_runtime_url:(fun _ -> fail "resolver should not run")
-      ~base_cascade:"keeper_unified"
-      ~effective_cascade:"default"
-      [ "not-a-real-label" ]
-  with
-  | UT.Keep_effective_cascade cascade ->
-    check string "keeps selected cascade" (KC.default_cascade_name ()) cascade
-  | UT.Probe_phase_buffer_urls _ -> fail "unexpected local-only probe decision"
-;;
-
-let test_decide_phase_buffer_liveness_keeps_explicit_local_only () =
-  match
-    UT.decide_phase_buffer_liveness
-      ~resolve_runtime_url:(fun _ -> fail "resolver should not run")
-      ~base_cascade:"local_only"
-      ~effective_cascade:"local_only"
-      [ "not-a-real-label" ]
-  with
-  | UT.Keep_effective_cascade cascade ->
-    check
-      string
-      "removed local_only alias stays raw"
-      "local_only"
-      cascade
-  | UT.Probe_phase_buffer_urls _ -> fail "unexpected local-only probe decision"
-;;
-
-let test_decide_phase_buffer_liveness_keeps_phase_buffer_route () =
-  let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
-  match
-    UT.decide_phase_buffer_liveness
-      ~base_cascade:"scoring"
-      ~effective_cascade:KC.phase_buffer_cascade_name
-      [ label; label ]
-  with
-  | UT.Keep_effective_cascade cascade ->
-    check
-      string
-      "phase-buffer route is not probed as a local-only lane"
-      (phase_buffer_cascade_name ())
-      cascade
-  | UT.Probe_phase_buffer_urls _ -> fail "unexpected local-only probe decision"
-;;
-
-let test_fail_open_local_only_when_probe_fails () =
-  let cascade =
-    UT.fail_open_phase_buffer_when_unavailable
-      ~probe_base_url:(fun _ -> false)
-      ~base_cascade:"scoring"
-      ~effective_cascade:KC.phase_buffer_cascade_name
-      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
-  in
-  check
-    string
-    "keeps configured phase-buffer route"
-    (phase_buffer_cascade_name ())
-    cascade
-;;
-
-let test_fail_open_local_only_preserves_explicit_local_only_base () =
-  let probe_calls = ref 0 in
-  let cascade =
-    UT.fail_open_phase_buffer_when_unavailable
-      ~probe_base_url:(fun _ ->
-        incr probe_calls;
-        false)
-      ~base_cascade:"local_only"
-      ~effective_cascade:"local_only"
-      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
-  in
-  check int "probe not called" 0 !probe_calls;
-  check
-    string
-    "removed local_only alias stays raw"
-    "local_only"
-    cascade
-;;
-
-let test_fail_open_local_only_preserves_healthy_local_only () =
-  let cascade =
-    UT.fail_open_phase_buffer_when_unavailable
-      ~probe_base_url:(fun _ -> true)
-      ~base_cascade:"scoring"
-      ~effective_cascade:KC.phase_buffer_cascade_name
-      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
-  in
-  check
-    string
-    "healthy ollama keeps phase-buffer route"
-    (phase_buffer_cascade_name ())
-    cascade
-;;
+(* cascade→Runtime 숙청: phase-buffer liveness probe 테스트 6종 제거
+   (decide_phase_buffer_liveness / fail_open_phase_buffer_when_unavailable —
+   Keeper_turn_liveness 에서 적출된 죽은 probe 기계). *)
 
 let wrapped_claude_limit_error () =
   Agent_sdk.Error.Api
@@ -6312,7 +6215,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quo
   in
   expect_degraded_retry
     "hard quota degraded retry"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6335,7 +6238,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
   in
   expect_degraded_retry
     "resumable session degraded retry"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "resumable_cli_session"
     degraded_retry
 ;;
@@ -6354,7 +6257,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
   in
   expect_degraded_retry
     "admission queue timeout degraded retry"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "admission_queue_timeout"
     degraded_retry
 ;;
@@ -6369,7 +6272,7 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
   in
   expect_degraded_retry
     "turn timeout degraded retry"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "turn_timeout"
     degraded_retry
 ;;
@@ -6392,7 +6295,7 @@ let test_degraded_retry_after_recoverable_error_includes_provider_timeout () =
   in
   expect_degraded_retry
     "provider timeout degraded retry"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "provider_timeout"
     degraded_retry
 ;;
@@ -6406,7 +6309,7 @@ let test_degraded_retry_after_recoverable_error_includes_max_turns () =
   in
   expect_degraded_retry
     "max turns degraded retry"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "max_turns"
     degraded_retry
 ;;
@@ -6424,7 +6327,7 @@ let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
 let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:KC.phase_buffer_cascade_name
+      ~effective_cascade:(KC.default_cascade_name ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
@@ -6434,7 +6337,7 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
 let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:KC.phase_recovery_cascade_name
+      ~effective_cascade:(KC.default_cascade_name ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
@@ -6462,7 +6365,7 @@ let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_overr
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
       ~base_cascade:"scoring"
-      ~effective_cascade:KC.phase_recovery_cascade_name
+      ~effective_cascade:(KC.default_cascade_name ())
   in
   check
     (option string)
@@ -6512,7 +6415,7 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
       ~attempted_cascades:
         [ "scoring"
         ; KC.default_cascade_name ()
-        ; KC.phase_recovery_cascade_name
+        ; (KC.default_cascade_name ())
         ; safe_lane_cascade_name
         ]
       (wrapped_claude_limit_error ())
@@ -6571,13 +6474,11 @@ let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violatio
 let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:
-        [ KC.default_cascade_name (); KC.phase_recovery_cascade_name; "ollama_only" ]
       ~base_cascade:"scoring"
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
-        [ "scoring"; KC.default_cascade_name (); KC.phase_recovery_cascade_name ]
+        [ "scoring"; KC.default_cascade_name (); (KC.default_cascade_name ()) ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6590,7 +6491,6 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
 let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_omits_it () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ "resilient_profile" ]
       ~base_cascade:"scoring"
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -6607,7 +6507,6 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
 let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ KC.phase_recovery_cascade_name; "required_safe" ]
       ~base_cascade:(KC.default_cascade_name ())
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6624,7 +6523,6 @@ let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog
 let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ KC.phase_recovery_cascade_name ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6643,7 +6541,6 @@ let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manua
   =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ "cli_manual" ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6659,7 +6556,6 @@ let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manua
 let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.phase_recovery_cascade_name; " primary " ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6676,7 +6572,6 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
 let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_tool () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "primary"; "local_recovery" ]
       ~fallback_hint:"local_recovery"
       ~base_cascade:"primary_required"
       ~effective_cascade:"secondary_required"
@@ -6694,7 +6589,6 @@ let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_to
 let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ ""; " scoring "; " catalog_next "; "catalog_next" ]
       ~base_cascade:" scoring "
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -6711,7 +6605,6 @@ let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly (
 let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.phase_recovery_cascade_name; "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6729,7 +6622,6 @@ let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
 let test_degraded_rotation_skips_already_attempted_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.phase_recovery_cascade_name; "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6739,7 +6631,7 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
   in
   expect_degraded_retry
     "exhausted hint falls through to catalog"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6747,7 +6639,6 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
 let test_degraded_rotation_ignores_blank_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.phase_recovery_cascade_name; "primary" ]
       ~fallback_hint:"   "
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6757,92 +6648,9 @@ let test_degraded_rotation_ignores_blank_fallback_hint () =
   in
   expect_degraded_retry
     "blank hint behaves like no hint"
-    KC.phase_recovery_cascade_name
+    (KC.default_cascade_name ())
     "hard_quota"
     degraded_retry
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:
-        [ KC.default_cascade_name (); KC.phase_recovery_cascade_name; "ollama_only" ]
-      ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
-      ()
-  in
-  check
-    (option (list string))
-    "catalog-derived rotation order"
-    (Some [ KC.default_cascade_name (); "ollama_only" ])
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:
-        [ "ollama_only"; KC.phase_recovery_cascade_name; KC.default_cascade_name () ]
-      ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
-      ()
-  in
-  check
-    (option (list string))
-    "catalog-derived rotation preserves catalog order"
-    (Some [ "ollama_only"; KC.default_cascade_name () ])
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~excluded_targets:[ "cascade.ollama_cloud_primary" ]
-      ~catalog_names:
-        [
-          KC.default_cascade_name ();
-          "ollama_cloud_primary";
-          "provider_k-coding-with-spark";
-        ]
-      ~keeper_assignable:
-        [
-          KC.default_cascade_name ();
-          "ollama_cloud_primary";
-          "provider_k-coding-with-spark";
-        ]
-      ()
-  in
-  check
-    (option (list string))
-    "catalog-derived rotation excludes non-keeper route targets"
-    (Some [ KC.default_cascade_name (); "provider_k-coding-with-spark" ])
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:[]
-      ~keeper_assignable:[ KC.default_cascade_name () ]
-      ()
-  in
-  check
-    (option (list string))
-    "unresolved catalog falls back to legacy path"
-    None
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candidates () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:[ "experimental_only" ]
-      ~keeper_assignable:[]
-      ()
-  in
-  check
-    (option (list string))
-    "resolved catalog without assignable candidates"
-    None
-    rotation
 ;;
 
 let test_metrics_persist_social_state_fields () =
@@ -7053,10 +6861,7 @@ let test_prompt_includes_board_activity_section () =
   let board_meta =
     { minimal_meta with
       tool_access =
-        Preset
-          { preset = Social
-          ; also_allow = []
-          }
+        []
     }
   in
   let sys, user =
@@ -11779,30 +11584,7 @@ let () =
             "async keeper_msg preflight surfaces discovery failure"
             `Quick
             test_keeper_msg_async_failure_surface
-        ; test_case
-            "local_only liveness decision keeps non-local route"
-            `Quick
-            test_decide_phase_buffer_liveness_keeps_non_local_effective
-        ; test_case
-            "local_only liveness decision keeps explicit local base"
-            `Quick
-            test_decide_phase_buffer_liveness_keeps_explicit_local_only
-        ; test_case
-            "local_only liveness decision keeps phase-buffer route"
-            `Quick
-            test_decide_phase_buffer_liveness_keeps_phase_buffer_route
-        ; test_case
-            "local_only fail-open falls back when ollama is down"
-            `Quick
-            test_fail_open_local_only_when_probe_fails
-        ; test_case
-            "explicit local_only does not fail-open"
-            `Quick
-            test_fail_open_local_only_preserves_explicit_local_only_base
-        ; test_case
-            "healthy local_only stays selected"
-            `Quick
-            test_fail_open_local_only_preserves_healthy_local_only
+        (* cascade→Runtime 숙청: phase-buffer liveness probe 테스트 등록 6종 제거. *)
         ; test_case
             "hard quota degraded retry uses local_recovery"
             `Quick
@@ -11916,26 +11698,6 @@ let () =
             `Quick
             test_degraded_rotation_ignores_blank_fallback_hint
         ; test_case
-            "catalog rotation order merges reserved and assignable"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable
-        ; test_case
-            "catalog rotation preserves catalog order"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order
-        ; test_case
-            "catalog rotation excludes non-keeper route targets"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes
-        ; test_case
-            "unresolved catalog keeps legacy rotation fallback"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved
-        ; test_case
-            "resolved catalog without assignable candidates falls back"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candidates
-        ; test_case
             "keeper runtime declared name substitutes unresolvable with keeper_turn"
             `Quick
             test_keeper_runtime_declared_name_substitutes_unresolvable_with_keeper_turn
@@ -11943,26 +11705,8 @@ let () =
             "keeper runtime declared name preserves logical-use route"
             `Quick
             test_keeper_runtime_declared_name_preserves_logical_use_route
-        ] )
-    ; ( "tool_classification"
-      , [ test_case
-            "keeper allowed tools exclude heartbeat"
-            `Quick
-            test_keeper_allowed_tools_exclude_heartbeat
         ; test_case
-            "initial tool requirement mirrors first-turn gate"
-            `Quick
-            test_should_require_tools_for_initial_turn_matches_first_turn_gate
-        ; test_case
-            "initial tool requirement covers actionable affordances"
-            `Quick
-            test_should_require_tools_for_initial_turn_covers_actionable_affordances
-        ; test_case
-            "actionable observation requires provider tool_choice filter"
-            `Quick
-            test_actionable_observation_requires_provider_tool_choice_filter
-        ; test_case
-            "task backlog required turn prefers claim tool choice"
+            "preferred tool choice for required turn claims first"
             `Quick
             test_preferred_tool_choice_for_required_turn_claims_first
         ; test_case

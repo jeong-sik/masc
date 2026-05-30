@@ -47,10 +47,10 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('operations')
   })
 
-  it('redirects retired activity links to observatory on the monitoring surface', () => {
+  it('falls back invalid activity section to default agents section', () => {
     navigate('monitoring', { section: 'activity', ag_range: '24h' })
     expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('observatory')
+    expect(route.value.params.section).toBe('agents')
     expect(route.value.params.range).toBe('24h')
     expect(route.value.params.ag_range).toBeUndefined()
   })

@@ -185,7 +185,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 | Some access -> access
                 | None ->
                     (match p.profile_defaults.tool_custom_list with
-                     | Some tools -> Custom (normalize_tool_names tools)
+                     | Some tools -> normalize_tool_names tools
                      | None -> default_tool_access_of_meta_json ())
               in
               let room_signal_prompt_enabled =

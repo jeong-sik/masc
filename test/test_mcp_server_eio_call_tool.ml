@@ -333,7 +333,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-001"
-      ~tool_access:(Masc_mcp.Keeper_meta_tool_access.Custom [ "tool_execute" ])
+      ~tool_access:([ "tool_execute" ])
       keeper_name
   in
   Fun.protect

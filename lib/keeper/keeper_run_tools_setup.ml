@@ -160,7 +160,7 @@ let prepare_agent_setup
   let tool_entries = List.map tool_index_entry_of_tool keeper_tools in
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
   let load_preset_selection_context () =
-    let preset_names = Keeper_tool_policy.keeper_preset_universe_tool_names meta in
+    let preset_names = Keeper_tool_policy.keeper_tool_search_scope meta in
     let preset_set = Hashtbl.create (List.length preset_names) in
     List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
     let preset_tools =

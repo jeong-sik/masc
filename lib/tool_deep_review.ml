@@ -152,8 +152,7 @@ let handle_deep_review
           (`Assoc [ ("error", `String msg) ])
     | Ok prompt ->
         let cascade_name =
-          Keeper_cascade_profile.cascade_name_for_use
-            Keeper_cascade_profile.Adversarial_reviewer
+          Runtime.get_default_runtime_id ()
         in
         match
           Masc_oas_bridge.run_with_caller

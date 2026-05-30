@@ -114,6 +114,7 @@ target = "cascade.primary"
       f config_dir)
 
 (** Test: TOML personality fields overwrite stale runtime JSON values. *)
+;;
 let test_personality_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -178,6 +179,7 @@ instructions = "TOML instructions"
    a policy field to drive the assertion. test_sandbox_policy_resync
    below preserves the same TOML-resync coverage on the sandbox
    policy fields, which remain part of keeper_meta. *)
+;;
 let test_sandbox_policy_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -219,6 +221,7 @@ network_mode = "none"
       check string "network_mode" "none"
         (Keeper_types_profile_sandbox.network_mode_to_string updated.network_mode)
 
+;;
 let test_keeper_up_create_uses_profile_default_sandbox_policy () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -276,6 +279,7 @@ network_mode = "inherit"
       | Error e -> fail ("read_meta failed: " ^ e))
 
 (** Test: TOML tool policy and allowed_paths overwrite stale runtime JSON values. *)
+;;
 let test_tool_policy_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -310,8 +314,8 @@ also_allow = ["tool_execute", "tool_search_files"]
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
-                  ("preset", `String "delivery");
+                  ("kind", `String "custom");
+                  ("tools", `List []);
                   ("also_allow", `List [ `String "masc_board_post" ]);
                 ] );
           ])
@@ -323,155 +327,18 @@ also_allow = ["tool_execute", "tool_search_files"]
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      let (Keeper_meta_tool_access.Custom tools) = updated.Keeper_meta_contract.tool_access in
+      let tools = updated.Keeper_meta_contract.tool_access in
       check bool "has custom tool_access" true (tools <> []);
       check
         (list string)
         "allowed_paths"
         [ "workspace/example/project" ]
         updated.allowed_paths;
-      check
-        (option string)
-        "tool_preset_source"
-        (Some "toml")
-        updated.tool_preset_source
+      ignore updated.allowed_paths (* tool_preset_source removed *)
 
-let test_tool_preset_source_resyncs_from_toml_without_policy_delta () =
-  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
-  with_config_dir @@ fun config_dir ->
-  Fs_compat.clear_fs ();
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "tool_source_toml_resync" in
-  let keepers_toml_dir = Filename.concat config_dir "keepers" in
-  Unix.mkdir keepers_toml_dir 0o755;
-  write_file
-    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
-    {|[keeper]
-sandbox_profile = "docker"
-goal = "test"
 
-[keeper.tool_access]
-kind = "preset"
-preset = "social"
-|};
-  let config = Coord.default_config room_dir in
-  let initial_meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [
-            ("name", `String keeper_name);
-            ("agent_name", `String keeper_name);
-            ("trace_id", `String "trace-tool-source-toml-resync");
-            ("goal", `String "test");
-            ( "tool_access",
-              `Assoc
-                [
-                  ("kind", `String "preset");
-                  ("preset", `String "social");
-                  ("also_allow", `List []);
-                ] );
-          ])
-    with
-    | Ok meta -> meta
-    | Error e -> fail ("meta_of_json failed: " ^ e)
-  in
-  let persisted_path = write_persisted_meta_file config initial_meta in
-  Fs_compat.clear_fs ();
-  check bool "persisted meta fixture exists" true (Sys.file_exists persisted_path);
-  (match Keeper_meta_store.read_meta_file_path persisted_path with
-  | Ok (Some _) -> ()
-  | Ok None -> fail "persisted meta fixture was not readable"
-  | Error e -> fail ("persisted meta fixture read failed: " ^ e));
-  (match Keeper_meta_store.read_meta config keeper_name with
-  | Ok (Some _) -> ()
-  | Ok None -> fail ("persisted meta fixture not found via read_meta: " ^ persisted_path)
-  | Error e -> fail ("persisted meta fixture read_meta failed: " ^ e));
-  match Keeper_runtime.ensure_keeper_meta config keeper_name with
-  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
-  | Ok updated ->
-      check
-        (option string)
-        "tool_preset_source resynced from TOML"
-        (Some "toml")
-        updated.Keeper_meta_contract.tool_preset_source
 
-let test_persona_no_longer_drives_tool_preset_source () =
-  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
-  with_config_dir @@ fun config_dir ->
-  Fs_compat.clear_fs ();
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "tool_source_persona_resync" in
-  let personas_dir = Filename.concat config_dir "personas" in
-  let persona_dir = Filename.concat personas_dir keeper_name in
-  Unix.mkdir personas_dir 0o755;
-  Unix.mkdir persona_dir 0o755;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|{
-  "name": "source persona",
-  "keeper": {
-    "goal": "test"
-  }
-}|};
-  (* Persona-only configs cannot satisfy the sandbox_profile required-field
-     check (personas are not allowed to declare execution policy). Add a
-     minimal TOML wrapper that only sets sandbox_profile + persona_name. *)
-  let keepers_toml_dir = Filename.concat config_dir "keepers" in
-  Unix.mkdir keepers_toml_dir 0o755;
-  write_file
-    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
-    (Printf.sprintf
-       {|[keeper]
-sandbox_profile = "docker"
-persona_name = "%s"
-|}
-       keeper_name);
-  let config = Coord.default_config room_dir in
-  let initial_meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [
-            ("name", `String keeper_name);
-            ("agent_name", `String keeper_name);
-            ("trace_id", `String "trace-tool-source-persona-resync");
-            ("goal", `String "test");
-            ( "tool_access",
-              `Assoc
-                [
-                  ("kind", `String "preset");
-                  ("preset", `String "research");
-                  ("also_allow", `List []);
-                ] );
-          ])
-    with
-    | Ok meta -> meta
-    | Error e -> fail ("meta_of_json failed: " ^ e)
-  in
-  let persisted_path = write_persisted_meta_file config initial_meta in
-  Fs_compat.clear_fs ();
-  check bool "persisted meta fixture exists" true (Sys.file_exists persisted_path);
-  (match Keeper_meta_store.read_meta_file_path persisted_path with
-  | Ok (Some _) -> ()
-  | Ok None -> fail "persisted meta fixture was not readable"
-  | Error e -> fail ("persisted meta fixture read failed: " ^ e));
-  (match Keeper_meta_store.read_meta config keeper_name with
-  | Ok (Some _) -> ()
-  | Ok None -> fail ("persisted meta fixture not found via read_meta: " ^ persisted_path)
-  | Error e -> fail ("persisted meta fixture read_meta failed: " ^ e));
-  match Keeper_runtime.ensure_keeper_meta config keeper_name with
-  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
-  | Ok updated ->
-      check
-        (option string)
-        "persona does not drive tool_preset_source"
-        None
-        updated.Keeper_meta_contract.tool_preset_source
-
-(** Test: explicit empty allowed_paths in TOML clears stale runtime JSON values. *)
+;;
 let test_allowed_paths_explicit_empty_clears_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -510,6 +377,7 @@ allowed_paths = []
       check (list string) "allowed_paths cleared" [] updated.allowed_paths
 
 (** Test: persona allowed_paths is ignored and cannot inject authored allowlists. *)
+;;
 let test_persona_allowed_paths_is_ignored () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -562,6 +430,7 @@ persona_name = "%s"
       check (list string) "persona allowed_paths ignored" [] updated.allowed_paths
 
 (** Test: custom tool_access stays custom when TOML omits tool_preset. *)
+;;
 let test_custom_tool_access_preserved_without_preset () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -604,16 +473,10 @@ allowed_paths = ["workspace/example/project"]
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check
-        (option string)
-        "custom access keeps no preset"
-        None
-        ((fun _ -> None) updated.Keeper_meta_contract.tool_access
-         |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
-      check
-        (option (list string))
+        (list string)
         "custom allowlist preserved"
-        (Some [ "keeper_board_get"; "masc_status" ])
-        (Keeper_meta_tool_access.tool_access_custom_allowlist updated.tool_access);
+        [ "keeper_board_get"; "masc_status" ]
+        updated.tool_access;
       check
         (list string)
         "allowed_paths"
@@ -621,6 +484,7 @@ allowed_paths = ["workspace/example/project"]
         updated.allowed_paths
 
 (** Test: TOML can reference a persona and only override selected fields. *)
+;;
 let test_persona_overlay_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -656,9 +520,6 @@ sandbox_profile = "docker"
 persona_name = "scholar"
 goal = "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -676,7 +537,7 @@ preset = "delivery"
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
+                  ("kind", `String "custom");
                   ("preset", `String "messaging");
                   ("also_allow", `List []);
                 ] );
@@ -701,18 +562,8 @@ preset = "delivery"
       check (list string) "persona mention_targets inherited"
         [ "scholar"; "학자" ]
         updated.mention_targets;
-      check
-        (option string)
-        "tool_preset from toml overlay"
-        (Some "delivery")
-      ((fun _ -> None) updated.tool_access
-         |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
-      check
-        (option string)
-        "tool_preset_source from toml overlay"
-        (Some "toml")
-        updated.tool_preset_source
 
+;;
 let test_toml_integer_per_provider_timeout_updates_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -754,6 +605,7 @@ per_provider_timeout = 45
         (Some 45.0)
         updated.Keeper_meta_contract.per_provider_timeout_s
 
+;;
 let test_toml_invalid_per_provider_timeout_clears_stale_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -792,6 +644,7 @@ per_provider_timeout = 0
       check (option (float 0.0001)) "invalid TOML clears stale timeout"
         None updated.Keeper_meta_contract.per_provider_timeout_s
 
+;;
 let test_persona_invalid_per_provider_timeout_clears_stale_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -844,6 +697,7 @@ persona_name = "%s"
       check (option (float 0.0001)) "invalid persona clears stale timeout"
         None updated.Keeper_meta_contract.per_provider_timeout_s
 
+;;
 let test_meta_of_json_invalid_per_provider_timeout_is_ignored () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -861,6 +715,7 @@ let test_meta_of_json_invalid_per_provider_timeout_is_ignored () =
         None meta.Keeper_meta_contract.per_provider_timeout_s
 
 (** Test: fields absent from TOML (None) preserve runtime JSON values. *)
+;;
 let test_none_preserves_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -907,6 +762,7 @@ goal = "minimal TOML"
 
 (** Test: declarative keepers reset stale live cascade_name to the default
     keeper cascade when the authored config omits cascade_name. *)
+;;
 let test_cascade_defaults_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -950,6 +806,7 @@ preset = "social"
       check string "cascade_name reset to keeper default"
         ((Keeper_config.default_cascade_name ())) (Keeper_meta_contract.cascade_name_of_meta updated)
 
+;;
 let test_social_model_resynced_from_declarative_defaults () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -991,6 +848,7 @@ social_model = "magentic_ledger_v1"
         updated.social_model
 
 (** Test: authored nonblank unknown cascade_name is rejected. *)
+;;
 let test_unknown_cascade_name_rejected () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -1034,6 +892,7 @@ cascade_name = "missing_profile"
         (contains_substring detail "unknown cascade_name")
 
 (** Test: room presence sync updates stale agent capabilities from live keeper meta. *)
+;;
 let test_room_presence_syncs_capabilities () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   Fs_compat.clear_fs ();
@@ -1054,7 +913,7 @@ let test_room_presence_syncs_capabilities () =
             ( "tool_access",
               `Assoc
                 [
-                  ("kind", `String "preset");
+                  ("kind", `String "custom");
                   ("preset", `String "social");
                 ] );
           ])
@@ -1080,6 +939,7 @@ let test_room_presence_syncs_capabilities () =
         agent.capabilities
 
 (* Test: update_field_in_content replaces existing field *)
+;;
 let test_toml_update_existing () =
   let input = {|[keeper]
 sandbox_profile = "docker"
@@ -1108,6 +968,7 @@ instructions = "keep this"
            (Keeper_toml_loader.toml_string_opt doc "keeper.instructions"))
 
 (** Test: update_field_in_content inserts new field *)
+;;
 let test_toml_update_insert () =
   let input = {|[keeper]
 sandbox_profile = "docker"
@@ -1128,6 +989,7 @@ goal = "test"
            (Keeper_toml_loader.toml_string_opt doc "keeper.goal"))
 
 (** Test: update_field_in_content returns Error for missing table *)
+;;
 let test_toml_update_no_table () =
   let input = {|# no [keeper] table here
 goal = "orphan"
@@ -1142,6 +1004,7 @@ goal = "orphan"
    a configured keeper, leaving non-keeper credentials (dashboard,
    admin, agent_code-mcp-client, ...) untouched. Spec: AuthIdentityFSM
    I1 IdentityBindsToken. *)
+;;
 let test_canonicalize_if_keeper () =
   with_temp_dir "canonicalize-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -1195,14 +1058,6 @@ let () =
             "TOML tool policy fields overwrite stale runtime JSON"
             `Quick
             test_tool_policy_resync;
-          test_case
-            "TOML tool_preset_source resyncs without policy delta"
-            `Quick
-            test_tool_preset_source_resyncs_from_toml_without_policy_delta;
-          test_case
-            "persona no longer drives tool_preset_source"
-            `Quick
-            test_persona_no_longer_drives_tool_preset_source;
           test_case
             "custom tool_access is preserved when TOML omits preset"
             `Quick

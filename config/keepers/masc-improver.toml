@@ -5,6 +5,3 @@ base = "base.toml"
 autoboot_enabled = true
 persona_name = "analyst"
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"

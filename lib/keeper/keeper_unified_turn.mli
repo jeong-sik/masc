@@ -70,8 +70,7 @@ type degraded_retry_budget_decision =
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
 val next_fail_open_cascade_for_turn_with_budget
-  :  ?rotation_cascades:string list
-  -> base_cascade:string
+  :  base_cascade:string
   -> effective_cascade:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
   -> attempted_cascades:string list
@@ -174,49 +173,8 @@ val ensure_local_discovery_ready
   -> string list
   -> (unit, string) result
 
-(** Deterministic decision for the phase-buffer fallback boundary. This
-    does not probe runtime liveness; it only decides whether the selected
-    labels resolve to a probeable runtime URL before preserving the configured
-    [routes.phase_buffer] target. Removed route aliases are left as raw
-    names; only canonical route keys resolve through routes before this
-    decision. *)
-type phase_buffer_liveness_decision =
-  | Keep_effective_cascade of string
-  | Probe_phase_buffer_urls of
-      { effective_cascade : string
-      ; fallback_cascade : string
-      ; probeable_base_urls : string list
-      }
-
-val decide_phase_buffer_liveness
-  :  ?resolve_runtime_url:(string -> string option)
-  -> base_cascade:string
-  -> effective_cascade:string
-  -> string list
-  -> phase_buffer_liveness_decision
-
-(** When phase routing temporarily forces the phase-buffer route, fail open to the
-    keeper's configured base cascade if the probeable runtime endpoint is
-    unavailable. Removed route aliases are not treated as phase-buffer
-    targets. Exposed for targeted tests. *)
-val fail_open_phase_buffer_when_unavailable
-  :  ?resolve_runtime_url:(string -> string option)
-  -> ?probe_base_url:(string -> bool)
-  -> base_cascade:string
-  -> effective_cascade:string
-  -> string list
-  -> string
-
-(** Pure merge step for runtime-owned fail-open rotation candidates. The
-    active path feeds this from the live cascade catalog: catalog order is
-    preserved while retaining only reserved recovery profiles and
-    keeper-assignable profiles. *)
-val fail_open_rotation_cascades_from_catalog
-  :  ?excluded_targets:string list
-  -> catalog_names:string list
-  -> keeper_assignable:string list
-  -> unit
-  -> string list option
+(* cascade→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
+   (Keeper_turn_liveness 에서 적출됨 — 단일 runtime 에서 죽은 코드). *)
 
 (** Typed phase-gate output for the first turn pipeline boundary.
     [run_keeper_cycle] converts this record into the manifest
@@ -248,12 +206,11 @@ val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
 
 (** Resolve the next cascade to try after an auto-recoverable failure.
     Uses the current effective cascade, the turn tool requirement, and
-    optionally a runtime/catalog-owned rotation order, then suppresses
-    suggestions that would loop back to a cascade already attempted during
-    the current turn. Exposed for targeted tests. *)
+    the default degraded rotation candidate, then suppresses suggestions
+    that would loop back to a cascade already attempted during the current
+    turn. Exposed for targeted tests. *)
 val next_fail_open_cascade_for_turn
-  :  ?rotation_cascades:string list
-  -> base_cascade:string
+  :  base_cascade:string
   -> effective_cascade:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
   -> attempted_cascades:string list
@@ -281,7 +238,6 @@ val run_keeper_cycle
   -> ?semaphore_wait_ms:int
   -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> ?shared_context:Agent_sdk.Context.t
-  -> ?selected_item:string * Cascade_ref.cascade_item
   -> unit
   -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
 

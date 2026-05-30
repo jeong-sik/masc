@@ -132,7 +132,7 @@ function WaterfallRow({
       class="grid gap-2 py-2 px-3 rounded-[var(--r-1)] border bg-[var(--color-bg-surface)]"
       style="border-color: ${tone.border}"
       role="row"
-      aria-label="캐스케이드 ${ev.cascade_name} 사이클 ${ev.cycle}"
+      aria-label="런타임 ${ev.cascade_name} 사이클 ${ev.cycle}"
     >
       <!-- Header row -->
       <div class="flex flex-wrap items-center gap-2 text-2xs">
@@ -189,7 +189,7 @@ export function CascadeWaterfallPanel() {
   const updatedAt = waterfallUpdatedAt.value
 
   if (isLoading && events.length === 0) {
-    return html`<${LoadingState}>캐스케이드 전략 트레이스 불러오는 중...<//>`
+    return html`<${LoadingState}>런타임 전략 트레이스 불러오는 중...<//>`
   }
 
   if (error) {
@@ -203,7 +203,7 @@ export function CascadeWaterfallPanel() {
       <div class="flex flex-wrap items-center gap-2 justify-between">
         <div>
           <div class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
-            캐스케이드 전략 워터폴
+            런타임 전략 워터폴
           </div>
           ${updatedAt
             ? html`<div class="text-3xs text-[var(--color-fg-disabled)] mt-0.5">
@@ -215,7 +215,7 @@ export function CascadeWaterfallPanel() {
           ${names.length > 1
             ? html`
               <select
-                aria-label="캐스케이드 필터"
+                aria-label="런타임 필터"
                 class="py-1 px-2 rounded-[var(--r-1)] text-3xs bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)] border border-[var(--color-border-default)] cursor-pointer"
                 value=${waterfallFilter.value}
                 onChange=${(e: Event) => { waterfallFilter.value = (e.target as HTMLSelectElement).value }}
@@ -233,9 +233,9 @@ export function CascadeWaterfallPanel() {
       </div>
 
       ${events.length === 0
-        ? html`<div class="text-xs text-[var(--color-fg-muted)] py-4 text-center">전략 트레이스 없음 — 캐스케이드가 아직 활동하지 않았습니다.</div>`
+        ? html`<div class="text-xs text-[var(--color-fg-muted)] py-4 text-center">전략 트레이스 없음 — 런타임이 아직 활동하지 않았습니다.</div>`
         : html`
-          <div class="flex flex-col gap-2" role="table" aria-label="캐스케이드 전략 워터폴 이벤트">
+          <div class="flex flex-col gap-2" role="table" aria-label="런타임 전략 워터폴 이벤트">
             ${events.map((ev, i) => html`
               <${WaterfallRow} ev=${ev} maxIn=${maxIn} key=${i} />
             `)}

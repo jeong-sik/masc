@@ -70,7 +70,6 @@ type event =
   | Tool_assigned of {
       agent_id : string;
       profile : string;
-      preset : string option; [@default None]
       tool_count : int;
       assignment_id : string;
     }
@@ -217,7 +216,6 @@ val track_tool_assigned :
   config ->
   agent_id:string ->
   profile:string ->
-  ?preset:string ->
   tool_count:int ->
   assignment_id:string ->
   unit ->

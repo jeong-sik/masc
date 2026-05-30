@@ -18,10 +18,6 @@ export const selectedKeeperName = signal('')
 export const keeperMessage = signal('')
 export const hydratedWorkflowId = signal<string | null>(null)
 
-// QuickIntervene: unified message target
-// 'namespace' = broadcast, 'keeper:{name}' = keeper_message
-export type QuickComposerMode = 'broadcast' | 'dm' | 'state'
-
 export const STATE_BLOCK_TEMPLATE = [
   '[STATE]',
   'Goal: ',
@@ -33,10 +29,6 @@ export const STATE_BLOCK_TEMPLATE = [
   '[/STATE]',
 ].join('\n')
 
-export const quickTarget = signal('namespace')
-export const quickMessage = signal('')
-export const quickComposerMode = signal<QuickComposerMode>('broadcast')
-
 const STATE_BLOCK_KEYS: Record<string, string> = {
   constraints: 'Constraints',
   decisions: 'Decisions',
@@ -45,20 +37,6 @@ const STATE_BLOCK_KEYS: Record<string, string> = {
   next: 'NEXT',
   openquestions: 'OpenQuestions',
   progress: 'Progress',
-}
-
-export function composerModeForFocus(focus?: string | null): QuickComposerMode | null {
-  switch (focus?.trim().toLowerCase()) {
-    case 'broadcast':
-      return 'broadcast'
-    case 'mention':
-    case 'dm':
-      return 'dm'
-    case 'state':
-      return 'state'
-    default:
-      return null
-  }
 }
 
 function stateBlockBody(message: string): string | null {

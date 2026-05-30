@@ -1,8 +1,4 @@
 val default_cascade_name : unit -> string
-val phase_recovery_cascade_name : string
-val phase_buffer_cascade_name : string
-val phase_routing_cascade_names : string list
-val tool_required_cascade_name : string
 val min_keeper_context_tokens : int
 val max_keeper_context_tokens : int
 val alert_error_detail_max_chars : int

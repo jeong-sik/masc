@@ -521,8 +521,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
         else (
           let inference_cascade_name =
             Cascade_name.of_string_exn
-              (Keeper_cascade_profile.cascade_name_for_use
-                 Keeper_cascade_profile.Provider_benchmark)
+              (Runtime.get_default_runtime_id ())
           in
           match
             Masc_oas_bridge.run_with_caller

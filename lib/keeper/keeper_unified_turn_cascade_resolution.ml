@@ -19,7 +19,6 @@ type cascade_resolution =
 let resolve_cascade
       ~(meta : keeper_meta)
       ~(phase_opt : Keeper_state_machine.phase option)
-      ~(selected_item : (string * Cascade_ref.cascade_item) option)
       ~(append_cascade_routed_manifest :
          cascade_name:string -> decision:Yojson.Safe.t -> unit)
   =
@@ -45,28 +44,16 @@ let resolve_cascade
     Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[ "edge", "ksm_to_kcl_routing" ]
     ();
-  let routed_labels =
-    Keeper_model_labels.configured_model_labels_of_meta meta
-  in
-  let resolved_cascade =
-    Keeper_turn_liveness.fail_open_phase_buffer_when_unavailable
-      ~base_cascade:(cascade_name_of_meta meta)
-      ~effective_cascade:routing.effective_cascade
-      routed_labels
-  in
+  (* cascade→Runtime 숙청: phase_buffer liveness fail-open 제거. 단일 runtime
+     에서 effective == base 라 fail_open 은 항상 effective 를 그대로 반환했다 —
+     resolved_cascade 는 곧 routing.effective_cascade. *)
+  let resolved_cascade = routing.effective_cascade in
   Log.Keeper.debug
     "%s: cascade routing: %s -> %s (reason: %s)"
     meta.name
     (cascade_name_of_meta meta)
     routing.effective_cascade
     routing.reason;
-  if not (String.equal resolved_cascade routing.effective_cascade)
-  then
-    Log.Keeper.warn
-      "%s: phase_buffer unavailable for labels [%s]; falling back to base cascade %s"
-      meta.name
-      (String.concat ", " routed_labels)
-      resolved_cascade;
   let decision =
     `Assoc
       (Keeper_cascade_engine.manifest_fields
@@ -76,10 +63,9 @@ let resolve_cascade
          ("effective_cascade", `String routing.effective_cascade);
          ("resolved_cascade", `String resolved_cascade);
          ("routing_reason", `String routing.reason);
-         ( "fail_opened",
-           `Bool
-             (not (String.equal resolved_cascade routing.effective_cascade))
-         );
+         (* fail_opened: phase_buffer liveness fail-open 제거 후 항상 false.
+            manifest schema 호환을 위해 필드는 유지. *)
+         ("fail_opened", `Bool false);
        ])
   in
   append_cascade_routed_manifest ~cascade_name:resolved_cascade ~decision;

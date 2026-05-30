@@ -1,8 +1,4 @@
 val default_cascade_name : unit -> string
-val phase_recovery_cascade_name : string
-val phase_buffer_cascade_name : string
-val phase_routing_cascade_names : string list
-val tool_required_cascade_name : string
 val min_keeper_context_tokens : int
 val max_keeper_context_tokens : int
 val alert_error_detail_max_chars : int
@@ -213,8 +209,6 @@ val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option
-val valid_tool_preset_raw_strings : string list
-val normalize_tool_preset_raw : string -> string option
 val first_some : 'a option -> 'a option -> 'a option
 val normalize_per_provider_timeout_opt :
   source:string -> float option -> float option

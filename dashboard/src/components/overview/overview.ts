@@ -9,7 +9,7 @@
 //   4. Keeper strip    — top three keepers by recent heartbeat
 
 import { html } from 'htm/preact'
-import { useMemo } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { SectionCard } from '../common/card'
 import { StatTile } from '../common/stat-tile'
 import { TimeAgo } from '../common/time-ago'
@@ -32,6 +32,13 @@ import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
 import { isAgentOffline } from '../../lib/agent-status'
+import { get } from '../../api/core'
+import { createAsyncResource, type AsyncResource } from '../../lib/async-state'
+import {
+  normalizeSurfaceReadinessPayload,
+  summarizeSurfaceReadiness,
+  type SurfaceReadinessEntry,
+} from '../surface-readiness-panel'
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
 
@@ -580,6 +587,40 @@ export function pickActiveSession(snap: DashboardMissionResponse | null): Dashbo
   return running ?? snap.sessions[0] ?? null
 }
 
+// ─── Surface Readiness Summary ───────────────────────────────────────────────
+
+const surfaceReadinessResource: AsyncResource<SurfaceReadinessEntry[]> = createAsyncResource()
+
+function loadSurfaceReadiness(): Promise<void> {
+  return surfaceReadinessResource.load(async () => {
+    const raw = await get<unknown>('/api/v1/dashboard/surface-readiness')
+    const data = normalizeSurfaceReadinessPayload(raw)
+    return data.surfaces
+  })
+}
+
+function SurfaceReadinessSummary() {
+  useEffect(() => { void loadSurfaceReadiness() }, [])
+
+  const state = surfaceReadinessResource.state.value
+  if (state.status !== 'loaded') return null
+
+  const summary = summarizeSurfaceReadiness(state.data)
+  return html`
+    <${SectionCard} label="Surface Readiness" data-testid="overview-surface-readiness">
+      <${KpiStripIsland}
+        ariaLabel="Surface readiness summary"
+        cols=${3}
+        cells=${[
+          { variant: 'stacked', label: 'Main', value: String(summary.main), testId: 'sr-main' },
+          { variant: 'stacked', label: 'Total', value: String(summary.total), testId: 'sr-total' },
+          { variant: 'stacked', label: 'Gaps', value: String(summary.gaps), kind: summary.gaps > 0 ? 'warn' : 'ok', testId: 'sr-gaps' },
+        ]}
+      />
+    <//>
+  `
+}
+
 // ─── Root ────────────────────────────────────────────────────────────────────
 
 export function Overview() {
@@ -602,6 +643,7 @@ export function Overview() {
   return html`
     <div class="flex flex-col gap-8">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
+      <${SurfaceReadinessSummary} />
       <${FleetTicker} events=${tickerEvents} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />

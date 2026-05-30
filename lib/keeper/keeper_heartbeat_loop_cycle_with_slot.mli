@@ -9,6 +9,5 @@ val run_keeper_cycle_with_slot
   -> shared_context:Agent_sdk.Context.t
   -> semaphore_wait_ms:int
   -> slot_control:Keeper_turn_slot.keeper_turn_slot_control
-  -> ?selected_item:string * Cascade_ref.cascade_item
   -> unit
   -> Keeper_meta_contract.keeper_meta

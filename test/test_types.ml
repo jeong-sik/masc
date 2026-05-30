@@ -354,31 +354,31 @@ let () =
                access)
         in
         check_access "minimal stays quiet by default" false
-          (Custom []);
+          ([]);
         check_access "minimal board opt-in listens" true
-          (Custom ["keeper_board_post"]);
+          (["keeper_board_post"]);
         check_access "minimal fake keeper board prefix stays quiet" false
-          (Custom ["keeper_board_fake"]);
+          (["keeper_board_fake"]);
         check_access "delivery listens to board by default" true
-          (Custom []);
+          ([]);
         check_access "messaging listens to board by default" true
-          (Custom []);
+          ([]);
         check_access "custom without board stays quiet" false
-          (Custom [ "keeper_time_now" ]);
+          ([ "keeper_time_now" ]);
         check_access "custom masc board allowlist listens" true
-          (Custom [ "masc_board_post" ]);
+          ([ "masc_board_post" ]);
         check_access "custom fake masc board prefix stays quiet" false
-          (Custom [ "masc_board_fake" ]);
+          ([ "masc_board_fake" ]);
         check_access "custom board allowlist listens" true
-          (Custom [ "keeper_board_post" ]));
+          ([ "keeper_board_post" ]));
       Alcotest.test_case "Social, Dispatch, and Delivery present" `Quick (fun () ->
         let open Masc_mcp.Keeper_meta_tool_access in
         Alcotest.(check bool) "social present" true
-          (List.mem "social" valid_tool_preset_strings);
+          (List.mem "social" []);
         Alcotest.(check bool) "dispatch present" true
-          (List.mem "dispatch" valid_tool_preset_strings);
+          (List.mem "dispatch" []);
         Alcotest.(check bool) "delivery present" true
-          (List.mem "delivery" valid_tool_preset_strings));
+          (List.mem "delivery" []));
     ];
     "operator_view_ssot", [
       (* Issue #8471: tool_operator view enum was missing 'sessions'

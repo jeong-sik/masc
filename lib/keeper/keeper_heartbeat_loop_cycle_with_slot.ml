@@ -48,7 +48,6 @@ let run_keeper_cycle_with_slot
       ~shared_context
       ~semaphore_wait_ms
       ~slot_control
-      ?selected_item
       ()
   =
   match
@@ -62,7 +61,6 @@ let run_keeper_cycle_with_slot
         ~semaphore_wait_ms
         ~turn_slot_control:slot_control
         ~shared_context
-        ?selected_item
         ())
   with
   | Error err ->

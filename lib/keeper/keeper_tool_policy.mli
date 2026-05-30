@@ -27,13 +27,6 @@ val policy_config_for_validation :
     state. Intended for isolated regression tests only. *)
 val reset_policy_config_for_test : unit -> unit
 
-(** {1 Policy Group Helpers} *)
-
-(** Check if [agent_preset] subsumes [required_preset] per the config hierarchy.
-    Still used for task-claim matching even though per-keeper presets are gone. *)
-val preset_can_satisfy :
-  agent_preset:string -> required_preset:string -> bool
-
 (** {1 MASC Schema Injection} *)
 
 (** Inline MCP-runtime tools that are safe for keepers without an MCP session
@@ -140,7 +133,7 @@ val keeper_allowed_tool_names :
 val keeper_universe_tool_names : keeper_meta -> string list
 
 (** Preset-scoped universe: preset allowlist + core_always - denied. *)
-val keeper_preset_universe_tool_names : keeper_meta -> string list
+val keeper_tool_search_scope : keeper_meta -> string list
 
 (** Tools safe to call on the keeper's last turn. *)
 val last_turn_safe_tool_names : unit -> string list
@@ -155,7 +148,7 @@ val keeper_allowed_model_tools :
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** Preset-scoped universe model tool schemas for BM25 indexing. *)
-val keeper_preset_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
+val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)
 val filter_schemas_by_names :

@@ -3095,6 +3095,121 @@ let test_generic_subcommand_args_edge_cases () =
     rt_cases
 ;;
 
+(* Batch 18: Curl parser edge cases — method, headers, body, output,
+   follow_redirects, insecure, combined flags, eq-form, POSIX --. *)
+let test_curl_edge_cases () =
+  let open Shell_ir_typed in
+  let base =
+    { Shell_ir.bin = bin_ok "curl"
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* --- Basic GET (default method, URL only) --- *)
+  let w = of_simple { base with args = [ lit "https://example.com" ] } in
+  (match w with
+   | W (Curl { url = "https://example.com"; method_ = `GET; body = None; follow_redirects = false; insecure = false; _ }) -> ()
+   | w -> Alcotest.failf "Curl basic GET: got %a" pp w);
+  (* --- POST with -X POST --- *)
+  let w2 = of_simple { base with args = [ lit "-X"; lit "POST"; lit "-d"; lit "{\"key\":\"val\"}"; lit "https://api.example.com" ] } in
+  (match w2 with
+   | W (Curl { url = "https://api.example.com"; method_ = `POST; body = Some "{\"key\":\"val\"}"; _ }) -> ()
+   | w -> Alcotest.failf "Curl POST -X: got %a" pp w);
+  (* --- --request=PUT eq-form --- *)
+  let w3 = of_simple { base with args = [ lit "--request=PUT"; lit "https://api.example.com" ] } in
+  (match w3 with
+   | W (Curl { method_ = `PUT; url = "https://api.example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Curl --request=PUT: got %a" pp w);
+  (* --- Header with -H --- *)
+  let w4 = of_simple { base with args = [ lit "-H"; lit "Authorization: Bearer token123"; lit "https://api.example.com" ] } in
+  (match w4 with
+   | W (Curl { headers = Some [ ("Authorization", "Bearer token123") ]; _ }) -> ()
+   | w -> Alcotest.failf "Curl -H header: got %a" pp w);
+  (* --- Header with --header=KEY:VALUE eq-form --- *)
+  let w5 = of_simple { base with args = [ lit "--header=Content-Type: application/json"; lit "https://api.example.com" ] } in
+  (match w5 with
+   | W (Curl { headers = Some [ ("Content-Type", "application/json") ]; _ }) -> ()
+   | w -> Alcotest.failf "Curl --header= eq-form: got %a" pp w);
+  (* --- Body with --data=VALUE eq-form --- *)
+  let w6 = of_simple { base with args = [ lit "--data=hello"; lit "https://api.example.com" ] } in
+  (match w6 with
+   | W (Curl { body = Some "hello"; method_ = `GET; _ }) -> ()
+   | w -> Alcotest.failf "Curl --data= eq-form: got %a" pp w);
+  (* --- Output with -o --- *)
+  let w7 = of_simple { base with args = [ lit "-o"; lit "out.html"; lit "https://example.com" ] } in
+  (match w7 with
+   | W (Curl { output_file = Some "out.html"; _ }) -> ()
+   | w -> Alcotest.failf "Curl -o: got %a" pp w);
+  (* --- Output with --output=FILE eq-form --- *)
+  let w8 = of_simple { base with args = [ lit "--output=data.json"; lit "https://api.example.com" ] } in
+  (match w8 with
+   | W (Curl { output_file = Some "data.json"; _ }) -> ()
+   | w -> Alcotest.failf "Curl --output=: got %a" pp w);
+  (* --- Follow redirects -L --- *)
+  let w9 = of_simple { base with args = [ lit "-L"; lit "https://example.com" ] } in
+  (match w9 with
+   | W (Curl { follow_redirects = true; insecure = false; _ }) -> ()
+   | w -> Alcotest.failf "Curl -L: got %a" pp w);
+  (* --- Insecure -k --- *)
+  let w10 = of_simple { base with args = [ lit "-k"; lit "https://self-signed.example.com" ] } in
+  (match w10 with
+   | W (Curl { insecure = true; follow_redirects = false; _ }) -> ()
+   | w -> Alcotest.failf "Curl -k: got %a" pp w);
+  (* --- Combined short flags -Lk --- *)
+  let w11 = of_simple { base with args = [ lit "-Lk"; lit "https://example.com" ] } in
+  (match w11 with
+   | W (Curl { follow_redirects = true; insecure = true; _ }) -> ()
+   | w -> Alcotest.failf "Curl -Lk: got %a" pp w);
+  (* --- Combined short flags -kL (reversed order) --- *)
+  let w12 = of_simple { base with args = [ lit "-kL"; lit "https://example.com" ] } in
+  (match w12 with
+   | W (Curl { follow_redirects = true; insecure = true; _ }) -> ()
+   | w -> Alcotest.failf "Curl -kL: got %a" pp w);
+  (* --- POSIX -- end-of-options --- *)
+  let w13 = of_simple { base with args = [ lit "-L"; lit "--"; lit "https://example.com" ] } in
+  (match w13 with
+   | W (Curl { follow_redirects = true; url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Curl --: got %a" pp w);
+  (* --- Unknown flags are skipped --- *)
+  let w14 = of_simple { base with args = [ lit "-s"; lit "-S"; lit "--progress-bar"; lit "https://example.com" ] } in
+  (match w14 with
+   | W (Curl { url = "https://example.com"; method_ = `GET; _ }) -> ()
+   | w -> Alcotest.failf "Curl unknown flags: got %a" pp w);
+  (* --- Value-consuming flags (--max-time) are skipped --- *)
+  let w15 = of_simple { base with args = [ lit "--max-time"; lit "30"; lit "-H"; lit "Accept: text/html"; lit "https://example.com" ] } in
+  (match w15 with
+   | W (Curl { headers = Some [ ("Accept", "text/html") ]; url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Curl --max-time skip: got %a" pp w);
+  (* --- DELETE method --- *)
+  let w16 = of_simple { base with args = [ lit "-X"; lit "DELETE"; lit "https://api.example.com/resource/1" ] } in
+  (match w16 with
+   | W (Curl { method_ = `DELETE; url = "https://api.example.com/resource/1"; _ }) -> ()
+   | w -> Alcotest.failf "Curl DELETE: got %a" pp w);
+  (* --- Multiple headers --- *)
+  let w17 = of_simple { base with args = [ lit "-H"; lit "Accept: application/json"; lit "-H"; lit "Authorization: Bearer tok"; lit "https://api.example.com" ] } in
+  (match w17 with
+   | W (Curl { headers = Some hs; _ }) when List.length hs = 2 -> ()
+   | w -> Alcotest.failf "Curl multiple headers: got %a" pp w);
+  (* --- Round-trip for Curl --- *)
+  let rt_cases =
+    [ W (Curl { url = "https://example.com"; method_ = `GET; headers = None; body = None; output_file = None; follow_redirects = false; insecure = false })
+    ; W (Curl { url = "https://api.example.com"; method_ = `POST; headers = Some [ ("Content-Type", "application/json") ]; body = Some "{\"k\":\"v\"}"; output_file = None; follow_redirects = true; insecure = false })
+    ; W (Curl { url = "https://secure.example.com"; method_ = `PUT; headers = None; body = Some "data"; output_file = Some "out.bin"; follow_redirects = false; insecure = true })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = to_simple cmd in
+       let back = of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "Curl round-trip failed for %a" pp w)
+    rt_cases
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"

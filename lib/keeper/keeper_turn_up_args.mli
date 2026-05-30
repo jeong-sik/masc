@@ -33,7 +33,7 @@ type parsed_args =
   ; compaction_message_gate_opt : int option
   ; compaction_token_gate_opt : int option
   ; continuity_compaction_cooldown_sec_opt : int option
-  ; tool_access_opt : tool_access option
+  ; tool_access_opt : string list option
   ; tool_denylist_opt : string list option
   ; auto_handoff_opt : bool option
   ; handoff_threshold_opt : float option
@@ -88,7 +88,7 @@ val reject_legacy_tool_access_kind :
     Legacy top-level tool-policy args are rejected. *)
 val parse_tool_access_input :
   Yojson.Safe.t ->
-  (tool_access option, string) result
+  (string list option, string) result
 
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)

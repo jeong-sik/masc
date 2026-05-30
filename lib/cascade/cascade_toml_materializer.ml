@@ -369,6 +369,12 @@ let render_toml_to_yojson toml =
          shape for JSON-shaped readers such as route decoding. *)
     let is_rfc_0058_namespace = function
       | "providers" | "models" -> true
+      (* [runtime] is the cascade→Runtime substrate namespace (#19453):
+         a top-level table holding the default runtime binding key. It is
+         a declarative namespace, not a legacy flat cascade profile, so it
+         passes through verbatim to the materialized JSON for the Runtime
+         consumer rather than tripping the flat-profile rejection below. *)
+      | "runtime" -> true
       | _ -> false
     in
     let rec loop acc = function

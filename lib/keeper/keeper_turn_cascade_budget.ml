@@ -19,12 +19,6 @@ type cascade_execution = {
   max_tokens : int;
 }
 
-let fail_open_rotation_cascades_from_catalog =
-  Keeper_turn_cascade_budget_routing.fail_open_rotation_cascades_from_catalog
-
-let active_fail_open_rotation_cascades =
-  Keeper_turn_cascade_budget_routing.active_fail_open_rotation_cascades
-
 let next_fail_open_cascade_for_turn =
   Keeper_turn_cascade_budget_routing.next_fail_open_cascade_for_turn
 
@@ -245,7 +239,6 @@ type degraded_retry_budget_decision =
   | Degraded_retry_allowed of EC.degraded_retry
 
 let next_fail_open_cascade_for_turn_with_budget
-    ?rotation_cascades
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
@@ -257,7 +250,6 @@ let next_fail_open_cascade_for_turn_with_budget
     (err : Agent_sdk.Error.sdk_error) : degraded_retry_budget_decision =
   match
     next_fail_open_cascade_for_turn
-      ?rotation_cascades
       ~base_cascade ~effective_cascade ~tool_requirement
       ~attempted_cascades err
   with

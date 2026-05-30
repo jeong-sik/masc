@@ -14,14 +14,20 @@
 (** Field extraction with type coercion *)
 
 let get_string : Yojson.Safe.t -> string -> string option = fun json key ->
-  match Yojson.Safe.Util.member key json with
-  | `String s -> Some s
-  | _ -> None
+  try
+    match Yojson.Safe.Util.member key json with
+    | `String s -> Some s
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
 
 let get_string_with_default json ~key ~default =
-  match Yojson.Safe.Util.member key json with
-  | `String s -> s
-  | _ -> default
+  try
+    match Yojson.Safe.Util.member key json with
+    | `String s -> s
+    | _ -> default
+  with
+  | Yojson.Safe.Util.Type_error _ -> default
 
 (** Like [get_string] but rejects whitespace-only strings.  Returns
     [Some] only when the field is a non-empty string after [String.trim].
@@ -29,75 +35,111 @@ let get_string_with_default json ~key ~default =
     this exact filter (typed-LLM output, keeper contract introspection,
     etc.) — this is the SSOT for that pattern. *)
 let get_string_nonempty json key : string option =
-  match Yojson.Safe.Util.member key json with
-  | `String s when String.trim s <> "" -> Some s
-  | _ -> None
+  try
+    match Yojson.Safe.Util.member key json with
+    | `String s when String.trim s <> "" -> Some s
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
 
 let get_int : Yojson.Safe.t -> string -> int option = fun json key ->
-  match Yojson.Safe.Util.member key json with
-  | `Int n -> Some n
-  | `Intlit s -> int_of_string_opt s
-  | _ -> None
+  try
+    match Yojson.Safe.Util.member key json with
+    | `Int n -> Some n
+    | `Intlit s -> int_of_string_opt s
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
 
 let get_float : Yojson.Safe.t -> string -> float option = fun json key ->
-  match Yojson.Safe.Util.member key json with
-  | `Float f -> Some f
-  | `Int n -> Some (Float.of_int n)
-  | _ -> None
+  try
+    match Yojson.Safe.Util.member key json with
+    | `Float f -> Some f
+    | `Int n -> Some (Float.of_int n)
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
 
 let get_bool : Yojson.Safe.t -> string -> bool option = fun json key ->
-  match Yojson.Safe.Util.member key json with
-  | `Bool b -> Some b
-  | _ -> None
+  try
+    match Yojson.Safe.Util.member key json with
+    | `Bool b -> Some b
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
 
 let get_string_list : Yojson.Safe.t -> string -> string list = fun json key ->
-  match Yojson.Safe.Util.member key json with
-  | `List xs ->
+  try
+    match Yojson.Safe.Util.member key json with
+    | `List xs ->
       List.filter_map
         (function `String s when String.trim s <> "" -> Some s | _ -> None)
         xs
-  | _ -> []
+    | _ -> []
+  with
+  | Yojson.Safe.Util.Type_error _ -> []
 
 let get_object : Yojson.Safe.t -> string -> Yojson.Safe.t option = fun json key ->
-  match Yojson.Safe.Util.member key json with
-  | `Assoc _ as json' -> Some json'
-  | _ -> None
+  try
+    match Yojson.Safe.Util.member key json with
+    | `Assoc _ as json' -> Some json'
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
 
 let get_array : Yojson.Safe.t -> string -> Yojson.Safe.t option = fun json key ->
-  match Yojson.Safe.Util.member key json with
-  | `List _ as json' -> Some json'
-  | _ -> None
+  try
+    match Yojson.Safe.Util.member key json with
+    | `List _ as json' -> Some json'
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
 
 (** {1 Required field extraction (Result-returning)} *)
 
 let require_string json key : (string, string) result =
-  match Yojson.Safe.Util.member key json with
-  | `String s -> Ok s
-  | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
-  | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not a string" key)
+  try
+    match Yojson.Safe.Util.member key json with
+    | `String s -> Ok s
+    | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+    | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not a string" key)
+  with
+  | Yojson.Safe.Util.Type_error _ ->
+    Error (Printf.sprintf "required field '%s' is missing" key)
 
 let require_int json key : (int, string) result =
-  match Yojson.Safe.Util.member key json with
-  | `Int n -> Ok n
-  | `Intlit s ->
+  try
+    match Yojson.Safe.Util.member key json with
+    | `Int n -> Ok n
+    | `Intlit s ->
       (match int_of_string_opt s with
        | Some n -> Ok n
        | None -> Error (Printf.sprintf "field '%s' has non-integer intlit: %s" key s))
-  | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
-  | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not an int" key)
+    | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+    | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not an int" key)
+  with
+  | Yojson.Safe.Util.Type_error _ -> Error (Printf.sprintf "required field '%s' is missing" key)
 
 let require_float json key : (float, string) result =
-  match Yojson.Safe.Util.member key json with
-  | `Float f -> Ok f
-  | `Int n -> Ok (Float.of_int n)
-  | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
-  | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not a float" key)
+  try
+    match Yojson.Safe.Util.member key json with
+    | `Float f -> Ok f
+    | `Int n -> Ok (Float.of_int n)
+    | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+    | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not a float" key)
+  with
+  | Yojson.Safe.Util.Type_error _ ->
+    Error (Printf.sprintf "required field '%s' is missing" key)
 
 let require_bool json key : (bool, string) result =
-  match Yojson.Safe.Util.member key json with
-  | `Bool b -> Ok b
-  | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
-  | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not a bool" key)
+  try
+    match Yojson.Safe.Util.member key json with
+    | `Bool b -> Ok b
+    | `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+    | #Yojson.Safe.t -> Error (Printf.sprintf "field '%s' is not a bool" key)
+  with
+  | Yojson.Safe.Util.Type_error _ ->
+    Error (Printf.sprintf "required field '%s' is missing" key)
 
 (** Value-level type discrimination — returns the JSON variant name as
     a lowercase string.  Used in parse-error diagnostics across 5+ modules. *)
@@ -194,15 +236,18 @@ let assoc_float_opt name json =
   | _ -> None
 
 let json_string_list_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `List values ->
+  try
+    match Yojson.Safe.Util.member name json with
+    | `List values ->
     values
-    |> List.filter_map (function
-      | `String value ->
-        let trimmed = String.trim value in
-        if trimmed <> "" then Some trimmed else None
-      | _ -> None)
-  | _ -> []
+      |> List.filter_map (function
+        | `String value ->
+          let trimmed = String.trim value in
+          if trimmed <> "" then Some trimmed else None
+        | _ -> None)
+    | _ -> []
+  with
+  | Yojson.Safe.Util.Type_error _ -> []
 
 
 (** List utilities *)

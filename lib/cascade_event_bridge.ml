@@ -17,7 +17,7 @@
     @modified 2.255.0 — accept OAS native events (#5620)
     @modified 2.260.0 — emit envelope correlation_id/run_id (oas#845) *)
 
-open Cascade_event_bridge_error_json
+open Keeper_event_bridge_error_json
 
 (** Drain interval: how often we poll the Event_bus subscription.
     Lower default keeps the dashboard close to real-time, while staying

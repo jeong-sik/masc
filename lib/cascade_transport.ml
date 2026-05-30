@@ -5,8 +5,8 @@
     {!Cascade_runner}. *)
 
 (* cli_transport_overrides type extracted to
-   [Cascade_transport_cli_overrides] (godfile decomp). *)
-type cli_transport_overrides = Cascade_transport_cli_overrides.cli_transport_overrides =
+   [Keeper_transport_cli_overrides] (godfile decomp). *)
+type cli_transport_overrides = Keeper_transport_cli_overrides.cli_transport_overrides =
   { cwd : string option
   ; claude_mcp_config : string option
   ; claude_allowed_tools : string list option
@@ -41,23 +41,23 @@ let provider_effective_max_turns _kind requested = requested
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
-type label_resolution_error = Cascade_transport_label_resolution.label_resolution_error =
+type label_resolution_error = Keeper_transport_label_resolution.label_resolution_error =
   | Invalid_model_label of string
 
-let label_resolution_error_to_string = Cascade_transport_label_resolution.label_resolution_error_to_string
-let label_resolution_error_to_sdk_error = Cascade_transport_label_resolution.label_resolution_error_to_sdk_error
-let resolve_provider_config_of_label = Cascade_transport_label_resolution.resolve_provider_config_of_label
-let invalid_runtime_config = Cascade_transport_label_resolution.invalid_runtime_config
+let label_resolution_error_to_string = Keeper_transport_label_resolution.label_resolution_error_to_string
+let label_resolution_error_to_sdk_error = Keeper_transport_label_resolution.label_resolution_error_to_sdk_error
+let resolve_provider_config_of_label = Keeper_transport_label_resolution.resolve_provider_config_of_label
+let invalid_runtime_config = Keeper_transport_label_resolution.invalid_runtime_config
 
-let cli_model_override = Cascade_transport_cli_config.cli_model_override
+let cli_model_override = Keeper_transport_cli_config.cli_model_override
 
 (* CLI MCP config JSON serializer extracted to
-   [Cascade_transport_cli_mcp_config_json] (godfile decomp). *)
-let json_of_string_pairs = Cascade_transport_cli_mcp_config_json.json_of_string_pairs
-let json_of_cli_mcp_server = Cascade_transport_cli_mcp_config_json.json_of_cli_mcp_server
+   [Keeper_transport_cli_mcp_config_json] (godfile decomp). *)
+let json_of_string_pairs = Keeper_transport_cli_mcp_config_json.json_of_string_pairs
+let json_of_cli_mcp_server = Keeper_transport_cli_mcp_config_json.json_of_cli_mcp_server
 
 let cli_mcp_config_json_of_policy =
-  Cascade_transport_cli_mcp_config_json.cli_mcp_config_json_of_policy
+  Keeper_transport_cli_mcp_config_json.cli_mcp_config_json_of_policy
 ;;
 
 let provider_caps_of_config = Provider_tool_support.oas_capabilities_of_config
@@ -79,84 +79,84 @@ let dedupe_preserve_order (items : string list) =
     items
 ;;
 
-let upsert_http_header = Cascade_transport_authorization.upsert_http_header
+let upsert_http_header = Keeper_transport_authorization.upsert_http_header
 (* String_util.trim_nonempty + first_nonempty_env + runtime-MCP policy header helpers
-   extracted to [Cascade_transport_mcp_policy_helpers] (godfile decomp). *)
-let first_nonempty_env = Cascade_transport_mcp_policy_helpers.first_nonempty_env
-let keeper_name_of_agent_name = Cascade_transport_authorization.keeper_name_of_agent_name
+   extracted to [Keeper_transport_mcp_policy_helpers] (godfile decomp). *)
+let first_nonempty_env = Keeper_transport_mcp_policy_helpers.first_nonempty_env
+let keeper_name_of_agent_name = Keeper_transport_authorization.keeper_name_of_agent_name
 
 let runtime_mcp_policy_with_masc_agent_name =
-  Cascade_transport_mcp_policy_helpers.runtime_mcp_policy_with_masc_agent_name
+  Keeper_transport_mcp_policy_helpers.runtime_mcp_policy_with_masc_agent_name
 ;;
 
 let runtime_mcp_policy_without_http_headers =
-  Cascade_transport_mcp_policy_helpers.runtime_mcp_policy_without_http_headers
+  Keeper_transport_mcp_policy_helpers.runtime_mcp_policy_without_http_headers
 ;;
 
-let is_authorization_header = Cascade_transport_authorization.is_authorization_header
-let authorization_header_from_policy = Cascade_transport_authorization.authorization_header_from_policy
-let per_keeper_authorization_header = Cascade_transport_authorization.per_keeper_authorization_header
-let runtime_mcp_policy_uses_bound_actor_tools = Cascade_transport_authorization.runtime_mcp_policy_uses_bound_actor_tools
-let add_masc_authorization_header = Cascade_transport_authorization.add_masc_authorization_header
+let is_authorization_header = Keeper_transport_authorization.is_authorization_header
+let authorization_header_from_policy = Keeper_transport_authorization.authorization_header_from_policy
+let per_keeper_authorization_header = Keeper_transport_authorization.per_keeper_authorization_header
+let runtime_mcp_policy_uses_bound_actor_tools = Keeper_transport_authorization.runtime_mcp_policy_uses_bound_actor_tools
+let add_masc_authorization_header = Keeper_transport_authorization.add_masc_authorization_header
 
 (* Per-keeper authorization bridging extracted to
-   [Cascade_transport_auth_bridging] (godfile decomp). *)
-let cli_tool_a_can_auth_keeper_bound_runtime_mcp = Cascade_transport_auth_bridging.cli_tool_a_can_auth_keeper_bound_runtime_mcp
-let bridged_runtime_mcp_policy_for_agent = Cascade_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
+   [Keeper_transport_auth_bridging] (godfile decomp). *)
+let cli_tool_a_can_auth_keeper_bound_runtime_mcp = Keeper_transport_auth_bridging.cli_tool_a_can_auth_keeper_bound_runtime_mcp
+let bridged_runtime_mcp_policy_for_agent = Keeper_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
 
 (* Provider-driven runtime MCP policy resolver extracted to
-   [Cascade_transport_runtime_policy_provider] (godfile decomp). *)
-let runtime_mcp_policy_for_provider = Cascade_transport_runtime_policy_provider.runtime_mcp_policy_for_provider
-let cli_runtime_mcp_jsons = Cascade_transport_runtime_policy_provider.cli_runtime_mcp_jsons
+   [Keeper_transport_runtime_policy_provider] (godfile decomp). *)
+let runtime_mcp_policy_for_provider = Keeper_transport_runtime_policy_provider.runtime_mcp_policy_for_provider
+let cli_runtime_mcp_jsons = Keeper_transport_runtime_policy_provider.cli_runtime_mcp_jsons
 let public_mcp_tool_names_of_oas_tools =
-  Cascade_transport_mcp_tool_classifier.public_mcp_tool_names_of_oas_tools
+  Keeper_transport_mcp_tool_classifier.public_mcp_tool_names_of_oas_tools
 ;;
 
 let public_mcp_tools_of_oas_tools =
-  Cascade_transport_mcp_tool_classifier.public_mcp_tools_of_oas_tools
+  Keeper_transport_mcp_tool_classifier.public_mcp_tools_of_oas_tools
 ;;
 
 let tool_names_are_public_mcp =
-  Cascade_transport_mcp_tool_classifier.tool_names_are_public_mcp
+  Keeper_transport_mcp_tool_classifier.tool_names_are_public_mcp
 ;;
 
 let runtime_mcp_tool_requires_bound_actor =
-  Cascade_transport_mcp_tool_classifier.runtime_mcp_tool_requires_bound_actor
+  Keeper_transport_mcp_tool_classifier.runtime_mcp_tool_requires_bound_actor
 ;;
 
 let public_mcp_tool_requires_bound_actor =
-  Cascade_transport_mcp_tool_classifier.public_mcp_tool_requires_bound_actor
+  Keeper_transport_mcp_tool_classifier.public_mcp_tool_requires_bound_actor
 ;;
 
 let tool_names_are_runtime_mcp =
-  Cascade_transport_mcp_tool_classifier.tool_names_are_runtime_mcp
+  Keeper_transport_mcp_tool_classifier.tool_names_are_runtime_mcp
 ;;
 
 ;;
 
-let runtime_mcp_policy_of_tool_names = Cascade_transport_runtime_mcp_policy_of_tool_names.runtime_mcp_policy_of_tool_names
-let public_mcp_runtime_policy_of_tool_names = Cascade_transport_runtime_mcp_policy_of_tool_names.public_mcp_runtime_policy_of_tool_names
+let runtime_mcp_policy_of_tool_names = Keeper_transport_runtime_mcp_policy_of_tool_names.runtime_mcp_policy_of_tool_names
+let public_mcp_runtime_policy_of_tool_names = Keeper_transport_runtime_mcp_policy_of_tool_names.public_mcp_runtime_policy_of_tool_names
 
-let provider_label = Cascade_transport_cli_config.provider_label
+let provider_label = Keeper_transport_cli_config.provider_label
 
 let cli_model_for_provider_config =
-  Cascade_transport_cli_config.cli_model_for_provider_config
+  Keeper_transport_cli_config.cli_model_for_provider_config
 ;;
 
 let cli_command_for_provider_config =
-  Cascade_transport_cli_config.cli_command_for_provider_config
+  Keeper_transport_cli_config.cli_command_for_provider_config
 ;;
 
 let cli_process_name_for_provider_config =
-  Cascade_transport_cli_config.cli_process_name_for_provider_config
+  Keeper_transport_cli_config.cli_process_name_for_provider_config
 ;;
 
 let cli_runtime_config_json_for_provider =
-  Cascade_transport_cli_config.cli_runtime_config_json_for_provider
+  Keeper_transport_cli_config.cli_runtime_config_json_for_provider
 ;;
 
 let cli_direct_binding_extra_env =
-  Cascade_transport_cli_config.cli_direct_binding_extra_env
+  Keeper_transport_cli_config.cli_direct_binding_extra_env
 ;;
 
 let resolve_tool_lane_for_oas_tools
@@ -331,10 +331,10 @@ let resolve_tool_lane_for_oas_tools
 ;;
 
 (* JSON-stream CLI transport (665 LOC nested module) extracted to
-   [Cascade_transport_json_stream_cli_local] (godfile decomp).
+   [Keeper_transport_json_stream_cli_local] (godfile decomp).
    Module alias preserves type identity; [Cascade_transport.mli]
    signature constraint continues to apply unchanged. *)
-module Json_stream_cli_transport_local = Cascade_transport_json_stream_cli_local
+module Json_stream_cli_transport_local = Keeper_transport_json_stream_cli_local
 
 let json_stream_cli_transport_ctor
       ~(provider_cfg : Llm_provider.Provider_config.t)
@@ -343,11 +343,11 @@ let json_stream_cli_transport_ctor
   =
   let cwd =
     Option.bind cli_transport_overrides (fun overrides ->
-      overrides.Cascade_transport_cli_overrides.cwd)
+      overrides.Keeper_transport_cli_overrides.cwd)
   in
   let stdout_idle_timeout_s =
     Option.bind cli_transport_overrides (fun overrides ->
-      overrides.Cascade_transport_cli_overrides.cli_subprocess_idle_sec)
+      overrides.Keeper_transport_cli_overrides.cli_subprocess_idle_sec)
   in
   let mcp_config_json = cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
   let model = cli_model_for_provider_config provider_cfg in
@@ -374,34 +374,34 @@ let json_stream_cli_transport_ctor
   | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
   | Ok mgr ->
     Ok
-      (Cascade_transport_cli_ctors.make_per_call_switch_transport (fun ~sw ->
+      (Keeper_transport_cli_ctors.make_per_call_switch_transport (fun ~sw ->
          Json_stream_cli_transport_local.create ~sw ~mgr ~config))
 ;;
 
 let () =
-  Cascade_transport_non_http_registry.register_non_http_transport
+  Keeper_transport_non_http_registry.register_non_http_transport
     ~kind:Llm_provider.Provider_config.Cli_tool_c
     ~ctor:json_stream_cli_transport_ctor
 ;;
 
 (* CLI transport constructors + per-call switch wrapping + ctor
-   registration extracted to [Cascade_transport_cli_ctors]
+   registration extracted to [Keeper_transport_cli_ctors]
    (godfile decomp). The sibling's top-level [let () = ...]
    block registers the 4 ctors into
-   [Cascade_transport_non_http_registry] at module-load time. *)
-let make_per_call_switch_transport = Cascade_transport_cli_ctors.make_per_call_switch_transport
+   [Keeper_transport_non_http_registry] at module-load time. *)
+let make_per_call_switch_transport = Keeper_transport_cli_ctors.make_per_call_switch_transport
 
 (* CLI argv UTF-8 sanitization extracted to
-   [Cascade_transport_cli_argv_sanitize] (godfile decomp). *)
+   [Keeper_transport_cli_argv_sanitize] (godfile decomp). *)
 let sanitize_runtime_mcp_server_for_cli =
-  Cascade_transport_cli_argv_sanitize.sanitize_runtime_mcp_server_for_cli
+  Keeper_transport_cli_argv_sanitize.sanitize_runtime_mcp_server_for_cli
 ;;
 
 let sanitize_runtime_mcp_policy_for_cli =
-  Cascade_transport_cli_argv_sanitize.sanitize_runtime_mcp_policy_for_cli
+  Keeper_transport_cli_argv_sanitize.sanitize_runtime_mcp_policy_for_cli
 ;;
 
 let sanitize_cli_completion_request_for_argv =
-  Cascade_transport_cli_argv_sanitize.sanitize_cli_completion_request_for_argv
+  Keeper_transport_cli_argv_sanitize.sanitize_cli_completion_request_for_argv
 ;;
-let non_http_transport_of_provider = Cascade_transport_non_http_registry.non_http_transport_of_provider
+let non_http_transport_of_provider = Keeper_transport_non_http_registry.non_http_transport_of_provider

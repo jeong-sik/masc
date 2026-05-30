@@ -2,8 +2,8 @@
 
     All functions are pure with respect to the runtime binding registry and
     {!Llm_provider} SSOTs. No I/O. Intentionally kept stdlib-light: the
-    callers in {!Cascade_config_parser}, {!Cascade_config_selection},
-    {!Cascade_config_resolve}, and {!Cascade_config_strategy_resolve} pick up
+    callers in {!Keeper_config_parser}, {!Keeper_config_selection},
+    {!Keeper_config_resolve}, and {!Keeper_config_strategy_resolve} pick up
     these helpers as their lowest layer.
 
     @stability Internal *)

@@ -166,7 +166,7 @@ val order_weighted_entries :
     {!parse_error_to_string} to render the human-facing message.
 
     @since 0.81.0 *)
-type parse_error = Cascade_config_parser.parse_error =
+type parse_error = Keeper_config_parser.parse_error =
   | Invalid_spec of string
   | Unknown_provider of { provider : string; spec : string }
   | Provider_unavailable of { provider : string; env_var : string }

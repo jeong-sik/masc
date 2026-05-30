@@ -4,11 +4,11 @@
    Implementation lives in submodules under [lib/cascade/]:
 
    - [Keeper_catalog_runtime_cache]            types + singleton cache state
-   - [Cascade_catalog_runtime_probe]            provider liveness probes
-   - [Cascade_catalog_runtime_json]             boot-log serialization
-   - [Cascade_catalog_runtime_validate]         validate_path_result boot path
-   - [Cascade_catalog_runtime_resolve]          inspect/lookup orchestration
-   - [Cascade_catalog_runtime_named_providers]  resolve_named_providers*
+   - [Keeper_catalog_runtime_probe]            provider liveness probes
+   - [Keeper_catalog_runtime_json]             boot-log serialization
+   - [Keeper_catalog_runtime_validate]         validate_path_result boot path
+   - [Keeper_catalog_runtime_resolve]          inspect/lookup orchestration
+   - [Keeper_catalog_runtime_named_providers]  resolve_named_providers*
 
    Types below are re-exported transparently so callers that pattern
    match on [Validated _ | Validated_with_rejections _ |
@@ -74,7 +74,7 @@ type state = Keeper_catalog_runtime_cache.state =
     }
 
 type secondary_resolution =
-  Cascade_catalog_runtime_named_providers.secondary_resolution = {
+  Keeper_catalog_runtime_named_providers.secondary_resolution = {
   providers : Llm_provider.Provider_config.t list;
   secondary_resolver :
     int ->
@@ -84,57 +84,57 @@ type secondary_resolution =
 
 (* === Function re-exports ============================================== *)
 
-let inspect_active = Cascade_catalog_runtime_resolve.inspect_active
+let inspect_active = Keeper_catalog_runtime_resolve.inspect_active
 
-type route_data = Cascade_catalog_runtime_validate.route_data = {
+type route_data = Keeper_catalog_runtime_validate.route_data = {
   keeper_turn_target : string option;
   route_targets : string list;
   unknown_route_keys : string list;
 }
-let empty_route_data = Cascade_catalog_runtime_validate.empty_route_data
-let validate_path = Cascade_catalog_runtime_validate.validate_path
+let empty_route_data = Keeper_catalog_runtime_validate.empty_route_data
+let validate_path = Keeper_catalog_runtime_validate.validate_path
 let resolve_declared_name ?sw ?net ?clock ~raw_name () =
-  match Cascade_catalog_runtime_resolve.resolve_declared_name ?sw ?net ?clock
+  match Keeper_catalog_runtime_resolve.resolve_declared_name ?sw ?net ?clock
           ~raw_name ()
   with
   | Ok name -> Ok name
   | Error _ as e -> e
-let models_of_cascade_name = Cascade_catalog_runtime_resolve.models_of_cascade_name
+let models_of_cascade_name = Keeper_catalog_runtime_resolve.models_of_cascade_name
 
 let resolve_named_providers =
-  Cascade_catalog_runtime_named_providers.resolve_named_providers
+  Keeper_catalog_runtime_named_providers.resolve_named_providers
 
 let resolve_named_providers_strict =
-  Cascade_catalog_runtime_named_providers.resolve_named_providers_strict
+  Keeper_catalog_runtime_named_providers.resolve_named_providers_strict
 
 let resolve_named_providers_strict_with_secondary_resolver =
-  Cascade_catalog_runtime_named_providers
+  Keeper_catalog_runtime_named_providers
   .resolve_named_providers_strict_with_secondary_resolver
 
 let resolve_secondary_provider_for_primary =
-  Cascade_catalog_runtime_named_providers.resolve_secondary_provider_for_primary
+  Keeper_catalog_runtime_named_providers.resolve_secondary_provider_for_primary
 
 let resolve_inference_params =
-  Cascade_catalog_runtime_named_providers.resolve_inference_params
+  Keeper_catalog_runtime_named_providers.resolve_inference_params
 
-let resolve_strategy = Cascade_catalog_runtime_named_providers.resolve_strategy
+let resolve_strategy = Keeper_catalog_runtime_named_providers.resolve_strategy
 
 let resolve_ollama_max_concurrent =
-  Cascade_catalog_runtime_named_providers.resolve_ollama_max_concurrent
+  Keeper_catalog_runtime_named_providers.resolve_ollama_max_concurrent
 
 let resolve_cli_max_concurrent =
-  Cascade_catalog_runtime_named_providers.resolve_cli_max_concurrent
+  Keeper_catalog_runtime_named_providers.resolve_cli_max_concurrent
 
-let known_profile_names = Cascade_catalog_runtime_resolve.known_profile_names
-let invalid_profile_errors = Cascade_catalog_runtime_resolve.invalid_profile_errors
+let known_profile_names = Keeper_catalog_runtime_resolve.known_profile_names
+let invalid_profile_errors = Keeper_catalog_runtime_resolve.invalid_profile_errors
 
 let resolve_selection_trace =
-  Cascade_catalog_runtime_named_providers.resolve_selection_trace
+  Keeper_catalog_runtime_named_providers.resolve_selection_trace
 
-let snapshot_to_yojson = Cascade_catalog_runtime_json.snapshot_to_yojson
-let rejection_to_yojson = Cascade_catalog_runtime_json.rejection_to_yojson
-let state_to_yojson = Cascade_catalog_runtime_json.state_to_yojson
-let candidate_probe_to_yojson = Cascade_catalog_runtime_json.candidate_probe_to_yojson
+let snapshot_to_yojson = Keeper_catalog_runtime_json.snapshot_to_yojson
+let rejection_to_yojson = Keeper_catalog_runtime_json.rejection_to_yojson
+let state_to_yojson = Keeper_catalog_runtime_json.state_to_yojson
+let candidate_probe_to_yojson = Keeper_catalog_runtime_json.candidate_probe_to_yojson
 
 let invalidate_path = Keeper_catalog_runtime_cache.invalidate_path
 

@@ -10,5 +10,11 @@
     this module.  Callers that only need the configured route target
     without catalog cross-check use {!Cascade_routes} directly. *)
 
+(* cascade→Runtime hotfix: return valid profile name instead of
+   binding key.  The cascade profile resolver only accepts profile
+   names ("tool_strict", "lite"), not binding keys like
+   "runpod_mtp.qwen36-35b-a3b-mtp".  All 18 routes target the same
+   binding which satisfies [tool_strict].  Module will be deleted
+   when cascade layer is fully removed. *)
 let cascade_name_for_use ?config_path:_ _use =
-  Runtime.get_default_runtime_id ()
+  "tool_strict"

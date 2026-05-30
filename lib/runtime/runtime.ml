@@ -84,8 +84,15 @@ let init_default ~config_path =
 
 let get_default_runtime () = !default_runtime_ref
 
+(** Binding key of the default runtime (for logging/identity). *)
 let get_default_runtime_id () =
   match !default_runtime_ref with
   | Some rt -> rt.id
   | None -> "tool_strict"
+
+(** Cascade profile name for LLM dispatch.  Use this — NOT
+    [get_default_runtime_id] — as [cascade_name] in [run_named]
+    and similar cascade dispatch functions.  Full cascade removal
+    will eliminate this distinction entirely. *)
+let get_default_cascade_name () = "tool_strict"
 ;;

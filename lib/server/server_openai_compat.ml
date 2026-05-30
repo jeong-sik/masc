@@ -108,7 +108,7 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
 let route_cascade ~message ~system_prompt ~max_tokens ~temperature
   : (string, Openai_compat_error_map.t) result =
   let cascade_name =
-    Runtime.get_default_runtime_id ()
+    Runtime.get_default_cascade_name ()
   in
   match
     Masc_oas_bridge.run_with_caller

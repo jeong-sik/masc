@@ -96,7 +96,7 @@ let agent_type_of_mention = Mention.agent_type_of_mention
 (* --- MODEL mode: shared cascade + in-process MASC HTTP tools/call --- *)
 
 let cascade_name_for_agent_type _agent_type =
-  Runtime.get_default_runtime_id ()
+  Runtime.get_default_cascade_name ()
 
 (** Validate model response using structural fields, not text heuristics.
     Guardrail principle: accept unless there is a clear structural reason to reject.

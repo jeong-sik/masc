@@ -153,12 +153,12 @@ let declarative_tool_policy_for_provider_ids provider_ids =
         Some (tool_policy_of_decl_capabilities provider.Decl.capabilities))
 ;;
 
+(* CLI transport removal in progress: any binding with supports_tools
+   can carry runtime MCP.  The transport-based split was only needed to
+   distinguish CLI runtimes (implicit tool access) from HTTP providers.
+   With CLI removal, supports_tools is the sole signal. *)
 let binding_supports_runtime_mcp_http_headers (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.transport with
-  | Runtime_binding.Cli -> binding.Runtime_binding.capabilities.supports_tools
-  | Runtime_binding.Http
-  | Runtime_binding.Managed
-  | Runtime_binding.Custom_provider_d_compat -> false
+  binding.Runtime_binding.capabilities.supports_tools
 ;;
 
 let fallback_tool_policy_for_config (provider_cfg : Llm_provider.Provider_config.t) =

@@ -3210,6 +3210,270 @@ let test_curl_edge_cases () =
     rt_cases
 ;;
 
+(* Batch 19: Docker parser edge cases — rm/privileged/detach, name/network/
+   volumes/publish/env_vars/workdir/platform typed fields, eq-form, POSIX --,
+   unknown flag skipping, combined flags, rest args. *)
+let test_docker_edge_cases () =
+  let open Shell_ir_typed in
+  let base =
+    { Shell_ir.bin = bin_ok "docker"
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* --- Basic: docker run image --- *)
+  let w = of_simple { base with args = [ lit "run"; lit "nginx" ] } in
+  (match w with
+   | W (Docker { subcommand = "run"; rest = [ "nginx" ]; rm = false; privileged = false; detach = false; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None }) -> ()
+   | w -> Alcotest.failf "Docker basic run: got %a" pp w);
+  (* --- --rm flag --- *)
+  let w2 = of_simple { base with args = [ lit "run"; lit "--rm"; lit "nginx" ] } in
+  (match w2 with
+   | W (Docker { rm = true; subcommand = "run"; rest = [ "nginx" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker --rm: got %a" pp w);
+  (* --- --privileged flag --- *)
+  let w3 = of_simple { base with args = [ lit "run"; lit "--privileged"; lit "nginx" ] } in
+  (match w3 with
+   | W (Docker { privileged = true; _ }) -> ()
+   | w -> Alcotest.failf "Docker --privileged: got %a" pp w);
+  (* --- -d / --detach flags --- *)
+  let w4 = of_simple { base with args = [ lit "run"; lit "-d"; lit "nginx" ] } in
+  (match w4 with
+   | W (Docker { detach = true; _ }) -> ()
+   | w -> Alcotest.failf "Docker -d: got %a" pp w);
+  let w4b = of_simple { base with args = [ lit "run"; lit "--detach"; lit "nginx" ] } in
+  (match w4b with
+   | W (Docker { detach = true; _ }) -> ()
+   | w -> Alcotest.failf "Docker --detach: got %a" pp w);
+  (* --- --name NAME --- *)
+  let w5 = of_simple { base with args = [ lit "run"; lit "--name"; lit "myapp"; lit "nginx" ] } in
+  (match w5 with
+   | W (Docker { name = Some "myapp"; rest = [ "nginx" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker --name: got %a" pp w);
+  (* --- --name=NAME eq-form --- *)
+  let w5b = of_simple { base with args = [ lit "run"; lit "--name=myapp"; lit "nginx" ] } in
+  (match w5b with
+   | W (Docker { name = Some "myapp"; rest = [ "nginx" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker --name= eq-form: got %a" pp w);
+  (* --- --network NETWORK / --net NETWORK --- *)
+  let w6 = of_simple { base with args = [ lit "run"; lit "--network"; lit "host"; lit "nginx" ] } in
+  (match w6 with
+   | W (Docker { network = Some "host"; _ }) -> ()
+   | w -> Alcotest.failf "Docker --network: got %a" pp w);
+  (* --net is a short alias — eq-form only supported for --network= *)
+  let w6b = of_simple { base with args = [ lit "run"; lit "--network=mynet"; lit "nginx" ] } in
+  (match w6b with
+   | W (Docker { network = Some "mynet"; _ }) -> ()
+   | w -> Alcotest.failf "Docker --network= eq-form: got %a" pp w);
+  (* --- Multiple -v volumes --- *)
+  let w7 = of_simple { base with args = [ lit "run"; lit "-v"; lit "/a:/b"; lit "-v"; lit "/c:/d"; lit "nginx" ] } in
+  (match w7 with
+   | W (Docker { volumes = [ "/a:/b"; "/c:/d" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker -v multiple: got %a" pp w);
+  (* --- Multiple -p publish --- *)
+  let w8 = of_simple { base with args = [ lit "run"; lit "-p"; lit "8080:80"; lit "-p"; lit "443:443"; lit "nginx" ] } in
+  (match w8 with
+   | W (Docker { publish = [ "8080:80"; "443:443" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker -p multiple: got %a" pp w);
+  (* --- Multiple -e env_vars --- *)
+  let w9 = of_simple { base with args = [ lit "run"; lit "-e"; lit "FOO=bar"; lit "-e"; lit "BAZ=qux"; lit "nginx" ] } in
+  (match w9 with
+   | W (Docker { env_vars = [ "FOO=bar"; "BAZ=qux" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker -e multiple: got %a" pp w);
+  (* --- -w WORKDIR / --workdir= eq-form --- *)
+  let w10 = of_simple { base with args = [ lit "run"; lit "-w"; lit "/app"; lit "nginx" ] } in
+  (match w10 with
+   | W (Docker { workdir = Some "/app"; _ }) -> ()
+   | w -> Alcotest.failf "Docker -w: got %a" pp w);
+  let w10b = of_simple { base with args = [ lit "run"; lit "--workdir=/srv"; lit "nginx" ] } in
+  (match w10b with
+   | W (Docker { workdir = Some "/srv"; _ }) -> ()
+   | w -> Alcotest.failf "Docker --workdir= eq-form: got %a" pp w);
+  (* --- --platform PLATFORM / --platform= eq-form --- *)
+  let w11 = of_simple { base with args = [ lit "run"; lit "--platform"; lit "linux/amd64"; lit "nginx" ] } in
+  (match w11 with
+   | W (Docker { platform = Some "linux/amd64"; _ }) -> ()
+   | w -> Alcotest.failf "Docker --platform: got %a" pp w);
+  let w11b = of_simple { base with args = [ lit "run"; lit "--platform=linux/arm64"; lit "nginx" ] } in
+  (match w11b with
+   | W (Docker { platform = Some "linux/arm64"; _ }) -> ()
+   | w -> Alcotest.failf "Docker --platform= eq-form: got %a" pp w);
+  (* --- POSIX -- end-of-options --- *)
+  let w12 = of_simple { base with args = [ lit "run"; lit "--rm"; lit "--"; lit "nginx"; lit "sh" ] } in
+  (match w12 with
+   | W (Docker { rm = true; rest = [ "nginx"; "sh" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker --: got %a" pp w);
+  (* --- Unknown flags skipped (-t, --tty, --interactive, --init) --- *)
+  let w13 = of_simple { base with args = [ lit "run"; lit "-t"; lit "--tty"; lit "-i"; lit "--interactive"; lit "nginx" ] } in
+  (match w13 with
+   | W (Docker { rest = [ "nginx" ]; subcommand = "run"; _ }) -> ()
+   | w -> Alcotest.failf "Docker unknown flags: got %a" pp w);
+  (* --- Combined: docker run --rm -d --name web -p 8080:80 -e NODE_ENV=prod -w /app nginx --- *)
+  let w14 =
+    of_simple
+      { base with
+        args =
+          [ lit "run"; lit "--rm"; lit "-d"; lit "--name"; lit "web"
+          ; lit "-p"; lit "8080:80"; lit "-e"; lit "NODE_ENV=prod"
+          ; lit "-w"; lit "/app"; lit "nginx"
+          ]
+      }
+  in
+  (match w14 with
+   | W (Docker { subcommand = "run"; rm = true; detach = true; name = Some "web"; publish = [ "8080:80" ]; env_vars = [ "NODE_ENV=prod" ]; workdir = Some "/app"; rest = [ "nginx" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker combined: got %a" pp w);
+  (* --- Non-run subcommand: docker build (unknown -t skipped, myimage + . go to rest) --- *)
+  let w15 = of_simple { base with args = [ lit "build"; lit "-t"; lit "myimage"; lit "." ] } in
+  (match w15 with
+   | W (Docker { subcommand = "build"; rest = [ "myimage"; "." ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker build: got %a" pp w);
+  (* --- Round-trip tests --- *)
+  let rt_cases =
+    [ W (Docker { subcommand = "run"; rm = false; privileged = false; detach = false; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [ "nginx" ] })
+    ; W (Docker { subcommand = "run"; rm = true; privileged = false; detach = true; name = Some "myapp"; network = Some "host"; volumes = [ "/a:/b"; "/c:/d" ]; publish = [ "8080:80" ]; env_vars = [ "FOO=bar" ]; workdir = Some "/app"; platform = Some "linux/amd64"; rest = [ "nginx" ] })
+    ; W (Docker { subcommand = "build"; rm = false; privileged = false; detach = false; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [ "." ] })
+    ; W (Docker { subcommand = "exec"; rm = false; privileged = false; detach = false; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [ "mycontainer"; "sh"; "-c"; "echo hello" ] })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = to_simple cmd in
+       let back = of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "Docker round-trip failed for %a" pp w)
+    rt_cases
+;;
+
+(* Batch 20: Make parser edge cases — target, jobs, directory, makefile,
+   dry_run, keep_going, silent, always_make, combined -jN, eq-form, POSIX --. *)
+let test_make_edge_cases () =
+  let open Shell_ir_typed in
+  let base =
+    { Shell_ir.bin = bin_ok "make"
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* --- Bare make (no args) --- *)
+  let w = of_simple { base with args = [] } in
+  (match w with
+   | W (Make { target = None; jobs = None; directory = None; makefile = None; dry_run = false; keep_going = false; silent = false; always_make = false }) -> ()
+   | w -> Alcotest.failf "Make bare: got %a" pp w);
+  (* --- Target only --- *)
+  let w2 = of_simple { base with args = [ lit "all" ] } in
+  (match w2 with
+   | W (Make { target = Some "all"; _ }) -> ()
+   | w -> Alcotest.failf "Make target: got %a" pp w);
+  (* --- Boolean flags: -n / --dry-run --- *)
+  let w3 = of_simple { base with args = [ lit "-n" ] } in
+  (match w3 with
+   | W (Make { dry_run = true; _ }) -> ()
+   | w -> Alcotest.failf "Make -n: got %a" pp w);
+  let w3b = of_simple { base with args = [ lit "--dry-run" ] } in
+  (match w3b with
+   | W (Make { dry_run = true; _ }) -> ()
+   | w -> Alcotest.failf "Make --dry-run: got %a" pp w);
+  (* --- -k / --keep-going --- *)
+  let w4 = of_simple { base with args = [ lit "-k" ] } in
+  (match w4 with
+   | W (Make { keep_going = true; _ }) -> ()
+   | w -> Alcotest.failf "Make -k: got %a" pp w);
+  (* --- -s / --silent / --quiet --- *)
+  let w5 = of_simple { base with args = [ lit "-s" ] } in
+  (match w5 with
+   | W (Make { silent = true; _ }) -> ()
+   | w -> Alcotest.failf "Make -s: got %a" pp w);
+  let w5b = of_simple { base with args = [ lit "--quiet" ] } in
+  (match w5b with
+   | W (Make { silent = true; _ }) -> ()
+   | w -> Alcotest.failf "Make --quiet: got %a" pp w);
+  (* --- -B / --always-make --- *)
+  let w6 = of_simple { base with args = [ lit "-B" ] } in
+  (match w6 with
+   | W (Make { always_make = true; _ }) -> ()
+   | w -> Alcotest.failf "Make -B: got %a" pp w);
+  (* --- Jobs: -j N, --jobs N, --jobs=N, -jN combined --- *)
+  let w7 = of_simple { base with args = [ lit "-j"; lit "4" ] } in
+  (match w7 with
+   | W (Make { jobs = Some 4; _ }) -> ()
+   | w -> Alcotest.failf "Make -j 4: got %a" pp w);
+  let w7b = of_simple { base with args = [ lit "--jobs"; lit "8" ] } in
+  (match w7b with
+   | W (Make { jobs = Some 8; _ }) -> ()
+   | w -> Alcotest.failf "Make --jobs 8: got %a" pp w);
+  let w7c = of_simple { base with args = [ lit "--jobs=16" ] } in
+  (match w7c with
+   | W (Make { jobs = Some 16; _ }) -> ()
+   | w -> Alcotest.failf "Make --jobs=16: got %a" pp w);
+  let w7d = of_simple { base with args = [ lit "-j4" ] } in
+  (match w7d with
+   | W (Make { jobs = Some 4; _ }) -> ()
+   | w -> Alcotest.failf "Make -j4 combined: got %a" pp w);
+  (* --- Directory: -C DIR, --directory DIR, --directory=DIR --- *)
+  let w8 = of_simple { base with args = [ lit "-C"; lit "/tmp/build" ] } in
+  (match w8 with
+   | W (Make { directory = Some "/tmp/build"; _ }) -> ()
+   | w -> Alcotest.failf "Make -C: got %a" pp w);
+  let w8b = of_simple { base with args = [ lit "--directory=/opt" ] } in
+  (match w8b with
+   | W (Make { directory = Some "/opt"; _ }) -> ()
+   | w -> Alcotest.failf "Make --directory=: got %a" pp w);
+  (* --- Makefile: -f FILE, --file FILE, --file=FILE, --makefile FILE, --makefile=FILE --- *)
+  let w9 = of_simple { base with args = [ lit "-f"; lit "custom.mk" ] } in
+  (match w9 with
+   | W (Make { makefile = Some "custom.mk"; _ }) -> ()
+   | w -> Alcotest.failf "Make -f: got %a" pp w);
+  let w9b = of_simple { base with args = [ lit "--makefile=other.mk" ] } in
+  (match w9b with
+   | W (Make { makefile = Some "other.mk"; _ }) -> ()
+   | w -> Alcotest.failf "Make --makefile=: got %a" pp w);
+  (* --- POSIX -- end-of-options --- *)
+  let w10 = of_simple { base with args = [ lit "-n"; lit "--"; lit "target1" ] } in
+  (match w10 with
+   | W (Make { dry_run = true; target = Some "target1"; _ }) -> ()
+   | w -> Alcotest.failf "Make --: got %a" pp w);
+  (* --- Unknown flags skipped --- *)
+  let w11 = of_simple { base with args = [ lit "-j2"; lit "--warn-undefined-variables"; lit "all" ] } in
+  (match w11 with
+   | W (Make { jobs = Some 2; target = Some "all"; _ }) -> ()
+   | w -> Alcotest.failf "Make unknown flags: got %a" pp w);
+  (* --- Combined: make -C /b -f m.mk -j8 -nksB all --- *)
+  let w12 = of_simple { base with args = [ lit "-C"; lit "/b"; lit "-f"; lit "m.mk"; lit "-j8"; lit "-nksB"; lit "all" ] } in
+  (match w12 with
+   | W (Make { directory = Some "/b"; makefile = Some "m.mk"; jobs = Some 8; target = Some "all"; _ }) -> ()
+   | w -> Alcotest.failf "Make combined: got %a" pp w);
+  (* Note: -nksB is NOT a combined flag in the parser — only -jN is handled as combined.
+     -n/-k/-s/-B are single-char boolean flags but the parser doesn't expand combined booleans.
+     So -nksB is treated as an unknown flag and skipped. *)
+  let w12b = of_simple { base with args = [ lit "-C"; lit "/b"; lit "-f"; lit "m.mk"; lit "-j8"; lit "-n"; lit "-k"; lit "-s"; lit "-B"; lit "all" ] } in
+  (match w12b with
+   | W (Make { directory = Some "/b"; makefile = Some "m.mk"; jobs = Some 8; dry_run = true; keep_going = true; silent = true; always_make = true; target = Some "all"; _ }) -> ()
+   | w -> Alcotest.failf "Make all flags: got %a" pp w);
+  (* --- Round-trip tests --- *)
+  let rt_cases =
+    [ W (Make { target = None; jobs = None; directory = None; makefile = None; dry_run = false; keep_going = false; silent = false; always_make = false })
+    ; W (Make { target = Some "all"; jobs = Some 4; directory = Some "/tmp"; makefile = Some "Makefile"; dry_run = true; keep_going = true; silent = true; always_make = true })
+    ; W (Make { target = Some "test"; jobs = Some 8; directory = None; makefile = None; dry_run = false; keep_going = false; silent = false; always_make = false })
+    ; W (Make { target = None; jobs = None; directory = Some "/src"; makefile = Some "custom.mk"; dry_run = true; keep_going = false; silent = false; always_make = false })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = to_simple cmd in
+       let back = of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "Make round-trip failed for %a" pp w)
+    rt_cases
+;;
+
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"
@@ -3301,6 +3565,14 @@ let () =
             "Batch18 Curl edge cases (method/headers/body/eq-form/combined flags/--)"
             `Quick
             test_curl_edge_cases
+        ; Alcotest.test_case
+            "Batch19 Docker edge cases (rm/priv/detach/name/net/vol/port/env/wd/platform/eq-form/--)"
+            `Quick
+            test_docker_edge_cases
+        ; Alcotest.test_case
+            "Batch20 Make edge cases (target/jobs/dir/mkfile/-nksB/-jN/eq-form/--)"
+            `Quick
+            test_make_edge_cases
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

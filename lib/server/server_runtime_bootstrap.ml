@@ -424,7 +424,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       (* Initialize the default Runtime singleton from cascade TOML.
          Must happen after Config_dir_resolver is set up (inside
-         create_server_state) and before any cascade name resolution. *)
+         create_server_state) and before any cascade name resolution.
+
+         fail-fast: a missing config path or a missing/broken [runtime].default
+         is fatal — the server cannot route turns without a default Runtime, so
+         booting into a half-configured state only defers the failure to the
+         first turn (cascade→Runtime vision: no silent fallback). *)
       (match Cascade_runtime.cascade_config_path () with
        | Some config_path ->
          (match Runtime.init_default ~config_path with
@@ -432,10 +437,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             Log.Server.info "Runtime default initialized: %s"
               (Runtime.get_default_runtime_id ())
           | Error msg ->
-            Log.Server.error "Runtime.init_default failed: %s" msg)
+            Log.Server.error
+              "Runtime.init_default failed (fatal, refusing to boot): %s" msg;
+            exit 1)
        | None ->
-         Log.Server.warn
-           "No cascade config path; Runtime default not initialized");
+         Log.Server.error
+           "No cascade config path; cannot initialize default Runtime \
+            (fatal, refusing to boot)";
+         exit 1);
       let provider_health = Provider_health.create state.room_config in
       Provider_health.set_active provider_health;
       Provider_health.start_probe_fiber ~sw ~env provider_health;

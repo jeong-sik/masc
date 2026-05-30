@@ -1,37 +1,37 @@
 (** Runtime = Provider + Model + Spec(binding).
 
-    cascade→Runtime 전환 (B0). cascade 의 routes/cascade_name/tier/profile
+    cascade→Runtime 전환 (RFC-0206). cascade 의 routes/cascade_name/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
 
-    B0 는 additive: 기존 [Cascade_declarative_types] 를 합성만 한다(새 nominal
-    타입 없음 — 264파일 강결합에서 새 타입은 conversion 폭증을 부른다).
-    provider_cfg (hot-path materialize) 는 소비자 연결 단계(B2)에서 추가. *)
+    타입은 자립 모듈 {!Runtime_schema} 소유 (삭제된 [Cascade_declarative_types]
+    대체). parse 는 {!Runtime_toml}, hot-path materialize 는 {!Runtime_adapter}
+    가 담당한다 — 셋 다 [Cascade_*] 코드 의존 0. *)
 
-open Cascade_declarative_types
+open Runtime_schema
 
 type t =
   { id : string
     (** binding key ["provider.model"], 예 ["runpod_mtp.qwen-runpod"] *)
-  ; provider : cascade_provider
-  ; model : cascade_model_spec
-  ; binding : cascade_binding
+  ; provider : provider
+  ; model : model_spec
+  ; binding : binding
   ; provider_config : Llm_provider.Provider_config.t
     (** load 시점에 materialize 된 hot-path provider config. 소비자는
         routing 없이 이걸 곧장 LLM dispatch 로 넘긴다. *)
   }
 
-let id_of_binding (b : cascade_binding) : string =
-  Printf.sprintf "%s.%s" b.provider_id b.model_id
-;;
+(* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
+   인덱싱하는 모든 호출자와 동일한 ["provider.model"] 규칙을 공유한다. *)
+let id_of_binding (b : binding) : string = binding_key b
 
 (** binding 을 Runtime 으로 변환. provider/model resolve 또는 provider_config
     materialize 가 실패하면 [None] (fail-closed — partial-boot 없음, 해당
     binding 은 가용 Runtime 목록에서 제외). *)
-let of_binding (cfg : cascade_config) (b : cascade_binding) : t option =
+let of_binding (cfg : config) (b : binding) : t option =
   match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
   | Some provider, Some model ->
-    (match Cascade_declarative_adapter.binding_to_provider_config cfg b with
+    (match Runtime_adapter.binding_to_provider_config cfg b with
      | Ok provider_config ->
        Some { id = id_of_binding b; provider; model; binding = b; provider_config }
      | Error _ -> None)
@@ -44,11 +44,11 @@ let of_binding (cfg : cascade_config) (b : cascade_binding) : t option =
     silent fallback 일절 없음 (cascade→Runtime 비전: TOML 에 default 없으면
     프로그램 실행 불가). *)
 let load_list ~(config_path : string) : (t list * t, string) result =
-  match Cascade_declarative_parser.parse_file config_path with
+  match Runtime_toml.parse_file config_path with
   | Error errs ->
     Error
       (Printf.sprintf
-         "cascade config parse failed (%s): %d error(s)"
+         "runtime config parse failed (%s): %d error(s)"
          config_path
          (List.length errs))
   | Ok cfg ->
@@ -84,8 +84,17 @@ let init_default ~config_path =
 
 let get_default_runtime () = !default_runtime_ref
 
+(* fail-fast: uninitialized = startup-ordering bug, NOT a recoverable
+   condition. 이전 [| None -> "tool_strict"] 하드코딩 fallback 은 90 사이트에
+   조작된 id 를 흘리는 Unknown→Permissive 안티패턴이라 제거했다 (RFC-0206 §2.1).
+   불변식: [init_default] 가 startup 에서 성공해야 한다(아니면 startup abort).
+   NB(R2): 함수 호출 시점에만 raise 하므로 호출자는 이 값을 모듈 top-level
+   [let] 로 eager 바인딩하면 안 된다(config-less 테스트 바이너리 load crash). *)
 let get_default_runtime_id () =
   match !default_runtime_ref with
   | Some rt -> rt.id
-  | None -> "tool_strict"
+  | None ->
+    failwith
+      "Runtime.get_default_runtime_id: default runtime not initialized; \
+       Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
 ;;

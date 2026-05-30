@@ -1,4 +1,4 @@
-(** Standalone Alcotest suite for [Cascade_preflight_state].
+(** Standalone Alcotest suite for [Keeper_preflight_state].
 
     Built outside of [dune] to avoid contention on the workspace-wide
     [dune] / [opam] locks (see CLAUDE.md token-miser §5 — dune build is
@@ -6,9 +6,9 @@
 
     {[
     ocamlfind ocamlc -package alcotest -linkpkg \
-      prometheus.ml ../../lib/cascade/cascade_preflight_state.mli \
-      ../../lib/cascade/cascade_preflight_state.ml \
-      test_cascade_preflight_state.ml -o run_test
+      prometheus.ml ../../lib/keeper/keeper_preflight_state.mli \
+      ../../lib/keeper/keeper_preflight_state.ml \
+      test_keeper_preflight_state.ml -o run_test
     ./run_test
     ]}
 
@@ -23,11 +23,11 @@
       until any one reaches threshold (provider is disabled at
       provider-level, not fingerprint-level).
     - [reset_on_health_recovery] clears fingerprints and removes
-      provider from disabled list; returns [true] iff it was
+      provider from disabled list; returns [true] iff it had been
       previously disabled.
     - [reason_slug] stable for log/metric interpolation. *)
 
-module S = Cascade_preflight_state
+module S = Keeper_preflight_state
 
 let outcome_pp fmt = function
   | `First -> Format.fprintf fmt "First"
@@ -324,7 +324,7 @@ let test_ttl_disabled_provider_re_enables_then_re_thresholds () =
 ;;
 
 let () =
-  Alcotest.run "cascade_preflight_state"
+  Alcotest.run "keeper_preflight_state"
     [ ( "first / repeated / threshold"
       , [ Alcotest.test_case "first call returns First" `Quick
             test_first_call_returns_first

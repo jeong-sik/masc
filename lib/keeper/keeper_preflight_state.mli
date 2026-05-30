@@ -1,4 +1,4 @@
-(** Cascade preflight unhealthy-skip escalation state.
+(** Keeper preflight unhealthy-skip escalation state.
 
     Tracks repeated [preflight skipped N unhealthy ...] events per
     (cascade_name, provider, reason) fingerprint. After [threshold_disable]

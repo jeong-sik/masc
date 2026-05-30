@@ -260,7 +260,7 @@ let run_named
   in
   (* RFC: MASC/OAS Error-Warn Reduction Goal — 2026-05-18 §P3.
      For each unhealthy endpoint, record the preflight-skip event in
-     [Cascade_preflight_state.global]. After N consecutive skips of
+     [Keeper_preflight_state.global]. After N consecutive skips of
      the same (cascade, endpoint, reason) fingerprint we escalate to
      ERROR once and register the endpoint in the in-process disabled
      list — subsequent identical skips return [`Already_disabled] and
@@ -273,11 +273,11 @@ let run_named
   List.iter
     (fun endpoint ->
       let outcome =
-        Cascade_preflight_state.record
-          Cascade_preflight_state.global
+        Keeper_preflight_state.record
+          Keeper_preflight_state.global
           ~cascade_name
           ~provider:endpoint
-          ~reason:Cascade_preflight_state.Health_check_failed_repeatedly
+          ~reason:Keeper_preflight_state.Health_check_failed_repeatedly
       in
       match outcome with
       | `First ->
@@ -286,16 +286,16 @@ let run_named
            provider dispatch: [%s] (reason=%s, first occurrence)"
           cascade_name
           endpoint
-          (Cascade_preflight_state.reason_slug
-             Cascade_preflight_state.Health_check_failed_repeatedly)
+          (Keeper_preflight_state.reason_slug
+             Keeper_preflight_state.Health_check_failed_repeatedly)
       | `Repeated n ->
         Log.Misc.warn
           "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
            provider dispatch: [%s] (reason=%s, consecutive=%d)"
           cascade_name
           endpoint
-          (Cascade_preflight_state.reason_slug
-             Cascade_preflight_state.Health_check_failed_repeatedly)
+          (Keeper_preflight_state.reason_slug
+             Keeper_preflight_state.Health_check_failed_repeatedly)
           n
       | `Threshold_disable n ->
         Log.Misc.error
@@ -305,8 +305,8 @@ let run_named
           cascade_name
           endpoint
           n
-          (Cascade_preflight_state.reason_slug
-             Cascade_preflight_state.Health_check_failed_repeatedly)
+          (Keeper_preflight_state.reason_slug
+             Keeper_preflight_state.Health_check_failed_repeatedly)
       | `Already_disabled ->
         (* Drop noise: this endpoint is in the disabled list and has
            already emitted its ERROR escalation. *)
@@ -319,12 +319,12 @@ let run_named
   List.iter
     (fun (url, healthy) ->
       if healthy
-         && Cascade_preflight_state.is_disabled
-              Cascade_preflight_state.global ~provider:url
+         && Keeper_preflight_state.is_disabled
+              Keeper_preflight_state.global ~provider:url
       then
         let recovered =
-          Cascade_preflight_state.reset_on_health_recovery
-            Cascade_preflight_state.global ~provider:url
+          Keeper_preflight_state.reset_on_health_recovery
+            Keeper_preflight_state.global ~provider:url
         in
         if recovered
         then

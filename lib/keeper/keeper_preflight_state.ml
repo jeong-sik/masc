@@ -1,4 +1,4 @@
-(** Implementation: see [Cascade_preflight_state.mli] for surface docs.
+(** Implementation: see [Keeper_preflight_state.mli] for surface docs.
 
     Closed sum types only — no catch-all branches in this file. *)
 

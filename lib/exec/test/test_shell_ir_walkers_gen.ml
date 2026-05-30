@@ -85,7 +85,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Gh { subcommand = "pr"; action = Some "list"; draft = false; squash = false; delete_branch = false; body = None; title = None; rest = [] })
   ; W (Chmod { mode = "755"; path = "/tmp/x"; recursive = false })
   ; W (Chown { owner = "root"; path = "/tmp/x"; recursive = false })
-  ; W (Docker { subcommand = "run"; rm = false; privileged = false; detach = true; rest = [ "nginx" ] })
+  ; W (Docker { subcommand = "run"; rm = false; privileged = false; detach = true; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [ "nginx" ] })
   ; W (Opam { subcommand = "install"; yes = true; rest = [ "dune" ] })
   ; W (Npx { subcommand = "tsc"; yes = false; rest = [ "--noEmit" ] })
   ; W (Yarn { subcommand = "install"; dev = false; global = false; production = false; frozen_lockfile = true; rest = [] })
@@ -289,7 +289,7 @@ let test_of_simple_round_trip () =
     ; W (Gh { subcommand = "issue"; action = Some "create"; draft = false; squash = false; delete_branch = false; body = None; title = Some "bug"; rest = [] })
     ; W (Chmod { mode = "644"; path = "/etc/config"; recursive = true })
     ; W (Chown { owner = "user:group"; path = "/var/data"; recursive = true })
-    ; W (Docker { subcommand = "build"; rm = false; privileged = false; detach = false; rest = [ "-t"; "myapp"; "." ] })
+    ; W (Docker { subcommand = "build"; rm = false; privileged = false; detach = false; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [ "myapp"; "." ] })
     ; W (Opam { subcommand = "switch"; yes = false; rest = [ "create"; "5.2.0" ] })
     ; W (Npx { subcommand = "jest"; yes = true; rest = [ "--coverage" ] })
     ; W (Yarn { subcommand = "add"; dev = false; global = false; production = false; frozen_lockfile = false; rest = [ "lodash" ] })
@@ -1607,24 +1607,26 @@ let test_batch12_value_consuming_flags () =
     }
   in
   let pp = Shell_ir_typed.pp in
-  (* Docker: --name myapp → name parsed, --env FOO=bar → env parsed *)
+  (* Docker: --name myapp → name = Some "myapp", rest should NOT contain "myapp" *)
   let d1 =
     of_simple { (base "docker") with args = [ lit "run"; lit "--name"; lit "myapp"; lit "img" ] }
   in
   (match d1 with
-   | W (Docker { subcommand = "run"; rest; _ }) ->
+   | W (Docker { subcommand = "run"; name = Some "myapp"; rest; _ }) ->
      if List.exists ((=) "myapp") rest then
-       Alcotest.failf "Docker --name myapp: 'myapp' should be consumed, not in rest (%a)" pp d1
-   | w -> Alcotest.failf "Docker run --name myapp: expected Docker, got %a" pp w);
-  (* Docker: --flag=VALUE form → eq-form extracts "myapp" into rest *)
+       Alcotest.failf "Docker --name myapp: 'myapp' should be in name field, not rest (%a)" pp d1
+   | w -> Alcotest.failf "Docker run --name myapp: expected Docker(name=Some myapp), got %a" pp w);
+  (* Docker: --name=myapp eq-form → name = Some "myapp", rest = [img] *)
   let d2 =
     of_simple { (base "docker") with args = [ lit "run"; lit "--name=myapp"; lit "img" ] }
   in
   (match d2 with
-   | W (Docker { subcommand = "run"; rest; _ }) ->
-     if not (List.exists ((=) "myapp") rest) then
-       Alcotest.failf "Docker --name=myapp: 'myapp' should be in rest after eq extraction (%a)" pp d2
-   | w -> Alcotest.failf "Docker --name=myapp: expected Docker, got %a" pp w);
+   | W (Docker { subcommand = "run"; name = Some "myapp"; rest; _ }) ->
+     if List.exists ((=) "myapp") rest then
+       Alcotest.failf "Docker --name=myapp: 'myapp' should be in name field, not rest (%a)" pp d2;
+     if not (List.exists ((=) "img") rest) then
+       Alcotest.failf "Docker --name=myapp img: 'img' should be in rest (%a)" pp d2
+   | w -> Alcotest.failf "Docker --name=myapp: expected Docker(name=Some myapp), got %a" pp w);
   (* Go: -o bin → consumed, rest empty *)
   let g1 =
     of_simple { (base "go") with args = [ lit "build"; lit "-o"; lit "bin"; lit "./..." ] }
@@ -2203,22 +2205,24 @@ let test_subcommand_args_eq_form_flags () =
     }
   in
   let pp = Shell_ir_typed.pp in
-  (* Docker: --name=myapp (eq-form → "myapp" extracted, prepended to rest) *)
+  (* Docker: --name=myapp (eq-form → name = Some "myapp", rest gets remaining args) *)
   let w_docker_eq =
     of_simple
       { (base "docker") with args = [ lit "run"; lit "--name=myapp"; lit "-d"; lit "nginx" ] }
   in
   (match w_docker_eq with
-   | W (Docker { subcommand = "run"; rest = [ "myapp"; "-d"; "nginx" ]; detach = false; _ }) -> ()
-   | w -> Alcotest.failf "Docker --name=myapp: expected rest=[myapp;-d;nginx], got %a" pp w);
-  (* Docker: --name myapp (space-separated → two tokens in rest) *)
+   | W (Docker { subcommand = "run"; name = Some "myapp"; detach = true; rest; _ }) ->
+     if List.exists ((=) "myapp") rest then
+       Alcotest.failf "Docker --name=myapp: 'myapp' should be in name, not rest (%a)" pp w_docker_eq
+   | w -> Alcotest.failf "Docker --name=myapp: expected Docker(name=Some myapp), got %a" pp w);
+  (* Docker: --name myapp (space-separated → name = Some "myapp", -d sets detach) *)
   let w_docker_sp =
     of_simple
       { (base "docker") with args = [ lit "run"; lit "--name"; lit "myapp"; lit "-d"; lit "nginx" ] }
   in
   (match w_docker_sp with
-   | W (Docker { subcommand = "run"; rest = [ "nginx" ]; detach = true; _ }) -> ()
-   | w -> Alcotest.failf "Docker --name myapp: expected rest=[nginx],detach=true, got %a" pp w);
+   | W (Docker { subcommand = "run"; name = Some "myapp"; detach = true; rest = [ "nginx" ]; _ }) -> ()
+   | w -> Alcotest.failf "Docker --name myapp -d: expected Docker(name=Some myapp,detach=true), got %a" pp w);
   (* Cargo: --features=serde (special-cased → features field set) *)
   let w_cargo_eq =
     of_simple
@@ -2396,7 +2400,7 @@ let test_bin_variant_dispatch () =
     ; W (Cat { path = "/dev/null" }), "cat"
     ; W (Rg { pattern = "."; path = None; case_sensitive = false }), "rg"
     ; W (Rm { paths = []; recursive = false; force = false }), "rm"
-    ; W (Docker { subcommand = "ps"; rm = false; privileged = false; detach = false; rest = [] }), "docker"
+    ; W (Docker { subcommand = "ps"; rm = false; privileged = false; detach = false; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [] }), "docker"
     ; W (Npm { subcommand = "test"; save_dev = false; global = false; force = false; rest = [] }), "npm"
     ; W (Cargo { subcommand = "build"; release = false; verbose = false; features = None; rest = [] }), "cargo"
     ; W (Su { subcommand = "root"; args = [] }), "su"
@@ -2534,11 +2538,11 @@ let test_batch2_regression_fixes () =
     of_simple { (base "docker") with args = [ lit "run"; lit "--oom-kill-disable"; lit "--name"; lit "foo"; lit "img" ] }
   in
   (match dk with
-   | W (Docker { subcommand = "run"; rest; _ }) ->
-     if not (List.exists ((=) "foo") rest) then
-       Alcotest.failf "docker run --oom-kill-disable --name foo: 'foo' should be in rest, got [%s]"
+   | W (Docker { subcommand = "run"; name = Some "foo"; rest; _ }) ->
+     if List.exists ((=) "foo") rest then
+       Alcotest.failf "docker run --oom-kill-disable --name foo: 'foo' should be in name field, not rest, got [%s]"
          (String.concat "; " rest)
-   | w -> Alcotest.failf "docker run --oom-kill-disable --name foo: expected Docker, got %a" pp w);
+   | w -> Alcotest.failf "docker run --oom-kill-disable --name foo: expected Docker(name=Some foo), got %a" pp w);
   (* Ninja: -C /builddir → /builddir promoted to subcmd when none exists, "all" goes to rest *)
   let nj =
     of_simple { (base "ninja") with args = [ lit "-C"; lit "/builddir"; lit "all" ] }

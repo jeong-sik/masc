@@ -418,8 +418,16 @@ let pp fmt = function
     Format.fprintf fmt "Chmod(mode=%s, path=%s, recursive=%b)" mode path recursive
   | W (Chown { owner; path; recursive }) ->
     Format.fprintf fmt "Chown(owner=%s, path=%s, recursive=%b)" owner path recursive
-  | W (Docker { subcommand; rm; privileged; detach; rest }) ->
-    Format.fprintf fmt "Docker(sub=%s, rm=%b, priv=%b, det=%b, rest=%a)" subcommand rm privileged detach
+  | W (Docker { subcommand; rm; privileged; detach; name; network; volumes; publish; env_vars; workdir; platform; rest }) ->
+    Format.fprintf fmt "Docker(sub=%s, rm=%b, priv=%b, det=%b, name=%a, net=%a, vols=%a, pubs=%a, envs=%a, wd=%a, plat=%a, rest=%a)"
+      subcommand rm privileged detach
+      (Format.pp_print_option Format.pp_print_string) name
+      (Format.pp_print_option Format.pp_print_string) network
+      (Format.pp_print_list Format.pp_print_string) volumes
+      (Format.pp_print_list Format.pp_print_string) publish
+      (Format.pp_print_list Format.pp_print_string) env_vars
+      (Format.pp_print_option Format.pp_print_string) workdir
+      (Format.pp_print_option Format.pp_print_string) platform
       (Format.pp_print_list Format.pp_print_string) rest
   | W (Opam { subcommand; yes; rest }) ->
     Format.fprintf fmt "Opam(sub=%s, yes=%b, rest=%a)" subcommand yes

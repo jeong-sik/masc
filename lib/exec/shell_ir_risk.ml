@@ -452,6 +452,11 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   (* git pull: word-list does not list "pull" as write -> R0 (kept under
      option B; escalation deferred to a correctness follow-up) *)
   | W (Git_pull _) -> R0_Read
+  | W (Git_stash _) -> R0_Read
+  | W (Git_rebase _) -> R0_Read
+  | W (Git_merge _) -> R0_Read
+  | W (Git_branch _) -> R0_Read
+  | W (Git_checkout _) -> R0_Read
   (* network commands the word-list leaves at R0 (option B: unchanged) *)
   | W (Curl _) -> R0_Read
   | W (Wget _) -> R0_Read

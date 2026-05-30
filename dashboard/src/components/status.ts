@@ -9,7 +9,7 @@ import { sectionItemsForTab } from '../config/navigation'
 import { LoadingState } from './common/feedback-state'
 
 export type StatusSection =
-  | 'observatory' | 'journey' | 'agents' | 'runtime' | 'cascade-config'
+  | 'observatory' | 'journey' | 'agents' | 'runtime'
   | 'fleet-health' | 'doctor' | 'transport-health'
   | 'feature-health'
   | 'cognition'
@@ -37,9 +37,6 @@ const LazyAgentsUnified = lazy(async () => ({
 }))
 const LazyRuntimePanel = lazy(async () => ({
   default: (await import('./runtime-panel')).RuntimePanel,
-}))
-const LazyCascadeConfigPanel = lazy(async () => ({
-  default: (await import('./cascade-config-panel')).CascadeConfigPanel,
 }))
 const LazyFleetHealthPanel = lazy(async () => ({
   default: (await import('./fleet-health-panel')).FleetHealthPanel,
@@ -79,8 +76,6 @@ function renderSection(section: StatusSection) {
       return html`<${LazyJourneyPanel} />`
     case 'runtime':
       return html`<${LazyRuntimePanel} />`
-    case 'cascade-config':
-      return html`<${LazyCascadeConfigPanel} />`
     case 'fleet-health':
       return html`<${LazyFleetHealthPanel} />`
     case 'doctor':

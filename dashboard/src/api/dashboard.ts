@@ -83,45 +83,6 @@ export type {
   ConfigEntrySource,
   DashboardConfigResponse,
 } from './schemas/dashboard-config'
-export {
-  fetchCascadeAuditRuns,
-  fetchCascadeClientCapacity,
-  fetchCascadeClientCapacityHistory,
-  fetchCascadeConfig,
-  fetchCascadeConfigRaw,
-  fetchCascadeHealth,
-  fetchCascadeProfiles,
-  fetchCascadeSlo,
-  fetchCascadeStrategyTrace,
-  updateCascadeConfigRaw,
-  updateKeeperCascade,
-} from './dashboard-cascade'
-export type {
-  CascadeAuditHop,
-  CascadeAuditHopStatus,
-  CascadeAuditRun,
-  CascadeAuditRunsResponse,
-  CascadeCandidate,
-  CascadeCapacityEventKind,
-  CascadeClientCapacityEntry,
-  CascadeClientCapacityHistoryEvent,
-  CascadeClientCapacityHistoryResponse,
-  CascadeClientCapacityResponse,
-  CascadeConfigResponse,
-  CascadeHealthProvider,
-  CascadeHealthResponse,
-  CascadeProviderStatus,
-  CascadeInvalidProfile,
-  CascadeKeeperProfile,
-  CascadeProfile,
-  CascadeRawConfigResponse,
-  CascadeSloResponse,
-  CascadeSloStatus,
-  CascadeStrategyTraceEvent,
-  CascadeStrategyTraceKind,
-  CascadeStrategyTraceResponse,
-  CascadeValidationStatus,
-} from './dashboard-cascade'
 export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
 

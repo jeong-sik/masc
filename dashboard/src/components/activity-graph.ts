@@ -13,7 +13,6 @@ import { Sparkline } from './common/sparkline'
 import { TextInput } from './common/input'
 import { ActivityHeatmap } from './activity-heatmap'
 import { KeeperPhaseTimeline } from './keeper-phase-strip'
-import { CascadeWaterfallPanel } from './cascade-waterfall'
 import { CollapsibleSection } from './common/collapsible'
 import {
   buildActionTimelineGroups,
@@ -454,7 +453,6 @@ export function ObservatoryActivityPanels() {
       <//>
 
       <${CollapsibleSection} title="캐스케이드 워터폴" mountWhenOpen>
-        <${CascadeWaterfallPanel} />
       <//>
 
       ${data && (data.stats.event_count ?? 0) > 0 ? html`

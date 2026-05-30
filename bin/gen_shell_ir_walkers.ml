@@ -3986,7 +3986,7 @@ parse false None None args|}
     }
   ; { name = "Docker"
     ; anon_pattern = "Docker _"
-    ; bind_pattern = "Docker { subcommand; rm; privileged; detach; rest }"
+    ; bind_pattern = "Docker { subcommand; rm; privileged; detach; name; network; volumes; publish; env_vars; workdir; platform; rest }"
     ; risk = "`Audited"
     ; sandbox = "`Docker"
     ; to_simple_body =
@@ -3996,6 +3996,13 @@ parse false None None args|}
         let base = if rm then base @ [ "--rm" ] else base in
         let base = if privileged then base @ [ "--privileged" ] else base in
         let base = if detach then base @ [ "-d" ] else base in
+        let base = (match name with Some n -> base @ [ "--name"; n ] | None -> base) in
+        let base = (match network with Some n -> base @ [ "--network"; n ] | None -> base) in
+        let base = List.fold_left (fun acc v -> acc @ [ "-v"; v ]) base volumes in
+        let base = List.fold_left (fun acc p -> acc @ [ "-p"; p ]) base publish in
+        let base = List.fold_left (fun acc e -> acc @ [ "-e"; e ]) base env_vars in
+        let base = (match workdir with Some w -> base @ [ "-w"; w ] | None -> base) in
+        let base = (match platform with Some p -> base @ [ "--platform"; p ] | None -> base) in
         base @ rest
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Docker
@@ -4055,39 +4062,73 @@ let docker_value_flags =
   ; "--init-binary"
   ]
 in
-let rec parse subcmd rm priv det dd = function
+let rec parse subcmd rm priv det nm net vols pubs envs wd plat dd = function
   | [] ->
     (match subcmd with
      | Some s ->
-       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker { subcommand = s; rm; privileged = priv; detach = det; rest = [] }))
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker {
+         subcommand = s; rm; privileged = priv; detach = det;
+         name = nm; network = net; volumes = List.rev vols; publish = List.rev pubs;
+         env_vars = List.rev envs; workdir = wd; platform = plat; rest = [] }))
      | None -> None)
-  | "--rm" :: rest when not dd -> parse subcmd true priv det dd rest
-  | "--privileged" :: rest when not dd -> parse subcmd rm true det dd rest
-  | "-d" :: rest when not dd -> parse subcmd rm priv true dd rest
-  | "--detach" :: rest when not dd -> parse subcmd rm priv true dd rest
-  (* Value-consuming flags: skip the flag and its argument *)
+  | "--rm" :: rest when not dd -> parse subcmd true priv det nm net vols pubs envs wd plat dd rest
+  | "--privileged" :: rest when not dd -> parse subcmd rm true det nm net vols pubs envs wd plat dd rest
+  | "-d" :: rest when not dd -> parse subcmd rm priv true nm net vols pubs envs wd plat dd rest
+  | "--detach" :: rest when not dd -> parse subcmd rm priv true nm net vols pubs envs wd plat dd rest
+  (* Typed value-consuming flags: capture into typed fields *)
+  | "--name" :: v :: rest when not dd -> parse subcmd rm priv det (Some v) net vols pubs envs wd plat dd rest
+  | "--network" :: v :: rest when not dd -> parse subcmd rm priv det nm (Some v) vols pubs envs wd plat dd rest
+  | "--net" :: v :: rest when not dd -> parse subcmd rm priv det nm (Some v) vols pubs envs wd plat dd rest
+  | "-v" :: v :: rest when not dd -> parse subcmd rm priv det nm net (v :: vols) pubs envs wd plat dd rest
+  | "--volume" :: v :: rest when not dd -> parse subcmd rm priv det nm net (v :: vols) pubs envs wd plat dd rest
+  | "-p" :: v :: rest when not dd -> parse subcmd rm priv det nm net vols (v :: pubs) envs wd plat dd rest
+  | "--publish" :: v :: rest when not dd -> parse subcmd rm priv det nm net vols (v :: pubs) envs wd plat dd rest
+  | "-e" :: v :: rest when not dd -> parse subcmd rm priv det nm net vols pubs (v :: envs) wd plat dd rest
+  | "--env" :: v :: rest when not dd -> parse subcmd rm priv det nm net vols pubs (v :: envs) wd plat dd rest
+  | "-w" :: v :: rest when not dd -> parse subcmd rm priv det nm net vols pubs envs (Some v) plat dd rest
+  | "--workdir" :: v :: rest when not dd -> parse subcmd rm priv det nm net vols pubs envs (Some v) plat dd rest
+  | "--platform" :: v :: rest when not dd -> parse subcmd rm priv det nm net vols pubs envs wd (Some v) dd rest
+  (* Other value-consuming flags: skip the flag and its argument *)
   | arg :: _val :: rest
     when not dd && String.length arg > 0 && arg.[0] = '-'
          && List.mem arg docker_value_flags ->
-    parse subcmd rm priv det dd rest
-  (* --flag=VALUE equal-sign form for value-consuming flags *)
+    parse subcmd rm priv det nm net vols pubs envs wd plat dd rest
+  (* --flag=VALUE equal-sign form for typed flags *)
+  | arg :: rest when not dd && String.length arg > 7 && String.sub arg 0 7 = "--name=" ->
+    let v = String.sub arg 7 (String.length arg - 7) in
+    parse subcmd rm priv det (Some v) net vols pubs envs wd plat dd rest
+  | arg :: rest when not dd && String.length arg > 10 && String.sub arg 0 10 = "--network=" ->
+    let v = String.sub arg 10 (String.length arg - 10) in
+    parse subcmd rm priv det nm (Some v) vols pubs envs wd plat dd rest
+  | arg :: rest when not dd && String.length arg > 10 && String.sub arg 0 10 = "--workdir=" ->
+    let v = String.sub arg 10 (String.length arg - 10) in
+    parse subcmd rm priv det nm net vols pubs envs (Some v) plat dd rest
+  | arg :: rest when not dd && String.length arg > 11 && String.sub arg 0 11 = "--platform=" ->
+    let v = String.sub arg 11 (String.length arg - 11) in
+    parse subcmd rm priv det nm net vols pubs envs wd (Some v) dd rest
+  (* --flag=VALUE equal-sign form for other value-consuming flags *)
   | arg :: rest
     when not dd && Shell_ir_typed_types.is_eq_form_flag arg docker_value_flags ->
     let ev = Shell_ir_typed_types.eq_form_flag_value arg docker_value_flags in
-    parse subcmd rm priv det dd (match ev with Some evv -> evv :: rest | None -> rest)
+    parse subcmd rm priv det nm net vols pubs envs wd plat dd (match ev with Some evv -> evv :: rest | None -> rest)
   (* POSIX end-of-options: all remaining args are positional *)
-  | "--" :: rest -> parse subcmd rm priv det true rest
+  | "--" :: rest -> parse subcmd rm priv det nm net vols pubs envs wd plat true rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' && Option.is_some subcmd && not dd ->
+    (* Unknown flag (e.g. -t, --tty): skip, continue parsing to avoid breaking round-trip *)
+    parse subcmd rm priv det nm net vols pubs envs wd plat dd rest
   | arg :: rest ->
     (match subcmd with
-     | None when not dd -> parse (Some arg) rm priv det dd rest
+     | None when not dd -> parse (Some arg) rm priv det nm net vols pubs envs wd plat dd rest
      | _ ->
-       (* accumulate remaining args in rest *)       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker {
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Docker {
          subcommand = (match subcmd with Some s -> s | None -> arg);
          rm; privileged = priv; detach = det;
+         name = nm; network = net; volumes = List.rev vols; publish = List.rev pubs;
+         env_vars = List.rev envs; workdir = wd; platform = plat;
          rest = (match subcmd with Some _ -> arg :: rest | None -> List.rev rest)
        })))
 in
-parse None false false false false args|}
+parse None false false false None None [] [] [] None None false args|}
     ; no_expand_combined = false
     }
   ; { name = "Opam"

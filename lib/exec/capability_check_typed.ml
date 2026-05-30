@@ -407,11 +407,18 @@ let of_command = function
   | Shell_ir_typed.W (Chown { owner; path; recursive }) ->
     let flag_args = if recursive then [ arg "-R" ] else [] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Chown, flag_args @ [ arg owner; arg path ]) ]
-  | Shell_ir_typed.W (Docker { subcommand; rm; privileged; detach; rest }) ->
+  | Shell_ir_typed.W (Docker { subcommand; rm; privileged; detach; name; network; volumes; publish; env_vars; workdir; platform; rest }) ->
     let args = [ arg subcommand ] in
     let args = if rm then args @ [ arg "--rm" ] else args in
     let args = if privileged then args @ [ arg "--privileged" ] else args in
     let args = if detach then args @ [ arg "-d" ] else args in
+    let args = (match name with Some n -> args @ [ arg "--name"; arg n ] | None -> args) in
+    let args = (match network with Some n -> args @ [ arg "--network"; arg n ] | None -> args) in
+    let args = List.fold_left (fun acc v -> acc @ [ arg "-v"; arg v ]) args volumes in
+    let args = List.fold_left (fun acc p -> acc @ [ arg "-p"; arg p ]) args publish in
+    let args = List.fold_left (fun acc e -> acc @ [ arg "-e"; arg e ]) args env_vars in
+    let args = (match workdir with Some w -> args @ [ arg "-w"; arg w ] | None -> args) in
+    let args = (match platform with Some p -> args @ [ arg "--platform"; arg p ] | None -> args) in
     let args = args @ List.map arg rest in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Docker, args) ]
   | Shell_ir_typed.W (Opam { subcommand; yes; rest }) ->

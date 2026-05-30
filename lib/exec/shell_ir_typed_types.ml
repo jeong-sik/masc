@@ -377,6 +377,13 @@ and (_, _, _, _) command =
       ; rm : bool
       ; privileged : bool
       ; detach : bool
+      ; name : string option
+      ; network : string option
+      ; volumes : string list
+      ; publish : string list
+      ; env_vars : string list
+      ; workdir : string option
+      ; platform : string option
       ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Docker ]) command

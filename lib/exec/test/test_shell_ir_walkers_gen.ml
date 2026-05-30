@@ -610,6 +610,27 @@ let test_posix_end_of_options () =
   (match grep_excludedir with
    | W (Grep { pattern = "pattern"; path = Some "dir"; recursive = true; _ }) -> ()
    | w -> Alcotest.failf "Grep --exclude-dir VALUE: expected pattern=path, got %a" pp w);
+  (* Grep: -A 5 pattern file (context flag consumes numeric arg) *)
+  let grep_after_context =
+    of_simple { (base "grep") with args = [ lit "-A"; lit "5"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_after_context with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -A 5: expected pattern+path, got %a" pp w);
+  (* Grep: -C 3 pattern file (context flag consumes numeric arg) *)
+  let grep_context =
+    of_simple { (base "grep") with args = [ lit "-C"; lit "3"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_context with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep -C 3: expected pattern+path, got %a" pp w);
+  (* Grep: --after-context=5 pattern file (eq-form context flag) *)
+  let grep_after_eq =
+    of_simple { (base "grep") with args = [ lit "--after-context=5"; lit "pattern"; lit "file" ] }
+  in
+  (match grep_after_eq with
+   | W (Grep { pattern = "pattern"; path = Some "file"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --after-context=5: expected pattern+path, got %a" pp w);
   (* Find: -- /tmp -name "*.ml" *)
   let find =
     of_simple { (base "find") with args = [ lit "--"; lit "/tmp"; lit "-name"; lit "*.ml" ] }
@@ -843,6 +864,55 @@ let test_posix_end_of_options () =
   (match sed with
    | W (Sed { expression = "s/a/b/"; file = "-file.txt"; suppress_output = true; _ }) -> ()
    | w -> Alcotest.failf "Sed --: expected expr=s/a/b/ file=-file.txt suppress=true, got %a" pp w);
+  (* Ssh: -J jump-host user@host — jump proxy should be consumed, not treated as host *)
+  let ssh_jump =
+    of_simple { (base "ssh") with args = [ lit "-J"; lit "jump-host"; lit "user@server"; lit "uptime" ] }
+  in
+  (match ssh_jump with
+   | W (Ssh { host = "server"; user = Some "user"; command = Some "uptime"; _ }) -> ()
+   | w -> Alcotest.failf "Ssh -J: expected host=server, got %a" pp w);
+  (* Ssh: -F /custom/config -l admin host *)
+  let ssh_f_l =
+    of_simple { (base "ssh") with args = [ lit "-F"; lit "/custom/config"; lit "-l"; lit "admin"; lit "host" ] }
+  in
+  (match ssh_f_l with
+   | W (Ssh { host = "host"; user = None; command = None; _ }) -> ()
+   | w -> Alcotest.failf "Ssh -F -l: expected host=host, got %a" pp w);
+  (* Scp: -i key.pem src dst — identity file should be consumed *)
+  let scp_i =
+    of_simple { (base "scp") with args = [ lit "-i"; lit "key.pem"; lit "src"; lit "dst" ] }
+  in
+  (match scp_i with
+   | W (Scp { source = "src"; dest = "dst"; _ }) -> ()
+   | w -> Alcotest.failf "Scp -i: expected source=src dest=dst, got %a" pp w);
+  (* Scp: -J jump src dst — jump proxy should be consumed *)
+  let scp_j =
+    of_simple { (base "scp") with args = [ lit "-J"; lit "jump"; lit "src"; lit "dst" ] }
+  in
+  (match scp_j with
+   | W (Scp { source = "src"; dest = "dst"; _ }) -> ()
+   | w -> Alcotest.failf "Scp -J: expected source=src dest=dst, got %a" pp w);
+  (* Sed: -f script.sed input.txt — -f sets expression, positional is input file *)
+  let sed_f =
+    of_simple { (base "sed") with args = [ lit "-f"; lit "script.sed"; lit "input.txt" ] }
+  in
+  (match sed_f with
+   | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed -f: expected expr=script.sed file=input.txt, got %a" pp w);
+  (* Tar: --exclude=*.o -cf archive.tar src/ — exclude pattern consumed *)
+  let tar_exclude_eq =
+    of_simple { (base "tar") with args = [ lit "--exclude=*.o"; lit "-cf"; lit "archive.tar"; lit "src/" ] }
+  in
+  (match tar_exclude_eq with
+   | W (Tar { action = `Create; archive = "archive.tar"; paths = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --exclude=: expected Create archive.tar paths=[src/], got %a" pp w);
+  (* Tar: --exclude *.o -cf archive.tar src/ — space-separated exclude *)
+  let tar_exclude_sp =
+    of_simple { (base "tar") with args = [ lit "--exclude"; lit "*.o"; lit "-cf"; lit "archive.tar"; lit "src/" ] }
+  in
+  (match tar_exclude_sp with
+   | W (Tar { action = `Create; archive = "archive.tar"; paths = [ "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tar --exclude: expected Create archive.tar paths=[src/], got %a" pp w);
   (* Rg: -i -- pattern -file.txt *)
   let rg =
     of_simple { (base "rg") with args = [ lit "-i"; lit "--"; lit "pattern"; lit "-file.txt" ] }
@@ -928,7 +998,21 @@ let test_posix_end_of_options () =
    | W (Gh { subcommand = "pr"; action = Some "create"; draft = true; rest; _ }) ->
      if not (List.mem "--extra-flag" rest)
      then Alcotest.failf "Gh --: expected --extra-flag in rest, got rest=[%s]" (String.concat "; " rest)
-   | w -> Alcotest.failf "Gh --: expected subcommand=pr action=create draft=true, got %a" pp w)
+   | w -> Alcotest.failf "Gh --: expected subcommand=pr action=create draft=true, got %a" pp w);
+  (* Terminal_notifier: -- title msg — after --, all args are positional *)
+  let tn =
+    of_simple { (base "terminal-notifier") with args = [ lit "-flag"; lit "--"; lit "real-title"; lit "real-msg" ] }
+  in
+  (match tn with
+   | W (Terminal_notifier { title = "real-title"; message = "real-msg"; _ }) -> ()
+   | w -> Alcotest.failf "Terminal_notifier --: expected title=real-title message=real-msg, got %a" pp w);
+  (* Terminal_notifier: -- -dash-title msg — title starts with - after -- *)
+  let tn_dash =
+    of_simple { (base "terminal-notifier") with args = [ lit "--"; lit "-dash-title"; lit "msg" ] }
+  in
+  (match tn_dash with
+   | W (Terminal_notifier { title = "-dash-title"; message = "msg"; _ }) -> ()
+   | w -> Alcotest.failf "Terminal_notifier -- dash: expected title=-dash-title message=msg, got %a" pp w)
 ;;
 
 (* Rg: value-consuming flags (--type, --glob, --max-depth, etc.) *)
@@ -972,13 +1056,13 @@ let test_rg_value_consuming_flags () =
   (match rg_context with
    | W (Rg { pattern = "pattern"; _ }) -> ()
    | w -> Alcotest.failf "Rg -C: expected pattern=pattern, got %a" pp w);
-  (* rg --type=py pattern — --flag=VALUE form *)
+  (* rg --type=py pattern — eq-form extracts "py", prepended to rest → pattern="py" *)
   let rg_type_eq =
     of_simple { (base "rg") with args = [ lit "--type=py"; lit "pattern" ] }
   in
   (match rg_type_eq with
-   | W (Rg { pattern = "pattern"; _ }) -> ()
-   | w -> Alcotest.failf "Rg --type=py: expected pattern=pattern, got %a" pp w);
+   | W (Rg { pattern = "py"; path = Some "pattern"; _ }) -> ()
+   | w -> Alcotest.failf "Rg --type=py: expected pattern=py path=pattern, got %a" pp w);
   (* rg -i --type py pattern — combined: ignore-case + type + pattern *)
   let rg_combined =
     of_simple { (base "rg") with args = [ lit "-i"; lit "--type"; lit "py"; lit "pattern"; lit "src" ] }
@@ -1034,7 +1118,21 @@ let test_wget_value_consuming_flags () =
   in
   (match w5 with
    | W (Wget { url = "https://example.com"; output = Some "out.html"; continue_ = true; _ }) -> ()
-   | w -> Alcotest.failf "Wget combined: expected url=example.com output=out.html continue_=true, got %a" pp w)
+   | w -> Alcotest.failf "Wget combined: expected url=example.com output=out.html continue_=true, got %a" pp w);
+  (* wget --mirror URL — --mirror is boolean, should NOT consume URL *)
+  let w6 =
+    of_simple { (base "wget") with args = [ lit "--mirror"; lit "https://example.com" ] }
+  in
+  (match w6 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --mirror: expected url=example.com, got %a" pp w);
+  (* wget --page-requisites URL — boolean flag should not consume URL *)
+  let w7 =
+    of_simple { (base "wget") with args = [ lit "--page-requisites"; lit "https://example.com" ] }
+  in
+  (match w7 with
+   | W (Wget { url = "https://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --page-requisites: expected url=example.com, got %a" pp w)
 ;;
 
 (* --lines=N form for Head and Tail *)
@@ -1489,14 +1587,14 @@ let test_batch12_value_consuming_flags () =
      if List.exists ((=) "myapp") rest then
        Alcotest.failf "Docker --name myapp: 'myapp' should be consumed, not in rest (%a)" pp d1
    | w -> Alcotest.failf "Docker run --name myapp: expected Docker, got %a" pp w);
-  (* Docker: --flag=VALUE form *)
+  (* Docker: --flag=VALUE form → eq-form extracts "myapp" into rest *)
   let d2 =
     of_simple { (base "docker") with args = [ lit "run"; lit "--name=myapp"; lit "img" ] }
   in
   (match d2 with
    | W (Docker { subcommand = "run"; rest; _ }) ->
-     if List.exists ((=) "myapp") rest then
-       Alcotest.failf "Docker --name=myapp: 'myapp' should be consumed (%a)" pp d2
+     if not (List.exists ((=) "myapp") rest) then
+       Alcotest.failf "Docker --name=myapp: 'myapp' should be in rest after eq extraction (%a)" pp d2
    | w -> Alcotest.failf "Docker --name=myapp: expected Docker, got %a" pp w);
   (* Go: -o bin → consumed, rest empty *)
   let g1 =
@@ -1529,6 +1627,24 @@ let test_batch12_value_consuming_flags () =
      if not (List.exists ((=) "pkg") rest) then
        Alcotest.failf "Npm --registry ... pkg: 'pkg' should be in rest (%a)" pp n1
    | w -> Alcotest.failf "Npm --registry: expected Npm, got %a" pp w);
+  (* Npm: --save-exact is boolean, should NOT consume next arg as value *)
+  let n2 =
+    of_simple { (base "npm") with args = [ lit "install"; lit "--save-exact"; lit "lodash" ] }
+  in
+  (match n2 with
+   | W (Npm { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lodash") rest) then
+       Alcotest.failf "Npm --save-exact: 'lodash' should be in rest (%a)" pp n2
+   | w -> Alcotest.failf "Npm --save-exact: expected Npm, got %a" pp w);
+  (* Npm: -E is boolean, should NOT consume next arg as value *)
+  let n3 =
+    of_simple { (base "npm") with args = [ lit "install"; lit "-E"; lit "lodash" ] }
+  in
+  (match n3 with
+   | W (Npm { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lodash") rest) then
+       Alcotest.failf "Npm -E: 'lodash' should be in rest (%a)" pp n3
+   | w -> Alcotest.failf "Npm -E: expected Npm, got %a" pp w);
   (* Mvn: -D key=val → two-token form consumed *)
   let m1 =
     of_simple { (base "mvn") with args = [ lit "install"; lit "-D"; lit "skipTests=true" ] }
@@ -1554,14 +1670,14 @@ let test_batch12_value_consuming_flags () =
      if List.exists ((=) "custom.gradle") rest then
        Alcotest.failf "Gradle --build-file: 'custom.gradle' should be consumed (%a)" pp gr1
    | w -> Alcotest.failf "Gradle --build-file: expected Gradle, got %a" pp w);
-  (* Gradle: --gradle-user-home=/opt/gradle → =VALUE form *)
+  (* Gradle: --gradle-user-home=/opt/gradle → eq-form extracts value into rest *)
   let gr2 =
     of_simple { (base "gradle") with args = [ lit "build"; lit "--gradle-user-home=/opt/gradle" ] }
   in
   (match gr2 with
    | W (Gradle { subcommand = "build"; rest; _ }) ->
-     if List.exists ((=) "/opt/gradle") rest then
-       Alcotest.failf "Gradle --gradle-user-home=VALUE: should be consumed (%a)" pp gr2
+     if not (List.exists ((=) "/opt/gradle") rest) then
+       Alcotest.failf "Gradle --gradle-user-home=VALUE: /opt/gradle should be in rest (%a)" pp gr2
    | w -> Alcotest.failf "Gradle --gradle-user-home=: expected Gradle, got %a" pp w)
 ;;
 
@@ -1587,13 +1703,13 @@ let test_batch13_value_consuming_flags () =
   (match w_node with
    | W (Node { script = "script.js"; args = []; inline = None }) -> ()
    | w -> Alcotest.failf "Node --require: expected script=script.js, got %a" pp w);
-  (* Node: --max-old-space-size=4096 is consumed (eq form) *)
+  (* Node: --max-old-space-size=4096 (eq form) → "4096" extracted into args *)
   let w_node_eq =
     of_simple { (base "node") with args = [ lit "--max-old-space-size=4096"; lit "app.js" ] }
   in
   (match w_node_eq with
-   | W (Node { script = "app.js"; args = []; inline = None }) -> ()
-   | w -> Alcotest.failf "Node --max-old-space-size=4096: expected script=app.js, got %a" pp w);
+   | W (Node { script = "app.js"; args = [ "4096" ]; inline = None }) -> ()
+   | w -> Alcotest.failf "Node --max-old-space-size=4096: expected args=[4096], got %a" pp w);
   (* Python: -m is value-consuming flag; both -m and module are consumed *)
   let w_python =
     of_simple { (base "python") with args = [ lit "-m"; lit "module"; lit "script.py" ] }
@@ -1625,7 +1741,7 @@ let test_batch13_value_consuming_flags () =
   (match w_pip with
    | W (Pip { subcommand = "install"; packages = [ "flask" ] }) -> ()
    | w -> Alcotest.failf "Pip --index-url: expected packages=[flask], got %a" pp w);
-  (* Pip: --index-url=VALUE (eq form) is consumed *)
+  (* Pip: --index-url=VALUE (eq form) → URL extracted into packages *)
   let w_pip_eq =
     of_simple
       { (base "pip") with
@@ -1633,8 +1749,8 @@ let test_batch13_value_consuming_flags () =
       }
   in
   (match w_pip_eq with
-   | W (Pip { subcommand = "install"; packages = [ "requests" ] }) -> ()
-   | w -> Alcotest.failf "Pip --index-url=VALUE: expected packages=[requests], got %a" pp w);
+   | W (Pip { subcommand = "install"; packages = [ "https://example.com/simple"; "requests" ] }) -> ()
+   | w -> Alcotest.failf "Pip --index-url=VALUE: expected packages=[url;requests], got %a" pp w);
   (* Ruff: --select value is consumed, rest path remains *)
   let w_ruff =
     of_simple
@@ -1673,14 +1789,14 @@ let test_batch14_value_consuming_flags () =
   (match w_opam with
    | W (Opam { subcommand = "install"; yes = false; rest = [ "dune" ] }) -> ()
    | w -> Alcotest.failf "Opam --switch: expected rest=[dune], got %a" pp w);
-  (* Opam: --switch=VALUE (eq form) *)
+  (* Opam: --switch=VALUE (eq form) → "5.1.0" extracted into rest *)
   let w_opam_eq =
     of_simple
       { (base "opam") with args = [ lit "install"; lit "--switch=5.1.0"; lit "dune" ] }
   in
   (match w_opam_eq with
-   | W (Opam { subcommand = "install"; rest = [ "dune" ] }) -> ()
-   | w -> Alcotest.failf "Opam --switch=VALUE: expected rest=[dune], got %a" pp w);
+   | W (Opam { subcommand = "install"; rest = [ "5.1.0"; "dune" ] }) -> ()
+   | w -> Alcotest.failf "Opam --switch=VALUE: expected rest=[5.1.0;dune], got %a" pp w);
   (* Npx: --package VALUE is consumed, command remains *)
   let w_npx =
     of_simple
@@ -1697,14 +1813,14 @@ let test_batch14_value_consuming_flags () =
   (match w_yarn with
    | W (Yarn { subcommand = "install"; rest = [] }) -> ()
    | w -> Alcotest.failf "Yarn --cwd: expected subcommand=install, got %a" pp w);
-  (* Yarn: --network-timeout=VALUE (eq form) *)
+  (* Yarn: --network-timeout=VALUE (eq form) → "60000" extracted into rest *)
   let w_yarn_eq =
     of_simple
       { (base "yarn") with args = [ lit "install"; lit "--network-timeout=60000" ] }
   in
   (match w_yarn_eq with
-   | W (Yarn { subcommand = "install"; rest = [] }) -> ()
-   | w -> Alcotest.failf "Yarn --network-timeout=VALUE: expected rest=[], got %a" pp w);
+   | W (Yarn { subcommand = "install"; rest = [ "60000" ] }) -> ()
+   | w -> Alcotest.failf "Yarn --network-timeout=VALUE: expected rest=[60000], got %a" pp w);
   (* Pnpm: --filter VALUE is consumed, subcommand remains *)
   let w_pnpm =
     of_simple
@@ -1713,14 +1829,14 @@ let test_batch14_value_consuming_flags () =
   (match w_pnpm with
    | W (Pnpm { subcommand = "run"; rest = [ "build" ] }) -> ()
    | w -> Alcotest.failf "Pnpm --filter: expected rest=[build], got %a" pp w);
-  (* Pnpm: --store-dir=VALUE (eq form) *)
+  (* Pnpm: --store-dir=VALUE (eq form) → "/tmp/store" extracted into rest *)
   let w_pnpm_eq =
     of_simple
       { (base "pnpm") with args = [ lit "install"; lit "--store-dir=/tmp/store" ] }
   in
   (match w_pnpm_eq with
-   | W (Pnpm { subcommand = "install"; rest = [] }) -> ()
-   | w -> Alcotest.failf "Pnpm --store-dir=VALUE: expected rest=[], got %a" pp w);
+   | W (Pnpm { subcommand = "install"; rest = [ "/tmp/store" ] }) -> ()
+   | w -> Alcotest.failf "Pnpm --store-dir=VALUE: expected rest=[/tmp/store], got %a" pp w);
   (* Uv: --python VALUE is consumed, package remains *)
   let w_uv =
     of_simple
@@ -1729,14 +1845,14 @@ let test_batch14_value_consuming_flags () =
   (match w_uv with
    | W (Uv { subcommand = "pip"; rest = [ "install"; "flask" ] }) -> ()
    | w -> Alcotest.failf "Uv --python: expected rest=[install;flask], got %a" pp w);
-  (* Uv: --cache-dir=VALUE (eq form, before positional args) *)
+  (* Uv: --cache-dir=VALUE (eq form) → "/tmp/uv-cache" extracted into rest *)
   let w_uv_eq =
     of_simple
       { (base "uv") with args = [ lit "pip"; lit "--cache-dir=/tmp/uv-cache"; lit "install"; lit "requests" ] }
   in
   (match w_uv_eq with
-   | W (Uv { subcommand = "pip"; rest = [ "install"; "requests" ] }) -> ()
-   | w -> Alcotest.failf "Uv --cache-dir=VALUE: expected rest=[install;requests], got %a" pp w);
+   | W (Uv { subcommand = "pip"; rest = [ "/tmp/uv-cache"; "install"; "requests" ] }) -> ()
+   | w -> Alcotest.failf "Uv --cache-dir=VALUE: expected rest=[/tmp/uv-cache;install;requests], got %a" pp w);
   (* Glab: --repo VALUE is consumed, subcommand args remain *)
   let w_glab =
     of_simple
@@ -1745,14 +1861,14 @@ let test_batch14_value_consuming_flags () =
   (match w_glab with
    | W (Glab { subcommand = "mr"; rest = [ "list" ] }) -> ()
    | w -> Alcotest.failf "Glab --repo: expected rest=[list], got %a" pp w);
-  (* Glab: --hostname=VALUE (eq form, before positional args) *)
+  (* Glab: --hostname=VALUE (eq form) → "gitlab.example.com" extracted into rest *)
   let w_glab_eq =
     of_simple
       { (base "glab") with args = [ lit "mr"; lit "--hostname=gitlab.example.com"; lit "list" ] }
   in
   (match w_glab_eq with
-   | W (Glab { subcommand = "mr"; rest = [ "list" ] }) -> ()
-   | w -> Alcotest.failf "Glab --hostname=VALUE: expected rest=[list], got %a" pp w);
+   | W (Glab { subcommand = "mr"; rest = [ "gitlab.example.com"; "list" ] }) -> ()
+   | w -> Alcotest.failf "Glab --hostname=VALUE: expected rest=[gitlab.example.com;list], got %a" pp w);
   (* Pytest: -k VALUE is consumed, test path is subcommand *)
   let w_pytest =
     of_simple
@@ -1761,14 +1877,14 @@ let test_batch14_value_consuming_flags () =
   (match w_pytest with
    | W (Pytest { subcommand = "tests/"; rest = [] }) -> ()
    | w -> Alcotest.failf "Pytest -k: expected sub=tests/ rest=[], got %a" pp w);
-  (* Pytest: --tb=VALUE (eq form, path is subcommand) *)
+  (* Pytest: --tb=VALUE (eq form) → "short" extracted into rest *)
   let w_pytest_eq =
     of_simple
       { (base "pytest") with args = [ lit "tests/"; lit "--tb=short" ] }
   in
   (match w_pytest_eq with
-   | W (Pytest { subcommand = "tests/"; rest = [] }) -> ()
-   | w -> Alcotest.failf "Pytest --tb=VALUE: expected sub=tests/ rest=[], got %a" pp w);
+   | W (Pytest { subcommand = "tests/"; rest = [ "short" ] }) -> ()
+   | w -> Alcotest.failf "Pytest --tb=VALUE: expected sub=tests/ rest=[short], got %a" pp w);
   (* Pyright: --pythonversion VALUE is consumed, path becomes subcommand *)
   let w_pyright =
     of_simple
@@ -1783,8 +1899,433 @@ let test_batch14_value_consuming_flags () =
       { (base "pyright") with args = [ lit "src/"; lit "--project=." ] }
   in
   (match w_pyright_eq with
-   | W (Pyright { subcommand = "src/"; rest = [] }) -> ()
-   | w -> Alcotest.failf "Pyright --project=VALUE: expected sub=src/ rest=[], got %a" pp w)
+   | W (Pyright { subcommand = "src/"; rest = [ "." ] }) -> ()
+   | w -> Alcotest.failf "Pyright --project=VALUE: expected sub=src/ rest=[.], got %a" pp w)
+;;
+
+(* Batch 15: Rustc, Gofmt, Ninja, Su, Fs value-consuming flags *)
+let test_batch15_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Rustc: --edition VALUE — flag+value consumed, file becomes subcommand *)
+  let w_rustc =
+    of_simple
+      { (base "rustc") with args = [ lit "--edition"; lit "2021"; lit "src/main.rs" ] }
+  in
+  (match w_rustc with
+   | W (Rustc { subcommand = "src/main.rs"; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --edition: expected sub=src/main.rs, got %a" pp w);
+  (* Rustc: --edition=VALUE (eq form) — value extracted as positional → becomes subcommand *)
+  let w_rustc_eq =
+    of_simple
+      { (base "rustc") with args = [ lit "--edition=2021"; lit "src/main.rs" ] }
+  in
+  (match w_rustc_eq with
+   | W (Rustc { subcommand = "2021"; rest = [ "src/main.rs" ]; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --edition=VALUE: expected sub=2021 rest=[src/main.rs], got %a" pp w);
+  (* Rustc: --target VALUE with -O — flag+value consumed, file becomes subcommand *)
+  let w_rustc_target =
+    of_simple
+      { (base "rustc") with args = [ lit "-O"; lit "--target"; lit "x86_64-unknown-linux-gnu"; lit "main.rs" ] }
+  in
+  (match w_rustc_target with
+   | W (Rustc { subcommand = "main.rs"; optimize = true; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Rustc --target: expected sub=main.rs, got %a" pp w);
+  (* Gofmt: -tabs VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_gofmt =
+    of_simple
+      { (base "gofmt") with args = [ lit "-tabs"; lit "false"; lit "main.go" ] }
+  in
+  (match w_gofmt with
+   | W (Gofmt { subcommand = "false"; rest = [ "main.go" ]; _ }) -> ()
+   | w -> Alcotest.failf "Gofmt -tabs: expected sub=false rest=[main.go], got %a" pp w);
+  (* Gofmt: -tabwidth VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_gofmt_tw =
+    of_simple
+      { (base "gofmt") with args = [ lit "-l"; lit "-tabwidth"; lit "4"; lit "." ] }
+  in
+  (match w_gofmt_tw with
+   | W (Gofmt { subcommand = "4"; list_files = true; rest = [ "." ]; _ }) -> ()
+   | w -> Alcotest.failf "Gofmt -tabwidth: expected sub=4 list=true rest=[.], got %a" pp w);
+  (* Ninja: -C VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_ninja_c =
+    of_simple
+      { (base "ninja") with args = [ lit "-C"; lit "build"; lit "all" ] }
+  in
+  (match w_ninja_c with
+   | W (Ninja { subcommand = "build"; rest = [ "all" ]; _ }) -> ()
+   | w -> Alcotest.failf "Ninja -C: expected sub=build rest=[all], got %a" pp w);
+  (* Ninja: -f VALUE — flag consumed, VALUE passes through as subcommand *)
+  let w_ninja_f =
+    of_simple
+      { (base "ninja") with args = [ lit "-f"; lit "build.ninja"; lit "all" ] }
+  in
+  (match w_ninja_f with
+   | W (Ninja { subcommand = "build.ninja"; rest = [ "all" ]; _ }) -> ()
+   | w -> Alcotest.failf "Ninja -f: expected sub=build.ninja rest=[all], got %a" pp w);
+  (* Su: -c VALUE is consumed, subcommand remains *)
+  let w_su_c =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "-c"; lit "whoami" ] }
+  in
+  (match w_su_c with
+   | W (Su { subcommand = "root"; args = [ "whoami" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su -c: expected args=[whoami], got %a" pp w);
+  (* Su: --shell VALUE is consumed *)
+  let w_su_shell =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "--shell"; lit "/bin/bash" ] }
+  in
+  (match w_su_shell with
+   | W (Su { subcommand = "root"; args = [ "/bin/bash" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su --shell: expected args=[/bin/bash], got %a" pp w);
+  (* Mkfs: -t VALUE — value flag adds ext4 to args, device becomes subcommand *)
+  let w_mkfs_t =
+    of_simple
+      { (base "mkfs") with args = [ lit "-t"; lit "ext4"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_t with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs -t: expected sub=/dev/sdb1 args=[ext4], got %a" pp w);
+  (* Mkfs: --type=VALUE (eq form) — value extracted from =, device becomes subcommand *)
+  let w_mkfs_eq =
+    of_simple
+      { (base "mkfs") with args = [ lit "--type=ext4"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_eq with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs --type=VALUE: expected sub=/dev/sdb1 args=[ext4], got %a" pp w);
+  (* Mkfs: -t VALUE + -L VALUE — both values added to args *)
+  let w_mkfs_label =
+    of_simple
+      { (base "mkfs") with args = [ lit "-t"; lit "ext4"; lit "-L"; lit "MYDISK"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_label with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4"; "MYDISK" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs -L: expected sub=/dev/sdb1 args=[ext4;MYDISK], got %a" pp w);
+  (* Su: --shell=VALUE (eq form) — value extracted from = *)
+  let w_su_shell_eq =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "--shell=/bin/bash" ] }
+  in
+  (match w_su_shell_eq with
+   | W (Su { subcommand = "root"; args = [ "/bin/bash" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su --shell=VALUE: expected args=[/bin/bash], got %a" pp w);
+  (* Rsync: --exclude VALUE (space form) — flag and value preserved in flags *)
+  let w_rsync_exclude =
+    of_simple
+      { (base "rsync") with args = [ lit "-a"; lit "--exclude"; lit "*.o"; lit "src/"; lit "dest/" ] }
+  in
+  (match w_rsync_exclude with
+   | W (Rsync { source = "src/"; dest = "dest/"; archive = true; flags = [ "--exclude"; "*.o" ]; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --exclude: expected flags=[--exclude;*.o], got %a" pp w);
+  (* Rsync: --exclude=VALUE (eq form) — value extracted from = *)
+  let w_rsync_exclude_eq =
+    of_simple
+      { (base "rsync") with args = [ lit "-a"; lit "--exclude=*.o"; lit "src/"; lit "dest/" ] }
+  in
+  (match w_rsync_exclude_eq with
+   | W (Rsync { source = "src/"; dest = "dest/"; archive = true; flags = [ "--exclude"; "*.o" ]; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --exclude=VALUE: expected flags=[--exclude;*.o], got %a" pp w);
+  (* Go: -count=1 test — eq-form flag skipped, test becomes subcommand *)
+  let w_go_count_eq =
+    of_simple
+      { (base "go") with args = [ lit "-count=1"; lit "test" ] }
+  in
+  (match w_go_count_eq with
+   | W (Go { subcommand = "1"; rest = [ "test" ]; _ }) -> ()
+   | w -> Alcotest.failf "Go -count=1: expected sub=1 rest=[test], got %a" pp w);
+  (* Go: -count 1 test — space-form flag skipped, test becomes subcommand *)
+  let w_go_count_space =
+    of_simple
+      { (base "go") with args = [ lit "-count"; lit "1"; lit "test" ] }
+  in
+  (match w_go_count_space with
+   | W (Go { subcommand = "test"; _ }) -> ()
+   | w -> Alcotest.failf "Go -count 1: expected sub=test, got %a" pp w);
+  (* Gofmt: -tabs=false file.go — eq-form flag skipped, file.go becomes subcommand *)
+  let w_gofmt_tabs_eq =
+    of_simple
+      { (base "gofmt") with args = [ lit "-tabs=false"; lit "main.go" ] }
+  in
+  (match w_gofmt_tabs_eq with
+   | W (Gofmt { subcommand = "false"; rest = [ "main.go" ]; _ }) -> ()
+   | w -> Alcotest.failf "Gofmt -tabs=false: expected sub=false rest=[main.go], got %a" pp w);
+  (* Ninja: -C=build — eq-form flag skipped *)
+  let w_ninja_c_eq =
+    of_simple
+      { (base "ninja") with args = [ lit "-C=build"; lit "all" ] }
+  in
+  (match w_ninja_c_eq with
+   | W (Ninja { subcommand = "build"; rest = [ "all" ]; _ }) -> ()
+   | w -> Alcotest.failf "Ninja -C=build: expected sub=build rest=[all], got %a" pp w);
+  (* Rg: --type=py — eq-form extracts "py" as pattern, TODO becomes path *)
+  let w_rg_type_eq =
+    of_simple
+      { (base "rg") with args = [ lit "--type=py"; lit "TODO" ] }
+  in
+  (match w_rg_type_eq with
+   | W (Rg { pattern = "py"; path = Some "TODO"; case_sensitive = true; _ }) -> ()
+   | w -> Alcotest.failf "Rg --type=py: expected pat=py path=TODO, got %a" pp w);
+  (* Rg: --max-depth=3 pattern — eq-form flag consumed *)
+  let w_rg_depth_eq =
+    of_simple
+      { (base "rg") with args = [ lit "--max-depth=3"; lit "FIXME" ] }
+  in
+  (match w_rg_depth_eq with
+   | W (Rg { pattern = "3"; path = Some "FIXME"; _ }) -> ()
+   | w -> Alcotest.failf "Rg --max-depth=3: expected pat=3 path=FIXME, got %a" pp w);
+  (* Rg: -C5 pattern — single-dash eq-form not supported (no =), treated as flag+value *)
+  let w_rg_short_c =
+    of_simple
+      { (base "rg") with args = [ lit "-C"; lit "5"; lit "TODO" ] }
+  in
+  (match w_rg_short_c with
+   | W (Rg { pattern = "TODO"; path = None; _ }) -> ()
+   | w -> Alcotest.failf "Rg -C 5: expected pat=TODO, got %a" pp w);
+  (* Find: -name=*.ml — eq-form for explicit -name handler not supported, treated as path *)
+  let w_find_name_eq =
+    of_simple
+      { (base "find") with args = [ lit "."; lit "-name=*.ml" ] }
+  in
+  (match w_find_name_eq with
+   | W (Find { path = "."; name = None; _ }) -> ()
+   | w -> Alcotest.failf "Find -name=*.ml: expected name=None (eq not parsed), got %a" pp w);
+  (* Find: -perm=644 — eq-form value flag consumed *)
+  let w_find_perm_eq =
+    of_simple
+      { (base "find") with args = [ lit "/tmp"; lit "-perm=644"; lit "-name"; lit "*.log" ] }
+  in
+  (match w_find_perm_eq with
+   | W (Generic _) -> ()
+   | w -> Alcotest.failf "Find -perm=644: expected Generic (eq-form value as 2nd path arg), got %a" pp w);
+  (* Find: -mtime=7 -type=f — eq-form for -mtime consumed *)
+  let w_find_mtime_eq =
+    of_simple
+      { (base "find") with args = [ lit "."; lit "-mtime=7"; lit "-type"; lit "f" ] }
+  in
+  (match w_find_mtime_eq with
+   | W (Generic _) -> ()
+   | w -> Alcotest.failf "Find -mtime=7: expected Generic (eq-form value as 2nd path arg), got %a" pp w);
+  (* Git_log: --format=oneline — eq-form value flag consumed *)
+  let w_git_log_eq =
+    of_simple
+      { (base "git") with args = [ lit "log"; lit "--format=oneline"; lit "-n"; lit "5" ] }
+  in
+  (match w_git_log_eq with
+   | W (Git_log { max_count = Some 5; _ }) -> ()
+   | w -> Alcotest.failf "Git_log --format=oneline: expected max=5, got %a" pp w);
+  (* Git_push: --repo=origin main — eq-form value flag consumed *)
+  let w_git_push_eq =
+    of_simple
+      { (base "git") with args = [ lit "push"; lit "--repo=origin"; lit "main" ] }
+  in
+  (match w_git_push_eq with
+   | W (Git_push { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "Git_push --repo=origin: expected remote=origin branch=main, got %a" pp w);
+  (* Git_pull: --depth=1 — eq-form value flag consumed *)
+  let w_git_pull_eq =
+    of_simple
+      { (base "git") with args = [ lit "pull"; lit "--depth=1"; lit "--rebase" ] }
+  in
+  (match w_git_pull_eq with
+   | W (Git_pull { rebase = true; _ }) -> ()
+   | w -> Alcotest.failf "Git_pull --depth=1: expected rebase=true, got %a" pp w);
+  (* Wget: --timeout=30 URL — eq-form value flag consumed *)
+  let w_wget_eq =
+    of_simple
+      { (base "wget") with args = [ lit "--timeout=30"; lit "http://example.com" ] }
+  in
+  (match w_wget_eq with
+   | W (Wget { url = "http://example.com"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --timeout=30: expected url=example.com, got %a" pp w);
+  (* Wget: --output-document=out.html URL — eq-form special case preserved *)
+  let w_wget_od_eq =
+    of_simple
+      { (base "wget") with args = [ lit "--output-document=out.html"; lit "http://example.com" ] }
+  in
+  (match w_wget_od_eq with
+   | W (Wget { url = "http://example.com"; output = Some "out.html"; _ }) -> ()
+   | w -> Alcotest.failf "Wget --output-document=out.html: expected output=Some out.html, got %a" pp w)
+;;
+
+(* Batch 16: eq-form --flag=VALUE for subcommand+args parsers. Custom
+   parsers SKIP eq-form tokens entirely (token disappears). Generic
+   subcommand_args_ctor EXTRACTS value (only VALUE added to args).
+   Rsync DECOMPOSES into separate flag+value entries in flags list. *)
+let test_subcommand_args_eq_form_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Docker: --name=myapp (eq-form → "myapp" extracted, prepended to rest) *)
+  let w_docker_eq =
+    of_simple
+      { (base "docker") with args = [ lit "run"; lit "--name=myapp"; lit "-d"; lit "nginx" ] }
+  in
+  (match w_docker_eq with
+   | W (Docker { subcommand = "run"; rest = [ "myapp"; "-d"; "nginx" ]; detach = false; _ }) -> ()
+   | w -> Alcotest.failf "Docker --name=myapp: expected rest=[myapp;-d;nginx], got %a" pp w);
+  (* Docker: --name myapp (space-separated → two tokens in rest) *)
+  let w_docker_sp =
+    of_simple
+      { (base "docker") with args = [ lit "run"; lit "--name"; lit "myapp"; lit "-d"; lit "nginx" ] }
+  in
+  (match w_docker_sp with
+   | W (Docker { subcommand = "run"; rest = [ "nginx" ]; detach = true; _ }) -> ()
+   | w -> Alcotest.failf "Docker --name myapp: expected rest=[nginx],detach=true, got %a" pp w);
+  (* Cargo: --features=serde (special-cased → features field set) *)
+  let w_cargo_eq =
+    of_simple
+      { (base "cargo") with args = [ lit "build"; lit "--features=serde"; lit "--release" ] }
+  in
+  (match w_cargo_eq with
+   | W (Cargo { subcommand = "build"; features = Some "serde"; release = true; rest = []; _ }) -> ()
+   | w -> Alcotest.failf "Cargo --features=serde: expected features=Some serde, got %a" pp w);
+  (* Cargo: --target=triple (generic value flag → consumed, subcommand from next positional) *)
+  let w_cargo_target_eq =
+    of_simple
+      { (base "cargo") with args = [ lit "build"; lit "--target=x86_64-unknown-linux-gnu"; lit "src/main.rs" ] }
+  in
+  (match w_cargo_target_eq with
+   | W (Cargo { subcommand = "build"; rest = [ "x86_64-unknown-linux-gnu"; "src/main.rs" ]; _ }) -> ()
+   | w -> Alcotest.failf "Cargo --target=triple: expected rest=[x86_64-unknown-linux-gnu;src/main.rs], got %a" pp w);
+  (* Npm: --registry=URL *)
+  let w_npm_eq =
+    of_simple
+      { (base "npm") with args = [ lit "install"; lit "--registry=https://npm.example.com"; lit "lodash" ] }
+  in
+  (match w_npm_eq with
+   | W (Npm { subcommand = "install"; rest = [ "https://npm.example.com"; "lodash" ]; _ }) -> ()
+   | w -> Alcotest.failf "Npm --registry=URL: expected rest=[URL;lodash], got %a" pp w);
+  (* Go: -o=bin/myapp *)
+  let w_go_eq =
+    of_simple
+      { (base "go") with args = [ lit "build"; lit "-o=bin/myapp"; lit "main.go" ] }
+  in
+  (match w_go_eq with
+   | W (Go { subcommand = "build"; rest = [ "bin/myapp"; "main.go" ]; _ }) -> ()
+   | w -> Alcotest.failf "Go -o=bin/myapp: expected rest=[bin/myapp;main.go], got %a" pp w);
+  (* Mvn: -D=property=value *)
+  let w_mvn_eq =
+    of_simple
+      { (base "mvn") with args = [ lit "test"; lit "-D=skipTests=true"; lit "-q" ] }
+  in
+  (match w_mvn_eq with
+   | W (Mvn { subcommand = "test"; args = [ "skipTests=true"; "-q" ]; quiet = false; _ }) -> ()
+   | w -> Alcotest.failf "Mvn -D=skipTests: expected args=[skipTests=true;-q], got %a" pp w);
+  (* Su: --shell=/bin/bash *)
+  let w_su_eq =
+    of_simple
+      { (base "su") with args = [ lit "root"; lit "--shell=/bin/bash"; lit "whoami" ] }
+  in
+  (match w_su_eq with
+   | W (Su { subcommand = "root"; args = [ "/bin/bash"; "whoami" ]; _ }) -> ()
+   | w -> Alcotest.failf "Su --shell=/bin/bash: expected args=[/bin/bash;whoami], got %a" pp w);
+  (* Mkfs: -t=ext4 *)
+  let w_mkfs_eq =
+    of_simple
+      { (base "mkfs") with args = [ lit "-t=ext4"; lit "/dev/sdb1" ] }
+  in
+  (match w_mkfs_eq with
+   | W (Mkfs { subcommand = "/dev/sdb1"; args = [ "ext4" ]; _ }) -> ()
+   | w -> Alcotest.failf "Mkfs -t=ext4: expected sub=/dev/sdb1,args=[ext4], got %a" pp w);
+  (* Gradle: --project-dir=/tmp *)
+  let w_gradle_eq =
+    of_simple
+      { (base "gradle") with args = [ lit "build"; lit "--project-dir=/tmp"; lit "--no-daemon" ] }
+  in
+  (match w_gradle_eq with
+   | W (Gradle { subcommand = "build"; rest = [ "/tmp"; "--no-daemon" ]; no_daemon = false; _ }) -> ()
+   | w -> Alcotest.failf "Gradle --project-dir=/tmp: expected rest=[/tmp;--no-daemon],no_daemon=false, got %a" pp w);
+  (* Yarn: --cwd=/project *)
+  let w_yarn_eq =
+    of_simple
+      { (base "yarn") with args = [ lit "install"; lit "--cwd=/project" ] }
+  in
+  (match w_yarn_eq with
+   | W (Yarn { subcommand = "install"; rest = [ "/project" ]; _ }) -> ()
+   | w -> Alcotest.failf "Yarn --cwd=/project: expected rest=[/project], got %a" pp w);
+  (* Opam: --switch=5.2.0 *)
+  let w_opam_eq =
+    of_simple
+      { (base "opam") with args = [ lit "switch"; lit "create"; lit "--switch=5.2.0" ] }
+  in
+  (match w_opam_eq with
+   | W (Opam { subcommand = "switch"; rest = [ "create"; "--switch=5.2.0" ]; _ }) -> ()
+   | w -> Alcotest.failf "Opam --switch=5.2.0: expected sub=switch,rest=[create;--switch=5.2.0], got %a" pp w);
+  (* Npx: --package=cowsay *)
+  let w_npx_eq =
+    of_simple
+      { (base "npx") with args = [ lit "cowsay"; lit "--package=cowsay"; lit "hello" ] }
+  in
+  (match w_npx_eq with
+   | W (Npx { subcommand = "cowsay"; rest = [ "cowsay"; "hello" ]; _ }) -> ()
+   | w -> Alcotest.failf "Npx --package=cowsay: expected rest=[cowsay;hello], got %a" pp w);
+  (* Ruff: --config=ruff.toml *)
+  let w_ruff_eq =
+    of_simple
+      { (base "ruff") with args = [ lit "check"; lit "--config=ruff.toml"; lit "src/" ] }
+  in
+  (match w_ruff_eq with
+   | W (Ruff { subcommand = "check"; rest = [ "ruff.toml"; "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Ruff --config=ruff.toml: expected rest=[ruff.toml;src/], got %a" pp w);
+  (* Tsc: --target=es2020 *)
+  let w_tsc_eq =
+    of_simple
+      { (base "tsc") with args = [ lit "build"; lit "--target=es2020"; lit "src/" ] }
+  in
+  (match w_tsc_eq with
+   | W (Tsc { subcommand = "build"; rest = [ "es2020"; "src/" ]; _ }) -> ()
+   | w -> Alcotest.failf "Tsc --target=es2020: expected rest=[es2020;src/], got %a" pp w);
+  (* Pip: --timeout=30 *)
+  let w_pip_eq =
+    of_simple
+      { (base "pip") with args = [ lit "install"; lit "--timeout=30"; lit "numpy" ] }
+  in
+  (match w_pip_eq with
+   | W (Pip { subcommand = "install"; packages = [ "30"; "numpy" ]; _ }) -> ()
+   | w -> Alcotest.failf "Pip --timeout=30: expected packages=[30;numpy], got %a" pp w);
+  (* Node: --max-old-space-size=4096 *)
+  let w_node_eq =
+    of_simple
+      { (base "node") with args = [ lit "--max-old-space-size=4096"; lit "server.js" ] }
+  in
+  (match w_node_eq with
+   | W (Node { script = "server.js"; args = [ "4096" ]; inline = None; _ }) -> ()
+   | w -> Alcotest.failf "Node --max-old-space-size=4096: expected script=server.js args=[4096], got %a" pp w);
+  (* Rsync: --exclude=.git *)
+  let w_rsync_eq =
+    of_simple
+      { (base "rsync") with args = [ lit "-av"; lit "--exclude=.git"; lit "src/"; lit "dest/" ] }
+  in
+  (match w_rsync_eq with
+   | W (Rsync { flags = [ "-av"; "--exclude"; ".git" ]; source = "src/"; dest = "dest/"; _ }) -> ()
+   | w -> Alcotest.failf "Rsync --exclude=.git: expected flags=[-av;--exclude;.git], got %a" pp w);
+  (* Python: -W=ignore *)
+  let w_python_eq =
+    of_simple
+      { (base "python") with args = [ lit "-W=ignore"; lit "script.py" ] }
+  in
+  (match w_python_eq with
+   | W (Python { script = "script.py"; args = [ "ignore" ]; inline = None; _ }) -> ()
+   | w -> Alcotest.failf "Python -W=ignore: expected script=script.py args=[ignore], got %a" pp w)
 ;;
 
 (* Batch 11: all_wrapped minimal-payload round-trip. Catches regressions
@@ -1845,6 +2386,57 @@ let test_bin_variant_dispatch () =
     cases
 ;;
 
+let test_is_eq_form_flag () =
+  let open Shell_ir_typed_types in
+  let flags = [ "--output"; "--timeout"; "-o" ] in
+  (* Positive: standard eq-form *)
+  Alcotest.(check bool) "--output=file" true (is_eq_form_flag "--output=file" flags);
+  Alcotest.(check bool) "--timeout=30" true (is_eq_form_flag "--timeout=30" flags);
+  Alcotest.(check bool) "-o=file" true (is_eq_form_flag "-o=file" flags);
+  (* Negative: no '=' *)
+  Alcotest.(check bool) "--output" false (is_eq_form_flag "--output" flags);
+  Alcotest.(check bool) "-o" false (is_eq_form_flag "-o" flags);
+  (* Negative: not in flags *)
+  Alcotest.(check bool) "--unknown=val" false (is_eq_form_flag "--unknown=val" flags);
+  (* Negative: too short *)
+  Alcotest.(check bool) "-=" false (is_eq_form_flag "-=" flags);
+  (* Negative: no leading dash *)
+  Alcotest.(check bool) "output=file" false (is_eq_form_flag "output=file" flags);
+  (* Edge: value with '=' inside *)
+  Alcotest.(check bool) "--output=a=b" true (is_eq_form_flag "--output=a=b" flags);
+  (* Edge: empty flags list *)
+  Alcotest.(check bool) "empty flags" false (is_eq_form_flag "--output=file" [])
+;;
+
+let test_eq_form_flag_value () =
+  let open Shell_ir_typed_types in
+  let flags = [ "--output"; "--timeout"; "-o" ] in
+  let check_val desc expected arg =
+    Alcotest.(check (option string)) desc expected (eq_form_flag_value arg flags)
+  in
+  (* Positive: extract value *)
+  check_val "--output=file" (Some "file") "--output=file";
+  check_val "--timeout=30" (Some "30") "--timeout=30";
+  check_val "-o=file" (Some "file") "-o=file";
+  check_val "--output=a=b" (Some "a=b") "--output=a=b";
+  check_val "--output=" (Some "") "--output=";
+  (* Negative: no '=' → None *)
+  check_val "--output" None "--output";
+  check_val "-o" None "-o";
+  (* Negative: not in flags *)
+  check_val "--unknown=val" None "--unknown=val";
+  (* Negative: too short *)
+  check_val "-=" None "-=";
+  (* Negative: no leading dash *)
+  check_val "output=file" None "output=file";
+  (* Edge: empty flags list *)
+  Alcotest.(check (option string))
+    "empty flags"
+    None
+    (eq_form_flag_value "--output=file" [])
+
+;;
+
 let test_constructor_names_in_declaration_order () =
   Alcotest.(check (list string))
     "generated names match declaration order"
@@ -1865,6 +2457,345 @@ let test_constructor_names_in_declaration_order () =
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names
+;;
+
+(* Batch 2 regression tests: boolean-as-value misclassification & missing value arms *)
+let test_batch2_regression_fixes () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Git_push: --signed is boolean → should NOT eat "origin" as value *)
+  let gp =
+    of_simple { (base "git") with args = [ lit "push"; lit "--signed"; lit "origin"; lit "main" ] }
+  in
+  (match gp with
+   | W (Git_push { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git push --signed origin main: expected remote=origin branch=main, got %a" pp w);
+  (* Git_pull: --recurse-submodules is boolean → should NOT eat "origin" as value *)
+  let gl =
+    of_simple { (base "git") with args = [ lit "pull"; lit "--recurse-submodules"; lit "origin"; lit "main" ] }
+  in
+  (match gl with
+   | W (Git_pull { remote = Some "origin"; branch = Some "main"; _ }) -> ()
+   | w -> Alcotest.failf "git pull --recurse-submodules origin main: expected remote=origin branch=main, got %a" pp w);
+  (* Git_log: --merges is boolean → should NOT eat "--oneline" as value *)
+  let gl2 =
+    of_simple { (base "git") with args = [ lit "log"; lit "--merges"; lit "--oneline" ] }
+  in
+  (match gl2 with
+   | W (Git_log { oneline = true; _ }) -> ()
+   | w -> Alcotest.failf "git log --merges --oneline: expected oneline=true, got %a" pp w);
+  (* Git_log: --no-merges is boolean → should NOT eat "-n5" as value *)
+  let gl3 =
+    of_simple { (base "git") with args = [ lit "log"; lit "--no-merges"; lit "-n5" ] }
+  in
+  (match gl3 with
+   | W (Git_log { max_count = Some 5; _ }) -> ()
+   | w -> Alcotest.failf "git log --no-merges -n5: expected max_count=5, got %a" pp w);
+  (* Docker: --oom-kill-disable is boolean → should NOT eat "--name" as value *)
+  let dk =
+    of_simple { (base "docker") with args = [ lit "run"; lit "--oom-kill-disable"; lit "--name"; lit "foo"; lit "img" ] }
+  in
+  (match dk with
+   | W (Docker { subcommand = "run"; rest; _ }) ->
+     if not (List.exists ((=) "foo") rest) then
+       Alcotest.failf "docker run --oom-kill-disable --name foo: 'foo' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "docker run --oom-kill-disable --name foo: expected Docker, got %a" pp w);
+  (* Ninja: -C /builddir → /builddir promoted to subcmd when none exists, "all" goes to rest *)
+  let nj =
+    of_simple { (base "ninja") with args = [ lit "-C"; lit "/builddir"; lit "all" ] }
+  in
+  (match nj with
+   | W (Ninja { subcommand = "/builddir"; rest = [ "all" ]; _ }) -> ()
+   | w -> Alcotest.failf "ninja -C /builddir all: expected sub=/builddir rest=[all], got %a" pp w);
+  (* Diff: -L label → label consumed, file1 file2 are positional *)
+  let df =
+    of_simple { (base "diff") with args = [ lit "-L"; lit "old"; lit "file1"; lit "file2" ] }
+  in
+  (match df with
+   | W (Diff { file1 = "file1"; file2 = "file2"; _ }) -> ()
+   | w -> Alcotest.failf "diff -L old file1 file2: expected file1=file1 file2=file2, got %a" pp w);
+  (* Diff: -U 3 → unified consumed, file1 file2 are positional *)
+  let df2 =
+    of_simple { (base "diff") with args = [ lit "-U"; lit "3"; lit "file1"; lit "file2" ] }
+  in
+  (match df2 with
+   | W (Diff { file1 = "file1"; file2 = "file2"; _ }) -> ()
+   | w -> Alcotest.failf "diff -U 3 file1 file2: expected file1=file1 file2=file2, got %a" pp w);
+  (* Diff: -W 120 → width consumed, file1 file2 are positional *)
+  let df3 =
+    of_simple { (base "diff") with args = [ lit "-W"; lit "120"; lit "file1"; lit "file2" ] }
+  in
+  (match df3 with
+   | W (Diff { file1 = "file1"; file2 = "file2"; _ }) -> ()
+   | w -> Alcotest.failf "diff -W 120 file1 file2: expected file1=file1 file2=file2, got %a" pp w)
+
+let test_batch3_regression_fixes () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Node: --permission is boolean → should NOT eat "script.js" as value *)
+  let n =
+    of_simple { (base "node") with args = [ lit "--permission"; lit "script.js" ] }
+  in
+  (match n with
+   | W (Node { script = "script.js"; _ }) -> ()
+   | w -> Alcotest.failf "node --permission script.js: expected script=script.js, got %a" pp w);
+  (* Opam: --json is boolean → should NOT eat "install" as value *)
+  let o =
+    of_simple { (base "opam") with args = [ lit "install"; lit "--json"; lit "lwt" ] }
+  in
+  (match o with
+   | W (Opam { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lwt") rest) then
+       Alcotest.failf "opam install --json lwt: 'lwt' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "opam install --json lwt: expected Opam, got %a" pp w);
+  (* Opam: --safe is boolean → should NOT eat "lwt" as value *)
+  let o2 =
+    of_simple { (base "opam") with args = [ lit "install"; lit "--safe"; lit "lwt" ] }
+  in
+  (match o2 with
+   | W (Opam { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lwt") rest) then
+       Alcotest.failf "opam install --safe lwt: 'lwt' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "opam install --safe lwt: expected Opam, got %a" pp w);
+  (* Yarn: --ignore-scripts is boolean → should NOT eat "add" as value *)
+  let y =
+    of_simple { (base "yarn") with args = [ lit "--ignore-scripts"; lit "add"; lit "lodash" ] }
+  in
+  (match y with
+   | W (Yarn { rest; _ }) ->
+     if not (List.exists ((=) "add") rest) then
+       Alcotest.failf "yarn --ignore-scripts add lodash: 'add' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "yarn --ignore-scripts add lodash: expected Yarn, got %a" pp w);
+  (* Yarn: --no-lockfile is boolean → should NOT eat "install" as value *)
+  let y2 =
+    of_simple { (base "yarn") with args = [ lit "--no-lockfile"; lit "install" ] }
+  in
+  (match y2 with
+   | W (Yarn { rest; _ }) ->
+     if not (List.exists ((=) "install") rest) then
+       Alcotest.failf "yarn --no-lockfile install: 'install' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "yarn --no-lockfile install: expected Yarn, got %a" pp w);
+  (* Npx: --shell is boolean → should NOT eat "jest" as value *)
+  let nx =
+    of_simple { (base "npx") with args = [ lit "--shell"; lit "jest" ] }
+  in
+  (match nx with
+   | W (Npx { rest; _ }) ->
+     if not (List.exists ((=) "jest") rest) then
+       Alcotest.failf "npx --shell jest: 'jest' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "npx --shell jest: expected Npx, got %a" pp w);
+  (* Ruff: --preview is boolean → should NOT eat "check" as value *)
+  let r =
+    of_simple { (base "ruff") with args = [ lit "--preview"; lit "check"; lit "." ] }
+  in
+  (match r with
+   | W (Ruff { subcommand = "check"; _ }) -> ()
+   | w -> Alcotest.failf "ruff --preview check .: expected subcmd=check, got %a" pp w);
+  (* Npm: --timing is boolean → should NOT eat "install" as value *)
+  let np =
+    of_simple { (base "npm") with args = [ lit "install"; lit "--timing"; lit "lodash" ] }
+  in
+  (match np with
+   | W (Npm { subcommand = "install"; rest; _ }) ->
+     if not (List.exists ((=) "lodash") rest) then
+       Alcotest.failf "npm install --timing lodash: 'lodash' should be in rest, got [%s]"
+         (String.concat "; " rest)
+   | w -> Alcotest.failf "npm install --timing lodash: expected Npm, got %a" pp w)
+;;
+
+let test_batch4_posix_end_of_options () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Sudo: -- command arg1 → target_argv = ["command"; "arg1"] *)
+  let s =
+    of_simple { (base "sudo") with args = [ lit "--"; lit "command"; lit "arg1" ] }
+  in
+  (match s with
+   | W (Sudo { target_argv }) ->
+     if target_argv <> [ "command"; "arg1" ] then
+       Alcotest.failf "sudo -- command arg1: expected [command; arg1], got [%s]"
+         (String.concat "; " target_argv)
+   | w -> Alcotest.failf "sudo -- command arg1: expected Sudo, got %a" pp w);
+  (* Echo: -- hello → args = ["hello"] *)
+  let e =
+    of_simple { (base "echo") with args = [ lit "--"; lit "hello" ] }
+  in
+  (match e with
+   | W (Echo { args = echo_args }) ->
+     if echo_args <> [ "hello" ] then
+       Alcotest.failf "echo -- hello: expected [hello], got [%s]"
+         (String.concat "; " echo_args)
+   | w -> Alcotest.failf "echo -- hello: expected Echo, got %a" pp w);
+  (* Which: -- command → names = ["command"] *)
+  let w =
+    of_simple { (base "which") with args = [ lit "--"; lit "command" ] }
+  in
+  (match w with
+   | W (Which { names }) ->
+     if names <> [ "command" ] then
+       Alcotest.failf "which -- command: expected [command], got [%s]"
+         (String.concat "; " names)
+   | w -> Alcotest.failf "which -- command: expected Which, got %a" pp w);
+  (* Printenv: -- VAR → name = Some "VAR" *)
+  let pe =
+    of_simple { (base "printenv") with args = [ lit "--"; lit "VAR" ] }
+  in
+  (match pe with
+   | W (Printenv { name = Some "VAR" }) -> ()
+   | w -> Alcotest.failf "printenv -- VAR: expected Printenv(Some VAR), got %a" pp w);
+  (* Printf: -- %s\n hello → format="%s\n", args=["hello"] *)
+  let pf =
+    of_simple { (base "printf") with args = [ lit "--"; lit "%s\\n"; lit "hello" ] }
+  in
+  (match pf with
+   | W (Printf { format; args = pf_args }) ->
+     if format <> "%s\\n" then
+       Alcotest.failf "printf -- %%s\\n hello: expected format=%%s\\n, got %s" format;
+     if pf_args <> [ "hello" ] then
+       Alcotest.failf "printf -- %%s\\n hello: expected args=[hello], got [%s]"
+         (String.concat "; " pf_args)
+   | w -> Alcotest.failf "printf -- %%s\\n hello: expected Printf, got %a" pp w);
+  (* Test: -- -f file → expression = ["-f"; "file"] *)
+  let t =
+    of_simple { (base "test") with args = [ lit "--"; lit "-f"; lit "file" ] }
+  in
+  (match t with
+   | W (Test { expression }) ->
+     if expression <> [ "-f"; "file" ] then
+       Alcotest.failf "test -- -f file: expected [-f; file], got [%s]"
+         (String.concat "; " expression)
+   | w -> Alcotest.failf "test -- -f file: expected Test, got %a" pp w)
+;;
+
+let test_long_form_boolean_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Du: --human-readable --summarize /tmp *)
+  let du =
+    of_simple { (base "du") with args = [ lit "--human-readable"; lit "--summarize"; lit "/tmp" ] }
+  in
+  (match du with
+   | W (Du { human_readable = true; summary = true; path = Some "/tmp"; _ }) -> ()
+   | w -> Alcotest.failf "Du --human-readable --summarize: expected h=true s=true, got %a" pp w);
+  (* Df: --human-readable / *)
+  let df =
+    of_simple { (base "df") with args = [ lit "--human-readable"; lit "/" ] }
+  in
+  (match df with
+   | W (Df { human_readable = true; path = Some "/"; _ }) -> ()
+   | w -> Alcotest.failf "Df --human-readable: expected h=true, got %a" pp w);
+  (* Sed: --in-place -E 's/foo/bar/g' input.txt *)
+  let sed =
+    of_simple { (base "sed") with args = [ lit "--in-place"; lit "-E"; lit "s/foo/bar/g"; lit "input.txt" ] }
+  in
+  (match sed with
+   | W (Sed { in_place = true; extended_regex = true; expression = "s/foo/bar/g"; file = "input.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --in-place: expected in_place=true, got %a" pp w);
+  (* Pytest: --verbose --exitfirst tests/ *)
+  let py =
+    of_simple { (base "pytest") with args = [ lit "--verbose"; lit "--exitfirst"; lit "tests/" ] }
+  in
+  (match py with
+   | W (Pytest { verbose = true; exitfirst = true; subcommand = "tests/"; _ }) -> ()
+   | w -> Alcotest.failf "Pytest --verbose --exitfirst: expected v=true x=true, got %a" pp w)
+;;
+
+let test_long_form_value_consuming_flags () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Sort: --field-separator : -k3 file.txt *)
+  let sort =
+    of_simple { (base "sort") with args = [ lit "--field-separator"; lit ":"; lit "-k3"; lit "file.txt" ] }
+  in
+  (match sort with
+   | W (Sort { key = Some 3; file = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sort --field-separator: expected key=3, got %a" pp w);
+  (* Grep: --regexp PATTERN file.txt *)
+  let grep =
+    of_simple { (base "grep") with args = [ lit "--regexp"; lit "foo"; lit "file.txt" ] }
+  in
+  (match grep with
+   | W (Grep { pattern = "foo"; path = Some "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Grep --regexp: expected pattern=foo, got %a" pp w);
+  (* Git_commit: --message "msg" *)
+  let gc =
+    of_simple { (base "git") with args = [ lit "commit"; lit "--message"; lit "hello" ] }
+  in
+  (match gc with
+   | W (Git_commit { message = "hello"; _ }) -> ()
+   | w -> Alcotest.failf "Git_commit --message: expected msg=hello, got %a" pp w);
+  (* Sed: --expression 's/foo/bar/' --file script.sed input.txt *)
+  let sed =
+    of_simple { (base "sed") with args = [ lit "--expression"; lit "s/foo/bar/"; lit "--file"; lit "script.sed"; lit "input.txt" ] }
+  in
+  (match sed with
+   | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Sed --expression --file: expected expr=s/foo/bar/, got %a" pp w);
+  (* Head: --lines 5 file.txt *)
+  let head =
+    of_simple { (base "head") with args = [ lit "--lines"; lit "5"; lit "file.txt" ] }
+  in
+  (match head with
+   | W (Head { lines = 5; path = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Head --lines 5: expected lines=5, got %a" pp w);
+  (* Tail: --lines 10 file.txt *)
+  let tail =
+    of_simple { (base "tail") with args = [ lit "--lines"; lit "10"; lit "file.txt" ] }
+  in
+  (match tail with
+   | W (Tail { lines = 10; path = "file.txt"; _ }) -> ()
+   | w -> Alcotest.failf "Tail --lines 10: expected lines=10, got %a" pp w)
 ;;
 
 let () =
@@ -1914,9 +2845,39 @@ let () =
             "Batch14 Opam/Npx/Yarn/Pnpm/Uv/Glab/Pytest/Pyright value flags"
             `Quick
             test_batch14_value_consuming_flags
+        ; Alcotest.test_case
+            "Batch15 Rustc/Gofmt/Ninja/Su/Mkfs value flags"
+            `Quick
+            test_batch15_value_consuming_flags
+        ; Alcotest.test_case
+            "Batch16 eq-form --flag=VALUE for subcommand+args"
+            `Quick
+            test_subcommand_args_eq_form_flags
+        ; Alcotest.test_case
+            "Batch 2 regression: boolean-as-value & missing value arms"
+            `Quick
+            test_batch2_regression_fixes
+        ; Alcotest.test_case
+            "Batch 3 regression: Node/Opam/Yarn/Npx/Ruff boolean-as-value"
+            `Quick
+            test_batch3_regression_fixes
+        ; Alcotest.test_case
+            "Batch 4: POSIX -- end-of-options for Sudo/Echo/Which/Printenv/Printf/Test"
+            `Quick
+            test_batch4_posix_end_of_options
+        ; Alcotest.test_case
+            "Long-form boolean flags (--human-readable, --summarize, --in-place, --verbose, --exitfirst)"
+            `Quick
+            test_long_form_boolean_flags
+        ; Alcotest.test_case
+            "Long-form value-consuming flags (--field-separator, --regexp, --message, --expression, --file, --lines)"
+            `Quick
+            test_long_form_value_consuming_flags
         ] )
     ; ( "spec_invariants"
-      , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count
+      , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag
+        ; Alcotest.test_case "eq_form_flag_value helper" `Quick test_eq_form_flag_value
+        ; Alcotest.test_case "constructor count baseline" `Quick test_constructor_count
         ; Alcotest.test_case
             "constructor names declaration-order"
             `Quick

@@ -548,3 +548,14 @@ and (_, _, _, _) command =
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command
+
+(** [is_eq_form_flag arg flags] returns [true] if [arg] is an eq-form
+    value flag (e.g., "--flag=VALUE") whose prefix before '=' is in [flags].
+    Handles both --flag=VALUE and -flag=VALUE forms. *)
+val is_eq_form_flag : string -> string list -> bool
+
+(** [eq_form_flag_value arg flags] returns [Some value] if [arg] is an
+    eq-form value flag whose prefix before '=' is in [flags], extracting
+    the portion after '='. Returns [None] if [arg] is not a matching
+    eq-form flag. Handles both --flag=VALUE and -flag=VALUE forms. *)
+val eq_form_flag_value : string -> string list -> string option

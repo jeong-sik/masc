@@ -38,3 +38,15 @@ val config_path : unit -> string option
 (** Path to the runtime config TOML, or [None] if unresolved. Re-homed from
     deleted [Runtime.config_path] (delegates to
     [Config_dir_resolver]). *)
+
+val default_max_context : unit -> int
+(** Context-window budget of the default runtime's model (RFC-0206
+    single-binding). Replaces the deleted [Cascade_runtime.resolve_*_max_context]
+    label scans. Falls back to [Runtime_constants.fallback_context_window]
+    before {!init_default} runs. *)
+
+val default_model_api_name : unit -> string
+(** API model name of the default runtime, sent to the runtime completion
+    endpoint (RFC-0206 single-binding). Replaces the deleted
+    [Cascade_runtime.default_local_model_label_and_id]. Falls back to ["auto"]
+    before {!init_default} runs. *)

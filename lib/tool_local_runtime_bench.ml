@@ -117,9 +117,8 @@ let finalize_runtime_breakdown json =
         ]
   | _ -> json
 
-let default_local_model_id () =
-  let _label, model_id = Cascade_runtime.default_local_model_label_and_id () in
-  model_id
+(* RFC-0206 single-binding: bench the default runtime's model directly. *)
+let default_local_model_id () = Runtime.default_model_api_name ()
 
 let is_oas_managed_runtime_pool = function
   | None -> true

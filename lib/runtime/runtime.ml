@@ -106,3 +106,26 @@ let config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"Runtime" ();
   Config_dir_resolver.cascade_path_opt ()
 ;;
+
+(* RFC-0206 single-binding: the deleted [Cascade_runtime.resolve_*_max_context]
+   scanned model labels across a cascade's candidates and folded the max. Under
+   single-binding every keeper uses the default runtime, so the context budget
+   is that runtime's [model.max_context]. Falls back to
+   [Runtime_constants.fallback_context_window] when the default is not yet
+   initialized (config-less test binaries). *)
+let default_max_context () : int =
+  match get_default_runtime () with
+  | Some rt -> rt.model.max_context
+  | None -> Runtime_constants.fallback_context_window
+;;
+
+(* RFC-0206 single-binding: the deleted
+   [Cascade_runtime.default_local_model_label_and_id] scanned configured/available
+   labels and returned the model-id substring. Under single-binding the model
+   name sent to the runtime endpoint is the default runtime's [model.api_name].
+   Falls back to ["auto"] before {!init_default} runs. *)
+let default_model_api_name () : string =
+  match get_default_runtime () with
+  | Some rt -> rt.model.api_name
+  | None -> "auto"
+;;

@@ -333,21 +333,18 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
       then dedupe_keep_order (model :: configured)
       else configured
 
-let resolve_max_context_resolution ~requested_override (labels : string list)
+let resolve_max_context_resolution ~requested_override (_labels : string list)
     : max_context_resolution =
   let min_keeper_context = Keeper_config.min_keeper_context_tokens in
   let clamp resolved =
     let local_clamped = resolved in
     max min_keeper_context local_clamped
   in
-  let primary_budget =
-    Cascade_runtime.resolve_primary_max_context labels
-    |> clamp
-  in
-  let cascade_budget =
-    Cascade_runtime.resolve_max_cascade_context labels
-    |> clamp
-  in
+  (* RFC-0206 single-binding: cascade label scans removed. Primary and cascade
+     budgets both resolve to the default runtime's model context window. *)
+  let default_budget = Runtime.default_max_context () |> clamp in
+  let primary_budget = default_budget in
+  let cascade_budget = default_budget in
   let turn_budget =
     match requested_override with
     | Some requested when requested > 0 ->

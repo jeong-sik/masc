@@ -309,16 +309,34 @@ let keeper_decisions_json
     ]
 ;;
 
-(* Per-keeper decision-log feed cache: the transformed (ts_unix, event) list
-   for a source file, keyed by (path, per_keeper_limit) so a different requested
-   limit gets its own entry and the cached output is byte-identical to the
-   uncached path. Gated on the decision-log file's (mtime, size) — keeper turn
-   spans are streamed, so the size component is what catches same-second
-   appends. The per-request [generated_at] and the global sort/take below stay
-   outside the cache, so freshness metadata remains live. *)
+(* Bounded most-recent window per keeper feed: caps the in-memory ring so an
+   unbounded multi-MB log projects to a fixed footprint. Kept >= any
+   per_keeper_limit so the global sort/take below still sees every candidate it
+   could surface; the cap only drops events too old to ever appear. *)
+let keeper_feed_max_events = 512
+let keeper_feed_tail_bytes = 1_000_000
+
+(* Keep the most-recent [keeper_feed_max_events]. The accumulator is built
+   most-recent-first by the incremental fold (each new line is prepended). *)
+let keeper_feed_retain (events : (float * Yojson.Safe.t) list) :
+    (float * Yojson.Safe.t) list =
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  take keeper_feed_max_events events
+
+(* Per-keeper decision-log feed projection. Decision logs are append-only and
+   streamed several times per second under active turns, growing to multiple MB.
+   Re-tailing and re-parsing them per request — even behind a whole-file cache,
+   which a streamed log invalidates on every append — is O(tail) per read.
+   [Jsonl_incremental_projection] folds only newly appended lines into a bounded
+   recent ring, so a warm read costs O(bytes appended since the last read). The
+   per-request [generated_at] and the global sort/take below stay live. *)
 let decisions_feed_cache :
-    (float * Yojson.Safe.t) list Jsonl_mtime_projection.t =
-  Jsonl_mtime_projection.create ()
+    (float * Yojson.Safe.t) list Jsonl_incremental_projection.t =
+  Jsonl_incremental_projection.create ()
 
 let keeper_decisions_log_json
     ~(config : Coord.config)
@@ -327,7 +345,6 @@ let keeper_decisions_log_json
     ()
   : Yojson.Safe.t =
   let limit = k2_feed_limit limit in
-  let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
@@ -335,19 +352,12 @@ let keeper_decisions_log_json
         if not (Fs_compat.file_exists path)
         then []
         else
-          Jsonl_mtime_projection.get decisions_feed_cache
-            ~key:(path ^ "#" ^ string_of_int per_keeper_limit)
-            ~sources:[ path ]
-            ~build:(fun () ->
-          let lines =
-            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_turn_spans"
-              path
-              ~max_bytes:500_000
-              ~max_lines:per_keeper_limit
-          in
-          List.filter_map
-            (fun line ->
-              try
+          Jsonl_incremental_projection.read decisions_feed_cache
+            ~key:path ~path ~empty:[]
+            ~initial_tail_bytes:keeper_feed_tail_bytes
+            ~add:(fun acc line ->
+              match
+                (try
                 let json = Yojson.Safe.from_string line in
                 let str key =
                   match Json_util.assoc_member_opt key json with
@@ -436,9 +446,11 @@ let keeper_decisions_log_json
                         , Json_util.float_opt_to_json duration_ms )
                       ; "evidence_refs", `List evidence_refs
                       ] )
+                with
+                | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
               with
-              | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
-            lines))
+              | Some event -> keeper_feed_retain (event :: acc)
+              | None -> acc))
       keepers
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_events in
@@ -461,8 +473,8 @@ let keeper_decisions_log_json
    transformed (ts_unix, entry) list per source file, keyed by
    (path, per_keeper_limit) so output is identical to the uncached path. *)
 let memory_feed_cache :
-    (float * Yojson.Safe.t) list Jsonl_mtime_projection.t =
-  Jsonl_mtime_projection.create ()
+    (float * Yojson.Safe.t) list Jsonl_incremental_projection.t =
+  Jsonl_incremental_projection.create ()
 
 let keeper_memory_log_json
     ~(config : Coord.config)
@@ -471,7 +483,6 @@ let keeper_memory_log_json
     ()
   : Yojson.Safe.t =
   let limit = k2_feed_limit limit in
-  let per_keeper_limit = limit * 2 in
   let all_entries =
     List.concat_map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
@@ -479,20 +490,12 @@ let keeper_memory_log_json
         if not (Fs_compat.file_exists path)
         then []
         else
-          Jsonl_mtime_projection.get memory_feed_cache
-            ~key:(path ^ "#" ^ string_of_int per_keeper_limit)
-            ~sources:[ path ]
-            ~build:(fun () ->
-          let lines =
-            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_memory_log"
-              path
-              ~max_bytes:500_000
-              ~max_lines:per_keeper_limit
-          in
-          List.filter_map
-            (fun line ->
+          Jsonl_incremental_projection.read memory_feed_cache
+            ~key:path ~path ~empty:[]
+            ~initial_tail_bytes:keeper_feed_tail_bytes
+            ~add:(fun acc line ->
               match Keeper_memory.parse_memory_bank_row line with
-              | None -> None
+              | None -> acc
               | Some (row : Keeper_memory.keeper_memory_row_raw) ->
                 let kind = memory_kind_for_log row.kind in
                 let ts = k2_iso8601_of_unix row.ts_unix in
@@ -503,17 +506,17 @@ let keeper_memory_log_json
                     ~ts_unix:row.ts_unix
                     ~raw:line
                 in
-                Some
-                  ( row.ts_unix
-                  , `Assoc
-                      [ "id", `String id
-                      ; "ts", `String ts
-                      ; "ts_unix", `Float row.ts_unix
-                      ; "keeper", `String m.name
-                      ; "kind", `String kind
-                      ; "summary", `String row.text
-                      ] ))
-            lines))
+                keeper_feed_retain
+                  (( row.ts_unix
+                   , `Assoc
+                       [ "id", `String id
+                       ; "ts", `String ts
+                       ; "ts_unix", `Float row.ts_unix
+                       ; "keeper", `String m.name
+                       ; "kind", `String kind
+                       ; "summary", `String row.text
+                       ] )
+                   :: acc)))
       keepers
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_entries in

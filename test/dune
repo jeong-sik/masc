@@ -31,6 +31,7 @@
  (names
   test_board_activity_cache
   test_jsonl_mtime_projection
+  test_jsonl_incremental_projection
   test_attribution
   test_attribution_tagged
   test_dashboard_attribution
@@ -351,6 +352,7 @@
  (modules
   test_board_activity_cache
   test_jsonl_mtime_projection
+  test_jsonl_incremental_projection
   test_attribution
   test_attribution_tagged
   test_dashboard_attribution

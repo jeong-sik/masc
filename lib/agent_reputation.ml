@@ -162,24 +162,9 @@ let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
    and warm refresh loops reuse the parse. mtime gating (rather than a
    file-watch daemon) keeps the projection correct under external multi-agent
    appends without adding load to fseventsd. *)
-type board_activity_counts = {
-  dir : string;
-  posts_sig : float * int;
-  comments_sig : float * int;
-  by_author : (string, int * int) Hashtbl.t; (* author -> (posts, comments) *)
-}
-
-let board_activity_cache : board_activity_counts option Atomic.t =
-  Atomic.make None
-
-(* Cache-invalidation signature for a source file: (mtime, size). Size catches
-   same-second appends that a coarse-resolution mtime clock would miss (board
-   JSONL files are append-only, so size grows monotonically on every write);
-   mtime catches rewrites or truncations that leave the size unchanged. A
-   missing file maps to a distinct sentinel so its appearance also invalidates. *)
-let file_sig path : float * int =
-  ( (match Fs_compat.file_mtime path with Some m -> m | None -> 0.0),
-    (match Fs_compat.file_size path with Some s -> s | None -> -1) )
+let board_activity_cache :
+    (string, int * int) Hashtbl.t Jsonl_mtime_projection.t =
+  Jsonl_mtime_projection.create ()
 
 let build_board_activity_counts ~posts_path ~comments_path :
     (string, int * int) Hashtbl.t =
@@ -198,26 +183,18 @@ let build_board_activity_counts ~posts_path ~comments_path :
   tally (fun (p, c) -> (p, c + 1)) (load_jsonl_safe comments_path);
   by_author
 
-(* Return the cached author -> (posts, comments) projection, rebuilding it when
-   the board directory or either source file's mtime changes. The table is
-   published via [Atomic] and never mutated after publication, so a benign race
-   between two renders only repeats idempotent work. *)
+(* Return the author -> (posts, comments) projection, rebuilding only when a
+   source file's (mtime, size) signature changes. Keyed on the board directory;
+   the shared [Jsonl_mtime_projection] performs the stat-gated reuse and is the
+   appropriate tool here because the board JSONL files change rarely relative to
+   render volume (unlike the streamed keeper feeds, which use the incremental
+   projection). *)
 let board_activity_table board_dir : (string, int * int) Hashtbl.t =
   let posts_path = Filename.concat board_dir "board_posts.jsonl" in
   let comments_path = Filename.concat board_dir "board_comments.jsonl" in
-  let posts_sig = file_sig posts_path in
-  let comments_sig = file_sig comments_path in
-  match Atomic.get board_activity_cache with
-  | Some c
-    when String.equal c.dir board_dir
-         && c.posts_sig = posts_sig
-         && c.comments_sig = comments_sig ->
-      c.by_author
-  | _ ->
-      let by_author = build_board_activity_counts ~posts_path ~comments_path in
-      Atomic.set board_activity_cache
-        (Some { dir = board_dir; posts_sig; comments_sig; by_author });
-      by_author
+  Jsonl_mtime_projection.get board_activity_cache ~key:board_dir
+    ~sources:[ posts_path; comments_path ]
+    ~build:(fun () -> build_board_activity_counts ~posts_path ~comments_path)
 
 (** Count board posts and comments authored by an agent under [board_dir].
 

@@ -24,7 +24,7 @@ let make_meta
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Custom []
+    | None -> []
   in
   let json = `Assoc [
     ("name", `String name);

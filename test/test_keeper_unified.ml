@@ -385,7 +385,7 @@ let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
 let minimal_meta : Masc_mcp.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
 let minimal_policy_meta =
-  { minimal_meta with tool_access = Custom [] }
+  { minimal_meta with tool_access = [] }
 ;;
 
 let room_signal_meta = { minimal_meta with room_signal_prompt_enabled = true }
@@ -3205,10 +3205,10 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
   Masc_mcp.Agent_tool_dispatch_runtime.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let module Guidance = Masc_mcp.Keeper_tool_guidance in
   let social_meta =
-    { minimal_meta with tool_access = Custom [] }
+    { minimal_meta with tool_access = [] }
   in
   let coding_meta =
-    { minimal_meta with tool_access = Custom [] }
+    { minimal_meta with tool_access = [] }
   in
   let social_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names social_meta in
   let coding_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names coding_meta in
@@ -7053,7 +7053,7 @@ let test_prompt_includes_board_activity_section () =
   let board_meta =
     { minimal_meta with
       tool_access =
-        Custom []
+        []
     }
   in
   let sys, user =

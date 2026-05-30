@@ -23,7 +23,7 @@ let make_goal_scoped_meta goal_ids =
 ;;
 
 let make_meta_with_tools tools =
-  { (make_test_meta ()) with tool_access = Keeper_meta_tool_access.Custom tools }
+  { (make_test_meta ()) with tool_access = tools }
 ;;
 
 let make_ctx_work () = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000

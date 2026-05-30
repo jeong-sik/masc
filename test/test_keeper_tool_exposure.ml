@@ -22,7 +22,7 @@ let make_meta
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Custom []
+    | None -> []
   in
   let json =
     `Assoc
@@ -152,7 +152,7 @@ let test_voice_policy_disabled_hides_voice_tools () =
 ;;
 
 let test_custom_empty_blocks_all_tools () =
-  let meta = make_meta ~tool_access:(Keeper_meta_tool_access.Custom []) () in
+  let meta = make_meta ~tool_access:([]) () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check int "custom empty blocks every tool" 0 (List.length tools)
 ;;
@@ -162,7 +162,7 @@ let test_custom_unknown_tool_names_are_dropped () =
   let meta =
     make_meta
       ~tool_access:
-        (Keeper_meta_tool_access.Custom [ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
+        ([ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
       ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -480,7 +480,7 @@ let test_research_plus_also_allow_combined () =
   let meta =
     make_meta
       ~tool_access:
-        (Keeper_meta_tool_access.Custom [])
+        ([])
       ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -1504,7 +1504,7 @@ let () =
             in
             let outer = `Assoc [ "tool_access", json ] in
             match Keeper_meta_tool_access.tool_access_of_meta_json outer with
-            | Ok (Custom tools) ->
+            | Ok tools ->
               check bool "has masc_status" true (List.mem "masc_status" tools);
               check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
             | Error msg -> fail ("unexpected error: " ^ msg))

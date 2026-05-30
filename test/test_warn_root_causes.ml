@@ -85,9 +85,9 @@ let write_only_tools = [ "Edit" ]
 let shell_bridge_tools = [ "Execute" ]
 
 let privileged_presets =
-  [ Keeper_meta_tool_access.Custom []; Keeper_meta_tool_access.Custom []; Keeper_meta_tool_access.Custom [] ]
+  [ []; []; [] ]
 
-let unprivileged_presets = [ Keeper_meta_tool_access.Custom [] ]
+let unprivileged_presets = [ [] ]
 
 let test_privileged_preset_write_gates () = ()
 
@@ -95,7 +95,7 @@ let test_core_tools_filtered_by_research_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-research" ()) with
-      tool_access = Custom [];
+      tool_access = [];
       tool_denylist = [] }
   in
   (* Precondition: direct write tools ARE in unfiltered core *)
@@ -120,7 +120,7 @@ let test_core_tools_filtered_by_social_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-social" ()) with
-      tool_access = Custom [];
+      tool_access = [];
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in
@@ -131,7 +131,7 @@ let test_core_tools_include_write_for_delivery_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-delivery" ()) with
-      tool_access = Custom [];
+      tool_access = [];
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in

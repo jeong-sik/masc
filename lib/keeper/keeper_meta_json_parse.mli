@@ -32,7 +32,7 @@ type parsed_keeper_policy =
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
-  ; pp_tool_access : tool_access
+  ; pp_tool_access : string list
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
   ; pp_room_signal_prompt_enabled : bool

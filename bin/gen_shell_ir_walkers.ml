@@ -5080,6 +5080,334 @@ parse None false false false args|}
   ; subcommand_args_ctor ~name:"Dd" ~risk:"`Privileged" ~sandbox:"`Host" ()
   ; subcommand_args_ctor ~name:"Mkfs" ~risk:"`Privileged" ~sandbox:"`Host"
       ~value_flags:[ "-t"; "--type"; "-L"; "--label"; "-U"; "-b"; "-i"; "-I"; "-N"; "-m"; "-O" ] ()
+  ; { name = "Cp"
+    ; anon_pattern =
+        "Cp { source; dest; recursive; force; preserve }"
+    ; bind_pattern =
+        "Cp { source; dest; recursive; force; preserve }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if recursive then [ "-r" ] else [])
+        @ (if force then [ "-f" ] else [])
+        @ (if preserve then [ "-p" ] else [])
+      in
+      let all_args = flag_args @ [ source; dest ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Cp
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Cp"
+    ; parse_body =
+        Some
+          {|
+let rec parse flags positional dd = function
+  | [] ->
+    (match positional with
+     | [ src; dst ] ->
+       let recursive = List.mem "-r" flags || List.mem "-R" flags in
+       let force = List.mem "-f" flags in
+       let preserve = List.mem "-p" flags in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cp { source = src; dest = dst; recursive; force; preserve }))
+     | _ -> None)
+  | "--" :: rest -> parse flags positional true rest
+  | arg :: rest when not dd && (arg = "-r" || arg = "-R" || arg = "-f" || arg = "-p" || arg = "-rf" || arg = "-fp" || arg = "-pf" || arg = "-pr" || arg = "-rp" || arg = "-rfp" || arg = "-rpf" || arg = "-frp" || arg = "-fpr" || arg = "-prf" || arg = "-pfr") ->
+    let rec extract acc i =
+      if i >= String.length arg then acc
+      else extract (("-" ^ String.make 1 arg.[i]) :: acc) (i + 1)
+    in
+    let new_flags = extract [] 1 in
+    parse (new_flags @ flags) positional dd rest
+  | arg :: rest when not dd && arg = "--no-preserve=all" ->
+    parse flags positional dd rest
+  | arg :: rest when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] <> '-' ->
+    parse flags positional dd rest
+  | arg :: rest ->
+    parse flags (positional @ [ arg ]) dd rest
+in
+parse [] [] false args|}
+    ; no_expand_combined = true
+    }
+  ; { name = "Mv"
+    ; anon_pattern = "Mv { source; dest; force; no_clobber }"
+    ; bind_pattern = "Mv { source; dest; force; no_clobber }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if force then [ "-f" ] else [])
+        @ (if no_clobber then [ "-n" ] else [])
+      in
+      let all_args = flag_args @ [ source; dest ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Mv
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Mv"
+    ; parse_body =
+        Some
+          {|
+let rec parse flags positional dd = function
+  | [] ->
+    (match positional with
+     | [ src; dst ] ->
+       let force = List.mem "-f" flags in
+       let no_clobber = List.mem "-n" flags in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mv { source = src; dest = dst; force; no_clobber }))
+     | _ -> None)
+  | "--" :: rest -> parse flags positional true rest
+  | arg :: rest when not dd && (arg = "-f" || arg = "-n" || arg = "-fn" || arg = "-nf" || arg = "-i" || arg = "-fi" || arg = "-if" || arg = "-ni" || arg = "-in") ->
+    let rec extract acc i =
+      if i >= String.length arg then acc
+      else extract (("-" ^ String.make 1 arg.[i]) :: acc) (i + 1)
+    in
+    let new_flags = extract [] 1 in
+    parse (new_flags @ flags) positional dd rest
+  | arg :: rest when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] <> '-' ->
+    parse flags positional dd rest
+  | arg :: rest ->
+    parse flags (positional @ [ arg ]) dd rest
+in
+parse [] [] false args|}
+    ; no_expand_combined = true
+    }
+  ; { name = "Ln"
+    ; anon_pattern = "Ln { target; link_name; symbolic; force }"
+    ; bind_pattern = "Ln { target; link_name; symbolic; force }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if symbolic then [ "-s" ] else [])
+        @ (if force then [ "-f" ] else [])
+      in
+      let all_args = flag_args @ [ target; link_name ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ln
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Ln"
+    ; parse_body =
+        Some
+          {|
+let rec parse flags positional dd = function
+  | [] ->
+    (match positional with
+     | [ tgt; link ] ->
+       let symbolic = List.mem "-s" flags in
+       let force = List.mem "-f" flags in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ln { target = tgt; link_name = link; symbolic; force }))
+     | _ -> None)
+  | "--" :: rest -> parse flags positional true rest
+  | arg :: rest when not dd && (arg = "-s" || arg = "-f" || arg = "-sf" || arg = "-fs" || arg = "-n" || arg = "-sn" || arg = "-ns") ->
+    let rec extract acc i =
+      if i >= String.length arg then acc
+      else extract (("-" ^ String.make 1 arg.[i]) :: acc) (i + 1)
+    in
+    let new_flags = extract [] 1 in
+    parse (new_flags @ flags) positional dd rest
+  | arg :: rest when not dd && arg = "--symbolic" ->
+    parse ("-s" :: flags) positional dd rest
+  | arg :: rest when not dd && arg = "--force" ->
+    parse ("-f" :: flags) positional dd rest
+  | arg :: rest when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] <> '-' ->
+    parse flags positional dd rest
+  | arg :: rest ->
+    parse flags (positional @ [ arg ]) dd rest
+in
+parse [] [] false args|}
+    ; no_expand_combined = true
+    }
+  ; { name = "Touch"
+    ; anon_pattern = "Touch { files; no_create; time }"
+    ; bind_pattern = "Touch { files; no_create; time }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if no_create then [ "-c" ] else [])
+        @ (match time with
+           | Some `Access -> [ "-a" ]
+           | Some `Modify -> [ "-m" ]
+           | None -> [])
+      in
+      let all_args = flag_args @ files in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Touch
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Touch"
+    ; parse_body =
+        Some
+          {|
+let rec parse flags positional dd = function
+  | [] ->
+    let no_create = List.mem "-c" flags in
+    let time =
+      if List.mem "-a" flags then Some `Access
+      else if List.mem "-m" flags then Some `Modify
+      else None
+    in
+    (match positional with
+     | _ :: _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Touch { files = positional; no_create; time }))
+     | [] -> None)
+  | "--" :: rest -> parse flags positional true rest
+  | arg :: rest when not dd && (arg = "-c" || arg = "-a" || arg = "-m" || arg = "-r" || arg = "-t") ->
+    parse (arg :: flags) positional dd rest
+  | arg :: _val :: rest when not dd && (arg = "-r" || arg = "-t") ->
+    parse (arg :: flags) positional dd rest
+  | arg :: rest when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] <> '-' ->
+    parse flags positional dd rest
+  | arg :: rest ->
+    parse flags (positional @ [ arg ]) dd rest
+in
+parse [] [] false args|}
+    ; no_expand_combined = true
+    }
+  ; { name = "Tee"
+    ; anon_pattern = "Tee { files; append }"
+    ; bind_pattern = "Tee { files; append }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args = if append then [ "-a" ] else [] in
+      let all_args = flag_args @ files in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Tee
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Tee"
+    ; parse_body =
+        Some
+          {|
+let rec parse append positional dd = function
+  | [] ->
+    (match positional with
+     | _ :: _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tee { files = positional; append }))
+     | [] -> None)
+  | "--" :: rest -> parse append positional true rest
+  | arg :: rest when not dd && arg = "-a" ->
+    parse true positional dd rest
+  | arg :: rest when not dd && String.length arg > 2 && arg.[0] = '-' && arg.[1] <> '-' ->
+    parse append positional dd rest
+  | arg :: rest ->
+    parse append (positional @ [ arg ]) dd rest
+in
+parse false [] false args|}
+    ; no_expand_combined = true
+    }
+  ; { name = "Awk"
+    ; anon_pattern = "Awk { program; files }"
+    ; bind_pattern = "Awk { program; files }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = program :: files in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Awk
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Awk"
+    ; parse_body =
+        Some
+          {|
+let rec parse flags program files dd = function
+  | [] ->
+    (match program with
+     | Some prog ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Awk { program = prog; files = List.rev files }))
+     | None -> None)
+  | "--" :: rest -> parse flags program files true rest
+  | arg :: _val :: rest when not dd && (arg = "-F" || arg = "-v" || arg = "-f" || arg = "-e") ->
+    parse (arg :: _val :: flags) program files dd rest
+  | arg :: rest when not dd && arg = "--re-interval" ->
+    parse (arg :: flags) program files dd rest
+  | arg :: rest when not dd && String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-' ->
+    parse (arg :: flags) program files dd rest
+  | arg :: rest ->
+    (match program with
+     | None -> parse flags (Some arg) files dd rest
+     | Some _ -> parse flags program (arg :: files) dd rest)
+in
+parse [] None [] false args|}
+    ; no_expand_combined = true
+    }
+  ; { name = "Xargs"
+    ; anon_pattern = "Xargs { command; args; null_terminated; max_args }"
+    ; bind_pattern = "Xargs { command; args; null_terminated; max_args }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if null_terminated then [ "-0" ] else [])
+        @ (match max_args with Some n -> [ "-n"; string_of_int n ] | None -> [])
+      in
+      let all_args = flag_args @ [ command ] @ args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Xargs
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Xargs"
+    ; parse_body =
+        Some
+          {|
+let rec parse flags positional dd = function
+  | [] ->
+    (match positional with
+     | cmd :: rest ->
+       let null_terminated = List.mem "-0" flags in
+       let max_args =
+         let rec find_n = function
+           | "-n" :: n :: _ -> (try Some (int_of_string n) with _ -> None)
+           | _ :: tl -> find_n tl
+           | [] -> None
+         in
+         find_n flags
+       in
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Xargs { command = cmd; args = rest; null_terminated; max_args }))
+     | [] -> None)
+  | "--" :: rest -> parse flags positional true rest
+  | arg :: rest when not dd && arg = "-0" ->
+    parse (arg :: flags) positional dd rest
+  | arg :: _n :: rest when not dd && arg = "-n" ->
+    parse (arg :: _n :: flags) positional dd rest
+  | arg :: rest ->
+    parse flags (positional @ [ arg ]) dd rest
+in
+parse [] [] false args|}
+    ; no_expand_combined = true
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"
@@ -5313,6 +5641,7 @@ let emit_of_simple buf spec =
     ; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
     ; "Curl"; "Wget"; "Sudo"; "Su"; "Dd"; "Mkfs"
     ; "Find"
+    ; "Cp"; "Mv"; "Ln"; "Touch"; "Tee"; "Awk"; "Xargs"
     ]
   in
   List.iter

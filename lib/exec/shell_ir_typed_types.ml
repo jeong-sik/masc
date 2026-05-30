@@ -568,6 +568,51 @@ and (_, _, _, _) command =
       ; args : string list
       }
       -> (unit, string, [ `Privileged ], [ `Host ]) command
+  | Cp :
+      { source : string
+      ; dest : string
+      ; recursive : bool
+      ; force : bool
+      ; preserve : bool
+      }
+      -> (unit, unit, [ `Safe ], [ `Host ]) command
+  | Mv :
+      { source : string
+      ; dest : string
+      ; force : bool
+      ; no_clobber : bool
+      }
+      -> (unit, unit, [ `Safe ], [ `Host ]) command
+  | Ln :
+      { target : string
+      ; link_name : string
+      ; symbolic : bool
+      ; force : bool
+      }
+      -> (unit, unit, [ `Safe ], [ `Host ]) command
+  | Touch :
+      { files : string list
+      ; no_create : bool
+      ; time : [ `Access | `Modify ] option
+      }
+      -> (unit, unit, [ `Safe ], [ `Host ]) command
+  | Tee :
+      { files : string list
+      ; append : bool
+      }
+      -> (unit, unit, [ `Safe ], [ `Host ]) command
+  | Awk :
+      { program : string
+      ; files : string list
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Xargs :
+      { command : string
+      ; args : string list
+      ; null_terminated : bool
+      ; max_args : int option
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

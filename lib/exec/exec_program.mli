@@ -72,6 +72,13 @@ type known =
   | Uname
   | Ps
   | Tty
+  | Cp
+  | Mv
+  | Ln
+  | Touch
+  | Tee
+  | Awk
+  | Xargs
   | Git
   | Docker
   | Curl

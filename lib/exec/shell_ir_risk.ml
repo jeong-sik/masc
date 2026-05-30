@@ -543,6 +543,14 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
      the typed model captures the method + graphql body. *)
   | W (Gh _) -> R0_Read
   | W (Docker _) -> R0_Read
+  (* File operations — cp/mv/ln/touch are reversible or low-risk mutations *)
+  | W (Cp _) -> R1_Reversible_mutation
+  | W (Mv _) -> R1_Reversible_mutation
+  | W (Ln _) -> R1_Reversible_mutation
+  | W (Touch _) -> R1_Reversible_mutation
+  | W (Tee _) -> R1_Reversible_mutation
+  | W (Awk _) -> R0_Read
+  | W (Xargs _) -> R2_Irreversible
   (* escape hatch (env/redirect/$VAR/unknown bin): no typed shape to
      read; [classify]'s word-list floor classifies it. *)
   | W (Generic _) -> R0_Read

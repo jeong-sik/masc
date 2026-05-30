@@ -546,5 +546,41 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Dd, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Mkfs { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Mkfs, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Cp { source; dest; recursive; force; preserve }) ->
+    let flag_args =
+      (if recursive then [ "-r" ] else [])
+      @ (if force then [ "-f" ] else [])
+      @ (if preserve then [ "-p" ] else [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Cp, List.map arg (flag_args @ [ source; dest ])) ]
+  | Shell_ir_typed.W (Mv { source; dest; force; no_clobber }) ->
+    let flag_args =
+      (if force then [ "-f" ] else [])
+      @ (if no_clobber then [ "-n" ] else [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Mv, List.map arg (flag_args @ [ source; dest ])) ]
+  | Shell_ir_typed.W (Ln { target; link_name; symbolic; force }) ->
+    let flag_args =
+      (if symbolic then [ "-s" ] else [])
+      @ (if force then [ "-f" ] else [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ln, List.map arg (flag_args @ [ target; link_name ])) ]
+  | Shell_ir_typed.W (Touch { files; no_create; time }) ->
+    let flag_args =
+      (if no_create then [ "-c" ] else [])
+      @ (match time with Some `Access -> [ "-a" ] | Some `Modify -> [ "-m" ] | None -> [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Touch, List.map arg (flag_args @ files)) ]
+  | Shell_ir_typed.W (Tee { files; append }) ->
+    let flag_args = if append then [ "-a" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tee, List.map arg (flag_args @ files)) ]
+  | Shell_ir_typed.W (Awk { program; files }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Awk, List.map arg ("-e" :: program :: files)) ]
+  | Shell_ir_typed.W (Xargs { command; args; null_terminated; max_args }) ->
+    let flag_args =
+      (if null_terminated then [ "-0" ] else [])
+      @ (match max_args with Some n -> [ "-n"; string_of_int n ] | None -> [])
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Xargs, List.map arg (flag_args @ [ command ] @ args)) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

@@ -143,6 +143,13 @@ let constructor_label = function
      | Shell_ir_typed.Su _ -> "Su"
      | Shell_ir_typed.Dd _ -> "Dd"
      | Shell_ir_typed.Mkfs _ -> "Mkfs"
+     | Shell_ir_typed.Cp _ -> "Cp"
+     | Shell_ir_typed.Mv _ -> "Mv"
+     | Shell_ir_typed.Ln _ -> "Ln"
+     | Shell_ir_typed.Touch _ -> "Touch"
+     | Shell_ir_typed.Tee _ -> "Tee"
+     | Shell_ir_typed.Awk _ -> "Awk"
+     | Shell_ir_typed.Xargs _ -> "Xargs"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

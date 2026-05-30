@@ -1275,6 +1275,14 @@ let rec parse message amend = function
      | None -> parse (Some m) amend rest
      | Some _ -> None)
   | "--" :: rest -> parse message amend rest
+  (* --message=MSG eq-form *)
+  | arg :: rest
+    when String.length arg > 10
+         && String.sub arg 0 10 = "--message=" ->
+    let m = String.sub arg 10 (String.length arg - 10) in
+    (match message with
+     | None -> parse (Some m) amend rest
+     | Some _ -> None)
   | arg :: rest ->
     if String.length arg > 0 && arg.[0] = '-'
     then parse message amend rest
@@ -1616,6 +1624,12 @@ let rec parse reverse numeric unique key file = function
       let n' = numeric || String.contains arg 'n' in
       let u' = unique || String.contains arg 'u' in
       parse r' n' u' key file rest)
+    else if String.length arg > 2 && arg.[0] = '-' && arg.[1] = '-'
+    then (
+      (* eq-form: --field-separator=SEP *)
+      match Shell_ir_typed_types.eq_form_flag_value arg [ "--field-separator" ] with
+      | Some _sep -> parse reverse numeric unique key file rest
+      | None -> parse reverse numeric unique key file rest)
     else if String.length arg > 0 && arg.[0] = '-'
     then parse reverse numeric unique key file rest
     else (

@@ -2854,7 +2854,6 @@ let test_eq_form_value_consuming_flags () =
    | W (Sed { expression = "script.sed"; file = "input.txt"; _ }) -> ()
    | w -> Alcotest.failf "Sed --expression/--file eq-form: expected expression=script.sed, file=input.txt, got %a" pp w)
 ;;
-
 let () =
   Alcotest.run
     "shell_ir_walkers_gen"

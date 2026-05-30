@@ -3297,6 +3297,10 @@ let () =
             "Batch17 generic subcommand_args_ctor edge cases (Cmake/Java/Javac/Dd/Osascript/Ffplay/Mpg123/Open/Dune/Play/Rec/Ocamlfind)"
             `Quick
             test_generic_subcommand_args_edge_cases
+        ; Alcotest.test_case
+            "Batch18 Curl edge cases (method/headers/body/eq-form/combined flags/--)"
+            `Quick
+            test_curl_edge_cases
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "is_eq_form_flag helper" `Quick test_is_eq_form_flag

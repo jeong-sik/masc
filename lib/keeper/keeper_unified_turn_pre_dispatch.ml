@@ -9,7 +9,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_turn_profile
 
 let resolve_unified_max_tokens_fallback
       ~(meta_name : string)
@@ -28,7 +28,7 @@ let build_cascade_execution
       ~(meta : keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(cascade_name : Keeper_name.t)
-  : ( Keeper_turn_cascade_budget.cascade_execution
+  : ( Keeper_turn_budget.cascade_execution
     , Agent_sdk.Error.sdk_error )
     result
   =
@@ -49,17 +49,17 @@ let build_cascade_execution
            model_labels
        in
        let max_context =
-         Keeper_turn_cascade_budget.resolved_max_context_for_turn
+         Keeper_turn_budget.resolved_max_context_for_turn
            ~meta
            model_labels
        in
        let temperature =
-         Cascade_inference.resolve_temperature
+         Keeper_inference.resolve_temperature
            ~cascade_name
            ~fallback:Keeper_config.keeper_unified_temperature
        in
        let raw_max_tokens =
-         Cascade_inference.resolve_max_tokens
+         Keeper_inference.resolve_max_tokens
            ~cascade_name
            ~fallback:
              (resolve_unified_max_tokens_fallback
@@ -71,7 +71,7 @@ let build_cascade_execution
            cascade_name
        in
        (match
-          Cascade_inference.validate_max_tokens_within_ceiling
+          Keeper_inference.validate_max_tokens_within_ceiling
             ~cascade_name
             ~provider_ceiling:max_output_ceiling
             raw_max_tokens
@@ -81,7 +81,7 @@ let build_cascade_execution
             (Cascade_error_classify.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->
           Ok
-            { Keeper_turn_cascade_budget.cascade_name
+            { Keeper_turn_budget.cascade_name
             ; max_context_resolution
             ; max_context
             ; temperature

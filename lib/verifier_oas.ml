@@ -93,7 +93,7 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
           (sprintf "Invalid verdict format: %s" msg)
     in
     let cascade_name =
-      Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Verifier
+      Keeper_turn_profile.cascade_name_for_use Keeper_turn_profile.Verifier
     in
     match
       Keeper_turn_driver_wrappers.run_named_with_masc_tools

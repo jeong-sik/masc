@@ -1,7 +1,7 @@
 (* Tests for KeeperCascadeRouting TLA+ spec mirror. *)
 
 let test_provider_outcome_ppx_tla () =
-  let open Masc_mcp.Cascade_fsm in
+  let open Masc_mcp.Keeper_fsm in
   Alcotest.(check (list string))
     "all_symbols provider_outcome"
     ["call_ok"; "call_err"; "accept_rejected"]
@@ -12,36 +12,36 @@ let test_provider_outcome_ppx_tla () =
 
 let test_decide_call_ok () =
   let d =
-    Masc_mcp.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last:false
+    Masc_mcp.Keeper_fsm.decide ~accept_on_exhaustion:false ~is_last:false
       (Call_ok (Obj.magic ()))
   in
   match d with
-  | Masc_mcp.Cascade_fsm.Accept _ -> ()
+  | Masc_mcp.Keeper_fsm.Accept _ -> ()
   | _ -> Alcotest.fail "Call_ok must map to Accept"
 ;;
 
 let test_decide_accept_rejected () =
   let dummy = Obj.magic () in
   let d1 =
-    Masc_mcp.Cascade_fsm.decide ~accept_on_exhaustion:true ~is_last:true
+    Masc_mcp.Keeper_fsm.decide ~accept_on_exhaustion:true ~is_last:true
       (Accept_rejected { response = dummy; reason = "t" })
   in
   (match d1 with
-  | Masc_mcp.Cascade_fsm.Accept_on_exhaustion _ -> ()
+  | Masc_mcp.Keeper_fsm.Accept_on_exhaustion _ -> ()
   | _ -> Alcotest.fail "expected Accept_on_exhaustion");
   let d2 =
-    Masc_mcp.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last:true
+    Masc_mcp.Keeper_fsm.decide ~accept_on_exhaustion:false ~is_last:true
       (Accept_rejected { response = dummy; reason = "t" })
   in
   (match d2 with
-  | Masc_mcp.Cascade_fsm.Exhausted _ -> ()
+  | Masc_mcp.Keeper_fsm.Exhausted _ -> ()
   | _ -> Alcotest.fail "expected Exhausted");
   let d3 =
-    Masc_mcp.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last:false
+    Masc_mcp.Keeper_fsm.decide ~accept_on_exhaustion:false ~is_last:false
       (Accept_rejected { response = dummy; reason = "t" })
   in
   match d3 with
-  | Masc_mcp.Cascade_fsm.Try_next _ -> ()
+  | Masc_mcp.Keeper_fsm.Try_next _ -> ()
   | _ -> Alcotest.fail "expected Try_next"
 ;;
 
@@ -50,21 +50,21 @@ let test_decide_call_err () =
     Llm_provider.Http_client.HttpError { code = 429; body = "" }
   in
   let d1 =
-    Masc_mcp.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last:false
+    Masc_mcp.Keeper_fsm.decide ~accept_on_exhaustion:false ~is_last:false
       (Call_err err429)
   in
   (match d1 with
-  | Masc_mcp.Cascade_fsm.Try_next _ -> ()
+  | Masc_mcp.Keeper_fsm.Try_next _ -> ()
   | _ -> Alcotest.fail "429 -> Try_next");
   let err400 =
     Llm_provider.Http_client.HttpError { code = 400; body = "" }
   in
   let d2 =
-    Masc_mcp.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last:false
+    Masc_mcp.Keeper_fsm.decide ~accept_on_exhaustion:false ~is_last:false
       (Call_err err400)
   in
   match d2 with
-  | Masc_mcp.Cascade_fsm.Exhausted _ -> ()
+  | Masc_mcp.Keeper_fsm.Exhausted _ -> ()
   | _ -> Alcotest.fail "400 -> Exhausted"
 ;;
 

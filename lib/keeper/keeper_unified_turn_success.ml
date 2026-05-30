@@ -1,6 +1,6 @@
 (** Success-path post-processing for [Keeper_unified_turn]. *)
 
-module KCB = Keeper_turn_cascade_budget
+module KCB = Keeper_turn_budget
 module KEC = Keeper_context_runtime
 module KUM = Keeper_unified_metrics
 module Social = Keeper_social_model

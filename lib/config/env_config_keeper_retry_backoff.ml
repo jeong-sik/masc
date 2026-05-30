@@ -2,7 +2,7 @@
 
     Exponential backoff knobs for the keeper outer-loop transient
     retry path plus the productive slot-phase budget gate used by
-    [Keeper_turn_cascade_budget] when deciding whether a degraded
+    [Keeper_turn_budget] when deciding whether a degraded
     retry rotation may proceed.
 
     Verbatim extract from [Env_config_keeper.KeeperRetryBackoff];

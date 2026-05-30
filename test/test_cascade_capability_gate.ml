@@ -5,7 +5,7 @@
 
 open Alcotest
 
-module CI = Masc_mcp.Cascade_inference
+module CI = Masc_mcp.Keeper_inference
 module CE = Masc_mcp.Cascade_error_classify
 module CR = Masc_mcp.Cascade_runtime
 module P = Masc_mcp.Prometheus

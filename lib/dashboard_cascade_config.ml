@@ -143,10 +143,10 @@ let source_assist_json source_text =
     before first successful validation), fall back to the active
     [cascade.toml] projection so the dashboard still renders a best-effort
     raw view instead of failing hard. *)
-let live_profiles ?config_path () = Keeper_cascade_profile.catalog_names ?config_path ()
+let live_profiles ?config_path () = Keeper_turn_profile.catalog_names ?config_path ()
 
 let keeper_assignable_name_set ?config_path () =
-  Keeper_cascade_profile.keeper_catalog_names ?config_path ()
+  Keeper_turn_profile.keeper_catalog_names ?config_path ()
   |> List.fold_left (fun acc name -> StringSet.add name acc) StringSet.empty
 ;;
 
@@ -213,7 +213,7 @@ let keeper_profile_fields ~keeper ~cascade_name : (string * Yojson.Safe.t) list 
      [null] is a third state that the UI can render as "unresolved" — a
      stronger drift signal than a silent rewrite to [Keeper_turn]. *)
   let canonical_json =
-    match Keeper_cascade_profile.resolve_live_result cascade_name with
+    match Keeper_turn_profile.resolve_live_result cascade_name with
     | Ok runtime ->
       `String (Cascade_name.to_string runtime)
     | Error (`Unresolved _) -> `Null
@@ -327,7 +327,7 @@ let config_json ?base_path () =
         Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path:path
     in
     let add_profile_name (acc, seen) name =
-      let canonical = Keeper_cascade_profile.canonicalize name in
+      let canonical = Keeper_turn_profile.canonicalize name in
       if StringSet.mem canonical seen
          || Option.is_some
               (invalid_assignment_reasons

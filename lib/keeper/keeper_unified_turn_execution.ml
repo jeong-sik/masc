@@ -11,10 +11,10 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 open Result.Syntax
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_turn_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
-include Keeper_turn_cascade_budget
+include Keeper_turn_budget
 include Keeper_unified_turn_types
 
 type retry_loop_input =
@@ -40,7 +40,7 @@ type ctx =
   ; config : Coord.config
   ; current_turn_blocker_info : blocker_info option ref
   ; degraded_retry_info : EC.degraded_retry option ref
-  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_cascade_budget.turn_event_bus_summary
+  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_budget.turn_event_bus_summary
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
   ; failure_reason : Keeper_turn_fsm.failure_reason option ref
   ; generation : int
@@ -293,11 +293,11 @@ let run (ctx : ctx)
         in
         let attempt_kind =
           if is_retry
-          then Keeper_turn_cascade_budget.Retry_attempt
-          else Keeper_turn_cascade_budget.First_attempt
+          then Keeper_turn_budget.Retry_attempt
+          else Keeper_turn_budget.First_attempt
         in
         (match
-           Keeper_turn_cascade_budget.decide_retry_admission_for_turn
+           Keeper_turn_budget.decide_retry_admission_for_turn
              ~remaining_turn_budget_s:remaining_turn_budget_sec
              ~attempt_kind
              ~allow_wall_clock_retry_budget

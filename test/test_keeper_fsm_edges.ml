@@ -13,7 +13,7 @@
     2. Wired but never invoked / wired in dead code (this file catches it)
 
     The KSM→KCL edge is the cleanest production site to drive in a
-    unit test: [Keeper_cascade_routing.select_cascade] is pure and
+    unit test: [Keeper_turn_routing.select_cascade] is pure and
     its caller in [keeper_unified_turn.ml] is wrapped in a heavy
     cycle setup. To keep the test focused and fast we exercise the
     counter via the same call shape the caller uses (pure routing
@@ -60,14 +60,14 @@ let test_distinct_edges_are_isolated () =
     "edge B unchanged when only A is bumped"
     b_before b_after
 
-(* End-to-end: when [Keeper_cascade_routing.select_cascade] is wrapped
+(* End-to-end: when [Keeper_turn_routing.select_cascade] is wrapped
    into the same call shape used at [keeper_unified_turn.ml:1086],
    the counter increments. This proves the wiring around the
    production caller sees the counter constant correctly. *)
 let test_select_cascade_caller_pattern_increments () =
   let before = read_edge_count edge_label in
   (* Mirror keeper_unified_turn.ml:1084-1086 caller pattern. *)
-  let routing = Masc_mcp.Keeper_cascade_routing.select_cascade
+  let routing = Masc_mcp.Keeper_turn_routing.select_cascade
                   ~base_cascade:"keeper_unified"
                   ~phase:Masc_mcp.Keeper_state_machine.Running
   in

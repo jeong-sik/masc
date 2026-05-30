@@ -29,7 +29,7 @@
  keeper_world_observation_message_scope
  keeper_profile_load_failure_site
  keeper_turn_cleanup_failure_site
- keeper_cascade_sync_failure_site
+ keeper_turn_sync_failure_site
  keeper_event_bus_drain_site
  keeper_turn_metrics_snapshot_failure_site
  keeper_metric_emit_dropped_site
@@ -161,7 +161,7 @@
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_activation_readiness
-   keeper_cascade_resilience
+   keeper_turn_resilience
    agent_tool_task_runtime
    agent_tool_voice_runtime
    agent_tool_dispatch_runtime
@@ -209,17 +209,17 @@
   voice_bridge_transport
   cascade_health_tracker_config
   keeper_oas_checkpoint
-  keeper_cascade_engine keeper_turn_driver_named_resolution
+  keeper_turn_engine keeper_turn_driver_named_resolution
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
-  keeper_turn_driver_cascade_health
+  keeper_turn_driver_health
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
-  keeper_turn_driver_try_cascade
+  keeper_turn_driver_try_turn
   keeper_turn_driver_wrappers
-  keeper_turn_cascade_budget_admission
-  keeper_turn_cascade_budget_event_bus
-  keeper_turn_cascade_budget_routing
+  keeper_turn_budget_admission
+  keeper_turn_budget_event_bus
+  keeper_turn_budget_routing
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support
   keeper_unified_turn_event_bus
@@ -228,7 +228,7 @@
   keeper_unified_turn_failure
   keeper_unified_turn_phase_plan
   keeper_unified_turn_phase_gate
-  keeper_unified_turn_cascade_resolution
+  keeper_unified_turn_resolution
   keeper_unified_turn_pre_dispatch
   keeper_unified_turn_retry_setup
   keeper_unified_turn_terminal_error

@@ -1,4 +1,4 @@
-(** Keeper_registry_types_cascade — cascade and compaction FSM types and transitions.
+(** Keeper_registry_types_turn — cascade and compaction FSM types and transitions.
 
     Extracted from [Keeper_registry_types] (534 LoC). Pure type definitions
     and functions for the cascade_state and compaction_stage GADTs, witnesses,

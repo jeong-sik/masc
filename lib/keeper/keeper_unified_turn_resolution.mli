@@ -2,7 +2,7 @@
     [Keeper_unified_turn.run_keeper_cycle] per RFC-0136 PR-2.
 
     Owns the [selected_item] override of [meta.cascade_ref], the
-    [Keeper_cascade_routing.select_cascade] call, and the
+    [Keeper_turn_routing.select_cascade] call, and the
     [fail_open_phase_buffer_when_unavailable] hardening of the resolved
     cascade. Returns both the updated meta and the resolved cascade so
     the caller can resume with downstream pre-dispatch validation. *)

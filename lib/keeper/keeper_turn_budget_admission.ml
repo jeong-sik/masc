@@ -6,7 +6,7 @@
     dependency cycle — [Keeper_internal_error] references this type in the
     [Retry_admission_denied] variant of [masc_internal_error], so the type
     must be defined below the keeper layer.  This module re-exports via
-    transparent alias so [Keeper_turn_cascade_budget] and its callers are
+    transparent alias so [Keeper_turn_budget] and its callers are
     unchanged. *)
 
 type retry_admission_denial =

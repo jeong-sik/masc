@@ -14,9 +14,9 @@ let fallback_cascade_for_provider_cooldown
       ~(effective_cascade : string)
   : string option
   =
-  let normalized_base = Keeper_cascade_profile.normalize_declared_name base_cascade in
+  let normalized_base = Keeper_turn_profile.normalize_declared_name base_cascade in
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    Keeper_turn_profile.normalize_declared_name effective_cascade
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base

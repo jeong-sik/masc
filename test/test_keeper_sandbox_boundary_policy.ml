@@ -374,8 +374,8 @@ let test_preflight_uses_keeper_cascade_resilience () =
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.mli");
   assert_contains "lib/dune" "keeper_cascade_resilience";
   assert_not_contains "lib/dune" ("keeper_" ^ "exec_preflight");
-  assert_contains heartbeat_scheduling "Keeper_cascade_resilience.";
-  assert_contains turn "Keeper_cascade_resilience.";
+  assert_contains heartbeat_scheduling "Keeper_turn_resilience.";
+  assert_contains turn "Keeper_turn_resilience.";
   assert_not_contains heartbeat_scheduling ("Keeper_" ^ "exec_preflight");
   assert_not_contains turn ("Keeper_" ^ "exec_preflight")
 

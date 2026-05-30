@@ -2293,8 +2293,8 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           Alcotest.(check (option string))
             "provider lane records keeper cascade engine"
             (Some
-               (Masc_mcp.Keeper_cascade_engine.to_string
-                  Masc_mcp.Keeper_cascade_engine.keeper_managed))
+               (Masc_mcp.Keeper_turn_engine.to_string
+                  Masc_mcp.Keeper_turn_engine.keeper_managed))
             (json_string_member_opt "cascade_engine"
                provider_lane_row.M.decision);
           Alcotest.(check (option string))
@@ -2805,9 +2805,9 @@ let test_wired_manifest_sites () =
         ] );
       ( "lib/keeper/keeper_turn_driver.ml",
         [
-          "Keeper_cascade_engine.guard_keeper_hot_path";
+          "Keeper_turn_engine.guard_keeper_hot_path";
           "cascade_engine;";
-          "Keeper_cascade_engine.manifest_fields";
+          "Keeper_turn_engine.manifest_fields";
           "client_capacity_full_decision";
           "client_capacity_full";
           "provider_attempt_started";
@@ -2821,8 +2821,8 @@ let test_wired_manifest_sites () =
         ] );
       ( "lib/keeper/keeper_turn_driver_try_provider.ml",
         [
-          "cascade_engine : Keeper_cascade_engine.t";
-          "Keeper_cascade_engine.manifest_fields";
+          "cascade_engine : Keeper_turn_engine.t";
+          "Keeper_turn_engine.manifest_fields";
           "Keeper_runtime_manifest.Provider_lane_resolved";
         ] );
       ( "lib/keeper/keeper_cascade_engine.ml",
@@ -3281,7 +3281,7 @@ let test_local_preflight_filters_unhealthy_local_endpoints () =
   Alcotest.(check (list string)) "nothing dropped when healthy" [] dropped
 
 let test_keeper_cascade_engine_boundary () =
-  let module E = Masc_mcp.Keeper_cascade_engine in
+  let module E = Masc_mcp.Keeper_turn_engine in
   let engine = E.keeper_managed in
   Alcotest.(check string)
     "engine id" "masc_keeper_named_cascade" (E.to_string engine);

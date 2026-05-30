@@ -73,7 +73,7 @@ let test_unexpected_accept_branch_is_success_attributed () =
   let source =
     read_file (Filename.concat (repo_root ()) "lib/keeper/keeper_turn_driver.ml")
   in
-  let branch_marker = "| Cascade_fsm.Accept _resp ->" in
+  let branch_marker = "| Keeper_fsm.Accept _resp ->" in
   let branch =
     match substring_index_opt source branch_marker with
     | None -> fail "missing Accept branch marker"

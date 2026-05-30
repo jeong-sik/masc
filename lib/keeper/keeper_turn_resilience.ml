@@ -16,7 +16,7 @@ type cascade_resilience =
 let cascade_resilience_of_name raw_name =
   let cascade_name =
     raw_name
-    |> Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+    |> Keeper_turn_profile.normalize_keeper_runtime_declared_name
     |> String.trim
   in
   let model_labels, error =
@@ -28,7 +28,7 @@ let cascade_resilience_of_name raw_name =
     | Error err -> [], Some err
   in
   let fallback_cascade =
-    Keeper_cascade_profile.fallback_cascade_for cascade_name
+    Keeper_turn_profile.fallback_cascade_for cascade_name
   in
   let pure_local =
     match model_labels with

@@ -21,7 +21,7 @@
     [test_keeper_cascade_profile_partial]). *)
 
 open Masc_mcp
-module P = Keeper_cascade_profile
+module P = Keeper_turn_profile
 
 let test_path_not_resolved () =
   (* config_path = Some "/nonexistent/...." would trigger

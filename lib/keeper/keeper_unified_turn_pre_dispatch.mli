@@ -5,7 +5,7 @@
     projection, model-label resolution, API-key + local-discovery
     readiness checks, context budget resolution, temperature/max-tokens
     inference, and ceiling validation. Returns a
-    [Keeper_turn_cascade_budget.cascade_execution] record on success,
+    [Keeper_turn_budget.cascade_execution] record on success,
     or a typed [Agent_sdk.Error.sdk_error] on the first failed check.
 
     The unified-max-tokens fallback is internal to this module — its
@@ -16,7 +16,7 @@ val build_cascade_execution
   :  meta:Keeper_meta_contract.keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> cascade_name:Keeper_name.t
-  -> ( Keeper_turn_cascade_budget.cascade_execution
+  -> ( Keeper_turn_budget.cascade_execution
      , Agent_sdk.Error.sdk_error )
      result
 (** Build a [cascade_execution] for the given cascade name under

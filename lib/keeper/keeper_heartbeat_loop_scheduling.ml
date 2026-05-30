@@ -35,7 +35,7 @@ type keepalive_scheduling_decision = {
 
 let decide_keepalive_scheduling
       ?(cascade_resilience_of_name =
-        Keeper_cascade_resilience.cascade_resilience_of_name)
+        Keeper_turn_resilience.cascade_resilience_of_name)
       ?(cascade_status_of_name =
         fun ~cascade_name -> Keeper_health_probe.get_cascade_status ~cascade_name)
       ~stop

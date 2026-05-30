@@ -795,9 +795,9 @@ let test_cascade_inference_rejects_removed_keeper_aliases () =
       ; "keeper_unified_max_tokens", `Int 16384
       ]
   in
-  let canonical = Cascade_inference.for_json ~name:"keeper_unified" json in
-  let removed_oas = Cascade_inference.for_json ~name:"oas-keeper_unified" json in
-  let removed_coding = Cascade_inference.for_json ~name:"oas-coding_first" json in
+  let canonical = Keeper_inference.for_json ~name:"keeper_unified" json in
+  let removed_oas = Keeper_inference.for_json ~name:"oas-keeper_unified" json in
+  let removed_coding = Keeper_inference.for_json ~name:"oas-coding_first" json in
   Alcotest.(check (option (float 0.0001)))
     "canonical temp"
     (Some 0.2)

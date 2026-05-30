@@ -137,7 +137,7 @@ let http_probe_url_of_config (cfg : Llm_provider.Provider_config.t) =
   let base_url = String.trim cfg.base_url in
   if String.equal base_url ""
   then None
-  else if Cascade_capacity_probe.can_probe ~url:base_url
+  else if Keeper_capacity_probe.can_probe ~url:base_url
   then Some base_url
   else None
 

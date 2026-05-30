@@ -7,7 +7,7 @@
 
     The phase-event publisher is injected (via [~publish_phase_lifecycle])
     so this module stays free of [Keeper_lifecycle_events] /
-    [Cascade_events] dependencies. *)
+    [Keeper_events] dependencies. *)
 
 open Keeper_types
 open Keeper_meta_contract

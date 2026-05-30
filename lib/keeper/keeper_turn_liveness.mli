@@ -2,7 +2,7 @@
    livelock configuration.
 
    Provider-specific probe knowledge lives in
-   [Cascade_capacity_probe]; this module routes probeable URLs through
+   [Keeper_capacity_probe]; this module routes probeable URLs through
    that registry without naming any single provider.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -13,7 +13,7 @@ open Keeper_types_profile
 
 (** Deterministic decision for the phase-buffer fallback boundary. This
     does not probe runtime liveness; it only decides whether the selected
-    labels resolve to runtime URLs that [Cascade_capacity_probe.can_probe]
+    labels resolve to runtime URLs that [Keeper_capacity_probe.can_probe]
     before preserving the canonical phase-buffer route. The provider/model
     label resolver stays behind [Cascade_runtime_candidate]. *)
 type phase_buffer_liveness_decision =

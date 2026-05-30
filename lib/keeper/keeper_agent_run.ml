@@ -59,9 +59,9 @@ end
     @param max_turns Maximum agent turns (default from keeper runtime config)
     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override; when omitted, resolved
-           from [Cascade_inference] with a 0.3 fallback
+           from [Keeper_inference] with a 0.3 fallback
     @param max_tokens Maximum output tokens override; when omitted, resolved
-           from [Cascade_inference] with a 8192 fallback
+           from [Keeper_inference] with a 8192 fallback
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
@@ -162,7 +162,7 @@ let run_turn
   in
   let max_tokens, pre_dispatch_max_tokens_error =
     match
-      Cascade_inference.validate_max_tokens_within_ceiling
+      Keeper_inference.validate_max_tokens_within_ceiling
         ~cascade_name
         ~provider_ceiling:max_output_ceiling
         ctx.max_tokens

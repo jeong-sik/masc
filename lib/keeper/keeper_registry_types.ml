@@ -20,9 +20,9 @@ include Keeper_registry_types_turn_phase
 include Keeper_registry_types_decision
 
 (* Cascade and compaction FSM types, witnesses, transitions, spec violation
-   types, and resolvers extracted to [Keeper_registry_types_cascade]
+   types, and resolvers extracted to [Keeper_registry_types_turn]
    (500-line decomp). *)
-include Keeper_registry_types_cascade
+include Keeper_registry_types_turn
 
 type turn_measurement =
   { tm_captured_at : float

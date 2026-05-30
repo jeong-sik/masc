@@ -619,12 +619,12 @@ let on_weighted_item_dropped ~reason =
 
 (* RFC-0149 §3.3 sunset closeout: [metric_resolve_live_fallback] +
    [on_resolve_live_fallback] removed together with the silent-fallback
-   carrier ([Keeper_cascade_profile.resolve_live_with_catalog]).  Every
+   carrier ([Keeper_turn_profile.resolve_live_with_catalog]).  Every
    caller now branches on [resolve_live_with_catalog_result]'s
    [Error (`Unresolved _)] and renders the unresolved cascade on the
    operator-visible path. *)
 
-(* [Keeper_cascade_profile.fallback_cascade_for] inspects a
+(* [Keeper_turn_profile.fallback_cascade_for] inspects a
    profile's [fallback_cascade] hint and rejects it (returns None)
    when the named target is not in the live catalog.  The function
    logs a WARN-once and silently ignores the hint — the keeper
@@ -752,7 +752,7 @@ let on_cascade_metrics_eviction () =
 
 (* Counts max_tokens budgets reduced to the resolved cascade output ceiling.
    Internal cascade-config / fallback / keeper override budgets are
-   normalized by {!Cascade_inference.cap_max_tokens_to_cascade_ceiling}
+   normalized by {!Keeper_inference.cap_max_tokens_to_cascade_ceiling}
    before dispatch because the narrowest failover member can be lower than
    the caller-visible primary route. *)
 let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
@@ -953,7 +953,7 @@ let all_cascade_counters : (string * string) list =
        Pair with iter 6 / iter 14 [profile_candidate_drop] which \
        surfaces the downstream effect of these registration gaps." )
   ; ( "masc_cascade_invariant_violation_total"
-    , "Total Cascade_fsm contract violations (should-be-unreachable \
+    , "Total Keeper_fsm contract violations (should-be-unreachable \
        defensive arms). MUST be zero in steady state. Any non-zero \
        rate is a guaranteed FSM bug - not a tunable; alert immediately \
        and investigate the FSM transition that exposed an Accept in \

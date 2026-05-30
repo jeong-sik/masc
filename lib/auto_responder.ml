@@ -96,8 +96,8 @@ let agent_type_of_mention = Mention.agent_type_of_mention
 (* --- MODEL mode: shared cascade + in-process MASC HTTP tools/call --- *)
 
 let cascade_name_for_agent_type _agent_type =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Auto_responder
+  Keeper_turn_profile.cascade_name_for_use
+    Keeper_turn_profile.Auto_responder
 
 (** Validate model response using structural fields, not text heuristics.
     Guardrail principle: accept unless there is a clear structural reason to reject.

@@ -40,17 +40,17 @@ let fail_open_rotation_cascades_from_catalog
     | candidates -> Some candidates)
 
 let keeper_fail_open_route_uses =
-  [ Keeper_cascade_profile.Keeper_turn
-  ; Keeper_cascade_profile.Phase_recovery
-  ; Keeper_cascade_profile.Phase_buffer
-  ; Keeper_cascade_profile.Tool_required
+  [ Keeper_turn_profile.Keeper_turn
+  ; Keeper_turn_profile.Phase_recovery
+  ; Keeper_turn_profile.Phase_buffer
+  ; Keeper_turn_profile.Tool_required
   ]
 
 let is_keeper_fail_open_route_use use =
   List.exists (( = ) use) keeper_fail_open_route_uses
 
 let route_target_for_use use =
-  try Some (Keeper_cascade_profile.cascade_name_for_use use |> public_profile_name)
+  try Some (Keeper_turn_profile.cascade_name_for_use use |> public_profile_name)
   with
   | Failure _ -> None
 
@@ -70,13 +70,13 @@ let active_fail_open_excluded_route_targets () =
 let active_fail_open_rotation_cascades () =
   fail_open_rotation_cascades_from_catalog
     ~excluded_targets:(active_fail_open_excluded_route_targets ())
-    ~catalog_names:(Keeper_cascade_profile.catalog_names ())
-    ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
+    ~catalog_names:(Keeper_turn_profile.catalog_names ())
+    ~keeper_assignable:(Keeper_turn_profile.keeper_catalog_names ())
     ()
 
 let tool_required_rotation_cascade_name () =
   try
-    Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Tool_required
+    Keeper_turn_profile.cascade_name_for_use Keeper_turn_profile.Tool_required
   with
   | Failure _ -> Keeper_config.tool_required_cascade_name
 
@@ -90,7 +90,7 @@ let next_fail_open_cascade_for_turn
   : EC.degraded_retry option
   =
   let fallback_hint =
-    Keeper_cascade_profile.fallback_cascade_for effective_cascade
+    Keeper_turn_profile.fallback_cascade_for effective_cascade
   in
   let rotation_cascades =
     match tool_requirement, rotation_cascades with
@@ -98,7 +98,7 @@ let next_fail_open_cascade_for_turn
       let tr_cascade = tool_required_rotation_cascade_name () in
       let tr_has_required_tool_choice =
         match
-          Keeper_cascade_profile.required_capability_profile_of_cascade_name
+          Keeper_turn_profile.required_capability_profile_of_cascade_name
             tr_cascade
         with
         | None -> true

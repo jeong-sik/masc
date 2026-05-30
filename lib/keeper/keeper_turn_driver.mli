@@ -22,7 +22,7 @@ include module type of Cascade_error_classify
 (** {1 Cascade error helpers} *)
 
 val sdk_error_to_cascade_outcome :
-  Agent_sdk.Error.sdk_error -> Cascade_fsm.provider_outcome option
+  Agent_sdk.Error.sdk_error -> Keeper_fsm.provider_outcome option
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
@@ -156,7 +156,7 @@ val run_named :
   (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] call with MASC-driven cascade model fallback.
     MASC drives the cascade FSM directly: resolves cascade providers,
-    tries each with OAS, and uses [Cascade_fsm.decide] on failure.
+    tries each with OAS, and uses [Keeper_fsm.decide] on failure.
     The cascade loop runs inside a capacity-managed queue permit. *)
 
 module For_testing : sig

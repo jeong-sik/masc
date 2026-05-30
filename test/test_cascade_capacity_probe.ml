@@ -1,10 +1,10 @@
-(** Unit tests for [Cascade_capacity_probe] adapter dispatch.
+(** Unit tests for [Keeper_capacity_probe] adapter dispatch.
 
     Tests the provider-agnostic registry and 3-tier resolution chain
     without hitting the network — mock probes return canned results. *)
 
 open Alcotest
-module Cp = Masc_mcp.Cascade_capacity_probe
+module Cp = Masc_mcp.Keeper_capacity_probe
 module Throttle = Masc_mcp.Cascade_throttle
 
 (* ── Mock probe ─────────────────────────────────────────────── *)

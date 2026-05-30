@@ -239,8 +239,8 @@ let refresh_many ~sw ~net ?timeout_s urls =
 (* ── Probe adapter ───────────────────────────────────────────── *)
 
 (* Wraps this module's functions as a first-class [Probe] for
-   {!Cascade_capacity_probe}.  The module structurally satisfies
-   [Cascade_capacity_probe.Probe] without an explicit annotation,
+   {!Keeper_capacity_probe}.  The module structurally satisfies
+   [Keeper_capacity_probe.Probe] without an explicit annotation,
    avoiding a circular dependency between the two compilation units. *)
 module Http_probe = struct
   let can_probe ~url = is_registered ~url

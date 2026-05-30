@@ -1234,7 +1234,7 @@ let test_keeper_direct_reply_contracts () =
   (* Historical: direct_reply once forked cascade name into
      "keeper_reply"/"keeper_turn", but neither was ever defined in
      cascade.json — the drift collapsed to the default cascade via
-     Keeper_cascade_profile.canonicalize. The fork is gone; the
+     Keeper_turn_profile.canonicalize. The fork is gone; the
      direct_reply flag now only affects persona prompt + skill-route
      suppression (checked below). *)
   check bool "keeper manual turns resolve declared cascade through runtime catalog" true
@@ -2436,13 +2436,13 @@ let test_oas_capacity_restore_contracts () =
        "Cascade_runtime.local_capacity_for_selections ~sw ~net");
   check bool "operator judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
-       "Keeper_cascade_profile.Operator_judge");
+       "Keeper_turn_profile.Operator_judge");
   check bool "governance judge backoff uses OAS local capacity" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
        "Cascade_runtime.local_capacity_for_selections ~sw ~net");
   check bool "governance judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
-       "Keeper_cascade_profile.Governance_judge");
+       "Keeper_turn_profile.Governance_judge");
   check bool "cascade config no longer exposes legacy local capacity parser" true
     (file_not_contains_pattern "lib/cascade/cascade_config.mli"
        "val local_capacity_for_selections")

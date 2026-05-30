@@ -120,7 +120,7 @@ let lifecycle_event_phase = function
 
 (** {1 Event Bus Publishers}
 
-    Moved from [Cascade_events] to decouple keeper lifecycle observability
+    Moved from [Keeper_events] to decouple keeper lifecycle observability
     from the cascade module surface. Routes through [Masc_event_bus] so the
     OAS/MASC boundary is preserved. *)
 

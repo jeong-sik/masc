@@ -1,7 +1,7 @@
 (** Cascade_attempt_fsm — SDK error to FSM outcome, session/resumption analysis.
 
     Extracted from oas_worker_named.ml (God file decomposition).
-    Converts OAS SDK errors into Cascade_fsm provider outcomes,
+    Converts OAS SDK errors into Keeper_fsm provider outcomes,
     classifies CLI-wrapped hard-quota patterns,
     and enriches errors with provider-specific hints.
 
@@ -11,7 +11,7 @@
 (** {1 Cascade outcome classification} *)
 
 val sdk_error_to_cascade_outcome :
-  Agent_sdk.Error.sdk_error -> Cascade_fsm.provider_outcome option
+  Agent_sdk.Error.sdk_error -> Keeper_fsm.provider_outcome option
 (** Convert an SDK error into a cascade FSM provider outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable.  Structural agent errors (budget, idle, exit) are not. *)

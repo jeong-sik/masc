@@ -1,4 +1,4 @@
-(** Keeper_turn_driver_try_cascade — Cascade retry loop with provider dispatch.
+(** Keeper_turn_driver_try_turn — Cascade retry loop with provider dispatch.
 
     Extracted from [Keeper_turn_driver.run_named]. The [try_cascade]
     recursive function iterates through provider candidates, handling
@@ -210,7 +210,7 @@ type try_cascade_ctx =
       unit
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
-  ; cascade_engine : Keeper_cascade_engine.t
+  ; cascade_engine : Keeper_turn_engine.t
   ; turn_start : Mtime.t
   ; seq_ref : int ref
   ; (* Other config *)
@@ -294,7 +294,7 @@ let record_cascade_attempt ctx candidate ?http_status ~outcome () =
             Unix.gettimeofday ()
         }
       in
-      Keeper_registry_cascade_attempt.record ~base_path
+      Keeper_registry_turn_attempt.record ~base_path
         ~keeper_name:ctx.keeper_name record
 
 let emit_capacity_blocked_manifest ctx ~capacity_key =
@@ -346,26 +346,26 @@ let rec run
           else if kind = Llm_provider.Http_client.Dns_failure then
             Keeper_meta_contract.Dns_failure
           else
-            Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
+            Keeper_meta_contract.Other_detail (Keeper_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.TimeoutError _) ->
-          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Keeper_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.HttpError _) ->
-          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Keeper_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.AcceptRejected _) ->
-          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Keeper_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.CliTransportRequired _) ->
-          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Keeper_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.ProviderTerminal
           { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
           Keeper_meta_contract.Max_turns_exceeded
       | Some (Llm_provider.Http_client.ProviderTerminal
           { kind = Llm_provider.Http_client.Other _; _ }) ->
-          Keeper_meta_contract.Other_detail (Cascade_fsm.to_user_message last_err)
+          Keeper_meta_contract.Other_detail (Keeper_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.ProviderFailure
           { kind = Llm_provider.Http_client.Capacity_exhausted _; _ }) ->
           Keeper_meta_contract.Capacity_exhausted
       | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
-          let message = Cascade_fsm.to_user_message (Some err) in
+          let message = Keeper_fsm.to_user_message (Some err) in
           Keeper_meta_contract.Other_detail message
       | None -> Keeper_meta_contract.No_providers_available
     in
@@ -608,7 +608,7 @@ let rec run
      | None -> ());
     let is_last = rest = [] in
     let attempt_index = max 1 (ctx.candidate_count - List.length rest) in
-    match Keeper_turn_driver_cascade_health.acquire_client_capacity_slot candidate with
+    match Keeper_turn_driver_health.acquire_client_capacity_slot candidate with
     | `Full (capacity_key, retry_after_s) ->
       let skip_reason =
         Capacity_full
@@ -942,7 +942,7 @@ let rec run
     | Ok result when ctx.accept result.response ->
       ctx.record_provider_health_result candidate ~success:true ~http_status:None;
       record_accepted_liveness_sample ();
-      Keeper_turn_driver_cascade_health.record_candidate_success
+      Keeper_turn_driver_health.record_candidate_success
         candidate ~latency_ms:attempt_latency_ms result;
       let observation =
         Cascade_observation.cascade_observation_with_metrics
@@ -952,7 +952,7 @@ let rec run
           ~selected_model_raw:(success_selected_model_raw candidate)
           ~capture:ctx.capture
         ~oas_internal_cascade_allowed:
-          (Keeper_cascade_engine.allows_oas_internal_cascade ctx.cascade_engine)
+          (Keeper_turn_engine.allows_oas_internal_cascade ctx.cascade_engine)
         ()
       in
       let result = { result with cascade_observation = Some observation } in
@@ -964,14 +964,14 @@ let rec run
               Ok result
     | Ok result ->
       let reason = "response rejected by accept" in
-      Keeper_turn_driver_cascade_health.record_candidate_rejected candidate ~reason;
-      let outcome = Cascade_fsm.Accept_rejected
+      Keeper_turn_driver_health.record_candidate_rejected candidate ~reason;
+      let outcome = Keeper_fsm.Accept_rejected
         { response = result.response; reason } in
-      (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
-         | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
+      (match Keeper_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+         | Keeper_fsm.Accept_on_exhaustion { response; _ } ->
          ctx.record_provider_health_result candidate ~success:true ~http_status:None;
          record_accepted_liveness_sample ();
-         Keeper_turn_driver_cascade_health.record_candidate_success
+         Keeper_turn_driver_health.record_candidate_success
            candidate ~latency_ms:attempt_latency_ms result;
          let observation =
            Cascade_observation.cascade_observation_with_metrics
@@ -981,7 +981,7 @@ let rec run
              ~selected_model_raw:(success_selected_model_raw candidate)
              ~capture:ctx.capture
         ~oas_internal_cascade_allowed:
-          (Keeper_cascade_engine.allows_oas_internal_cascade ctx.cascade_engine)
+          (Keeper_turn_engine.allows_oas_internal_cascade ctx.cascade_engine)
         ()
          in
          let result = { result with cascade_observation = Some observation } in
@@ -991,7 +991,7 @@ let rec run
                  record_cascade_attempt ctx candidate ~outcome:`Success ();
                  on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
                  Ok result
-       | Cascade_fsm.Try_next { last_err = new_err } ->
+       | Keeper_fsm.Try_next { last_err = new_err } ->
          let skip_reason =
            Accept_rejected { reason }
          in
@@ -1019,7 +1019,7 @@ let rec run
 
            (ctx.filter_provider_health_fail_open rest)
            new_err
-       | Cascade_fsm.Exhausted _ ->
+       | Keeper_fsm.Exhausted _ ->
          record_candidate_health_rejected candidate ~reason;
          let observation =
            Cascade_observation.cascade_observation_with_metrics
@@ -1028,7 +1028,7 @@ let rec run
              ~candidate_count:ctx.candidate_count ~selected_model_raw:ctx.error_selected_model_raw
              ~capture:ctx.capture
         ~oas_internal_cascade_allowed:
-          (Keeper_cascade_engine.allows_oas_internal_cascade ctx.cascade_engine)
+          (Keeper_turn_engine.allows_oas_internal_cascade ctx.cascade_engine)
         ()
          in
          Cascade_observation.record_cascade ~keeper_name:ctx.keeper_name
@@ -1046,14 +1046,14 @@ let rec run
                    model = Some runtime_candidate_label;
                    reason;
                  }))
-         | Cascade_fsm.Accept _resp ->
+         | Keeper_fsm.Accept _resp ->
          Cascade_metrics.on_cascade_invariant_violation ();
          Log.Misc.warn
            "cascade %s: unexpected Accept in Accept_rejected branch (runtime=%s)"
            ctx.cascade_name runtime_candidate_label;
          ctx.record_provider_health_result candidate ~success:true ~http_status:None;
          record_accepted_liveness_sample ();
-         Keeper_turn_driver_cascade_health.record_candidate_success
+         Keeper_turn_driver_health.record_candidate_success
            candidate ~latency_ms:attempt_latency_ms result;
          let observation =
            Cascade_observation.cascade_observation_with_metrics
@@ -1063,7 +1063,7 @@ let rec run
              ~selected_model_raw:(success_selected_model_raw candidate)
              ~capture:ctx.capture
         ~oas_internal_cascade_allowed:
-          (Keeper_cascade_engine.allows_oas_internal_cascade ctx.cascade_engine)
+          (Keeper_turn_engine.allows_oas_internal_cascade ctx.cascade_engine)
         ()
          in
          let result = { result with cascade_observation = Some observation } in
@@ -1083,30 +1083,30 @@ let rec run
           sdk_err
       in
       record_cascade_attempt ctx candidate
-        ?http_status:(Keeper_turn_driver_cascade_health.http_status_of_provider_error provider_error)
+        ?http_status:(Keeper_turn_driver_health.http_status_of_provider_error provider_error)
         ~outcome:(`Failure (Agent_sdk.Error.to_string sdk_err))
         ();
       Option.iter (ctx.record_provider_health_error candidate) provider_error;
       let _ = err_str in
       let cascade_outcome = sdk_error_to_cascade_outcome sdk_err in
       Option.iter
-        (fun _ -> Keeper_turn_driver_cascade_health.record_candidate_error candidate sdk_err)
+        (fun _ -> Keeper_turn_driver_health.record_candidate_error candidate sdk_err)
         cascade_outcome;
       (match cascade_outcome with
        | Some outcome ->
          let decision =
            if sdk_error_is_hard_quota sdk_err then
              let last_err = match outcome with
-               | Cascade_fsm.Call_err e -> Some e
-               | Cascade_fsm.Call_ok _
-               | Cascade_fsm.Accept_rejected _ -> None
+               | Keeper_fsm.Call_err e -> Some e
+               | Keeper_fsm.Call_ok _
+               | Keeper_fsm.Accept_rejected _ -> None
              in
-             Cascade_fsm.Exhausted { last_err }
+             Keeper_fsm.Exhausted { last_err }
            else
-             Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome
+             Keeper_fsm.decide ~accept_on_exhaustion:false ~is_last outcome
          in
          (match decision with
-          | Cascade_fsm.Try_next { last_err = new_err } ->
+          | Keeper_fsm.Try_next { last_err = new_err } ->
             let class_label =
               match sdk_error_cascade_fallback_class sdk_err with
               | Some class_name -> Printf.sprintf "[%s] " class_name
@@ -1147,7 +1147,7 @@ let rec run
               ctx
               (ctx.filter_provider_health_fail_open rest)
               new_err
-          | Cascade_fsm.Exhausted _ ->
+          | Keeper_fsm.Exhausted _ ->
             let observation =
               Cascade_observation.cascade_observation_with_metrics
                 ~cascade_name:ctx.error_cascade_name
@@ -1169,8 +1169,8 @@ let rec run
               (Option.value
                  (capacity_backpressure_of_sdk_error ctx sdk_err)
                  ~default:sdk_err)
-          | Cascade_fsm.Accept _
-          | Cascade_fsm.Accept_on_exhaustion _ -> Error sdk_err)
+          | Keeper_fsm.Accept _
+          | Keeper_fsm.Accept_on_exhaustion _ -> Error sdk_err)
        | None ->
          let observation =
            Cascade_observation.cascade_observation_with_metrics

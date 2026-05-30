@@ -204,14 +204,14 @@ val on_weighted_item_dropped : reason:string -> unit
 
 (* RFC-0149 §3.3 sunset closeout: [on_resolve_live_fallback] +
    [metric_resolve_live_fallback] removed.  Their carrier function
-   ([Keeper_cascade_profile.resolve_live_with_catalog] silent fallback)
+   ([Keeper_turn_profile.resolve_live_with_catalog] silent fallback)
    was deleted in the same closeout; every caller now consumes
    [resolve_live_with_catalog_result] and surfaces [Error (`Unresolved _)]
    on the operator-visible path. *)
 
 val on_fallback_hint_invalid : unit -> unit
 (** Tick the fallback-hint-invalid counter at
-    [Keeper_cascade_profile.fallback_cascade_for] when the named
+    [Keeper_turn_profile.fallback_cascade_for] when the named
     [fallback_cascade] target is not in the live catalog and the
     function silently returns None (operator-declared fallback has
     no effect).  Runtime complement to iter-32

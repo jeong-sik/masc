@@ -6,7 +6,7 @@
     use [Keeper_unified_turn.<name>] unchanged. *)
 
 let turn_event_bus_manifest_decision
-      (summary : Keeper_turn_cascade_budget.turn_event_bus_summary)
+      (summary : Keeper_turn_budget.turn_event_bus_summary)
   =
   let overflow =
     match summary.overflow_imminent with

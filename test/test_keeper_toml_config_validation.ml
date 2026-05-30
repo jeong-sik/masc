@@ -504,7 +504,7 @@ let test_cascade_name_accepts_catalog_entry () =
   (* Tests that the live declarative catalog is consulted during
      validation. *)
   let catalog =
-    try Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ()
+    try Masc_mcp.Keeper_turn_profile.keeper_catalog_names ()
     with _ -> []
   in
   let test_name =
@@ -586,7 +586,7 @@ target = "cascade.ollama_cloud_primary"
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   check string "assignable concrete route target is preserved"
     "cascade.ollama_cloud_primary"
-    (Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+    (Masc_mcp.Keeper_turn_profile.normalize_keeper_runtime_declared_name
        ~config_path:cascade_path "cascade.ollama_cloud_primary")
 
 let test_catalog_validator_surfaces_adapter_errors () =

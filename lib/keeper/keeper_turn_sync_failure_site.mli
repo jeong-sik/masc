@@ -1,4 +1,4 @@
-(** Keeper_cascade_sync_failure_site — closed sum for [site] label on
+(** Keeper_turn_sync_failure_site — closed sum for [site] label on
     [metric_keeper_cascade_sync_failures] (now 3 sites across
     keeper_turn_cascade_budget.ml + keeper_unified_turn.ml). *)
 

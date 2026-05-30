@@ -21,7 +21,7 @@ let keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
      (matching the degraded-fallback shape below) instead of the silent
      [Keeper_turn] default the legacy [resolve_live] would have written. *)
   let canonical_json =
-    match Keeper_cascade_profile.resolve_live_result cascade_name with
+    match Keeper_turn_profile.resolve_live_result cascade_name with
     | Ok runtime ->
       `String (Cascade_name.to_string runtime)
     | Error (`Unresolved _) -> cascade_name_json

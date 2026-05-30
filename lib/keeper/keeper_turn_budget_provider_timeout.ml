@@ -1,6 +1,6 @@
-(** Keeper_turn_cascade_budget_provider_timeout — Provider timeout budget resolution.
+(** Keeper_turn_budget_provider_timeout — Provider timeout budget resolution.
 
-    Extracted from [Keeper_turn_cascade_budget] during godfile decomposition.
+    Extracted from [Keeper_turn_budget] during godfile decomposition.
     Provider timeout budget types, constants, and resolution functions that
     determine per-attempt timeout ceilings within a keeper turn budget.
 
@@ -21,7 +21,7 @@
    was removed. End-to-end cap chain confirmed:
      [effective_timeout_sec] ->
        [Keeper_turn_driver_try_provider.per_provider_timeout_s] ->
-       [Cascade_agent_context.max_execution_time_s] ->
+       [Keeper_agent_context.max_execution_time_s] ->
        [Agent_sdk.Builder.with_max_execution_time]
    plus OAS 0.195.0+ enforces a per-HTTP cap via [body_timeout_s]
    (lib/llm_provider/complete.ml:656) and per-stream-line cap via

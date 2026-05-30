@@ -25,7 +25,7 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
   -> max_turns:int
   -> remaining_turn_budget_s:float
   -> provider_timeout_budget option
-(** See [Keeper_turn_cascade_budget] for first-attempt retry reserve and
+(** See [Keeper_turn_budget] for first-attempt retry reserve and
     retry-attempt budget semantics. *)
 
 (** Per-attempt watchdog used around the OAS call. It fires before the

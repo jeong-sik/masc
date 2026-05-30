@@ -2,7 +2,7 @@
 
     Reproduces 2026-05-17 incident — a stale binding referencing a removed
     provider used to make
-    [Keeper_cascade_profile.declarative_public_catalog_names] return
+    [Keeper_turn_profile.declarative_public_catalog_names] return
     [Error "declarative cascade catalog invalid: ..."], dropping keeper
     toml validation onto the [reserved_cascade_names] fallback. With the
     Phase 8 partial-parse surface and Phase 8.2 caller switch, the same
@@ -12,7 +12,7 @@
 
 open Alcotest
 
-module KCP = Masc_mcp.Keeper_cascade_profile
+module KCP = Masc_mcp.Keeper_turn_profile
 
 let write_file path content =
   let oc = open_out path in

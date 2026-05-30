@@ -1,7 +1,7 @@
 (** Cascade_attempt_fsm — SDK error to FSM outcome, session/resumption analysis.
 
     Extracted from oas_worker_named.ml (God file decomposition).
-    Converts OAS SDK errors into Cascade_fsm provider outcomes,
+    Converts OAS SDK errors into Keeper_fsm provider outcomes,
     classifies CLI-wrapped hard-quota patterns,
     and enriches errors with provider-specific hints.
 
@@ -121,16 +121,16 @@ let capacity_backpressure_source_to_failure_scope = function
   | Cascade_error_classify.Cascade_slot ->
     Llm_provider.Http_client.Failure_scope_unknown
 
-(** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
+(** Convert an OAS sdk_error into a Keeper_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
     errors (budget, idle, exit) are not — they would recur on any model. *)
 let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
-    : Cascade_fsm.provider_outcome option =
+    : Keeper_fsm.provider_outcome option =
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some (Cascade_error_classify.Resumable_cli_session { detail; _ }) ->
     Some
-      (Cascade_fsm.Call_err
+      (Keeper_fsm.Call_err
          (Llm_provider.Http_client.NetworkError
             { message = detail; kind = Llm_provider.Http_client.Unknown }))
   (* All other MASC-internal classifications (and unclassified errors) fall
@@ -147,7 +147,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
       | Keeper_internal_error.No_retry_hint -> None
     in
     Some
-      (Cascade_fsm.Call_err
+      (Keeper_fsm.Call_err
          (Llm_provider.Http_client.ProviderFailure
             { kind =
                 Llm_provider.Http_client.Capacity_exhausted
@@ -210,26 +210,26 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
         Llm_provider.Http_client.NetworkError
           { message; kind = Llm_provider.Http_client.Timeout }
     in
-    Some (Cascade_fsm.Call_err http_err)
+    Some (Keeper_fsm.Call_err http_err)
   | Agent_sdk.Error.Provider provider_err ->
-    Some (Cascade_fsm.Call_err (provider_error_to_http_error provider_err))
+    Some (Keeper_fsm.Call_err (provider_error_to_http_error provider_err))
   (* Model-capability errors: the next provider may handle these.
      CompletionContractViolation: model returned text when tool_use was
      required — a different model with better tool calling may succeed.
      UnrecognizedStopReason: model returned a non-standard stop reason
      that this provider does not map — another provider may not. *)
   | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation { reason; _ }) ->
-    Some (Cascade_fsm.Call_err
+    Some (Keeper_fsm.Call_err
       (Llm_provider.Http_client.AcceptRejected { reason }))
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason { reason }) ->
-    Some (Cascade_fsm.Call_err
+    Some (Keeper_fsm.Call_err
       (Llm_provider.Http_client.AcceptRejected { reason }))
   | Agent_sdk.Error.Config
       (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
   | Agent_sdk.Error.Config
       (Agent_sdk.Error.InvalidConfig { field = "tool_support"; detail }) ->
     Some
-      (Cascade_fsm.Call_err
+      (Keeper_fsm.Call_err
          (Llm_provider.Http_client.AcceptRejected { reason = detail }))
   (* Other Agent error variants are structural (budget, idle, exit, retries,
      guardrails, tripwires) and would recur on any model — not cascadeable. *)
@@ -260,7 +260,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
 let sdk_error_is_model_access_denied (err : Agent_sdk.Error.sdk_error) =
   match sdk_error_to_cascade_outcome err with
   | Some
-      (Cascade_fsm.Call_err
+      (Keeper_fsm.Call_err
          (Llm_provider.Http_client.ProviderFailure
             {
               kind =

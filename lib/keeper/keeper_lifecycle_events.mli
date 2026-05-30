@@ -41,7 +41,7 @@ val lifecycle_event_phase :
 
 (** {1 Event Bus Publishers}
 
-    Moved from [Cascade_events] to decouple keeper lifecycle observability
+    Moved from [Keeper_events] to decouple keeper lifecycle observability
     from the cascade module surface. *)
 
 val publish_keeper_lifecycle :

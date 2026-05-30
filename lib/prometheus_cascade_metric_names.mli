@@ -40,7 +40,7 @@ val metric_cascade_inter_chunk_seconds : string
     Labels: [provider_key]. *)
 val metric_cascade_provider_health_score : string
 
-(** Counter: cascade routing decisions emitted by [Cascade_fsm.decide].
+(** Counter: cascade routing decisions emitted by [Keeper_fsm.decide].
     Labels: [decision] in [accept|accept_on_exhaustion|try_next|exhausted]. *)
 val metric_cascade_decisions : string
 

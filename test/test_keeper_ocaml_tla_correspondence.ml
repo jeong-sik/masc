@@ -20,7 +20,7 @@
  *     as comment-pinned atoms (current state for tool_surface_class,
  *     tool_requirement, wirein order).
  *   - Run a small number of representative transition checks: invoke
- *     [Cascade_fsm.decide] on inputs that map onto B1 actions and
+ *     [Keeper_fsm.decide] on inputs that map onto B1 actions and
  *     verify the OCaml decision matches the spec's expected next
  *     phase.
  *
@@ -52,7 +52,7 @@ let test_phase_set_parity () =
   in
   (* The OCaml side does not have a single [type attempt_phase = …]
      — the recursion shape inside [keeper_turn_driver::try_cascade]
-     plus [Cascade_fsm.decision] together encode the FSM.  We pin
+     plus [Keeper_fsm.decision] together encode the FSM.  We pin
      the observable phase names here as the OCaml-side contract.
      A future cleanup may introduce a typed [attempt_phase] enum;
      when it does, replace this list with [all_symbols] from that
@@ -97,7 +97,7 @@ let test_provider_outcomes_parity () =
      cover every [provider_outcome] variant the OCaml ppx_tla emits.
      The spec may carry extra abstract outcomes (e.g. terminal-vs-hard-
      quota split) that OCaml encodes inside variant payloads. *)
-  let open Masc_mcp.Cascade_fsm in
+  let open Masc_mcp.Keeper_fsm in
   let ocaml_outcomes = Masc_test_deps.sorted_strings all_symbols in
   (* Spec set includes finer-grained split:
        call_err → call_err_cascadeable | call_err_terminal | call_err_hard_quota
@@ -133,8 +133,8 @@ let test_provider_outcomes_parity () =
 let test_call_ok_maps_to_success () =
   (* B1 action ResolveSuccess: from "awaiting_response" with
      last_outcome = "call_ok", attempt_phase' = "success".
-     OCaml: Cascade_fsm.decide on Call_ok returns Accept. *)
-  let open Masc_mcp.Cascade_fsm in
+     OCaml: Keeper_fsm.decide on Call_ok returns Accept. *)
+  let open Masc_mcp.Keeper_fsm in
   match decide ~accept_on_exhaustion:false ~is_last:false
           (Call_ok (Obj.magic ()))
   with
@@ -147,10 +147,10 @@ let test_call_ok_maps_to_success () =
 let test_call_err_cascadeable_maps_to_try_next () =
   (* B1 action ResolveTryNext (non-last tier): from
      "awaiting_response" with cascadeable error, tier_index advances,
-     attempt_phase' = "attempting".  OCaml: Cascade_fsm.decide on
+     attempt_phase' = "attempting".  OCaml: Keeper_fsm.decide on
      Call_err with cascade_health_filter.should_cascade=true returns
      Try_next. *)
-  let open Masc_mcp.Cascade_fsm in
+  let open Masc_mcp.Keeper_fsm in
   let err429 =
     Llm_provider.Http_client.HttpError { code = 429; body = "" }
   in
@@ -169,7 +169,7 @@ let test_accept_rejected_on_last_maps_to_exhausted () =
      slot released.
 
      This test pins the *directly observable* exhaustion path through
-     [Cascade_fsm.decide] — namely Accept_rejected + is_last=true +
+     [Keeper_fsm.decide] — namely Accept_rejected + is_last=true +
      accept_on_exhaustion=false → Exhausted.
 
      The Call_err exhaustion path is NOT directly observable from
@@ -180,7 +180,7 @@ let test_accept_rejected_on_last_maps_to_exhausted () =
      try_cascade tier walker), so spec-side it covers both paths.
      Phase 5.2/5.3 may add an integration-level test that exercises
      try_cascade and verifies the composite contract end-to-end. *)
-  let open Masc_mcp.Cascade_fsm in
+  let open Masc_mcp.Keeper_fsm in
   let dummy = Obj.magic () in
   match decide ~accept_on_exhaustion:false ~is_last:true
           (Accept_rejected { response = dummy; reason = "test" })
@@ -197,7 +197,7 @@ let test_accept_on_exhaustion_terminal () =
      into "success" (accepted last response).  OCaml: when
      accept_on_exhaustion=true and is_last=true with Accept_rejected,
      decide returns Accept_on_exhaustion (terminal success). *)
-  let open Masc_mcp.Cascade_fsm in
+  let open Masc_mcp.Keeper_fsm in
   let dummy = Obj.magic () in
   match decide ~accept_on_exhaustion:true ~is_last:true
           (Accept_rejected { response = dummy; reason = "test" })

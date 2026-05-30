@@ -15,7 +15,7 @@ let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
   if String.equal trimmed "" then None
   else
     let normalized_declared =
-      try Keeper_cascade_profile.normalize_declared_name trimmed with
+      try Keeper_turn_profile.normalize_declared_name trimmed with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | _ -> trimmed
     in

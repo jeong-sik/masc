@@ -93,7 +93,7 @@ let relay_test_config broken_root =
   { base with base_path = broken_root; workspace_path = broken_root }
 
 (* ================================================================ *)
-(* Cascade_events tests                                                  *)
+(* Keeper_events tests                                                  *)
 (* ================================================================ *)
 
 let test_event_bus_broadcast () =
@@ -102,7 +102,7 @@ let test_event_bus_broadcast () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Cascade_events.publish_broadcast ~agent_name:"test-agent" ~content:"hello";
+  Keeper_events.publish_broadcast ~agent_name:"test-agent" ~content:"hello";
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
@@ -117,7 +117,7 @@ let test_event_bus_heartbeat () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Cascade_events.publish_heartbeat ~agent_name:"keeper-runtime" ~turn:5 ~context_pct:0.42;
+  Keeper_events.publish_heartbeat ~agent_name:"keeper-runtime" ~turn:5 ~context_pct:0.42;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
@@ -219,7 +219,7 @@ let test_event_bus_task_transition () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Cascade_events.publish_task_transition ~agent_name:"worker"
+  Keeper_events.publish_task_transition ~agent_name:"worker"
     ~task_id:"task-1" ~transition:Types_core.Done_action;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);

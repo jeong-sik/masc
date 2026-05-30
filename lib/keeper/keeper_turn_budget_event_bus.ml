@@ -9,7 +9,7 @@
     Pure data + a left-biased merge (left wins on the
     string-id and overflow_imminent slots; right wins on
     last_compaction; counters sum). Verbatim extract from
-    [Keeper_turn_cascade_budget]; the parent retains transparent
+    [Keeper_turn_budget]; the parent retains transparent
     record aliases + 2 value aliases. *)
 
 type turn_event_bus_overflow = {

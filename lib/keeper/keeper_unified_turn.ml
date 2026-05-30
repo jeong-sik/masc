@@ -12,10 +12,10 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_turn_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
-include Keeper_turn_cascade_budget
+include Keeper_turn_budget
 include Keeper_unified_turn_types
 
 (* RFC-0132 PR-2: removed dead [runtime_lane_label] (0 callers). *)
@@ -136,16 +136,16 @@ let run_keeper_cycle
      the registry returned for an executable phase. *)
   let main_path phase_opt =
       (* RFC-0136 PR-2: cascade resolution stage extracted to
-         [Keeper_unified_turn_cascade_resolution].  The stage owns the
+         [Keeper_unified_turn_resolution].  The stage owns the
          [selected_item] override of [meta.cascade_ref], the
-         [Keeper_cascade_routing.select_cascade] call, and the
+         [Keeper_turn_routing.select_cascade] call, and the
          [fail_open_phase_buffer_when_unavailable] hardening.  Returns
          the updated meta + the resolved cascade name. *)
-      let { Keeper_unified_turn_cascade_resolution.resolved_meta = meta
+      let { Keeper_unified_turn_resolution.resolved_meta = meta
           ; resolved_cascade = effective_cascade_name
           }
         =
-        Keeper_unified_turn_cascade_resolution.resolve_cascade
+        Keeper_unified_turn_resolution.resolve_cascade
           ~meta
           ~phase_opt
           ~append_cascade_routed_manifest:(fun ~cascade_name ~decision ->
@@ -804,7 +804,7 @@ let run_keeper_cycle
                         Prometheus.inc_counter
                           Keeper_metrics.(to_string CascadeSyncFailures)
                           ~labels:
-                            [ "keeper", meta.name; "site", Keeper_cascade_sync_failure_site.(to_label Ambiguous_partial_pause) ]
+                            [ "keeper", meta.name; "site", Keeper_turn_sync_failure_site.(to_label Ambiguous_partial_pause) ]
                           ();
                         combined_err, updated_meta)
                     else err, updated_meta

@@ -143,10 +143,10 @@ let effective_declarative_cascade_name
   (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model. *)
   match defaults.model, defaults.manifest_path with
   | Some cascade_name, _ ->
-      Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
+      Keeper_turn_profile.normalize_keeper_runtime_declared_name cascade_name
   | None, Some _ -> (Keeper_config.default_cascade_name ())
   | None, None ->
-      Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+      Keeper_turn_profile.normalize_keeper_runtime_declared_name
         (cascade_name_of_meta meta)
 
 let resynced_tool_access
@@ -353,7 +353,7 @@ let ensure_keeper_meta config name =
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)
     let cascade_changed =
-      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
+      Keeper_turn_profile.normalize_declared_name (cascade_name_of_meta meta)
       <> Keeper_name.to_string resolved_target_cascade_name
     in
     (* #10061: persisted state vs TOML source can differ by a single

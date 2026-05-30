@@ -284,10 +284,10 @@ let fallback_cascade_for_unavailable_profile
     ~(base_cascade : string)
     ~(effective_cascade : string) : string option =
   let normalized_base =
-    Keeper_cascade_profile.normalize_declared_name base_cascade
+    Keeper_turn_profile.normalize_declared_name base_cascade
   in
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    Keeper_turn_profile.normalize_declared_name effective_cascade
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
@@ -302,7 +302,7 @@ let degraded_retry_after_recoverable_error
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    Keeper_turn_profile.normalize_declared_name effective_cascade
   in
   let effective_is_declared_phase_buffer =
     is_declared_phase_alias effective_cascade Keeper_config.phase_buffer_cascade_name
@@ -508,7 +508,7 @@ let normalized_cascade_name ~catalog_names name =
     || String.equal trimmed Keeper_config.phase_recovery_cascade_name
     || String.equal trimmed Keeper_config.tool_required_cascade_name
   then trimmed
-  else Keeper_cascade_profile.normalize_declared_name trimmed
+  else Keeper_turn_profile.normalize_declared_name trimmed
 
 let required_tool_rotation_candidate
     ?(allow_phase_recovery = false)
@@ -536,8 +536,8 @@ let required_tool_rotation_candidate
 
 let tool_required_rotation_cascade_name () =
   try
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Tool_required
+    Keeper_turn_profile.cascade_name_for_use
+      Keeper_turn_profile.Tool_required
   with Failure _ -> Keeper_config.tool_required_cascade_name
 
 let default_degraded_rotation_candidates
@@ -553,8 +553,8 @@ let default_degraded_rotation_candidates
   in
   let phase_recovery_cascade =
     normalized_cascade_name ~catalog_names
-      (Keeper_cascade_profile.cascade_name_for_use
-         Keeper_cascade_profile.Phase_recovery)
+      (Keeper_turn_profile.cascade_name_for_use
+         Keeper_turn_profile.Phase_recovery)
   in
   match tool_requirement with
   | Required -> [ normalized_base; tool_required_cascade ]
@@ -630,7 +630,7 @@ let degraded_rotation_after_recoverable_error
       (* Load the live catalog once at the degraded-rotation boundary and pass
          the snapshot through normalization/filter helpers.  This preserves
          concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = Keeper_cascade_profile.catalog_lookup_names () in
+      let catalog_names = Keeper_turn_profile.catalog_lookup_names () in
       let attempted =
         attempted_cascades
         |> List.map (normalized_cascade_name ~catalog_names)

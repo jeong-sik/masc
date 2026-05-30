@@ -3,7 +3,7 @@
 
     Pure derivation pipeline over [Cascade_catalog_runtime] (preferred)
     + [Cascade_catalog_validator] (fallback on snapshot unavailability)
-    + [Keeper_cascade_profile.keeper_catalog_names] (keeper-assignable
+    + [Keeper_turn_profile.keeper_catalog_names] (keeper-assignable
     filter). *)
 
 (** Result of one gate computation:

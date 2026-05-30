@@ -236,7 +236,7 @@ let test_wait_observation_reason_labels () =
        ())
 
 let test_cascade_backpressure_decision () =
-  let blocked_resilience : Masc_mcp.Keeper_cascade_resilience.cascade_resilience =
+  let blocked_resilience : Masc_mcp.Keeper_turn_resilience.cascade_resilience =
     {
       ok = false;
       cascade_name = "cascade.provider_k-coding-with-spark";

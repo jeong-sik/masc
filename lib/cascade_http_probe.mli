@@ -129,11 +129,11 @@ val cache_clear : unit -> unit
 (** Number of cached entries.  Test helper. *)
 val cache_size : unit -> int
 
-(** {1 Probe adapter for {!Cascade_capacity_probe}} *)
+(** {1 Probe adapter for {!Keeper_capacity_probe}} *)
 
 (** First-class probe wrapper for registration with
-    {!Cascade_capacity_probe.register}.  Structurally satisfies
-    {!Cascade_capacity_probe.Probe}. *)
+    {!Keeper_capacity_probe.register}.  Structurally satisfies
+    {!Keeper_capacity_probe.Probe}. *)
 module Http_probe : sig
   val can_probe : url:string -> bool
 

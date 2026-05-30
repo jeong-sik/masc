@@ -2,7 +2,7 @@
     on 2026-05-17 to fix fleet-wide [pre_dispatch_max_tokens_ceiling_violation]
     after the multilane cascade rollout (see PR body for incident timeline).
 
-    Tests target [Cascade_inference.For_testing.clamp_with_ceiling] so they
+    Tests target [Keeper_inference.For_testing.clamp_with_ceiling] so they
     do not need a live cascade.toml on disk; the production helper
     [resolve_max_tokens] composes the same clamp with the catalog-driven
     ceiling lookup. *)
@@ -13,12 +13,12 @@ let cascade name =
   Cascade_name.of_string_exn name
 
 let reset () =
-  Cascade_inference.For_testing.reset_auto_max_tokens_clamp_warnings ()
+  Keeper_inference.For_testing.reset_auto_max_tokens_clamp_warnings ()
 
 let test_no_ceiling_passes_through () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.test_a")
       ~source:"cascade_config"
       ~ceiling:None
@@ -29,7 +29,7 @@ let test_no_ceiling_passes_through () =
 let test_ceiling_above_request_passes_through () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.test_b")
       ~source:"cascade_config"
       ~ceiling:(Some 32000)
@@ -40,7 +40,7 @@ let test_ceiling_above_request_passes_through () =
 let test_ceiling_at_request_passes_through () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.test_c")
       ~source:"cascade_config"
       ~ceiling:(Some 16384)
@@ -51,7 +51,7 @@ let test_ceiling_at_request_passes_through () =
 let test_ceiling_below_request_clamps () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.provider_k-coding-with-spark")
       ~source:"cascade_config"
       ~ceiling:(Some 8192)
@@ -64,7 +64,7 @@ let test_ceiling_below_request_clamps () =
 let test_fallback_source_clamps () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.test_d")
       ~source:"fallback"
       ~ceiling:(Some 8192)
@@ -75,7 +75,7 @@ let test_fallback_source_clamps () =
 let test_caller_override_source_clamps () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.test_override")
       ~source:"caller_override"
       ~ceiling:(Some 8192)
@@ -86,7 +86,7 @@ let test_caller_override_source_clamps () =
 let test_zero_ceiling_treated_as_no_ceiling () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.test_e")
       ~source:"cascade_config"
       ~ceiling:(Some 0)
@@ -97,7 +97,7 @@ let test_zero_ceiling_treated_as_no_ceiling () =
 let test_negative_ceiling_treated_as_no_ceiling () =
   reset ();
   let out =
-    Cascade_inference.For_testing.clamp_with_ceiling
+    Keeper_inference.For_testing.clamp_with_ceiling
       ~cascade_name:(cascade "cascade.test_f")
       ~source:"cascade_config"
       ~ceiling:(Some (-1))
@@ -109,11 +109,11 @@ let test_warn_dedup_per_tuple () =
   reset ();
   let name = cascade "cascade.test_g" in
   let first =
-    Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
+    Keeper_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"cascade_config" ~max_tokens:16384 ~ceiling:8192
   in
   let second =
-    Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
+    Keeper_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"cascade_config" ~max_tokens:16384 ~ceiling:8192
   in
   Alcotest.(check bool) "first occurrence logs" true first;
@@ -123,11 +123,11 @@ let test_warn_emits_distinct_source () =
   reset ();
   let name = cascade "cascade.test_h" in
   let cfg =
-    Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
+    Keeper_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"cascade_config" ~max_tokens:16384 ~ceiling:8192
   in
   let fb =
-    Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
+    Keeper_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"fallback" ~max_tokens:16384 ~ceiling:8192
   in
   Alcotest.(check bool) "cascade_config source logs" true cfg;
@@ -137,11 +137,11 @@ let test_warn_emits_distinct_caller_override_source () =
   reset ();
   let name = cascade "cascade.test_i" in
   let cfg =
-    Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
+    Keeper_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"cascade_config" ~max_tokens:16384 ~ceiling:8192
   in
   let override =
-    Cascade_inference.For_testing.should_log_auto_max_tokens_clamp
+    Keeper_inference.For_testing.should_log_auto_max_tokens_clamp
       ~cascade_name:name ~source:"caller_override" ~max_tokens:16384
       ~ceiling:8192
   in

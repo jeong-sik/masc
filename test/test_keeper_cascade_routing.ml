@@ -8,7 +8,7 @@
     - Running selects base_cascade unchanged *)
 
 open Alcotest
-module Routing = Masc_mcp.Keeper_cascade_routing
+module Routing = Masc_mcp.Keeper_turn_routing
 module SM = Masc_mcp.Keeper_state_machine
 
 let routing_t = testable

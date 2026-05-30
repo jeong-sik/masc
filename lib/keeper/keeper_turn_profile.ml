@@ -1,4 +1,4 @@
-(** See {!Keeper_cascade_profile} interface for rationale. *)
+(** See {!Keeper_turn_profile} interface for rationale. *)
 
 (** Per RFC-0041 cascade routing SSOT, the live cascade catalog
     (cascade.toml) is the only source of truth for cascade profile

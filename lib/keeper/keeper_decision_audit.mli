@@ -101,7 +101,7 @@ type provider_health =
     served the most recent successful response.
 
     Optional parameters bind runtime state from CascadeLiveness.tla
-    ([phealth], slot occupancy) and Keeper_cascade_routing (the reason
+    ([phealth], slot occupancy) and Keeper_turn_routing (the reason
     the routing layer picked this cascade profile, e.g. phase-derived
     vs explicit override). When omitted, the output falls back to the
     previous non-live rendering — callers can adopt parameters

@@ -8,7 +8,7 @@
     Contract:
     - Pure read. No mutation, no I/O, no event emission.
     - Never calls [Keeper_state_machine.apply_event],
-      [Keeper_cascade_routing.select_cascade], or any routine that would
+      [Keeper_turn_routing.select_cascade], or any routine that would
       shift keeper lifecycle state.
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).

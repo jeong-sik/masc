@@ -75,7 +75,7 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
-  ; cascade_engine : Keeper_cascade_engine.t
+  ; cascade_engine : Keeper_turn_engine.t
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; runtime_manifest_required_tool_names : string list
@@ -93,15 +93,15 @@ let emit_runtime_manifest
   | Some manifest_ctx, Some append ->
     let decision =
       match decision with
-      | None -> Some (`Assoc (Keeper_cascade_engine.manifest_fields ctx.cascade_engine))
+      | None -> Some (`Assoc (Keeper_turn_engine.manifest_fields ctx.cascade_engine))
       | Some (`Assoc fields) ->
           Some
             (`Assoc
-              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine @ fields))
+              (Keeper_turn_engine.manifest_fields ctx.cascade_engine @ fields))
       | Some other ->
           Some
             (`Assoc
-              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine
+              (Keeper_turn_engine.manifest_fields ctx.cascade_engine
                @ [ ("decision", other) ]))
     in
     ctx.seq_ref := !(ctx.seq_ref) + 1;

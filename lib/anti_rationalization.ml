@@ -496,7 +496,7 @@ let parse_verdict (text : string) : (verdict, string) result =
     because different model architectures have different blindspots.
     See: Provider_a "Harness Design" blog analysis. *)
 let default_evaluator_cascade =
-  Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Cross_verifier
+  Keeper_turn_profile.cascade_name_for_use Keeper_turn_profile.Cross_verifier
 ;;
 
 (* ================================================================ *)

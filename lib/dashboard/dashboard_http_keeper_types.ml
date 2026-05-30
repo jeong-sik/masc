@@ -12,11 +12,11 @@ let runtime_warning_ctx_ratio =
 
 (* RFC-0149 §3.3 — typed Result resolver for dashboard call sites.  The
    legacy [live_keeper_cascade_name] facade + its silent-fallback carrier
-   ([Keeper_cascade_profile.resolve_live]) were removed in the §3.3
+   ([Keeper_turn_profile.resolve_live]) were removed in the §3.3
    sunset closeout. *)
 let live_keeper_cascade_name_result (raw : string) :
     (Cascade_name.t, [ `Unresolved of string ]) result =
-  Keeper_cascade_profile.resolve_live_result raw
+  Keeper_turn_profile.resolve_live_result raw
 
 let compute_health_score
     ~restart_count ~max_restarts ~recent_crash_count

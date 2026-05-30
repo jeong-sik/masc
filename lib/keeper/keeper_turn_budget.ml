@@ -1,4 +1,4 @@
-(* Keeper_turn_cascade_budget — cascade execution types, fail-open rotation,
+(* Keeper_turn_budget — cascade execution types, fail-open rotation,
    provider timeout budget resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
@@ -20,19 +20,19 @@ type cascade_execution = {
 }
 
 let fail_open_rotation_cascades_from_catalog =
-  Keeper_turn_cascade_budget_routing.fail_open_rotation_cascades_from_catalog
+  Keeper_turn_budget_routing.fail_open_rotation_cascades_from_catalog
 
 let active_fail_open_rotation_cascades =
-  Keeper_turn_cascade_budget_routing.active_fail_open_rotation_cascades
+  Keeper_turn_budget_routing.active_fail_open_rotation_cascades
 
 let next_fail_open_cascade_for_turn =
-  Keeper_turn_cascade_budget_routing.next_fail_open_cascade_for_turn
+  Keeper_turn_budget_routing.next_fail_open_cascade_for_turn
 
-let sdk_error_kind = Keeper_turn_cascade_budget_routing.sdk_error_kind
+let sdk_error_kind = Keeper_turn_budget_routing.sdk_error_kind
 let record_turn_failure_stress =
-  Keeper_turn_cascade_budget_routing.record_turn_failure_stress
+  Keeper_turn_budget_routing.record_turn_failure_stress
 
-include Keeper_turn_cascade_budget_provider_timeout
+include Keeper_turn_budget_provider_timeout
 
 (* RFC-OAS-XXX (Team JJ §6) POC, 2026-05-21
    ------------------------------------------------------------------
@@ -81,12 +81,12 @@ type retry_admission_denial =
       remaining_turn_budget_s : float;
     }
 
-type attempt_kind = Keeper_turn_cascade_budget_admission.attempt_kind =
+type attempt_kind = Keeper_turn_budget_admission.attempt_kind =
   | First_attempt
   | Retry_attempt
 
 let attempt_kind_is_retry =
-  Keeper_turn_cascade_budget_admission.attempt_kind_is_retry
+  Keeper_turn_budget_admission.attempt_kind_is_retry
 let retry_admission_denial_to_yojson =
   Keeper_internal_error.retry_admission_denial_to_yojson
 
@@ -286,13 +286,13 @@ let next_fail_open_cascade_for_turn_with_budget
       else Degraded_retry_budget_exhausted retry
 
 type turn_event_bus_overflow =
-  Keeper_turn_cascade_budget_event_bus.turn_event_bus_overflow = {
+  Keeper_turn_budget_event_bus.turn_event_bus_overflow = {
   estimated_tokens : int;
   limit_tokens : int;
 }
 
 type turn_event_bus_compaction =
-  Keeper_turn_cascade_budget_event_bus.turn_event_bus_compaction = {
+  Keeper_turn_budget_event_bus.turn_event_bus_compaction = {
   before_tokens : int;
   after_tokens : int;
   tokens_freed : int;
@@ -300,7 +300,7 @@ type turn_event_bus_compaction =
 }
 
 type turn_event_bus_summary =
-  Keeper_turn_cascade_budget_event_bus.turn_event_bus_summary = {
+  Keeper_turn_budget_event_bus.turn_event_bus_summary = {
   correlation_id : string option;
   run_id : string option;
   caused_by : string option;
@@ -313,13 +313,13 @@ type turn_event_bus_summary =
 }
 
 let empty_turn_event_bus_summary =
-  Keeper_turn_cascade_budget_event_bus.empty_turn_event_bus_summary
+  Keeper_turn_budget_event_bus.empty_turn_event_bus_summary
 
 let merge_turn_event_bus_summary =
-  Keeper_turn_cascade_budget_event_bus.merge_turn_event_bus_summary
+  Keeper_turn_budget_event_bus.merge_turn_event_bus_summary
 
 let add_payload_kind =
-  Keeper_turn_cascade_budget_event_bus.add_payload_kind
+  Keeper_turn_budget_event_bus.add_payload_kind
 
 let summarize_turn_event_bus
     (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =
@@ -784,7 +784,7 @@ let enqueue_partial_commit_continue_gate
                meta.name err);
              Prometheus.inc_counter
                Keeper_metrics.(to_string CascadeSyncFailures)
-               ~labels:[("keeper", meta.name); ("site", Keeper_cascade_sync_failure_site.(to_label Resume_sync))]
+               ~labels:[("keeper", meta.name); ("site", Keeper_turn_sync_failure_site.(to_label Resume_sync))]
                ()
       | Agent_sdk.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
@@ -801,7 +801,7 @@ let enqueue_partial_commit_continue_gate
                meta.name err reason);
              Prometheus.inc_counter
                Keeper_metrics.(to_string CascadeSyncFailures)
-               ~labels:[("keeper", meta.name); ("site", Keeper_cascade_sync_failure_site.(to_label Pause_sync))]
+               ~labels:[("keeper", meta.name); ("site", Keeper_turn_sync_failure_site.(to_label Pause_sync))]
                ())
     ()
 

@@ -479,7 +479,7 @@ module KeeperKeepalive = struct
       this catches the case where a single bulk read hangs without
       producing line breaks.
 
-      Opt-in: unset env leaves [None] so {!Cascade_agent_context} skips
+      Opt-in: unset env leaves [None] so {!Keeper_agent_context} skips
       the builder wiring. Set to a value strictly less than the effective
       OAS attempt cap for attempt-level fall-forward; set
       [<= stream_idle_timeout_sec] for a strict overall cap.

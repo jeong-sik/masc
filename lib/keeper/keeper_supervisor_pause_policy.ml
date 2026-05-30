@@ -16,7 +16,7 @@
 
     The phase-event publisher [publish_phase_lifecycle] is injected
     explicitly so this module does not need to know about the
-    [Keeper_lifecycle_events] / [Cascade_events] surface. *)
+    [Keeper_lifecycle_events] / [Keeper_events] surface. *)
 
 open Keeper_types
 open Keeper_meta_contract

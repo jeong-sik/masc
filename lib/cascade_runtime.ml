@@ -49,7 +49,7 @@ let has_execution_model_config () =
 
 let default_model_strings ~cascade_name =
   let cascade_name =
-    cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
+    cascade_name |> cascade_name_to_string |> Keeper_turn_profile.canonicalize
   in
   match Provider_runtime_projection.preferred_execution_model_labels () with
   | [] ->
@@ -277,7 +277,7 @@ let models_of_cascade_name cascade_name =
   | Ok labels -> labels
   | Error detail ->
       let normalized =
-        Keeper_cascade_profile.normalize_declared_name cascade_name_string
+        Keeper_turn_profile.normalize_declared_name cascade_name_string
       in
       Log.warn ~ctx:"CascadeRuntime"
         "cascade config resolve failed for %s, returning []: %s"
@@ -405,7 +405,7 @@ let resolve_named_providers_result ?provider_filter
     : (Llm_provider.Provider_config.t list, string) result =
   let cascade_name_string = cascade_name_to_string cascade_name in
   let label =
-    Keeper_cascade_profile.normalize_declared_name cascade_name_string
+    Keeper_turn_profile.normalize_declared_name cascade_name_string
   in
   match
     Cascade_catalog_runtime.resolve_named_providers ?provider_filter
@@ -427,7 +427,7 @@ let resolve_named_providers_result_strict ?provider_filter
     : (Llm_provider.Provider_config.t list, string) result =
   let cascade_name_string = cascade_name_to_string cascade_name in
   let label =
-    Keeper_cascade_profile.normalize_declared_name cascade_name_string
+    Keeper_turn_profile.normalize_declared_name cascade_name_string
   in
   match
     Cascade_catalog_runtime.resolve_named_providers_strict ?provider_filter
@@ -454,7 +454,7 @@ let resolve_named_providers ?provider_filter
   | Ok providers -> providers
   | Error detail ->
       Log.Misc.warn "cascade %s: %s"
-        (Keeper_cascade_profile.normalize_declared_name
+        (Keeper_turn_profile.normalize_declared_name
            (cascade_name_to_string cascade_name))
         detail;
       []

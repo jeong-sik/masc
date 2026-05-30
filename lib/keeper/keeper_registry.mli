@@ -81,7 +81,7 @@ val all : ?base_path:string -> unit -> registry_entry list
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
 (* Cascade-attempt persistence + enrichment moved to
-   Keeper_registry_cascade_attempt (record / enrich_fiber_unresolved_outcome). *)
+   Keeper_registry_turn_attempt (record / enrich_fiber_unresolved_outcome). *)
 
 (** Record a restart. Increments restart_count and updates last_restart_ts. *)
 val record_restart : base_path:string -> string -> unit

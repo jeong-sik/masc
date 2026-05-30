@@ -27,7 +27,7 @@ type t = {
 let compute () : t =
   let config_path = Cascade_runtime.cascade_config_path () in
   let keeper_assignable_profiles =
-    Keeper_cascade_profile.keeper_catalog_names ?config_path ()
+    Keeper_turn_profile.keeper_catalog_names ?config_path ()
     |> List.sort_uniq String.compare
   in
   let keeper_assignable_profile profile =

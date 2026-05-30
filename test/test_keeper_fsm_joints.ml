@@ -24,7 +24,7 @@
 
 module Obs = Masc_mcp.Keeper_composite_observer
 module SM = Masc_mcp.Keeper_state_machine
-module Routing = Masc_mcp.Keeper_cascade_routing
+module Routing = Masc_mcp.Keeper_turn_routing
 module Keeper_config = Masc_mcp.Keeper_config
 
 (* ── Pretty-printers for Alcotest assertion messages ───────── *)
@@ -374,7 +374,7 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
         false i3_violated
 
 (* ============================================================
-   Section 4 — KDP → KCL join via Keeper_cascade_routing.
+   Section 4 — KDP → KCL join via Keeper_turn_routing.
 
    Enumerate every keeper phase and assert select_cascade returns the
    profile mandated by the cascade routing contract (mli lines 22-26).

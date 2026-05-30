@@ -35,7 +35,7 @@ let capacity_backpressure_source_of_string = function
 
 (* RFC-0158: typed denial reason carried by {!Retry_admission_denied}.
    Defined here (cascade layer) to avoid a dependency cycle with
-   [Keeper_turn_cascade_budget].  The keeper layer re-exports via
+   [Keeper_turn_budget].  The keeper layer re-exports via
    [type retry_admission_denial = Keeper_internal_error.retry_admission_denial]. *)
 type retry_admission_denial =
   | Retry_budget_below_min of {

@@ -84,7 +84,7 @@ let test_overflow_pause_marks_auto_resumable () =
      | Error e -> fail ("seed failed: " ^ e));
     ignore (Keeper_registry.register ~base_path:base_dir meta.name meta);
     let paused =
-      Keeper_turn_cascade_budget.pause_keeper_for_overflow
+      Keeper_turn_budget.pause_keeper_for_overflow
         ~config
         ~meta
         ~reason:"test-overflow"
@@ -117,7 +117,7 @@ let test_sync_pause_auto_resume_flag_sets_backoff () =
      | Error e -> fail ("seed failed: " ^ e));
     ignore (Keeper_registry.register ~base_path:base_dir meta.name meta);
     match
-      Keeper_turn_cascade_budget.sync_keeper_paused_state_with_resume_policy
+      Keeper_turn_budget.sync_keeper_paused_state_with_resume_policy
         ~config
         ~meta
         ~paused:true
@@ -260,7 +260,7 @@ let test_pause_sync_sets_auto_resume_backoff () =
       ignore (Keeper_registry.register ~base_path:base_dir m0.name m0);
       let paused =
         match
-          Keeper_turn_cascade_budget.sync_keeper_paused_state_with_resume_policy
+          Keeper_turn_budget.sync_keeper_paused_state_with_resume_policy
             ~config
             ~meta:m0
             ~paused:true

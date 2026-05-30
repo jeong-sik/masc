@@ -90,15 +90,15 @@ let run_named
     ?per_provider_timeout_s
     ()
   : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
-  let cascade_engine = Keeper_cascade_engine.keeper_managed in
-  match Keeper_cascade_engine.guard_keeper_hot_path cascade_engine with
+  let cascade_engine = Keeper_turn_engine.keeper_managed in
+  match Keeper_turn_engine.guard_keeper_hot_path cascade_engine with
   | Error msg -> Error (Agent_sdk.Error.Internal msg)
   | Ok () ->
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
   let cascade_name =
-    Keeper_cascade_profile.normalize_declared_name cascade_name
+    Keeper_turn_profile.normalize_declared_name cascade_name
   in
   let error_cascade_name = Keeper_name.of_string_exn cascade_name in
   let runtime_cascade_name = Keeper_name.of_string_exn cascade_name in
@@ -132,7 +132,7 @@ let run_named
     runtime_candidates_of_providers original_candidate_cfgs
   in
   let required_capability_profile =
-    Keeper_cascade_profile.required_capability_profile_of_cascade_name cascade_name
+    Keeper_turn_profile.required_capability_profile_of_cascade_name cascade_name
   in
   let tool_filtered_candidate_cfgs =
     filter_candidate_providers_for_tool_support
@@ -526,7 +526,7 @@ let run_named
            ~status:"error"
            ~decision:
              (`Assoc
-               (Keeper_cascade_engine.manifest_fields cascade_engine
+               (Keeper_turn_engine.manifest_fields cascade_engine
                 @ [
                     ("reason", `String (kind_of_masc_internal_error internal_error));
                     ( "required_tool_names",
@@ -663,15 +663,15 @@ let run_named
     | Some manifest_ctx, Some append ->
       let decision =
         match decision with
-        | None -> Some (`Assoc (Keeper_cascade_engine.manifest_fields cascade_engine))
+        | None -> Some (`Assoc (Keeper_turn_engine.manifest_fields cascade_engine))
         | Some (`Assoc fields) ->
             Some
               (`Assoc
-                (Keeper_cascade_engine.manifest_fields cascade_engine @ fields))
+                (Keeper_turn_engine.manifest_fields cascade_engine @ fields))
       | Some other ->
             Some
               (`Assoc
-                (Keeper_cascade_engine.manifest_fields cascade_engine
+                (Keeper_turn_engine.manifest_fields cascade_engine
                  @ [ ("decision", other) ]))
       in
       let decision =
@@ -712,7 +712,7 @@ let run_named
         Some (Keeper_deadline.of_seconds_from_now ~clock turn_budget)
     | None -> None
   in
-  let try_cascade_ctx : Keeper_turn_driver_try_cascade.try_cascade_ctx = {
+  let try_cascade_ctx : Keeper_turn_driver_try_turn.try_cascade_ctx = {
     cascade_name;
     error_cascade_name;
     keeper_name;
@@ -750,7 +750,7 @@ let run_named
         ?(pre_dispatch_required_tool_rejections_rev = [])
         ?resume_checkpoint ?per_provider_timeout_s ?last_capacity_source
         ?last_capacity_backpressure remaining last_err =
-    Keeper_turn_driver_try_cascade.run
+    Keeper_turn_driver_try_turn.run
       ~on_success
       ~pre_dispatch_required_tool_rejections_rev
       ?resume_checkpoint ?per_provider_timeout_s ?last_capacity_source
@@ -782,7 +782,7 @@ let run_named
   let adapter = Cascade_runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
     health = Cascade_health_tracker.global;
-    capacity = Cascade_capacity_probe.capacity;
+    capacity = Keeper_capacity_probe.capacity;
     now = Unix.gettimeofday ();
     rand_int = Random.int;
     keeper_name;

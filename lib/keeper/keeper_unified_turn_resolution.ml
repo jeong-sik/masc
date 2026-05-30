@@ -1,8 +1,8 @@
-(* Keeper_unified_turn_cascade_resolution — RFC-0136 PR-2.
+(* Keeper_unified_turn_resolution — RFC-0136 PR-2.
 
    Extracted from keeper_unified_turn.ml (L143-210) during the
    run_keeper_cycle stage decomposition. Owns the [selected_item]
-   override of [meta.cascade_ref], the [Keeper_cascade_routing.select_cascade]
+   override of [meta.cascade_ref], the [Keeper_turn_routing.select_cascade]
    call, and the [fail_open_phase_buffer_when_unavailable] hardening
    of the resolved cascade. *)
 
@@ -36,7 +36,7 @@ let resolve_cascade
       Keeper_state_machine.Failing
   in
   let routing =
-    Keeper_cascade_routing.select_cascade
+    Keeper_turn_routing.select_cascade
       ~base_cascade:(cascade_name_of_meta meta)
       ~phase
   in
@@ -68,8 +68,8 @@ let resolve_cascade
       resolved_cascade;
   let decision =
     `Assoc
-      (Keeper_cascade_engine.manifest_fields
-         Keeper_cascade_engine.keeper_managed
+      (Keeper_turn_engine.manifest_fields
+         Keeper_turn_engine.keeper_managed
        @ [
          ("base_cascade", `String (cascade_name_of_meta meta));
          ("effective_cascade", `String routing.effective_cascade);

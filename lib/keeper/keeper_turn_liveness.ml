@@ -1,7 +1,7 @@
 (* Keeper_turn_liveness — phase-buffer cascade liveness decisions and turn
    livelock configuration.
 
-   Provider-specific knowledge lives in [Cascade_capacity_probe]; this
+   Provider-specific knowledge lives in [Keeper_capacity_probe]; this
    module routes probeable URLs through that registry without naming
    any single provider.
 
@@ -31,9 +31,9 @@ let decide_phase_buffer_liveness
     | Some resolve_runtime_url -> resolve_runtime_url
     | None -> Cascade_runtime_candidate.runtime_url_of_label
   in
-  let normalized_base = Keeper_cascade_profile.normalize_declared_name base_cascade in
+  let normalized_base = Keeper_turn_profile.normalize_declared_name base_cascade in
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    Keeper_turn_profile.normalize_declared_name effective_cascade
   in
   if
     (not (String.equal normalized_effective Keeper_config.phase_buffer_cascade_name))
@@ -43,7 +43,7 @@ let decide_phase_buffer_liveness
     let probeable_urls =
       labels
       |> List.filter_map resolve_runtime_url
-      |> List.filter (fun url -> Cascade_capacity_probe.can_probe ~url)
+      |> List.filter (fun url -> Keeper_capacity_probe.can_probe ~url)
       |> dedupe_keep_order
     in
     match probeable_urls with
@@ -77,7 +77,7 @@ let fail_open_phase_buffer_when_unavailable
          | Some sw, Some net ->
            Some
              (fun base_url ->
-               Option.is_some (Cascade_capacity_probe.probe ~sw ~net ~url:base_url ()))
+               Option.is_some (Keeper_capacity_probe.probe ~sw ~net ~url:base_url ()))
          | _ -> None)
     in
     (match probe_base_url with
@@ -91,7 +91,7 @@ let fail_open_phase_buffer_when_unavailable
 (** PR-B: saturation pre-skip support (provider-agnostic).
 
     When every label in the resolved cascade points at the same
-    [base_url] AND a registered [Cascade_capacity_probe] recognises
+    [base_url] AND a registered [Keeper_capacity_probe] recognises
     that URL, we can pre-check the probe cache before paying an
     [Agent.run] dispatch.  If the probe reports
     [process_available <= 0] the request would queue on a busy slot

@@ -143,13 +143,13 @@ let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
   in
   match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
-      (Cascade_fsm.Call_err
+      (Keeper_fsm.Call_err
          (Llm_provider.Http_client.HttpError
             { code = 404; body = {|{"detail":"Not Found"}|} })) -> ()
   | outcome ->
     Alcotest.failf
       "expected Some (Call_err (HttpError 404)) for 404-like InvalidRequest, got %s"
-      (Cascade_fsm.provider_outcome_option_to_string outcome)
+      (Keeper_fsm.provider_outcome_option_to_string outcome)
 ;;
 
 let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
@@ -159,13 +159,13 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
   in
   match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
-      (Cascade_fsm.Call_err
+      (Keeper_fsm.Call_err
          (Llm_provider.Http_client.HttpError
             { code = 400; body = {|{"detail":"Bad Request"}|} })) -> ()
   | outcome ->
     Alcotest.failf
       "expected Some (Call_err (HttpError 400)) for ordinary InvalidRequest, got %s"
-      (Cascade_fsm.provider_outcome_option_to_string outcome)
+      (Keeper_fsm.provider_outcome_option_to_string outcome)
 ;;
 
 let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
@@ -173,7 +173,7 @@ let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
   let err = Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message }) in
   match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
-      (Cascade_fsm.Call_err
+      (Keeper_fsm.Call_err
          (Llm_provider.Http_client.ProviderFailure
             { kind =
                 Llm_provider.Http_client.Capability_mismatch
@@ -193,7 +193,7 @@ let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
     Alcotest.failf
       "expected model access InvalidRequest to cascade as ProviderFailure \
        Capability_mismatch, got %s"
-      (Cascade_fsm.provider_outcome_option_to_string outcome)
+      (Keeper_fsm.provider_outcome_option_to_string outcome)
 ;;
 
 let test_sdk_error_is_model_access_denied_predicate () =
@@ -223,12 +223,12 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
       (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
   in
   match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
-  | Some (Cascade_fsm.Call_err (Llm_provider.Http_client.AcceptRejected { reason })) ->
+  | Some (Keeper_fsm.Call_err (Llm_provider.Http_client.AcceptRejected { reason })) ->
     Alcotest.(check string) "reason preserved" detail reason
   | outcome ->
     Alcotest.failf
       "expected runtime_mcp_auth InvalidConfig to cascade as AcceptRejected, got %s"
-      (Cascade_fsm.provider_outcome_option_to_string outcome)
+      (Keeper_fsm.provider_outcome_option_to_string outcome)
 ;;
 
 let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
@@ -244,7 +244,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
          })
   in
   match Keeper_turn_driver.sdk_error_to_cascade_outcome structured with
-  | Some (Cascade_fsm.Call_err (Llm_provider.Http_client.NetworkError { message; kind }))
+  | Some (Keeper_fsm.Call_err (Llm_provider.Http_client.NetworkError { message; kind }))
     ->
     Alcotest.(check string) "detail remains typed marker" detail message;
     Alcotest.(check bool)
@@ -254,7 +254,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   | outcome ->
     Alcotest.failf
       "expected resumable CLI session to cascade as NetworkError, got %s"
-      (Cascade_fsm.provider_outcome_option_to_string outcome)
+      (Keeper_fsm.provider_outcome_option_to_string outcome)
 ;;
 
 let test_sdk_error_is_resumable_cli_session_detects_structured_error () =

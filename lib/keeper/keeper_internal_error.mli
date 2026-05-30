@@ -54,7 +54,7 @@ val capacity_backpressure_source_of_string :
 
 (** RFC-0158: typed denial reason carried by {!Retry_admission_denied}.
     Defined here (cascade layer) to avoid a dependency cycle with
-    [Keeper_turn_cascade_budget].  The keeper layer re-exports via
+    [Keeper_turn_budget].  The keeper layer re-exports via
     [type retry_admission_denial = Keeper_internal_error.retry_admission_denial]. *)
 
 type retry_admission_denial =
@@ -146,7 +146,7 @@ type masc_internal_error =
       cascade rotation and supervisor pause-policy should treat it differently.
 
       [denial_reason] carries the typed budget breakdown from
-      {!Keeper_turn_cascade_budget.retry_admission_denial}; [is_retry]
+      {!Keeper_turn_budget.retry_admission_denial}; [is_retry]
       distinguishes retry-path from first-attempt denials. *)
   | Retry_admission_denied of {
       denial_reason : retry_admission_denial;

@@ -131,7 +131,7 @@ val save_raw_config_json : string -> (Yojson.Safe.t, string) Result.t
     contract can be exercised in tests directly.
 
     The [cascade_name] argument is forwarded as-is (not canonicalized);
-    the [canonical] field is [Keeper_cascade_profile.resolve_live
+    the [canonical] field is [Keeper_turn_profile.resolve_live
     cascade_name]. When the two match, the UI renders "—" in the
     canonical column.
 

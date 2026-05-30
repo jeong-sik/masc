@@ -1,4 +1,4 @@
-(** Keeper_turn_driver_cascade_health — Health tracking for cascade candidates.
+(** Keeper_turn_driver_health — Health tracking for cascade candidates.
 
     Extracted from [Keeper_turn_driver.run_named]. Pure functions for
     recording provider health events (success, rejection, error) and

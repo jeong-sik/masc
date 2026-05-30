@@ -13,7 +13,7 @@ open Dashboard_cascade_helpers
 let classify_capacity_key url =
   if Masc_network_defaults.is_cli_sentinel_url url
   then "cli"
-  else if Cascade_capacity_probe.can_probe ~url
+  else if Keeper_capacity_probe.can_probe ~url
   then "http_probe"
   else "other"
 ;;

@@ -1,4 +1,4 @@
-(* Keeper_turn_cascade_budget — cascade execution types, fail-open rotation,
+(* Keeper_turn_budget — cascade execution types, fail-open rotation,
    provider timeout budget resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 

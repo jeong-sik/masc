@@ -148,8 +148,8 @@ let preflight_keeper_msg ctx args : (unit, string) result =
       | Error e -> Error e
       | Ok turn_cascade_name ->
         (match
-           Keeper_cascade_resilience.cascade_resilience_error_message
-             (Keeper_cascade_resilience.cascade_resilience_of_name
+           Keeper_turn_resilience.cascade_resilience_error_message
+             (Keeper_turn_resilience.cascade_resilience_of_name
                 (Keeper_name.to_string turn_cascade_name))
          with
          | Some e -> Error e
@@ -228,8 +228,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         tool_result_error ("" ^ e)
       | Ok turn_cascade_name ->
       (match
-         Keeper_cascade_resilience.cascade_resilience_error_message
-           (Keeper_cascade_resilience.cascade_resilience_of_name
+         Keeper_turn_resilience.cascade_resilience_error_message
+           (Keeper_turn_resilience.cascade_resilience_of_name
               (Keeper_name.to_string turn_cascade_name))
        with
        | Some e ->
@@ -534,7 +534,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
               let resilience_handles =
-                Keeper_turn_cascade_budget.post_turn_resilience_handles
+                Keeper_turn_budget.post_turn_resilience_handles
                   ~config:ctx.config ~meta
               in
               let lifecycle =

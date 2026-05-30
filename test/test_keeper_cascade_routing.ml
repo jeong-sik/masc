@@ -91,17 +91,17 @@ let test_tool_required_turn_preserves_routed_cascade () =
   check string "required tool turns preserve routed cascade"
     "primary" r.effective_cascade;
   check bool "required tool turns do not rewrite to strict cascade" false
-    (String.equal Masc_mcp.Keeper_config.tool_required_cascade_name
+    (String.equal (Masc_mcp.Keeper_config.default_cascade_name ())
        r.effective_cascade)
 
 let test_tool_required_turn_preserves_phase_recovery () =
   let r =
     Routing.route_effective_cascade_for_tool_requirement
-      ~effective_cascade:Masc_mcp.Keeper_config.phase_recovery_cascade_name
+      ~effective_cascade:(Masc_mcp.Keeper_config.default_cascade_name ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
   in
   check string "required tool turns preserve phase recovery"
-    Masc_mcp.Keeper_config.phase_recovery_cascade_name r.effective_cascade
+    (Masc_mcp.Keeper_config.default_cascade_name ()) r.effective_cascade
 
 let test_all_phases_have_reason () =
   List.iter (fun phase ->

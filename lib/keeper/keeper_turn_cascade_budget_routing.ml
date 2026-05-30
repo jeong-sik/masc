@@ -75,10 +75,10 @@ let active_fail_open_rotation_cascades () =
     ()
 
 let tool_required_rotation_cascade_name () =
-  try
-    Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Tool_required
-  with
-  | Failure _ -> Keeper_config.tool_required_cascade_name
+  (* cascade→Runtime 숙청: cascade_name_for_use 는 use 무시하고 default
+     Runtime id 를 반환(raise 없음). tool_required 구분이 죽었으므로
+     default_cascade_name 으로 collapse. *)
+  Keeper_config.default_cascade_name ()
 
 let next_fail_open_cascade_for_turn
       ?rotation_cascades

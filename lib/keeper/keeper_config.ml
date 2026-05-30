@@ -16,15 +16,13 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
     naming the "1 day" intent at the call site. *)
 let one_day_seconds_int = Masc_time_constants.day_int
 
+(* cascade→Runtime 숙청: per-phase cascade name 구분 제거. cascade 세계의
+   phase_recovery / phase_buffer / tool_required / routing 은 서로 다른 route
+   였으나, Runtime 모델에서는 모든 phase 가 동일한 default Runtime 을 쓴다 —
+   넷 다 default_cascade_name () 으로 수렴하는 죽은 구분이었다. 단일 함수로
+   collapse 하고, eager 모듈-레벨 baking(module-init 시점 미초기화 싱글톤 읽기)
+   도 함께 제거한다. *)
 let default_cascade_name () = Runtime.get_default_runtime_id ()
-
-let phase_recovery_cascade_name = Runtime.get_default_runtime_id ()
-
-let phase_buffer_cascade_name = Runtime.get_default_runtime_id ()
-
-let phase_routing_cascade_names = [ Runtime.get_default_runtime_id () ]
-
-let tool_required_cascade_name = Runtime.get_default_runtime_id ()
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward

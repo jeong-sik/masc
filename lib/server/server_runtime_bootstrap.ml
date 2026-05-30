@@ -448,50 +448,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let provider_health = Provider_health.create state.room_config in
       Provider_health.set_active provider_health;
       Provider_health.start_probe_fiber ~sw ~env provider_health;
-      let format_catalog_validation_error label rejection =
-        Printf.sprintf
-          "%s: %s"
-          label
-          (Yojson.Safe.to_string
-             (Cascade_catalog_runtime.rejection_to_yojson rejection))
-      in
-      let catalog_validation_error =
-        match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
-        | Ok (Cascade_catalog_runtime.Validated snapshot) ->
-            Log.Server.info
-              "Validated active cascade catalog: %s"
-              (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.snapshot_to_yojson snapshot));
-            None
-        | Ok
-            (Cascade_catalog_runtime.Validated_with_rejections
-               { snapshot; rejected_update }) ->
-            Log.Server.warn
-              "Validated active cascade catalog with rejected profiles: snapshot=%s rejected_update=%s"
-              (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.snapshot_to_yojson snapshot))
-              (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.rejection_to_yojson rejected_update));
-            None
-        | Ok
-            (Cascade_catalog_runtime.Serving_last_known_good
-               { rejected_update; _ }) ->
-            Some
-              (format_catalog_validation_error
-                 "startup rejected active cascade catalog"
-                 rejected_update)
-        | Error rejection ->
-            Some
-              (format_catalog_validation_error
-                 "startup catalog validation failed"
-                 rejection)
-      in
-      (match catalog_validation_error with
-       | Some detail ->
-           Log.Server.error
-             "Startup continuing in degraded mode because cascade catalog validation failed: %s"
-             detail
-       | None -> ());
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
@@ -617,7 +573,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
        | _ -> ());
       Server_bootstrap_loops.install_tooling ~governance_level state;
       Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
-      (state, path_diagnostics, catalog_validation_error)
+      (state, path_diagnostics)
     in
     let run_lazy_task (task_name, task_fn) =
       Log.Server.info "lazy_task: starting %s" task_name;
@@ -688,7 +644,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     in
     try
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
-      let state, path_diagnostics, catalog_validation_error =
+      let state, path_diagnostics =
         init_state_blocking ()
       in
       server_state := Some state;
@@ -938,9 +894,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
            cold-start diagnostics do not contend with the shell's first render. *)
         Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock);
       start_lazy_startup state;
-      (match catalog_validation_error with
-       | Some detail -> Server_startup_state.mark_degraded ~error:detail
-       | None -> ());
+      (* RFC-0206: cascade catalog startup validation removed; Runtime.init_default
+         already fail-fasts on an invalid runtime config at boot. *)
       Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

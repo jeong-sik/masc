@@ -168,6 +168,52 @@ let pp fmt = function
       remote
       (Format.pp_print_option Format.pp_print_string)
       branch
+  | W (Git_stash { action; message }) ->
+    let action_s =
+      match action with
+      | `Push -> "push" | `Pop -> "pop" | `Drop -> "drop" | `List -> "list" | `Show -> "show"
+    in
+    Format.fprintf
+      fmt
+      "Git_stash(action=%s, message=%a)"
+      action_s
+      (Format.pp_print_option Format.pp_print_string)
+      message
+  | W (Git_rebase { interactive; onto; branch; continue_; abort }) ->
+    Format.fprintf
+      fmt
+      "Git_rebase(interactive=%b, onto=%a, branch=%a, continue=%b, abort=%b)"
+      interactive
+      (Format.pp_print_option Format.pp_print_string)
+      onto
+      (Format.pp_print_option Format.pp_print_string)
+      branch
+      continue_
+      abort
+  | W (Git_merge { no_ff; squash; branch; abort; continue_ }) ->
+    Format.fprintf
+      fmt
+      "Git_merge(no_ff=%b, squash=%b, branch=%s, abort=%b, continue=%b)"
+      no_ff
+      squash
+      branch
+      abort
+      continue_
+  | W (Git_branch { delete; list_all; rename }) ->
+    Format.fprintf
+      fmt
+      "Git_branch(delete=%a, list_all=%b, rename=%a)"
+      (Format.pp_print_option Format.pp_print_string)
+      delete
+      list_all
+      (Format.pp_print_option Format.pp_print_string)
+      rename
+  | W (Git_checkout { new_branch; branch }) ->
+    Format.fprintf
+      fmt
+      "Git_checkout(new_branch=%b, branch=%s)"
+      new_branch
+      branch
   | W (Pwd ()) -> Format.fprintf fmt "Pwd"
   | W (Echo { args }) ->
     Format.fprintf

@@ -131,6 +131,38 @@ and (_, _, _, _) command =
       ; branch : string option
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_stash :
+      { action : [ `Push | `Pop | `Drop | `List | `Show ]
+      ; message : string option
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_rebase :
+      { interactive : bool
+      ; onto : string option
+      ; branch : string option
+      ; continue_ : bool
+      ; abort : bool
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_merge :
+      { no_ff : bool
+      ; squash : bool
+      ; branch : string
+      ; abort : bool
+      ; continue_ : bool
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_branch :
+      { delete : string option
+      ; list_all : bool
+      ; rename : string option
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Git_checkout :
+      { new_branch : bool
+      ; branch : string
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Pwd : unit -> (unit, string, [ `Safe ], [ `Host ]) command
   | Echo :
       { args : string list }

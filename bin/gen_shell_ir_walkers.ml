@@ -1461,6 +1461,198 @@ in
 parse false None None args|}
     ; no_expand_combined = false
     }
+  ; { name = "Git_stash"
+    ; anon_pattern = "Git_stash _"
+    ; bind_pattern = "Git_stash { action; message }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let subcmd, extra =
+        match action with
+        | `Push -> "push", (match message with None -> [] | Some m -> [ "-m"; m ])
+        | `Pop -> "pop", []
+        | `Drop -> "drop", []
+        | `List -> "list", []
+        | `Show -> "show", []
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("stash" :: subcmd :: extra)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse message = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_stash { action = `List; message }))
+  | "push" :: rest ->
+    let rec find_msg acc = function
+      | "-m" :: m :: rest' -> find_msg (Some m) rest'
+      | _ :: rest' -> find_msg acc rest'
+      | [] -> acc
+    in
+    let msg = find_msg None rest in
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_stash { action = `Push; message = msg }))
+  | "pop" :: _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_stash { action = `Pop; message }))
+  | "drop" :: _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_stash { action = `Drop; message }))
+  | "show" :: _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_stash { action = `Show; message }))
+  | "list" :: _ -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_stash { action = `List; message }))
+  | _ :: rest -> parse message rest
+in
+parse None args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_rebase"
+    ; anon_pattern = "Git_rebase _"
+    ; bind_pattern = "Git_rebase { interactive; onto; branch; continue_; abort }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "rebase" ] in
+      let parts = if continue_ then parts @ [ "--continue" ] else parts in
+      let parts = if abort then parts @ [ "--abort" ] else parts in
+      let parts = if interactive then parts @ [ "--interactive" ] else parts in
+      let parts = match onto with Some t -> parts @ [ "--onto"; t ] | None -> parts in
+      let parts = match branch with Some b -> parts @ [ b ] | None -> parts in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse interactive onto branch continue_ abort = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_rebase { interactive; onto; branch; continue_; abort }))
+  | "--interactive" :: rest | "-i" :: rest -> parse true onto branch continue_ abort rest
+  | "--onto" :: t :: rest -> parse interactive (Some t) branch continue_ abort rest
+  | "--continue" :: rest -> parse interactive onto branch true abort rest
+  | "--abort" :: rest -> parse interactive onto branch continue_ true rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse interactive onto branch continue_ abort rest
+  | arg :: rest -> parse interactive onto (Some arg) continue_ abort rest
+in
+parse false None None false false args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_merge"
+    ; anon_pattern = "Git_merge _"
+    ; bind_pattern = "Git_merge { no_ff; squash; branch; abort; continue_ }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "merge" ] in
+      let parts = if no_ff then parts @ [ "--no-ff" ] else parts in
+      let parts = if squash then parts @ [ "--squash" ] else parts in
+      let parts = if abort then parts @ [ "--abort" ] else parts in
+      let parts = if continue_ then parts @ [ "--continue" ] else parts in
+      let parts = parts @ [ branch ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse no_ff squash branch abort continue_ = function
+  | [] ->
+    (match branch, abort, continue_ with
+     | Some b, false, false ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_merge { no_ff; squash; branch = b; abort; continue_ }))
+     | _, true, _ ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_merge { no_ff; squash; branch = ""; abort = true; continue_ }))
+     | _, _, true ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_merge { no_ff; squash; branch = ""; abort; continue_ = true }))
+     | None, false, false -> None)
+  | "--no-ff" :: rest -> parse true squash branch abort continue_ rest
+  | "--squash" :: rest -> parse no_ff true branch abort continue_ rest
+  | "--abort" :: rest -> parse no_ff squash branch true continue_ rest
+  | "--continue" :: rest -> parse no_ff squash branch abort true rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse no_ff squash branch abort continue_ rest
+  | arg :: rest -> parse no_ff squash (Some arg) abort continue_ rest
+in
+parse false false None false false args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_branch"
+    ; anon_pattern = "Git_branch _"
+    ; bind_pattern = "Git_branch { delete; list_all; rename }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "branch" ] in
+      let parts = if list_all then parts @ [ "-a" ] else parts in
+      let parts = match delete with Some d -> parts @ [ "-d"; d ] | None -> parts in
+      let parts = match rename with Some r -> parts @ [ "-m"; r ] | None -> parts in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse delete list_all rename = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_branch { delete; list_all; rename }))
+  | "-a" :: rest | "--all" :: rest -> parse delete true rename rest
+  | "-d" :: d :: rest | "--delete" :: d :: rest -> parse (Some d) list_all rename rest
+  | "-m" :: r :: rest | "--move" :: r :: rest -> parse delete list_all (Some r) rest
+  | "-D" :: d :: rest -> parse (Some d) list_all rename rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse delete list_all rename rest
+  | _ :: rest -> parse delete list_all rename rest
+in
+parse None false None args|}
+    ; no_expand_combined = false
+    }
+  ; { name = "Git_checkout"
+    ; anon_pattern = "Git_checkout _"
+    ; bind_pattern = "Git_checkout { new_branch; branch }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let parts = [ "checkout" ] in
+      let parts = if new_branch then parts @ [ "-b" ] else parts in
+      let parts = parts @ [ branch ] in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) parts
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse new_branch branch = function
+  | [] ->
+    (match branch with
+     | Some b -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_checkout { new_branch; branch = b }))
+     | None -> None)
+  | "-b" :: rest -> parse true branch rest
+  | arg :: rest when String.length arg > 0 && arg.[0] = '-' -> parse new_branch branch rest
+  | arg :: rest -> parse new_branch (Some arg) rest
+in
+parse false None args|}
+    ; no_expand_combined = false
+    }
   ; { name = "Pwd"
     ; anon_pattern = "Pwd _"
     ; bind_pattern = "Pwd ()"

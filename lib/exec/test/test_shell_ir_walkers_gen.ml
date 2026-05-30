@@ -43,6 +43,11 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Git_commit { message = "test"; amend = false })
   ; W (Git_push { force = false; force_with_lease = false; set_upstream = false; remote = None; branch = None })
   ; W (Git_pull { rebase = false; remote = None; branch = None })
+  ; W (Git_stash { action = `List; message = None })
+  ; W (Git_rebase { interactive = false; onto = None; branch = None; continue_ = false; abort = false })
+  ; W (Git_merge { no_ff = false; squash = false; branch = "main"; abort = false; continue_ = false })
+  ; W (Git_branch { delete = None; list_all = false; rename = None })
+  ; W (Git_checkout { new_branch = false; branch = "main" })
   ; W (Pwd ())
   ; W (Echo { args = [ "hello" ] })
   ; W (Which { names = [ "ocaml" ] })
@@ -210,9 +215,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    100
+    105
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 100 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 105 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -250,6 +255,11 @@ let test_of_simple_round_trip () =
     ; W (Git_commit { message = "feat: add feature"; amend = false })
     ; W (Git_push { force = false; force_with_lease = true; set_upstream = true; remote = Some "origin"; branch = Some "main" })
     ; W (Git_pull { rebase = true; remote = Some "origin"; branch = Some "develop" })
+    ; W (Git_stash { action = `Push; message = Some "wip" })
+    ; W (Git_rebase { interactive = true; onto = Some "main"; branch = Some "feature"; continue_ = false; abort = false })
+    ; W (Git_merge { no_ff = true; squash = false; branch = "develop"; abort = false; continue_ = false })
+    ; W (Git_branch { delete = Some "old-branch"; list_all = true; rename = Some "new-name" })
+    ; W (Git_checkout { new_branch = true; branch = "feature-branch" })
     ; W (Pwd ())
     ; W (Echo { args = [ "hello"; "world" ] })
     ; W (Which { names = [ "ocaml"; "dune" ] })
@@ -402,15 +412,15 @@ let test_of_simple_generic_fallback () =
     (match w_unknown with
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false);
-  (* git sub-command we do not parse *)
-  let w_git_stash =
+  (* git sub-command we do not parse — use "bisect" which has no typed constructor *)
+  let w_git_bisect =
     Shell_ir_typed.of_simple
-      { base with bin = bin_ok "git"; args = [ lit "stash"; lit "pop" ] }
+      { base with bin = bin_ok "git"; args = [ lit "bisect"; lit "start" ] }
   in
   Alcotest.(check bool)
-    "git stash fallback"
+    "git bisect fallback"
     true
-    (match w_git_stash with
+    (match w_git_bisect with
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false)
 ;;
@@ -970,6 +980,48 @@ let test_posix_end_of_options () =
   (match git_pull with
    | W (Git_pull { rebase = true; remote = Some "origin"; branch = Some "main"; _ }) -> ()
    | w -> Alcotest.failf "Git_pull --: expected rebase=true remote=origin branch=main, got %a" pp w);
+  (* Git_stash: push -m "wip" *)
+  let git_stash_push =
+    of_simple { (base "git") with args = [ lit "stash"; lit "push"; lit "-m"; lit "wip" ] }
+  in
+  (match git_stash_push with
+   | W (Git_stash { action = `Push; message = Some "wip"; _ }) -> ()
+   | w -> Alcotest.failf "Git_stash push: expected Push message=wip, got %a" pp w);
+  (* Git_stash: pop *)
+  let git_stash_pop =
+    of_simple { (base "git") with args = [ lit "stash"; lit "pop" ] }
+  in
+  (match git_stash_pop with
+   | W (Git_stash { action = `Pop; _ }) -> ()
+   | w -> Alcotest.failf "Git_stash pop: expected Pop, got %a" pp w);
+  (* Git_rebase: --interactive --onto main feature *)
+  let git_rebase =
+    of_simple { (base "git") with args = [ lit "rebase"; lit "--interactive"; lit "--onto"; lit "main"; lit "feature" ] }
+  in
+  (match git_rebase with
+   | W (Git_rebase { interactive = true; onto = Some "main"; branch = Some "feature"; _ }) -> ()
+   | w -> Alcotest.failf "Git_rebase: expected interactive onto=main branch=feature, got %a" pp w);
+  (* Git_merge: --no-ff develop *)
+  let git_merge =
+    of_simple { (base "git") with args = [ lit "merge"; lit "--no-ff"; lit "develop" ] }
+  in
+  (match git_merge with
+   | W (Git_merge { no_ff = true; branch = "develop"; _ }) -> ()
+   | w -> Alcotest.failf "Git_merge: expected no_ff=true branch=develop, got %a" pp w);
+  (* Git_branch: -a *)
+  let git_branch =
+    of_simple { (base "git") with args = [ lit "branch"; lit "-a" ] }
+  in
+  (match git_branch with
+   | W (Git_branch { list_all = true; _ }) -> ()
+   | w -> Alcotest.failf "Git_branch -a: expected list_all=true, got %a" pp w);
+  (* Git_checkout: -b feature-branch *)
+  let git_checkout =
+    of_simple { (base "git") with args = [ lit "checkout"; lit "-b"; lit "feature-branch" ] }
+  in
+  (match git_checkout with
+   | W (Git_checkout { new_branch = true; branch = "feature-branch"; _ }) -> ()
+   | w -> Alcotest.failf "Git_checkout -b: expected new_branch=true branch=feature-branch, got %a" pp w);
   (* Git_diff: --stat -- -file1 -file2 *)
   let git_diff =
     of_simple { (base "git") with args = [ lit "diff"; lit "--stat"; lit "--"; lit "-file1"; lit "-file2" ] }
@@ -2490,6 +2542,7 @@ let test_constructor_names_in_declaration_order () =
     [ "Ls"; "Cat"; "Rg"; "Git_status"; "Git_clone"; "Curl"; "Rm"; "Sudo"
     ; "Find"; "Head"; "Tail"; "Grep"; "Mkdir"; "Wc"
     ; "Git_diff"; "Git_log"; "Git_commit"; "Git_push"; "Git_pull"
+    ; "Git_stash"; "Git_rebase"; "Git_merge"; "Git_branch"; "Git_checkout"
     ; "Pwd"; "Echo"; "Which"; "Sort"; "Cut"; "Tr"; "Date"
     ; "Env"; "Printenv"; "Uniq"; "Basename"; "Dirname"; "Test"; "Stat"; "Hostname"; "Whoami"
     ; "Du"; "Df"; "File"; "Printf"; "Uname"; "Ps"; "Tty"

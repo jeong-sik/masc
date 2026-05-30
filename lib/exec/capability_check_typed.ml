@@ -178,6 +178,55 @@ let of_command = function
     [ Capability.Exec_program
         (Exec_program.of_known Exec_program.Git, arg "pull" :: flag_args @ positional)
     ]
+  | Shell_ir_typed.W (Git_stash { action; message }) ->
+    let subcmd =
+      match action with
+      | `Push -> "push"
+      | `Pop -> "pop"
+      | `Drop -> "drop"
+      | `List -> "list"
+      | `Show -> "show"
+    in
+    let extra = match message with None -> [] | Some m -> [ arg "-m"; arg m ] in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "stash" :: arg subcmd :: extra)
+    ]
+  | Shell_ir_typed.W (Git_rebase { interactive; onto; branch; continue_; abort }) ->
+    let flag_args =
+      (if interactive then [ arg "--interactive" ] else [])
+      @ (if continue_ then [ arg "--continue" ] else [])
+      @ (if abort then [ arg "--abort" ] else [])
+      @ (match onto with None -> [] | Some t -> [ arg "--onto"; arg t ])
+    in
+    let positional = match branch with None -> [] | Some b -> [ arg b ] in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "rebase" :: flag_args @ positional)
+    ]
+  | Shell_ir_typed.W (Git_merge { no_ff; squash; branch; abort; continue_ }) ->
+    let flag_args =
+      (if no_ff then [ arg "--no-ff" ] else [])
+      @ (if squash then [ arg "--squash" ] else [])
+      @ (if abort then [ arg "--abort" ] else [])
+      @ (if continue_ then [ arg "--continue" ] else [])
+    in
+    let positional = if abort || continue_ then [] else [ arg branch ] in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "merge" :: flag_args @ positional)
+    ]
+  | Shell_ir_typed.W (Git_branch { delete; list_all; rename }) ->
+    let flag_args =
+      (if list_all then [ arg "-a" ] else [])
+      @ (match delete with None -> [] | Some d -> [ arg "-d"; arg d ])
+      @ (match rename with None -> [] | Some r -> [ arg "-m"; arg r ])
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "branch" :: flag_args)
+    ]
+  | Shell_ir_typed.W (Git_checkout { new_branch; branch }) ->
+    let flag_args = if new_branch then [ arg "-b" ] else [] in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "checkout" :: flag_args @ [ arg branch ])
+    ]
   | Shell_ir_typed.W (Pwd ()) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Pwd, []) ]
   | Shell_ir_typed.W (Echo { args = echo_args }) ->

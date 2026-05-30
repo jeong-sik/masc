@@ -43,6 +43,15 @@ let alias_keys (cfg : cascade_config) : string list =
     cfg.aliases
 ;;
 
+(* Route/system targets reference [profiles.*] names under the
+   cascade→Runtime model (#19482): the resolver matches targets against
+   known profile names, capability resolution then maps the profile to a
+   binding. R7/R8 verify referential integrity of the target name, so the
+   valid-target set includes profile names alongside binding/alias keys. *)
+let profile_names (cfg : cascade_config) : string list =
+  List.map (fun (p : cascade_profile) -> p.name) cfg.profiles
+;;
+
 (* Build a name-keyed Hashtbl once for O(1) membership.  Eight
    validator rules below (R1-R8) used to do [List.mem key list]
    per filtered item, paying O(items × |list|).  Several rules also
@@ -142,7 +151,9 @@ let validate_alias_max_input (cfg : cascade_config) : validation_error list =
 (* --- R7: Route targets exist --- *)
 
 let validate_route_targets (cfg : cascade_config) : validation_error list =
-  let all_targets_set = name_set (binding_keys cfg @ alias_keys cfg) in
+  let all_targets_set =
+    name_set (binding_keys cfg @ alias_keys cfg @ profile_names cfg)
+  in
   List.filter_map
     (fun (r : cascade_route) ->
        if Hashtbl.mem all_targets_set r.target

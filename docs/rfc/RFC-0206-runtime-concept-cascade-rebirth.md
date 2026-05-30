@@ -141,4 +141,41 @@ P1-P3(자립 schema/parser/adapter + runtime.ml 재배선 + `tool_strict` 제거
 
 세부 file-level 매핑은 Phase U 워크플로(8-cluster understand) 산출.
 
+## 10. Substrate 설계 (Phase U 종합, 2026-05-30)
+
+8-cluster understand 워크플로(w93dm28ba) 종합 + 저자 override. dependency layer 순서로 실행한다(monolithic lib → 전부 green 돼야 머지).
+
+### L0 — lib/runtime 추가 (keeper 의존 0, 최우선)
+
+- **transport/dispatch 부분그래프 restore-rename** (RFC §9.2): `cascade_transport`(+14 transport_* 하위) + `cascade_agent_context` + `cascade_wire_overlay` + `cascade_oas_runner` + `cascade_runner` → `Runtime_transport*` / `Runtime_agent_context` / `Runtime_wire_overlay` / `Runtime_oas_runner` / `Runtime_agent`. ~3000 LoC, 결정론적 rename. 경계 rewire: `Cascade_config`→`Runtime_schema`/`Runtime`, `Cascade_name`→`string`, `Cascade_observation` 참조(runner 2건) 외과 제거.
+- **`Runtime_agent`** (dispatch entry): `stop_reason`/`run_result`(cascade_observation 필드 제거)/`response`/`cli_transport_overrides` 타입 + `run`/`run_with_masc_tools` single-binding wrapper(Agent_sdk.Agent.run 위).
+- **`runtime_constants`**: `fallback_context_window = 128000`.
+- **`runtime_deadline`**: `of_seconds_from_now` 등 (Cascade_deadline 단순 이식).
+- **`Runtime.config_path : unit -> string option`** 추가 (Cascade_runtime.cascade_config_path 대체).
+- 샘플링 상수: `Llm_provider.Constants.Worker_sampling`(외부 lib, 존재 시 reuse) — 신규 모듈 회피.
+
+### L1 — lib/keeper substrate (L0 + 생존 keeper_meta_contract 의존)
+
+- **`keeper_event_bridge`** ← Cascade_event_bridge (start/native_event_to_json, 동일 시그니처).
+- **`keeper_event_publisher`** ← Cascade_events (publish_keeper_lifecycle/snapshot, Masc_event_bus.get).
+- **`keeper_binding_health`** ← Cascade_health_tracker (per-binding, global 싱글톤 제거; record_success/failure/rejected/...).
+- **`keeper_attempt_metrics`** + **`keeper_audit`** ← Cascade_observation (single attempt metadata demote; `cascade_name`→`binding_id:string`).
+- **`keeper_attempt_liveness`** ← Cascade_attempt_liveness(+config/observer) (per-attempt streaming liveness FSM, Eio Switch).
+- **`keeper_preflight_health_tracker`** ← Cascade_preflight_state (global/record/is_disabled/reset_on_health_recovery/reason_slug).
+- **error classify**: 신규 모듈 0 — `Keeper_meta_contract`가 이미 `masc_internal_error`/codec/provider_rejection/capacity_backpressure_source 소유(RFC-0142). 소비자는 `Cascade_error_classify.X`/`Cascade_internal_error.X` → `Keeper_meta_contract.X`.
+
+### DISCARD / DELETE-CALLSITE (substrate 0)
+
+- **catalog**: `Cascade_catalog_runtime.{snapshot,Validated,Validated_with_rejections,Serving_last_known_good,state_to_yojson,rejection_*,resolve_strategy,resolve_*_max_concurrent,resolve_declared_name}` — routing 아티팩트, callsite 삭제.
+- **routing**: `Cascade_routes.logical_use`→string literal("keeper_turn"), `Cascade_routes_resolve.cascade_name_for_use`→`Runtime.get_default_runtime_id ()`, `Cascade_strategy.*`/`Cascade_strategy_trace.record` → **callsite에서 identity/no-op inline** (⚠️ 저자 override: U 에이전트가 제안한 `Runtime_strategy` 신규 모듈은 multi-candidate 재성장이므로 **거부**. single binding에서 order_candidates는 항등, record_choice는 no-op).
+- **misc**: `Cascade_trust_persist.start_snapshot_fiber` → 삭제(JSONL 스냅샷 불요, 관측은 Neo4j/Prometheus).
+
+### L2 — consumer rewire (120 파일)
+
+L0+L1 위로 재배선. mechanical(naming Cascade_name→string 49파일, error→Keeper_meta_contract, misc 상수) + semantic(dispatch run_result destructure 25파일, catalog DELETE-CALLSITE, fsm). naming은 batch 가능, semantic은 파일별.
+
+### 검증 순서
+
+L0 scratch 컴파일 → L1 (keeper_meta_contract 링크 필요, 전체 lib 빌드) → L2 후 full build green + `rg -w 'Cascade_[a-z][A-Za-z_]*\.' lib bin` = 0 (생존 variant 생성자 `Cascade_idle` 등은 잔존 허용, P6 rename).
+
 RFC-WAIVED 근거(상위 #19536): 사용자 명시 지시에 따른 cascade→Runtime 재탄생. 본 RFC가 그 구현 단계의 설계 SSOT를 제공한다.

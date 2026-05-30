@@ -339,13 +339,13 @@ let rec parse depth branch repo dd = function
      | Some d -> parse (Some d) branch repo dd rest
      | None -> None)
   | "-b" :: b :: rest | "--branch" :: b :: rest when not dd -> parse depth (Some b) repo dd rest
-  | arg :: rest when not dd && String.length arg > 8 && String.sub arg 0 8 = "--depth=" ->
-    let n = String.sub arg 8 (String.length arg - 8) in
+  | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--depth"] ->
+    let n = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--depth"]) in
     (match int_of_string_opt n with
      | Some d -> parse (Some d) branch repo dd rest
      | None -> parse depth branch repo dd rest)
-  | arg :: rest when not dd && String.length arg > 9 && String.sub arg 0 9 = "--branch=" ->
-    let b = String.sub arg 9 (String.length arg - 9) in
+  | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--branch"] ->
+    let b = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--branch"]) in
     parse depth (Some b) repo dd rest
   | "--" :: rest -> parse depth branch repo true rest
   | arg :: rest ->
@@ -423,9 +423,8 @@ let rec parse method_ headers body url output_file follow_redirects insecure dd 
      | _ -> None)
   (* --request=METHOD form *)
   | arg :: rest
-    when not dd && String.length arg > 10
-         && String.sub arg 0 10 = "--request=" ->
-    let m = String.uppercase_ascii (String.sub arg 10 (String.length arg - 10)) in
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--request"] ->
+    let m = String.uppercase_ascii (Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--request"])) in
     (match m with
      | "GET" -> parse `GET headers body url output_file follow_redirects insecure dd rest
      | "POST" -> parse `POST headers body url output_file follow_redirects insecure dd rest
@@ -441,9 +440,8 @@ let rec parse method_ headers body url output_file follow_redirects insecure dd 
      | None -> None)
   (* --header=VALUE form *)
   | arg :: rest
-    when not dd && String.length arg > 9
-         && String.sub arg 0 9 = "--header=" ->
-    let h = String.sub arg 9 (String.length arg - 9) in
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--header"] ->
+    let h = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--header"]) in
     (match String.index_opt h ':' with
      | Some i ->
        let key = String.trim (String.sub h 0 i) in
@@ -456,9 +454,8 @@ let rec parse method_ headers body url output_file follow_redirects insecure dd 
      | Some _ -> None)
   (* --data=VALUE form *)
   | arg :: rest
-    when not dd && String.length arg > 7
-         && String.sub arg 0 7 = "--data=" ->
-    let d = String.sub arg 7 (String.length arg - 7) in
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--data"] ->
+    let d = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--data"]) in
     (match body with
      | None -> parse method_ headers (Some d) url output_file follow_redirects insecure dd rest
      | Some _ -> None)
@@ -466,9 +463,8 @@ let rec parse method_ headers body url output_file follow_redirects insecure dd 
     parse method_ headers body url (Some o) follow_redirects insecure dd rest
   (* --output=FILE form *)
   | arg :: rest
-    when not dd && String.length arg > 9
-         && String.sub arg 0 9 = "--output=" ->
-    let o = String.sub arg 9 (String.length arg - 9) in
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--output"] ->
+    let o = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--output"]) in
     parse method_ headers body url (Some o) follow_redirects insecure dd rest
   | "-L" :: rest | "--location" :: rest when not dd ->
     parse method_ headers body url output_file true insecure dd rest
@@ -658,8 +654,8 @@ let rec parse name type_ maxdepth path = function
      | Some n -> parse name type_ (Some n) path rest
      | None -> parse name type_ maxdepth path rest)
   | arg :: rest
-    when String.length arg > 10 && String.sub arg 0 10 = "-maxdepth=" ->
-    (match int_of_string_opt (String.sub arg 10 (String.length arg - 10)) with
+    when Shell_ir_typed_types.is_eq_form_flag arg ["-maxdepth"] ->
+    (match int_of_string_opt (Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["-maxdepth"])) with
      | Some n -> parse name type_ (Some n) path rest
      | None -> parse name type_ maxdepth path rest)
   (* Eq-form value flags: -flag=VALUE — extract prefix and skip *)
@@ -741,9 +737,8 @@ let rec parse lines path = function
     parse l path rest
   (* --lines=N form *)
   | arg :: rest
-    when String.length arg > 8
-         && String.sub arg 0 8 = "--lines=" ->
-    let n_str = String.sub arg 8 (String.length arg - 8) in
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--lines"] ->
+    let n_str = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--lines"]) in
     (match int_of_string_opt n_str with
      | Some l -> parse l path rest
      | None -> parse lines path rest)
@@ -810,9 +805,8 @@ let rec parse lines path = function
     parse l path rest
   (* --lines=N form *)
   | arg :: rest
-    when String.length arg > 8
-         && String.sub arg 0 8 = "--lines=" ->
-    let n_str = String.sub arg 8 (String.length arg - 8) in
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--lines"] ->
+    let n_str = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--lines"]) in
     (match int_of_string_opt n_str with
      | Some l -> parse l path rest
      | None -> parse lines path rest)
@@ -902,9 +896,8 @@ let rec parse recursive case_sensitive files_with_matches pattern path = functio
     parse recursive case_sensitive files_with_matches (Some p) path rest
   (* --regexp=PATTERN eq-form *)
   | arg :: rest
-    when String.length arg > 9
-         && String.sub arg 0 9 = "--regexp=" ->
-    let p = String.sub arg 9 (String.length arg - 9) in
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--regexp"] ->
+    let p = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--regexp"]) in
     parse recursive case_sensitive files_with_matches (Some p) path rest
   (* --color=auto and similar --flag=VALUE forms: skip *)
   | arg :: rest
@@ -1149,9 +1142,8 @@ let rec parse oneline max_count = function
      | None -> None)
   (* --max-count=N form *)
   | arg :: rest
-    when String.length arg > 12
-         && String.sub arg 0 12 = "--max-count=" ->
-    (match int_of_string_opt (String.sub arg 12 (String.length arg - 12)) with
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--max-count"] ->
+    (match int_of_string_opt (Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--max-count"])) with
      | Some c -> parse oneline (Some c) rest
      | None -> parse oneline max_count rest)
   (* Combined form: -n5 → max_count = Some 5 *)
@@ -1273,18 +1265,16 @@ let rec parse message amend = function
         | m :: rest' -> parse (Some m) !has_a rest'
         | _ -> None))
   | arg :: rest
-    when String.length arg > 10
-         && String.sub arg 0 10 = "--message=" ->
-    let m = String.sub arg 10 (String.length arg - 10) in
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--message"] ->
+    let m = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--message"]) in
     (match message with
      | None -> parse (Some m) amend rest
      | Some _ -> None)
   | "--" :: rest -> parse message amend rest
   (* --message=MSG eq-form *)
   | arg :: rest
-    when String.length arg > 10
-         && String.sub arg 0 10 = "--message=" ->
-    let m = String.sub arg 10 (String.length arg - 10) in
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--message"] ->
+    let m = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--message"]) in
     (match message with
      | None -> parse (Some m) amend rest
      | Some _ -> None)
@@ -1336,8 +1326,7 @@ let rec parse force force_with_lease set_upstream remote branch = function
   | "--force-with-lease" :: rest -> parse force true set_upstream remote branch rest
   (* --force-with-lease=VALUE form: sets force_with_lease AND skips value *)
   | arg :: rest
-    when String.length arg > 19
-         && String.sub arg 0 19 = "--force-with-lease=" ->
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--force-with-lease"] ->
     parse force true set_upstream remote branch rest
   | "-u" :: rest | "--set-upstream" :: rest -> parse force force_with_lease true remote branch rest
   | "--delete" :: rest -> parse force force_with_lease set_upstream remote branch rest
@@ -1577,14 +1566,12 @@ let rec parse reverse numeric unique key file = function
   | "-t" :: _ :: rest | "--field-separator" :: _ :: rest -> parse reverse numeric unique key file rest  (* -t/--field-separator SEP *)
   (* --field-separator=SEP *)
   | arg :: rest
-    when String.length arg > 18
-         && String.sub arg 0 18 = "--field-separator=" ->
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--field-separator"] ->
     parse reverse numeric unique key file rest
   (* --key=N form *)
   | arg :: rest
-    when String.length arg > 6
-         && String.sub arg 0 6 = "--key=" ->
-    let n_str = String.sub arg 6 (String.length arg - 6) in
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--key"] ->
+    let n_str = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--key"]) in
     (match int_of_string_opt n_str with
      | Some n -> parse reverse numeric unique (Some n) file rest
      | None -> parse reverse numeric unique key file rest)
@@ -2876,16 +2863,16 @@ let rec parse action compression archive paths = function
      | _ -> None)
   (* --file=ARCHIVE equal-sign form *)
   | arg :: rest
-    when String.length arg > 7 && String.sub arg 0 7 = "--file=" ->
-    let f = String.sub arg 7 (String.length arg - 7) in
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--file"] ->
+    let f = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--file"]) in
     parse action compression (Some f) paths rest
   (* --exclude=PATTERN equal-sign form *)
   | arg :: rest
-    when String.length arg > 10 && String.sub arg 0 10 = "--exclude=" ->
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--exclude"] ->
     parse action compression archive paths rest
   (* --strip-components=N equal-sign form *)
   | arg :: rest
-    when String.length arg > 19 && String.sub arg 0 19 = "--strip-components=" ->
+    when Shell_ir_typed_types.is_eq_form_flag arg ["--strip-components"] ->
     parse action compression archive paths rest
   | arg :: rest ->
     if String.length arg >= 3 && arg.[0] = '-'
@@ -3165,14 +3152,12 @@ let rec parse in_place ext_re suppress expr file dd = function
   | "--" :: rest -> parse in_place ext_re suppress expr file true rest
   (* --expression=EXPR and --file=FILE eq-forms *)
   | arg :: rest
-    when not dd && String.length arg > 13
-         && String.sub arg 0 13 = "--expression=" ->
-    let e = String.sub arg 13 (String.length arg - 13) in
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--expression"] ->
+    let e = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--expression"]) in
     parse in_place ext_re suppress (Some e) file dd rest
   | arg :: rest
-    when not dd && String.length arg > 7
-         && String.sub arg 0 7 = "--file=" ->
-    let f = String.sub arg 7 (String.length arg - 7) in
+    when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--file"] ->
+    let f = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--file"]) in
     parse in_place ext_re suppress (Some f) file dd rest
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
@@ -3849,11 +3834,11 @@ let rec parse subcmd act draft squash del_branch body title rest = function
           (match args with
            | v :: rest' -> parse subcmd act draft squash del_branch body (Some v) rest rest'
            | [] -> parse subcmd act draft squash del_branch body title rest args)
-        | arg when String.length arg > 7 && String.sub arg 0 7 = "--body=" ->
-          let v = String.sub arg 7 (String.length arg - 7) in
+        | arg when Shell_ir_typed_types.is_eq_form_flag arg ["--body"] ->
+          let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--body"]) in
           parse subcmd act draft squash del_branch (Some v) title rest args
-        | arg when String.length arg > 8 && String.sub arg 0 8 = "--title=" ->
-          let v = String.sub arg 8 (String.length arg - 8) in
+        | arg when Shell_ir_typed_types.is_eq_form_flag arg ["--title"] ->
+          let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--title"]) in
           parse subcmd act draft squash del_branch body (Some v) rest args
         | "--repo" | "--assignee" | "--label" | "--milestone" | "--project"
         | "--reviewer" | "--base" | "--head" | "--editor" | "--hostname"
@@ -4096,17 +4081,17 @@ let rec parse subcmd rm priv det nm net vols pubs envs wd plat dd = function
          && List.mem arg docker_value_flags ->
     parse subcmd rm priv det nm net vols pubs envs wd plat dd rest
   (* --flag=VALUE equal-sign form for typed flags *)
-  | arg :: rest when not dd && String.length arg > 7 && String.sub arg 0 7 = "--name=" ->
-    let v = String.sub arg 7 (String.length arg - 7) in
+  | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--name"] ->
+    let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--name"]) in
     parse subcmd rm priv det (Some v) net vols pubs envs wd plat dd rest
-  | arg :: rest when not dd && String.length arg > 10 && String.sub arg 0 10 = "--network=" ->
-    let v = String.sub arg 10 (String.length arg - 10) in
+  | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--network"] ->
+    let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--network"]) in
     parse subcmd rm priv det nm (Some v) vols pubs envs wd plat dd rest
-  | arg :: rest when not dd && String.length arg > 10 && String.sub arg 0 10 = "--workdir=" ->
-    let v = String.sub arg 10 (String.length arg - 10) in
+  | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--workdir"] ->
+    let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--workdir"]) in
     parse subcmd rm priv det nm net vols pubs envs (Some v) plat dd rest
-  | arg :: rest when not dd && String.length arg > 11 && String.sub arg 0 11 = "--platform=" ->
-    let v = String.sub arg 11 (String.length arg - 11) in
+  | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--platform"] ->
+    let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--platform"]) in
     parse subcmd rm priv det nm net vols pubs envs wd (Some v) dd rest
   (* --flag=VALUE equal-sign form for other value-consuming flags *)
   | arg :: rest
@@ -4960,8 +4945,8 @@ parse None false false false args|}
            subcommand = (match subcmd with Some s -> s | None -> n); jobs = j;
            rest = (match subcmd with Some _ -> List.rev_append rest [ n ] | None -> List.rev rest)
          })))
-    | arg :: rest when not dd && String.length arg > 7 && String.sub arg 0 7 = "--jobs=" ->
-      let n = String.sub arg 7 (String.length arg - 7) in
+    | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--jobs"] ->
+      let n = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--jobs"]) in
       (match int_of_string_opt n with
        | Some j' -> parse subcmd (Some j') dd rest
        | None ->         Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ninja {

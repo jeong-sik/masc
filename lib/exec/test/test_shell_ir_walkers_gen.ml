@@ -2729,6 +2729,69 @@ let test_batch4_posix_end_of_options () =
    | w -> Alcotest.failf "test -- -f file: expected Test, got %a" pp w)
 ;;
 
+let test_mvn_gh_boolean_flag_regression () =
+  let open Shell_ir_typed in
+  let base bin_name =
+    { Shell_ir.bin = bin_ok bin_name
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  let pp = Shell_ir_typed.pp in
+  (* Mvn: -nt is boolean (disables transfer progress) → should NOT eat "install" as value *)
+  let m1 =
+    of_simple { (base "mvn") with args = [ lit "clean"; lit "-nt"; lit "install" ] }
+  in
+  (match m1 with
+   | W (Mvn { subcommand = "clean"; args; _ }) ->
+     if not (List.mem "install" args) then
+       Alcotest.failf "mvn clean -nt install: 'install' should be in args (boolean -nt), got args=[%s]"
+         (String.concat "; " args)
+   | w -> Alcotest.failf "mvn clean -nt install: expected Mvn, got %a" pp w);
+  (* Mvn: --no-transfer-progress is boolean → should NOT eat "package" as value *)
+  let m2 =
+    of_simple { (base "mvn") with args = [ lit "build"; lit "--no-transfer-progress"; lit "package" ] }
+  in
+  (match m2 with
+   | W (Mvn { subcommand = "build"; args; _ }) ->
+     if not (List.mem "package" args) then
+       Alcotest.failf "mvn build --no-transfer-progress package: 'package' should be in args, got args=[%s]"
+         (String.concat "; " args)
+   | w -> Alcotest.failf "mvn build --no-transfer-progress package: expected Mvn, got %a" pp w);
+  (* Mvn: -X is boolean (debug output) → should NOT eat "verify" as value *)
+  let m3 =
+    of_simple { (base "mvn") with args = [ lit "test"; lit "-X"; lit "verify" ] }
+  in
+  (match m3 with
+   | W (Mvn { subcommand = "test"; args; _ }) ->
+     if not (List.mem "verify" args) then
+       Alcotest.failf "mvn test -X verify: 'verify' should be in args (boolean -X), got args=[%s]"
+         (String.concat "; " args)
+   | w -> Alcotest.failf "mvn test -X verify: expected Mvn, got %a" pp w);
+  (* Gh: --web is boolean (opens browser) → should NOT eat "--title" as value *)
+  let g1 =
+    of_simple { (base "gh") with args = [ lit "pr"; lit "create"; lit "--web"; lit "--title"; lit "my-pr" ] }
+  in
+  (match g1 with
+   | W (Gh { subcommand = "pr"; action = Some "create"; title; _ }) ->
+     (match title with
+      | Some "my-pr" -> ()
+      | other ->
+        Alcotest.failf "gh pr create --web --title my-pr: title should be Some \"my-pr\", got %s"
+          (match other with None -> "None" | Some s -> Printf.sprintf "Some \"%s\"" s))
+   | w -> Alcotest.failf "gh pr create --web --title my-pr: expected Gh, got %a" pp w);
+  (* Gh: --web combined with --draft — both boolean *)
+  let g2 =
+    of_simple { (base "gh") with args = [ lit "pr"; lit "create"; lit "--draft"; lit "--web"; lit "--body"; lit "desc" ] }
+  in
+  (match g2 with
+   | W (Gh { subcommand = "pr"; action = Some "create"; draft = true; body = Some "desc"; _ }) -> ()
+   | w -> Alcotest.failf "gh pr create --draft --web --body desc: expected draft=true body=Some desc, got %a" pp w)
+;;
+
 let test_long_form_boolean_flags () =
   let open Shell_ir_typed in
   let base bin_name =
@@ -2950,6 +3013,10 @@ let () =
             "Batch 4: POSIX -- end-of-options for Sudo/Echo/Which/Printenv/Printf/Test"
             `Quick
             test_batch4_posix_end_of_options
+        ; Alcotest.test_case
+            "Mvn/Gh boolean-as-value regression (-nt, --no-transfer-progress, -X, --web)"
+            `Quick
+            test_mvn_gh_boolean_flag_regression
         ; Alcotest.test_case
             "Long-form boolean flags (--human-readable, --summarize, --in-place, --verbose, --exitfirst)"
             `Quick

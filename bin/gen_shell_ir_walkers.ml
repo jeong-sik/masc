@@ -3855,7 +3855,7 @@ let rec parse subcmd act draft squash del_branch body title rest = function
           parse subcmd act draft squash del_branch body (Some v) rest args
         | "--repo" | "--assignee" | "--label" | "--milestone" | "--project"
         | "--reviewer" | "--base" | "--head" | "--editor" | "--hostname"
-        | "--jq" | "--template" | "--limit" | "--state" | "--web"
+        | "--jq" | "--template" | "--limit" | "--state"
         | "-R" | "-a" | "-l" | "-p" | "-r" | "-B" | "-H" ->
           (match args with
            | _ :: rest' -> parse subcmd act draft squash del_branch body title rest rest'
@@ -4986,6 +4986,9 @@ parse None false false false args|}
         Some
           {|
   (* Mvn flags that consume the next token as their argument *)
+  (* Mvn flags that consume the next token as their argument.
+     NOTE: -nt/--no-transfer-progress is boolean (disables progress display),
+     -X is boolean (enables debug output) — neither consumes a value. *)
   let mvn_value_flags =
     [ "-D"; "--define"
     ; "-f"; "--file"
@@ -4998,9 +5001,7 @@ parse None false false false args|}
     ; "-pl"; "--projects"
     ; "-rf"; "--resume-from"
     ; "-t"; "--threads"
-    ; "-nt"; "--no-transfer-progress"
     ; "-T"
-    ; "-X"
     ]
   in
   let rec parse subcmd off bat q dd = function

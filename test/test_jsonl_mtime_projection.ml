@@ -41,7 +41,7 @@ let test_caches_until_change () =
       check int "second call served from cache" v1 v2;
       (* mtime advance invalidates *)
       write p "two" ~mtime:2000.0;
-      ignore (run ());
+      let _ = run () in
       check int "rebuilt after mtime change" 2 !builds)
 
 let test_size_gate_same_mtime () =

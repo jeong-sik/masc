@@ -47,7 +47,7 @@ let test_no_change_no_refold () =
       append path "a\nb\n";
       let cache = P.create () in
       let c = ref 0 in
-      ignore (reader cache path c);
+      let _ = reader cache path c in
       check int "first read folds 2" 2 !c;
       let acc = reader cache path c in
       check int "unchanged file folds nothing more" 2 !c;
@@ -58,7 +58,7 @@ let test_append_folds_only_new () =
       append path "a\nb\n";
       let cache = P.create () in
       let c = ref 0 in
-      ignore (reader cache path c);
+      let _ = reader cache path c in
       append path "c\n";
       let acc = reader cache path c in
       check int "only the appended line is folded" 3 !c;
@@ -69,10 +69,10 @@ let test_partial_line_held () =
       append path "a\n";
       let cache = P.create () in
       let c = ref 0 in
-      ignore (reader cache path c);
+      let _ = reader cache path c in
       check int "1 complete line" 1 !c;
       append path "partial";
-      ignore (reader cache path c);
+      let _ = reader cache path c in
       check int "partial line not folded" 1 !c;
       append path "rest\n";
       let acc = reader cache path c in
@@ -84,7 +84,7 @@ let test_truncation_reseeds () =
       append path "a\nb\nc\n";
       let cache = P.create () in
       let c = ref 0 in
-      ignore (reader cache path c);
+      let _ = reader cache path c in
       check int "3 folded" 3 !c;
       rewrite path "x\n" (* shorter than consumed offset *);
       let acc = reader cache path c in

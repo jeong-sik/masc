@@ -6474,8 +6474,6 @@ let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violatio
 let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:
-        [ KC.default_cascade_name (); (KC.default_cascade_name ()); "ollama_only" ]
       ~base_cascade:"scoring"
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -6493,7 +6491,6 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
 let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_omits_it () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ "resilient_profile" ]
       ~base_cascade:"scoring"
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -6510,7 +6507,6 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
 let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ (KC.default_cascade_name ()); "required_safe" ]
       ~base_cascade:(KC.default_cascade_name ())
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6527,7 +6523,6 @@ let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog
 let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ (KC.default_cascade_name ()) ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6546,7 +6541,6 @@ let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manua
   =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ "cli_manual" ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6562,7 +6556,6 @@ let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manua
 let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ (KC.default_cascade_name ()); " primary " ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6579,7 +6572,6 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
 let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_tool () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "primary"; "local_recovery" ]
       ~fallback_hint:"local_recovery"
       ~base_cascade:"primary_required"
       ~effective_cascade:"secondary_required"
@@ -6597,7 +6589,6 @@ let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_to
 let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ ""; " scoring "; " catalog_next "; "catalog_next" ]
       ~base_cascade:" scoring "
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -6614,7 +6605,6 @@ let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly (
 let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ (KC.default_cascade_name ()); "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6632,7 +6622,6 @@ let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
 let test_degraded_rotation_skips_already_attempted_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ (KC.default_cascade_name ()); "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6650,7 +6639,6 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
 let test_degraded_rotation_ignores_blank_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ (KC.default_cascade_name ()); "primary" ]
       ~fallback_hint:"   "
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6663,89 +6651,6 @@ let test_degraded_rotation_ignores_blank_fallback_hint () =
     (KC.default_cascade_name ())
     "hard_quota"
     degraded_retry
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:
-        [ KC.default_cascade_name (); (KC.default_cascade_name ()); "ollama_only" ]
-      ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
-      ()
-  in
-  check
-    (option (list string))
-    "catalog-derived rotation order"
-    (Some [ KC.default_cascade_name (); "ollama_only" ])
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:
-        [ "ollama_only"; (KC.default_cascade_name ()); KC.default_cascade_name () ]
-      ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
-      ()
-  in
-  check
-    (option (list string))
-    "catalog-derived rotation preserves catalog order"
-    (Some [ "ollama_only"; KC.default_cascade_name () ])
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~excluded_targets:[ "cascade.ollama_cloud_primary" ]
-      ~catalog_names:
-        [
-          KC.default_cascade_name ();
-          "ollama_cloud_primary";
-          "provider_k-coding-with-spark";
-        ]
-      ~keeper_assignable:
-        [
-          KC.default_cascade_name ();
-          "ollama_cloud_primary";
-          "provider_k-coding-with-spark";
-        ]
-      ()
-  in
-  check
-    (option (list string))
-    "catalog-derived rotation excludes non-keeper route targets"
-    (Some [ KC.default_cascade_name (); "provider_k-coding-with-spark" ])
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:[]
-      ~keeper_assignable:[ KC.default_cascade_name () ]
-      ()
-  in
-  check
-    (option (list string))
-    "unresolved catalog falls back to legacy path"
-    None
-    rotation
-;;
-
-let test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candidates () =
-  let rotation =
-    UT.fail_open_rotation_cascades_from_catalog
-      ~catalog_names:[ "experimental_only" ]
-      ~keeper_assignable:[]
-      ()
-  in
-  check
-    (option (list string))
-    "resolved catalog without assignable candidates"
-    None
-    rotation
 ;;
 
 let test_metrics_persist_social_state_fields () =
@@ -11793,26 +11698,6 @@ let () =
             `Quick
             test_degraded_rotation_ignores_blank_fallback_hint
         ; test_case
-            "catalog rotation order merges reserved and assignable"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable
-        ; test_case
-            "catalog rotation preserves catalog order"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order
-        ; test_case
-            "catalog rotation excludes non-keeper route targets"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes
-        ; test_case
-            "unresolved catalog keeps legacy rotation fallback"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved
-        ; test_case
-            "resolved catalog without assignable candidates falls back"
-            `Quick
-            test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candidates
-        ; test_case
             "keeper runtime declared name substitutes unresolvable with keeper_turn"
             `Quick
             test_keeper_runtime_declared_name_substitutes_unresolvable_with_keeper_turn
@@ -11820,26 +11705,8 @@ let () =
             "keeper runtime declared name preserves logical-use route"
             `Quick
             test_keeper_runtime_declared_name_preserves_logical_use_route
-        ] )
-    ; ( "tool_classification"
-      , [ test_case
-            "keeper allowed tools exclude heartbeat"
-            `Quick
-            test_keeper_allowed_tools_exclude_heartbeat
         ; test_case
-            "initial tool requirement mirrors first-turn gate"
-            `Quick
-            test_should_require_tools_for_initial_turn_matches_first_turn_gate
-        ; test_case
-            "initial tool requirement covers actionable affordances"
-            `Quick
-            test_should_require_tools_for_initial_turn_covers_actionable_affordances
-        ; test_case
-            "actionable observation requires provider tool_choice filter"
-            `Quick
-            test_actionable_observation_requires_provider_tool_choice_filter
-        ; test_case
-            "task backlog required turn prefers claim tool choice"
+            "preferred tool choice for required turn claims first"
             `Quick
             test_preferred_tool_choice_for_required_turn_claims_first
         ; test_case

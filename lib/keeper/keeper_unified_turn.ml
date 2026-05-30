@@ -521,7 +521,6 @@ let run_keeper_cycle
                           ~registry_base_path
                           ~degraded_retry_slot_phase_budget_sec
                           ~record_streaming_cancelled_observation
-                          ~active_fail_open_rotation_cascades
                           ~cascade_name_of_meta
                           ~start_background_turn_event_bus_drain
                     )

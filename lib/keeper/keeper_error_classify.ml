@@ -569,7 +569,6 @@ let normalize_rotation_candidates ~catalog_names candidates =
 
 let degraded_rotation_candidates
     ~catalog_names
-    ~(rotation_cascades : string list option)
     ~(fallback_hint : string option)
     ~(base_cascade : string)
     ~(effective_cascade : string)
@@ -578,11 +577,8 @@ let degraded_rotation_candidates
     normalized_cascade_name ~catalog_names effective_cascade
   in
   let raw_candidates =
-    match rotation_cascades with
-    | None ->
-        default_degraded_rotation_candidates ~catalog_names ~base_cascade
-          ~tool_requirement
-    | Some catalog -> normalize_rotation_candidates ~catalog_names catalog
+    default_degraded_rotation_candidates ~catalog_names ~base_cascade
+      ~tool_requirement
   in
   let fallback_hint_candidate =
     match fallback_hint with
@@ -615,7 +611,6 @@ let degraded_rotation_candidates
                   candidate))
 
 let degraded_rotation_after_recoverable_error
-    ?rotation_cascades
     ?fallback_hint
     ~(base_cascade : string)
     ~(effective_cascade : string)
@@ -636,7 +631,6 @@ let degraded_rotation_after_recoverable_error
       in
       degraded_rotation_candidates
         ~catalog_names
-        ~rotation_cascades
         ~fallback_hint
         ~base_cascade ~effective_cascade ~tool_requirement
       |> List.find_opt (fun candidate ->

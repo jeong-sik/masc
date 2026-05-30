@@ -199,7 +199,6 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
   let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "catalog_first"; "base_only" ]
       ~base_cascade:"base_only"
       ~effective_cascade:"tool_use_strict"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -216,8 +215,6 @@ let test_rotation_skips_direct_tier_after_attempted_cascade () =
   let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:
-        [ "cascade.strict_tool_candidates"; "cascade.provider_k-coding-with-spark" ]
       ~base_cascade:"cascade.strict_tool_candidates"
       ~effective_cascade:"cascade.strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -246,7 +243,6 @@ let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "provider_k-coding-with-spark"; "strict_tool_candidates" ]
       ~fallback_hint:"ollama_cloud_stable"
       ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
@@ -275,7 +271,6 @@ let test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted ()
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "provider_k-coding-with-spark"; "strict_tool_candidates" ]
       ~fallback_hint:"ollama_cloud_stable"
       ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
@@ -434,7 +429,6 @@ let test_rotation_finds_next_cascade_for_rate_limit () =
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "primary"; "fallback_cascade" ]
       ~base_cascade:"primary"
       ~effective_cascade:"primary"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -454,7 +448,6 @@ let test_rotation_finds_next_cascade_for_auth_error () =
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "primary"; "fallback_cascade" ]
       ~base_cascade:"primary"
       ~effective_cascade:"primary"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional

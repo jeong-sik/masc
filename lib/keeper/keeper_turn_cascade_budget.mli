@@ -18,17 +18,7 @@ type cascade_execution = {
   max_tokens : int;
 }
 
-val fail_open_rotation_cascades_from_catalog :
-  ?excluded_targets:string list ->
-  catalog_names:string list ->
-  keeper_assignable:string list ->
-  unit ->
-  string list option
-
-val active_fail_open_rotation_cascades : unit -> string list option
-
 val next_fail_open_cascade_for_turn :
-  ?rotation_cascades:string list ->
   base_cascade:string ->
   effective_cascade:string ->
   tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
@@ -194,7 +184,6 @@ type degraded_retry_budget_decision =
   | Degraded_retry_allowed of EC.degraded_retry
 
 val next_fail_open_cascade_for_turn_with_budget :
-  ?rotation_cascades:string list ->
   base_cascade:string ->
   effective_cascade:string ->
   tool_requirement:Keeper_agent_tool_surface.tool_requirement ->

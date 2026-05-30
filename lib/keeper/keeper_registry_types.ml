@@ -19,10 +19,12 @@ include Keeper_registry_types_turn_phase
    [Keeper_registry_types_decision] (500-line decomp). *)
 include Keeper_registry_types_decision
 
-(* Cascade and compaction FSM types, witnesses, transitions, spec violation
-   types, and resolvers extracted to [Keeper_registry_types_cascade]
-   (500-line decomp). *)
-include Keeper_registry_types_cascade
+(* Compaction-stage (KMC) FSM types, witnesses, transitions, and spec
+   violations re-homed to [Keeper_registry_types_compaction] (RFC-0206). The
+   cascade selection FSM that shared the deleted [Keeper_registry_types_cascade]
+   module is removed — single-binding Runtime has no Selecting/Trying loop; turn
+   lifecycle is the surviving [turn_phase] FSM. *)
+include Keeper_registry_types_compaction
 
 type turn_measurement =
   { tm_captured_at : float
@@ -77,7 +79,6 @@ and turn_observation =
   ; last_progress_kind : string option
   ; turn_phase : packed_turn_phase
   ; decision_stage : packed_decision_stage
-  ; cascade_state : packed_cascade_state
   ; measurement : turn_measurement option
   ; measurement_bind_count : int
   ; selected_model : string option
@@ -88,7 +89,6 @@ and completed_turn_observation =
   ; ct_started_at : float
   ; ct_ended_at : float
   ; ct_decision_stage : packed_decision_stage
-  ; ct_cascade_state : packed_cascade_state
   ; ct_selected_model : string option
   }
 
@@ -109,32 +109,26 @@ let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 ;;
 
-let turn_phase_of_cascade_state (s : packed_cascade_state) : packed_turn_phase =
-  match s with
-  | Packed Cascade_idle -> Packed Turn_prompting
-  | Packed Cascade_selecting -> Packed Turn_routing
-  | Packed Cascade_trying -> Packed Turn_executing
-  | Packed Cascade_done -> Packed Turn_finalizing
-  | Packed Cascade_exhausted -> Packed Turn_exhausted
-;;
-
 let completed_turn_outcome_of_observation (obs : turn_observation)
   : Keeper_transition_audit.completed_turn_outcome
   =
-  (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
-     meant that adding a new variant to either ADT (decision_stage or
-     cascade_state) would silently fall through to Turn_failed without
-     a compile error.  Spelling out every variant lets the OCaml
-     exhaustiveness checker catch missing cases at build time. *)
+  (* RFC-0206: the cascade selection FSM was removed; turn substantiveness is
+     now read off the surviving [turn_phase] projection. Terminal
+     [Turn_finalizing] (the phase the deleted [turn_phase_of_cascade_state]
+     mapped [Cascade_done] onto) = substantive; every other phase = failed.
+     Exhaustive match (no wildcard) so a new turn_phase or decision_stage
+     variant fails the build rather than silently degrading to Turn_failed. *)
   match obs.decision_stage with
   | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
   | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
-    (match obs.cascade_state with
-     | Packed Cascade_done -> Keeper_transition_audit.Turn_substantive
-     | Packed Cascade_idle
-     | Packed Cascade_selecting
-     | Packed Cascade_trying
-     | Packed Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
+    (match obs.turn_phase with
+     | Packed Turn_finalizing -> Keeper_transition_audit.Turn_substantive
+     | Packed Turn_idle
+     | Packed Turn_prompting
+     | Packed Turn_routing
+     | Packed Turn_executing
+     | Packed Turn_compacting
+     | Packed Turn_exhausted -> Keeper_transition_audit.Turn_failed)
 ;;
 
 (* RFC-0002 Event Dispatch — lifecycle_event_origin type + pure helpers. *)

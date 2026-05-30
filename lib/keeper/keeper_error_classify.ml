@@ -284,10 +284,10 @@ let fallback_cascade_for_unavailable_profile
     ~(base_cascade : string)
     ~(effective_cascade : string) : string option =
   let normalized_base =
-    Keeper_cascade_profile.normalize_declared_name base_cascade
+    String.trim base_cascade
   in
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    String.trim effective_cascade
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
@@ -302,7 +302,7 @@ let degraded_retry_after_recoverable_error
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    String.trim effective_cascade
   in
   let effective_is_declared_phase_buffer =
     is_declared_phase_alias effective_cascade (Keeper_config.default_cascade_name ())
@@ -508,7 +508,7 @@ let normalized_cascade_name ~catalog_names name =
     || String.equal trimmed (Keeper_config.default_cascade_name ())
     || String.equal trimmed (Keeper_config.default_cascade_name ())
   then trimmed
-  else Keeper_cascade_profile.normalize_declared_name trimmed
+  else String.trim trimmed
 
 let required_tool_rotation_candidate
     ?(allow_phase_recovery = false)

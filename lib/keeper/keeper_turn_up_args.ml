@@ -118,7 +118,7 @@ let parse_cascade_name_opt args =
   | None -> Ok None
   | Some raw ->
       let normalized =
-        Keeper_cascade_profile.normalize_declared_name raw |> String.trim
+        String.trim raw |> String.trim
       in
       if normalized = "" then Error "cascade_name must not be empty"
       else

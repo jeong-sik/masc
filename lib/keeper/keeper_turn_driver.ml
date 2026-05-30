@@ -98,7 +98,7 @@ let run_named
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
   let cascade_name =
-    Keeper_cascade_profile.normalize_declared_name cascade_name
+    String.trim cascade_name
   in
   let error_cascade_name = cascade_name in
   let runtime_cascade_name = cascade_name in

@@ -41,7 +41,7 @@ let private_provider_hint_of_fields (fields : (string * Yojson.Safe.t) list) =
 let cascade_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list) =
   match json_string_field_opt "cascade_name" fields with
   | Some cascade_name ->
-    Some (Keeper_cascade_profile.canonicalize cascade_name ^ " (cascade)")
+    Some ((fun s -> s) cascade_name ^ " (cascade)")
   | None -> None
 ;;
 

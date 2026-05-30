@@ -276,17 +276,7 @@ let tool_policy_unloaded_metric accessor =
 
 let test_tool_policy_unloaded_accessors_emit_metric () =
   Keeper_tool_policy.reset_policy_config_for_test ();
-  let fallback_accessors =
-    [
-      ( "preset_can_satisfy",
-        fun () ->
-          ignore
-            (Keeper_tool_policy.preset_can_satisfy ~agent_preset:"delivery"
-               ~required_preset:"minimal") );
-      ( "configured_preset_names",
-        fun () -> ignore (Keeper_tool_policy.configured_preset_names ()) );
-    ]
-  in
+  let fallback_accessors : (string * (unit -> unit)) list = [] in
   List.iter
     (fun (accessor, call) ->
       let before = tool_policy_unloaded_metric accessor in

@@ -27,13 +27,6 @@ val policy_config_for_validation :
     state. Intended for isolated regression tests only. *)
 val reset_policy_config_for_test : unit -> unit
 
-(** {1 Policy Group Helpers} *)
-
-(** Check if [agent_preset] subsumes [required_preset] per the config hierarchy.
-    Still used for task-claim matching even though per-keeper presets are gone. *)
-val preset_can_satisfy :
-  agent_preset:string -> required_preset:string -> bool
-
 (** {1 MASC Schema Injection} *)
 
 (** Inline MCP-runtime tools that are safe for keepers without an MCP session

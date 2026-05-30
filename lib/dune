@@ -29,7 +29,6 @@
  keeper_world_observation_message_scope
  keeper_profile_load_failure_site
  keeper_turn_cleanup_failure_site
- keeper_cascade_sync_failure_site
  keeper_event_bus_drain_site
  keeper_turn_metrics_snapshot_failure_site
  keeper_metric_emit_dropped_site
@@ -52,7 +51,6 @@
  prometheus_builtin_metrics
  prometheus_transport_metric_names
  prometheus_core_metric_names
- prometheus_cascade_metric_names
  prometheus_oas_metric_names
  prometheus_runtime_metric_names
  prometheus_policy_metric_names
@@ -161,7 +159,6 @@
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_activation_readiness
-   keeper_cascade_resilience
    agent_tool_task_runtime
    agent_tool_voice_runtime
    agent_tool_dispatch_runtime
@@ -207,26 +204,13 @@
   keeper_run_tools_setup
   provider_runtime_projection
   voice_bridge_transport
-  cascade_wire_overlay
-  cascade_event_bridge_inference
-  cascade_event_bridge_error_json
-  cascade_http_probe_url
-  cascade_agent_context
-  cascade_health_tracker_config
-  cascade_metrics_registry
-  cascade_transport_cli_config
   keeper_oas_checkpoint
-  keeper_cascade_engine keeper_turn_driver_named_resolution
+  keeper_turn_driver_named_resolution
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
-  keeper_turn_driver_cascade_health
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
-  keeper_turn_driver_try_cascade
   keeper_turn_driver_wrappers
-  keeper_turn_cascade_budget_admission
-  keeper_turn_cascade_budget_event_bus
-  keeper_turn_cascade_budget_routing
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support
   keeper_unified_turn_event_bus
@@ -235,7 +219,6 @@
   keeper_unified_turn_failure
   keeper_unified_turn_phase_plan
   keeper_unified_turn_phase_gate
-  keeper_unified_turn_cascade_resolution
   keeper_unified_turn_pre_dispatch
   keeper_unified_turn_retry_setup
   keeper_unified_turn_terminal_error
@@ -340,7 +323,6 @@
   lsp_message_router
   lsp_overlay_provider
   server_ide_lsp_proxy
-  cascade_declarative_hotpath
   ;; Stage 04 (godfile decomposition build plan, Lane A) — internal
   ;; facade-only siblings of Model_inference_metrics. The public
   ;; surface lives in model_inference_metrics.mli.
@@ -529,10 +511,8 @@
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.
-   masc_mcp.cascade_decl
    ;; RFC-0163 Phase D1 — Cascade_name leaf extraction (lib/cascade_name/).
    ;; Pure canonical-name validation, stdlib-only.
-   masc_mcp.cascade_name
    masc_mcp.oas_compat
 
    uri

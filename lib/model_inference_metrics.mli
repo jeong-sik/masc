@@ -169,7 +169,7 @@ val render_keeper_prompt_feedback : aggregate -> string
     rather than concrete provider or model names. *)
 
 (** Per-provider rollup of {!model_stats} aggregated across every model id
-    whose [provider] matches. Feeds {!Dashboard_cascade.health_json}'s
+    whose [provider] matches. Feeds the cascade health surface (removed)'s
     [providers] array so the UI can render per-provider throughput and
     latency next to the existing behavioural (success_rate, cooldown)
     fields from {!Cascade_health_tracker}.

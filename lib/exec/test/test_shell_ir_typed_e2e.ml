@@ -49,6 +49,16 @@ let ctor_name = function
      | Shell_ir_typed.Git_commit _ -> "Git_commit"
      | Shell_ir_typed.Git_push _ -> "Git_push"
      | Shell_ir_typed.Git_pull _ -> "Git_pull"
+     | Shell_ir_typed.Git_stash _ -> "Git_stash"
+     | Shell_ir_typed.Git_rebase _ -> "Git_rebase"
+     | Shell_ir_typed.Git_merge _ -> "Git_merge"
+     | Shell_ir_typed.Git_branch _ -> "Git_branch"
+     | Shell_ir_typed.Git_checkout _ -> "Git_checkout"
+     | Shell_ir_typed.Git_fetch _ -> "Git_fetch"
+     | Shell_ir_typed.Git_show _ -> "Git_show"
+     | Shell_ir_typed.Git_reset _ -> "Git_reset"
+     | Shell_ir_typed.Git_blame _ -> "Git_blame"
+     | Shell_ir_typed.Git_add _ -> "Git_add"
      | Shell_ir_typed.Pwd _ -> "Pwd"
      | Shell_ir_typed.Echo _ -> "Echo"
      | Shell_ir_typed.Which _ -> "Which"
@@ -122,6 +132,13 @@ let ctor_name = function
      | Shell_ir_typed.Su _ -> "Su"
      | Shell_ir_typed.Dd _ -> "Dd"
      | Shell_ir_typed.Mkfs _ -> "Mkfs"
+     | Shell_ir_typed.Cp _ -> "Cp"
+     | Shell_ir_typed.Mv _ -> "Mv"
+     | Shell_ir_typed.Ln _ -> "Ln"
+     | Shell_ir_typed.Touch _ -> "Touch"
+     | Shell_ir_typed.Tee _ -> "Tee"
+     | Shell_ir_typed.Awk _ -> "Awk"
+     | Shell_ir_typed.Xargs _ -> "Xargs"
      | Shell_ir_typed.Generic _ -> "Generic")
 ;;
 
@@ -321,7 +338,7 @@ let test_build_tools () =
     ; "pytest tests/", "Pytest"
     ; "ruff check .", "Ruff"
     ; "pyright --check .", "Pyright"
-    ; "tsc --noEmit", "Tsc"
+    ; "tsc --noEmit src/index.ts", "Tsc"
     ; "ocamlfind list", "Ocamlfind"
     ; "rustc --version", "Rustc"
     ; "gofmt -l .", "Gofmt"
@@ -378,10 +395,7 @@ let test_generic_fallback () =
   (* Commands not in Exec_program.known should fall through to Generic *)
   List.iter
     (fun cmd -> check_ctor cmd "Generic")
-    [ "awk '{print $1}'"
-    ; "xargs echo"
-    ; "tee /tmp/output.txt"
-    ; "less file.txt"
+    [ "less file.txt"
     ; "vim file.txt"
     ]
 ;;

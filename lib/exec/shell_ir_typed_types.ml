@@ -163,6 +163,34 @@ and (_, _, _, _) command =
       ; branch : string
       }
       -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_fetch :
+      { remote : string option
+      ; branch : string option
+      ; prune : bool
+      ; all : bool
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_show :
+      { commit : string
+      ; stat : bool
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Git_reset :
+      { mode : [ `Soft | `Mixed | `Hard ]
+      ; target : string option
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_blame :
+      { file : string
+      ; range : string option
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Git_add :
+      { paths : string list
+      ; force : bool
+      ; update : bool
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Pwd : unit -> (unit, string, [ `Safe ], [ `Host ]) command
   | Echo :
       { args : string list }

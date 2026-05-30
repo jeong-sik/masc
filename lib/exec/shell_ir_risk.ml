@@ -457,6 +457,11 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Git_merge _) -> R0_Read
   | W (Git_branch _) -> R0_Read
   | W (Git_checkout _) -> R0_Read
+  | W (Git_fetch _) -> R0_Read
+  | W (Git_show _) -> R0_Read
+  | W (Git_reset _) -> R0_Read
+  | W (Git_blame _) -> R0_Read
+  | W (Git_add _) -> R0_Read
   (* network commands the word-list leaves at R0 (option B: unchanged) *)
   | W (Curl _) -> R0_Read
   | W (Wget _) -> R0_Read

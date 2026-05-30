@@ -227,6 +227,42 @@ let of_command = function
     [ Capability.Exec_program
         (Exec_program.of_known Exec_program.Git, arg "checkout" :: flag_args @ [ arg branch ])
     ]
+  | Shell_ir_typed.W (Git_fetch { remote; branch; prune; all }) ->
+    let flag_args =
+      (if prune then [ arg "--prune" ] else [])
+      @ (if all then [ arg "--all" ] else [])
+    in
+    let pos_args =
+      (match remote with Some r -> [ arg r ] | None -> [])
+      @ (match branch with Some b -> [ arg b ] | None -> [])
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "fetch" :: flag_args @ pos_args)
+    ]
+  | Shell_ir_typed.W (Git_show { commit; stat }) ->
+    let flag_args = if stat then [ arg "--stat" ] else [] in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "show" :: flag_args @ [ arg commit ])
+    ]
+  | Shell_ir_typed.W (Git_reset { mode; target }) ->
+    let mode_arg = match mode with `Soft -> "--soft" | `Mixed -> "--mixed" | `Hard -> "--hard" in
+    let pos_args = match target with Some t -> [ arg t ] | None -> [] in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "reset" :: arg mode_arg :: pos_args)
+    ]
+  | Shell_ir_typed.W (Git_blame { file; range }) ->
+    let range_args = match range with Some r -> [ arg "-L"; arg r ] | None -> [] in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "blame" :: range_args @ [ arg file ])
+    ]
+  | Shell_ir_typed.W (Git_add { paths; force; update }) ->
+    let flag_args =
+      (if force then [ arg "--force" ] else [])
+      @ (if update then [ arg "-u" ] else [])
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "add" :: flag_args @ List.map arg paths)
+    ]
   | Shell_ir_typed.W (Pwd ()) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Pwd, []) ]
   | Shell_ir_typed.W (Echo { args = echo_args }) ->

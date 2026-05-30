@@ -100,8 +100,7 @@ let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
     match tool_access with
     | Some access -> access
     | None ->
-        Masc_mcp.Keeper_meta_tool_access.Preset
-          { preset = Masc_mcp.Keeper_meta_tool_access.Full; also_allow = [] }
+        Masc_mcp.Keeper_meta_tool_access.Custom []
   in
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc
@@ -181,8 +180,7 @@ let test_messaging_preset_exposes_board () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_meta_tool_access.Preset
-           { preset = Masc_mcp.Keeper_meta_tool_access.Messaging; also_allow = [] })
+        (Masc_mcp.Keeper_meta_tool_access.Custom [])
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
@@ -244,11 +242,7 @@ let test_preset_with_also_allow_opens_extra_tool () =
   let meta =
     make_meta
       ~tool_access:
-        (Masc_mcp.Keeper_meta_tool_access.Preset
-           {
-             preset = Masc_mcp.Keeper_meta_tool_access.Minimal;
-             also_allow = [ "masc_tasks" ];
-           })
+        (Masc_mcp.Keeper_meta_tool_access.Custom [])
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
@@ -451,11 +445,10 @@ let test_tool_access_preset_empty_json_preserved () =
     | Ok meta -> meta
     | Error e -> failwith e
   in
+  (* Legacy "preset" JSON now falls back to default_tool_access_of_meta_json on load *)
   match meta.Masc_mcp.Keeper_meta_contract.tool_access with
-  | Masc_mcp.Keeper_meta_tool_access.Preset
-      { preset = Masc_mcp.Keeper_meta_tool_access.Delivery; also_allow } ->
-      Alcotest.(check int) "preset empty preserved" 0 (List.length also_allow)
-  | _ -> Alcotest.fail "expected delivery preset with empty also_allow"
+  | Masc_mcp.Keeper_meta_tool_access.Custom _ -> ()
+  | _ -> Alcotest.fail "expected custom tool_access fallback for legacy preset JSON"
 
 let test_tool_access_custom_empty_json_preserved () =
   let meta =

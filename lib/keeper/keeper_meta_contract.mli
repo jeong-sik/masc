@@ -7,10 +7,9 @@
     ({!Keeper_meta_json}) and store I/O.
 
     Re-exports {!Keeper_meta_tool_access} via [include] for the
-    [tool_preset] / [tool_access] ADT — callers can reach those
-    via either {!Keeper_meta_contract.tool_preset} or
-    {!Keeper_meta_contract.tool_preset} interchangeably (type
-    identity preserved through the cascade).
+    [tool_access] ADT — callers can reach it via
+    {!Keeper_meta_contract.tool_access} (type identity preserved
+    through the cascade).
 
     Internal: ~3 helpers stay private —
     \[blocker_class_of_serialized_string] (deserializer used
@@ -336,7 +335,6 @@ type keeper_meta = {
   network_mode : Keeper_types_profile.network_mode;
   allowed_paths : string list;
   tool_access : tool_access;
-  tool_preset_source : string option;
   tool_denylist : string list;
   mention_targets : string list;
   room_signal_prompt_enabled : bool;

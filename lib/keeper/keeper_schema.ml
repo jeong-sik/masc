@@ -3,14 +3,6 @@
 open Masc_domain
 module Persona_contract = Keeper_persona_authoring_contract
 
-(** Issue #8430: canonical [tool_preset] strings. Mirrors
-    [Keeper_meta_contract.valid_tool_preset_strings]. Direct dependency would
-    create a cycle (Keeper_schema -> Keeper_types -> Keeper_types_profile
-    -> Keeper_schema), so the test in [test_types.ml :: tool_preset_ssot]
-    asserts these two lists stay in sync. *)
-let tool_preset_enum_strings =
-  [ "minimal"; "social"; "messaging"; "dispatch"; "research"; "delivery"; "full" ]
-
 (** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
     [network_mode], . Same cycle constraint as
     [tool_preset_enum_strings] above — Keeper_schema cannot depend on
@@ -48,23 +40,6 @@ let persona_axis_schema (axis : Persona_contract.archetype_axis) =
     ]
 
 let tool_access_schema description =
-  let preset_shape =
-    `Assoc [
-      ("type", `String "object");
-      ("description", `String "Preset-based tool policy.");
-      ("properties", `Assoc [
-        ("kind", `Assoc [ ("const", `String "preset") ]);
-        ("preset", `Assoc [
-          ("type", `String "string");
-          ("enum",
-            `List (List.map (fun s -> `String s) tool_preset_enum_strings));
-        ]);
-        ("also_allow", string_array_schema);
-      ]);
-      ("required", `List [ `String "kind"; `String "preset" ]);
-      ("additionalProperties", `Bool false);
-    ]
-  in
   let custom_shape =
     `Assoc [
       ("type", `String "object");
@@ -80,7 +55,7 @@ let tool_access_schema description =
   `Assoc [
     ("type", `String "object");
     ("description", `String description);
-    ("oneOf", `List [ preset_shape; custom_shape ]);
+    ("oneOf", `List [ custom_shape ]);
   ]
 
 let keeper_schemas : tool_schema list = [

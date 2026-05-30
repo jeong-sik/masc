@@ -565,7 +565,6 @@ type keeper_meta =
   ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
   ; tool_access : tool_access
-  ; tool_preset_source : string option
   ; tool_denylist : string list
   ; mention_targets : string list
   ; room_signal_prompt_enabled : bool

@@ -28,9 +28,7 @@ type keeper_profile_defaults = {
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   repo_cli_identity : string option;
   git_identity_mode : string option;
-  tool_preset : string option;
-  tool_preset_source : string option;
-  tool_also_allow : string list option;
+  tool_custom_list : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
@@ -89,9 +87,7 @@ let empty_keeper_profile_defaults =
     network_mode = None;
     repo_cli_identity = None;
     git_identity_mode = None;
-    tool_preset = None;
-    tool_preset_source = None;
-    tool_also_allow = None;
+    tool_custom_list = None;
     tool_denylist = None;
     active_goal_ids = None;
     telemetry_feedback_enabled = None;

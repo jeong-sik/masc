@@ -16,41 +16,26 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let tool_access_key key = k ("tool_access." ^ key) in
   let tool_access_defaults_result =
     let kind_key = tool_access_key "kind" in
+    let tools_key = tool_access_key "tools" in
     let preset_key = tool_access_key "preset" in
     let also_allow_key = tool_access_key "also_allow" in
-    let tools_key = tool_access_key "tools" in
     match Keeper_toml_loader.toml_string_opt doc kind_key with
     | None
       when has_raw preset_key || has_raw also_allow_key || has_raw tools_key ->
         Error
           "keeper.tool_access.kind is required when keeper.tool_access.* keys are present"
-    | None -> Ok (None, None, None)
-    | Some "preset" -> (
-        match Keeper_toml_loader.toml_string_opt doc preset_key with
-        | None ->
-            Error
-              "keeper.tool_access.preset is required when keeper.tool_access.kind = \"preset\""
-        | Some raw -> (
-            match normalize_tool_preset_raw raw with
-            | Some normalized ->
-                Ok
-                  ( Some normalized,
-                    normalize_name_list_opt
-                      (Keeper_toml_loader.toml_string_list doc also_allow_key),
-                    Some "toml" )
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid keeper.tool_access.preset '%s' (allowed: %s)"
-                     raw
-                     (String.concat ", " valid_tool_preset_raw_strings))))
-    | Some "custom" ->
+    | None -> Ok None
+    | Some "preset" ->
         Error
-          "keeper.tool_access.kind=\"custom\" cannot be used in keeper TOML defaults yet; use masc_keeper_up tool_access for runtime custom policies"
+          "keeper.tool_access.kind=\"preset\" is no longer supported. \
+           Use kind=\"custom\" with an explicit tools list."
+    | Some "custom" ->
+        let tools = Keeper_toml_loader.toml_string_list doc tools_key in
+        Ok (Some (normalize_name_list tools))
     | Some raw ->
         Error
           (Printf.sprintf
-             "invalid keeper.tool_access.kind '%s' (allowed: preset)"
+             "invalid keeper.tool_access.kind '%s' (allowed: custom)"
              raw)
   in
   let per_provider_timeout_state, per_provider_timeout =
@@ -60,7 +45,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       (k "per_provider_timeout")
   in
   let removed_present =
-    ("also_allow" :: removed_keeper_input_key_names)
+    removed_keeper_input_key_names
     |> List.map k
     |> List.filter (fun key -> List.mem_assoc key doc)
   in
@@ -159,7 +144,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     Result.bind result (fun () -> tool_access_defaults_result)
   in
   Result.map
-    (fun (tool_preset, tool_also_allow, tool_preset_source) ->
+    (fun tool_custom_list ->
       {
         id = None;
         manifest_path = None;
@@ -199,9 +184,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         repo_cli_identity = str "repo_cli_identity";
         git_identity_mode =
           normalize_git_identity_mode_opt (str "git_identity_mode");
-        tool_preset;
-        tool_preset_source;
-        tool_also_allow;
+        tool_custom_list;
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
           if has "active_goal_ids" then
@@ -251,8 +234,6 @@ let parsed_field_key_names =
   ; "repo_cli_identity"
   ; "git_identity_mode"
   ; "tool_access.kind"
-  ; "tool_access.preset"
-  ; "tool_access.also_allow"
   ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"
@@ -300,8 +281,6 @@ let canonical_keeper_toml_key_names =
   ; "repo_cli_identity"
   ; "git_identity_mode"
   ; "tool_access.kind"
-  ; "tool_access.preset"
-  ; "tool_access.also_allow"
   ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"
@@ -444,18 +423,7 @@ let merge_keeper_profile_defaults
     repo_cli_identity = prefer overlay.repo_cli_identity base.repo_cli_identity;
     git_identity_mode =
       prefer overlay.git_identity_mode base.git_identity_mode;
-    tool_preset = prefer overlay.tool_preset base.tool_preset;
-    tool_preset_source =
-      (match overlay.tool_preset_source with
-       | Some _ as source -> source
-       | None ->
-         match overlay.tool_preset with
-       | Some _ -> Some "toml"
-       | None ->
-           match base.tool_preset with
-           | Some _ -> Some "persona"
-           | None -> None);
-    tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
+    tool_custom_list = prefer overlay.tool_custom_list base.tool_custom_list;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     telemetry_feedback_enabled =

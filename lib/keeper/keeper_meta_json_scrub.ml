@@ -17,7 +17,7 @@ let config_field_names =
   ; "social_model"; "cascade_name"
   ; "will"; "needs"; "desires"; "instructions"
   ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
-  ; "tool_access"; "tool_preset_source"; "tool_denylist"
+  ; "tool_access"; "tool_denylist"
   ; "mention_targets"; "room_signal_prompt_enabled"
   ; "joined_room_ids"
   ; "proactive_enabled"; "proactive_idle_sec"; "proactive_cooldown_sec"
@@ -47,7 +47,7 @@ let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
 ;;
 
 let legacy_keeper_meta_tool_policy_key_names =
-  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
+  [ "tool_preset"; "tool_preset_source"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
 ;;
 
 let legacy_keeper_meta_key_names =

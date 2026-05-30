@@ -322,9 +322,8 @@ let handle_tool_execute
       args
   in
   let write_enabled =
-    match Keeper_meta_contract.tool_access_preset meta.tool_access with
-    | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
-    | None -> false
+    let (Custom names) = meta.tool_access in
+    List.exists (fun n -> n = "tool_edit_file" || n = "tool_write_file") names
   in
   if has_typed_execute_input_key args
   then

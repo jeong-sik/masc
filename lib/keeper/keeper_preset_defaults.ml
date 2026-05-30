@@ -1,12 +1,4 @@
-let preset_of_defaults_warn ~call_site ~defaults_tool_preset =
-  match defaults_tool_preset with
-  | None -> None
-  | Some raw ->
-      (match Keeper_meta_contract.tool_preset_of_string raw with
-       | Some _ as v -> v
-       | None ->
-           Log.Keeper.warn
-             "%s: unknown tool_preset %S in profile defaults \
-              -> falling back to caller default (drift; see #8605)"
-             call_site raw;
-           None)
+(* keeper_preset_defaults: formerly held tool_preset string parsing helpers.
+   Named presets have been removed; keepers use explicit Custom tool lists.
+   This module is retained as an empty stub to avoid breaking any external
+   references until callers are fully migrated. *)

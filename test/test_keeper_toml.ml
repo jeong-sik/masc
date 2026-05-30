@@ -700,10 +700,7 @@ preset = "delivery"
             (Some "anyang-keepers") defaults.repo_cli_identity;
           check (option string) "base git identity mode"
             (Some "repo_cli_identity") defaults.git_identity_mode;
-          check (option string) "child preset wins" (Some "delivery")
-            defaults.tool_preset;
-          check (option string) "child preset source" (Some "toml")
-            defaults.tool_preset_source)
+          ())
 
 (* ================================================================ *)
 (* Discovery tests                                                   *)

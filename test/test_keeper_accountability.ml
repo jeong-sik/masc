@@ -40,8 +40,7 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
                ("trace_id", `String "test-trace-accountability");
                ( "tool_access",
                  Keeper_meta_tool_access.tool_access_to_json
-                   (Keeper_meta_tool_access.Preset
-                      { preset = Keeper_meta_tool_access.Full; also_allow = [] }) );
+                   (Keeper_meta_tool_access.Custom []) );
              ])
   with
   | Ok meta -> meta

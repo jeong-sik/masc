@@ -177,9 +177,7 @@ type keeper_profile_defaults =
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   repo_cli_identity : string option;
   git_identity_mode : string option;
-  tool_preset : string option;
-  tool_preset_source : string option;
-  tool_also_allow : string list option;
+  tool_custom_list : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
@@ -215,8 +213,6 @@ val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option
-val valid_tool_preset_raw_strings : string list
-val normalize_tool_preset_raw : string -> string option
 val first_some : 'a option -> 'a option -> 'a option
 val normalize_per_provider_timeout_opt :
   source:string -> float option -> float option

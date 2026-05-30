@@ -19,14 +19,12 @@ let make_meta
     ?(policy_voice_enabled = false)
     
     ?(name = "test-keeper")
-    ?(preset = Keeper_meta_tool_access.Full)
-    ?(also_allow = [])
     ?tool_access
     () : Keeper_meta_contract.keeper_meta =
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Preset { preset; also_allow }
+    | None -> Keeper_meta_tool_access.Custom []
   in
   let json = `Assoc [
     ("name", `String name);

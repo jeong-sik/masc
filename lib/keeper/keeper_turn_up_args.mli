@@ -34,8 +34,6 @@ type parsed_args =
   ; compaction_token_gate_opt : int option
   ; continuity_compaction_cooldown_sec_opt : int option
   ; tool_access_opt : tool_access option
-  ; tool_preset_opt : tool_preset option
-  ; tool_also_allow_opt : string list option
   ; tool_denylist_opt : string list option
   ; auto_handoff_opt : bool option
   ; handoff_threshold_opt : float option
@@ -86,14 +84,11 @@ val resolve_tool_name_list :
 val reject_legacy_tool_access_kind :
   Yojson.Safe.t -> (unit, string) result
 
-(** Parse the canonical [tool_access] field. The tuple shape is kept
-    for the create/update resolver, but legacy top-level tool-policy
-    args are rejected before returning. *)
+(** Parse the canonical [tool_access] field.
+    Legacy top-level tool-policy args are rejected. *)
 val parse_tool_access_input :
   Yojson.Safe.t ->
-  ( tool_access option * tool_preset option * string list option
-  , string )
-  result
+  (tool_access option, string) result
 
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)

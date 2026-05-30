@@ -91,16 +91,9 @@ let make_tool_bundle
      Assigned/Called/Completed pairing has no missing entries. *)
   let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
     let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
-    let preset =
-      match meta.tool_access with
-      | Preset { preset; _ } ->
-        Some (Keeper_tool_policy.preset_name_of_tool_preset preset)
-      | Custom _ -> None
-    in
     Tool_assignment_telemetry.emit_assigned
       ~agent_id:meta.agent_name
       ~profile:"keeper"
-      ?preset
       ~tool_list:assembled_surface_names
       ~allow_set:(Keeper_tool_policy.StringSet.elements lookup.allow_set)
       ~deny_set:(Keeper_tool_policy.StringSet.elements lookup.deny_set)

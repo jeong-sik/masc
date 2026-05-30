@@ -426,9 +426,7 @@ val recent_outcome_count :
   window_s:float ->
   int
 
-(** Global singleton tracker shared across all cascade calls.
-    Deprecated: use per-pool health trackers via {!Cascade_pool} instead.
-    @deprecated Since Phase 1 — per-pool isolation replaces the global singleton. *)
+(** Global singleton tracker shared across all cascade calls. *)
 val global : t
 
 val check_circuit_breaker : t -> provider_key:string -> (unit, string) result

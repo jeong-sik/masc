@@ -11,7 +11,7 @@
 (* ================================================================ *)
 
 type stop_reason =
-  Cascade_agent_context.stop_reason =
+  Keeper_agent_context.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
@@ -28,7 +28,7 @@ type cli_transport_overrides =
 }
 
 type config =
-  Cascade_agent_context.config = {
+  Keeper_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
   provider : Agent_sdk.Provider.config;
@@ -82,7 +82,7 @@ type config =
           to scrub [STATE] blocks before the 100-char truncation. *)
 }
 
-let default_config = Cascade_agent_context.default_config
+let default_config = Keeper_agent_context.default_config
 
 type run_result = {
   response : Agent_sdk.Types.api_response;
@@ -365,7 +365,7 @@ let build
   | Error _ as e -> e
   | Ok transport ->
       let builder =
-        Cascade_agent_context.builder_without_approval ~net ~config ?transport ()
+        Keeper_agent_context.builder_without_approval ~net ~config ?transport ()
       in
       let builder =
         match config.approval with
@@ -463,7 +463,7 @@ let resume_from_checkpoint
   | Error _ as e -> e
   | Ok transport ->
       let prepared_resume =
-        Cascade_agent_context.prepare_resume ~config ~checkpoint
+        Keeper_agent_context.prepare_resume ~config ~checkpoint
       in
       Log.Misc.info
         "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d effective_max_turns=%d"

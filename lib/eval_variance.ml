@@ -118,24 +118,43 @@ let band_of_proportion ?(confidence = 0.95) ~(trials : int)
 
 type verdict = Improvement | Regression | Inconclusive
 
+type difference = {
+  delta : float;
+  se : float;
+  ci_low : float;
+  ci_high : float;
+  confidence : float;
+  verdict : verdict;
+}
+
+let difference ?(confidence = 0.95) ~(baseline : variance_band)
+    ~(candidate : variance_band) () : difference =
+  let delta = candidate.mean -. baseline.mean in
+  let se = sqrt ((baseline.stderr ** 2.0) +. (candidate.stderr ** 2.0)) in
+  let z = z_for_confidence confidence in
+  (* z *. 0.0 = 0.0, so the se=0 case (identical constant runs) needs no
+     special branch: the CI collapses to [delta, delta] and the verdict
+     stays exact. *)
+  let ci_low = delta -. (z *. se) in
+  let ci_high = delta +. (z *. se) in
+  let verdict =
+    (* the difference CI must EXCLUDE 0 to act on the delta *)
+    if ci_low > 0.0 then Improvement
+    else if ci_high < 0.0 then Regression
+    else Inconclusive
+  in
+  {
+    delta;
+    se;
+    ci_low;
+    ci_high;
+    confidence = clamp_confidence confidence;
+    verdict;
+  }
+
 let compare ?(confidence = 0.95) ~(baseline : variance_band)
     ~(candidate : variance_band) () : verdict =
-  let delta = candidate.mean -. baseline.mean in
-  let se =
-    sqrt ((baseline.stderr ** 2.0) +. (candidate.stderr ** 2.0))
-  in
-  if se = 0.0 then
-    if delta > 0.0 then Improvement
-    else if delta < 0.0 then Regression
-    else Inconclusive
-  else
-    let z = z_for_confidence confidence in
-    let lo = delta -. (z *. se) in
-    let hi = delta +. (z *. se) in
-    (* the difference CI must EXCLUDE 0 to act on the delta *)
-    if lo > 0.0 then Improvement
-    else if hi < 0.0 then Regression
-    else Inconclusive
+  (difference ~confidence ~baseline ~candidate ()).verdict
 
 let verdict_to_string = function
   | Improvement -> "improvement"
@@ -168,4 +187,15 @@ let variance_band_to_json (b : variance_band) : Yojson.Safe.t =
       ("ci_high", `Float b.ci_high);
       ("ci_width", `Float b.ci_width);
       ("confidence", `Float b.confidence);
+    ]
+
+let difference_to_json (d : difference) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("delta", `Float d.delta);
+      ("se", `Float d.se);
+      ("ci_low", `Float d.ci_low);
+      ("ci_high", `Float d.ci_high);
+      ("confidence", `Float d.confidence);
+      ("verdict", `String (verdict_to_string d.verdict));
     ]

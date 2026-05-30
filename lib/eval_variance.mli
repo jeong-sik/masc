@@ -54,6 +54,20 @@ type verdict =
   | Regression    (** difference CI lies entirely below 0 *)
   | Inconclusive  (** difference CI includes 0 — within run-to-run noise *)
 
+type difference = {
+  delta : float;      (** candidate.mean - baseline.mean *)
+  se : float;         (** pooled standard error sqrt(se_base^2 + se_cand^2) *)
+  ci_low : float;     (** lower bound of the CI of the difference *)
+  ci_high : float;    (** upper bound of the CI of the difference *)
+  confidence : float;
+  verdict : verdict;  (** Improvement/Regression iff the CI excludes 0 *)
+}
+(** The full result of a two-sample difference test — the inspectable delta
+    AND its confidence interval, not just the [verdict]. This is what the
+    A/B harness (roadmap M2: injected-vs-not) and the evolving-brain
+    visibility surfaces render ("delta = +0.07 [0.02, 0.12]"); [compare]
+    keeps only the verdict. *)
+
 val compare :
   ?confidence:float ->
   baseline:variance_band ->
@@ -66,7 +80,23 @@ val compare :
     improvement is declared ONLY when that difference CI excludes 0;
     otherwise the delta is [Inconclusive] (do not act on it). *)
 
+val difference :
+  ?confidence:float ->
+  baseline:variance_band ->
+  candidate:variance_band ->
+  unit ->
+  difference
+(** The inspectable difference (delta + its CI + verdict). [compare] is
+    exactly [(difference ...).verdict] — this is the single source of the
+    math. The CI of (candidate.mean - baseline.mean) uses the pooled
+    standard error; a verdict of Improvement/Regression is returned ONLY
+    when that CI excludes 0. *)
+
 val verdict_to_string : verdict -> string
+
+val difference_to_json : difference -> Yojson.Safe.t
+(** Serialize a difference (delta, CI bounds, verdict) for the eval JSONL /
+    dashboard A/B and run-comparison surfaces. *)
 
 type gate = {
   min_runs : int;       (** minimum N for a band to be trusted *)

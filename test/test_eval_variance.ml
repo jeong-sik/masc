@@ -76,6 +76,24 @@ let () =
     (Eval_variance.compare ~baseline:noisy_a ~candidate:noisy_b ()
      = Eval_variance.Inconclusive);
 
+  print_endline "difference (inspectable delta + CI)";
+  let d = Eval_variance.difference ~baseline:low ~candidate:high () in
+  check "delta ~0.30 (0.90 - 0.60)" (approx ~eps:1e-9 d.delta 0.30);
+  check "difference.verdict matches compare"
+    (d.verdict = Eval_variance.compare ~baseline:low ~candidate:high ());
+  check "improvement -> ci_low > 0" (d.ci_low > 0.0);
+  check "ci_low < ci_high" (d.ci_low < d.ci_high);
+  check "ci brackets delta" (d.ci_low <= d.delta && d.delta <= d.ci_high);
+  let d_eq = Eval_variance.difference ~baseline:high ~candidate:high () in
+  check "identical -> delta=0" (approx d_eq.delta 0.0);
+  check "identical -> Inconclusive" (d_eq.verdict = Eval_variance.Inconclusive);
+  check "identical -> ci brackets 0" (d_eq.ci_low <= 0.0 && d_eq.ci_high >= 0.0);
+  let dj = Eval_variance.difference_to_json d in
+  check "difference json has delta + verdict"
+    (match dj with
+     | `Assoc l -> List.mem_assoc "delta" l && List.mem_assoc "verdict" l
+     | _ -> false);
+
   print_endline "check_gate";
   let few = some_band (Eval_variance.band_of_scores [ 0.7; 0.8 ]) in
   check "n=2 < min_runs=5 -> Too_few_runs"

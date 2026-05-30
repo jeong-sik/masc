@@ -197,7 +197,7 @@ let run_try_provider
   =
   let config_result =
     match
-      Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+      Keeper_runtime_candidate.resolve_tool_lane_for_oas_tools
         ?agent_name:(Keeper_oas_runner.keeper_agent_name_opt ctx.keeper_name)
         ~tool_requirement:
           (if ctx.require_tool_choice_support || ctx.require_tool_support
@@ -211,7 +211,7 @@ let run_try_provider
       let runtime_mcp_policy =
         match runtime_mcp_policy, String.trim ctx.keeper_name with
         | Some policy, keeper_name when keeper_name <> "" ->
-          Cascade_runtime_candidate.runtime_mcp_policy_for_agent
+          Keeper_runtime_candidate.runtime_mcp_policy_for_agent
             ~agent_name:(Keeper_identity.keeper_agent_name ctx.keeper_name)
             candidate
             (Some policy)
@@ -281,7 +281,7 @@ let run_try_provider
              ~materialized_tools:materialized_tool_names)
       else
         Ok
-          { (Cascade_runtime_candidate.default_config
+          { (Keeper_runtime_candidate.default_config
                ~name:ctx.name
                ~system_prompt:ctx.system_prompt
                ~tools:effective_tools
@@ -357,7 +357,7 @@ let run_try_provider
        identities remain on the OAS side.  Prometheus receives only the public,
        bounded provider bucket for TTFT/inter-chunk grouping. *)
     let candidate_key = Keeper_attempt_liveness_config.runtime_candidate_key in
-    let provider_label = Cascade_runtime_candidate.provider_label candidate in
+    let provider_label = Keeper_runtime_candidate.provider_label candidate in
     let liveness_observer_opt =
       match liveness_mode with
       | Keeper_attempt_liveness_config.Off ->
@@ -546,7 +546,7 @@ let run_try_provider
        let liveness_success_sample = liveness_success_sample () in
        let result =
          Result.map_error
-           (Cascade_runtime_candidate.enrich_sdk_error
+           (Keeper_runtime_candidate.enrich_sdk_error
               ~cascade_name:ctx.error_cascade_name
               candidate)
            result

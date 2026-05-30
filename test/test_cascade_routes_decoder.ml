@@ -1,4 +1,4 @@
-(** Regression test for [Cascade_routes.route_bindings_from_json].
+(** Regression test for [Keeper_routes.route_bindings_from_json].
 
     Routes are declared as RFC-0058 sub-tables:
     [[routes.X] target = "Y"]. The TOML materializer passes those
@@ -13,7 +13,7 @@ let bindings = testable
 
 let parse_routes_json src =
   let j = Yojson.Safe.from_string src in
-  Masc_mcp.Cascade_routes.route_bindings_from_json j
+  Masc_mcp.Keeper_routes.route_bindings_from_json j
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
 let test_declarative_sub_table_form () =

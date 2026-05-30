@@ -1,6 +1,6 @@
 open Alcotest
 
-module Candidate = Masc_mcp.Cascade_runtime_candidate
+module Candidate = Masc_mcp.Keeper_runtime_candidate
 module Driver = Masc_mcp.Keeper_turn_driver
 module Provider_config = Llm_provider.Provider_config
 

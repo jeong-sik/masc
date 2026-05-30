@@ -3246,7 +3246,7 @@ let provider_config ?(kind = Llm_provider.Provider_config.Provider_d_compat)
   Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
 
 let test_local_preflight_filters_unhealthy_local_endpoints () =
-  let module C = Masc_mcp.Cascade_runtime_candidate in
+  let module C = Masc_mcp.Keeper_runtime_candidate in
   let ollama =
     provider_config ~kind:Llm_provider.Provider_config.Ollama
       ~model_id:"gemma4:e2b" ~base_url:"http://localhost:11434/" ()

@@ -101,7 +101,7 @@ val invalid_assignments_for_public_profiles :
 
     [source_text] is the editable TOML source file content; [raw_json] is the
     in-memory rendering returned by
-    {!Cascade_toml_materializer.render_toml_to_json_string}. RFC-0058 §9
+    {!Keeper_toml_materializer.render_toml_to_json_string}. RFC-0058 §9
     Phase 9.3 retired the JSON-native authoring mode and the on-disk JSON
     sibling, so the [config_path] and [raw_json_editable] fields are gone.
     [assist] is a dashboard authoring helper derived from the same TOML source:
@@ -306,7 +306,7 @@ val provider_scheme_of_model_string : string -> string
     provider list with zero-traffic candidates. *)
 val declared_provider_schemes_of_config : ?config_path:string -> unit -> string list
 
-(** JSON snapshot of the {!Cascade_client_capacity} registry —
+(** JSON snapshot of the {!Keeper_client_capacity} registry —
     the per-URL/sentinel slot table used for registered HTTP probes and CLI
     subprocess throttling.
 
@@ -393,7 +393,7 @@ val client_capacity_history_json
   -> unit
   -> Yojson.Safe.t
 
-(** JSON projection of {!Cascade_strategy_trace} — recent per-cycle
+(** JSON projection of {!Keeper_strategy_trace} — recent per-cycle
     strategy decisions (candidate in/out counts, backoff, kind).
 
     Shape:
@@ -419,7 +419,7 @@ val client_capacity_history_json
       }
     ]}
 
-    Sorted newest-first (delegated to {!Cascade_strategy_trace.snapshot}).
+    Sorted newest-first (delegated to {!Keeper_strategy_trace.snapshot}).
 
     @param limit    max events returned (default 100).
     @param cascade  filter by [cascade_name]; omit to include every cascade.
@@ -478,7 +478,7 @@ val audit_runs_json
   -> Yojson.Safe.t
 
 (** Instantaneous SLO snapshot computed from the live
-    {!Cascade_strategy_trace} ring buffer.
+    {!Keeper_strategy_trace} ring buffer.
 
     Mirrors the SLO definitions codified in
     {{:../../infrastructure/monitoring/cascade-slo.yml}cascade-slo.yml}

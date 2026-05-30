@@ -1,19 +1,19 @@
-(** Unit tests for Cascade_strategy and Cascade_client_capacity.
+(** Unit tests for Cascade_strategy and Keeper_client_capacity.
 
     Strategy ordering is pure — these tests use a synthetic record
     type plus an adapter rather than building real Provider_config.t
     values, isolating strategy behaviour from provider construction.
 
-    Cascade_client_capacity carries process-global state via a
+    Keeper_client_capacity carries process-global state via a
     Hashtbl; each test that mutates the registry calls [unregister_all]
     in setup. *)
 
 open Alcotest
 module S = Masc_mcp.Cascade_strategy
 module H = Masc_mcp.Cascade_health_tracker
-module C = Masc_mcp.Cascade_client_capacity
+module C = Masc_mcp.Keeper_client_capacity
 module CH = Masc_mcp.Cascade_client_capacity_history
-module ST = Masc_mcp.Cascade_strategy_trace
+module ST = Masc_mcp.Keeper_strategy_trace
 module Kcp = Masc_mcp.Keeper_turn_profile
 module T = Masc_mcp.Cascade_throttle
 module Cascade_state = Masc_mcp.Cascade_state
@@ -242,7 +242,7 @@ let test_parse_config_kind_retired_rejected () =
            (string_contains msg "failover"))
     rejected
 
-(* ── Cascade_client_capacity ─────────────────────────────────── *)
+(* ── Keeper_client_capacity ─────────────────────────────────── *)
 
 let test_client_capacity_register_query () =
   C.unregister_all ();
@@ -297,11 +297,11 @@ let test_declared_client_capacity_registers_generic_endpoint () =
       ~internal_model_rotation_count:2
       ()
   in
-  let candidate = Masc_mcp.Cascade_runtime_candidate.of_provider_config cfg in
+  let candidate = Masc_mcp.Keeper_runtime_candidate.of_provider_config cfg in
   check (option int) "declared capacity"
     (Some 2)
-    (Masc_mcp.Cascade_runtime_candidate.declared_client_capacity candidate);
-  Masc_mcp.Cascade_runtime_candidate.register_declared_client_capacity candidate;
+    (Masc_mcp.Keeper_runtime_candidate.declared_client_capacity candidate);
+  Masc_mcp.Keeper_runtime_candidate.register_declared_client_capacity candidate;
   (* capacity_key = base_url:model_id, not bare base_url *)
   match C.capacity "https://runpod.example/v1:runpod-provider_h" with
   | None -> fail "declared endpoint capacity was not registered"
@@ -326,8 +326,8 @@ let test_client_capacity_clamp_max () =
     check int "max_concurrent <=0 clamped to 1" 1 info.total
 
 (* The previous HTTP auto-registration tests exercised the substring-scan path
-   inside [Cascade_client_capacity]. That path is gone now: callers consult the
-   registered probe surface and call [Cascade_client_capacity.register]
+   inside [Keeper_client_capacity]. That path is gone now: callers consult the
+   registered probe surface and call [Keeper_client_capacity.register]
    explicitly, so the removed auto-register functions have no test surface. *)
 
 (* ── Phase C3: CLI sentinel auto-registration ──────────────── *)

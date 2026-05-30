@@ -1,5 +1,5 @@
 (** test_cascade_strategy_labels — pure label-uniqueness tests for the
-    [Cascade_strategy.kind] and [Cascade_strategy_trace.event_kind]
+    [Cascade_strategy.kind] and [Keeper_strategy_trace.event_kind]
     ADTs.
 
     Step 15 (partial) of the bloodflow restoration plan, mirrors the
@@ -11,7 +11,7 @@
       label on the [cascade_strategy_decisions] Prometheus counter
       (see [bump_prometheus_counter] in cascade_strategy_trace.ml)
       and on the dashboard cascade card.
-    - [Cascade_strategy_trace.kind_to_string] — surfaced as the
+    - [Keeper_strategy_trace.kind_to_string] — surfaced as the
       [kind] label on the same counter and as the [kind] field on
       the dashboard JSON projection.
 
@@ -57,14 +57,14 @@ let test_cascade_strategy_all_kinds_documented_one () =
     1
     (List.length Cascade_strategy.all_kinds)
 
-(* ── Cascade_strategy_trace.event_kind ───────────────────────── *)
+(* ── Keeper_strategy_trace.event_kind ───────────────────────── *)
 
-let all_event_kinds : Cascade_strategy_trace.event_kind list =
+let all_event_kinds : Keeper_strategy_trace.event_kind list =
   [ Ordered; Filtered_empty; Exhausted ]
 
 let test_cascade_strategy_trace_kind_labels_unique () =
   let labels =
-    List.map Cascade_strategy_trace.kind_to_string all_event_kinds
+    List.map Keeper_strategy_trace.kind_to_string all_event_kinds
   in
   Alcotest.(check (list string))
     "no duplicate cascade_strategy_trace.event_kind labels" []
@@ -73,7 +73,7 @@ let test_cascade_strategy_trace_kind_labels_unique () =
 let test_cascade_strategy_trace_kind_labels_match_dashboard_doc () =
   (* Asserts the exact strings documented at
      cascade_strategy_trace.mli :: kind_to_string. *)
-  let pairs : (Cascade_strategy_trace.event_kind * string) list =
+  let pairs : (Keeper_strategy_trace.event_kind * string) list =
     [
       (Ordered, "ordered");
       (Filtered_empty, "filtered_empty");
@@ -85,7 +85,7 @@ let test_cascade_strategy_trace_kind_labels_match_dashboard_doc () =
       Alcotest.(check string)
         ("documented label for " ^ expected)
         expected
-        (Cascade_strategy_trace.kind_to_string k))
+        (Keeper_strategy_trace.kind_to_string k))
     pairs
 
 let () =

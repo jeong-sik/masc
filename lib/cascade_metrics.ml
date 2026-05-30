@@ -499,7 +499,7 @@ let on_context_capability_drift ~provider =
    removed when the product-named arm in
    [Cascade_config.resolve_label_context] was dropped. *)
 
-(* [Cascade_routes.cascade_name_for_use] has two fallback arms that
+(* [Keeper_routes.cascade_name_for_use] has two fallback arms that
    resolve a route to a hardcoded fallback instead of the
    operator-declared target:
 
@@ -561,7 +561,7 @@ let on_capability_mismatch ~count =
       ~delta:(float_of_int count)
       ()
 
-(* [Cascade_routes.route_bindings_from_json] silently drops two
+(* [Keeper_routes.route_bindings_from_json] silently drops two
    classes of malformed [routes] entry that escaped iter 9's
    schema-error counters (which cover missing-target-profile and
    unknown-route-key, NOT value-shape faults):

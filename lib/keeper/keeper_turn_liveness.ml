@@ -29,7 +29,7 @@ let decide_phase_buffer_liveness
   let resolve_runtime_url =
     match resolve_runtime_url with
     | Some resolve_runtime_url -> resolve_runtime_url
-    | None -> Cascade_runtime_candidate.runtime_url_of_label
+    | None -> Keeper_runtime_candidate.runtime_url_of_label
   in
   let normalized_base = Keeper_turn_profile.normalize_declared_name base_cascade in
   let normalized_effective =

@@ -6146,7 +6146,7 @@ let test_keeper_msg_async_failure_surface () =
 ;;
 
 let runtime_url_of_label label =
-  match Masc_mcp.Cascade_runtime_candidate.runtime_url_of_label label with
+  match Masc_mcp.Keeper_runtime_candidate.runtime_url_of_label label with
   | Some url -> url
   | None -> fail ("expected model label to resolve to runtime URL: " ^ label)
 ;;

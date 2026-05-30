@@ -15,7 +15,7 @@ open Keeper_types_profile
     does not probe runtime liveness; it only decides whether the selected
     labels resolve to runtime URLs that [Keeper_capacity_probe.can_probe]
     before preserving the canonical phase-buffer route. The provider/model
-    label resolver stays behind [Cascade_runtime_candidate]. *)
+    label resolver stays behind [Keeper_runtime_candidate]. *)
 type phase_buffer_liveness_decision =
   | Keep_effective_cascade of string
   | Probe_phase_buffer_urls of

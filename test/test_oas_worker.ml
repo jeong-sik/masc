@@ -1356,23 +1356,23 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         Alcotest.(check string) "primary base url" primary_url primary.base_url;
         Alcotest.(check string) "fallback base url" fallback_url fallback.base_url;
         let primary_candidate =
-          Masc_mcp.Cascade_runtime_candidate.of_provider_config primary
+          Masc_mcp.Keeper_runtime_candidate.of_provider_config primary
         in
         let fallback_candidate =
-          Masc_mcp.Cascade_runtime_candidate.of_provider_config fallback
+          Masc_mcp.Keeper_runtime_candidate.of_provider_config fallback
         in
         let primary_model_health_key =
-          Masc_mcp.Cascade_runtime_candidate.model_health_key primary_candidate
+          Masc_mcp.Keeper_runtime_candidate.model_health_key primary_candidate
         in
         let fallback_model_health_key =
-          Masc_mcp.Cascade_runtime_candidate.model_health_key fallback_candidate
+          Masc_mcp.Keeper_runtime_candidate.model_health_key fallback_candidate
         in
         Alcotest.(check bool)
           "model health keys are isolated"
           true
           (primary_model_health_key <> fallback_model_health_key);
         ( primary_model_health_key
-        , Masc_mcp.Cascade_runtime_candidate.health_key fallback_candidate )
+        , Masc_mcp.Keeper_runtime_candidate.health_key fallback_candidate )
       | providers ->
         Alcotest.failf "expected 2 resolved providers, got %d" (List.length providers)
     in

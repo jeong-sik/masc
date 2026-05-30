@@ -269,7 +269,7 @@ let validation_summary_json ?config_path () =
 
 let config_json ?base_path () =
   let config_path = Cascade_runtime.cascade_config_path () in
-  let source : Cascade_toml_materializer.source_info = source_info ?config_path () in
+  let source : Keeper_toml_materializer.source_info = source_info ?config_path () in
   let keeper_assignable_names = keeper_assignable_name_set ?config_path () in
   let keeper_entries =
     (* Issue #8619: was [with _ -> []] which silently swallowed
@@ -395,7 +395,7 @@ let raw_config_cache_key = "cascade:config:raw"
 
 let raw_config_json_compute () =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
-  let source : Cascade_toml_materializer.source_info = source_info () in
+  let source : Keeper_toml_materializer.source_info = source_info () in
   let source_read_error = ref None in
   let source_text =
     try load_raw_config_string source.source_path with
@@ -418,7 +418,7 @@ let raw_config_json_compute () =
     match !source_read_error with
     | Some msg -> "", Some msg
     | None ->
-      (match Cascade_toml_materializer.render_toml_string_to_json_string source_text with
+      (match Keeper_toml_materializer.render_toml_string_to_json_string source_text with
        | Ok json -> json, None
        | Error msg ->
          Log.Keeper.warn
@@ -429,7 +429,7 @@ let raw_config_json_compute () =
   in
   `Assoc
     [ "updated_at", `String (Masc_domain.now_iso ())
-    ; "source_kind", `String (Cascade_toml_materializer.source_kind_to_string source.kind)
+    ; "source_kind", `String (Keeper_toml_materializer.source_kind_to_string source.kind)
     ; "source_path", `String source.source_path
     ; "source_editable", `Bool (Option.is_none !source_read_error)
     ; "source_text", `String source_text
@@ -461,8 +461,8 @@ let raw_config_json () =
    in memory via [render_toml_to_json_string]. *)
 let save_raw_config_json raw_json =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
-  let source : Cascade_toml_materializer.source_info = source_info () in
-  match Cascade_toml_materializer.render_toml_string_to_json_string raw_json with
+  let source : Keeper_toml_materializer.source_info = source_info () in
+  match Keeper_toml_materializer.render_toml_string_to_json_string raw_json with
   | Error msg -> Error (Printf.sprintf "invalid TOML: %s" msg)
   | Ok _rendered_json ->
     (try

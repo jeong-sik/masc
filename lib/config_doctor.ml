@@ -625,13 +625,13 @@ let keeper_internal_tool_route_issue route_key target candidates =
 
 let forced_tool_route_issue
     (snapshot : Cascade_catalog_runtime.snapshot)
-    (use : Cascade_routes.logical_use)
+    (use : Keeper_routes.logical_use)
   =
-  let route_key = Cascade_routes.logical_use_key use in
+  let route_key = Keeper_routes.logical_use_key use in
   let target =
     try
       Some
-        (Cascade_routes_resolve.cascade_name_for_use
+        (Keeper_routes_resolve.cascade_name_for_use
            ~config_path:snapshot.source_path use)
     with
     | Failure _ | Sys_error _ | Unix.Unix_error _ -> None
@@ -697,7 +697,7 @@ let forced_tool_route_issues live_state_result =
   match live_catalog_snapshot live_state_result with
   | None -> []
   | Some snapshot ->
-      [ Cascade_routes.Keeper_turn; Cascade_routes.Tool_required ]
+      [ Keeper_routes.Keeper_turn; Keeper_routes.Tool_required ]
       |> List.filter_map (forced_tool_route_issue snapshot)
 
 let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input

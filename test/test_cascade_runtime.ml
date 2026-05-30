@@ -87,7 +87,7 @@ let test_custom_urls_use_endpoint_scoped_health_keys () =
         second_cfg
     in
     let runtime_keys =
-      Masc_mcp.Cascade_runtime_candidate.runtime_health_keys_of_labels
+      Masc_mcp.Keeper_runtime_candidate.runtime_health_keys_of_labels
         [ first; second ]
     in
     check

@@ -1,7 +1,7 @@
 (** SLO projection (LT-11).
 
    Targets mirror infrastructure/monitoring/cascade-slo.yml.  Computed
-   in-process from the live Cascade_strategy_trace ring so the MASC
+   in-process from the live Keeper_strategy_trace ring so the MASC
    dashboard can render SLO status without reaching Prometheus. *)
 
 open Dashboard_cascade_helpers
@@ -12,9 +12,9 @@ let slo_target_exhaustion_count = 10
 let slo_target_burn_rate = 1.0
 let slo_cache_ttl_s = 30.0
 
-let compute_slo_counts (events : Cascade_strategy_trace.event list) =
+let compute_slo_counts (events : Keeper_strategy_trace.event list) =
   List.fold_left
-    (fun (total, ordered, exhausted) (ev : Cascade_strategy_trace.event) ->
+    (fun (total, ordered, exhausted) (ev : Keeper_strategy_trace.event) ->
        match ev.kind with
        | Ordered -> total + 1, ordered + 1, exhausted
        | Filtered_empty -> total + 1, ordered, exhausted
@@ -24,7 +24,7 @@ let compute_slo_counts (events : Cascade_strategy_trace.event list) =
 ;;
 
 let slo_json_compute () =
-  let events = Cascade_strategy_trace.snapshot ~limit:slo_sample_limit () in
+  let events = Keeper_strategy_trace.snapshot ~limit:slo_sample_limit () in
   let total, ordered, exhausted = compute_slo_counts events in
   let ordered_ratio =
     if total = 0 then 1.0 else Stdlib.Float.of_int ordered /. Stdlib.Float.of_int total

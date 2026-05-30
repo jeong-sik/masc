@@ -324,7 +324,7 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
         List.mem model configured
         || List.exists
              (fun label ->
-               Cascade_runtime_candidate.label_matches_runtime_id
+               Keeper_runtime_candidate.label_matches_runtime_id
                  ~label
                  ~runtime_id:model)
              configured

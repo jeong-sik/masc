@@ -1,7 +1,7 @@
-(** Bounded ring buffer of [Cascade_client_capacity] acquire / release /
+(** Bounded ring buffer of [Keeper_client_capacity] acquire / release /
     rejected-when-full events, for dashboard observability.
 
-    Phase A ({!Cascade_client_capacity}) introduced the process-local
+    Phase A ({!Keeper_client_capacity}) introduced the process-local
     semaphore.  Phase D ({!Dashboard_cascade.client_capacity_json})
     exposed the *current* snapshot.  Operators still could not answer
     "how often was HTTP-probe capacity full in the last hour?" — this
@@ -15,7 +15,7 @@
     - Drop-oldest on overflow: recording into a full ring overwrites
       the oldest slot in place, no allocation on steady state.
     - [record] and [snapshot] are thread-safe via a plain stdlib
-      [Mutex] (matches {!Cascade_client_capacity}'s locking style; see
+      [Mutex] (matches {!Keeper_client_capacity}'s locking style; see
       memory/feedback_ocaml5-mutex-selection for the same-domain Eio.Mutex
       deadlock risk that pushed us to stdlib Mutex here).
     - [snapshot] returns events newest-first so the dashboard can
@@ -33,7 +33,7 @@ type event_kind = Acquired | Released | Rejected_full
 
     [ts] is a Unix timestamp (seconds).
     [key] is the registry key (URL or CLI sentinel) as accepted by
-    {!Cascade_client_capacity.register}.
+    {!Keeper_client_capacity.register}.
     [active_after] is the value of the atomic counter *after* the
     event took effect:
     - [Acquired]: counter after the successful CAS ([old + 1]).

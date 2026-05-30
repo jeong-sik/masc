@@ -9,7 +9,7 @@
     {ol
      {- [Cascade_throttle.capacity url]}
      {- Registered probes' [cached ~url]}
-     {- [Cascade_client_capacity.capacity url]}}
+     {- [Keeper_client_capacity.capacity url]}}
     @since 0.10.0  *)
 
 (* ── Module type ─────────────────────────────────────────────── *)
@@ -88,7 +88,7 @@ let capacity url =
   | None ->
     (match cached ~url () with
      | Some _ as v -> v
-     | None -> Cascade_client_capacity.capacity url)
+     | None -> Keeper_client_capacity.capacity url)
 ;;
 
 let probe ~sw ~net ~url ?timeout_s () =

@@ -529,7 +529,7 @@ let run_turn
          Keeper_model_labels.configured_model_labels_of_meta meta
        in
        let requires_runtime_mcp_header_sync =
-         Cascade_runtime_candidate.labels_require_runtime_mcp_header_sync
+         Keeper_runtime_candidate.labels_require_runtime_mcp_header_sync
            configured_model_labels
        in
        if

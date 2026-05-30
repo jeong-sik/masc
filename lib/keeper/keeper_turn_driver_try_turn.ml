@@ -223,13 +223,13 @@ type try_cascade_ctx =
     error_cascade_name_for_backpressure : Keeper_name.t
   ; (* Provider health recording *)
     record_provider_health_result :
-      Cascade_runtime_candidate.t -> success:bool -> http_status:int option -> unit
+      Keeper_runtime_candidate.t -> success:bool -> http_status:int option -> unit
   ; (* Provider health filtering *)
     filter_provider_health_fail_open :
-      Cascade_runtime_candidate.t list -> Cascade_runtime_candidate.t list
+      Keeper_runtime_candidate.t list -> Keeper_runtime_candidate.t list
   ; (* Provider health error recording *)
     record_provider_health_error :
-      Cascade_runtime_candidate.t -> Provider_error.t -> unit
+      Keeper_runtime_candidate.t -> Provider_error.t -> unit
   ; (* RFC-0192: keeper-level total budget for cascade attempts. Threaded
        from [Keeper_agent_run.admission_wait_timeout_sec] through
        [run_named] for per-attempt deadline composition. [None] =
@@ -287,7 +287,7 @@ let record_cascade_attempt ctx candidate ?http_status ~outcome () =
     then ()
     else
       let record : Keeper_meta_contract.cascade_attempt_record =
-        { provider_id = Cascade_runtime_candidate.provider_label candidate
+        { provider_id = Keeper_runtime_candidate.provider_label candidate
         ; http_status
         ; outcome
         ; timestamp =
@@ -405,7 +405,7 @@ let rec run
        let cooldown_expirations =
          List.filter_map
            (fun c ->
-              match Cascade_runtime_candidate.first_health_cooldown c with
+              match Keeper_runtime_candidate.first_health_cooldown c with
               | None -> None
               | Some (key, _) -> (
                 match
@@ -443,9 +443,9 @@ let rec run
       match ctx.runtime_manifest_required_tool_names with
       | [] -> None
       | required_tool_names ->
-      let provider_label = Cascade_runtime_candidate.provider_label candidate in
+      let provider_label = Keeper_runtime_candidate.provider_label candidate in
       match
-        Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+        Keeper_runtime_candidate.resolve_tool_lane_for_oas_tools
           ?agent_name:(Keeper_oas_runner.keeper_agent_name_opt ctx.keeper_name)
           ~tool_requirement:`Required
           ~tools:ctx.tools
@@ -527,15 +527,15 @@ let rec run
     (* Pre-admission capacity check: skip providers in capacity backpressure
        cooldown before spending OAS body budget on a doomed attempt. *)
     let capacity_constrained =
-      Cascade_runtime_candidate.health_keys candidate
+      Keeper_runtime_candidate.health_keys candidate
       |> List.exists (fun key ->
         Cascade_health_tracker.is_capacity_constrained
           Cascade_health_tracker.global ~provider_key:key)
     in
     if capacity_constrained then (
-      let provider_label = Cascade_runtime_candidate.provider_label candidate in
+      let provider_label = Keeper_runtime_candidate.provider_label candidate in
       let provider_key =
-        match Cascade_runtime_candidate.health_keys candidate with
+        match Keeper_runtime_candidate.health_keys candidate with
         | key :: _ -> key
         | [] -> provider_label
       in
@@ -562,7 +562,7 @@ let rec run
         ?last_capacity_source ?last_capacity_backpressure ctx rest last_err)
     else
     let health_cooldown =
-      Cascade_runtime_candidate.first_health_cooldown candidate
+      Keeper_runtime_candidate.first_health_cooldown candidate
     in
     let should_skip_health_cooldown =
       match health_cooldown with
@@ -649,7 +649,7 @@ let rec run
     in
     Log.Misc.debug "cascade %s: trying %s (is_last=%b)" ctx.cascade_name runtime_candidate_label is_last;
     let timeout_resolution =
-      Cascade_runtime_candidate.effective_attempt_timeout_resolution
+      Keeper_runtime_candidate.effective_attempt_timeout_resolution
         ~is_last
         ~configured_timeout_s:per_provider_timeout_s
         candidate
@@ -960,7 +960,7 @@ let rec run
                 ~cascade_name:ctx.error_cascade_name
                 ~outcome:`Success ~observation:(Some observation) ();
               record_cascade_attempt ctx candidate ~outcome:`Success ();
-              on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+              on_success ~provider_key:(Keeper_runtime_candidate.health_key candidate);
               Ok result
     | Ok result ->
       let reason = "response rejected by accept" in
@@ -989,7 +989,7 @@ let rec run
                    ~cascade_name:ctx.error_cascade_name
                    ~outcome:`Success ~observation:(Some observation) ();
                  record_cascade_attempt ctx candidate ~outcome:`Success ();
-                 on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+                 on_success ~provider_key:(Keeper_runtime_candidate.health_key candidate);
                  Ok result
        | Keeper_fsm.Try_next { last_err = new_err } ->
          let skip_reason =
@@ -1071,7 +1071,7 @@ let rec run
                    ~cascade_name:ctx.error_cascade_name
                    ~outcome:`Success ~observation:(Some observation) ();
                  record_cascade_attempt ctx candidate ~outcome:`Success ();
-                 on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+                 on_success ~provider_key:(Keeper_runtime_candidate.health_key candidate);
                  Ok result)
     | Error sdk_err ->
       let err_str = Agent_sdk.Error.to_string sdk_err in

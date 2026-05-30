@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 (** Pure helpers shared across the dashboard_cascade projection submodules:
     JSON shape primitives, public profile name normalization, validation
     rejection parsing, and retention/query envelope builders. No side
-    effects beyond reading [Cascade_toml_materializer.source_info] when
+    effects beyond reading [Keeper_toml_materializer.source_info] when
     [source_info] is invoked. *)
 
 module CC = Cascade_config
@@ -123,11 +123,11 @@ let source_info ?config_path () =
     | Some path -> path
     | None -> Config_dir_resolver.cascade_path_candidate ()
   in
-  Cascade_toml_materializer.source_info ~config_path
+  Keeper_toml_materializer.source_info ~config_path
 ;;
 
-let source_json_fields (source : Cascade_toml_materializer.source_info) =
-  [ "source_kind", `String (Cascade_toml_materializer.source_kind_to_string source.kind)
+let source_json_fields (source : Keeper_toml_materializer.source_info) =
+  [ "source_kind", `String (Keeper_toml_materializer.source_kind_to_string source.kind)
   ; "source_path", `String source.source_path
   ]
 ;;

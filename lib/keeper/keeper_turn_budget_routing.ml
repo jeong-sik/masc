@@ -60,7 +60,7 @@ let active_fail_open_excluded_route_targets () =
     |> List.filter_map route_target_for_use
     |> dedupe_keep_order
   in
-  Cascade_routes.all_logical_uses
+  Keeper_routes.all_logical_uses
   |> List.filter (fun use -> not (is_keeper_fail_open_route_use use))
   |> List.filter_map route_target_for_use
   |> List.filter (fun target ->

@@ -1,6 +1,6 @@
 (** Config loading with mtime-based hot-reload.
 
-    TOML → [Cascade_toml_materializer] → Yojson.Safe.t
+    TOML → [Keeper_toml_materializer] → Yojson.Safe.t
 
     @since 0.59.0
     @since 0.92.0 extracted from Cascade_config *)
@@ -100,7 +100,7 @@ let read_json_file path =
    loop). *)
 let load_toml_in_memory ~emit_telemetry config_path =
   let source_state =
-    Cascade_toml_materializer.source_state ~config_path
+    Keeper_toml_materializer.source_state ~config_path
   in
   let cache_key = source_state.info.source_path in
   match source_state.source_mtime with
@@ -109,7 +109,7 @@ let load_toml_in_memory ~emit_telemetry config_path =
        and let [render_toml_to_json_string] surface the real error
        (file missing, permission denied, etc.) — its error message is
        more actionable than what we could synthesize here. *)
-    (match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
+    (match Keeper_toml_materializer.render_toml_to_json_string ~config_path with
      | Error msg -> Error msg
      | Ok (_source, json_string) -> Ok (Yojson.Safe.from_string json_string))
   | Some mtime_pre ->
@@ -124,7 +124,7 @@ let load_toml_in_memory ~emit_telemetry config_path =
     (match cached with
      | Some cached_json -> Ok cached_json
      | None ->
-       (match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
+       (match Keeper_toml_materializer.render_toml_to_json_string ~config_path with
         | Error msg -> Error msg
         | Ok (_source, json_string) ->
           let mtime_post =

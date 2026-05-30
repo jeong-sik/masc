@@ -169,7 +169,7 @@ val on_context_capability_drift : provider:string -> unit
 
 val on_route_resolve_fallback : reason:string -> unit
 (** Tick the runtime route-resolution fallback counter at
-    [Cascade_routes.cascade_name_for_use] when a configured route
+    [Keeper_routes.cascade_name_for_use] when a configured route
     target cannot be honored.  [reason] must be one of
     [catalog_unvalidated] (no validated catalog names available)
     or [target_not_in_catalog] (declared target missing from the
@@ -189,7 +189,7 @@ val on_capability_mismatch : count:int -> unit
 
 val on_route_binding_dropped : reason:string -> unit
 (** Tick the route-binding-dropped counter at
-    [Cascade_routes.route_bindings_from_json] when an entry in the
+    [Keeper_routes.route_bindings_from_json] when an entry in the
     [routes] table is silently dropped.  [reason] must be one of
     [invalid_value] (not a declarative route table with [target]) or
     [empty_key_or_target] (target or key trimmed to empty string). *)

@@ -177,7 +177,7 @@ let validate_strategy ~config_path ~name =
     Error strategy_errors
   else
     (* Bypass Cascade_config facade.  Calling through it would create the
-       Cascade_config → Cascade_config_resolve → Cascade_routes →
+       Cascade_config → Cascade_config_resolve → Keeper_routes →
        Cascade_catalog_runtime → Cascade_catalog_runtime_validate →
        Cascade_config cycle. *)
     Ok
@@ -192,7 +192,7 @@ let rejection_of_path ~config_path ~attempted_mtime ~checked_at
   { source_path = config_path; attempted_mtime; checked_at; errors; profiles }
 
 let active_source_state ~config_path =
-  Cascade_toml_materializer.source_state ~config_path
+  Keeper_toml_materializer.source_state ~config_path
 
 let profile_build_of_declarative_profile
     (profile : Keeper_declarative_hotpath.profile) =
@@ -274,9 +274,9 @@ let profile_build_of_declarative
 (* #19327/#19340 follow-up: [runtime_required_profile_names] and its helper
    [runtime_required_profiles] had no callers (grep on the whole tree returned
    zero matches), and were the only sites in this module that pulled in
-   [Cascade_routes.configured_route_targets].  Deleting them removes one of
-   the four back-edges into [Cascade_routes] that closed the
-   Cascade_routes ↔ Cascade_catalog_runtime_validate module-level cycle.
+   [Keeper_routes.configured_route_targets].  Deleting them removes one of
+   the four back-edges into [Keeper_routes] that closed the
+   Keeper_routes ↔ Cascade_catalog_runtime_validate module-level cycle.
    See PR cycle resolution section. *)
 
 let config_path_opt () =
@@ -285,8 +285,8 @@ let config_path_opt () =
 
 (* #19327/#19340 follow-up: DI envelope for the post-profile route-target
    cross-check that was previously buried in [validate_path_result] and
-   reached up into [Cascade_routes] — the back-edge that closed the
-   Cascade_routes ↔ Cascade_catalog_runtime_validate module-level cycle. *)
+   reached up into [Keeper_routes] — the back-edge that closed the
+   Keeper_routes ↔ Cascade_catalog_runtime_validate module-level cycle. *)
 type route_data = {
   keeper_turn_target : string option;
   route_targets : string list;
@@ -408,9 +408,9 @@ let validate_path_result ?sw ?net ~route_data ~config_path () =
             (* #19327/#19340 follow-up: route-target cross-checks moved out of
                the validate function body and exposed as injected parameters
                (DI).  Internal callers (resolve.ml) pass empty data so they do
-               not need [Cascade_routes].  External callers (dashboard) fetch
-               from [Cascade_routes] and pass typed [route_data].  This breaks
-               the Cascade_routes ↔ Cascade_catalog_runtime_validate cycle.
+               not need [Keeper_routes].  External callers (dashboard) fetch
+               from [Keeper_routes] and pass typed [route_data].  This breaks
+               the Keeper_routes ↔ Cascade_catalog_runtime_validate cycle.
 
                Empty defaults preserve internal behavior — the route checks
                were duplicated against [validate_route_data] anyway from the

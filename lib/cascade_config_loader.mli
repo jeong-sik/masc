@@ -13,7 +13,7 @@
     [Yojson.Safe.Util]), this function does not read any JSON from disk.
     The on-disk source is [cascade.toml]; it is parsed by [Otoml] and
     rendered to an in-memory [Yojson.Safe.t] view by
-    [Cascade_toml_materializer]. The cache is keyed by the resolved
+    [Keeper_toml_materializer]. The cache is keyed by the resolved
     source-path mtime.
 
     @since RFC-0058 §9 Phase 9.3 renamed from [load_json] — no on-disk

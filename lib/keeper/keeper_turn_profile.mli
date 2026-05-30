@@ -12,7 +12,7 @@
 
     @since 0.9.5 *)
 
-type logical_use = Cascade_routes.logical_use =
+type logical_use = Keeper_routes.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer

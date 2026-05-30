@@ -1,9 +1,9 @@
 (** Strategy-trace projection: shapes the most recent
-    {!Cascade_strategy_trace} ring events for the dashboard. *)
+    {!Keeper_strategy_trace} ring events for the dashboard. *)
 
 open Dashboard_cascade_helpers
 
-let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event) : Yojson.Safe.t =
+let strategy_trace_event_to_json (ev : Keeper_strategy_trace.event) : Yojson.Safe.t =
   let cascade_name = Cascade_name.to_string ev.cascade_name in
   let trace_id_json = Json_util.string_opt_to_json ev.trace_id
   in
@@ -15,14 +15,14 @@ let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event) : Yojson.Sa
     ; "candidates_in", `Int ev.candidates_in
     ; "candidates_out", `Int ev.candidates_out
     ; "backoff_ms", `Int ev.backoff_ms
-    ; "kind", `String (Cascade_strategy_trace.kind_to_string ev.kind)
+    ; "kind", `String (Keeper_strategy_trace.kind_to_string ev.kind)
     ; "trace_id", trace_id_json
     ; "confidence_score", Json_util.float_opt_to_json ev.confidence_score
     ]
 ;;
 
 let strategy_trace_json ?limit ?cascade () =
-  let events = Cascade_strategy_trace.snapshot ?limit ?cascade () in
+  let events = Keeper_strategy_trace.snapshot ?limit ?cascade () in
   let generated_at = Masc_domain.now_iso () in
   `Assoc
     [ "updated_at", `String generated_at
@@ -32,9 +32,9 @@ let strategy_trace_json ?limit ?cascade () =
     ; ( "retention"
       , retention_json
           ~scope:"cascade_strategy_trace"
-          ~producer:"Cascade_strategy_trace.record"
+          ~producer:"Keeper_strategy_trace.record"
           ~store_kind:"process_ring_buffer"
-          ~ring_capacity:(Cascade_strategy_trace.capacity ())
+          ~ring_capacity:(Keeper_strategy_trace.capacity ())
           ~cache_policy:"uncached; reads the newest entries from the process ring buffer"
           () )
     ; ( "query"

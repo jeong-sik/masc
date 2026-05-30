@@ -5,7 +5,7 @@
 module Parser = Cascade_config_parser
 (* Removed dead alias [module Resolve = Cascade_config_resolve] — the only
    reference was the alias itself.  Keeping it would re-introduce the
-   Cascade_routes ↔ Cascade_config cycle via the new direct call from
+   Keeper_routes ↔ Cascade_config cycle via the new direct call from
    Cascade_catalog_runtime_validate (see PR cycle resolution). *)
 
 (* One-time warning per (cascade name, raw value) pair so misspelled

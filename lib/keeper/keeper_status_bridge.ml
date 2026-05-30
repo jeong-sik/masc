@@ -538,10 +538,10 @@ let optional_existing_path_json ?source = function
    TOML path + the single-arm [source_kind]. *)
 let cascade_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
   let source =
-    Cascade_toml_materializer.source_info ~config_path:resolution.cascade.path
+    Keeper_toml_materializer.source_info ~config_path:resolution.cascade.path
   in
   [ ( "cascade_catalog_source_kind"
-    , `String (Cascade_toml_materializer.source_kind_to_string source.kind) )
+    , `String (Keeper_toml_materializer.source_kind_to_string source.kind) )
   ; "cascade_catalog_source_path", `String source.source_path
   ]
 ;;

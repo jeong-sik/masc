@@ -49,7 +49,7 @@ val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info 
 
 (** [capacity url] is the 3-level resolution chain:
     [Cascade_throttle] → registered probes' cache →
-    [Cascade_client_capacity].  Identical semantics to the previous
+    [Keeper_client_capacity].  Identical semantics to the previous
     per-caller hardcoded chain. *)
 val capacity : string -> Cascade_throttle.capacity_info option
 

@@ -51,18 +51,18 @@ val client_capacity_full_decision :
   capacity_key:string -> Yojson.Safe.t
 
 val success_selected_model_raw :
-  Cascade_runtime_candidate.t -> string option
+  Keeper_runtime_candidate.t -> string option
 
 val error_selected_model_raw : string option
 val health_error_kind : string -> Cascade_health_tracker.error_kind
 
 val record_candidate_health_success :
-  Cascade_runtime_candidate.t -> latency_ms:float -> unit
+  Keeper_runtime_candidate.t -> latency_ms:float -> unit
 
 val record_candidate_health_rejected :
-  Cascade_runtime_candidate.t -> reason:string -> unit
+  Keeper_runtime_candidate.t -> reason:string -> unit
 
 val record_candidate_health_error :
-  Cascade_runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
+  Keeper_runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
 
 val runtime_candidate_label : string

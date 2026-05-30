@@ -1,6 +1,6 @@
 (** Ollama [/api/ps] capacity probe.
 
-    Phase A introduced {!Cascade_client_capacity} as a process-local
+    Phase A introduced {!Keeper_client_capacity} as a process-local
     semaphore for endpoints {!Cascade_throttle} cannot probe (ollama
     HTTP, CLI transports, etc.).  The Phase A semaphore is accurate
     for *this* OCaml process, but it cannot see request load from

@@ -32,7 +32,7 @@ let provider_cooldown_remaining_sec_for_cascade
   =
   let runtime_health_keys =
     Cascade_runtime.models_of_cascade_name cascade_name
-    |> Cascade_runtime_candidate.runtime_health_keys_of_labels
+    |> Keeper_runtime_candidate.runtime_health_keys_of_labels
   in
   match runtime_health_keys with
   | [] -> None

@@ -10,7 +10,7 @@
 (** Default cascade name for keeper turns. Resolved each call against
     the live [Cascade_catalog_runtime] snapshot so the answer reflects
     the currently-installed catalog rather than module-init state. Falls
-    back to [Cascade_routes.cascade_name_for_use Keeper_turn] when the
+    back to [Keeper_routes.cascade_name_for_use Keeper_turn] when the
     snapshot is not yet available (early boot).
     @since v2.128.0
     @since RFC-0066 Phase 1: changed from a string value to a thunk

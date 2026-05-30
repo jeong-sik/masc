@@ -176,7 +176,7 @@ let provider_rejections_for_no_tool_error
   candidates
   |> List.filter_map (fun candidate ->
        match
-         Cascade_runtime_candidate.tool_filter_rejection_label
+         Keeper_runtime_candidate.tool_filter_rejection_label
            ~keeper_name ?runtime_mcp_policy ~tools
            ~require_tool_choice_support ~require_tool_support candidate
        with
@@ -185,7 +185,7 @@ let provider_rejections_for_no_tool_error
            Some
              ({
                 provider_label =
-                  Cascade_runtime_candidate.provider_label candidate;
+                  Keeper_runtime_candidate.provider_label candidate;
                 reason;
               }
                : Cascade_error_classify.provider_rejection))

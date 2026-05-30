@@ -1,14 +1,14 @@
 (** Declarative cascade catalog validation. *)
 
 val active_source_state :
-  config_path:string -> Cascade_toml_materializer.source_state
+  config_path:string -> Keeper_toml_materializer.source_state
 
 val config_path_opt : unit -> string option
 
 (* #19327/#19340 follow-up: [runtime_required_profile_names] removed (dead). *)
 
 (** DI envelope for the post-profile route-target cross-check.  External
-    callers (dashboard / boot probes) build this from {!Cascade_routes}
+    callers (dashboard / boot probes) build this from {!Keeper_routes}
     before invoking validate; internal callers (resolve.ml) pass
     {!empty_route_data} to skip route-target validation when they only
     need profile validation.  See PR cycle resolution. *)

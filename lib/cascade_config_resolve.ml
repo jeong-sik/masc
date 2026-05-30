@@ -153,21 +153,21 @@ let resolve_model_strings_traced_with
        else
          let fallback_profile =
            (* #19327/#19340 follow-up: bypass the catalog-aware
-              [Cascade_routes_resolve.cascade_name_for_use] (which would
-              re-introduce the Cascade_routes ↔ Cascade_catalog_runtime
+              [Keeper_routes_resolve.cascade_name_for_use] (which would
+              re-introduce the Keeper_routes ↔ Cascade_catalog_runtime
               cycle through this module) and resolve directly from route
               bindings, falling back to the canonical route name. *)
            let route_key =
-             Cascade_routes.logical_use_key Cascade_routes.Keeper_turn
+             Keeper_routes.logical_use_key Keeper_routes.Keeper_turn
            in
            match
-             Cascade_routes.configured_route_bindings ~config_path:path ()
+             Keeper_routes.configured_route_bindings ~config_path:path ()
              |> List.find_map (fun (k, target) ->
                     if String.equal k route_key then Some target else None)
            with
            | Some target -> target
            | None ->
-             Cascade_routes.fallback_name_for_catalog Cascade_routes.Keeper_turn
+             Keeper_routes.fallback_name_for_catalog Keeper_routes.Keeper_turn
                ~catalog:[]
          in
          let fallback_weighted =
@@ -232,18 +232,18 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     else
       let fallback_profile =
         (* #19327/#19340 follow-up: bypass catalog-aware resolver to avoid
-           the Cascade_routes ↔ Cascade_catalog_runtime cycle. *)
+           the Keeper_routes ↔ Cascade_catalog_runtime cycle. *)
         let route_key =
-          Cascade_routes.logical_use_key Cascade_routes.Keeper_turn
+          Keeper_routes.logical_use_key Keeper_routes.Keeper_turn
         in
         match
-          Cascade_routes.configured_route_bindings ~config_path:path ()
+          Keeper_routes.configured_route_bindings ~config_path:path ()
           |> List.find_map (fun (k, target) ->
                  if String.equal k route_key then Some target else None)
         with
         | Some target -> target
         | None ->
-          Cascade_routes.fallback_name_for_catalog Cascade_routes.Keeper_turn
+          Keeper_routes.fallback_name_for_catalog Keeper_routes.Keeper_turn
             ~catalog:[]
       in
       let fallback_weighted =

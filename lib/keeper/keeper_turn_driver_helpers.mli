@@ -82,7 +82,7 @@ val provider_rejections_for_no_tool_error :
   tools:Agent_sdk.Tool.t list ->
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
-  Cascade_runtime_candidate.t list ->
+  Keeper_runtime_candidate.t list ->
   Cascade_error_classify.provider_rejection list
 
 val apply_stream_idle_timeout_default : float option -> float option

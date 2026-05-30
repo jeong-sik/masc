@@ -109,7 +109,7 @@ let inspect_active ?sw ?net ?clock () =
           (* #19327/#19340 follow-up: internal resolve path skips the
              route-target cross-check by passing [empty_route_data] — that
              check is owned by external callers (dashboard / boot probes)
-             which fetch from [Cascade_routes] explicitly.  See PR cycle
+             which fetch from [Keeper_routes] explicitly.  See PR cycle
              resolution. *)
           match
             Validate.validate_path_result ?sw ?net
@@ -229,7 +229,7 @@ let lookup_active_profile ?sw ?net ?clock raw_name =
       if String.equal trimmed "" then
         (* RFC-0066 Phase 1: blank raw means "the active default cascade".
            Resolve via the snapshot's [default_profile_name], which the
-           validator builds from [Cascade_routes.cascade_name_for_use
+           validator builds from [Keeper_routes.cascade_name_for_use
            Keeper_turn] and guarantees is present in [profiles]
            (snapshot construction rejects otherwise).  Reading
            [List.hd snapshot.profiles] would silently return the

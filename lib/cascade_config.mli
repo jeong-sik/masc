@@ -525,7 +525,7 @@ val resolve_ollama_max_concurrent :
 (** Per-cascade override for the HTTP-probe-capable provider's
     client-capacity registration default.  The caller in
     {!Keeper_turn_driver} consults provider-kind probe capability and registers
-    matching cfgs through {!Cascade_client_capacity.register}.
+    matching cfgs through {!Keeper_client_capacity.register}.
     [None] means "use the literal default of 1". *)
 
 val resolve_cli_max_concurrent :
@@ -534,7 +534,7 @@ val resolve_cli_max_concurrent :
   unit ->
   int option
 (** Per-cascade override for the CLI client-capacity registration
-    default ({!Cascade_client_capacity.auto_register_cli_for_candidates}).
+    default ({!Keeper_client_capacity.auto_register_cli_for_candidates}).
     [None] means "use the env-var default
     ([MASC_CLI_MAX_CONCURRENT] or 1)".
     @since 0.9.8 *)

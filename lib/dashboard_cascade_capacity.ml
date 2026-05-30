@@ -1,7 +1,7 @@
 (** Client capacity registry + history projections.
 
     Projects the per-URL/sentinel slot table maintained by
-    {!Cascade_client_capacity} and the ring buffer of acquire/release
+    {!Keeper_client_capacity} and the ring buffer of acquire/release
     events from {!Cascade_client_capacity_history} into dashboard JSON. *)
 
 open Dashboard_cascade_helpers
@@ -31,7 +31,7 @@ let client_capacity_entry_to_json ((url, info) : string * Cascade_throttle.capac
 ;;
 
 let client_capacity_json_compute () =
-  let entries = Cascade_client_capacity.snapshot () in
+  let entries = Keeper_client_capacity.snapshot () in
   (* Stable ordering by (kind, key) so the dashboard table doesn't
      reshuffle on every poll.  Hashtbl iteration is unordered, so we
      sort here rather than depend on insertion order. *)
@@ -54,7 +54,7 @@ let client_capacity_json_compute () =
     ; ( "retention"
       , retention_json
           ~scope:"cascade_client_capacity"
-          ~producer:"Cascade_client_capacity.register"
+          ~producer:"Keeper_client_capacity.register"
           ~store_kind:"process_registry"
           ~cache_policy:"2s ttl + stale-while-revalidate via Dashboard_cache" () )
     ; "entries", `List (List.map client_capacity_entry_to_json sorted)

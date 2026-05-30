@@ -158,7 +158,7 @@ let run_named
     | required_tool_names ->
       List.fold_right
         (fun candidate (kept, rejected) ->
-           let provider_label = Cascade_runtime_candidate.provider_label candidate in
+           let provider_label = Keeper_runtime_candidate.provider_label candidate in
            let drop ~lane ~missing_required_tools ~materialized_tool_names =
              let reason =
                Printf.sprintf
@@ -181,7 +181,7 @@ let run_named
              :: rejected
            in
            match
-             Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+             Keeper_runtime_candidate.resolve_tool_lane_for_oas_tools
                ?agent_name:(Keeper_oas_runner.keeper_agent_name_opt keeper_name)
                ~tool_requirement:`Required
                ~tools
@@ -196,7 +196,7 @@ let run_named
              let runtime_mcp_policy =
                match runtime_mcp_policy, String.trim keeper_name with
                | Some policy, keeper_name when keeper_name <> "" ->
-                 Cascade_runtime_candidate.runtime_mcp_policy_for_agent
+                 Keeper_runtime_candidate.runtime_mcp_policy_for_agent
                    ~agent_name:(Keeper_identity.keeper_agent_name keeper_name)
                    candidate
                    (Some policy)
@@ -225,7 +225,7 @@ let run_named
     required_lane_filtered_candidates
     |> List.filter
          (fun candidate ->
-            match Cascade_runtime_candidate.first_health_cooldown candidate with
+            match Keeper_runtime_candidate.first_health_cooldown candidate with
             | None -> true
             | Some (_provider_health_key, msg) ->
                 Log.Misc.debug
@@ -243,7 +243,7 @@ let run_named
       ~health_filtered_candidates
   in
   let local_endpoint_health =
-    match Cascade_runtime_candidate.local_runtime_urls dispatch_seed_candidates with
+    match Keeper_runtime_candidate.local_runtime_urls dispatch_seed_candidates with
     | [] -> []
     | endpoints ->
       Llm_provider.Discovery.refresh_and_sync ~sw ~net ~endpoints
@@ -251,7 +251,7 @@ let run_named
              status.url, status.healthy)
   in
   let local_prefiltered_candidates, unhealthy_local_endpoints =
-    Cascade_runtime_candidate.filter_unhealthy_local_runtime_urls
+    Keeper_runtime_candidate.filter_unhealthy_local_runtime_urls
       ~endpoint_health:local_endpoint_health
       dispatch_seed_candidates
   in
@@ -347,10 +347,10 @@ let run_named
   in
   let register_capacity_controls candidates =
     List.iter
-      Cascade_runtime_candidate.register_declared_client_capacity
+      Keeper_runtime_candidate.register_declared_client_capacity
       candidates;
     let capacity_keys =
-      Cascade_runtime_candidate.capacity_keys candidates
+      Keeper_runtime_candidate.capacity_keys candidates
       |> List.map String.trim
       |> List.filter (fun key -> not (String.equal key ""))
       |> Json_util.dedupe_keep_order
@@ -365,11 +365,11 @@ let run_named
     in
     (match cli_max_concurrent with
      | Some max_concurrent ->
-       Cascade_client_capacity.auto_register_cli_with_override
+       Keeper_client_capacity.auto_register_cli_with_override
          ~capacity_keys
          ~max_concurrent
      | None ->
-       Cascade_client_capacity.auto_register_cli_for_candidates ~capacity_keys);
+       Keeper_client_capacity.auto_register_cli_for_candidates ~capacity_keys);
     let http_probe_default_max_concurrent = 1 in
     let http_probe_max_concurrent =
       match
@@ -388,7 +388,7 @@ let run_named
         http_probe_default_max_concurrent
     in
     List.iter
-      (Cascade_runtime_candidate.register_http_probe_capable
+      (Keeper_runtime_candidate.register_http_probe_capable
          ~max_concurrent:http_probe_max_concurrent)
       candidates
   in
@@ -410,7 +410,7 @@ let run_named
     | None -> candidates
     | Some health ->
       Provider_health.filter_healthy health
-        ~provider_id:Cascade_runtime_candidate.health_key
+        ~provider_id:Keeper_runtime_candidate.health_key
         candidates
   in
   let record_provider_health_result candidate ~success ~http_status =
@@ -418,7 +418,7 @@ let run_named
     | None -> ()
     | Some health ->
       Provider_health.record_attempt_result health
-        ~provider_id:(Cascade_runtime_candidate.health_key candidate)
+        ~provider_id:(Keeper_runtime_candidate.health_key candidate)
         ~success
         ~http_status
   in
@@ -779,7 +779,7 @@ let run_named
   let strategy_name = Cascade_strategy.kind_to_string strategy.kind in
   let () = cascade_strategy_name_ref := Some strategy_name in
   let _ = sw, net in
-  let adapter = Cascade_runtime_candidate.strategy_adapter in
+  let adapter = Keeper_runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
     health = Cascade_health_tracker.global;
     capacity = Keeper_capacity_probe.capacity;
@@ -822,7 +822,7 @@ let run_named
             }))
   in
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
-    Cascade_strategy_trace.record {
+    Keeper_strategy_trace.record {
       ts = Unix.gettimeofday ();
       cascade_name = Keeper_name.of_string_exn cascade_name;
       strategy = strategy_name;

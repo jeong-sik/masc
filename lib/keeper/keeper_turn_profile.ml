@@ -10,7 +10,7 @@
     gate that rejects keeper boot, so a missing catalog never reaches
     these helpers. *)
 
-type logical_use = Cascade_routes.logical_use =
+type logical_use = Keeper_routes.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer
@@ -30,10 +30,10 @@ type logical_use = Cascade_routes.logical_use =
   | Complex_task
   | Tool_rerank_use
 
-let logical_use_key = Cascade_routes.logical_use_key
-let logical_use_of_string_opt = Cascade_routes.logical_use_of_string_opt
-let configured_route_targets = Cascade_routes.configured_route_targets
-let cascade_name_for_use = Cascade_routes_resolve.cascade_name_for_use
+let logical_use_key = Keeper_routes.logical_use_key
+let logical_use_of_string_opt = Keeper_routes.logical_use_of_string_opt
+let configured_route_targets = Keeper_routes.configured_route_targets
+let cascade_name_for_use = Keeper_routes_resolve.cascade_name_for_use
 
 let strip_declarative_profile_prefix name = name
 
@@ -373,7 +373,7 @@ let canonicalize_with_catalog ~catalog raw =
       else (
         match logical_use_of_string_opt trimmed with
         | Some use when catalog <> [] ->
-            Cascade_routes.fallback_name_for_catalog use ~catalog
+            Keeper_routes.fallback_name_for_catalog use ~catalog
         | Some _ -> trimmed
         | None -> trimmed)
 
@@ -449,7 +449,7 @@ let resolve_live_with_catalog_result ~catalog raw :
       else
         match logical_use_of_string_opt trimmed with
         | Some use when catalog <> [] ->
-            Cascade_routes.fallback_name_for_catalog use ~catalog
+            Keeper_routes.fallback_name_for_catalog use ~catalog
         | Some _ -> trimmed
         | None -> trimmed
   in

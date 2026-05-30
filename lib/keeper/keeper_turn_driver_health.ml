@@ -28,7 +28,7 @@ let positive_finite_float = function
   | _ -> None
 
 let health_keys candidate =
-  Cascade_runtime_candidate.health_keys candidate
+  Keeper_runtime_candidate.health_keys candidate
   |> List.sort_uniq String.compare
 
 let cost_usd_of_response (response : Agent_sdk.Types.api_response) =
@@ -71,8 +71,8 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
     |> Option.value ~default:"provider_error"
     |> Cascade_health_tracker.error_kind_of_string
   in
-  let provider_key = Cascade_runtime_candidate.health_key candidate in
-  let model_key = Cascade_runtime_candidate.model_health_key candidate in
+  let provider_key = Keeper_runtime_candidate.health_key candidate in
+  let model_key = Keeper_runtime_candidate.model_health_key candidate in
   if sdk_error_is_hard_quota sdk_err then
     Cascade_health_tracker.record_hard_quota
       Cascade_health_tracker.global
@@ -164,12 +164,12 @@ let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
 
 let acquire_client_capacity_slot candidate =
   let capacity_key =
-    Cascade_runtime_candidate.capacity_key candidate |> String.trim
+    Keeper_runtime_candidate.capacity_key candidate |> String.trim
   in
   if String.equal capacity_key ""
   then `No_client_capacity
   else
-    match Cascade_client_capacity.try_acquire capacity_key with
+    match Keeper_client_capacity.try_acquire capacity_key with
     | Unregistered -> `No_client_capacity
     | Acquired release -> `Acquired (capacity_key, release)
     | Full { retry_after_s } -> `Full (capacity_key, retry_after_s)

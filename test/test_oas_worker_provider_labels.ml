@@ -126,16 +126,16 @@ let local_runtime_timeout_floor_s =
 ;;
 
 let provider_timeout ?(is_last = false) ?configured provider_cfg =
-  let candidate = Cascade_runtime_candidate.of_provider_config provider_cfg in
-  Cascade_runtime_candidate.effective_attempt_timeout_s
+  let candidate = Keeper_runtime_candidate.of_provider_config provider_cfg in
+  Keeper_runtime_candidate.effective_attempt_timeout_s
     ~is_last
     ~configured_timeout_s:configured
     candidate
 ;;
 
 let provider_timeout_resolution ?(is_last = false) ?configured provider_cfg =
-  let candidate = Cascade_runtime_candidate.of_provider_config provider_cfg in
-  Cascade_runtime_candidate.effective_attempt_timeout_resolution
+  let candidate = Keeper_runtime_candidate.of_provider_config provider_cfg in
+  Keeper_runtime_candidate.effective_attempt_timeout_resolution
     ~is_last
     ~configured_timeout_s:configured
     candidate
@@ -145,11 +145,11 @@ let check_timeout_resolution label expected_timeout expected_source actual =
   check_timeout_opt
     (label ^ " timeout")
     expected_timeout
-    actual.Cascade_runtime_candidate.timeout_s;
+    actual.Keeper_runtime_candidate.timeout_s;
   Alcotest.(check string)
     (label ^ " source")
     expected_source
-    actual.Cascade_runtime_candidate.source
+    actual.Keeper_runtime_candidate.source
 ;;
 
 let test_provider_attempt_timeout_passes_cli_tool_d_configured_timeout () =

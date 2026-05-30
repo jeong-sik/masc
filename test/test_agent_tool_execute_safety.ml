@@ -744,7 +744,7 @@ let make_write_enabled_meta name =
         ("goal", `String "write-enabled Execute test");
         ( "tool_access",
           Keeper_meta_tool_access.tool_access_to_json
-            (Keeper_meta_tool_access.Custom ["tool_edit_file"; "tool_write_file"]) );
+            (["tool_edit_file"; "tool_write_file"]) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

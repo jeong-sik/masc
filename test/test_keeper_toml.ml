@@ -1148,7 +1148,7 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
 |};
   let expected_tool_access =
     Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
-      (Masc_mcp.Keeper_meta_tool_access.Custom [ "masc_status" ])
+      ([ "masc_status" ])
   in
   match
     Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona

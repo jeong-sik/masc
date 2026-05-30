@@ -418,7 +418,7 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
             ("trace_id", `String ("trace-" ^ name));
             ( "tool_access",
               Lib.Keeper_meta_tool_access.tool_access_to_json
-                (Lib.Keeper_meta_tool_access.Custom []) );
+                ([]) );
           ])
     with
     | Ok meta -> meta

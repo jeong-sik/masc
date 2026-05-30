@@ -501,7 +501,7 @@ let test_universe_superset_of_policy () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
-    tool_access = Custom [];
+    tool_access = [];
     tool_denylist = [];
   } in
   let policy = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -517,7 +517,7 @@ let test_minimal_preset_includes_core_masc () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-minimal" () in
   let meta = { base with
-    tool_access = Custom [];
+    tool_access = [];
     tool_denylist = [];
   } in
   let universe = Agent_tool_dispatch_runtime.keeper_universe_tool_names meta in
@@ -538,7 +538,7 @@ let test_preset_universe_subset_of_global () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
-    tool_access = Custom [];
+    tool_access = [];
     tool_denylist = [];
   } in
   let scoped = Agent_tool_dispatch_runtime.keeper_tool_search_scope meta in
@@ -554,7 +554,7 @@ let test_preset_universe_includes_core () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-scoped" () in
   let meta = { base with
-    tool_access = Custom [];
+    tool_access = [];
     tool_denylist = [];
   } in
   let scoped = Agent_tool_dispatch_runtime.keeper_tool_search_scope meta in
@@ -573,7 +573,7 @@ let test_dispatch_preset_routes_pm_tools () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-dispatch" () in
   let meta = { base with
-    tool_access = Custom [];
+    tool_access = [];
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -616,7 +616,7 @@ let test_delivery_preset_routes_coordination_read_models () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-delivery-coordination-read" () in
   let meta = { base with
-    tool_access = Custom [];
+    tool_access = [];
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -637,7 +637,7 @@ let test_coordination_presets_route_plan_history_reads () =
       let meta =
         {
           base with
-          tool_access = Custom [];
+          tool_access = [];
           tool_denylist = [];
         }
       in
@@ -656,7 +656,7 @@ let test_preset_universe_superset_of_policy () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
-    tool_access = Custom [];
+    tool_access = [];
     tool_denylist = [];
   } in
   let policy = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -671,7 +671,7 @@ let test_registered_inline_board_tool_survives_filter () =
   Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let base = make_gate_test_meta ~name:"test-board-inline" () in
   let meta = { base with
-    tool_access = Custom [ "keeper_board_post"; "masc_who" ];
+    tool_access = [ "keeper_board_post"; "masc_who" ];
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in

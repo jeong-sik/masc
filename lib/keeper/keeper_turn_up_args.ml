@@ -31,7 +31,7 @@ type parsed_args = {
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
   continuity_compaction_cooldown_sec_opt : int option;
-  tool_access_opt : tool_access option;
+  tool_access_opt : string list option;
   tool_denylist_opt : string list option;
   auto_handoff_opt : bool option;
   handoff_threshold_opt : float option;
@@ -144,7 +144,7 @@ let reject_legacy_tool_access_kind access_json =
   | _ -> Ok ()
 
 let parse_tool_access_input (args : Yojson.Safe.t) :
-    (tool_access option, string) result =
+    (string list option, string) result =
   let removed_tool_policy_keys =
     present_json_keys
       [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist" ]

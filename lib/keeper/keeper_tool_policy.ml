@@ -255,10 +255,7 @@ let last_turn_safe_tool_names () =
     "last_turn_safe"
 
 let tool_policy_of_meta (meta : keeper_meta) =
-  let allow =
-    match meta.tool_access with
-    | Custom allowlist -> Tool_access_policy.Names allowlist
-  in
+  let allow = Tool_access_policy.Names meta.tool_access in
   {
     Tool_access_policy.allow;
     deny = Tool_access_policy.Names meta.tool_denylist;
@@ -425,12 +422,8 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
     See #4637 (Samchon harness: absence > prohibition). *)
 let keeper_tool_search_scope (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
-  let preset_tools =
-    match meta.tool_access with
-    | Custom allowlist -> allowlist
-  in
-  let from_preset =
-    preset_tools
+  let from_allowlist =
+    meta.tool_access
     |> List.filter (fun name ->
          StringSet.mem name lookup.candidate_set
          && not (StringSet.mem name lookup.deny_set))
@@ -439,7 +432,7 @@ let keeper_tool_search_scope (meta : keeper_meta) : string list =
     Keeper_tool_registry.core_always_tools
     |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
   in
-  dedupe_tool_names (from_preset @ from_core)
+  dedupe_tool_names (from_allowlist @ from_core)
 
 (** Shared schema assembly: computes the full tool schema list once.
     [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas

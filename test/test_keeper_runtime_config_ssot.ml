@@ -327,7 +327,7 @@ also_allow = ["tool_execute", "tool_search_files"]
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      let (Keeper_meta_tool_access.Custom tools) = updated.Keeper_meta_contract.tool_access in
+      let tools = updated.Keeper_meta_contract.tool_access in
       check bool "has custom tool_access" true (tools <> []);
       check
         (list string)
@@ -473,16 +473,10 @@ allowed_paths = ["workspace/example/project"]
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check
-        (option string)
-        "custom access keeps no preset"
-        None
-        ((fun _ -> None) updated.Keeper_meta_contract.tool_access
-         |> Option.map Keeper_meta_tool_access.(fun _ -> "custom"));
-      check
         (list string)
         "custom allowlist preserved"
         [ "keeper_board_get"; "masc_status" ]
-        (Keeper_meta_tool_access.tool_access_custom_allowlist updated.tool_access);
+        updated.tool_access;
       check
         (list string)
         "allowed_paths"

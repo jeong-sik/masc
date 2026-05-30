@@ -92,7 +92,7 @@ val effective_declarative_cascade_name :
 
 val resynced_tool_access :
   Keeper_types_profile.keeper_profile_defaults ->
-  Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.tool_access
+  Keeper_meta_contract.keeper_meta -> string list
 (** Re-derive the tool-access record after merging profile defaults so
     the meta-level [preset] and per-tool overrides stay consistent. *)
 

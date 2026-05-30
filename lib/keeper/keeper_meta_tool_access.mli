@@ -1,32 +1,27 @@
-(** Keeper tool-access policy types and JSON helpers.
+(** Keeper tool-access helpers.
 
-    Defines the canonical [tool_access] ADT and parsers for persisted
-    keeper meta JSON.  Named presets have been removed; keepers declare
-    an explicit [Custom] tool list. *)
-
-type tool_access = Custom of string list
+    A keeper's tool access is the list of tool names it may call —
+    [keeper_meta.tool_access : string list].  There is no wrapper type;
+    the allowlist IS the policy. *)
 
 (** Returns true if any name in the list resolves to a [Tool_name.is_board]
     tool. Used to detect implicit board surface. *)
 val tool_names_include_board : string list -> bool
 
-(** Decide whether a [tool_access] should keep [room_signal_prompt] on:
-    Custom → true when the list contains any board tool (or [default] is
-    true). *)
+(** Keep [room_signal_prompt] on when [default] is set or the allowlist
+    contains any board tool. *)
 val tool_access_default_room_signal_prompt_enabled :
-  default:bool -> tool_access -> bool
+  default:bool -> string list -> bool
 
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)
 val normalize_tool_names : string list -> string list
 
-(** Sort Custom lists for stable comparison and hash. *)
-val normalize_tool_access : tool_access -> tool_access
+(** Trim, drop blanks, dedupe a tool allowlist (alias of
+    {!normalize_tool_names}, kept for call-site clarity). *)
+val normalize_tool_access : string list -> string list
 
-val tool_access_custom_allowlist : tool_access -> string list
-
-(** Encode a [tool_access] as the canonical
-    [{ "kind": "custom", "tools": [...] }] JSON object. *)
-val tool_access_to_json : tool_access -> Yojson.Safe.t
+(** Encode a tool allowlist as a JSON array of tool names. *)
+val tool_access_to_json : string list -> Yojson.Safe.t
 
 (** True if [json] has a non-null member at [key] (top level). *)
 val json_member_present : string -> Yojson.Safe.t -> bool
@@ -47,12 +42,12 @@ val string_list_field_opt_result :
   Yojson.Safe.t ->
   (string list, string) result
 
-(** Default [tool_access] for missing/null fields:
+(** Default tool allowlist for missing/null fields:
     [Keeper_internal] surface with write tools excluded. *)
-val default_tool_access_of_meta_json : unit -> tool_access
+val default_tool_access_of_meta_json : unit -> string list
 
-(** Parse [tool_access] from persisted meta JSON, accepting "custom" kind.
-    Legacy "preset" kind falls back to [default_tool_access_of_meta_json]
-    with a deprecation warning. *)
+(** Parse [tool_access] from persisted meta JSON.  Canonical form is a JSON
+    array of tool names; legacy [{ "kind": "custom"/"preset", ... }] objects
+    are accepted for backward compat. *)
 val tool_access_of_meta_json :
-  Yojson.Safe.t -> (tool_access, string) result
+  Yojson.Safe.t -> (string list, string) result

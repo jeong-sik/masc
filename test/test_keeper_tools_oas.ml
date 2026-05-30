@@ -32,7 +32,7 @@ let make_test_meta
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Custom []
+    | None -> []
   in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -906,7 +906,7 @@ let make_research_meta ?tool_access () : Keeper_meta_contract.keeper_meta =
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_meta_tool_access.Custom []
+    | None -> []
   in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -931,7 +931,7 @@ let make_learned_meta () : Keeper_meta_contract.keeper_meta =
           ; "trace_id", `String "test-trace-learned"
           ; ( "tool_access"
             , Keeper_meta_tool_access.tool_access_to_json
-                (Keeper_meta_tool_access.Custom []) )
+                ([]) )
           ])
   with
   | Ok meta -> meta

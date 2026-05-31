@@ -128,7 +128,6 @@ val run_named :
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
   ?transport:Masc_grpc_transport.t ->
-  ?cli_transport_overrides:Runtime_agent.cli_transport_overrides ->
   ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->

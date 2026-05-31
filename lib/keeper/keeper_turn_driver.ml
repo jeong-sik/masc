@@ -64,7 +64,6 @@ let run_named
     ?on_resume
     ?agent_ref
     ?transport
-    ?cli_transport_overrides
     ?(allowed_paths = [])
     ?checkpoint_sidecar
     ?(cache_system_prompt = false)
@@ -626,7 +625,6 @@ let run_named
     required_tool_satisfaction;
     raw_trace;
     transport_resolved;
-    cli_transport_overrides;
     runtime_mcp_policy;
     allowed_paths;
     checkpoint_sidecar;

@@ -4,27 +4,6 @@
     CLI transport construction separate from the build/run orchestration in
     {!Runtime_agent}. *)
 
-(* cli_transport_overrides type extracted to
-   [Runtime_transport_cli_overrides] (godfile decomp). *)
-type cli_transport_overrides = Runtime_transport_cli_overrides.cli_transport_overrides =
-  { cwd : string option
-  ; claude_mcp_config : string option
-  ; claude_allowed_tools : string list option
-  ; claude_permission_mode : string option
-  ; claude_max_turns : int option
-  ; gemini_yolo : bool option
-  ; cli_subprocess_idle_sec : float option
-  }
-
-(* OAS owns provider subprocess hard caps. This constant is a
-   backward-compat re-export for tests and operator-facing labels only;
-   MASC does not clamp provider-internal max_turns before dispatch. *)
-let cli_tool_d_max_turns_hard_cap =
-  Llm_provider.Provider_config.max_turns_hard_cap
-    Llm_provider.Provider_config.Cli_tool_d
-  |> Option.value ~default:30
-;;
-
 let provider_effective_max_turns _kind requested = requested
 
 (* RFC-0167: the client-named omission-dedup module
@@ -48,17 +27,6 @@ let label_resolution_error_to_string = Runtime_transport_label_resolution.label_
 let label_resolution_error_to_sdk_error = Runtime_transport_label_resolution.label_resolution_error_to_sdk_error
 let resolve_provider_config_of_label = Runtime_transport_label_resolution.resolve_provider_config_of_label
 let invalid_runtime_config = Runtime_transport_label_resolution.invalid_runtime_config
-
-let cli_model_override = Runtime_transport_cli_config.cli_model_override
-
-(* CLI MCP config JSON serializer extracted to
-   [Runtime_transport_cli_mcp_config_json] (godfile decomp). *)
-let json_of_string_pairs = Runtime_transport_cli_mcp_config_json.json_of_string_pairs
-let json_of_cli_mcp_server = Runtime_transport_cli_mcp_config_json.json_of_cli_mcp_server
-
-let cli_mcp_config_json_of_policy =
-  Runtime_transport_cli_mcp_config_json.cli_mcp_config_json_of_policy
-;;
 
 let provider_caps_of_config = Provider_tool_support.oas_capabilities_of_config
 let provider_supports_inline_tools = Provider_tool_support.provider_supports_inline_tools
@@ -107,7 +75,6 @@ let bridged_runtime_mcp_policy_for_agent = Runtime_transport_auth_bridging.bridg
 (* Provider-driven runtime MCP policy resolver extracted to
    [Runtime_transport_runtime_policy_provider] (godfile decomp). *)
 let runtime_mcp_policy_for_provider = Runtime_transport_runtime_policy_provider.runtime_mcp_policy_for_provider
-let cli_runtime_mcp_jsons = Runtime_transport_runtime_policy_provider.cli_runtime_mcp_jsons
 let public_mcp_tool_names_of_oas_tools =
   Runtime_transport_mcp_tool_classifier.public_mcp_tool_names_of_oas_tools
 ;;
@@ -137,26 +104,14 @@ let tool_names_are_runtime_mcp =
 let runtime_mcp_policy_of_tool_names = Runtime_transport_runtime_mcp_policy_of_tool_names.runtime_mcp_policy_of_tool_names
 let public_mcp_runtime_policy_of_tool_names = Runtime_transport_runtime_mcp_policy_of_tool_names.public_mcp_runtime_policy_of_tool_names
 
-let provider_label = Runtime_transport_cli_config.provider_label
-
-let cli_model_for_provider_config =
-  Runtime_transport_cli_config.cli_model_for_provider_config
-;;
-
-let cli_command_for_provider_config =
-  Runtime_transport_cli_config.cli_command_for_provider_config
-;;
-
-let cli_process_name_for_provider_config =
-  Runtime_transport_cli_config.cli_process_name_for_provider_config
-;;
-
-let cli_runtime_config_json_for_provider =
-  Runtime_transport_cli_config.cli_runtime_config_json_for_provider
-;;
-
-let cli_direct_binding_extra_env =
-  Runtime_transport_cli_config.cli_direct_binding_extra_env
+(* provider_label inlined from the removed [Runtime_transport_cli_config].
+   General display label ([kind:model_id]); used by the surviving tool-lane
+   resolver and external consumers, so it outlives the CLI transport purge. *)
+let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
+  Printf.sprintf
+    "%s:%s"
+    (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+    provider_cfg.model_id
 ;;
 
 let resolve_tool_lane_for_oas_tools
@@ -330,78 +285,8 @@ let resolve_tool_lane_for_oas_tools
       Error (invalid_runtime_config "tool_support" detail))
 ;;
 
-(* JSON-stream CLI transport (665 LOC nested module) extracted to
-   [Runtime_transport_json_stream_cli_local] (godfile decomp).
-   Module alias preserves type identity; [Runtime_transport.mli]
-   signature constraint continues to apply unchanged. *)
-module Json_stream_cli_transport_local = Runtime_transport_json_stream_cli_local
-
-let json_stream_cli_transport_ctor
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      ~runtime_mcp_policy
-      ~cli_transport_overrides
-  =
-  let cwd =
-    Option.bind cli_transport_overrides (fun overrides ->
-      overrides.Runtime_transport_cli_overrides.cwd)
-  in
-  let stdout_idle_timeout_s =
-    Option.bind cli_transport_overrides (fun overrides ->
-      overrides.Runtime_transport_cli_overrides.cli_subprocess_idle_sec)
-  in
-  let mcp_config_json = cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
-  let model = cli_model_for_provider_config provider_cfg in
-  let config_json = cli_runtime_config_json_for_provider provider_cfg in
-  let extra_env = cli_direct_binding_extra_env provider_cfg in
-  let cli_path =
-    cli_command_for_provider_config provider_cfg
-    |> Option.value ~default:Json_stream_cli_transport_local.default_config.cli_path
-  in
-  let process_name = cli_process_name_for_provider_config provider_cfg in
-  let config =
-    { Json_stream_cli_transport_local.default_config with
-      cli_path
-    ; process_name
-    ; model
-    ; cwd
-    ; config_json
-    ; mcp_config_json
-    ; extra_env
-    ; stdout_idle_timeout_s
-    }
-  in
-  match Process_eio.get_proc_mgr () with
-  | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
-  | Ok mgr ->
-    Ok
-      (Runtime_transport_cli_ctors.make_per_call_switch_transport (fun ~sw ->
-         Json_stream_cli_transport_local.create ~sw ~mgr ~config))
-;;
-
-let () =
-  Runtime_transport_non_http_registry.register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Cli_tool_c
-    ~ctor:json_stream_cli_transport_ctor
-;;
-
-(* CLI transport constructors + per-call switch wrapping + ctor
-   registration extracted to [Runtime_transport_cli_ctors]
-   (godfile decomp). The sibling's top-level [let () = ...]
-   block registers the 4 ctors into
-   [Runtime_transport_non_http_registry] at module-load time. *)
-let make_per_call_switch_transport = Runtime_transport_cli_ctors.make_per_call_switch_transport
-
-(* CLI argv UTF-8 sanitization extracted to
-   [Runtime_transport_cli_argv_sanitize] (godfile decomp). *)
-let sanitize_runtime_mcp_server_for_cli =
-  Runtime_transport_cli_argv_sanitize.sanitize_runtime_mcp_server_for_cli
-;;
-
-let sanitize_runtime_mcp_policy_for_cli =
-  Runtime_transport_cli_argv_sanitize.sanitize_runtime_mcp_policy_for_cli
-;;
-
-let sanitize_cli_completion_request_for_argv =
-  Runtime_transport_cli_argv_sanitize.sanitize_cli_completion_request_for_argv
-;;
-let non_http_transport_of_provider = Runtime_transport_non_http_registry.non_http_transport_of_provider
+(* CLI subprocess transport (json-stream local transport, ctors, argv
+   sanitization, MCP-config JSON, and the non-HTTP registry) was removed
+   in the CLI provider purge (2026-05-31). Provider dispatch is now
+   HTTP-only; the [Cli_tool_*] provider kinds remain defined in the pinned
+   agent_sdk but have no registered transport and are unreachable here. *)

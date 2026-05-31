@@ -4,43 +4,9 @@
     CLI transport construction separate from the build/run orchestration in
     {!Runtime_agent}. *)
 
-(** Per-call overrides forwarded to CLI transports.  Each field is consulted
-    only by the matching provider kind; missing fields fall back to the
-    transport's [default_config]. *)
-type cli_transport_overrides = {
-  cwd : string option;
-  claude_mcp_config : string option;
-  claude_allowed_tools : string list option;
-  claude_permission_mode : string option;
-  claude_max_turns : int option;
-  gemini_yolo : bool option;
-  cli_subprocess_idle_sec : float option;
-      (** When [Some s], the CLI subprocess is aborted via SIGINT if no
-          stdout line arrives within [s] seconds.  Currently honoured
-          only by [Json_stream_cli_transport_local], which calls
-          [Cli_common_subprocess.run_stream_lines] directly.  Other CLI
-          transports route through agent_sdk [Transport_*_cli.create]
-          configs that do not yet expose [stdout_idle_timeout_s]; an
-          OAS upstream change is needed to honour this field there. *)
-}
-
-(** Hard cap for Claude Code's internal agent loop.  MASC may run a keeper
-    for more turns overall, but a single Claude Code subprocess attempt must
-    not receive that keeper-level budget unchanged. *)
-val cli_tool_d_max_turns_hard_cap : int
-
 (** Clamp provider-internal max_turns to provider hard constraints. *)
 val provider_effective_max_turns :
   Llm_provider.Provider_config.provider_kind -> int -> int
-
-val sanitize_cli_completion_request_for_argv :
-  Llm_provider.Llm_transport.completion_request ->
-  Llm_provider.Llm_transport.completion_request
-(** Scrub request text that CLI transports may flatten into argv.
-
-    Codex CLI passes sub-threshold prompts as a positional argument, so any
-    invalid UTF-8 in history, system prompt, or request-scoped MCP overrides
-    can make the subprocess fail before the cascade reaches provider logic. *)
 
 (* RFC-0167: the client-named omission-dedup helpers
    ([cli_tool_a_omission_fingerprint], [cli_tool_a_omission_fingerprint_seen],
@@ -70,10 +36,6 @@ val resolve_provider_config_of_label :
     [detail] text. *)
 val invalid_runtime_config : string -> string -> Agent_sdk.Error.sdk_error
 
-(** Normalize a CLI [model_id] to an explicit override.  Returns [None] when
-    the model id is empty or [auto] (case-insensitive after trim). *)
-val cli_model_override : string -> string option
-
 (** OAS capability snapshot for a provider config.  Alias for
     {!Provider_tool_support.oas_capabilities_of_config}. *)
 val provider_caps_of_config :
@@ -90,24 +52,6 @@ val provider_supports_inline_tools :
 val provider_supports_runtime_mcp_lane :
   ?override:Provider_tool_support.runtime_capabilities_override ->
   Llm_provider.Provider_config.t -> bool
-
-(** Render the [mcpServers] config JSON consumed by JSON-stream CLI transports, filtering
-    by [policy.allowed_server_names].  Returns [None] when no allowed
-    server remains after filtering. *)
-val cli_mcp_config_json_of_policy :
-  Llm_provider.Llm_transport.runtime_mcp_policy -> string option
-
-(** Resolve a CLI provider model name from explicit provider config first,
-    then from the OAS runtime binding default/supported-model projection.
-    Returns [None] when the CLI binding does not publish a default. *)
-val cli_model_for_provider_config :
-  Llm_provider.Provider_config.t -> string option
-
-(** Render root config JSON (default_model + providers + models) for a
-    JSON-stream CLI provider.  Returns [None] when either the model
-    resolution or the auth value resolution fails. *)
-val cli_runtime_config_json_for_provider :
-  Llm_provider.Provider_config.t -> string option
 
 (** Drop duplicates from a list while preserving the first-seen order. *)
 val dedupe_preserve_order : string list -> string list
@@ -163,13 +107,6 @@ val runtime_mcp_policy_for_provider :
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 
-(** Compose JSON-stream CLI [--mcp-config] arguments from a [base] list and
-    an optional runtime MCP policy.  Output is deduped, preserving order. *)
-val cli_runtime_mcp_jsons :
-  base:string list ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  string list
-
 (** Build the runtime MCP policy that exposes [tool_names] back to the
     provider's CLI.  Returns [None] when the tool set is not eligible for
     the runtime MCP lane (e.g. mixed surface, missing keeper identity for
@@ -215,78 +152,7 @@ val resolve_tool_lane_for_oas_tools :
     Agent_sdk.Error.sdk_error )
   result
 
-(** Wrap a CLI transport factory in a per-call sub-switch so that any
-    pipe/process resources allocated by the factory are deterministically
-    released at the end of each completion call. *)
-val make_per_call_switch_transport :
-  (sw:Eio.Switch.t -> Llm_provider.Llm_transport.t) ->
-  Llm_provider.Llm_transport.t
-
-(** Construct a non-HTTP CLI transport for [provider_cfg].  Returns [Ok None]
-    for HTTP-shaped providers.  Returns [Error] when the process manager is not
-    initialized. *)
-val non_http_transport_of_provider :
-  sw:Eio.Switch.t ->
-  provider_cfg:Llm_provider.Provider_config.t ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  ?cli_transport_overrides:cli_transport_overrides ->
-  unit ->
-  (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
-
-(** JSON-stream print-mode CLI transport.  Owned by the transport layer;
-    runner facades must not re-export this protocol-local surface. *)
-module Json_stream_cli_transport_local : sig
-  type config = {
-    cli_path : string;
-    process_name : string;
-    model : string option;
-    cwd : string option;
-    config_json : string option;
-    mcp_config_json : string list;
-    extra_env : (string * string) list;
-    cancel : unit Eio.Promise.t option;
-    stdout_idle_timeout_s : float option;
-        (** When [Some s], the CLI subprocess is aborted via SIGINT if no
-            stdout line arrives within [s] seconds.  Forwarded to
-            [Llm_provider.Cli_common_subprocess.run_stream_lines] together
-            with the process clock obtained from [Process_eio.get_clock].
-            Defaults to [None] (no idle bound; rely on the outer keeper
-            turn timeout). *)
-  }
-
-  val default_config : config
-
-  (** Build the CLI argv from a config + per-call request, deciding
-      whether the prompt goes via [-p] or stdin. Non-ASCII or large prompts
-      use stdin to avoid Python CLI setproctitle UTF-8 decode crashes. *)
-  val build_args :
-    config:config ->
-    req_config:Llm_provider.Provider_config.t ->
-    mcp_config_json:string list ->
-    prompt:string ->
-    string list
-
-  (** Whether a CLI stderr line should be forwarded to the default
-      stderr logger.  Drops the [resume hint] lines, which are noise. *)
-  val should_log_stderr_line : string -> bool
-
-  (** Constant detail string used for typed resumable-session reports. *)
-  val resumable_session_detail : string
-
-  (** Reclassify a [NetworkError] from the CLI into [AcceptRejected] when
-      the message indicates a permanent per-provider error
-      (auth/config/model), a local CLI startup crash, or an exit-75
-      resumable-session process status.  Other variants pass through. *)
-  val classify_cli_error :
-    ('a, Llm_provider.Http_client.http_error) result ->
-    ('a, Llm_provider.Http_client.http_error) result
-
-  (** Create a JSON-stream CLI completion transport bound to [sw].  The transport
-      runs [<cli> --print --output-format stream-json ...] via [mgr] and
-      parses JSONL output into OAS response/event blocks. *)
-  val create :
-    sw:Eio.Switch.t ->
-    mgr:_ Eio.Process.mgr ->
-    config:config ->
-    Llm_provider.Llm_transport.t
-end
+(* CLI subprocess transport surface ([make_per_call_switch_transport],
+   [non_http_transport_of_provider], [Json_stream_cli_transport_local]) was
+   removed in the CLI provider purge (2026-05-31). Provider dispatch is
+   HTTP-only. *)

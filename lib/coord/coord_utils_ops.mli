@@ -10,7 +10,6 @@ open Coord_utils_backend_setup
 
 val validate_agent_name : string -> (string, string) result
 val validate_task_id : string -> (string, string) result
-val validate_room_id : string -> (string, string) result
 val validate_file_path : string -> (string, string) result
 
 (** {1 Sanitizers} *)

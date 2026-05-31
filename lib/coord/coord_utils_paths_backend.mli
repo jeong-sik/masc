@@ -19,8 +19,6 @@ val masc_root_dir : config -> string
     callsites). *)
 val masc_dir_from_base_path : base_path:string -> string
 
-val room_dir_for : config -> string -> string
-
 val masc_dir : config -> string
 val agents_dir : config -> string
 val tasks_dir : config -> string

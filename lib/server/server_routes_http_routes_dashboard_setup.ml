@@ -52,7 +52,7 @@ let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_d
 let handle_broadcast = Server_routes_http_dashboard_handlers.handle_broadcast
 let handle_dashboard_link_previews = Server_routes_http_dashboard_handlers.handle_dashboard_link_previews
 let handle_dashboard_task_history = Server_routes_http_dashboard_handlers.handle_dashboard_task_history
-let handle_dashboard_rooms = Server_routes_http_dashboard_handlers.handle_dashboard_rooms
+let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_dashboard_workspace
 
 (* Telemetry unified view handler — extracted from add_routes pipeline
    as part of godfile near-threshold split. *)

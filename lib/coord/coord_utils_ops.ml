@@ -13,31 +13,6 @@ let validate_task_id id =
   | Ok _ -> Ok id
   | Error msg -> Error msg
 
-(* Allowed character class for room ids: [A-Za-z0-9._-]+, anchored.
-   Hoisted to module load so room-id validation (called per MCP
-   request that takes a [room]/[coord] parameter) doesn't pay
-   [Re.compile] per call. *)
-let room_id_allowed_re =
-  Re.(compile
-        (whole_string
-           (rep1 (alt [
-             rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9';
-             char '.'; char '_'; char '-';
-           ]))))
-
-let validate_room_id room_id =
-  let room_id = String.trim room_id in
-  if room_id = "" then Error "Coord id cannot be empty"
-  else if String.length room_id > 128 then Error "Coord id too long (max 128 chars)"
-  else if room_id = "." || room_id = ".." then Error "Coord id cannot be '.' or '..'"
-  else if String_util.contains_substring room_id "/" || String_util.contains_substring room_id "\\" then
-    Error "Coord id cannot contain path separators"
-  else if String_util.contains_substring room_id ".." then
-    Error "Coord id cannot contain traversal segments"
-  else if not (Re.execp room_id_allowed_re room_id) then
-    Error "Coord id may only contain letters, digits, dot, underscore, and hyphen"
-  else Ok room_id
-
 let validate_file_path path =
   (* Delegate to Validation module for consistent security checks *)
   (* Additional length check for file paths *)
@@ -194,7 +169,7 @@ let write_json_local path json =
   let content = json_to_pretty_utf8 json in
   Fs_compat.save_file_atomic path content
 
-(* Root-scoped JSON helpers for shared room registry/current_room metadata. *)
+(* Root-scoped JSON helpers for shared root metadata. *)
 let read_json_root config path =
   match root_key_of_path config path with
   | Some key -> begin

@@ -84,9 +84,8 @@ let scope_of_string_opt = function
   | _ -> None
 
 (** Re-export shared types from Dashboard_labels to avoid breaking existing callers *)
-type room_snapshot = Dashboard_labels.room_snapshot = {
-  room_id: string;
-  is_current: bool;
+type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
+  workspace_id: string;
   agents: Masc_domain.agent list;
   tasks: Masc_domain.task list;
   messages: Masc_domain.message list;
@@ -209,8 +208,8 @@ let count_locks_for_dir (config : Coord_utils.config) locks_dir =
             | Error _ -> 0)
        | None -> 0)
 
-let count_locks_for_room (config : Coord_utils.config) room_id =
-  let locks_dir = Filename.concat (Coord.room_dir_for config room_id) "locks" in
+let count_locks_for_workspace (config : Coord_utils.config) =
+  let locks_dir = Filename.concat (Coord.masc_dir config) "locks" in
   count_locks_for_dir config locks_dir
 
 let tempo_section (config : Coord_utils.config) : section =
@@ -218,36 +217,32 @@ let tempo_section (config : Coord_utils.config) : section =
   let content = [Tempo.format_state state] in
   { title = "Tempo"; content; empty_msg = "" }
 
-let ordered_room_ids (_config : Coord_utils.config) =
-  let current_room = "default" in
-  (current_room, [ current_room ])
+let active_workspace_id = "root"
 
-let room_snapshot (config : Coord_utils.config) ~current_room room_id =
+let workspace_snapshot (config : Coord_utils.config) =
   {
-    room_id;
-    is_current = String.equal room_id current_room;
+    workspace_id = active_workspace_id;
     agents = Coord.get_active_agents config;
     tasks = Coord.get_tasks_safe config;
     messages = Coord.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
-    locks = count_locks_for_room config room_id;
+    locks = count_locks_for_workspace config;
   }
 
-let room_overview_section (snapshots : room_snapshot list) : section =
+let workspace_overview_section (snapshots : workspace_snapshot list) : section =
   let content =
     List.map (fun snapshot ->
       let (active, pending) = split_tasks snapshot.tasks in
-      Printf.sprintf "%s%s: %d agents | %d active | %d pending | %d locks"
-        snapshot.room_id
-        (if snapshot.is_current then " (current)" else "")
+      Printf.sprintf "%s: %d agents | %d active | %d pending | %d locks"
+        snapshot.workspace_id
         (List.length snapshot.agents)
         (List.length active)
         (List.length pending)
         snapshot.locks
     ) snapshots
   in
-  { title = "Namespaces"; content; empty_msg = "(no namespaces)" }
+  { title = "Workspace"; content; empty_msg = "(no workspace data)" }
 
-let room_section now (snapshot : room_snapshot) : section =
+let workspace_section now (snapshot : workspace_snapshot) : section =
   let (active, pending) = split_tasks snapshot.tasks in
   let content =
     [Printf.sprintf "Summary: %d agents | %d active | %d pending | %d locks"
@@ -259,15 +254,7 @@ let room_section now (snapshot : room_snapshot) : section =
     @ add_group "Tasks" (task_lines snapshot.tasks) "(no tasks)"
     @ add_group "Recent Messages" (message_lines snapshot.messages) "(no messages)"
   in
-  {
-    title =
-      if snapshot.is_current then
-        Printf.sprintf "Namespace: %s (flattened current)" snapshot.room_id
-      else
-        Printf.sprintf "Namespace: %s" snapshot.room_id;
-    content;
-    empty_msg = "";
-  }
+  { title = Printf.sprintf "Workspace: %s" snapshot.workspace_id; content; empty_msg = "" }
 
 let agents_section now (agents : Masc_domain.agent list) : section =
   let content = agent_lines now agents in
@@ -286,7 +273,7 @@ let locks_section locks : section =
   { title = "Locks"; content; empty_msg = "0" }
 
 let count_locks (config : Coord_utils.config) : int =
-  count_locks_for_room config "default"
+  count_locks_for_workspace config
 
 (* Agent workflow summaries: recent activity per active agent *)
 let agent_workflow_section now (_config : Coord_utils.config) (agents : Masc_domain.agent list) : section =
@@ -431,7 +418,7 @@ let keepers_section now : section =
   { title; content; empty_msg = "(no keepers registered)" }
 
 (** Attention section: items requiring operator action *)
-let attention_section now (snapshots : room_snapshot list) : section =
+let attention_section now (snapshots : workspace_snapshot list) : section =
   let items = Dashboard_attention.collect ~now snapshots in
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
@@ -444,21 +431,16 @@ let generate ?(scope = All) (config : Coord_utils.config) : string =
       (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
   in
-  let (current_room, room_ids) = ordered_room_ids config in
-  let snapshots =
-    match scope with
-    | All -> List.map (room_snapshot config ~current_room) room_ids
-    | Current -> [room_snapshot config ~current_room current_room]
-  in
+  let _scope = scope in
+  let snapshots = [ workspace_snapshot config ] in
+  let workspace_id = active_workspace_id in
   let all_agents = List.concat_map (fun s -> s.agents) snapshots in
   let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
   let header =
     Printf.sprintf
-      "========================================\n   MASC Dashboard   %s\n   Namespace: %s (flattened) | %d namespace%s | %d agents\n========================================"
+      "========================================\n   MASC Dashboard   %s\n   Workspace: %s | %d agents\n========================================"
       timestamp
-      current_room
-      (List.length room_ids)
-      (if List.length room_ids > 1 then "s" else "")
+      workspace_id
       (List.length all_agents)
   in
   (* Operator-first section order *)
@@ -484,13 +466,10 @@ let generate ?(scope = All) (config : Coord_utils.config) : string =
   String.concat "\n\n" ([header] @ section_strs @ [footer])
 
 let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
-  let (current_room, room_ids) = ordered_room_ids config in
+  let _scope = scope in
   let now = Time_compat.now () in
-  let snapshots =
-    match scope with
-    | All -> List.map (room_snapshot config ~current_room) room_ids
-    | Current -> [room_snapshot config ~current_room current_room]
-  in
+  let snapshots = [ workspace_snapshot config ] in
+  let workspace_id = active_workspace_id in
   let all_agents = List.concat_map (fun s -> s.agents) snapshots in
   let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
   let (active_tasks, pending_tasks) = split_tasks all_tasks in
@@ -539,8 +518,8 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let attention_line = Dashboard_attention.compact_summary attention_items in
   String.concat "\n"
     [
-      Printf.sprintf "MASC [%s namespace] %d agents / %d tasks"
-        current_room (List.length all_agents)
+      Printf.sprintf "MASC [%s workspace] %d agents / %d tasks"
+        workspace_id (List.length all_agents)
         (List.length all_tasks);
       Printf.sprintf "ATTENTION: %s" attention_line;
       Printf.sprintf "AGENTS: %d working / %d idle / %d stuck / %d offline | TASKS: %d active / %d pending / %d blocked"

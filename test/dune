@@ -620,7 +620,7 @@
   test_config_dir_resolver
   test_room_coverage
   test_streamable_http
-  test_dashboard_rooms
+  test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
   ; test_command_plane_help removed (CP purge)
@@ -822,7 +822,7 @@
   test_config_dir_resolver
   test_room_coverage
   test_streamable_http
-  test_dashboard_rooms
+  test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
   ; test_command_plane_help removed (CP purge)

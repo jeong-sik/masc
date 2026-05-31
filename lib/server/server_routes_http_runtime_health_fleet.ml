@@ -66,7 +66,7 @@ let bool_field name = function
    keeper from another workspace cannot mask a local outage in fleet
    safety. `bootable_keeper_count` is already derived from
    `state.room_config`, so the running count must use the same scope. *)
-let current_room_base_path_opt () =
+let runtime_base_path_opt () =
   match current_server_state_opt () with
   | Some state -> Some state.Mcp_server.room_config.base_path
   | None -> None
@@ -75,7 +75,7 @@ let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan
     ?(include_reaction_ledger = true)
     () =
-  let base_path = current_room_base_path_opt () in
+  let base_path = runtime_base_path_opt () in
   let phase_counts = keeper_phase_counts ?base_path () in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json =

@@ -107,7 +107,7 @@ let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
     if items = [] then working_context
     else
       Multimodal.Tool_emission.emit_from_tool_results
-        ~working_context items
+        ~emit:Multimodal.Keeper_emitter.emit ~working_context items
 
 let global_accumulator = create_accumulator ()
 

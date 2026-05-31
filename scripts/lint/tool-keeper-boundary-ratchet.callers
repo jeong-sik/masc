@@ -2,9 +2,8 @@
 # Files here still call a Keeper_<module> from the tool surface.
 # This list may SHRINK (severance PRs remove entries) but must NOT GROW.
 # Regenerate with: bash scripts/lint/tool-keeper-boundary-ratchet.sh --regenerate
-# Owner: RFC-0194 §3 (tool surface dependency direction).
+# See: docs/audit/2026-05-31-tool-keeper-boundary-severance.md
 #
-lib/multimodal/tool_emission.ml
 lib/tool_control.ml
 lib/tool_coord.ml
 lib/tool_deep_review.ml

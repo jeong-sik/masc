@@ -16,12 +16,14 @@ The raw `rg 'Keeper'` count over `lib/**/tool_*.ml` is misleading. After excludi
 false-positive classes — (a) `Tool_name.Keeper` / `Keeper.` name-namespace constructors,
 (b) `Keeper_internal` / `Keeper_denied` which are `Tool_catalog_surfaces.surface`
 constructors, not keeper modules — and after stripping nested comments + string literals,
-the real set is **12 tool-surface files that call a `Keeper_<module>`**:
+the measured severance set started at **12 tool-surface files that called a
+`Keeper_<module>`**. Current ratchet debt is **10** after the
+2026-06-01 `tool_emission` severance:
 
 | File | Keeper module(s) called | Bucket | Severance |
 |------|-------------------------|--------|-----------|
 | `lib/tool_usage_log.ml` | `Keeper_fd_pressure`, `Keeper_disk_pressure` | infra-leak | **DONE** — `~on_io_failure` injected at install boundary |
-| `lib/multimodal/tool_emission.ml` | `Keeper_emitter` (+`Multimodal_keeper_bridge`) | infra-leak | pass emit fn / move to keeper-bridge domain |
+| `lib/multimodal/tool_emission.ml` | `Keeper_emitter` (+`Multimodal_keeper_bridge`) | infra-leak | **DONE** — injected emitter port; keeper hook supplies `Keeper_emitter.emit` |
 | `lib/tool_unified.ml` | `Keeper_observation.runtime_metrics_json` | infra-leak | Runtime-demolition zone — re-eval after main green (field may be deleted) |
 | `lib/tool_task_payloads.ml` | `Keeper_tools_oas_workflow.workflow_rejection_*` | infra-leak | relocate pure payload builders to neutral module (RFC-0195 territory) |
 | `lib/tool_resource_axis.ml` | `Keeper_tool_alias.*` | misplaced | relocate `keeper_tool_alias` → `tool_alias` (surface concern). ⚠️ collides with #19290 |
@@ -51,12 +53,13 @@ direction is compiler-enforced; the lint holds the line until then.
 ## 3. This is not a workaround
 
 The ratchet is an invariant-enforcement gate (the compiler can't express the direction in a
-flat library), not a "counter-as-fix": this same PR severs `tool_usage_log` (baseline 12→11),
-proving the ratchet drives toward zero. Removal target: empty baseline / sub-library split.
+flat library), not a "counter-as-fix": severance PRs have already reduced the baseline
+12→11 (`tool_usage_log`) and 11→10 (`tool_emission`), proving the ratchet drives toward zero.
+Removal target: empty baseline / sub-library split.
 
 ## 4. Sequencing (in-flight PR collisions)
 
-- Clear runway (no in-flight PR): `tool_usage_log` (done), `tool_emission`, `tool_inline_dispatch*`,
+- Clear runway (no in-flight PR): `tool_usage_log` (done), `tool_emission` (done), `tool_inline_dispatch*`,
   `tool_control`, `tool_coord`, `tool_deep_review`, `tool_task_handlers`, `tool_task_payloads`.
 - Contended — sequence AFTER they land: `tool_registration_check`, `tool_resource_axis`
   (#19290 / #19282 typed-predicate pair touches these + `keeper_tool_policy`).
@@ -78,6 +81,12 @@ asymmetric because a flat library stops typechecking at the first broken module:
   tested for pass, drift-up fail, stale-baseline fail, and comment/string false-positives).
 
 Full `dune build @check` + `@runtest` and Ready transition are gated on main returning to green.
+
+2026-06-01 progress update:
+
+- `tool_emission` no longer calls `Keeper_emitter` directly; `Keeper_tool_emission_hook`
+  now injects the keeper emitter port at the keeper boundary.
+- `scripts/lint/tool-keeper-boundary-ratchet.callers` regenerated to 10 entries.
 
 ## 6. Open decision — RFC ownership
 

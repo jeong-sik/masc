@@ -107,66 +107,6 @@ let record_success
     Log.Keeper.error "keeper:%s episode_create failed: %s"
       keeper_name (Printexc.to_string exn)
 
-(** #10341: classify [error_kind] into the matching {!Agent_stress.stress_kind}
-    so the stress ledger receives signal for failure modes other than the
-    keepalive-only [Failure_streak] currently emitted by
-    [keeper_keepalive].  Returns [None] for kinds that do not map to a
-    pre-existing stress dimension (those are still recorded in the
-    institution episode store via [store_failed_turn_episode]).
-
-    Mapping rationale:
-    - provider-timeout families → [Provider_timeout].
-    - admission/runtime/provider capacity families → [Capacity_pressure].
-    - stale turn, heartbeat, and fiber liveness families → [Turn_liveness].
-    - generic [*_timeout] / [*_timeout_*] remains [Timeout] only when owner
-      evidence is unavailable.
-    - [completion_contract_violation] → [Parse_degraded] (the LLM
-      response failed contract parse — semantically a parse-degraded
-      output, not a timeout or hard failure streak). *)
-let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
-  let trimmed =
-    String.trim (Memory_oas_bridge.error_kind_to_string error_kind)
-  in
-  let canonical_error_kind = trimmed in
-  let ends_with suffix s =
-    let ls = String.length s in
-    let lp = String.length suffix in
-    ls >= lp && String.equal (String.sub s (ls - lp) lp) suffix
-  in
-  let contains needle s =
-    let ln = String.length needle in
-    let ls = String.length s in
-    if ln = 0 || ln > ls then false
-    else
-      let rec loop i =
-        if i + ln > ls then false
-        else if String.equal (String.sub s i ln) needle then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  if canonical_error_kind = "" then None
-  else if String.equal canonical_error_kind "provider_timeout"
-       || String.equal canonical_error_kind "oas_run_timeout"
-       || String.equal canonical_error_kind "api_error_timeout"
-  then Some Agent_stress.Provider_timeout
-  else if String.equal canonical_error_kind "capacity_backpressure"
-       || String.equal canonical_error_kind "admission_queue_timeout"
-       || String.equal canonical_error_kind "admission_queue_rejected"
-       || contains "capacity" canonical_error_kind
-  then Some Agent_stress.Capacity_pressure
-  else if String.equal canonical_error_kind "stale_turn_timeout"
-       || String.equal canonical_error_kind "turn_livelock_blocked"
-       || String.equal canonical_error_kind "fiber_unresolved"
-       || contains "heartbeat" canonical_error_kind
-       || contains "liveness" canonical_error_kind
-  then Some Agent_stress.Turn_liveness
-  else if ends_with "_timeout" canonical_error_kind
-       || contains "_timeout_" canonical_error_kind
-  then Some Agent_stress.Timeout
-  else if String.equal trimmed "completion_contract_violation"
-  then Some Agent_stress.Parse_degraded
-  else None
 
 let record_failure
     ~(config : Coord_utils.config)
@@ -181,18 +121,6 @@ let record_failure
   try
     Memory_oas_bridge.store_failed_turn_episode ~memory
       ~keeper_name ~turn ?oas_turn_count ~trace_id ~error_kind ~error_message ();
-    (* #10341: surface non-keepalive failure modes (timeout, parse) into
-       the Agent_stress ledger so the stress dimensions defined in
-       agent_stress.mli stop being write-only-for-Failure_streak. *)
-    (match stress_kind_of_error_kind error_kind with
-     | None -> ()
-     | Some kind ->
-         Agent_stress.record
-           {
-             agent_name = keeper_name;
-             kind;
-             timestamp = Unix.gettimeofday ();
-           });
     let episodes, procedures =
       Memory_oas_bridge.flush_incremental ~memory ~agent_name:keeper_name
     in

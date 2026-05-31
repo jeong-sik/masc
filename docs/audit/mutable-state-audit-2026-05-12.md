@@ -109,7 +109,7 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 
 대다수는 다음 중 하나:
 - **init guard** (`let initialized = ref false` — `lib/multimodal/workspace_id.ml:22`, `lib/shared_types/artifact_id.ml:3`, `lib/shared_audit/envelope.ml`, `lib/server_base_path_diagnostics.ml:153` 등): 정당. idempotent 초기화 1회 가드.
-- **lazy-init store handle** (`let store_ref : Dated_jsonl.t option ref = ref None` — `lib/tool_metrics_persist.ml:74`, `lib/eval_calibration.ml:100`, `lib/tool_usage_log.ml:42`, `lib/discovery_history.ml:11`, `lib/agent_stress.ml:253` 등): 서버 init 시 1회 set, 이후 읽기. 대부분 전용 Mutex 또는 `Stdlib.Mutex.protect` 로 보호됨 (예: `lib/tool_shard.ml:1837` `agent_shards_mutex`, `lib/agent_sdk_metrics_bridge.ml:37` `registry_mutex`). 해당 모듈은 "no Eio context" 주석으로 Stdlib.Mutex 선택 근거 명시 — 정당.
+- **lazy-init store handle** (`let store_ref : Dated_jsonl.t option ref = ref None` — `lib/tool_metrics_persist.ml:74`, `lib/eval_calibration.ml:100`, `lib/tool_usage_log.ml:42`, `lib/discovery_history.ml:11`): 서버 init 시 1회 set, 이후 읽기. 대부분 전용 Mutex 또는 `Stdlib.Mutex.protect` 로 보호됨 (예: `lib/tool_shard.ml:1837` `agent_shards_mutex`, `lib/agent_sdk_metrics_bridge.ml:37` `registry_mutex`). 해당 모듈은 "no Eio context" 주석으로 Stdlib.Mutex 선택 근거 명시 — 정당.
 - **dedup / "logged once" 상태** (`lib/config_dir_resolver.ml:537,554` `last_logged_*_signature`, `lib/prometheus.ml:334` `backend_mutex_observers_installed`): 로그 노이즈 억제 — 동작에 영향 없으나 mutable 전역.
 
 이미 식별된 위험/흠 (버킷 A/B 와 중복): `lib/heuristic_metrics.ml:165-167` (설정·상태 혼재), `lib/runtime/runtime_client_capacity_history.ml:53-56` (4-ref 링버퍼). `lib/core/safe_ops.ml:69-71` 는 버킷 E.

@@ -412,8 +412,6 @@ let store_episode_from_snapshot
   in
   Agent_sdk.Memory.store_episode memory episode
 
-(** #10341 (#10350): emit Agent_stress Timeout event for timeout-shaped
-    error_kind from institution failure path. *)
 type error_kind = Error_kind of string
 
 let error_kind_of_string value = Error_kind value
@@ -421,40 +419,6 @@ let error_kind_to_string (Error_kind value) = value
 
 let canonical_error_kind_label = function
   | value -> value
-
-let timeout_error_kinds =
-  List.map error_kind_of_string
-    [
-      "provider_timeout";
-      "provider_timeout_loop";
-      "turn_timeout";
-      "admission_queue_timeout";
-    ]
-
-let stress_kind_for_error_kind error_kind =
-  let trimmed =
-    error_kind_to_string error_kind
-    |> String.trim
-    |> canonical_error_kind_label
-  in
-  if
-    List.exists
-      (fun kind -> String.equal trimmed (error_kind_to_string kind))
-      timeout_error_kinds
-  then
-    Some Agent_stress.Timeout
-  else None
-
-let emit_stress_for_failure ~keeper_name ~error_kind =
-  match stress_kind_for_error_kind error_kind with
-  | None -> ()
-  | Some stress_kind ->
-      Agent_stress.record
-        {
-          agent_name = keeper_name;
-          kind = stress_kind;
-          timestamp = Unix.gettimeofday ();
-        }
 
 (** #10325 (#10339): per-failure-kind counter + structured learnings replacing
     boilerplate. Was 97% identical static string before. *)
@@ -524,7 +488,6 @@ let store_failed_turn_episode
     Printf.sprintf "keeper-%s-t%d-failure-%d" keeper_name turn
       (int_of_float (ts *. 1000.0) mod 1_000_000)
   in
-  emit_stress_for_failure ~keeper_name ~error_kind;
   let learnings =
     failure_learnings ~error_kind ~error_preview
   in

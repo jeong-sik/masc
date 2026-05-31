@@ -72,58 +72,6 @@ let test_heuristics_coverage_exposes_source_metadata () =
     (json |> U.member "total_events" |> U.to_int)
 ;;
 
-let test_agent_stress_feed_exposes_board_rows () =
-  let event =
-    Agent_stress.event_to_json
-      { agent_name = "sangsu"
-      ; kind =
-          Agent_stress.Turn_failure
-            { consecutive = 2
-            ; threshold = 4
-            ; counted_toward_crash = true
-            ; recoverable = false
-            ; error_kind = Some (Agent_stress.error_kind_of_string "api")
-            }
-      ; timestamp = 99.0
-      }
-  in
-  let agents =
-    [ { Agent_stress.agent = "sangsu"
-      ; ctx_pressure = Some 0.80
-      ; queue_depth = Some 2
-      ; blocked_on = Some "Admission_queue_wait_timeout"
-      ; ts = Some 100.0
-      }
-    ]
-  in
-  let feed = Agent_stress.dashboard_feed_json ~limit:25 ~agents [ event ] in
-  let row = first_list_item "agent_stress" feed in
-  Alcotest.(check string)
-    "stress dashboard surface"
-    "/api/v1/dashboard/stress"
-    (feed |> U.member "dashboard_surface" |> U.to_string);
-  Alcotest.(check string) "stress source" "agent_stress" (feed |> U.member "source" |> U.to_string);
-  Alcotest.(check string)
-    "stress durable store"
-    ".masc/agent_stress.jsonl"
-    (feed |> U.member "retention" |> U.member "durable_store" |> U.to_string);
-  Alcotest.(check int) "raw event count" 1 (feed |> U.member "count" |> U.to_int);
-  Alcotest.(check string) "agent" "sangsu" (row |> U.member "agent" |> U.to_string);
-  Alcotest.(check (float 0.001))
-    "budget pressure"
-    0.50
-    (row |> U.member "budget_pressure" |> U.to_float);
-  Alcotest.(check (float 0.001))
-    "context pressure"
-    0.80
-    (row |> U.member "ctx_pressure" |> U.to_float);
-  Alcotest.(check int) "queue depth" 2 (row |> U.member "queue_depth" |> U.to_int);
-  Alcotest.(check string)
-    "blocked on"
-    "Admission_queue_wait_timeout"
-    (row |> U.member "blocked_on" |> U.to_string)
-;;
-
 let () =
   Alcotest.run
     "dashboard_o5_feeds"
@@ -136,10 +84,6 @@ let () =
             "heuristics coverage carries source metadata"
             `Quick
             test_heuristics_coverage_exposes_source_metadata
-        ; Alcotest.test_case
-            "stress response carries agent board rows"
-            `Quick
-            test_agent_stress_feed_exposes_board_rows
         ] )
     ]
 ;;

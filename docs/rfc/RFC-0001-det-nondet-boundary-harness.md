@@ -287,7 +287,6 @@ handoff_context = {
 
 #### 0.2 Agent stress indicators
 
-신규 `lib/agent_stress.ml`:
 
 - failure streak
 - fallback approval ratio
@@ -521,21 +520,21 @@ difficulty_score = release_count  (task event log의 task.released 이벤트 cou
 keeper의 `dynamic_context` (keeper_agent_run.ml `turn_prompt.dynamic_context`)에 하이브리드 XML+NL 형식으로 주입한다.
 
 ```xml
-<agent_stress_context
+<agent_recovery_context
   failure_streak="4"
   rehabilitation="true"
   task_difficulty="3">
   Recent: 4 consecutive failures.
   Mode: rehabilitation.
   Previous release reason: parse_verdict fallback on malformed LLM output.
-</agent_stress_context>
+</agent_recovery_context>
 ```
 
 설계 결정:
 - XML attributes = 구조적 데이터 (파싱 가능, harness replay에서 검증 가능)
 - 태그 내용 = 자연어 요약 (LLM이 자연스럽게 해석, 인간 operator도 가독)
 - Issue #814 Gap 1의 `<git_status_change>` 태그와 동일 패턴
-- keeper system prompt에 `<agent_stress_context>` 태그 해석 규칙 포함: "이 태그가 있으면 rehabilitation 모드. 신중하게 작업하고, 불확실하면 broadcast로 도움을 요청하라."
+- keeper system prompt에 `<agent_recovery_context>` 태그 해석 규칙 포함: "이 태그가 있으면 rehabilitation 모드. 신중하게 작업하고, 불확실하면 broadcast로 도움을 요청하라."
 - 주입 조건: `failure_streak > 0`일 때만 주입. stress가 없으면 태그 자체를 생략 (토큰 절약)
 - 주입 위치: keeper_agent_run.ml의 `build_turn_prompt` 콜백 내부
 

@@ -14,10 +14,6 @@ lib/agent_sdk_log_bridge.ml,56,None,unclassified
 lib/agent_sdk_log_bridge.ml,116,None,unclassified
 lib/agent_sdk_log_bridge.ml,141,None,unclassified
 lib/agent_sdk_log_bridge.ml,171,false,unclassified
-lib/agent_stress.ml,117,None,unclassified
-lib/agent_stress.ml,123,None,unclassified
-lib/agent_stress.ml,129,None,unclassified
-lib/agent_stress.ml,204,(),unclassified
 lib/attempt_state.ml,15,None,unclassified
 lib/attempt_state.ml,70,None,unclassified
 lib/attempt_state.ml,74,None,unclassified

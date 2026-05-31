@@ -3,7 +3,7 @@
     Wired into the SIGINT / SIGTERM signal handlers in
     [bin/main_eio] and [bin/main_stdio_eio]; cancels the
     orchestrator first, then drains SSE / WebSocket sessions,
-    flushes metric / stress buffers,and clears
+    flushes metric buffers, and clears
     session-identity state. Each step is timed via
     [Unix.gettimeofday] and logged through [Log.Server.info] so
     operators can attribute slow shutdowns to a specific stage.
@@ -28,7 +28,7 @@ val run_all : unit -> unit
     2. Close every SSE client via [Sse.close_all_clients].
     3. Close every WebSocket session via
        [Server_mcp_transport_ws.close_all].
-    4. Flush [Heuristic_metrics] and [Agent_stress] buffers
+    4. Flush [Heuristic_metrics] buffers
        (Eio.Cancel.Cancelled re-raised; any other exception is
        logged at warn and swallowed so a partial flush failure
        cannot block shutdown of the rest of the chain).

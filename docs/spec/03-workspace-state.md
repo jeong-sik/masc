@@ -13,7 +13,7 @@ code_refs:
   - lib/tool_schemas/tool_schemas_workspace_extra.ml
 ---
 
-# Workspace Workspace
+# Workspace State
 
 | 항목 | 값 |
 |------|-----|
@@ -57,7 +57,7 @@ graph TB
     RWT --> RG[workspace_git<br>git ops]
     RS --> RP[workspace_portal<br>A2A]
     RS --> RM[workspace_multi<br>slug / registry]
-    RM --> RR[workspace_workspaces<br>list / create / enter]
+    RM --> RR[workspace_states<br>list / create / enter]
     RS --> RTE[workspace_tempo<br>pace control]
     RS --> RCP[workspace_checkpoint<br>snapshot]
   end
@@ -473,7 +473,7 @@ claims the task. There is no separate `task_sandbox` module.
 
 ## 10. Multi-Workspace & Federation
 
-### 10.1 Workspace Registry (`workspace_multi`, `workspace_workspaces`)
+### 10.1 Workspace Registry (`workspace_multi`, `workspace_states`)
 
 - Workspace ID: `slugify(name)` (소문자, alphanumeric + dash)
 - Registry: `.masc/workspaces/registry.json`

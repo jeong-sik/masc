@@ -249,7 +249,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 00-glossary.md              -- 용어집
 01-system-overview.md       -- 시스템 개요
 02-types-and-invariants.md  -- 타입과 불변식
-03-workspace-workspace collaboration.md     -- Workspace 조율
+03-workspace-state collaboration.md     -- Workspace 조율
 04-chain-engine.md          -- Chain/Runtime 엔진
 05-keeper-agent.md          -- Keeper 에이전트
 06-command-plane.md         -- Command Plane

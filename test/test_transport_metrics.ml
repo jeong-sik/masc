@@ -81,13 +81,13 @@ let test_init () =
 
 let test_sse_sessions () =
   TM.set_sse_sessions ~kind:"observer" 10;
-  TM.set_sse_sessions ~kind:"workspace_client" 5;
+  TM.set_sse_sessions ~kind:"workspace_session" 5;
   let obs = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
     ~labels:[("kind", "observer")] () in
   let workspace = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
-    ~labels:[("kind", "workspace_client")] () in
+    ~labels:[("kind", "workspace_session")] () in
   check (float 0.01) "observer sessions" 10.0 obs;
-  check (float 0.01) "workspace_client sessions" 5.0 workspace
+  check (float 0.01) "workspace_session sessions" 5.0 workspace
 
 let test_broadcast_duration () =
   TM.observe_broadcast_duration 0.05;
@@ -323,7 +323,7 @@ let test_transport_health_json () =
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer "observer-session"
        ~last_event_id:0);
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Workspace_client "workspace_client-session"
+    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Workspace_session "workspace_session-session"
        ~last_event_id:0);
   ignore
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Presence "presence-session"
@@ -361,8 +361,8 @@ let test_transport_health_json () =
   let agent_health_json = json |> U.member "agent_health" in
   check int "observer sessions" 1
     (sse_json |> U.member "sessions_observer" |> U.to_int);
-  check int "workspace_client sessions" 1
-    (sse_json |> U.member "sessions_workspace_client" |> U.to_int);
+  check int "workspace_session sessions" 1
+    (sse_json |> U.member "sessions_workspace_session" |> U.to_int);
   check int "presence sessions" 1
     (sse_json |> U.member "sessions_presence" |> U.to_int);
   check bool "queue depth reflects queued event" true

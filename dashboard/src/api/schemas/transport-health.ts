@@ -55,7 +55,7 @@ const SummarySchema = object({
 
 const SseOuterSchema = object({
   sessions_observer: fallback(number(), 0),
-  sessions_workspace client: fallback(number(), 0),
+  sessions_workspaceSession: fallback(number(), 0),
   sessions_presence: fallback(number(), 0),
   sessions_total: fallback(number(), 0),
   external_subscribers: fallback(number(), 0),
@@ -77,7 +77,7 @@ const SseOuterSchema = object({
 
 interface SseSection {
   sessions_observer: number
-  sessions_workspace client: number
+  sessions_workspaceSession: number
   sessions_presence: number
   sessions_total: number
   external_subscribers: number
@@ -268,7 +268,7 @@ export function parseTransportHealthData(data: unknown): TransportHealthData {
     summary: outer.summary,
     sse: {
       sessions_observer: outer.sse.sessions_observer,
-      sessions_workspace client: outer.sse.sessions_workspace client,
+      sessions_workspaceSession: outer.sse.sessions_workspaceSession,
       sessions_presence: outer.sse.sessions_presence,
       sessions_total: outer.sse.sessions_total,
       external_subscribers: outer.sse.external_subscribers,

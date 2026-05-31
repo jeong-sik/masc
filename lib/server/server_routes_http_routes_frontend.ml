@@ -224,7 +224,7 @@ let add_routes ~port ~host router =
           param — an EventSource cannot set an Authorization header. Parse
           sse_kind and let handle_get_mcp route it: Observer/Presence go to
           verify_mcp_observer_stream_auth (accepts header OR `token` query),
-          the default (Workspace_client) still requires a bearer header via
+          the default (Workspace_session) still requires a bearer header via
           verify_mcp_auth. Do NOT wrap in with_read_auth — that gate is
           header-only and 401s ("Token required") the query-token SSE
           handshake before the sse_kind-aware auth runs, which is why the

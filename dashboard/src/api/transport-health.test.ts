@@ -122,7 +122,7 @@ describe('decodeTransportHealthData', () => {
       },
       sse: {
         sessions_observer: 2,
-        sessions_workspace client: 1,
+        sessions_workspaceSession: 1,
         sessions_presence: 1,
         sessions_total: 4,
         external_subscribers: 5,
@@ -140,7 +140,7 @@ describe('decodeTransportHealthData', () => {
         relay_drop_broadcast: 1,
         hot_sessions: [
           { session_id: 'sess-1', kind: 'observer', queue_depth: 5, last_event_id: 99, idle_seconds: 3 },
-          { session_id: 'sess-2', kind: 'workspace client', queue_depth: 0, last_event_id: 50, idle_seconds: 30 },
+          { session_id: 'sess-2', kind: 'workspaceSession', queue_depth: 0, last_event_id: 50, idle_seconds: 30 },
         ],
       },
       grpc: {

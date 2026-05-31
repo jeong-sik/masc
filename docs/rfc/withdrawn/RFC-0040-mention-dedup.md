@@ -28,7 +28,7 @@ Earlier iter-6 sketch + iter-7 *correction* both assumed:
 
 **Verified (iter-8 grep, iter-9 cross-check 정정)**: `Mention.resolve_targets` has **0 callers in `lib/` production code** (test/docs는 별도). 정확히는:
 - `lib/workspace/mention.ml:110` 정의 + `lib/workspace/mention.mli:32` export
-- `docs/spec/03-workspace-workspace collaboration.md:437`에서 *공식 API 명시* — design 의도 존재
+- `docs/spec/03-workspace-state collaboration.md:437`에서 *공식 API 명시* — design 의도 존재
 - `test/test_mention.ml`, `test/test_mention_coverage.ml`에 6+ test
 - **lib/ 의 production caller는 0** — 의도된 API이나 미사용 (intended-but-unused infra)
 

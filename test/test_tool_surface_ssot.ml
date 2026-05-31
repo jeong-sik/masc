@@ -446,15 +446,15 @@ let test_role_catalogs_only_expose_available_tools () =
     ) tools
   in
   check_all "worker" Agent_tool_surfaces.execution_tool_names;
-  check_all "workspace_client" Agent_tool_surfaces.workspace_tool_names
+  check_all "workspace_session" Agent_tool_surfaces.workspace_tool_names
 
 let test_role_catalogs_drop_stale_entries_when_built () =
   let worker_tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
-  let workspace_client_tools = Agent_tool_surfaces.build_tool_catalog ~role:"workspace_client" () in
+  let workspace_session_tools = Agent_tool_surfaces.build_tool_catalog ~role:"workspace_session" () in
   Alcotest.(check bool) "worker role excludes portal_open" false
     (List.mem "masc_portal_open" worker_tools);
-  Alcotest.(check bool) "workspace_client role excludes portal_open" false
-    (List.mem "masc_portal_open" workspace_client_tools)
+  Alcotest.(check bool) "workspace_session role excludes portal_open" false
+    (List.mem "masc_portal_open" workspace_session_tools)
 
 let () =
   Alcotest.run "tool_surface_ssot"

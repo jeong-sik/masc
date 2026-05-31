@@ -3,11 +3,11 @@
  *
  * `DEFAULT_LANGUAGE_ID` was duplicated byte-for-byte in
  * ide-lsp-client.ts (textDocument/didOpen fallback when path-based
- * detection misses) and ide-data-workspace client.ts (initial value for
+ * detection misses) and ide-data-workspace-session.ts (initial value for
  * the code document store + workspace-file response fallback).
  * Both branches use the LSP "plain text" identifier `'text'`; a drift
  * here would silently change the fallback language between the
- * workspace client's optimistic open and the client's actual didOpen.
+ * workspaceSession's optimistic open and the client's actual didOpen.
  *
  * Keep this module dependency-free so it can grow into the natural
  * owner for LSP-related constants (file-extension → language id maps,

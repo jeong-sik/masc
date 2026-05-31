@@ -31,8 +31,8 @@ let test_build_tool_catalog_worker () =
   Alcotest.(check bool) "no admin tool" false
     (List.mem "masc_tool_admin_snapshot" tools)
 
-let test_build_tool_catalog_workspace_client () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"workspace_client" () in
+let test_build_tool_catalog_workspace_session () =
+  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"workspace_session" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
   Alcotest.(check bool) "has broadcast" true
     (List.mem "masc_broadcast" tools)
@@ -288,8 +288,8 @@ let () =
         [
           Alcotest.test_case "worker catalog" `Quick
             test_build_tool_catalog_worker;
-          Alcotest.test_case "workspace_client catalog" `Quick
-            test_build_tool_catalog_workspace_client;
+          Alcotest.test_case "workspace_session catalog" `Quick
+            test_build_tool_catalog_workspace_session;
           Alcotest.test_case "autonomous catalog" `Quick
             test_build_tool_catalog_autonomous;
         ] );

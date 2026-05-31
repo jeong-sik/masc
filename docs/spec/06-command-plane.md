@@ -5,7 +5,7 @@
 | Status | Retired Historical Reference |
 | Team | Foundation |
 | Maps to | Retired subsystem; former `lib/command_plane_v2.ml`, `lib/command_plane/*.ml`, and `lib/command_plane_orchestra.ml` files are removed |
-| Dependencies | 02-types-and-invariants, 03-workspace-workspace collaboration |
+| Dependencies | 02-types-and-invariants, 03-workspace-state collaboration |
 | LOC | N/A for current codebase |
 | MCP Tools | 0 active Command Plane tools |
 

@@ -371,7 +371,7 @@
             <td class="rank-p1">P1</td><td class="num">2890</td>
             <td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td>
             <td>Facade shrink after registry/supervisor/agent-run lanes</td>
-            <td>Largest keeper workspace client, but too coupled to split first without creating churn.</td>
+            <td>Largest keeper workspaceSession, but too coupled to split first without creating churn.</td>
           </tr>
           <tr>
             <td class="rank-p1">P1</td><td class="num">2496</td>
@@ -493,7 +493,7 @@
         <div class="panel lane keeper">
           <h3>B. Keeper Runtime</h3>
           <p>Hooks, registry, supervisor, agent-run, unified-turn.</p>
-          <p>Goal: registry model first, workspace client facades last, no premature sub-library cycles.</p>
+          <p>Goal: registry model first, workspaceSession facades last, no premature sub-library cycles.</p>
         </div>
         <div class="panel lane server">
           <h3>C. Server / Dashboard</h3>

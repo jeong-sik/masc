@@ -315,7 +315,7 @@ Meaning:
 
 Meaning:
 
-- observer and workspace client sessions both receive the live OAS tail
+- observer and workspaceSession sessions both receive the live OAS tail
 - lifecycle detail now carries `phase`, so the payload can replace the removed legacy direct SSE
 - dashboard runtime state ingests this as OAS telemetry, while main keeper transition journaling still comes from `keeper_phase_changed`
 

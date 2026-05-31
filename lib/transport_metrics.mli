@@ -41,7 +41,7 @@ type hot_queue_session =
 
 (** [set_sse_sessions ~kind count] sets the [masc_sse_sessions]
     gauge labelled with [kind] (typically ["observer"] /
-    ["workspace_client"]). *)
+    ["workspace_session"]). *)
 val set_sse_sessions : kind:string -> int -> unit
 
 (** [observe_broadcast_duration ?target seconds] records a

@@ -163,7 +163,7 @@ let local_worker_tool_schemas ?names () :
 let admin_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Admin
 
-(** Role-catalog candidates for workspace_clients and fleet leaders.
+(** Role-catalog candidates for workspace_sessions and fleet leaders.
     SSOT: Tool_catalog_surfaces.workspace_role_tools.
     [build_tool_catalog] filters against surfaced tool names so stale
     entries cannot escape into prompts. *)
@@ -184,7 +184,7 @@ let filter_catalog_to_available ~available names =
 (** Build a role-based tool catalog from the full registered tool set.
     [role] determines which subset of tools the agent sees:
     - ["worker"]: execution-focused tools
-    - ["workspace_client"]: workspace and orchestration tools
+    - ["workspace_session"]: workspace and orchestration tools
     - [_]: all non-admin tools (autonomous default)
     Returns tool names (unprefixed). *)
 let build_tool_catalog ~(role : string) () : string list =
@@ -196,7 +196,7 @@ let build_tool_catalog ~(role : string) () : string list =
     match role with
     | "worker" ->
         filter_catalog_to_available ~available:all_names execution_tool_names
-    | "workspace_client" | "fleet_leader" ->
+    | "workspace_session" | "fleet_leader" ->
         filter_catalog_to_available ~available:all_names workspace_tool_names
     | _ ->
         (* autonomous: all except admin.  Replace per-name [List.mem]

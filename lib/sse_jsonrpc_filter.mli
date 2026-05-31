@@ -1,5 +1,5 @@
-(** JSON-RPC payload filter for SSE workspace_client sessions. *)
+(** JSON-RPC payload filter for SSE workspace_session sessions. *)
 
-val jsonrpc_message_for_workspace_client : Yojson.Safe.t -> bool
+val jsonrpc_message_for_workspace_session : Yojson.Safe.t -> bool
 
-val event_string_jsonrpc_message_for_workspace_client : string -> bool
+val event_string_jsonrpc_message_for_workspace_session : string -> bool

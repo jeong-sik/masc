@@ -58,7 +58,7 @@ python3 scripts/lib_dep_report.py \
 
 The JSON shape is stable enough for CI checks to read `scc_count_delta`,
 `largest_scc_size`, `largest_scc_delta`, `scc_delta`,
-`workspace_workspace collaboration_dependents`, and `batch2_candidate_delta`.
+`workspace_state_dependents`, and `batch2_candidate_delta`.
 
 ## CI Report
 

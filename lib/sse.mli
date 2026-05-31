@@ -11,14 +11,14 @@ module SMap : Map.S with type key = string
 
 type session_kind =
   | Observer
-  | Workspace_client
+  | Workspace_session
   | Presence
 [@@deriving tla]
 
 type broadcast_target =
   | All
   | Observers
-  | Workspace_clients
+  | Workspace_sessions
   | Presence_only
 
 type client = {
@@ -122,7 +122,7 @@ val event_buffer : (int * string * float) list Atomic.t
 val buffer_event : int -> string -> unit
 val get_events_after : int -> string list
 val get_events_after_for_kind : session_kind -> int -> string list
-(** Replay-buffer lookup filtered for the target session kind. Workspace_client
+(** Replay-buffer lookup filtered for the target session kind. Workspace_session
     replay only returns JSON-RPC messages; observer replay keeps all durable
     events; presence replay is empty. *)
 val cleanup_expired_events : unit -> int

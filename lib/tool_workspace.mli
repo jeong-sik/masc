@@ -40,7 +40,7 @@ type context = Workspace_types.context =
 
 (** {1 Assertion kinds} *)
 
-(** Workspace_client-state assertion targets used by the
+(** Workspace_session-state assertion targets used by the
     [masc_assert] tool.  Re-export of
     {!Workspace_assertions.assertion_kind} — type identity
     preserved.  Adding a constructor requires update in

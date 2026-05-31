@@ -498,11 +498,11 @@ let ws_delivery_metric_names =
 let transport_health_json ~config =
   let v name ?(labels = []) () = Prometheus.metric_value_or_zero name ~labels () in
   let sse_observer = v Prometheus.metric_sse_sessions ~labels:[ "kind", "observer" ] () in
-  let sse_workspace_client =
-    v Prometheus.metric_sse_sessions ~labels:[ "kind", "workspace_client" ] ()
+  let sse_workspace_session =
+    v Prometheus.metric_sse_sessions ~labels:[ "kind", "workspace_session" ] ()
   in
   let sse_presence = v Prometheus.metric_sse_sessions ~labels:[ "kind", "presence" ] () in
-  let sse_total = int_of_float (sse_observer +. sse_workspace_client +. sse_presence) in
+  let sse_total = int_of_float (sse_observer +. sse_workspace_session +. sse_presence) in
   let sse_external_subscribers =
     int_of_float (v Prometheus.metric_sse_external_subscribers ())
   in
@@ -608,7 +608,7 @@ let transport_health_json ~config =
     ; ( "sse"
       , `Assoc
           [ "sessions_observer", `Int (int_of_float sse_observer)
-          ; "sessions_workspace_client", `Int (int_of_float sse_workspace_client)
+          ; "sessions_workspace_session", `Int (int_of_float sse_workspace_session)
           ; "sessions_presence", `Int (int_of_float sse_presence)
           ; "sessions_total", `Int sse_total
           ; "external_subscribers", `Int sse_external_subscribers

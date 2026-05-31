@@ -30,7 +30,7 @@ module Random = Stdlib.Random
     - **Local-worker**: tools available to in-process worker
       flows (a larger set including SDK contract schemas).
     - **Role-catalogue**: dynamic role-based filtering for the
-      autonomous agent (worker / workspace_client / fleet_leader). *)
+      autonomous agent (worker / workspace_session / fleet_leader). *)
 
 (** {1 Helpers} *)
 
@@ -133,7 +133,7 @@ val admin_tool_names : string list
 
 val workspace_tool_names : string list
 (** SSOT: {!Tool_catalog_surfaces.workspace_role_tools}.
-    Candidates for workspace_clients and fleet leaders. *)
+    Candidates for workspace_sessions and fleet leaders. *)
 
 val execution_tool_names : string list
 (** SSOT: {!Tool_catalog_surfaces.execution_role_tools}.
@@ -153,7 +153,7 @@ val build_tool_catalog : role:string -> unit -> string list
     | [role] | Result |
     |---|---|
     | [["worker"]] | {!execution_tool_names} ∩ available |
-    | [["workspace_client"]] / [["fleet_leader"]] | {!workspace_tool_names} ∩ available |
+    | [["workspace_session"]] / [["fleet_leader"]] | {!workspace_tool_names} ∩ available |
     | other | all available tools minus {!admin_tool_names} |
 
     Available = {!spawned_agent_public_tool_names} ∪

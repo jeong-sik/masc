@@ -274,7 +274,7 @@ Use this checklist when reviewing boundary-touching PRs:
 
 ## OAS API Surface Drift — Detection & Repair
 
-Three complementary mechanisms keep the OAS/MASC boundary honest. The first keeps upstream OAS workspace client-agnostic; the other two keep MASC's consumer-side type boundary honest.
+Three complementary mechanisms keep the OAS/MASC boundary honest. The first keeps upstream OAS workspaceSession-agnostic; the other two keep MASC's consumer-side type boundary honest.
 
 ### Layer 0 — SDK independence gate (`scripts/ci/check-masc-oas-boundary.sh`)
 

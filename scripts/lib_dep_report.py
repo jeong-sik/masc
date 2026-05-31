@@ -17,7 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GRAPH = ROOT / "reports" / "lib-dependency-graph.json"
 DEFAULT_OUTPUT = ROOT / "reports" / "lib-dependency-summary.md"
-WORKSPACE_WORKSPACE_MODULES = (
+WORKSPACE_STATE_MODULES = (
     "Workspace",
     "Workspace_state",
     "Workspace_task",
@@ -153,7 +153,7 @@ def workspace_dependents(raw: Json) -> list[Pair]:
             reverse.setdefault(dep, set()).add(node)
     rows = [
         {"module": module, "count": len(reverse.get(module, set()))}
-        for module in WORKSPACE_WORKSPACE_MODULES
+        for module in WORKSPACE_STATE_MODULES
         if module in reverse or module in graph(raw)
     ]
     return sorted(rows, key=lambda item: (-int(item["count"]), str(item["module"])))
@@ -264,8 +264,8 @@ def build_report(
         "scc_delta": scc_delta(current, baseline, limit=limit)
         if baseline is not None
         else None,
-        "workspace_workspace collaboration_dependents": current_workspace,
-        "workspace_workspace collaboration_dependents_delta": pair_delta(
+        "workspace_state_dependents": current_workspace,
+        "workspace_state_dependents_delta": pair_delta(
             current_workspace, workspace_dependents(baseline)
         )
         if baseline is not None
@@ -326,7 +326,7 @@ def render_markdown(report: Json) -> str:
     )
     workspace_delta = {
         str(item["module"]): item["count"]
-        for item in report["workspace_workspace collaboration_dependents_delta"] or []
+        for item in report["workspace_state_dependents_delta"] or []
     }
     workspace = table(
         ["Module", "Dependents", "Delta"],
@@ -336,7 +336,7 @@ def render_markdown(report: Json) -> str:
                 str(item["count"]),
                 fmt_delta(workspace_delta.get(str(item["module"]))),
             ]
-            for item in report["workspace_workspace collaboration_dependents"]
+            for item in report["workspace_state_dependents"]
         ],
     )
     hubs = table(
@@ -381,7 +381,7 @@ def render_markdown(report: Json) -> str:
         "## Workspace/Workspace Dependents",
         "",
         workspace
-        if report["workspace_workspace collaboration_dependents"]
+        if report["workspace_state_dependents"]
         else "No workspace/workspace collaboration modules found in graph.",
         "",
         "## Top Hub Modules",
@@ -511,7 +511,7 @@ def self_test() -> None:
         {"status": "added", "size": 3, "members": ["A", "B", "C"]},
         {"status": "removed", "size": 4, "members": ["A", "B", "C", "D"]},
     ]
-    assert report["workspace_workspace collaboration_dependents_delta"] == [
+    assert report["workspace_state_dependents_delta"] == [
         {"module": "Workspace", "count": -1}
     ]
     assert report["batch2_candidate_delta"][0]["module_count_delta"] == -1

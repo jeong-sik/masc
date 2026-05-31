@@ -28,7 +28,7 @@ code_refs:
 
 | 서브시스템 | 스펙 | IMPL | CODE | STUB | MISS | 비율 | 핵심 판정 |
 |-----------|------|------|------|------|------|------|---------|
-| Workspace Workspace | 03 | 24 | 0 | 0 | 0 | 100% | 전 기능 운용 |
+| Workspace State | 03 | 24 | 0 | 0 | 0 | 100% | 전 기능 운용 |
 | Chain Engine | 04 | - | - | - | - | **REMOVED** | 소스 삭제됨, OAS superseded |
 | Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | Memory.t Long_term JSONL-only 완료 (v2.140.0) |
 | Command Plane | 06 | 40 | 0 | 0 | 0 | 100% | Intent 도구 4종 MCP 등록 완료 |
@@ -69,7 +69,7 @@ code_refs:
 
 ## 3. Per-Subsystem Detail
 
-### 03-Workspace Workspace (100% IMPL)
+### 03-Workspace State (100% IMPL)
 
 | Section | Feature | Status | Evidence |
 |---------|---------|--------|----------|
@@ -80,7 +80,7 @@ code_refs:
 | WALPH | Retired — loop, state, tools all removed | REMOVED | — |
 | Mention Routing | @mention parsing, stateless/stateful/broadcast | IMPL | mention.ml |
 | Worktree | Git worktree create/remove per agent | IMPL | workspace_worktree.ml |
-| Multi-Workspace | Workspace registry, slugification | IMPL | workspace_multi.ml + workspace_workspaces.ml |
+| Multi-Workspace | Workspace registry, slugification | IMPL | workspace_multi.ml + workspace_states.ml |
 | Portal | A2A bidirectional task exchange | IMPL | workspace_portal.ml |
 | Checkpoint | Snapshot capture/restore | IMPL | workspace_checkpoint.ml |
 | Tempo | Pacing control (Normal/Slow/Fast/Paused) | IMPL | workspace_tempo.ml |

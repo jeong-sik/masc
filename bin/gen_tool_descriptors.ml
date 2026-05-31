@@ -91,7 +91,7 @@ let dashboard_scope_enum_strings = [ "all"; "current" ]
 let masc_dashboard_spec : tool_spec =
   { name = "masc_dashboard"
   ; description =
-      "Render the MASC dashboard summarizing workspace_clients, agents, and tasks. Set \
+      "Render the MASC dashboard summarizing workspace_sessions, agents, and tasks. Set \
        scope='current' for this workspace only."
   ; parameters =
       [ { p_name = "compact"

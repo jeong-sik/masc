@@ -194,31 +194,31 @@ let test_client_count_exact_unregister_decrement () =
 
 let test_client_count_by_kind_tracks_session_roles () =
   let before_observer = Sse.client_count_by_kind Sse.Observer in
-  let before_workspace_client = Sse.client_count_by_kind Sse.Workspace_client in
+  let before_workspace_session = Sse.client_count_by_kind Sse.Workspace_session in
   let observer = "test_kind_observer_" ^ string_of_int (Random.bits ()) in
-  let workspace_client = "test_kind_workspace_" ^ string_of_int (Random.bits ()) in
+  let workspace_session = "test_kind_workspace_" ^ string_of_int (Random.bits ()) in
   Fun.protect
     ~finally:(fun () ->
       Sse.unregister observer;
-      Sse.unregister workspace_client)
+      Sse.unregister workspace_session)
     (fun () ->
       let (_id1, _, _) = Sse.register ~kind:Sse.Observer observer ~last_event_id:0 in
       let (_id2, _, _) =
-        Sse.register ~kind:Sse.Workspace_client workspace_client ~last_event_id:0
+        Sse.register ~kind:Sse.Workspace_session workspace_session ~last_event_id:0
       in
       check int "observer count increments"
         (before_observer + 1)
         (Sse.client_count_by_kind Sse.Observer);
-      check int "workspace_client count increments"
-        (before_workspace_client + 1)
-        (Sse.client_count_by_kind Sse.Workspace_client);
+      check int "workspace_session count increments"
+        (before_workspace_session + 1)
+        (Sse.client_count_by_kind Sse.Workspace_session);
       Sse.unregister observer;
       check int "observer count decrements"
         before_observer
         (Sse.client_count_by_kind Sse.Observer);
-      check int "workspace_client still present"
-        (before_workspace_client + 1)
-        (Sse.client_count_by_kind Sse.Workspace_client))
+      check int "workspace_session still present"
+        (before_workspace_session + 1)
+        (Sse.client_count_by_kind Sse.Workspace_session))
 
 let test_unregister_if_current_replacement_count () =
   let before = Sse.client_count () in

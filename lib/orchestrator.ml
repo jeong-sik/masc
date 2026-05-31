@@ -124,7 +124,7 @@ let with_pulse_rw f = Eio_guard.with_mutex pulse_mu f
 let with_pulse_ro f = Eio_guard.with_mutex_ro pulse_mu f
 
 (** Build the orchestrator check consumer.
-    Checks if orchestration is needed and spawns workspace_client if so. *)
+    Checks if orchestration is needed and spawns workspace_session if so. *)
 let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspace_config ()
     : (module Pulse.Consumer) =
   (module struct

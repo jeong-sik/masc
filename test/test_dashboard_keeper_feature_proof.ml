@@ -54,7 +54,7 @@ let make_meta ?(name = "alpha") () =
           ("name", `String name);
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("runtime_id", `String (Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String (Keeper_config.default_runtime_id ()));
           ("last_model_used", `String "openai:gpt-5.4");
           ("sandbox_profile", `String "local");
           ("network_mode", `String "none");

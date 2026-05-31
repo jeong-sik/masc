@@ -374,7 +374,7 @@ let normalize_runtime_id raw =
     | _ -> []
   in
   let known =
-    [ Keeper_config.default_cascade_name () ]
+    [ Keeper_config.default_runtime_id () ]
     @ catalog
   in
   if List.mem (String.lowercase_ascii normalized) known

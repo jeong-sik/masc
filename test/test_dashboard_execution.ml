@@ -526,17 +526,17 @@ let append_execution_receipt
       degraded_retry_cascade =
         Some
           (Cascade_name.of_string_exn
-             (Lib.Keeper_config.default_cascade_name ()));
+             (Lib.Keeper_config.default_runtime_id ()));
       fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
       cascade_rotation_attempts =
         [
           {
             from_cascade =
               Cascade_name.of_string_exn
-                Lib.(Keeper_config.default_cascade_name ());
+                Lib.(Keeper_config.default_runtime_id ());
             to_cascade =
               Cascade_name.of_string_exn
-                (Lib.Keeper_config.default_cascade_name ());
+                (Lib.Keeper_config.default_runtime_id ());
             reason = Lib.Keeper_error_classify.Turn_timeout;
             outcome = Lib.Keeper_execution_receipt.Rotation_retry_scheduled;
             slot_release_at_phase =
@@ -703,10 +703,10 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check bool "diagnostic next action surfaced" true
               (row |> member "diagnostic" |> member "next_action_path" <> `Null);
             check string "runtime id surfaced on execution keeper row"
-              Lib.(Keeper_config.default_cascade_name ())
+              Lib.(Keeper_config.default_runtime_id ())
               (row |> member "runtime_id" |> to_string);
             check string "canonical runtime surfaced on execution keeper row"
-              Lib.(Keeper_config.default_cascade_name ())
+              Lib.(Keeper_config.default_runtime_id ())
               (row |> member "runtime_canonical" |> to_string);
             check bool "primary model omitted on execution keeper row" true
               (row |> member "primary_model" = `Null);
@@ -862,7 +862,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_applied" |> to_bool);
             check (option string) "execution trust row preserves degraded retry lane"
-              (Some (Lib.Keeper_config.default_cascade_name ()))
+              (Some (Lib.Keeper_config.default_runtime_id ()))
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_cascade" |> to_string_option);
             check (option string) "execution trust row preserves fallback reason"
@@ -870,7 +870,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "fallback_reason" |> to_string_option);
             check string "execution trust row preserves rotation target"
-              (Lib.Keeper_config.default_cascade_name ())
+              (Lib.Keeper_config.default_runtime_id ())
               (trust_row |> member "trust" |> member "cascade"
              |> member "rotation_attempts" |> to_list |> List.hd
              |> member "to_cascade" |> to_string);

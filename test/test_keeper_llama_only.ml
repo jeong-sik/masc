@@ -67,7 +67,7 @@ let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
           ("name", `String "keeper-llama-only-test");
           ("agent_name", `String "keeper-llama-only-test");
           ("trace_id", `String "trace-keeper-llama-only");
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
           ("last_model_used", `String last_model_used);
           ("sandbox_profile", `String "local");
           ("network_mode", `String "none");

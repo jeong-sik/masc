@@ -28,7 +28,7 @@ let make_meta ?(name = "keeper-exec-status-test")
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
           ("last_model_used", `String "llama:auto");
           ("sandbox_profile", `String "local");
           ("network_mode", `String "inherit");
@@ -692,7 +692,7 @@ let test_status_bridge_does_not_fabricate_resumable_cli_session_blocker () =
       (OWN.Resumable_cli_session
          {
            cascade_name =
-             Cascade_name.of_string_exn (Masc_mcp.Keeper_config.default_cascade_name ());
+             Cascade_name.of_string_exn (Masc_mcp.Keeper_config.default_runtime_id ());
            detail;
            exit_code = Some 75;
          })

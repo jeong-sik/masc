@@ -48,7 +48,7 @@ let make_keeper_meta ?(name = "keeper-a") ?(trace_id = "trace-keeper-a") () =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
           ("last_model_used", `String "llama:auto");
         ])
   with

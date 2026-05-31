@@ -630,7 +630,7 @@ let make_keeper_meta_json
            ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
            ; "trace_id", `String ("trace-" ^ name ^ "-seed")
            ; "goal", `String "Route shadow regression fixture"
-           ; "runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ())
+           ; "runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ())
            ; "updated_at", `String "2026-04-04T00:00:00Z"
            ; "paused", `Bool paused
            ]
@@ -735,7 +735,7 @@ let append_execution_receipt
       Cascade_passed_to_next_model)
     ?(degraded_retry_applied = true)
     ?(degraded_retry_cascade =
-      Some (Masc_mcp.Keeper_config.default_cascade_name ()))
+      Some (Masc_mcp.Keeper_config.default_runtime_id ()))
     ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
     ?(required_tool_candidates = [])
     ?started_at

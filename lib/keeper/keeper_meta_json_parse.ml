@@ -126,7 +126,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       in
       match runtime_id_opt with
       | Some runtime_id when runtime_id <> "" -> Ok runtime_id
-      | _ -> Ok (Keeper_config.default_cascade_name ())
+      | _ -> Ok (Keeper_config.default_runtime_id ())
     in
     (match pk_runtime_id_result with
      | Error e -> Error e

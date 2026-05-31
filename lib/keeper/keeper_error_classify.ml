@@ -292,10 +292,10 @@ let fallback_cascade_for_unavailable_profile
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
   else if
-    String.equal normalized_effective (Keeper_config.default_cascade_name ())
-    || String.equal normalized_effective (Keeper_config.default_cascade_name ())
+    String.equal normalized_effective (Keeper_config.default_runtime_id ())
+    || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
-  else Some (Keeper_config.default_cascade_name ())
+  else Some (Keeper_config.default_runtime_id ())
 
 let degraded_retry_after_recoverable_error
     ~(effective_cascade : string)
@@ -305,25 +305,25 @@ let degraded_retry_after_recoverable_error
     String.trim effective_cascade
   in
   let effective_is_declared_phase_buffer =
-    is_declared_phase_alias effective_cascade (Keeper_config.default_cascade_name ())
+    is_declared_phase_alias effective_cascade (Keeper_config.default_runtime_id ())
   in
   let effective_is_declared_phase_recovery =
     is_declared_phase_alias
       effective_cascade
-      (Keeper_config.default_cascade_name ())
+      (Keeper_config.default_runtime_id ())
   in
   let phase_recovery_retry fallback_reason =
     Some
       {
-        next_cascade = (Keeper_config.default_cascade_name ());
+        next_cascade = (Keeper_config.default_runtime_id ());
         fallback_reason;
       }
   in
   if tool_requirement = Required
      || effective_is_declared_phase_buffer
      || effective_is_declared_phase_recovery
-     || String.equal normalized_effective (Keeper_config.default_cascade_name ())
-     || String.equal normalized_effective (Keeper_config.default_cascade_name ())
+     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
+     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     phase_recovery_retry Hard_quota
@@ -504,9 +504,9 @@ let normalized_cascade_name ~catalog_names name =
   let trimmed = String.trim name in
   if List.exists (String.equal trimmed) catalog_names then trimmed
   else if
-    String.equal trimmed (Keeper_config.default_cascade_name ())
-    || String.equal trimmed (Keeper_config.default_cascade_name ())
-    || String.equal trimmed (Keeper_config.default_cascade_name ())
+    String.equal trimmed (Keeper_config.default_runtime_id ())
+    || String.equal trimmed (Keeper_config.default_runtime_id ())
+    || String.equal trimmed (Keeper_config.default_runtime_id ())
   then trimmed
   else String.trim trimmed
 
@@ -519,8 +519,8 @@ let required_tool_rotation_candidate
   let routed_phase_buffer_is_distinct =
     not
       (String.equal
-         (Keeper_config.default_cascade_name ())
-         (Keeper_config.default_cascade_name ()))
+         (Keeper_config.default_runtime_id ())
+         (Keeper_config.default_runtime_id ()))
   in
   (* Required-tool turns may still use the phase-recovery route when the catalog
      declares it as an explicit fallback profile. Do not take it from generic
@@ -528,16 +528,16 @@ let required_tool_rotation_candidate
      required-tool turns into a control/recovery lane. *)
   not
     ((routed_phase_buffer_is_distinct
-      && String.equal normalized (Keeper_config.default_cascade_name ())))
+      && String.equal normalized (Keeper_config.default_runtime_id ())))
   && (allow_phase_recovery
       || not
-           (String.equal normalized (Keeper_config.default_cascade_name ())))
+           (String.equal normalized (Keeper_config.default_runtime_id ())))
   && not (Runtime_capability_profile.is_system_cascade_name normalized)
 
 let tool_required_rotation_cascade_name () =
   try
     Runtime.get_default_runtime_id ()
-  with Failure _ -> (Keeper_config.default_cascade_name ())
+  with Failure _ -> (Keeper_config.default_runtime_id ())
 
 let default_degraded_rotation_candidates
     ~catalog_names
@@ -545,7 +545,7 @@ let default_degraded_rotation_candidates
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
   let normalized_base = normalized_cascade_name ~catalog_names base_cascade in
   let default_cascade =
-    normalized_cascade_name ~catalog_names (Keeper_config.default_cascade_name ())
+    normalized_cascade_name ~catalog_names (Keeper_config.default_runtime_id ())
   in
   let tool_required_cascade =
     normalized_cascade_name ~catalog_names (tool_required_rotation_cascade_name ())

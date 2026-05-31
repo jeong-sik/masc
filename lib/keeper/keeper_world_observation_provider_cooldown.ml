@@ -20,9 +20,9 @@ let fallback_cascade_for_provider_cooldown
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
-  else if String.equal normalized_effective (Keeper_config.default_cascade_name ())
+  else if String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
-  else Some (Keeper_config.default_cascade_name ())
+  else Some (Keeper_config.default_runtime_id ())
 
 let provider_cooldown_remaining_sec_for_cascade
       ~(cascade_name : string)

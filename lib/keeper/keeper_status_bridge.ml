@@ -31,7 +31,7 @@ let effective_declarative_cascade_name
   match defaults.model, defaults.manifest_path with
   | Some cascade_name, _ ->
     Keeper_runtime_profile.normalize_keeper_runtime_declared_name cascade_name
-  | None, Some _ -> (Keeper_config.default_cascade_name ())
+  | None, Some _ -> (Keeper_config.default_runtime_id ())
   | None, None ->
     Keeper_runtime_profile.normalize_keeper_runtime_declared_name
       (runtime_id_of_meta meta)

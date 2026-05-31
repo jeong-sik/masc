@@ -27,13 +27,13 @@ let to_string = function
 
 
 let normalize_call ~tool_name ~arguments =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match Keeper_tool_alias.canonical_resolution tool_name with
-  | Keeper_tool_alias.Public_mcp { internal; _ } -> internal, arguments
-  | Keeper_tool_alias.Public_alias { internal } ->
-    internal, Keeper_tool_alias.translate_input ~public:stripped arguments
-  | Keeper_tool_alias.Internal { canonical } -> canonical, arguments
-  | Keeper_tool_alias.Unknown -> stripped, arguments
+  let stripped = Tool_alias.strip_mcp_masc_prefix tool_name in
+  match Tool_alias.canonical_resolution tool_name with
+  | Tool_alias.Public_mcp { internal; _ } -> internal, arguments
+  | Tool_alias.Public_alias { internal } ->
+    internal, Tool_alias.translate_input ~public:stripped arguments
+  | Tool_alias.Internal { canonical } -> canonical, arguments
+  | Tool_alias.Unknown -> stripped, arguments
 ;;
 
 let json_string_list_opt key fields =

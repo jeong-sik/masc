@@ -73,20 +73,13 @@ let workflow_rejection_payload_json
       ?extra_fields
       message
   =
-  let scope_policy =
-    Option.bind
-      scope_policy
-      Keeper_tools_oas_workflow.workflow_rejection_scope_policy_of_string
-  in
-  Keeper_tools_oas_workflow.workflow_rejection_payload_json
+  Workflow_rejection_payload.payload_json
     ?rule_id
     ?tool_suggestion
     ?hint
     ?scope_policy
     ~alternatives
     ?extra_fields
-    ~error_class:Keeper_tools_oas_workflow.Workflow_error_deterministic
-    ~recoverability:Keeper_tools_oas_workflow.Workflow_unrecoverable
     message
 
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)

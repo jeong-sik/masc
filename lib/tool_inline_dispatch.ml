@@ -202,13 +202,13 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
   | "masc_approval_pending" ->
-      let json = Keeper_approval_queue.list_pending_json () in
+      let json = Approval_queue_backend.list_pending_json () in
       Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
   | "masc_approval_get" ->
       let id = arg_get_string "id" "" in
       if String.equal id "" then Some (inline_err_workflow ~tool_name:name ~start_time:start "id is required")
       else
-        (match Keeper_approval_queue.get_pending_json ~id with
+        (match Approval_queue_backend.get_pending_json ~id with
          | Some json -> Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
          | None ->
            Some (inline_err_workflow ~tool_name:name ~start_time:start
@@ -227,13 +227,12 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
             Agent_sdk.Hooks.Reject reason
           | _ -> Agent_sdk.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
         in
-        (match Keeper_approval_queue.resolve ~id ~decision with
+        (match Approval_queue_backend.resolve ~id ~decision with
          | Ok () ->
            Some (inline_ok ~tool_name:name ~start_time:start
              (Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str))
          | Error err ->
-           Some (inline_err_workflow ~tool_name:name ~start_time:start
-             (Keeper_approval_queue.resolve_error_to_string err)))
+           Some (inline_err_workflow ~tool_name:name ~start_time:start err))
 
   (* Verification tools removed: pruned *)
 

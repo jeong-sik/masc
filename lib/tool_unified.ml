@@ -77,7 +77,7 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
   ]
 
 (** Summary report for dashboard. *)
-let summary_report () : Yojson.Safe.t =
+let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   let total = Tool_registry.total_calls () in
   let distinct = Tool_registry.distinct_tools_called () in
   let top_20 = Tool_registry.get_top_n 20 in
@@ -123,5 +123,5 @@ let summary_report () : Yojson.Safe.t =
        Hashtbl dispatch path is now the only code path so the field
        carried no signal. *)
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
-    ("runtime_metrics", Keeper_observation.runtime_metrics_json ());
+    ("runtime_metrics", runtime_metrics ());
   ]

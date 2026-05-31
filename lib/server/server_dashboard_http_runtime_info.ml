@@ -1115,7 +1115,9 @@ let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Sa
     in
     let usage =
       run Tools_compute (fun () ->
-        Tool_unified.summary_report ()
+        Tool_unified.summary_report
+          ~runtime_metrics:Keeper_observation.runtime_metrics_json
+          ()
         |> Tool_usage_log.attach_source_metadata
              ~masc_root:(Coord.masc_root_dir config))
     in

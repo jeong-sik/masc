@@ -29,49 +29,6 @@ type context = {
 
 (* Handlers *)
 
-let keeper_pause_status_json ctx =
-  let names = Keeper_meta_store.keeper_names ctx.config in
-  (* Triple accumulator folded over [names].  All three lists are kept in
-     reverse-prepend order during the fold; downstream consumers
-     ([List.rev], [List.rev_map]) restore the natural order. *)
-  let read_errors_rev, paused_by_meta_rev, paused_by_phase_rev =
-    List.fold_left
-      (fun (errs, by_meta, by_phase) name ->
-        let by_meta, errs =
-          match Keeper_meta_store.read_meta ctx.config name with
-          | Ok (Some meta) when meta.paused -> (meta.name :: by_meta, errs)
-          | Ok _ -> (by_meta, errs)
-          | Error err -> (by_meta, (name, err) :: errs)
-        in
-        let by_phase =
-          match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
-          | Some Keeper_state_machine.Paused -> name :: by_phase
-          | Some _ | None -> by_phase
-        in
-        (errs, by_meta, by_phase))
-      ([], [], [])
-      names
-  in
-  let meta_paused_names = List.rev paused_by_meta_rev in
-  let phase_paused_names = List.rev paused_by_phase_rev in
-  let paused_names =
-    Keeper_types_profile_toml_normalizers.dedupe_keep_order (meta_paused_names @ phase_paused_names)
-  in
-  `Assoc
-    [
-      ("paused", `Bool (paused_names <> []));
-      ("paused_count", `Int (List.length paused_names));
-      ("paused_names", `List (List.map (fun name -> `String name) paused_names));
-      ("meta_paused_count", `Int (List.length meta_paused_names));
-      ("phase_paused_count", `Int (List.length phase_paused_names));
-      ( "read_errors",
-        `List
-          (List.rev_map
-             (fun (name, error) ->
-               `Assoc [ ("name", `String name); ("error", `String error) ])
-             read_errors_rev) );
-    ]
-
 (* RFC-0189 PR-1b: typed [Tool_result.result] success helper. Mirrors the
    round-trip-safe [text_ok] pattern introduced in #18767 — if [body] is
    itself a serialized JSON envelope, lift it back into the structured
@@ -114,7 +71,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
           ("phase_paused_count", `Null);
           ("read_errors", `List []);
         ]
-    else keeper_pause_status_json ctx
+    else Pause_status_backend.keeper_pause_status_json ctx.config
   in
   let keeper_paused =
     match keeper_pause with

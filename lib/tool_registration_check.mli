@@ -8,7 +8,10 @@ type validation_result = {
   (** Reserved for reverse-coverage diagnostics; currently non-fatal and may be empty. *)
 }
 
-val validate : unit -> validation_result
+type policy_config = { configured_tools : string list }
+(** Keeper-facing policy snapshot supplied by the runtime boundary. *)
+
+val validate : ?policy_config:policy_config -> unit -> validation_result
 (** Cross-validate tool_policy.toml against the runtime keeper tool universe.
     Returns orphan/uncovered tool names. Safe to call when policy not loaded. *)
 

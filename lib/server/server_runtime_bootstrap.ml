@@ -123,7 +123,16 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
        record_tool_policy_init_failure ~base_path msg;
        exit 1);
   (* Validate Tool_spec <-> TOML coverage *)
-  let validation = Tool_registration_check.validate () in
+  let policy_config =
+    Option.map
+      (fun cfg ->
+        { Tool_registration_check.configured_tools =
+            Keeper_tool_policy_config.all_group_tools cfg
+            @ Keeper_tool_policy_config.all_masc_tools cfg
+        })
+      (Keeper_tool_policy.policy_config_for_validation ())
+  in
+  let validation = Tool_registration_check.validate ?policy_config () in
   Tool_registration_check.log_validation_result validation;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock

@@ -281,39 +281,35 @@ let handle_join ~tool_name ~start_time (ctx : context) : Tool_result.result opti
     Mcp_server.sse_broadcast state join_event;
     Some (inline_ok ~tool_name ~start_time final_result)
   in
-  (* RFC P3-a — fail-closed identity gate.
-     Keeper_identity.normalize_all_names validates the agent identity
-     against persona + credential filesystem checks.  When validation
-     fails, the join is rejected rather than silently accepted.
-     Previously, normalize errors were logged and the join proceeded
-     with the original agent_name (fail-open), causing persona drift
-     and downstream credential resolution failures. *)
+  (* RFC P3-a — fail-closed identity gate. The identity backend validates
+     the agent identity against persona + credential filesystem checks.
+     When validation fails, the join is rejected rather than silently
+     accepted. Previously, normalize errors were logged and the join
+     proceeded with the original agent_name (fail-open), causing persona
+     drift and downstream credential resolution failures. *)
   match
-    Keeper_identity.normalize_all_names
-      ~input_agent_name:agent_name
+    Coord_identity_backend.validate_join_identity
+      ~agent_name
       ~base_path:config.base_path
-      ~check_persona:true ~check_credential:true ()
   with
-  | Ok bundle ->
+  | Ok keeper_name ->
       Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
         ~labels:[ ("outcome", "ok") ] ();
-      proceed_with_join bundle.keeper_name
+      proceed_with_join keeper_name
   | Error err ->
-      let outcome = Keeper_identity.validation_error_outcome_label err in
       Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
-        ~labels:[ ("outcome", outcome) ] ();
+        ~labels:[ ("outcome", err.Coord_identity_backend.outcome) ] ();
       Log.Misc.warn
         "[sid=%s] [fail-closed:coord_join_normalize] agent=%s outcome=%s \
          detail=%s - join rejected"
-        sid agent_name outcome
-        (Keeper_identity.show_validation_error err);
+        sid agent_name err.Coord_identity_backend.outcome err.detail;
       (* Caller-provided identity / persona / credential files invalid. *)
       Some
         (inline_err_workflow ~tool_name ~start_time
            (Printf.sprintf
               "masc_join rejected: identity validation failed for '%s' — %s. \
                Ensure the persona and credential files exist for this agent."
-              agent_name (Keeper_identity.show_validation_error err)))
+              agent_name err.detail))
 
 (** masc_leave — leave a MASC room *)
 let handle_leave ~tool_name ~start_time (ctx : context) : Tool_result.result option =

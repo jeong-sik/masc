@@ -46,6 +46,67 @@ export function asNullableIsoTimestamp(value: unknown): string | null {
   return null
 }
 
+function normalizeGovernanceDecisionKind(raw: unknown): GovernanceDecisionItem['kind'] {
+  return asString(raw, '').trim().toLowerCase() === 'petition' ? 'petition' : 'case'
+}
+
+function normalizeGovernanceJudgeStatus(raw: unknown): GovernanceJudgeSummary['status'] {
+  const status = asNullableString(raw)?.trim().toLowerCase()
+  switch (status) {
+    case 'online':
+    case 'refreshing':
+    case 'stale_visible':
+    case 'offline':
+    case 'backoff':
+      return status
+    default:
+      return undefined
+  }
+}
+
+function normalizeGovernanceJudgeDegradedReason(raw: unknown): GovernanceJudgeSummary['degraded_reason'] {
+  const reason = asNullableString(raw)?.trim().toLowerCase()
+  switch (reason) {
+    case 'timeout':
+    case 'error':
+    case 'backoff':
+      return reason
+    default:
+      return reason == null ? null : undefined
+  }
+}
+
+function normalizeBoardActorSource(raw: unknown): BoardActorIdentity['source'] {
+  const source = asString(raw, '').trim()
+  switch (source) {
+    case 'keeper_registry_agent_name':
+    case 'keeper_registry_name':
+    case 'keeper_alias_contract':
+    case 'raw_agent':
+      return source
+    default:
+      return undefined
+  }
+}
+
+function normalizeBoardContributorBand(raw: unknown): BoardContributorQuality['band'] {
+  const band = asString(raw, '').trim().toLowerCase()
+  switch (band) {
+    case 'low':
+    case 'watch':
+    case 'strong':
+    case 'excellent':
+      return band
+    default:
+      return undefined
+  }
+}
+
+function normalizeBoardKarmaTargetKind(raw: unknown): BoardKarmaLedgerEvent['target_kind'] | null {
+  const kind = asString(raw, '').trim().toLowerCase()
+  return kind === 'post' || kind === 'comment' ? kind : null
+}
+
 // normalizePendingConfirmation re-exported from pending-confirm.ts (SSOT)
 export { normalizePendingConfirmation }
 
@@ -182,7 +243,7 @@ export function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisio
   if (!id || !topic) return null
   const context = normalizeGovernanceContextRef(raw.context)
   return {
-    kind: asString(raw.kind, 'case'),
+    kind: normalizeGovernanceDecisionKind(raw.kind),
     id,
     topic,
     status: asString(raw.status ?? raw.state, 'open'),
@@ -233,8 +294,8 @@ export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSu
   return {
     judge_online: typeof raw.judge_online === 'boolean' ? raw.judge_online : undefined,
     refreshing: typeof raw.refreshing === 'boolean' ? raw.refreshing : undefined,
-    status: asNullableString(raw.status) ?? undefined,
-    degraded_reason: asNullableString(raw.degraded_reason),
+    status: normalizeGovernanceJudgeStatus(raw.status),
+    degraded_reason: normalizeGovernanceJudgeDegradedReason(raw.degraded_reason),
     cached_judgments_visible: typeof raw.cached_judgments_visible === 'boolean'
       ? raw.cached_judgments_visible
       : undefined,
@@ -316,7 +377,6 @@ function normalizeBoardActorIdentity(
   const key = asString(raw.key, '').trim() || `${kind}:${id.toLowerCase()}`
   const displayName = asString(raw.display_name, '').trim() || id
   const original = asString(raw.raw, '').trim() || fallbackRaw
-  const source = asString(raw.source, '').trim()
   const runtimeAgentName = asString(raw.runtime_agent_name, '').trim()
   return {
     kind,
@@ -324,7 +384,7 @@ function normalizeBoardActorIdentity(
     key,
     display_name: displayName,
     raw: original,
-    source: source || undefined,
+    source: normalizeBoardActorSource(raw.source),
     runtime_agent_name: runtimeAgentName || undefined,
   }
 }
@@ -354,7 +414,7 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
   if (score === undefined) return null
   return {
     score,
-    band: asString(raw.band, '').trim() || undefined,
+    band: normalizeBoardContributorBand(raw.band),
     source: asString(raw.source, '').trim() || undefined,
     completion_rate: asNumber(raw.completion_rate),
     response_rate: asNumber(raw.response_rate),
@@ -599,7 +659,7 @@ function normalizeBoardKarmaLedgerEvent(raw: unknown): BoardKarmaLedgerEvent | n
   if (!isRecord(raw)) return null
   const recipient = asString(raw.recipient, '').trim()
   const voter = asString(raw.voter, '').trim()
-  const targetKind = asString(raw.target_kind, '').trim()
+  const targetKind = normalizeBoardKarmaTargetKind(raw.target_kind)
   const targetId = asString(raw.target_id, '').trim()
   const tsIso = asNullableIsoTimestamp(raw.ts_iso ?? raw.ts)
   if (!recipient || !voter || !targetKind || !targetId || !tsIso) return null

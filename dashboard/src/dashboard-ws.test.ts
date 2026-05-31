@@ -82,31 +82,6 @@ class MockWebSocket {
   }
 }
 
-class MockParseWorker {
-  static holdResponses = false
-
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onerror: ((event: ErrorEvent) => void) | null = null
-  onmessageerror: ((event: MessageEvent) => void) | null = null
-  terminated = false
-
-  constructor(readonly url: URL) {}
-
-  postMessage(message: { id: number; data: string }): void {
-    if (MockParseWorker.holdResponses) return
-    this.onmessage?.({
-      data: {
-        id: message.id,
-        payloads: [JSON.parse(message.data) as unknown],
-      },
-    } as MessageEvent)
-  }
-
-  terminate(): void {
-    this.terminated = true
-  }
-}
-
 function installWebSocketMocks(): void {
   mockSockets.length = 0
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -184,7 +159,6 @@ beforeEach(() => {
 afterEach(() => {
   disconnectDashboardWS()
   clearDashboardWsDiscoveryCacheForTests()
-  MockParseWorker.holdResponses = false
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
   dashboardWsLastPingAt.value = 0
@@ -590,10 +564,8 @@ describe('dashboard websocket route subscriptions', () => {
     expect(dashboardWsLastSeq.value).toBe(42)
   })
 
-  it('falls back to main-thread parsing when the parse worker stops responding', async () => {
-    vi.useFakeTimers()
+  it('parses inbound deltas inline on the main thread', async () => {
     installWebSocketMocks()
-    vi.stubGlobal('Worker', MockParseWorker)
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const socket = mockSockets[0]!
@@ -611,16 +583,11 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
 
-    MockParseWorker.holdResponses = true
     socket.receive({
       jsonrpc: '2.0',
       method: 'dashboard/delta',
       params: { seq: 43, slice: 'execution', payload: { agents: [] } },
     })
-    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(5_000)
-    flushPendingInbound()
 
     expect(dashboardWsLastSeq.value).toBe(43)
     expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(

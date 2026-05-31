@@ -52,7 +52,7 @@ export interface GovernanceJudgment {
 }
 
 export interface GovernanceDecisionItem {
-  kind: 'case'
+  kind: 'case' | 'petition'
   id: string
   topic: string
   status: string

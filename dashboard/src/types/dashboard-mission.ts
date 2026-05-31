@@ -466,7 +466,7 @@ export interface OperatorReviewDecision {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'root' | 'namespace' | 'room'
+  target_type: 'root' | 'namespace' | 'room' | 'keeper'
   target_id?: string | null
   health?: string
   judgment_owner?: string | null

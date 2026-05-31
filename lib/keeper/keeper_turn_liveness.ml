@@ -1,7 +1,7 @@
-(* Keeper_turn_liveness — phase-buffer cascade liveness decisions and turn
+(* Keeper_turn_liveness — phase-buffer runtime liveness decisions and turn
    livelock configuration.
 
-   Provider-specific knowledge lives in [Cascade_capacity_probe]; this
+   Provider-specific knowledge lives in [Runtime_capacity_probe]; this
    module routes probeable URLs through that registry without naming
    any single provider.
 
@@ -11,17 +11,17 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-(* cascade→Runtime 숙청: phase-buffer liveness probe 기계 제거.
-   per-phase cascade override 가 사라진 뒤(단일 runtime) effective_runtime_id 는
-   항상 base_runtime_id 와 같으므로 decide_phase_buffer_liveness 의 probe 분기
+(* runtime→Runtime 숙청: phase-buffer liveness probe 기계 제거.
+   per-phase runtime override 가 사라진 뒤(단일 runtime) effective_runtime 는
+   항상 base_runtime 와 같으므로 decide_phase_buffer_liveness 의 probe 분기
    (effective == phase_buffer && base != phase_buffer 일 때만 발동)는 죽은
-   코드였다. fail_open_phase_buffer_when_unavailable 도 항상 effective_runtime_id
-   를 그대로 반환 — 호출자(resolve_cascade)가 직접 base 를 쓴다. *)
+   코드였다. fail_open_phase_buffer_when_unavailable 도 항상 effective_runtime
+   를 그대로 반환 — 호출자(resolve_runtime)가 직접 base 를 쓴다. *)
 
 (** PR-B: saturation pre-skip support (provider-agnostic).
 
-    When every label in the resolved cascade points at the same
-    [base_url] AND a registered [Cascade_capacity_probe] recognises
+    When every label in the resolved runtime points at the same
+    [base_url] AND a registered [Runtime_capacity_probe] recognises
     that URL, we can pre-check the probe cache before paying an
     [Agent.run] dispatch.  If the probe reports
     [process_available <= 0] the request would queue on a busy slot

@@ -125,7 +125,7 @@ Phase A is non-architectural — it's a hook plumbing addition that single-conta
 ## 7. Open Questions
 
 1. Does `container-per-keeper` mode need its own admission controller, or can it reuse `keeper_turn_slot` semaphore? (RFC-0026 territory.)
-2. How does `lib/cascade_routes` route turns when keepers are in different containers? Probably unchanged (HTTP → MCP socket), but worth confirming.
+2. How does `lib/runtime_routes` route turns when keepers are in different containers? Probably unchanged (HTTP → MCP socket), but worth confirming.
 3. Multi-keeper compose: per-persona named services (declarative) vs `--scale keeper=N` (parameterized)? Phase B decision.
 
 ## 8. Migration Plan

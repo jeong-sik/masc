@@ -74,7 +74,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 141 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 152 | Whether governance judge is enabled. Default: true. |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 149 | Governance judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_DEFAULT_CASCADE` | string_literal | n/a | n/a | 160 | Default cascade label (e.g. "provider_f:pro,agent_llm_a:sonnet"). |
+| `MASC_DEFAULT_CASCADE` | string_literal | n/a | n/a | 160 | Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). |
 | `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 168 | Default model id. |
 | `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 164 | Default provider name. |
 | `MASC_EVENT_BUFFER_SIZE` | typed:int | unclassified | unclassified | 113 | A2A event buffer size per subscription. Caps the in-memory event list to prevent unbounded growth. |
@@ -94,7 +94,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 129 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 58 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 62 | Max age for rate limit entries before cleanup (seconds) |
-| `MASC_ROUTING_CASCADE` | string_literal | n/a | n/a | 174 | Routing cascade for team session routing. Defaults to the logical [routes.routing] key; runtime callers normalize it ... |
+| `MASC_ROUTING_CASCADE` | string_literal | n/a | n/a | 174 | Routing runtime for team session routing. Defaults to the logical [routes.routing] key; runtime callers normalize it ... |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 48 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
 | `MASC_SSE_KEEPALIVE_SEC` | typed:float | unclassified | unclassified | 108 | SSE keepalive interval (seconds). Frequency of `: keepalive` frames on command-plane SSE streams. Clamped to >= 1.0 t... |
 
@@ -103,7 +103,7 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALERT_DEDUP_WINDOW_SEC` | typed:float | unclassified | unclassified | 226 | Alert dedup window, clamped to >= 5s. Default: 60. |
-| `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 743 | {1 Cascade Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Cascade_saturation_signal.t] emission from... |
+| `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 743 | {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Runtime_saturation_signal.t] emission from... |
 | `MASC_CONTEXT_RATIO_HARD_CAP` | typed:float | unclassified | unclassified | 670 | {1 Context Ratio Hard Cap} Absolute ceiling for compaction ratio_gate and handoff threshold after multiplier adjustme... |
 | `MASC_DASHBOARD_HEALTH_CTX_CRITICAL` | typed:float | unclassified | unclassified | 705 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
 | `MASC_DASHBOARD_HEALTH_CTX_WARN` | typed:float | unclassified | unclassified | 706 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
@@ -141,7 +141,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | typed:int | unclassified | unclassified | 28 | Max keeper meta files to scan during bootstrap |
 | `MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC` | typed:float | unclassified | unclassified | 70 | Settle delay (seconds) between lazy-startup completion and the keeper bootstrap fan-out. The autoboot fiber sleeps fo... |
 | `MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC` | typed:float | unclassified | unclassified | 24 | Keeper considered stale when last turn exceeds this threshold (seconds) |
-| `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` | string_literal | n/a | n/a | 773 | Comma-separated provider kind allowlist for every keeper cascade call. Values are OAS [Provider_config.string_of_prov... |
+| `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` | string_literal | n/a | n/a | 773 | Comma-separated provider kind allowlist for every keeper runtime call. Values are OAS [Provider_config.string_of_prov... |
 | `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 510 | Stdout-idle timeout for CLI subprocess transports (Provider_c CLI today; Claude Code / Provider_f CLI / Codex CLI nee... |
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 163 | Crash persistence drain fiber wake interval in seconds. Drain fiber batches in-memory crash events and persists them ... |
 | `MASC_KEEPER_DEBUG` | feature_flag | n/a | n/a | 182 | Enable keeper debug logging. Default: false. |
@@ -160,7 +160,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | unclassified | unclassified | 246 | Maximum seconds since last successful room heartbeat before presence sync is required again. Floor = keepalive interv... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 78 | Maximum metrics file size in bytes before rotation (default: 10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | typed:int | unclassified | unclassified | 81 | Number of rotated files to keep (default: 1, i.e. .1 only) |
-| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | typed:int | unclassified | unclassified | 426 | Maximum turns per single OAS Agent.run call. Keeper resumes via checkpoint in the next keepalive cycle when {!Cascade... |
+| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | typed:int | unclassified | unclassified | 426 | Maximum turns per single OAS Agent.run call. Keeper resumes via checkpoint in the next keepalive cycle when {!Runtime... |
 | `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS` | typed:int | unclassified | unclassified | 449 |  |
 | `MASC_KEEPER_OAS_TIMEOUT_SEC` | string_literal | n/a | n/a | 404 | Per-call OAS timeout override in seconds. Legacy/env override value is clamped to the active keepalive wall-clock cap... |
 | `MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS` | typed:int | unclassified | unclassified | 642 | Maximum proactive generation attempts before falling back. Default: 3. Range: [1, 10]. |
@@ -172,7 +172,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_STAGE_TIMING_RING_SIZE` | typed:int | unclassified | unclassified | 648 | Stage timing ring buffer size for Phase 0 profiling. Default: 100. Range: [10, 1000]. |
 | `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 471 | Idle-gap timeout for streaming OAS provider responses. This bounds time between streamed lines, not total turn durati... |
 | `MASC_KEEPER_TERMINATION_WINDOW_SEC` | typed:float | unclassified | unclassified | 600 | Sliding window for stale-termination escalation tracking. Default: 21600 (6 hours). |
-| `MASC_KEEPER_TURN_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 359 | Wall-clock timeout in seconds for a single unified turn (including all retries and cascade fallbacks). Prevents indef... |
+| `MASC_KEEPER_TURN_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 359 | Wall-clock timeout in seconds for a single unified turn (including all retries and runtime fallbacks). Prevents indef... |
 | `MASC_KEEPER_WATCHDOG_GRACE_SEC` | typed:float | unclassified | unclassified | 594 | Grace period after fiber start before idle-stale detection activates. Prevents false positives on server restart when... |
 | `MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD` | typed:int | unclassified | unclassified | 586 | Consecutive noop turns before considering the keeper stuck in a failure loop. Must be >= 2. Default: 3. |
 | `MASC_KEEPER_WATCHDOG_POLL_SEC` | typed:float | unclassified | unclassified | 582 | Watchdog poll interval in seconds. Must be >= 5. Default: 30. |
@@ -185,7 +185,7 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | Timeouts | operator | 71 | Productive slot-phase budget (seconds).  PR #13120: when a cascade returns a recoverable error after the keeper has a... |
+| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | Timeouts | operator | 71 | Productive slot-phase budget (seconds).  PR #13120: when a runtime returns a recoverable error after the keeper has a... |
 | `MASC_KEEPER_MAX_TRANSIENT_RETRIES` | typed:int | unclassified | unclassified | 19 | Maximum outer-loop retries after the initial attempt. Total attempts = 1 initial + max_transient_retries. Env: [MASC_... |
 | `MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC` | typed:float | unclassified | unclassified | 25 | Base delay (seconds) for exponential backoff. Delay at attempt [n] is [base * 2^(n-1)]. Env: [MASC_KEEPER_TRANSIENT_B... |
 | `MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC` | typed:float | unclassified | unclassified | 31 | Hard cap on backoff delay (seconds). Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. |

@@ -352,7 +352,7 @@ let receipt_timeline_event receipt =
           |> Option.value ~default:"unknown"
         in
         let runtime_outcome =
-          receipt |> json_member "cascade"
+          receipt |> json_member "runtime"
           |> json_string_opt_member "outcome"
           |> Option.value ~default:"not_observed"
         in
@@ -368,7 +368,7 @@ let receipt_timeline_event receipt =
               if String.equal tool_contract_result "violated" then "bad"
               else if
                 String.equal runtime_outcome "passed_to_next_model"
-                || (receipt |> json_member "cascade"
+                || (receipt |> json_member "runtime"
                     |> json_bool_opt_member "fallback_applied"
                     |> Option.value ~default:false)
               then "warn"
@@ -383,7 +383,7 @@ let receipt_timeline_event receipt =
              ~ts_unix ~kind:"execution_receipt"
              ~title:"Execution Receipt"
              ~summary:
-               (Printf.sprintf "%s · tool_contract=%s · cascade=%s"
+               (Printf.sprintf "%s · tool_contract=%s · runtime=%s"
                   outcome tool_contract_result runtime_outcome)
              ~severity ())
 

@@ -315,7 +315,7 @@ let keeper_action_kind_of_tool_names tool_names =
   |> Option.value ~default:"none"
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
-  (* provider filtering now handled by OAS cascade via ~provider_filter *)
+  (* provider filtering now handled by OAS runtime via ~provider_filter *)
   let configured = Keeper_model_labels.configured_model_labels_of_meta m in
   match String.trim (Keeper_status_runtime.active_model_of_meta m) with
   | "" -> configured
@@ -340,7 +340,7 @@ let resolve_max_context_resolution ~requested_override (_labels : string list)
     let local_clamped = resolved in
     max min_keeper_context local_clamped
   in
-  (* RFC-0206 single-binding: cascade label scans removed. Primary and cascade
+  (* RFC-0206 single-binding: runtime label scans removed. Primary and runtime
      budgets both resolve to the default runtime's model context window. *)
   let default_budget = Runtime.default_max_context () |> clamp in
   let primary_budget = default_budget in

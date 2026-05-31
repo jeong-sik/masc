@@ -26,8 +26,8 @@ let write_file path content =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
-let repo_cascade_toml = "# repo cascade seed\n"
-let local_cascade_toml = "# local cascade seed\n"
+let repo_runtime_toml = "# repo runtime seed\n"
+let local_runtime_toml = "# local runtime seed\n"
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -97,7 +97,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.toml") repo_cascade_toml;
+  write_file (Filename.concat config "keeper_runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "tool_policy.toml")
     "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
@@ -428,11 +428,11 @@ let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
   in
   loop ()
 
-let write_invalid_local_only_cascade base_path =
+let write_invalid_local_only_runtime base_path =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
   write_file
-    (Filename.concat config_root "cascade.toml")
+    (Filename.concat config_root "keeper_runtime.toml")
     {|[providers.ollama]
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
@@ -442,14 +442,14 @@ api-name = "qwen3.6:35b-a3b-mlx-bf16"
 max-context = 32768
 tools-support = false
 
-[cascade.invalid_local_lane]
+[runtime.invalid_local_lane]
 members = ["missing_provider.provider_h"]
 
-[cascade.invalid_local_lane]
+[runtime.invalid_local_lane]
 tiers = ["invalid_local_lane"]
 
 [routes.keeper_turn]
-target = "cascade.invalid_local_lane"
+target = "runtime.invalid_local_lane"
 |}
 
 let split_custom_model_spec spec =
@@ -464,12 +464,12 @@ let split_custom_model_spec spec =
         String.sub after_scheme (idx + 1) (String.length after_scheme - idx - 1) )
   | None -> after_scheme, "http://127.0.0.1:9/v1"
 
-let write_partially_invalid_cascade ~base_path ~valid_model =
+let write_partially_invalid_runtime ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
   let model_id, endpoint = split_custom_model_spec valid_model in
   write_file
-    (Filename.concat config_root "cascade.toml")
+    (Filename.concat config_root "keeper_runtime.toml")
     (Printf.sprintf
        {|[providers.custom]
 protocol = "provider_d-http"
@@ -482,29 +482,29 @@ tools-support = true
 
 [custom.stable]
 
-[cascade.primary_profile]
+[runtime.primary_profile]
 members = ["custom.stable"]
 
-[cascade.primary_profile]
+[runtime.primary_profile]
 tiers = ["primary_profile"]
 
-[cascade.broken_profile]
+[runtime.broken_profile]
 members = ["missing_provider.fake"]
 
-[cascade.broken_profile]
+[runtime.broken_profile]
 tiers = ["broken_profile"]
 
 [routes.keeper_turn]
-target = "cascade.primary_profile"
+target = "runtime.primary_profile"
 |}
        endpoint model_id)
 
-let write_partially_invalid_default_cascade ~base_path ~valid_model =
+let write_partially_invalid_default_runtime ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
   let model_id, endpoint = split_custom_model_spec valid_model in
   write_file
-    (Filename.concat config_root "cascade.toml")
+    (Filename.concat config_root "keeper_runtime.toml")
     (Printf.sprintf
        {|[providers.custom]
 protocol = "provider_d-http"
@@ -517,20 +517,20 @@ tools-support = true
 
 [custom.stable]
 
-[cascade.primary_profile]
+[runtime.primary_profile]
 members = ["missing_provider.fake"]
 
-[cascade.primary_profile]
+[runtime.primary_profile]
 tiers = ["primary_profile"]
 
-[cascade.secondary_profile]
+[runtime.secondary_profile]
 members = ["custom.stable"]
 
-[cascade.secondary_profile]
+[runtime.secondary_profile]
 tiers = ["secondary_profile"]
 
 [routes.keeper_turn]
-target = "cascade.primary_profile"
+target = "runtime.primary_profile"
 |}
        endpoint model_id)
 
@@ -599,8 +599,8 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
       let config_root = Filename.concat base_path ".masc/config" in
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
-      Alcotest.(check string) "cascade copied" repo_cascade_toml
-        (read_file (Filename.concat config_root "cascade.toml"));
+      Alcotest.(check string) "runtime copied" repo_runtime_toml
+        (read_file (Filename.concat config_root "keeper_runtime.toml"));
       Alcotest.(check bool) "tool policy copied" true
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "prompt copied" true
@@ -619,13 +619,13 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_only () =
       let base_path = Filename.concat dir "base" in
       let config_root = Filename.concat base_path ".masc/config" in
       mkdir_p config_root;
-      write_file (Filename.concat config_root "cascade.toml") local_cascade_toml;
+      write_file (Filename.concat config_root "keeper_runtime.toml") local_runtime_toml;
       mkdir_p (Filename.concat config_root "personas");
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
-      Alcotest.(check string) "existing cascade preserved" local_cascade_toml
-        (read_file (Filename.concat config_root "cascade.toml"));
+      Alcotest.(check string) "existing runtime preserved" local_runtime_toml
+        (read_file (Filename.concat config_root "keeper_runtime.toml"));
       Alcotest.(check bool) "keepers dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "keepers"));
       Alcotest.(check bool) "prompts dir scaffolded" true
@@ -664,7 +664,7 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "prompts");
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
-      write_file (Filename.concat config_root "cascade.toml") "";
+      write_file (Filename.concat config_root "keeper_runtime.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -704,10 +704,10 @@ let test_bootstrap_base_path_config_root_collapses_masc_input () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root
         ~base_path:(Filename.concat base_path Common.masc_dirname);
       Alcotest.(check bool) "config root created under parent .masc" true
-        (Sys.file_exists (Filename.concat base_path ".masc/config/cascade.toml"));
+        (Sys.file_exists (Filename.concat base_path ".masc/config/keeper_runtime.toml"));
       Alcotest.(check bool) "nested .masc/.masc config not created" false
         (Sys.file_exists
-           (Filename.concat base_path ".masc/.masc/config/cascade.toml")))
+           (Filename.concat base_path ".masc/.masc/config/keeper_runtime.toml")))
 let test_config_bootstrap_mode_parses_env () =
   let check expected value =
     with_env "MASC_CONFIG_BOOTSTRAP" value @@ fun () ->
@@ -743,8 +743,8 @@ let test_bootstrap_empty_mode_creates_scaffold_without_files () =
         (Sys.is_directory (Filename.concat config_root "personas"));
       Alcotest.(check bool) "prompts dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "prompts"));
-      Alcotest.(check bool) "cascade not copied" false
-        (Sys.file_exists (Filename.concat config_root "cascade.toml"));
+      Alcotest.(check bool) "runtime not copied" false
+        (Sys.file_exists (Filename.concat config_root "keeper_runtime.toml"));
       Alcotest.(check bool) "tool policy not copied" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "keeper not copied" false
@@ -2059,7 +2059,7 @@ let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
       let expected = Filename.concat dir ".masc/config/prompts" in
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "cascade.toml") "";
+      write_file (Filename.concat config_root "keeper_runtime.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -2082,7 +2082,7 @@ let test_prompt_markdown_dir_does_not_use_repo_seed () =
       let expected = Filename.concat dir ".masc/config/prompts" in
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "cascade.toml") "";
+      write_file (Filename.concat config_root "keeper_runtime.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -2662,8 +2662,8 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
           Alcotest.(check bool) "primary server stays healthy" true
             (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
 
-let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
-  with_temp_dir "startup-invalid-cascade" (fun dir ->
+let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
+  with_temp_dir "startup-invalid-runtime" (fun dir ->
       let exe = find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
@@ -2674,7 +2674,7 @@ let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
       with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_invalid_local_only_cascade dir;
+      write_invalid_local_only_runtime dir;
       let env =
         merge_env_overrides
           [
@@ -2709,7 +2709,7 @@ let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
           if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "degraded") then begin
             prerr_endline
               (Printf.sprintf
-                 "main_eio invalid cascade did not reach startup.phase=degraded within timeout in this environment.\nlog:\n%s"
+                 "main_eio invalid runtime did not reach startup.phase=degraded within timeout in this environment.\nlog:\n%s"
                  (read_file log_file));
             Alcotest.skip ()
           end;
@@ -2731,7 +2731,7 @@ let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
             (String.starts_with ~prefix:"startup catalog validation failed:" startup_error)))
 
 let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
-  with_temp_dir "startup-partial-cascade" (fun dir ->
+  with_temp_dir "startup-partial-runtime" (fun dir ->
       let exe = find_main_eio_exe () in
       let port = find_free_port () in
       let mock_port = find_free_port_from (port + 1) in
@@ -2747,7 +2747,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
       with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_partially_invalid_cascade ~base_path:dir
+      write_partially_invalid_runtime ~base_path:dir
         ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
       let env =
         merge_env_overrides
@@ -2804,7 +2804,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
             Yojson.Safe.Util.(startup |> member "last_error" |> to_string_option = None)))
 
 let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
-  with_temp_dir "startup-default-invalid-partial-cascade" (fun dir ->
+  with_temp_dir "startup-default-invalid-partial-runtime" (fun dir ->
       let exe = find_main_eio_exe () in
       let port = find_free_port () in
       let mock_port = find_free_port_from (port + 1) in
@@ -2820,7 +2820,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
       with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_partially_invalid_default_cascade ~base_path:dir
+      write_partially_invalid_default_runtime ~base_path:dir
         ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
       let env =
         merge_env_overrides
@@ -3079,8 +3079,8 @@ let () =
             `Slow
             test_main_eio_invalid_default_partial_catalog_stays_degraded;
           Alcotest.test_case
-            "main_eio invalid cascade stays degraded but serves dashboard"
+            "main_eio invalid runtime stays degraded but serves dashboard"
             `Slow
-            test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard;
+            test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard;
         ] );
     ]

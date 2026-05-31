@@ -52,7 +52,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
       phase: 'Stable',
       turn_phase: 'idle',
       decision: { stage: 'idle' },
-      cascade: { state: 'idle' },
+      runtime: { state: 'idle' },
       compaction: { stage: 'idle' },
       measurement: {} as KeeperCompositeSnapshot['measurement'],
       invariants: {} as KeeperCompositeSnapshot['invariants'],
@@ -133,16 +133,16 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     const note = rosterStateNote(
       k({
         phase: 'Running',
-        runtime_blocker_class: 'cascade_exhausted',
-        runtime_blocker_summary: 'cascade list 소진',
+        runtime_blocker_class: 'runtime_exhausted',
+        runtime_blocker_summary: 'runtime list 소진',
       }),
       compositeWith(attention({ execution_current: true, blocked: true })),
       null,
     )
     expect(note).toEqual({
       label: '현재 차단',
-      text: 'cascade list 소진',
-      kind: 'cascade_exhausted',
+      text: 'runtime list 소진',
+      kind: 'runtime_exhausted',
     })
   })
 
@@ -262,18 +262,18 @@ describe('rosterBlockerDisplay', () => {
     const display = rosterBlockerDisplay(
       {
         label: '현재 차단',
-        text: 'cascade list 소진',
-        kind: 'cascade_exhausted',
+        text: 'runtime list 소진',
+        kind: 'runtime_exhausted',
       },
       {
         name: 'echo',
         status: 'active',
-        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_class: 'runtime_exhausted',
       } as Keeper,
     )
 
     expect(display.cell).toBe('현재 차단: 캐스케이드 소진')
-    expect(display.detail).toBe('cascade list 소진')
+    expect(display.detail).toBe('runtime list 소진')
   })
 })
 

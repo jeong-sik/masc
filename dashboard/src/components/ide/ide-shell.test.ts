@@ -590,20 +590,20 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('lets explicit review-focus layers override the default review bundle', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'cascade' },
+      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'runtime' },
       postId: null,
     }
 
     render(h(IdeShell, {}), container)
 
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
-    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
@@ -684,12 +684,12 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
     const input = ideCommandInput(container)
-    input.value = 'cascade'
+    input.value = 'runtime'
     fireEvent.input(input)
     await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(route.value.params.layers).toBe('cascade')
+    expect(route.value.params.layers).toBe('runtime')
   })
 
   it('runs the rails command from the IDE command bar', async () => {
@@ -745,7 +745,7 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
   })
 
-  it('renders the Cascade layer button and toggles it via URL', () => {
+  it('renders the Runtime layer button and toggles it via URL', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -754,11 +754,11 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
 
-    const btn = buttonByText(container, 'Cascade')
+    const btn = buttonByText(container, 'Runtime')
     expect(btn.getAttribute('aria-pressed')).toBe('false')
 
     fireEvent.click(btn)
-    expect(route.value.params.layers).toBe('cascade')
+    expect(route.value.params.layers).toBe('runtime')
     expect(btn.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(btn)
@@ -834,18 +834,18 @@ describe('IdeShell', () => {
     expect(route.value.params.rails).toBeUndefined()
   })
 
-  it('hydrates cascade layer button from the ?layers=cascade URL param', () => {
+  it('hydrates runtime layer button from the ?layers=runtime URL param', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'source', layers: 'cascade' },
+      params: { section: 'ide-shell', view: 'source', layers: 'runtime' },
       postId: null,
     }
 
     render(h(IdeShell, {}), container)
 
-    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('true')
     expect(container.textContent).toContain('Active overlays')
-    expect(container.textContent).toContain('Cascade')
+    expect(container.textContent).toContain('Runtime')
   })
 
   it('mounts the OverlayKeeperTrace overlay when the keeper-trace layer is toggled on', () => {

@@ -110,10 +110,10 @@ include Prometheus_policy_metric_names
    [auto_resume_after_sec] means the sweep is not firing or the meta write
    is failing. Labels: keeper. *)
 (* Phase-3.5 health-gate block: incremented when the supervisor skips
-   auto-resume because the keeper's cascade is unhealthy (failure ratio
-   >= threshold).  Labels: keeper, cascade.  A positive rate means the
+   auto-resume because the keeper's runtime is unhealthy (failure ratio
+   >= threshold).  Labels: keeper, runtime.  A positive rate means the
    health probe is actively protecting the fleet from resuming into a
-   still-failing cascade. *)
+   still-failing runtime. *)
 (* Positive signal for the Skip_idle + Woken gate-promotion path added
    by #12271. Increments every time run_smart_heartbeat_gate observes
    that an external wakeup_keeper call cut a Skip_idle backoff sleep

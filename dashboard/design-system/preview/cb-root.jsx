@@ -68,15 +68,15 @@ function App() {
         <DCArtboard id="sw-bars" label="C · Aggregate bars" width={720} height={240}><SwimlanesBars/></DCArtboard>
       </DCSection>
 
-      <DCSection id="deck" title="07 · Deck" subtitle="Tabbed center. Board / Tasks / Providers / Cascade.">
+      <DCSection id="deck" title="07 · Deck" subtitle="Tabbed center. Board / Tasks / Providers / Runtime.">
         <DCArtboard id="dk-tasks" label="A · Tasks table" width={900} height={380}><DeckTasks/></DCArtboard>
         <DCArtboard id="dk-kan"   label="B · Board (kanban)" width={900} height={380}><DeckKanban/></DCArtboard>
         <DCArtboard id="dk-prov"  label="C · Providers matrix" width={900} height={280}><DeckProviders/></DCArtboard>
       </DCSection>
 
-      <DCSection id="rail" title="08 · Rail" subtitle="Right rail. Activity feed + cascade trace.">
+      <DCSection id="rail" title="08 · Rail" subtitle="Right rail. Activity feed + runtime trace.">
         <DCArtboard id="rl-act"  label="A · Activity feed" width={340} height={460}><RailActivity/></DCArtboard>
-        <DCArtboard id="rl-casc" label="B · Cascade + recent" width={340} height={360}><RailCascade/></DCArtboard>
+        <DCArtboard id="rl-casc" label="B · Runtime + recent" width={340} height={360}><RailRuntime/></DCArtboard>
       </DCSection>
 
       <DCSection id="composer" title="09 · Composer" subtitle="keeper.claim() prompt. Mono, terminal-style.">
@@ -144,8 +144,8 @@ function App() {
         <DCArtboard id="e4-stash" label="D · Stash list" width={920} height={340}><IxGraphStashes branch="main"/></DCArtboard>
       </DCSection>
 
-      <DCSection id="ide-term" title="E5 · Terminal / Search" subtitle="cascade-aware terminal · project search · find/replace overlay.">
-        <DCArtboard id="e5-term" label="A · Cascade-aware terminal pane" width={920} height={440}><IxTerm branch="agent-code/design-system-phase3-ide-v2"/></DCArtboard>
+      <DCSection id="ide-term" title="E5 · Terminal / Search" subtitle="runtime-aware terminal · project search · find/replace overlay.">
+        <DCArtboard id="e5-term" label="A · Runtime-aware terminal pane" width={920} height={440}><IxTerm branch="agent-code/design-system-phase3-ide-v2"/></DCArtboard>
         <DCArtboard id="e5-rg"   label="B · Project search (rg-style)" width={920} height={420}><IxSearch branch="main"/></DCArtboard>
         <DCArtboard id="e5-find" label="C · Find / replace in file" width={920} height={360}><IxFindReplace branch="main"/></DCArtboard>
       </DCSection>
@@ -191,13 +191,13 @@ function App() {
 
       {/* ════════ PHASE 2 · TRACK 3 · OBSERVABILITY PLANE ════════ */}
 
-      <DCSection id="cascade" title="O1 · Cascade Inspector" subtitle="cascade_audit.jsonl — hop-by-hop trace of model fallback chains.">
-        <DCArtboard id="cs-list" label="A · Cascade list (multi-run)"     width={1080} height={520}><CascadeList/></DCArtboard>
-        <DCArtboard id="cs-deep" label="B · Failed run · deep dive"        width={1080} height={360}><CascadeDeepDive/></DCArtboard>
-        <DCArtboard id="cs-cmp"  label="C · Failure vs success compare"    width={1080} height={280}><CascadeCompare/></DCArtboard>
+      <DCSection id="runtime" title="O1 · Runtime Inspector" subtitle="runtime_audit.jsonl — hop-by-hop trace of model fallback chains.">
+        <DCArtboard id="cs-list" label="A · Runtime list (multi-run)"     width={1080} height={520}><RuntimeList/></DCArtboard>
+        <DCArtboard id="cs-deep" label="B · Failed run · deep dive"        width={1080} height={360}><RuntimeDeepDive/></DCArtboard>
+        <DCArtboard id="cs-cmp"  label="C · Failure vs success compare"    width={1080} height={280}><RuntimeCompare/></DCArtboard>
       </DCSection>
 
-      <DCSection id="audit" title="O2 · Audit Ledger" subtitle="audit.jsonl — every tool/verdict/cascade/board/operator event, append-only.">
+      <DCSection id="audit" title="O2 · Audit Ledger" subtitle="audit.jsonl — every tool/verdict/runtime/board/operator event, append-only.">
         <DCArtboard id="au-led" label="A · Streaming ledger"               width={1080} height={520}><AuditLedger/></DCArtboard>
         <DCArtboard id="au-act" label="B · Filtered by actor (sangsu)"     width={920}  height={360}><AuditByActor/></DCArtboard>
         <DCArtboard id="au-sum" label="C · Event-kind summary"             width={780}  height={420}><AuditSummary/></DCArtboard>
@@ -225,7 +225,7 @@ function App() {
 
       <DCSection id="keeper-v2" title="K1 · Keeper Inspector v2" subtitle="BDI (will/needs/desires) · tool access · token & handoff stats — real keepers/*.json">
         <DCArtboard id="ki-bdi"    label="A · BDI panel (will / needs / desires / goals)" width={920} height={400}><KeeperBDIPanel/></DCArtboard>
-        <DCArtboard id="ki-acc"    label="B · Tool access + cascade config"                width={920} height={360}><KeeperToolAccess/></DCArtboard>
+        <DCArtboard id="ki-acc"    label="B · Tool access + runtime config"                width={920} height={360}><KeeperToolAccess/></DCArtboard>
         <DCArtboard id="ki-stats"  label="C · Token / handoff stats (all keepers)"         width={920} height={360}><KeeperTokenStats/></DCArtboard>
       </DCSection>
 

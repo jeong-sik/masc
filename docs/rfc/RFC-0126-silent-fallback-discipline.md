@@ -20,8 +20,8 @@ landed; Phase 2b / 3 / 4 remain.
 | Phase | PR | Scope | Merged |
 |-------|-----|------|--------|
 | Phase 0 | #15959 | RFC body — silent fallback discipline | 2026-05-17 |
-| Phase 0+ | #16000 | RFC-0126 cascade fast-fail + termination provenance amendment | 2026-05-18 |
-| Phase 1 PR-1 | #16019 | cascade attempt provenance via keeper-meta slot | 2026-05-18 |
+| Phase 0+ | #16000 | RFC-0126 runtime fast-fail + termination provenance amendment | 2026-05-18 |
+| Phase 1 PR-1 | #16019 | runtime attempt provenance via keeper-meta slot | 2026-05-18 |
 | Phase 1 PR-2 | #16024 | provider health probe loop (Phase 3 wiring per RFC-0127) | 2026-05-18 |
 | Phase 1 (cross) | #16189 | RFC-0127 PR-1 provenance threading — typed carrier for `Fiber_terminated` + `Provider_runtime_error`. Listed here because §6.1.b absorbs the RFC-0127 work as Phase 1 canary | 2026-05-18 |
 
@@ -59,7 +59,7 @@ filed in OAS repo.
 
 ### Related RFC
 
-- **RFC-0127** (Cascade Fast-Fail + Fiber Termination Provenance,
+- **RFC-0127** (Runtime Fast-Fail + Fiber Termination Provenance,
   Active): same Phase 1 cluster. #16189 dual-listed.
 - **RFC-0106** (Cancel-safe try-with discipline): Phase 2b
   dependency.

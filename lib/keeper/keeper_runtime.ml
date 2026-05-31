@@ -130,24 +130,21 @@ let apply_default_opt opt current = match opt with Some _ -> opt | None -> curre
 
 
 let invalid_profile_defaults_error ~keeper_name detail =
-  if String_util.contains_substring detail "cascade_name" then
+  if String_util.contains_substring detail "runtime_id" then
     Printf.sprintf
       "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
       keeper_name detail
   else
     Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
 
-let effective_declarative_cascade_name
+let effective_declarative_runtime_id
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
   (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
   match defaults.model, defaults.manifest_path with
-  | Some cascade_name, _ ->
-      Keeper_runtime_profile.normalize_keeper_runtime_declared_name cascade_name
+  | Some runtime_id, _ -> String.trim runtime_id
   | None, Some _ -> (Keeper_config.default_runtime_id ())
-  | None, None ->
-      Keeper_runtime_profile.normalize_keeper_runtime_declared_name
-        (runtime_id_of_meta meta)
+  | None, None -> String.trim (runtime_id_of_meta meta)
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -195,36 +192,10 @@ let ensure_keeper_meta config name =
     let target_social_model =
       apply_default defaults.social_model meta.social_model
       |> Keeper_social_model.normalize_social_model in
-    let target_cascade_name =
-      effective_declarative_cascade_name defaults meta
+    let target_runtime_id =
+      effective_declarative_runtime_id defaults meta
     in
-    match
-      Runtime_catalog.resolve_declared_name
-        ~raw_name:target_cascade_name
-        ()
-    with
-    | Error detail ->
-        (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
-        let field =
-          match defaults.model, defaults.manifest_path with
-          | Some _, _ -> "profile.runtime_id"
-          | None, Some _ -> "manifest.default_runtime_id"
-          | None, None -> "meta.runtime_id"
-        in
-        let raw_value =
-          match defaults.model, defaults.manifest_path with
-          | Some cascade_name, _ -> cascade_name
-          | None, Some _ -> (Keeper_config.default_runtime_id ())
-          | None, None -> runtime_id_of_meta meta
-        in
-        let msg =
-          Printf.sprintf
-            "invalid %s %S for keeper %s: %s"
-            field raw_value meta.name detail
-        in
-        Log.Keeper.error "%s" msg;
-        Error msg
-    | Ok resolved_target_cascade_name ->
+    let resolved_target_runtime_id = target_runtime_id in
     (* --- Personality --- *)
     let target_goal = apply_default defaults.goal meta.goal in
     let target_short_goal = apply_default defaults.short_goal meta.short_goal in
@@ -327,12 +298,12 @@ let ensure_keeper_meta config name =
     let denylist_changed = meta.tool_denylist <> target_denylist in
     let social_model_changed = meta.social_model <> target_social_model in
     (* [meta runtime id] may be a raw TOML/JSON value while
-       [resolved_target_cascade_name] is the validated runtime catalog
+       [resolved_target_runtime_id] is the validated runtime catalog
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)
-    let cascade_changed =
+    let runtime_changed =
       String.trim (runtime_id_of_meta meta)
-      <> resolved_target_cascade_name
+      <> resolved_target_runtime_id
     in
     (* #10061: persisted state vs TOML source can differ by a single
        trailing newline when OCaml string literals round-trip through
@@ -380,7 +351,7 @@ let ensure_keeper_meta config name =
     let any_changed =
       proactive_changed || signal_changed || denylist_changed
       || social_model_changed
-      || cascade_changed
+      || runtime_changed
       || personality_changed || policy_changed
       || telemetry_changed || timeout_policy_changed || oas_env_changed in
 
@@ -390,7 +361,7 @@ let ensure_keeper_meta config name =
         (if signal_changed then Some "signal" else None);
         (if denylist_changed then Some "denylist" else None);
         (if social_model_changed then Some "social_model" else None);
-        (if cascade_changed then Some "cascade" else None);
+        (if runtime_changed then Some "runtime" else None);
         (if personality_changed then
            Some
              (Printf.sprintf "personality:%s"
@@ -729,7 +700,7 @@ let start_supervisor_sweep ctx =
                     (match ensure_keeper_meta ctx.config entry.name with
                      | Ok updated_meta ->
                          (* Propagate the updated meta back into the registry so
-                            subsequent turns observe the new cascade_name (and
+                            subsequent turns observe the new runtime_id (and
                             any other reconciled fields) immediately.  Without
                             this the file is updated but the in-memory
                             [registry_entry.meta] stays stale until restart. *)
@@ -753,7 +724,7 @@ let start_supervisor_sweep ctx =
                               (* WORKAROUND-CARRYOVER §Symptom-억제: demote
                                  repeats to DEBUG so the system_log isn't
                                  flooded by invalid TOML drift. Root fix is
-                                 keeper TOML correction + cascade.toml
+                                 keeper TOML correction + keeper_runtime.toml
                                  [keeper_assignable] policy (separate RFC). *)
                               Prometheus.inc_counter
                                 Keeper_metrics.(to_string TomlReconcileDedup)

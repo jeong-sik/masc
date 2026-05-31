@@ -2,7 +2,7 @@ type t =
   | Turn_start
   | Runtime_exhausted
   | Terminal_non_exhaustion
-  | Recoverable_cascade_transient
+  | Recoverable_runtime_transient
   | Cycle_failed
   | Persistent_escalation
   | Resilience_audit_store
@@ -13,7 +13,7 @@ let to_label = function
   | Turn_start -> "turn_start"
   | Runtime_exhausted -> "runtime_exhausted"
   | Terminal_non_exhaustion -> "terminal_non_exhaustion"
-  | Recoverable_cascade_transient -> "recoverable_cascade_transient"
+  | Recoverable_runtime_transient -> "recoverable_runtime_transient"
   | Cycle_failed -> "cycle_failed"
   | Persistent_escalation -> "persistent_escalation"
   | Resilience_audit_store -> "resilience_audit_store"

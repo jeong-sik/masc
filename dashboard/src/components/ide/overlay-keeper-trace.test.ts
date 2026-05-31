@@ -158,10 +158,10 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
       line: 12,
     })
     pushTrace({
-      id: 'cascade-context',
+      id: 'runtime-context',
       tsMs: 1200,
       keeperName: 'mainline',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'mainline-7',
       provider: 'weighted_score',
       filePath: 'router.ts',
@@ -171,8 +171,8 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
     const buckets = bucketTraceEvents(keeperTraceState.value.events)
     const runtimeBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
     expect(runtimeBucket?.events.map(e => e.source).sort()).toEqual(['bdi-snapshot', 'decision-log'])
-    const cascadeBucket = buckets.find(b => b.filePath === 'router.ts' && b.line === 44)
-    expect(cascadeBucket?.events.map(e => e.source)).toEqual(['cascade-hop'])
+    const routerBucket = buckets.find(b => b.filePath === 'router.ts' && b.line === 44)
+    expect(routerBucket?.events.map(e => e.source)).toEqual(['runtime-hop'])
   })
 
   it('sorts events newest-first within each bucket', () => {

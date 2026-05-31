@@ -72,8 +72,8 @@ Useful interpretations:
 
 - `agent-code is role=worker, so requests authenticated as agent-code cannot satisfy CanAdmin.`
   - your bearer is valid, but it is the wrong role for admin-only routes
-- `agent-code-mcp-client is role=worker, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw.`
-  - the dashboard is presenting a worker bearer, so raw cascade save is expected to 403
+- `agent-code-mcp-client is role=worker, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/runtime/config/raw.`
+  - the dashboard is presenting a worker bearer, so raw runtime save is expected to 403
 - `token_bound_admin_http_ready: no`
   - room auth may be enabled, but no usable admin bearer source was found
 - `dashboard_dev_token: available=yes`
@@ -357,10 +357,10 @@ Expected:
 
 Use a low-risk keeper first.
 
-Raw cascade save:
+Raw runtime save:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8935/api/v1/cascade/config/raw \
+curl -sS -X POST http://127.0.0.1:8935/api/v1/runtime/config/raw \
   -H "Authorization: Bearer <raw-token>" \
   -H "X-MASC-Agent: <admin-agent>" \
   -H "Content-Type: application/json" \
@@ -371,7 +371,7 @@ curl -sS -X POST http://127.0.0.1:8935/api/v1/cascade/config/raw \
 
 ```json
 {
-  "source_text": "{ ...raw cascade json... }"
+  "source_text": "{ ...raw runtime json... }"
 }
 ```
 

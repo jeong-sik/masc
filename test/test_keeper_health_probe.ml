@@ -1,5 +1,5 @@
 (* Tests for keeper_health_probe.  Pure synchronous tests for the
-   cache and cascade ratio logic; the supervisor wiring (run_once
+   cache and runtime ratio logic; the supervisor wiring (run_once
    call site, get_runtime_status branch) is covered by integration
    tests in test_keeper_supervisor.ml. *)
 
@@ -52,16 +52,16 @@ let pressure_label_of_failure_reason reason =
 let test_get_runtime_status_default_unknown () =
   Alcotest.check
     status_t
-    "cold cascade cache = Unknown"
+    "cold runtime cache = Unknown"
     H.Unknown
-    (H.get_runtime_status ~runtime_id:"never-written-cascade-xyz")
+    (H.get_runtime_status ~runtime_id:"never-written-runtime-xyz")
 ;;
 
-let test_check_cascade_health_all_healthy () =
+let test_check_runtime_health_all_healthy () =
   let base_dir = Filename.temp_file "probe-" "" in
   Sys.remove base_dir;
-  let results = Masc_mcp.Keeper_health_probe.check_cascade_health ~base_path:base_dir in
-  Alcotest.(check int) "empty registry = no cascades" 0 (List.length results)
+  let results = Masc_mcp.Keeper_health_probe.check_runtime_health ~base_path:base_dir in
+  Alcotest.(check int) "empty registry = no runtimes" 0 (List.length results)
 ;;
 
 let test_runtime_pressure_classifier () =
@@ -79,7 +79,7 @@ let test_runtime_pressure_classifier () =
           }));
   Alcotest.check
     pressure_label_t
-    "cascade admission"
+    "runtime admission"
     (Some "tier_admission_full")
     (pressure_label_of_failure_reason
        (R.Provider_runtime_error
@@ -230,7 +230,7 @@ let test_terminal_unhealthy_exhaustive () =
 
 let test_restarting_is_healthy () =
   (* Core regression: a keeper mid-recovery (Restarting) must NOT
-     pollute its cascade.  The old restart_count > 0 proxy caused
+     pollute its runtime.  The old restart_count > 0 proxy caused
      permanent Unhealthy after any single restart since restart_count
      is monotonic. *)
   Alcotest.(check bool)
@@ -257,8 +257,8 @@ let check_max_failed name ~total ~expected =
     (H.max_failed_allowed_for_runtime ~total)
 ;;
 
-let test_max_failed_small_cascade_floor () =
-  (* N<10: floor of 1 — small cascades must tolerate at least 1 down.
+let test_max_failed_small_runtime_floor () =
+  (* N<10: floor of 1 — small runtimes must tolerate at least 1 down.
      Regression: the prior ratio<0.10 rule meant N=3 had zero tolerance
      and a single auto-paused keeper became a permanent admission
      block in keeper_supervisor.ml. *)
@@ -302,11 +302,11 @@ let () =
             `Quick
             test_get_runtime_status_default_unknown
         ] )
-    ; ( "cascade"
+    ; ( "runtime"
       , [ Alcotest.test_case
             "empty_registry_all_healthy"
             `Quick
-            test_check_cascade_health_all_healthy
+            test_check_runtime_health_all_healthy
         ; Alcotest.test_case
             "runtime_pressure_classifier"
             `Quick
@@ -332,9 +332,9 @@ let () =
         ] )
     ; ( "admission_threshold"
       , [ Alcotest.test_case
-            "small_cascade_floor_of_one"
+            "small_runtime_floor_of_one"
             `Quick
-            test_max_failed_small_cascade_floor
+            test_max_failed_small_runtime_floor
         ; Alcotest.test_case
             "scales_at_ten_percent"
             `Quick

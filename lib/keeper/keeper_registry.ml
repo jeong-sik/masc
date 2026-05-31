@@ -10,48 +10,10 @@ open Keeper_types_profile
 include Keeper_registry_setup
 
 
-let mark_turn_provider_attempt_started ~base_path name =
-  let set_runtime_state runtime_state =
-    set_turn_runtime_state
-      ~base_path
-      name
-      (Packed runtime_state : packed_runtime_state)
-  in
-  match get ~base_path name with
-  | None | Some { current_turn_observation = None; _ } -> ()
-  | Some { current_turn_observation = Some obs; _ } ->
-    (match obs.runtime_state with
-     | Packed Runtime_idle ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_runtime_state Runtime_selecting;
-       set_runtime_state Runtime_trying
-     | Packed Runtime_selecting ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_runtime_state Runtime_trying
-     | Packed Runtime_trying ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected
-     | Packed Runtime_done
-     | Packed Runtime_exhausted ->
-       Log.Keeper.warn
-         "registry: ignoring provider-attempt start after terminal cascade state \
-          name=%s base_path=%s"
-         name
-         base_path)
-;;
-
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
      (PR #14912) instead of the [validate_turn_phase_transition] call.
-     Mirrors the cascade-side wiring (PR #14908) — idempotent self-loops no
+     Mirrors the runtime-side wiring (PR #14908) — idempotent self-loops no
      longer flip [changed] or emit a broadcast, and forbidden transitions
      raise the typed [Turn_phase_transition_violation] (Phase 5) carrying
      the [turn_phase_transition_spec_violation] payload directly.  The
@@ -95,6 +57,17 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
+let mark_turn_provider_attempt_started ~base_path name =
+  match get ~base_path name with
+  | None | Some { current_turn_observation = None; _ } -> ()
+  | Some _ ->
+    set_turn_decision_stage
+      ~base_path
+      name
+      Decision_active_tool_policy_selected;
+    set_turn_phase ~base_path name (Packed Turn_executing)
+;;
+
 let set_turn_selected_model ~base_path name selected_model =
   let changed = ref false in
   let now = Time_compat.now () in
@@ -112,15 +85,11 @@ let prepare_turn_retry_after_compaction ~base_path name =
   let now = Time_compat.now () in
   update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
-      validate_runtime_transition
-        ~from:obs.runtime_state
-        ~to_:(Packed Runtime_idle : packed_runtime_state);
       validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_prompting);
       changed := true;
       { (stamp_turn_progress ~now ~event_kind:"retry_after_compaction" obs) with
         turn_phase = Packed Turn_prompting
       ; decision_stage = Packed Decision_guard_ok
-      ; runtime_state = Packed Runtime_idle
       ; selected_model = None
       }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -179,7 +148,6 @@ let mark_turn_finished ~base_path name =
           ; ct_started_at = obs.started_at
           ; ct_ended_at = ended_at
           ; ct_decision_stage = obs.decision_stage
-          ; ct_runtime_state = obs.runtime_state
           ; ct_selected_model = obs.selected_model
           }
       | None -> e.last_completed_turn (* no live turn → preserve previous *)

@@ -13,7 +13,7 @@
     [assignment]) had zero production callers as of
     2026-05-05 and was removed surgically per audit response;
     if leasing semantics are needed in the future, the design
-    should land at the OAS cascade layer per RFC-0026 (the
+    should land at the OAS runtime layer per RFC-0026 (the
     same architectural rollback as [admission_queue]).
     Selection ([select_runtime_from]) and the read-only
     accessors below remain in active use by

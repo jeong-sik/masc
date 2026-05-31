@@ -22,7 +22,7 @@
     Label cardinality (practical upper bound as of v0.4.x):
     - [provider]: fixed enum of 6 canonical values (ollama, provider_k,
       provider_k-coding, provider_a, provider_d, provider_f, cli_tool_d)
-    - [model]: bounded by entries in [config/cascade.toml], typically
+    - [model]: bounded by entries in [config/keeper_runtime.toml], typically
       under 10 distinct values per deployment
     - [status]: small set of HTTP codes the provider actually emits
       (usually 200, 400, 401, 429, 500, 503)
@@ -115,8 +115,8 @@ let provider_label_of_resolution = function
 
 (** Emit a single HTTP status observation to the Prometheus counter.
 
-    Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Cascade_observation]) can forward [on_http_status] to the
+    Exposed so that per-call metrics sinks (e.g. the runtime-observation
+    capture in [Runtime_observation]) can forward [on_http_status] to the
     same counter without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_http_status ~provider ~model_id ~status =
@@ -374,7 +374,7 @@ let emit_circuit_state ~provider ~model_id ~provider_key ~state =
 let fallback_triggered_metric = Prometheus.metric_fallback_triggered
 
 (** Emit a fallback observation to the unified counter.
-    [kind]   one of: cascade_empty | capability_drop | cli_unsupported
+    [kind]   one of: runtime_empty | capability_drop | cli_unsupported
                    | provider_error_fallback | …
     [detail] free-form drill-down (rejection_reason, target provider,
              dropped field, …). Cardinality bounded by callers. *)
@@ -386,7 +386,7 @@ let emit_fallback_triggered ~kind ~detail =
 (** Per-HTTP-request latency histogram.  Distinct from
     [masc_llm_inference_duration_seconds] (turn-scope, populated by the
     keeper AfterTurn hook): this metric is per provider HTTP call, so
-    streaming retries / cascade fallbacks each add an observation.
+    streaming retries / runtime fallbacks each add an observation.
 
     Populated unconditionally by the OAS [on_request_end] callback,
     which fires for every completed HTTP request regardless of whether
@@ -407,8 +407,8 @@ let emit_request_latency_clamped ~provider ~model_id ~reason =
 
 (** Emit a single latency observation to the Prometheus histogram.
 
-    Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Cascade_observation]) can forward [on_request_end] to the
+    Exposed so that per-call metrics sinks (e.g. the runtime-observation
+    capture in [Runtime_observation]) can forward [on_request_end] to the
     same histogram without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_request_latency ?provider ~model_id ~latency_ms () =

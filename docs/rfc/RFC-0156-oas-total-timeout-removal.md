@@ -34,7 +34,7 @@ let oas_call_timeout_sec () : float =
 ```
 
 ```ocaml
-(* lib/keeper/keeper_turn_cascade_budget.ml *)
+(* lib/keeper/keeper_turn_runtime_budget.ml *)
 let adaptive_timeout_sec = Keeper_runtime_resolved.oas_call_timeout_sec ()
 ```
 

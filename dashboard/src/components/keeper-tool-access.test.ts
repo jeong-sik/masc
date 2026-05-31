@@ -22,7 +22,7 @@ describe('KeeperToolAccessSummary', () => {
   it('renders all summary fields', () => {
     const container = document.createElement('div')
     render(h(KeeperToolAccessSummary, { config: makeConfig() }), container)
-    expect(container.textContent).toContain('cascade')
+    expect(container.textContent).toContain('runtime')
     expect(container.textContent).toContain('spark')
     expect(container.textContent).toContain('sandbox')
     expect(container.textContent).toContain('network')
@@ -32,7 +32,7 @@ describe('KeeperToolAccessSummary', () => {
     expect(container.textContent).toContain('allow / deny')
   })
 
-  it('shows em dash for null cascade name', () => {
+  it('shows em dash for null runtime name', () => {
     const container = document.createElement('div')
     render(h(KeeperToolAccessSummary, { config: makeConfig({ execution: { selected_runtime_id: null } }) }), container)
     const dds = container.querySelectorAll('dd')

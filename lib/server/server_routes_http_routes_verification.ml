@@ -1,8 +1,8 @@
 (** HTTP routes for the verification domain.
 
     Kept as a dedicated file to avoid bloating
-    [server_routes_http_routes_cascade.ml] — the verification domain is
-    independent of cascade.
+    [server_routes_http_routes_runtime.ml] — the verification domain is
+    independent of runtime.
 
     - [GET /api/v1/verification/requests] — operator view of pending /
       approved / rejected verification requests (see {!Dashboard_verification}).

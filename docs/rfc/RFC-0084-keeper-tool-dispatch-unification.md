@@ -166,7 +166,7 @@ keeper→tool 실행이 *macOS 운영자 workstation의 특정 디렉토리 layo
 |---|---|---|
 | `lib/keeper/host_config_provider.ml:3` | guard (cred env) | `let cred_root = "/tmp/keeper-creds"` (4× references) |
 | `lib/keeper/agent_tool_execute_runtime.ml:745, 802` | dispatch (Execute family) | `[ "/bin/bash"; "-lc"; cmd ]` |
-| `lib/keeper/keeper_cascade_resilience.ml:24-43` | scheduling guard | cascade resilience check before autonomous fan-out |
+| `lib/keeper/keeper_runtime_resilience.ml:24-43` | scheduling guard | runtime resilience check before autonomous fan-out |
 | `agent_tool_execute_command_parse.ml:217` | dispatch (gh family) | `[ "/bin/zsh"; "-lc"; ... ]` remaining gh command-parse site |
 | `lib/keeper/keeper_workspace_ops.ml:339,387,661,702,746` | dispatch (shell ops) | `"/bin/ls"`, `"/bin/cat"`, `"/bin/pwd"`, `"/usr/bin/head"`, `"/usr/bin/tail"`, `"/usr/bin/wc"` 6 sites |
 | `lib/tool_inline_dispatch_coord.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191, 210, 253, 331, 570` | persistence (agent identity) | `Printf.sprintf "/tmp/.masc_agent[_mcp]_%s" sid` **7 sites**. `TERM_SESSION_ID` 없으면 `"default"` silent collision |
@@ -234,7 +234,7 @@ PR-14 CI lint `ci/lint-no-direct-dispatch.sh`가 강제.
 |---|---|
 | **OAS Agent SDK ↔ masc-mcp keeper runtime** | masc-mcp의 oas usage는 `Worker_oas` 단일 module에 집중. 역방향 의존 0. (RFC-OAS-011 + SDK Independence Gate strict mode 이미 강제) |
 | **Public MCP ↔ Internal** | `Surface.Public_mcp` vs 그 외. 같은 dispatch path, 다른 capability set. |
-| **Runtime lens (외부 `"runtime"` placeholder vs 내부 real provider)** | `lib/cascade/cascade_catalog_runtime.candidate_probe_to_yojson` + `cascade_observation.cascade_attempt_to_json` carve-out — typed surface로 명시. 메모리 `reference_runtime_lens_boundary_carve_out`. |
+| **Runtime lens (외부 `"runtime"` placeholder vs 내부 real provider)** | `lib/runtime/runtime_catalog_runtime.candidate_probe_to_yojson` + `runtime_observation.runtime_attempt_to_json` carve-out — typed surface로 명시. 메모리 `reference_runtime_lens_boundary_carve_out`. |
 | **Boot policy ↔ runtime route** | 같은 `Tool_resolution.resolve` 결과를 *재사용*. 두 번 결정하지 않음 (PR-6). |
 
 ---

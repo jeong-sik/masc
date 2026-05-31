@@ -39,7 +39,7 @@ type harness_verdict_item =
   ; agent_name : string
   ; gate : string
   ; verdict : string
-  ; evaluator_cascade : string
+  ; evaluator_runtime : string
   ; fallback_reason : string option
   }
 

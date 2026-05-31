@@ -531,7 +531,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   (* Same sweep miss as Session.start_loop above: PR #10730 introduced
      [Keeper_observation] as an Eio actor (mailbox + Promise.await) but
      never wired its [start_actor_if_needed] into a bootstrap path.
-     [cascade_metrics_json ()] (called from [tool_unified.ml:summary_report],
+     [runtime_metrics_json ()] (called from [tool_unified.ml:summary_report],
      which the dashboard tool inspector hits) does
      [Stream.add Get_metrics_json u; Promise.await p]. Without an actor
      fiber draining [stream], the await blocks forever. *)

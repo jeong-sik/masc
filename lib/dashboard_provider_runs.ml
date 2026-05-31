@@ -516,7 +516,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
                "Provider '%s' is not runnable in dashboard single-agent mode"
                provider)
         else (
-          let inference_cascade_name =
+          let inference_runtime_id =
                           (Runtime.get_default_runtime_id ())
           in
           match
@@ -525,11 +525,11 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
               Keeper_turn_driver_wrappers.run_model_by_label ~model_label:label ~goal:prompt
                 ~system_prompt:(run_system_prompt provider)
                 ~max_turns:4
-                ~max_tokens:(Cascade_inference.resolve_max_tokens
-                  ~cascade_name:inference_cascade_name
+                ~max_tokens:(Runtime_inference.resolve_max_tokens
+                  ~runtime_id:inference_runtime_id
                   ~fallback:(fun () -> 2048))
-                ~temperature:(Cascade_inference.resolve_temperature
-                  ~cascade_name:inference_cascade_name
+                ~temperature:(Runtime_inference.resolve_temperature
+                  ~runtime_id:inference_runtime_id
                   ~fallback:(fun () -> 0.2))
                 ~sw ?net
                 ()

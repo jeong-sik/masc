@@ -7,7 +7,7 @@
 
     The phase-event publisher is injected (via [~publish_phase_lifecycle])
     so this module stays free of [Keeper_lifecycle_events] /
-    [Cascade_events] dependencies. *)
+    [Runtime_events] dependencies. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -55,7 +55,7 @@ val handle_crash_auto_pause
 (** [handle_stale_storm_pause ~publish_phase_lifecycle ctx entry ~count]
     pauses [entry] because the same keeper terminated [count] times in
     a 6h sliding window with [stale_termination]. Manual resume
-    required (operator must investigate the cascade/tool/runtime loop
+    required (operator must investigate the runtime/tool/runtime loop
     that caused the storm). *)
 val handle_stale_storm_pause
   :  publish_phase_lifecycle:

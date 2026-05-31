@@ -32,7 +32,7 @@
       "sha256": "9df57464415c79e849bd8821564052b7701ababdebb0c3c8047d796f3cb4af84",
       "line_count": 216,
       "line_refs": [16, 29, 60, 100, 156, 169, 172, 193, 215],
-      "claim": "Uses live incident logs to argue the 206-audit result is reproduced by production symptoms including turn-slot starvation, zero sub-op metrics, and provider/cascade failures."
+      "claim": "Uses live incident logs to argue the 206-audit result is reproduced by production symptoms including turn-slot starvation, zero sub-op metrics, and provider/runtime failures."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
@@ -74,7 +74,7 @@
       "sha256": "93d0ec27e77a575647edfb86cf71aa9309dfa523dd7d21e6cc9d5acbb1f758f8",
       "line_count": 299,
       "line_refs": [8, 10, 30, 46, 72, 86, 105, 146, 155, 157],
-      "claim": "Diagnoses simultaneous provider failures and cascade exhaustion as the reason keepers repeatedly die or restart without useful progress."
+      "claim": "Diagnoses simultaneous provider failures and runtime exhaustion as the reason keepers repeatedly die or restart without useful progress."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
@@ -88,7 +88,7 @@
       "sha256": "8519894053b54bf096644fa34ebf3b74dd3d19354639ec623d78e91b451e14b5",
       "line_count": 298,
       "line_refs": [24, 53, 57, 62, 71, 87, 94, 131, 154, 210],
-      "claim": "Synthesizes audit artifacts into ordered implementation dependencies, emphasizing string matching, Eio cascade death, telemetry gaps, fallback string drift, and dashboard context hardcoding."
+      "claim": "Synthesizes audit artifacts into ordered implementation dependencies, emphasizing string matching, Eio runtime death, telemetry gaps, fallback string drift, and dashboard context hardcoding."
     }
   ],
   "aggregate_claims": [
@@ -191,7 +191,7 @@
     },
     {
       "finding_id": "CC-3",
-      "title": "cascade_pool_router_hardcoded",
+      "title": "runtime_pool_router_hardcoded",
       "severity": "warning",
       "patterns": [],
       "actionability": "actionable",

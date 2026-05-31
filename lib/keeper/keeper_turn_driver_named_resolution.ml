@@ -11,25 +11,16 @@ type t = {
   secondary_resolver : secondary_resolver option;
 }
 
-let resolve ~sw ~net ?provider_filter ~runtime_id ~projection_runtime_id () =
-  let named_resolution =
-    Runtime_catalog
-    .resolve_named_providers_strict_with_secondary_resolver
-      ~sw ~net ?provider_filter ~runtime_id ()
-  in
+let resolve ~sw ~net ?provider_filter ~runtime_id ~runtime_runtime_id () =
+  let _ = sw, net in
   let candidate_cfgs_result =
-    match named_resolution with
-    | Ok resolution -> Ok resolution.providers
+    match Runtime_oas_runner.resolve_runtime_providers ?provider_filter ~runtime_id () with
+    | Ok providers -> Ok providers
     | Error detail -> Error detail
-  in
-  let secondary_resolver =
-    match named_resolution with
-    | Ok resolution -> Some resolution.secondary_resolver
-    | Error _ -> None
   in
   {
     configured_labels_result =
-      Provider_runtime_projection.default_execution_model_strings_result projection_runtime_id;
+      Provider_runtime_projection.default_execution_model_strings_result runtime_runtime_id;
     candidate_cfgs_result;
-    secondary_resolver;
+    secondary_resolver = None;
   }

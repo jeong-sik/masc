@@ -6,7 +6,7 @@
 #
 # Baseline (2026-05-05, HEAD 5806519c0b): the audit at
 # docs/audit/2026-05-05-fundamental-roadmap-reality-check.md found that
-# `lib/cascade/capabilities.ml` was deleted but model lists had migrated
+# `lib/runtime/capabilities.ml` was deleted but model lists had migrated
 # into the now-removed provider adapter. Keep this allowlist narrow: stale
 # entries for deleted implementation files must be removed instead of
 # grandfathered.

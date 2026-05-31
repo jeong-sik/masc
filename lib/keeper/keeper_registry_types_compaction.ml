@@ -1,11 +1,11 @@
 (** Keeper_registry_types_compaction — compaction-stage (KMC) FSM types and
     transitions.
 
-    Re-homed from the deleted [Keeper_registry_types_cascade] (RFC-0206
-    cascade→Runtime rebirth). The compaction FSM is independent of the removed
-    cascade selection FSM — it tracks the keeper's context-compaction
-    sub-lifecycle (accumulate → compact → done) and survives the cascade purge.
-    Only the cascade_state half of the deleted module is dropped; this module
+    Re-homed from the deleted [Keeper_registry_types_runtime] (RFC-0206
+    runtime→Runtime rebirth). The compaction FSM is independent of the removed
+    runtime selection FSM — it tracks the keeper's context-compaction
+    sub-lifecycle (accumulate → compact → done) and survives the runtime purge.
+    Only the runtime_state half of the deleted module is dropped; this module
     carries the compaction half verbatim so its GADT witnesses, transition
     matrix, typed spec violations, and [Printexc] printer keep their contracts. *)
 

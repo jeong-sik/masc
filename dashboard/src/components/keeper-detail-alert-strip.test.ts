@@ -95,14 +95,14 @@ describe('KeeperRuntimeAlertStrip', () => {
 
   // Lock the remaining producer-side attention reasons that
   // [canonicalAttentionReason] folds into runtime_blocked. Producers
-  // live at Keeper_status_bridge.ml:782/784/791 (cascade_attempts_exhausted,
+  // live at Keeper_status_bridge.ml:782/784/791 (runtime_attempts_exhausted,
   // provider_tool_capability_missing, fiber_unresolved). The previous
   // canonicalizes-* it() blocks already cover watchdog_stale_turn and
   // completion_contract_violation; this parametrises the rest. The
   // rendered Korean copy "런타임 근거 확인 필요" is the user-visible label
   // mapped from runtime_blocked in ATTENTION_REASON_LABELS.
   it.each([
-    'cascade_attempts_exhausted',
+    'runtime_attempts_exhausted',
     'provider_tool_capability_missing',
     'fiber_unresolved',
   ])('canonicalizes %s into runtime_blocked operator copy', (reason) => {
@@ -140,7 +140,7 @@ describe('KeeperRuntimeAlertStrip', () => {
   // canonicalizes-* it() blocks already cover inspect_watchdog_root_cause
   // and inspect_turn_timeout.
   it.each([
-    'inspect_cascade_attempts',
+    'inspect_runtime_attempts',
     'inspect_provider_tool_lane',
     'inspect_completion_contract',
     'inspect_turn_finalization',
@@ -169,7 +169,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         trust: {
           execution_summary: {
             tool_contract_result: 'satisfied_execution',
-            cascade_outcome: 'completed',
+            runtime_outcome: 'completed',
             provider_attempt_count: 1,
           },
         },
@@ -192,7 +192,7 @@ describe('KeeperRuntimeAlertStrip', () => {
       keeper: keeper({
         trust: {
           execution_summary: {
-            cascade_outcome: 'completed',
+            runtime_outcome: 'completed',
             provider_attempt_count: 2,
             provider_fallback_applied: true,
           },

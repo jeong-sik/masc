@@ -17,13 +17,13 @@
     Module aliases [Http] / [Http_negotiation] are exposed because
     sibling consumers (e.g. {!Server_h2_gateway},
     {!Server_mcp_transport_http}) reach them via the [include]
-    cascade. *)
+    runtime. *)
 
 include module type of struct
   include Server_mcp_transport_http_session
 end
 
-(** {1 Module aliases (cascade-visible)} *)
+(** {1 Module aliases (runtime-visible)} *)
 
 module Http = Http_server_eio
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
@@ -46,7 +46,7 @@ type deps = Server_mcp_transport_http_types.deps = {
     base_path:string -> Httpun.Request.t -> (unit, string) result;
 }
 (** Transparent alias of {!Server_mcp_transport_http_types.deps}.
-    Re-declared here so cascade consumers see the record fields
+    Re-declared here so runtime consumers see the record fields
     without needing to reach into [Types]. *)
 
 (** {1 Body parsing} *)

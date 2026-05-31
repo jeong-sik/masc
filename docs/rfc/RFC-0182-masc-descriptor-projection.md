@@ -16,7 +16,7 @@ implementation_prs: []
 Status: Draft · Architectural framing, no code yet
 Related: RFC-0064 (LLM-native two-surface tool model), RFC-0179 (keeper_* descriptor coverage)
 
-> Renumber note: This RFC was authored and merged as RFC-0181 (PR #18726, 2026-05-26 11:39 UTC). PR #18697 (capability/intent-based cascade SSOT, OPEN/Draft) had previously claimed the 0181 slot. The 0181 collision was resolved by renumbering this document to 0182; user-authored #18697 retains 0181. All other content is unchanged from the merged body.
+> Renumber note: This RFC was authored and merged as RFC-0181 (PR #18726, 2026-05-26 11:39 UTC). PR #18697 (capability/intent-based runtime SSOT, OPEN/Draft) had previously claimed the 0181 slot. The 0181 collision was resolved by renumbering this document to 0182; user-authored #18697 retains 0181. All other content is unchanged from the merged body.
 
 ## 0. Problem framing
 

@@ -34,7 +34,7 @@ let test_make_functor_signature_stable () =
 
 (** Pre-defined module loggers carry the same surface.  These four
     are the ones the keeper turn flow actually emits through:
-    - Keeper: receipts, phase gate, cascade routing
+    - Keeper: receipts, phase gate, runtime routing
     - Mcp:    runtime token / transport / dispatch
     - Auth:   token resolution events
     - Coord:  fleet coordination

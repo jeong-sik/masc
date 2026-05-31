@@ -55,7 +55,7 @@ let fallback_tool_policy_for_config (provider_cfg : Llm_provider.Provider_config
     }
 ;;
 
-(* RFC-0206: cascade-config tool-policy overrides removed. Under single-binding
+(* RFC-0206: runtime-config tool-policy overrides removed. Under single-binding
    the binding-derived policy is the sole source. *)
 let tool_policy_for_config provider_cfg = fallback_tool_policy_for_config provider_cfg
 ;;
@@ -88,7 +88,7 @@ let is_cli_agent_provider (_provider_cfg : Llm_provider.Provider_config.t) =
 
     Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
     Anthropic CLI) do not expose inline function-calling to this gate. Runtime MCP
-    support remains cascade.toml/OAS-owned because not every CLI can consume
+    support remains keeper_runtime.toml/OAS-owned because not every CLI can consume
     request-scoped MCP policy; Gemini CLI is the known false case. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
   if is_cli
@@ -97,7 +97,7 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
 ;;
 
 (** Resolve OAS-level capabilities for a provider config, then merge
-    declarative cascade.toml capabilities.  For CLI runtimes, the merge
+    declarative keeper_runtime.toml capabilities.  For CLI runtimes, the merge
     is unconditional (runtime MCP lane from tool policy).  For non-CLI
     runtimes, the merge applies when the declarative tool policy declares
     a runtime MCP lane — this ensures [classify_rejection] respects the
@@ -120,7 +120,7 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
     ; supports_runtime_tool_events = runtime_mcp_lane
     }
   else (
-    (* Non-CLI providers: merge declarative cascade.toml capabilities
+    (* Non-CLI providers: merge declarative keeper_runtime.toml capabilities
        so that [classify_rejection] respects the operator's declared
        [supports-runtime-mcp-tools] even when the OAS model-level
        lookup returns a narrower capability set. *)
@@ -319,7 +319,7 @@ let supports_required_tool_use
       either swap to stdio MCP or pick header-capable providers.
    2. [runtime_mcp_caps_missing] — provider lacks
       [supports_runtime_mcp_tools] or [supports_runtime_tool_events].
-      Inline path was also unavailable; cascade authoring problem.
+      Inline path was also unavailable; runtime authoring problem.
    3. [inline_tool_choice_unsupported] — only [require_tool_choice]
       mode and provider has no [supports_inline_tool_choice].
    4. [inline_tools_unsupported] — only [require_tool_support] mode
@@ -407,17 +407,17 @@ let provider_kind_label (cfg : Llm_provider.Provider_config.t) =
 ;;
 
 (* #10474: emit a Prometheus counter per rejected provider so
-   operators can see which rejection reason dominates per cascade.
-   Cardinality: cascades × provider_kinds × ~5 reasons; bounded by
-   the small set of cascade names actually configured (~10) and
+   operators can see which rejection reason dominates per runtime.
+   Cardinality: runtimes × provider_kinds × ~5 reasons; bounded by
+   the small set of runtime names actually configured (~10) and
    provider kinds (~10). *)
-let cascade_filter_rejection_metric = "masc_cascade_filter_rejection_total"
+let runtime_filter_rejection_metric = "masc_runtime_filter_rejection_total"
 
-let record_filter_rejection ~cascade ~provider_cfg ~reason =
+let record_filter_rejection ~runtime ~provider_cfg ~reason =
   Prometheus.inc_counter
-    cascade_filter_rejection_metric
+    runtime_filter_rejection_metric
     ~labels:
-      [ "cascade", cascade
+      [ "runtime", runtime
       ; "provider_kind", provider_kind_label provider_cfg
       ; "reason", rejection_reason_label reason
       ]
@@ -445,7 +445,7 @@ let apply_required_tool_use_filter
         providers
     in
     (* #10474: emit per-provider rejection observability so dashboards
-       can attribute "cascade dead" events to a specific cause. The
+       can attribute "runtime dead" events to a specific cause. The
        all-providers-removed warn line below kept for human-readable
        logs; counter is the machine-consumable signal. *)
     List.iter
@@ -458,7 +458,7 @@ let apply_required_tool_use_filter
              ~require_tool_support
              provider_cfg
          with
-         | Some reason -> record_filter_rejection ~cascade:label ~provider_cfg ~reason
+         | Some reason -> record_filter_rejection ~runtime:label ~provider_cfg ~reason
          | None -> ())
       rejected;
     if kept = [] && providers <> []
@@ -469,7 +469,7 @@ let apply_required_tool_use_filter
         | None -> false
       in
       Log.Misc.warn
-        "cascade %s: required tool-use gate removed all providers (providers=[%s], \
+        "runtime %s: required tool-use gate removed all providers (providers=[%s], \
          runtime_mcp_http_headers=%b)"
         label
         (String.concat ", " (List.map provider_debug_label providers))
@@ -508,7 +508,7 @@ let apply_required_tool_use_filter_with_overrides
              ~require_tool_support
              provider_cfg
          with
-         | Some reason -> record_filter_rejection ~cascade:label ~provider_cfg ~reason
+         | Some reason -> record_filter_rejection ~runtime:label ~provider_cfg ~reason
          | None -> ())
       rejected;
     if kept = [] && providers <> []
@@ -519,7 +519,7 @@ let apply_required_tool_use_filter_with_overrides
         | None -> false
       in
       Log.Misc.warn
-        "cascade %s: required tool-use gate removed all providers (providers=[%s], \
+        "runtime %s: required tool-use gate removed all providers (providers=[%s], \
          runtime_mcp_http_headers=%b)"
         label
         (String.concat ", " (List.map (fun (cfg, _) -> provider_debug_label cfg) providers))

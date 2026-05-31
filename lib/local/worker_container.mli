@@ -3,14 +3,14 @@
 
     Sits between {!Worker_container_types} (cycle 191) and
     {!Worker_container_runners} (which does
-    [include Worker_container] + a top-level cascade-include
+    [include Worker_container] + a top-level runtime-include
     in its .mli).  Type identity propagates end-to-end via
     [include module type of struct include M end]
     (cycle 187 rationale).
 
     External surface (15 entries — 11 dotted callers + 4
     additional helpers consumed unqualified by
-    {!Worker_container_runners} through the cascade):
+    {!Worker_container_runners} through the runtime):
     - File paths: {!worker_container_dir},
       {!worker_raw_trace_path},
       {!ensure_worker_container_dirs}.

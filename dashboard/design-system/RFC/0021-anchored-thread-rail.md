@@ -20,7 +20,7 @@ The IDE mockup right rail carries five kinds of conversation cards anchored to s
            "This is exactly the schema error we're seeing in prod —"
            2 replies · open
 
-[QUESTION] operator    router.ts:26   fn:resolveCascade               01:39:02
+[QUESTION] operator    router.ts:26   fn:resolveRuntime               01:39:02
            "Should normalizeTools also handle tool_choice=none?"
            1 reply · open
 
@@ -57,7 +57,7 @@ export interface ThreadAnchor {
   readonly file_path: string
   readonly line_start: number | null      // null = file-level
   readonly line_end: number | null
-  readonly symbol_hint?: string           // optional 'fn:resolveCascade' / 'token:log.warn'
+  readonly symbol_hint?: string           // optional 'fn:resolveRuntime' / 'token:log.warn'
 }
 
 export interface Thread {

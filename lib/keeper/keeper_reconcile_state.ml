@@ -31,7 +31,7 @@ let with_lock f =
 
 (* Compress an error string into a stable, low-cardinality digest. The
    reconcile error from [ensure_keeper_meta] is human prose plus the
-   offending [cascade_name] / field — using a hash would lose the
+   offending [runtime_id] / field — using a hash would lose the
    prefix, but a verbatim 200-byte snapshot also tracks irrelevant
    wording drift. Compromise: strip whitespace runs and clip to 96
    characters so two failures with the same root cause hash to the

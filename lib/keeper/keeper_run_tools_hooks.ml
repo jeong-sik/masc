@@ -74,7 +74,7 @@ let assemble_hooks
       ~(start_turn_count : int)
       ~(generation : int)
       ~(max_turns : int)
-      ~(cascade_name_string : string)
+      ~(runtime_id_string : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
       ~(required_tool_names : string list)
@@ -293,7 +293,7 @@ let assemble_hooks
                   else None
                 in
                 let runtime_seed =
-                  Runtime_inference.for_cascade ~name:cascade_name_string
+                  Runtime_inference.for_runtime ~name:runtime_id_string
                 in
                 let current_budget =
                   match runtime_seed.thinking_budget with
@@ -639,7 +639,7 @@ let assemble_hooks
                   ~required_tool_candidates:
                     computed_surface.required_tool_candidate_names
                   ~missing_required_tools:computed_surface.missing_required_tool_names
-                  ~runtime_profile:cascade_name_string
+                  ~runtime_profile:runtime_id_string
                   ();
                 (let now = Time_compat.now () in
                  let hook_elapsed_ms =
@@ -649,13 +649,12 @@ let assemble_hooks
                    ~base_path:config.base_path
                    meta.name
                    Keeper_registry.Decision_active_tool_policy_selected;
-                 Keeper_registry.set_turn_runtime_state
+                 Keeper_registry.set_turn_phase
                    ~base_path:config.base_path
                    meta.name
-                   (Keeper_registry.Packed Keeper_registry.Runtime_selecting
-                    : Keeper_registry.packed_runtime_state);
+                   (Keeper_registry.Packed Keeper_registry.Turn_routing);
                  (* Spec atomic group: SelectToolPolicy(idle->selecting)
-                   is immediately followed by CascadeTrying(selecting->
+                   is immediately followed by RuntimeTrying(selecting->
                    trying).  Both transitions are materialised inside
                    the disclosure hook because the spec invariant
                    [SelectingRequiresToolPolicy] requires
@@ -666,15 +665,13 @@ let assemble_hooks
                    producing an [idle -> trying] jump that bypassed
                    selecting; the move here closes that gap by keeping
                    the two transitions adjacent.  On retry attempts
-                   the prior cascade state is [Runtime_trying]; the
+                   the prior runtime state is [Runtime_trying]; the
                    re-entry sequence becomes [trying -> selecting ->
                    trying] which is admitted by
                    [validate_runtime_transition]. *)
-                 Keeper_registry.set_turn_runtime_state
+                 Keeper_registry.mark_turn_provider_attempt_started
                    ~base_path:config.base_path
-                   meta.name
-                   (Keeper_registry.Packed Keeper_registry.Runtime_trying
-                    : Keeper_registry.packed_runtime_state);
+                   meta.name;
                  let disclosure_json =
                    `Assoc
                      [ "ts_unix", `Float now

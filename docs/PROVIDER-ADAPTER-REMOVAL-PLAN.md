@@ -6,7 +6,7 @@ code_refs:
   - lib/provider_tool_support.ml
   - scripts/lint/provider-adapter-removal-ratchet.sh
   - docs/OAS-MASC-BOUNDARY.md
-  - docs/rfc/RFC-0058-declarative-cascade-config.md
+  - docs/rfc/RFC-0058-declarative-runtime-config.md
 ---
 
 # Provider Adapter Removal Record
@@ -19,7 +19,7 @@ intentionally a removal plan, not another centralization pass.
 
 Delete the compiled provider/model catalog from `masc-mcp`.
 
-`masc-mcp` may keep runtime-local projection code for cascade labels, spawn keys,
+`masc-mcp` may keep runtime-local projection code for runtime labels, spawn keys,
 auth display, telemetry policy, runtime-MCP quirks, and voice defaults. It must
 not own provider/model identity, aliases, canonical provider names, model defaults,
 or concrete provider capability truth.
@@ -71,7 +71,7 @@ out of MASC would preserve the bug.
 | Provider ids, aliases, model defaults | OAS | Use provider catalog / capability manifest, not MASC literals |
 | Provider capability truth | OAS | Tool support, transport class, model features, pricing/cost surfaces |
 | Runtime credentials contract | OAS for provider semantics; MASC for local injection policy | MASC may decide how to pass secrets into its workers, not what a provider means |
-| Cascade lane and profile intent | MASC | Logical use case, not concrete vendor/model identity |
+| Runtime lane and profile intent | MASC | Logical use case, not concrete vendor/model identity |
 | Health/capacity state | MASC runtime state over opaque runtime ids | Do not branch on vendor literals |
 | Spawn key mapping | MASC local overlay | Should be data-driven from runtime entries where possible |
 | Runtime-MCP quirks | MASC local overlay | Only for MASC tool/auth transport behavior; no provider catalog ownership |
@@ -132,7 +132,7 @@ catalog.
 
 | Caller group | Replacement |
 |---|---|
-| `lib/cascade/*` model/label resolution | runtime binding + capability requirement API |
+| `lib/runtime/*` model/label resolution | runtime binding + capability requirement API |
 | `lib/provider_tool_support*` | OAS capability query + MASC runtime-MCP local policy |
 | `lib/spawn.ml` / auto responder | spawn overlay keyed by opaque runtime id |
 | worker docker/auth env | credential projection from OAS binding plus MASC injection rules |

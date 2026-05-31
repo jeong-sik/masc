@@ -19,7 +19,7 @@
 @import "./base.css";
 @import "./keyframes.css";
 
-/* ── Feature imports (alphabetical, a11y.css last for cascade) ── */
+/* ── Feature imports (alphabetical, a11y.css last for runtime) ── */
 
 @import "./board.css";
 @import "./chat.css";

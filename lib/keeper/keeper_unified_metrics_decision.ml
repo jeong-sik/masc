@@ -21,7 +21,7 @@ let append_decision_record
     ?(semaphore_wait_ms : int = 0)
     ~(outcome : string)
     ?(degraded_retry_applied = false)
-    ?degraded_retry_runtime_id
+    ?degraded_retry_runtime
     ?fallback_reason
     ?turn_mode
     ?social_state
@@ -168,8 +168,8 @@ let append_decision_record
         ("channel", `String (decision_channel_of_observation observation));
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
-        ( "degraded_retry_runtime_id",
-          Json_util.string_opt_to_json degraded_retry_runtime_id );
+        ( "degraded_retry_runtime",
+          Json_util.string_opt_to_json degraded_retry_runtime );
         ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
@@ -256,14 +256,14 @@ let append_decision_record
                 | Some b -> [("thinking_enabled", `Bool b)]
                 | None -> []
               in
-              let cascade_fields =
+              let runtime_fields =
                 match r.runtime_observation with
                 | Some co ->
-                    let cascade_name =
-                      co.cascade_name
+                    let runtime_id =
+                      co.runtime_id
                     in
                     [
-                      ("runtime_id", `String cascade_name);
+                      ("runtime_id", `String runtime_id);
                       ("strategy", Json_util.string_opt_to_json co.strategy);
                       ("primary_model", `Null);
                       ("selected_model", `Null);
@@ -383,7 +383,7 @@ let append_decision_record
                 ("telemetry_reported", `Bool telemetry_reported);
                 ( "coverage_stage", Json_util.string_opt_to_json coverage_stage );
                 ( "coverage_reason", Json_util.string_opt_to_json coverage_reason );
-              ] @ usage_fields @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
+              ] @ usage_fields @ thinking_enabled_field @ inference_fields @ runtime_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for turns without a run_result: record
                  what we know without collapsing skipped/cancelled/partial

@@ -239,7 +239,7 @@ let display_disposition_of_operator ~operator_disposition
   | "pass_next_model" -> ("Pass", "runtime_fallback")
   | "blocked" | "blocked_runtime" -> ("Blocked", reason "runtime_blocked")
   | "pause_human" -> ("Blocked", reason "needs_human_attention")
-  | "fail_open_next_runtime_id" -> ("Blocked", reason "degraded_retry")
+  | "fail_open_next_runtime" -> ("Blocked", reason "degraded_retry")
   | "user_cancelled" -> ("Blocked", reason "cancelled")
   | "alert_exhausted" -> ("Alert", reason "runtime_exhausted")
   | "unknown" -> ("Alert", reason "unmapped_runtime_state")
@@ -515,23 +515,23 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
           json_string_list_member "missing_required_tools" surface )
     | None -> [], [], []
   in
-  let cascade_json =
+  let runtime_json =
     match latest_receipt with
-    | Some receipt -> json_member "cascade" receipt
+    | Some receipt -> json_member "runtime" receipt
     | None -> `Null
   in
-  let cascade_attempt_count =
-    match cascade_json with
+  let runtime_attempt_count =
+    match runtime_json with
     | `Null -> None
     | json -> json_int_opt_member "attempt_count" json
   in
   let runtime_fallback_applied =
-    match cascade_json with
+    match runtime_json with
     | `Null -> None
     | json -> json_bool_opt_member "fallback_applied" json
   in
   let runtime_outcome =
-    match cascade_json with
+    match runtime_json with
     | `Null -> None
     | json -> json_string_opt_member "outcome" json
   in
@@ -558,7 +558,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
       ("tools_used_count", `Int (List.length tools_used));
       ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ( "provider_attempt_count",
-        match cascade_attempt_count with
+        match runtime_attempt_count with
         | Some value -> `Int value
         | None -> `Null );
       ( "provider_fallback_applied",

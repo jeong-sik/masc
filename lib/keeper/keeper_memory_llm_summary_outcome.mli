@@ -7,7 +7,7 @@
     "what fraction of summary attempts succeed" or
     "which provider is regressing".  Successful summaries left no
     record at all.  Additionally, {!summarize_with_providers}
-    returning [None] after exhausting every provider in the cascade
+    returning [None] after exhausting every provider in the runtime
     was *silent* — no log, no metric, just a missing summary on the
     consolidation path.
 

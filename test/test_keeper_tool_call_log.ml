@@ -149,7 +149,7 @@ let test_model_field_stored () =
     Alcotest.(check (option string)) "model redacted to runtime"
       (Some "runtime")
       (Safe_ops.json_string_opt "model" (List.hd entries));
-    Alcotest.(check (option string)) "cascade profile stored"
+    Alcotest.(check (option string)) "runtime profile stored"
       (Some "local_qwen3_27b_only")
       (Safe_ops.json_string_opt "runtime_profile" (List.hd entries)))
 
@@ -697,22 +697,22 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     Alcotest.(check bool) "latest age present" true
       (Safe_ops.json_float_opt "latest_age_s" summary |> Option.is_some);
     let by_model = Yojson.Safe.Util.member "by_model" summary in
-    let by_cascade = Yojson.Safe.Util.member "by_cascade" summary in
+    let by_runtime = Yojson.Safe.Util.member "by_runtime" summary in
     let by_lane = Yojson.Safe.Util.member "by_lane" summary in
     let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
     let by_tool_choice = Yojson.Safe.Util.member "by_tool_choice" summary in
     let runtime_bucket = find_bucket "runtime" by_model in
-    let primary_cascade_bucket = find_bucket "primary" by_cascade in
-    let local_cascade_bucket = find_bucket "local_qwen3_27b_only" by_cascade in
+    let primary_runtime_bucket = find_bucket "primary" by_runtime in
+    let local_runtime_bucket = find_bucket "local_qwen3_27b_only" by_runtime in
     let retry_bucket = find_bucket "retry" by_lane in
     let enabled_bucket = find_bucket "enabled" by_thinking in
     let auto_bucket = find_bucket "auto" by_tool_choice in
     Alcotest.(check int) "runtime bucket calls" 2
       (Safe_ops.json_int ~default:0 "calls" runtime_bucket);
-    Alcotest.(check int) "primary cascade bucket calls" 1
-      (Safe_ops.json_int ~default:0 "calls" primary_cascade_bucket);
-    Alcotest.(check int) "local cascade bucket calls" 1
-      (Safe_ops.json_int ~default:0 "calls" local_cascade_bucket);
+    Alcotest.(check int) "primary runtime bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" primary_runtime_bucket);
+    Alcotest.(check int) "local runtime bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" local_runtime_bucket);
     Alcotest.(check int) "retry bucket calls" 1
       (Safe_ops.json_int ~default:0 "calls" retry_bucket);
     Alcotest.(check int) "enabled thinking calls" 1

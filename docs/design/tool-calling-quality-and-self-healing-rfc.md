@@ -232,8 +232,8 @@ Phase-1 표준 매트릭스는 여섯 개로 고정한다.
 
 - `gguf/gemma4-e4b-it-q4`
 - `gguf/gemma4-e2b-it-q8`
-- `gguf/provider-l-cascade-2-30b-a3b-q4km`
-- `mlx/provider-l-cascade-2-30b-a3b-4bit`
+- `gguf/provider-l-runtime-2-30b-a3b-q4km`
+- `mlx/provider-l-runtime-2-30b-a3b-4bit`
 - `mlx/qwen3-coder-next-4bit`
 - `mlx/lfm2.5-1.2b-thinking-6bit`
 

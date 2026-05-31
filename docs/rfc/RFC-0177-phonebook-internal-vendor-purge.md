@@ -13,7 +13,7 @@ related: RFC-0176 (OAS migration), RFC-0174-dashboard-substring-classifier-to-ty
 
 RFC-0176 migrated the OAS SDK boundary (Provider_config, Provider_kind, Transport modules). The migration explicitly deferred masc-mcp's *internal* vendor-coupled enums:
 
-- `cascade_server_flavor` variants: `Zai_glm`, `Qwen`, `Openai`, `Deep_seek`, `Anthropic_http`
+- `runtime_server_flavor` variants: `Zai_glm`, `Qwen`, `Openai`, `Deep_seek`, `Anthropic_http`
 - These are masc-mcp's own classification of wire-format flavors, separate from the SDK's Provider_kind.
 
 The outbound `flavor_to_string` was already updated to emit purged wire-strings (`"provider_d"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`), but the OCaml constructor names retained the vendor brand.
@@ -22,7 +22,7 @@ Per user direction "전부 폭파 — aggregator 포함", this RFC closes the in
 
 ## 2. Decision
 
-### Variant renames (cascade_phonebook_types.ml)
+### Variant renames (runtime_phonebook_types.ml)
 
 | Old | New | Vendor mapping |
 |-----|-----|----------------|
@@ -47,12 +47,12 @@ These are *serving infrastructure*, not vendor brands. Same rationale as OAS RFC
 
 ## 3. Out of scope
 
-- Other masc-mcp internal vendor references not in `cascade_phonebook_types.ml` (e.g., string fixtures `"anthropic"` / `"openai"` in tests, comment references) — future audit.
+- Other masc-mcp internal vendor references not in `runtime_phonebook_types.ml` (e.g., string fixtures `"anthropic"` / `"openai"` in tests, comment references) — future audit.
 - Dashboard string fixtures (`"provider_a-cli"`, `"provider_f-cli"`) — separate dashboard sweep.
 
 ## 4. Verification
 
-- ~75 OCaml constructor sites renamed across `lib/cascade/`, `lib/keeper/`, `lib/dashboard/`, related test files.
+- ~75 OCaml constructor sites renamed across `lib/runtime/`, `lib/keeper/`, `lib/dashboard/`, related test files.
 - Static residue check:
   ```
   find lib bin test -type f \( -name '*.ml' -o -name '*.mli' \) | xargs grep -E '\b(Zai_glm|Qwen|Anthropic_http|Anthropic_messages_compat|Deep_seek|\bOpenai\b)\b'

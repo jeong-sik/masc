@@ -93,7 +93,7 @@ val keeper_max_tools_per_turn : unit -> int
 val keeper_retry_max_tools_per_turn : unit -> int
 val keeper_board_event_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
-val keeper_llm_rerank_cascade : unit -> string
+val keeper_llm_rerank_runtime : unit -> string
 val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float

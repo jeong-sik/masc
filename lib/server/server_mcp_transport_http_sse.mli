@@ -15,7 +15,7 @@
     - [respond_sse_rate_limited] re-export from
       {!Server_mcp_transport_http_respond}.
 
-    This .mli mirrors with type-identity-preserving cascade
+    This .mli mirrors with type-identity-preserving runtime
     (see cycle 187 [coord_utils.mli] for the [module type of
     struct include M end] pattern rationale). *)
 

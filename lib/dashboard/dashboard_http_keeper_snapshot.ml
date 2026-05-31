@@ -244,20 +244,20 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("effective_system_prompt", `String effective_system_prompt);
         ]
       in
-      let cascade_name = Keeper_meta_contract.runtime_id_of_meta m in
+      let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
       (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the
-         legacy [live_keeper_cascade_name] would produce. *)
+         legacy [live_keeper_runtime_id] would produce. *)
       let selected_runtime_canonical_json =
-        match live_keeper_cascade_name_result cascade_name with
+        match live_keeper_runtime_id_result runtime_id with
         | Ok runtime ->
           `String (runtime)
         | Error (`Unresolved _) -> `Null
       in
       let execution =
         `Assoc [
-          ("selected_runtime_id", `String cascade_name);
+          ("selected_runtime_id", `String runtime_id);
           ( "selected_runtime_canonical",
             selected_runtime_canonical_json );
           ("models", `List []);

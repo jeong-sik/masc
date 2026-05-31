@@ -36,7 +36,7 @@ type proof_receipt = {
   keeper_id : string;
   tool_name : string;
   turn_id : int;
-  attribution : [`Autonomous | `Operator_triggered | `Cascade_routed];
+  attribution : [`Autonomous | `Operator_triggered | `Runtime_routed];
   outcome : [`Success | `Approval_required | `Policy_denied
             | `Precondition_failed | `Sandbox_path_error
             | `Zero_evidence_placeholder];
@@ -97,7 +97,7 @@ This invariant is what turns "I checked yesterday and we had coverage" into a fa
 ## Non-goals
 
 - We do not try to *fix* the policy gates / sandbox precondition failures / zero-evidence tools here. The harness only classifies and counts.
-- We do not extend proof beyond keeper-attributed autonomous tool calls. Operator-triggered receipts and cascade-routed receipts are tracked separately so they cannot mask a real coverage gap.
+- We do not extend proof beyond keeper-attributed autonomous tool calls. Operator-triggered receipts and runtime-routed receipts are tracked separately so they cannot mask a real coverage gap.
 - We do not gate CI on proof coverage. The harness is read-side observability; gating is a separate RFC if it ever becomes necessary.
 
 ## Implementation phases

@@ -33,7 +33,7 @@ type config =
           call. When [Some s] AND a clock is available at the call site,
           agent_sdk's [with_optional_timeout] returns
           [Error (Api (Retry.Timeout {...}))] after [s] seconds — the
-          cascade FSM already maps [Retry.Timeout] to a fallback signal,
+          runtime FSM already maps [Retry.Timeout] to a fallback signal,
           so this is the canonical knob to bound a hung [run_stream]
           when a provider closes the connection without [end_turn].
           Default [None] preserves the historical behaviour

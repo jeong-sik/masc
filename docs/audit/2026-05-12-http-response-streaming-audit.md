@@ -71,7 +71,7 @@ Related: PR-A (#14706 streaming JSONL reader), PR-C (#14711 credential blocking 
 
 | 엔드포인트 | 추정 응답 크기 | 비고 |
 |---|---|---|
-| `/dashboard/runtime_info` | < 100 KB | 모든 keeper meta + cascade snapshot |
+| `/dashboard/runtime_info` | < 100 KB | 모든 keeper meta + runtime snapshot |
 | `/dashboard/keeper/list` | 100 KB+ (N keeper × meta) | 64 keeper × ~2KB per meta |
 | `/telemetry/inference_metrics` | 변동 (대용량 가능) | bucketed metrics, time window 따라 |
 | `/activity/feed` | 변동 | 페이지네이션 있음 (good) |

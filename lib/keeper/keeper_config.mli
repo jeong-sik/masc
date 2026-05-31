@@ -7,9 +7,9 @@
 
 (** {1 Core Constants} *)
 
-(** Default cascade name for keeper turns = the default Runtime's id.
+(** Default runtime name for keeper turns = the default Runtime's id.
 
-    cascade→Runtime 숙청: 이전의 phase_recovery / phase_buffer /
+    runtime→Runtime 숙청: 이전의 phase_recovery / phase_buffer /
     tool_required / phase_routing 구분은 모두 동일한 default Runtime 으로
     수렴하는 죽은 추상화였으므로 이 단일 thunk 로 collapse 되었다.
     @since v2.128.0
@@ -228,8 +228,8 @@ val keeper_max_tools_per_turn : unit -> int
 val keeper_retry_max_tools_per_turn : unit -> int
 val keeper_board_event_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
-val keeper_llm_rerank_cascade : unit -> string
-(** Reranker cascade profile. Defaults through [routes.llm_rerank]; env
+val keeper_llm_rerank_runtime : unit -> string
+(** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
     overrides may be either a concrete profile name or a logical route key. *)
 
 val keeper_rule_reflect_repetition_threshold : unit -> float

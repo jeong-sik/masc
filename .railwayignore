@@ -22,8 +22,8 @@ Thumbs.db
 .masc/
 .worktrees/
 
-# LLM cascade config (contains env var names for API keys)
-config/llm_cascade.json
+# LLM runtime config (contains env var names for API keys)
+config/llm_runtime.json
 
 # Database files
 *.db

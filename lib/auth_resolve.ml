@@ -111,18 +111,18 @@ let resolve ~base_path ~keeper_id ~provider_kind
             Ok { raw; source = Provider_api_key_env { var_name } }
         | None -> Error (Api_key_env_unset { var_name }))
 
-let emit_resolution_trace ~cascade ~keeper_id ~provider_label ~outcome =
+let emit_resolution_trace ~runtime ~keeper_id ~provider_label ~outcome =
   let keeper_label = Option.value keeper_id ~default:"-" in
   match outcome with
   | Ok { source; _ } ->
       Log.Auth.routine
         ?keeper_name:keeper_id
-        "auth_resolve: cascade=%s provider=%s keeper=%s outcome=ok source=%s"
-        cascade provider_label keeper_label
+        "auth_resolve: runtime=%s provider=%s keeper=%s outcome=ok source=%s"
+        runtime provider_label keeper_label
         (token_source_label source)
   | Error err ->
       Log.Auth.error
         ?keeper_name:keeper_id
-        "auth_resolve: cascade=%s provider=%s keeper=%s outcome=error reason=%s"
-        cascade provider_label keeper_label
+        "auth_resolve: runtime=%s provider=%s keeper=%s outcome=error reason=%s"
+        runtime provider_label keeper_label
         (show_auth_error err)

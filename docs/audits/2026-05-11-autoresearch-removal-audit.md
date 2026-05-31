@@ -29,7 +29,7 @@
 - `autoresearch_storage.ml(.mli)` — persistent store
 
 추가:
-- `lib/autoresearch_codegen.ml` — LLM 기반 code change prompt builder + cascade 호출. "autonomous research assistant optimizing code" 책임
+- `lib/autoresearch_codegen.ml` — LLM 기반 code change prompt builder + runtime 호출. "autonomous research assistant optimizing code" 책임
 - `lib/tool_autoresearch.ml` — 7 도구 dispatch
 - `lib/tool_autoresearch_schemas.ml` — schema 정의
 - `lib/autoresearch/autoresearch_types.ml(.mli)` — shared types (verified, not under top-level `lib/autoresearch_types.ml`)
@@ -93,7 +93,7 @@
 | 위험 | 완화 |
 |------|------|
 | 외부 (dashboard UI, 사용자 manual workflow)에서 autoresearch UI 사용 중 | PR-N2b.1 본문에 deprecation 명시 + dashboard release note |
-| `autoresearch_codegen.ml`의 LLM cascade가 다른 곳에서 import | grep으로 외부 caller 없음 확인 (지금 0건) — RE-VERIFY on N2b.3 시점 |
+| `autoresearch_codegen.ml`의 LLM runtime가 다른 곳에서 import | grep으로 외부 caller 없음 확인 (지금 0건) — RE-VERIFY on N2b.3 시점 |
 | Test `test_env_config_exec_timeout_10426.ml`가 timeout 일반 케이스인데 마침 Autoresearch_serde 사용 | test에서 다른 module로 마이그레이션 (string serde 또는 inline JSON) |
 
 ## 다음 단계

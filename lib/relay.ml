@@ -3,7 +3,7 @@
 (** Relay configuration *)
 type relay_config = {
   threshold: float;          (* Context usage threshold (0.0-1.0), default 0.8 *)
-  target_agent: string;      (* Agent to relay to; "auto" defers to cascade *)
+  target_agent: string;      (* Agent to relay to; "auto" defers to runtime *)
   compress_ratio: float;     (* Target compression ratio, default 0.1 *)
   include_todos: bool;       (* Include TODO list in handoff *)
   include_pdca: bool;        (* Include PDCA state in handoff *)

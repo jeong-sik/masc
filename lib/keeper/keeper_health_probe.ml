@@ -1,7 +1,7 @@
 (* Asynchronous health probe for condition-based auto-resume.
    See [.mli] for TLA+ modeling notes.
 
-   RFC-0041 Phase B2: migrated from per-cascade (string) cache keys to
+   RFC-0041 Phase B2: migrated from per-runtime (string) cache keys to
    per-keeper, per-item (string * string) keys. *)
 
 type health_status =
@@ -11,7 +11,7 @@ type health_status =
 
 type runtime_pressure_class =
   | Client_capacity_full
-  | Cascade_admission_full
+  | Runtime_admission_full
   | Provider_capacity
   | Provider_dns_failure
   | Provider_timeout
@@ -23,7 +23,7 @@ type runtime_pressure_class =
 
 let runtime_pressure_class_to_string = function
   | Client_capacity_full -> "client_capacity_full"
-  | Cascade_admission_full -> "admission_full"
+  | Runtime_admission_full -> "admission_full"
   | Provider_capacity -> "provider_capacity"
   | Provider_dns_failure -> "provider_dns_failure"
   | Provider_timeout -> "provider_timeout"
@@ -37,7 +37,7 @@ let runtime_pressure_class_to_string = function
 let runtime_pressure_class_of_label label =
   match label |> String.trim |> String.lowercase_ascii with
   | "client_capacity_full" | "client_capacity" -> Some Client_capacity_full
-  | "admission_full" | "admission_capacity" -> Some Cascade_admission_full
+  | "admission_full" | "admission_capacity" -> Some Runtime_admission_full
   | "provider_capacity" | "provider_capacity_full" | "capacity_backpressure" ->
     Some Provider_capacity
   | "provider_dns_failure" | "provider_dns" -> Some Provider_dns_failure
@@ -72,7 +72,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_id =
     || contains "inflight_capacity_full"
     || Option.is_some runtime_id
     || contains "admission="
-  then Cascade_admission_full
+  then Runtime_admission_full
   else if
     contains "capacity_backpressure"
     || contains "capacity exhausted"
@@ -164,10 +164,10 @@ let set_runtime_status ~runtime_id status =
 
 (** [get_runtime_status ~runtime_id] reads the runtime-level entry
     written by [run_once].  Three-valued:
-      - [Healthy]    : last probe saw the cascade at < threshold ratio.
-      - [Unhealthy r]: last probe saw the cascade at >= threshold ratio.
-      - [Unknown]    : probe never wrote this cascade (e.g. boot before
-                       first sweep, or no running keepers in the cascade
+      - [Healthy]    : last probe saw the runtime at < threshold ratio.
+      - [Unhealthy r]: last probe saw the runtime at >= threshold ratio.
+      - [Unknown]    : probe never wrote this runtime (e.g. boot before
+                       first sweep, or no running keepers in the runtime
                        at the time of the last scan). *)
 let get_runtime_status ~runtime_id =
   Eio.Mutex.use_ro health_cache_mu (fun () ->
@@ -177,14 +177,14 @@ let get_runtime_status ~runtime_id =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Cascade health check                                               *)
+(* Runtime health check                                               *)
 (* ------------------------------------------------------------------ *)
 
 (** [is_terminal_unhealthy phase] returns true only for phases that
     represent unrecoverable or immediately-actionable failure.
     Dead / Zombie / Crashed are terminal unhealthy states.
     All other phases (including Restarting — a keeper mid-recovery)
-    are treated as healthy for cascade ratio purposes.
+    are treated as healthy for runtime ratio purposes.
 
     Extracted as a named function so tests can exercise the
     exhaustive match directly, and so the compiler catches omissions
@@ -195,27 +195,27 @@ let is_terminal_unhealthy (phase : Keeper_state_machine.phase) =
   | Offline | Running | Failing | Overflowed | Compacting
   | HandingOff | Draining | Paused | Stopped | Restarting -> false
 
-(** Threshold semantics: a cascade is healthy iff [failed <= max_failed_allowed]
+(** Threshold semantics: a runtime is healthy iff [failed <= max_failed_allowed]
     where [max_failed_allowed = max 1 (total / 10)]. The single-failure floor
-    keeps small cascades (N<10) from tripping on the first transient pause;
-    larger cascades retain the original 10% rule.
+    keeps small runtimes (N<10) from tripping on the first transient pause;
+    larger runtimes retain the original 10% rule.
 
-    The previous formula [ratio < 0.10] meant any cascade with N<10 had a
+    The previous formula [ratio < 0.10] meant any runtime with N<10 had a
     de-facto zero tolerance (1/3 = 0.333 ≥ 0.10), so a single auto-paused
-    keeper in a 3-member cascade became a permanent admission block in
+    keeper in a 3-member runtime became a permanent admission block in
     [keeper_supervisor.ml]'s auto-resume path. The floor restores the obvious
     invariant ("one keeper down out of N is recoverable") at every N. *)
 let max_failed_allowed_for_runtime ~total =
   max 1 (total / 10)
 ;;
 
-type cascade_scan_acc =
+type runtime_scan_acc =
   { total : int
   ; failed : int
   ; failure_reasons : Keeper_registry.failure_reason option list
   }
 
-let empty_cascade_scan_acc =
+let empty_runtime_scan_acc =
   { total = 0; failed = 0; failure_reasons = [] }
 ;;
 
@@ -248,22 +248,22 @@ let dominant_runtime_pressure_class failure_reasons =
   | [] -> None
 ;;
 
-let cascade_failure_reason acc =
+let runtime_failure_reason acc =
   match dominant_runtime_pressure_class acc.failure_reasons with
   | Some label -> "failure_ratio:" ^ label
   | None -> "failure_ratio"
 ;;
 
-let scan_cascade_health ~base_path =
+let scan_runtime_health ~base_path =
   let entries = Keeper_registry.all ~base_path () in
-  let by_cascade = Hashtbl.create 8 in
+  let by_runtime = Hashtbl.create 8 in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       let cascade = Keeper_meta_contract.runtime_id_of_meta entry.meta in
+       let runtime = Keeper_meta_contract.runtime_id_of_meta entry.meta in
        let acc =
-         match Hashtbl.find_opt by_cascade cascade with
+         match Hashtbl.find_opt by_runtime runtime with
          | Some acc -> acc
-         | None -> empty_cascade_scan_acc
+         | None -> empty_runtime_scan_acc
        in
        let failed = is_terminal_unhealthy entry.phase in
        let acc' =
@@ -275,34 +275,34 @@ let scan_cascade_health ~base_path =
               else acc.failure_reasons)
          }
        in
-       Hashtbl.replace by_cascade cascade acc')
+       Hashtbl.replace by_runtime runtime acc')
     entries;
   Hashtbl.fold
-    (fun cascade acc rows ->
+    (fun runtime acc rows ->
        let healthy =
          if acc.total <= 0 then true
          else acc.failed <= max_failed_allowed_for_runtime ~total:acc.total
        in
-       (cascade, healthy, acc) :: rows)
-    by_cascade
+       (runtime, healthy, acc) :: rows)
+    by_runtime
     []
 ;;
 
-(** Compute health per cascade from registry entries.
+(** Compute health per runtime from registry entries.
     Returns (runtime_id, is_healthy).
 
     A keeper is counted as "failed" only when its phase is a terminal
     unhealthy state (Dead, Zombie, or Crashed).  Past restarts
     (restart_count > 0) do NOT count — a restarted keeper that is now
     Running is healthy.  Prior to this fix, restart_count was used as
-    the proxy, causing permanent cascade pollution after any single
+    the proxy, causing permanent runtime pollution after any single
     restart since restart_count is monotonic and never resets.
 
     Per-item health is updated via [record_item_result] after each
     turn. *)
-let check_cascade_health ~base_path =
-  scan_cascade_health ~base_path
-  |> List.map (fun (cascade, healthy, _acc) -> cascade, healthy)
+let check_runtime_health ~base_path =
+  scan_runtime_health ~base_path
+  |> List.map (fun (runtime, healthy, _acc) -> runtime, healthy)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -310,11 +310,11 @@ let check_cascade_health ~base_path =
 (* ------------------------------------------------------------------ *)
 
 let run_once ~base_path =
-  let results = scan_cascade_health ~base_path in
+  let results = scan_runtime_health ~base_path in
   List.iter
-    (fun (cascade, healthy, acc) ->
+    (fun (runtime, healthy, acc) ->
        let status =
-         if healthy then Healthy else Unhealthy (cascade_failure_reason acc)
+         if healthy then Healthy else Unhealthy (runtime_failure_reason acc)
        in
        set_runtime_status ~runtime_id:runtime status)
     results

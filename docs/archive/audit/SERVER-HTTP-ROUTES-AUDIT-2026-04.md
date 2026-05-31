@@ -11,7 +11,7 @@
 
 ### 1.1 Domain route modules (16)
 
-`server_routes_http_routes_<domain>.ml` for: `activity`, `artifacts`, `attribution`, `autonomous`, `cascade`, `channel_gate`, `dashboard`, `frontend`, `git_graph`, `legendary_bash`, `multimodal`, `provider_runs`, `resilience`, `room`, `sidecar`, `verification`.
+`server_routes_http_routes_<domain>.ml` for: `activity`, `artifacts`, `attribution`, `autonomous`, `runtime`, `channel_gate`, `dashboard`, `frontend`, `git_graph`, `legendary_bash`, `multimodal`, `provider_runs`, `resilience`, `room`, `sidecar`, `verification`.
 
 ### 1.2 Infrastructure (~10)
 
@@ -103,7 +103,7 @@ Continued reuse confirms portability across heterogeneous domains (boundary, spe
 - PR #12202 / #12208 — Dashboard observability Phase 1+2 (sibling chain)
 - PR #12209 — Auth/credential audit Phase 1 (sibling chain)
 - `lib/server/server_routes_http*.ml` — primary surface
-- `MEMORY.md`: `feedback_module_alias_grep_required_for_test_consumers` (cascade-include surface analysis precedent)
+- `MEMORY.md`: `feedback_module_alias_grep_required_for_test_consumers` (runtime-include surface analysis precedent)
 
 ## 8. Summary table
 

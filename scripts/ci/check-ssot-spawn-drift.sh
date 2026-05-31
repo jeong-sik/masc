@@ -3,7 +3,7 @@
 # Meta-issue: #9516
 #
 # CONTRACT: masc-mcp no longer owns a provider-specific CLI spawn mapping.
-# Provider execution belongs to OAS/runtime bindings and MASC model cascades.
+# Provider execution belongs to OAS/runtime bindings and MASC model runtimes.
 
 set -euo pipefail
 

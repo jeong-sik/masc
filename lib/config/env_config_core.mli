@@ -5,7 +5,7 @@
     handling; convenience variants without the suffix raise
     {!Config_error} on missing/invalid values.
 
-    {b Cascade chain}: surface re-exposed via
+    {b Runtime chain}: surface re-exposed via
     [include module type of Env_config_core] in
     {!Env_config}, which sibling sub-modules
     ({!Env_config_runtime}, {!Env_config_governance},

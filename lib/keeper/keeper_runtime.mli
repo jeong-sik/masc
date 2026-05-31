@@ -84,10 +84,10 @@ val invalid_profile_defaults_error : keeper_name:string -> string -> string
 (** Render the structured error message for a profile-defaults parse
     failure. *)
 
-val effective_declarative_cascade_name :
+val effective_declarative_runtime_id :
   Keeper_types_profile.keeper_profile_defaults ->
   Keeper_meta_contract.keeper_meta -> string
-(** Resolve the cascade name for a keeper meta given its profile
+(** Resolve the runtime name for a keeper meta given its profile
     defaults; falls back to the profile default when the meta omits one. *)
 
 val resynced_tool_access :

@@ -10,22 +10,22 @@
 
 ```
 ── TurnPhaseSet cross-spec (5 spec(s), 3 unique signature(s)) ──
-  KeeperCascadeLifecycle:    compacting executing finalizing idle prompting          (5)
+  KeeperRuntimeLifecycle:    compacting executing finalizing idle prompting          (5)
   KeeperCompactionLifecycle: compacting executing idle prompting                     (4)
   KeeperCompositeLifecycle:  compacting executing exhausted finalizing idle prompting routing (7) ← canonical
   KeeperDecisionPipeline:    compacting executing finalizing idle prompting          (5)
   KeeperTurnCycle:           compacting executing exhausted finalizing idle prompting routing (7) ← canonical
 
 ── DecisionSet cross-spec (6 spec(s), 3 unique signature(s)) ──
-  KeeperCascadeLifecycle:    gate_rejected guard_ok tool_policy_selected undecided   (4) ← canonical
+  KeeperRuntimeLifecycle:    gate_rejected guard_ok tool_policy_selected undecided   (4) ← canonical
   KeeperCompactionLifecycle: guard_ok tool_policy_selected undecided                 (3)
   KeeperCompositeLifecycle:  gate_rejected guard_ok tool_policy_selected undecided   (4) ← canonical
   KeeperDecisionPipeline:    gate_rejected guard_ok tool_policy_selected undecided   (4) ← canonical
   KeeperEventQueue:          emit skip tick                                          (3) ← NAME COLLISION
   KeeperTurnCycle:           gate_rejected guard_ok tool_policy_selected undecided   (4) ← canonical
 
-── CascadeSet cross-spec (5 spec(s), 2 unique signature(s)) ──
-  KeeperCascadeLifecycle:    done exhausted idle selecting trying                    (5) ← canonical
+── RuntimeSet cross-spec (5 spec(s), 2 unique signature(s)) ──
+  KeeperRuntimeLifecycle:    done exhausted idle selecting trying                    (5) ← canonical
   KeeperCompactionLifecycle: idle trying                                             (2)
   KeeperCompositeLifecycle:  done exhausted idle selecting trying                    (5) ← canonical
   KeeperDecisionPipeline:    done exhausted idle selecting trying                    (5) ← canonical
@@ -36,29 +36,29 @@
 
 | Set | Spec file | Status | Classification | Recommended fix |
 |---|---|---|---|---|
-| TurnPhaseSet | KeeperCascadeLifecycle | 5 vs canonical 7 | **STALE** (missing routing, exhausted) | Sync to 7 (iter 39 R-E-1.a pattern) |
+| TurnPhaseSet | KeeperRuntimeLifecycle | 5 vs canonical 7 | **STALE** (missing routing, exhausted) | Sync to 7 (iter 39 R-E-1.a pattern) |
 | TurnPhaseSet | KeeperDecisionPipeline | 5 vs canonical 7 | **STALE** (missing routing, exhausted) | Sync to 7 |
 | TurnPhaseSet | KeeperCompactionLifecycle | 4 (missing finalizing too) | **DELIBERATE** — KMC header §"Out-of-scope" explicitly projects compaction-focused phases only.  Different size + shape from canonical. | Rename to `KMC_TurnPhaseSet` or `KMCPhaseSet`; document projection rationale |
 | DecisionSet | KeeperCompactionLifecycle | 3 (missing gate_rejected) | **DELIBERATE** — gate rejection doesn't enter compaction flow; KMC observes only the decision_stage values the compaction recovery loop cares about | Rename to `KMC_DecisionSet` |
 | DecisionSet | KeeperEventQueue | 3 ("emit", "skip", "tick") | **NAME COLLISION** — completely different vocabulary; this is the Event Queue's *own* decision space (`Heartbeat_smart.should_emit`), not decision_stage projection | Rename to `EventQueueDecisionSet` or `SmartHeartbeatDecisionSet`; KEQ has unique vocabulary unrelated to keeper-turn decision |
-| CascadeSet | KeeperCompactionLifecycle | 2 (idle, trying only) | **DELIBERATE** — compaction observes only "cascade running" vs "cascade idle" boundary | Rename to `KMC_CascadeSet` |
+| RuntimeSet | KeeperCompactionLifecycle | 2 (idle, trying only) | **DELIBERATE** — compaction observes only "runtime running" vs "runtime idle" boundary | Rename to `KMC_RuntimeSet` |
 
 ## Three classes, three fix shapes
 
 ### Class A — STALE (sync, like iter 39)
 
-Two specs (KeeperCascadeLifecycle, KeeperDecisionPipeline) carry the pre-iter-28 5-member `TurnPhaseSet`.  Same root cause as KCL (iter 38 Finding 1, closed iter 39 R-E-1.a): KTC widened the set in iter 28 (#14793); these observer specs were not synced.
+Two specs (KeeperRuntimeLifecycle, KeeperDecisionPipeline) carry the pre-iter-28 5-member `TurnPhaseSet`.  Same root cause as KCL (iter 38 Finding 1, closed iter 39 R-E-1.a): KTC widened the set in iter 28 (#14793); these observer specs were not synced.
 
 **Fix shape**: 1-line widening per spec to 7 members, mirroring iter 39 #14824.  Same `ktc_turn_phase` usage scan precaution — verify no negative full-set membership tests that would regress with widening.  Likely paired-PR with the rename work (Class B/C).
 
 ### Class B — DELIBERATE PROJECTION (rename to distinct identifier)
 
-KeeperCompactionLifecycle defines TurnPhaseSet (4), DecisionSet (3), CascadeSet (2) as *intentional* partial projections — header explicitly states "intentionally a projection, not a full copy" (line 9-15).  The 4-phase scope (Running/Overflowed/Compacting/Paused) is documented; sibling specs (KeeperContextLifecycle, KeeperCircuitBreaker) cover the rest.
+KeeperCompactionLifecycle defines TurnPhaseSet (4), DecisionSet (3), RuntimeSet (2) as *intentional* partial projections — header explicitly states "intentionally a projection, not a full copy" (line 9-15).  The 4-phase scope (Running/Overflowed/Compacting/Paused) is documented; sibling specs (KeeperContextLifecycle, KeeperCircuitBreaker) cover the rest.
 
 **Fix shape**: rename each KMC-local set:
 - `TurnPhaseSet` → `KMC_TurnPhaseSet` (or `KMCPhaseSet`)
 - `DecisionSet`  → `KMC_DecisionSet`
-- `CascadeSet`   → `KMC_CascadeSet`
+- `RuntimeSet`   → `KMC_RuntimeSet`
 
 Matches iter 38 audit recommendation: "if the projection is DELIBERATE (observer pattern), rename to a distinct identifier (e.g. KcafPhaseSet vs PhaseSet) and document in the spec header."
 
@@ -77,14 +77,14 @@ Header already documents the semantics; rename clarifies the boundary.
 
 ## Iter 42 implementation plan
 
-Bundle all 7 fixes in a single PR (`spec(multi): cross-spec divergence closure — R-E-1.a {KCascadeL,KDP} + KMC/KEQ rename`):
+Bundle all 7 fixes in a single PR (`spec(multi): cross-spec divergence closure — R-E-1.a {KRuntimeL,KDP} + KMC/KEQ rename`):
 
 1. **Stale sync** (2 changes, like iter 39):
-   - `KeeperCascadeLifecycle.tla`: TurnPhaseSet 5 → 7
+   - `KeeperRuntimeLifecycle.tla`: TurnPhaseSet 5 → 7
    - `KeeperDecisionPipeline.tla`: TurnPhaseSet 5 → 7
 
 2. **Deliberate rename** (3 changes in 1 file):
-   - `KeeperCompactionLifecycle.tla`: rename `TurnPhaseSet` → `KMC_TurnPhaseSet`, `DecisionSet` → `KMC_DecisionSet`, `CascadeSet` → `KMC_CascadeSet`.  Update all usages (TypeOK, Init, actions, invariants) within the file.
+   - `KeeperCompactionLifecycle.tla`: rename `TurnPhaseSet` → `KMC_TurnPhaseSet`, `DecisionSet` → `KMC_DecisionSet`, `RuntimeSet` → `KMC_RuntimeSet`.  Update all usages (TypeOK, Init, actions, invariants) within the file.
 
 3. **Name collision rename** (1 change):
    - `KeeperEventQueue.tla`: rename `DecisionSet` → `SmartHeartbeatDecisionSet`.  Update usages.
@@ -97,7 +97,7 @@ After all 7 fixes:
 ## TLC verification matrix (iter 42)
 
 Each touched spec needs both clean + buggy cfg re-verify:
-- KCascadeLifecycle.cfg (clean) + buggy variants
+- KRuntimeLifecycle.cfg (clean) + buggy variants
 - KDecisionPipeline.cfg (clean) + buggy variants
 - KCompactionLifecycle.cfg (clean) + buggy variants
 - KeeperEventQueue.cfg (clean) + buggy variants

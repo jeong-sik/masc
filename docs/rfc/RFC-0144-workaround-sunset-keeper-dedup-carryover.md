@@ -51,7 +51,7 @@ PR #16389 `error_kind` arms map to known root work:
 | `Fiber_unresolved` | 18 | TBD — Eio fiber cancellation audit | Unassigned. |
 | `State_machine_guard` | (sub-threshold) | RFC-0072 keeper sub-FSM transitions typed | Implemented. Residual events likely indicate spec drift. |
 | `Expected_version_mismatch` | (sub-threshold) | CAS contention — design-bounded; expected non-zero | Acceptable; dedup retains for noise control until rate >50/day. |
-| `Cascade_resolution_failure` | (sub-threshold) | RFC-0058 cascade typed errors | Implemented. Re-audit after PR #15040/15070/15089 settle. |
+| `Runtime_resolution_failure` | (sub-threshold) | RFC-0058 runtime typed errors | Implemented. Re-audit after PR #15040/15070/15089 settle. |
 | `Unknown_phase_transition` | (sub-threshold) | RFC-0072 + KSM exhaustive arms | Implemented. Residual events = bug, file issue. |
 | `Auth_token_mismatch` | (sub-threshold) | Identity layer — outside this RFC | Track separately. |
 | `Other` | 59 | Re-classification work | This RFC's removal criterion does not apply; `Other` must shrink via re-classification, not via root fix. |

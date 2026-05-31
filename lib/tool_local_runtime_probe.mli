@@ -10,7 +10,7 @@
     The .ml does [include Tool_local_runtime_http] for internal
     access to HTTP helpers ([http_post_json_text_with_status],
     [trim_to_option], etc.).  The .mli intentionally does NOT
-    mirror the cascade — those helpers are implementation
+    mirror the runtime — those helpers are implementation
     detail; probe is the contract layer.
 
     Internal: ~22 helpers stay private — \[bool_opt_to_json] /
@@ -23,7 +23,7 @@
     \[failed_probe_run] / \[run_single_probe] /
     \[prompt_eval_duration_ms_of_run_json] /
     \[generate_probe_skip_reason] type + the
-    [include Tool_local_runtime_http] cascade.  All consumed
+    [include Tool_local_runtime_http] runtime.  All consumed
     only inside {!runtime_ollama_probe_json}'s pipeline. *)
 
 (** {1 Snapshot types} *)

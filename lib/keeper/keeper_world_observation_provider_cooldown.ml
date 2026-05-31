@@ -10,13 +10,13 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 let fallback_runtime_for_provider_cooldown
-      ~(base_runtime_id : string)
-      ~(effective_runtime_id : string)
+      ~(base_runtime : string)
+      ~(effective_runtime : string)
   : string option
   =
-  let normalized_base = String.trim base_runtime_id in
+  let normalized_base = String.trim base_runtime in
   let normalized_effective =
-    String.trim effective_runtime_id
+    String.trim effective_runtime
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
@@ -80,7 +80,7 @@ let provider_capacity_blocked_task_count
     | Some _
       when Option.is_none
              (fallback_runtime_for_provider_cooldown
-                ~base_runtime_id:runtime_id
-                ~effective_runtime_id:runtime_id) ->
+                ~base_runtime:runtime_id
+                ~effective_runtime:runtime_id) ->
       claimable_task_count
     | Some _ | None -> 0)

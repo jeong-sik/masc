@@ -145,7 +145,7 @@ check_json \
 check_json \
   "surface-readiness dropped retired surfaces" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'monitoring.cascade-config', 'workspace.collab-mvp'])" \
+  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'monitoring.runtime-config', 'workspace.collab-mvp'])" \
   '^True$'
 
 echo "[3/7] Monitoring"

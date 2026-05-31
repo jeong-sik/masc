@@ -67,7 +67,7 @@ const STATUSBAR_LAYER_PRIORITY: ReadonlyArray<string> = [
   'keeper-trace',
   'approve',
   'notes',
-  'cascade',
+  'runtime',
   'time',
   'parallel',
   'tools',

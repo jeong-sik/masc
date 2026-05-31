@@ -9,7 +9,7 @@
     runtime policy projections, and transport-local
     diagnostics) are owned by {!Runtime_transport}.
 
-    All model-selection and cascade logic lives in
+    All model-selection and runtime logic lives in
     {!Keeper_observation} and {!Keeper_turn_driver}.
 
     Internal helpers stay private at this boundary
@@ -112,7 +112,7 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  cascade_observation : Keeper_observation.cascade_observation option;
+  runtime_observation : Keeper_observation.runtime_observation option;
   stop_reason : stop_reason;
 }
 

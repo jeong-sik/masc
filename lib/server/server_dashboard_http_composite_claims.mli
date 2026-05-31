@@ -4,7 +4,7 @@ val json_int : string -> Yojson.Safe.t -> int option
 val json_float : string -> Yojson.Safe.t -> float option
 val json_bool : string -> Yojson.Safe.t -> bool option
 val compact_receipt_error_json : Yojson.Safe.t -> Yojson.Safe.t
-val compact_receipt_cascade_json : Yojson.Safe.t -> Yojson.Safe.t
+val compact_receipt_runtime_json : Yojson.Safe.t -> Yojson.Safe.t
 val compact_receipt_tool_surface_json : Yojson.Safe.t -> Yojson.Safe.t
 val json_number : string -> Yojson.Safe.t -> float option
 val json_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t option

@@ -32,7 +32,7 @@
     - [Reconciled]         : durable keeper re-picked up after restart
     - [Restarted]          : supervisor relaunched after crash within budget
     - [Dead_cleaned]       : tombstone cleanup after restart budget exhaustion
-    - [Self_preservation]  : supervisor refused a cascade-wide action to protect itself
+    - [Self_preservation]  : supervisor refused a runtime-wide action to protect itself
     - [Paused_pruned]      : paused keeper removed from registry after timeout
     - [Auto_resumed]       : supervisor auto-resumed a keeper after circuit-breaker back-off
     - [Admission_denied]   : spawn/admission guard refused to launch a keeper *)

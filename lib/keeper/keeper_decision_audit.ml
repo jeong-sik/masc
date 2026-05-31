@@ -309,7 +309,7 @@ let decision_pipeline_to_mermaid
   Buffer.contents b
 
 (* ================================================================ *)
-(* Cascade FSM Mermaid diagram                                      *)
+(* Runtime FSM Mermaid diagram                                      *)
 (* ================================================================ *)
 
 type unhealthy_reason =
@@ -337,17 +337,17 @@ let unhealthy_reason_label = function
   | `Timeout -> "timeout"
   | `Other s -> sanitize_mermaid_note s
 
-let cascade_fsm_to_mermaid
+let runtime_fsm_to_mermaid
     ?(provider_health : (string * provider_health) list option)
     ?(slot_state : (int * int) option)
-    ?(effective_runtime_id_reason : string option)
+    ?(effective_runtime_reason : string option)
     ~(models : string list)
     ~(last_provider_result : string option)
     ()
     : string =
   let b = Buffer.create 512 in
   let p fmt = Printf.bprintf b fmt in
-  (* Look up provider health by label (mirrors CascadeLiveness.tla phealth). *)
+  (* Look up provider health by label (mirrors RuntimeLiveness.tla phealth). *)
   let health_for label =
     match provider_health with
     | None -> `Unknown
@@ -412,7 +412,7 @@ let cascade_fsm_to_mermaid
   (match slot_state with
    | Some (used, max) -> p "      Slots: %d / %d\n" used max
    | None -> ());
-  (match effective_runtime_id_reason with
+  (match effective_runtime_reason with
    | Some r when String.length r > 0 -> p "      Reason: %s\n" r
    | _ -> ());
   p "    end note\n";

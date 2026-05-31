@@ -1,4 +1,4 @@
-(** Reactive health tracking for cascade providers.
+(** Reactive health tracking for runtime providers.
 
     Tracks per-provider success/failure rates using a rolling time window.
     Providers in cooldown (consecutive failures exceed threshold) are
@@ -42,7 +42,7 @@ val soft_rate_limit_cooldown_sec : float
 (** Default cooldown applied immediately on a transient HTTP 429 (soft
     rate-limit) when no Retry-After hint is available.  Distinct from
     {!cooldown_sec} because a single 429 should already deprioritize the
-    provider for the remainder of the current cascade cycle — the
+    provider for the remainder of the current runtime cycle — the
     [cooldown_threshold] count-to-three semantics are wrong for transient
     rate limits.  Default 10.0 (10s).
 
@@ -60,12 +60,12 @@ val soft_rate_limit_max_clamp_sec : float
 
 val default_capacity_backpressure_backoff_sec : float
 (** Synthetic typed backoff applied when an upstream [Capacity_backpressure]
-    error arrives with [retry_after_sec = None].  Without this, the cascade
+    error arrives with [retry_after_sec = None].  Without this, the runtime
     rotates immediately onto the next candidate and frequently lands back
     on the same degraded provider before any recovery window has elapsed.
     Default 5.0 (5s) — shorter than {!soft_rate_limit_cooldown_sec} because
     capacity backpressure is a short-window signal (peers usually recover
-    faster than 429-bearing providers), but non-zero so the cascade does
+    faster than 429-bearing providers), but non-zero so the runtime does
     not immediately re-select the just-rejected provider.
 
     Env: [MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
@@ -117,7 +117,7 @@ val create : unit -> t
     Cooldown, failure count, and error fingerprints prevent a restart from
     immediately retrying a provider that was just circuit-broken.  The optional
     routing hints seed the bounded latency/confidence/cost rings from the last
-    persisted snapshot so weighted cascade selection does not restart with a
+    persisted snapshot so weighted runtime selection does not restart with a
     fully cold view of recent provider performance. *)
 type provider_restore = {
   restore_provider_key : string;
@@ -173,7 +173,7 @@ val record_failure :
   unit
 
 (** Record a provider call where the response arrived but was rejected
-    by the cascade's [accept] predicate (e.g. empty body, schema gate).
+    by the runtime's [accept] predicate (e.g. empty body, schema gate).
 
     Behaves like {!record_failure} for cooldown / weight purposes — a
     provider whose outputs are consistently unusable should be skipped —
@@ -184,7 +184,7 @@ val record_failure :
     Prior to 0.160.0 this path called {!record_success} (the response
     technically arrived), which silently masked gate drift: a provider
     could rank 100% healthy while every call fell through to the next
-    cascade.
+    runtime.
 
     See {!record_failure} for [error_kind] / [error_reason] semantics.
 
@@ -205,7 +205,7 @@ val record_rejected :
     ({!hard_quota_cooldown_sec}, default 1h) with no threshold — a
     provider whose account is out of credit will not recover within the
     regular [cooldown_sec] window, and weighted_random re-selection just
-    wastes cascade turns.
+    wastes runtime turns.
 
     Preserves an already-longer cooldown if one exists (no regression).
     Counts toward [consecutive_failures] for dashboard continuity and
@@ -241,7 +241,7 @@ val record_terminal_failure :
 (** Record a transient HTTP 429 (rate-limit) response.
 
     Unlike {!record_failure}, a single soft rate-limit triggers an
-    immediate short cooldown so the cascade can fall over to the next
+    immediate short cooldown so the runtime can fall over to the next
     candidate within the same turn instead of returning to the same
     provider on the next selection tick.  No threshold applies.
 
@@ -271,7 +271,7 @@ val record_soft_rate_limited :
     but tags the event as [Capacity_backpressure] and uses
     [default_capacity_backpressure_backoff_sec] as the synthetic default.
     A single capacity-exhaustion event triggers immediate cooldown so the
-    cascade skips the provider for the rest of the cycle without waiting
+    runtime skips the provider for the rest of the cycle without waiting
     for the [cooldown_threshold] consecutive-failure count.
 
     See {!record_failure} for [error_kind] / [error_reason] semantics. *)
@@ -306,7 +306,7 @@ val is_in_cooldown : t -> provider_key:string -> bool
     signalled capacity exhaustion, avoiding wasted OAS body budget. *)
 val is_capacity_constrained : t -> provider_key:string -> bool
 
-(** Compute effective weight for weighted cascade selection.
+(** Compute effective weight for weighted runtime selection.
 
     [effective_weight = config_weight * success_rate]
 
@@ -426,7 +426,7 @@ val recent_outcome_count :
   window_s:float ->
   int
 
-(** Global singleton tracker shared across all cascade calls. *)
+(** Global singleton tracker shared across all runtime calls. *)
 val global : t
 
 val check_circuit_breaker : t -> provider_key:string -> (unit, string) result

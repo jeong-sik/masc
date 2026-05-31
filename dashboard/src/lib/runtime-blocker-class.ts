@@ -48,7 +48,7 @@ export function asKeeperRuntimeBlockerClass(
 //     the drift at build time.
 
 const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
-  'cascade_exhausted',
+  'runtime_exhausted',
   'ambiguous_post_commit_timeout',
   'ambiguous_post_commit_failure',
   'autonomous_slot_wait_timeout',

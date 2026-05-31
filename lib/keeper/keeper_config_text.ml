@@ -64,7 +64,6 @@ let removed_keeper_input_key_names =
     "models";
     "allowed_models";
     "active_model";
-    "cascade_name";
     legacy_provider_filter_name;
     "presence_keepalive";
     "presence_keepalive_sec";

@@ -61,18 +61,18 @@ describe('isObservedStall', () => {
     expect(isObservedStall('turn', 'prompting', 44)).toBe(false)
   })
 
-  // --- cascade lane ---
+  // --- runtime lane ---
 
   it('detects selecting stall at 30s', () => {
-    expect(isObservedStall('cascade', 'selecting', 30)).toBe(true)
+    expect(isObservedStall('runtime', 'selecting', 30)).toBe(true)
   })
 
   it('detects trying stall at 45s', () => {
-    expect(isObservedStall('cascade', 'trying', 45)).toBe(true)
+    expect(isObservedStall('runtime', 'trying', 45)).toBe(true)
   })
 
-  it('does not detect cascade stall below threshold', () => {
-    expect(isObservedStall('cascade', 'selecting', 29)).toBe(false)
+  it('does not detect runtime stall below threshold', () => {
+    expect(isObservedStall('runtime', 'selecting', 29)).toBe(false)
   })
 
   // --- compaction lane ---

@@ -51,9 +51,9 @@ groups:
             same task_id has been claimed across many cycles without
             progress.
 
-      # Step 4f redirect: cascade_build error + run_turn errors
+      # Step 4f redirect: runtime_build error + run_turn errors
       # (Step 4j) both land here.  A spike means either a
-      # provider regression or a cascade_catalog mis-config.
+      # provider regression or a runtime_catalog mis-config.
       - alert: KeeperTurnProviderErrorSurge
         expr: |
           sum by (keeper) (
@@ -71,8 +71,8 @@ groups:
             transitions at {{ $value }}/s for 15m.  Possible causes:
               - upstream LLM provider degraded (check
                 masc_keeper_oas_timeout_classifications)
-              - cascade catalog includes an unreachable provider
-                (check Cascade_catalog_validator boot diagnostics)
+              - runtime catalog includes an unreachable provider
+                (check Runtime_catalog_validator boot diagnostics)
               - subprocess auth fallback regressed (check
                 Auth_resolve trace for Per_keeper_token_file
                 source)
@@ -95,7 +95,7 @@ groups:
           summary: "Keeper FSM emit hit runtime_error catch-all (Step 4f-regression?) for 30m"
           description: |
             After Step 4f (#11340), the runtime callsites no longer
-            emit Failure_runtime_error -- cascade_build redirects to
+            emit Failure_runtime_error -- runtime_build redirects to
             Failure_provider_error and livelock to
             Failure_turn_livelock_blocked.  A non-zero rate here for
             30m suggests a new emit site landed without picking a
@@ -129,7 +129,7 @@ groups:
               - phase gate stuck (check
                 masc_keeper_turn_fsm_transitions_total{from="phase_gating",
                 to="cancelled:phase_gate_close",keeper="{{ $labels.keeper }}"})
-              - cascade exhaustion specific to this keeper's cascade
+              - runtime exhaustion specific to this keeper's runtime
               - livelock guard re-rejecting (see KeeperTurnLivelockBurst)
             Drill: bin/masc-trace <base> {{ $labels.keeper }} <recent_turn_id>
 

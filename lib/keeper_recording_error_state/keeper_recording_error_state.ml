@@ -28,7 +28,7 @@ type error_kind =
   | Provider_timeout
   | State_machine_guard
   | Expected_version_mismatch
-  | Cascade_resolution_failure
+  | Runtime_resolution_failure
   | Unknown_phase_transition
   | Auth_token_mismatch
   | Shutdown_artifact
@@ -41,7 +41,7 @@ let error_kind_to_string = function
   | Provider_timeout -> "provider_timeout"
   | State_machine_guard -> "state_machine_guard"
   | Expected_version_mismatch -> "expected_version_mismatch"
-  | Cascade_resolution_failure -> "cascade_resolution_failure"
+  | Runtime_resolution_failure -> "runtime_resolution_failure"
   | Unknown_phase_transition -> "unknown_phase_transition"
   | Auth_token_mismatch -> "auth_token_mismatch"
   | Shutdown_artifact -> "shutdown_artifact"
@@ -59,7 +59,7 @@ let error_kind_of_string raw =
   | "provider_timeout" -> Some Provider_timeout
   | "state_machine_guard" -> Some State_machine_guard
   | "expected_version_mismatch" -> Some Expected_version_mismatch
-  | "cascade_resolution_failure" -> Some Cascade_resolution_failure
+  | "runtime_resolution_failure" -> Some Runtime_resolution_failure
   | "unknown_phase_transition" -> Some Unknown_phase_transition
   | "auth_token_mismatch" -> Some Auth_token_mismatch
   | "shutdown_artifact" -> Some Shutdown_artifact
@@ -74,7 +74,7 @@ let all_error_kinds =
   ; Provider_timeout
   ; State_machine_guard
   ; Expected_version_mismatch
-  ; Cascade_resolution_failure
+  ; Runtime_resolution_failure
   ; Unknown_phase_transition
   ; Auth_token_mismatch
   ; Shutdown_artifact
@@ -118,8 +118,8 @@ let classify_error (err : string) : error_kind =
   then State_machine_guard
   else if contains "expected_version" && contains "mismatch"
   then Expected_version_mismatch
-  else if contains "cascade" && contains "resolution"
-  then Cascade_resolution_failure
+  else if contains "runtime" && contains "resolution"
+  then Runtime_resolution_failure
   else if contains "unknown phase"
   then Unknown_phase_transition
   else if contains "auth" && contains "token" && contains "mismatch"

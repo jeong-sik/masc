@@ -45,7 +45,7 @@ type t =
           our side, not the provider.  RFC-0042 / RFC-0058 territory.
           Reactor: pause new admission, drain in-flight. *)
   | Admission_exhausted of { capability_profile : string option }
-      (** Cascade admission denied because every model in the strict
+      (** Runtime admission denied because every model in the strict
           capability profile is saturated or unavailable.
           [capability_profile] is the canonical profile name (e.g.
           [Some "strict_tool_candidates"]) when the adapter can
@@ -63,7 +63,7 @@ type t =
   | Dns_resolution_failure of { host : string option }
       (** Hostname could not be resolved.  [host] is the canonical
           host whose lookup failed when the adapter can name it.
-          Reactor: pause cascade, mark route unhealthy. *)
+          Reactor: pause runtime, mark route unhealthy. *)
   | Response_timeout of
       { kind : response_timeout_kind
       ; elapsed_ms : int option

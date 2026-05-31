@@ -121,12 +121,12 @@ let classify_failure_output (output : string) : string =
 let bucket_key record field ~default =
   Safe_ops.json_string_opt field record |> Option.value ~default
 
-let cascade_bucket_key record =
-  match Safe_ops.json_string_opt "cascade_profile" record with
+let runtime_bucket_key record =
+  match Safe_ops.json_string_opt "runtime_profile" record with
   | Some value when String.trim value <> "" -> value
   | _ ->
     let runtime_contract = Option.value ~default:`Null (Json_util.assoc_member_opt "runtime_contract" record) in
-    (match Safe_ops.json_string_opt "cascade_profile" runtime_contract with
+    (match Safe_ops.json_string_opt "runtime_profile" runtime_contract with
      | Some value when String.trim value <> "" -> value
      | _ -> "runtime")
 
@@ -239,7 +239,7 @@ let empty_summary ~window_hours ~n ~sampling_mode =
     ; ("success_rate", `Float 0.0)
     ; ("by_tool", `List [])
     ; ("by_keeper", `List [])
-    ; ("by_cascade", `List [])
+    ; ("by_runtime", `List [])
     ; ("by_model", `List [])
     ; ("by_lane", `List [])
     ; ("by_thinking_mode", `List [])
@@ -275,7 +275,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     Hashtbl.create 16
   in
   (* model/lane/thinking/tool_choice -> (calls, successes) *)
-  let cascade_stats : (string, int ref * int ref) Hashtbl.t =
+  let runtime_stats : (string, int ref * int ref) Hashtbl.t =
     Hashtbl.create 16
   in
   let model_stats : (string, int ref * int ref) Hashtbl.t =
@@ -376,7 +376,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
         Hashtbl.replace keeper_stats keeper v; v
     in
     incr kc; if ok then incr ks;
-    update_rate_table cascade_stats (cascade_bucket_key record) ok;
+    update_rate_table runtime_stats (runtime_bucket_key record) ok;
     update_rate_table model_stats (bucket_key record "model" ~default:"unknown") ok;
     update_rate_table lane_stats (bucket_key record "lane" ~default:"unknown") ok;
     update_rate_table thinking_mode_stats (thinking_mode_of_record record) ok;
@@ -447,7 +447,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let by_keeper =
     render_rate_table ~field:"name" keeper_stats
   in
-  let by_cascade = render_rate_table ~field:"name" cascade_stats in
+  let by_runtime = render_rate_table ~field:"name" runtime_stats in
   let by_model = render_rate_table ~field:"name" model_stats in
   let by_lane = render_rate_table ~field:"name" lane_stats in
   let by_thinking_mode =
@@ -503,7 +503,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("success_rate", `Float (Float.round (rate *. 100.0) /. 100.0));
     ("by_tool", `List by_tool);
     ("by_keeper", `List by_keeper);
-    ("by_cascade", `List by_cascade);
+    ("by_runtime", `List by_runtime);
     ("by_model", `List by_model);
     ("by_lane", `List by_lane);
     ("by_thinking_mode", `List by_thinking_mode);

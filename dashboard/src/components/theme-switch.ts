@@ -8,7 +8,7 @@
 // The switch is intentionally unobtrusive — a 2-letter mono label in
 // the same visual register as BuildIdentityBadge and ConnectionStatus.
 // It does not try to preview, animate, or decorate the flip; the
-// cascade handles rerender.
+// runtime handles rerender.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'

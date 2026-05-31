@@ -89,7 +89,7 @@ function RosterCard({ k, active, onSelect, onPick, picked }) {
         <span className={`cp-dot st-${st}`} title={st} />
       </div>
       <div className="cp-rc-meta">
-        <span className="cp-chip">{k.cascade}</span>
+        <span className="cp-chip">{k.runtime}</span>
         {k.current_task && <span className="cp-chip">⊙ {k.current_task}</span>}
         <span className="cp-chip cost">{fmtCost(k.total_cost_usd)}</span>
       </div>
@@ -193,7 +193,7 @@ function KeeperStage({ id, compact = false }) {
         </div>
         {!compact && (
           <div className="cp-sh-meta">
-            <div><b>cascade</b> {k.cascade}</div>
+            <div><b>runtime</b> {k.runtime}</div>
             <div><b>sandbox</b> {k.sandbox} · {k.network}</div>
             <div><b>turns</b> {k.total_turns} · <b>cost</b> {fmtCost(k.total_cost_usd)}</div>
             <div><b>last seen</b> {timeAgo(k.last_seen)}</div>

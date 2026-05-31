@@ -170,7 +170,7 @@ let active_turn_stale_status
 let active_turn_stale_status_for_test = active_turn_stale_status
 
 type batch_root_cause =
-  | Cascade_unhealthy
+  | Runtime_unhealthy
   | Provider_timeout
   | Provider_auth
   | Fd_exhaustion
@@ -178,7 +178,7 @@ type batch_root_cause =
   | Unknown
 
 let batch_root_cause_to_string = function
-  | Cascade_unhealthy -> "cascade_unhealthy"
+  | Runtime_unhealthy -> "runtime_unhealthy"
   | Provider_timeout -> "provider_timeout"
   | Provider_auth -> "provider_auth"
   | Fd_exhaustion -> "fd_exhaustion"
@@ -228,7 +228,7 @@ let failure_reason_batch_root_cause
   | Stale_termination_storm _
   | Stale_fleet_batch _
   | Provider_runtime_error _ ->
-      Some Cascade_unhealthy
+      Some Runtime_unhealthy
   | Heartbeat_consecutive_failures _
   | Turn_consecutive_failures _
   | Turn_overflow_pause
@@ -336,7 +336,7 @@ let () =
    labelled by the low-cardinality [batch_root_cause].
 
    This is deliberately observation-only.  A fleet-wide stale burst is a
-   useful signal for operators and provider/cascade health, but it is not
+   useful signal for operators and provider/runtime health, but it is not
    itself a keeper terminal reason.  Keepers retain their per-keeper
    watchdog reason so the supervisor can apply the normal restart/dead
    budget instead of amplifying one shared upstream hiccup into a durable
@@ -538,7 +538,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                      ctx.config
                      ~keeper_name:meta.name
                      ~agent_name:meta.agent_name
-                     ~cascade_name:
+                     ~runtime_id:
                        (                          (Keeper_meta_contract.runtime_id_of_meta meta))
                      ~trace_id:
                        (Keeper_id.Trace_id.to_string
@@ -576,7 +576,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    ~labels:[ ("keeper", meta.name) ]
                    ();
                  Log.Keeper.error
-                   "%s: watchdog terminating fiber (provider_timeout unresolved after idle %.0fs; count=%d; preserving provider timeout root cause) [cascade=%s]"
+                   "%s: watchdog terminating fiber (provider_timeout unresolved after idle %.0fs; count=%d; preserving provider timeout root cause) [runtime=%s]"
                    meta.name stall_seconds count (Keeper_meta_contract.runtime_id_of_meta meta);
                  emit_watchdog_broadcast ~failure_reason:(Some failure_reason)
                    ~stall_seconds
@@ -691,38 +691,12 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  ]
                  ();
                Log.Keeper.error
-                 "%s: stale watchdog terminating fiber (%s) [cascade=%s window_count=%d/6h]"
+                 "%s: stale watchdog terminating fiber (%s) [runtime=%s window_count=%d/6h]"
                  meta.name reason_desc (Keeper_meta_contract.runtime_id_of_meta meta) window_count;
                if window_count >= escalation_threshold then begin
-                 let cascade_recovered () =
-                   match ctx.net with
-                   | None -> false
-                   | Some net ->
-                       (match Runtime_catalog.resolve_named_providers_strict
-                                ~sw:ctx.sw ~net ~cascade_name:(Keeper_meta_contract.runtime_id_of_meta meta) () with
-                        | Error _ -> false
-                        | Ok candidates ->
-                            (* Strict variant returns a typed rejection
-                               (All_missing_api_key / All_local_unhealthy)
-                               instead of silently emptying the candidate
-                               list.  Either rejection means the cascade
-                               is configurationally broken or has drifted
-                               below the live-fallback threshold, so the
-                               recovery probe should not declare the
-                               cascade healthy. *)
-                            (match
-                               Cascade_health_filter.filter_healthy_strict
-                                 ~sw:ctx.sw ~net candidates
-                             with
-                             | Error _rejection -> false
-                             | Ok healthy ->
-                            healthy
-                            |> Runtime_candidate.of_provider_configs
-                            |> List.exists
-                                 Runtime_candidate.has_recovery_evidence))
-                 in
-                 if cascade_recovered () then
-                   Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name (Keeper_meta_contract.runtime_id_of_meta meta)
+                 let runtime_recovered () = false in
+                 if runtime_recovered () then
+                   Log.Keeper.info "%s: stale threshold reached, but runtime %s appears healthy. Skipping auto-pause." meta.name (Keeper_meta_contract.runtime_id_of_meta meta)
                  else begin
                  Prometheus.inc_counter
                    Keeper_metrics.(to_string StaleTerminationThresholdBreached)
@@ -734,7 +708,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     auto-pause + [meta.paused = true] persistence instead of
                     blindly enqueuing it for restart.  This breaks the
                     restart-loop-back-to-stale cycle observed when the
-                    underlying cascade/provider/fd issue persists across
+                    underlying runtime/provider/fd issue persists across
                     restarts (24h evidence: 116 events, single keeper 13×). *)
                  Keeper_registry.set_failure_reason ~base_path meta.name
                    (Some (Keeper_registry.Stale_termination_storm
@@ -748,7 +722,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     terminations in last %.0fs (threshold=%d). \
                     Phase 2: keeper will be auto-paused; supervisor will \
                     NOT restart until an operator investigates the \
-                    underlying root cause (cascade dead, fd leak, \
+                    underlying root cause (runtime dead, fd leak, \
                     provider auth, etc.) and resumes the keeper. \
                     See issue #10765."
                    meta.name window_count termination_window_sec

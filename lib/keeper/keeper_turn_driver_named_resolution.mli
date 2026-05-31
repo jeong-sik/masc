@@ -16,6 +16,6 @@ val resolve :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?provider_filter:string list ->
   runtime_id:string ->
-  projection_runtime_id:string ->
+  runtime_runtime_id:string ->
   unit ->
   t

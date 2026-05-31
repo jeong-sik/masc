@@ -5,9 +5,9 @@
     [Server_dashboard_http] does
     [include Server_dashboard_http_runtime_info], so
     everything reached unqualified through the facade
-    must be exposed here.  Pre-flight cascade grep
+    must be exposed here.  Pre-flight runtime grep
     (cycle 218 lesson) confirms only
-    {!runtime_resolution_json} escapes to the cascade
+    {!runtime_resolution_json} escapes to the runtime
     chain unqualified; the remaining surface is reached
     via [Server_dashboard_http.X] qualified calls or via
     a [module Runtime = ...] alias inside
@@ -50,7 +50,7 @@ val runtime_resolution_json : Coord.config -> Yojson.Safe.t
     {!git_rev_parse_short}) + server/workspace path
     mismatch visibility + base-path resolution inputs.
     Reached unqualified through the
-    [Server_dashboard_http_core] cascade consumer. *)
+    [Server_dashboard_http_core] runtime consumer. *)
 
 val light_runtime_resolution_json : Coord.config -> Yojson.Safe.t
 (** Renders the cheap runtime/fleet subset used by

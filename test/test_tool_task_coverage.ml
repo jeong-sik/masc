@@ -357,7 +357,7 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
         ("action", `String "done");
         ("notes", `String "Applied the fix to the login path.");
         ("completion_contract", `List [ `String "test coverage"; `String "migration" ]);
-        ("evaluator_cascade", `String "provider_k:auto");
+        ("evaluator_runtime", `String "provider_k:auto");
       ]) in
     assert (not (Tool_result.is_success result));
     assert (str_contains (Tool_result.message result) "completion contract not satisfied");
@@ -366,11 +366,11 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
     assert (List.length records >= 1);
     let first = List.hd records in
     let gate = Yojson.Safe.Util.(first |> member "gate" |> to_string) in
-    let evaluator_cascade =
-      Yojson.Safe.Util.(first |> member "evaluator_cascade" |> to_string)
+    let evaluator_runtime =
+      Yojson.Safe.Util.(first |> member "evaluator_runtime" |> to_string)
     in
     assert (gate = "contract");
-    assert (evaluator_cascade = "provider_k:auto");
+    assert (evaluator_runtime = "provider_k:auto");
     Eval_calibration.reset_store_for_testing ())
 )
 
@@ -2039,7 +2039,7 @@ let () = test "get_int_opt_missing" (fun () ->
 (* The payload is built by Tool_task.build_verdict_sse_payload —     *)
 (* a pure helper — so dashboard subscribers depend on a stable       *)
 (* JSON shape. The cross_model bool must match Eval_calibration's    *)
-(* inclusion rule (both cascades non-empty AND distinct).            *)
+(* inclusion rule (both runtimes non-empty AND distinct).            *)
 (* ================================================================ *)
 
 let make_review_request () : Anti_rationalization.review_request =
@@ -2051,12 +2051,12 @@ let make_review_request () : Anti_rationalization.review_request =
 
 let make_review_result
     ?(verdict = Anti_rationalization.Approve)
-    ?(evaluator_cascade = "verifier")
-    ?generator_cascade
+    ?(evaluator_runtime = "verifier")
+    ?generator_runtime
     ?(gate = Anti_rationalization.Structured_tool)
     ?fallback_reason
     () : Anti_rationalization.review_result =
-  { verdict; evaluator_cascade; generator_cascade; gate; fallback_reason }
+  { verdict; evaluator_runtime; generator_runtime; gate; fallback_reason }
 
 let payload_member key (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
@@ -2065,67 +2065,67 @@ let payload_member key (json : Yojson.Safe.t) : Yojson.Safe.t =
       | _ -> failwith "payload is not an object")
   | _ -> failwith "top-level is not an object"
 
-let () = test "build_verdict_sse_payload: distinct cascades = cross_model true" (fun () ->
+let () = test "build_verdict_sse_payload: distinct runtimes = cross_model true" (fun () ->
   let req = make_review_request () in
   let result =
     make_review_result
-      ~evaluator_cascade:"verifier"
-      ~generator_cascade:Masc_mcp.(Keeper_config.default_runtime_id ())
+      ~evaluator_runtime:"verifier"
+      ~generator_runtime:Masc_mcp.(Keeper_config.default_runtime_id ())
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t1" ~req ~result in
   assert (payload_member "cross_model" json = `Bool true);
-  assert (payload_member "generator_cascade" json
+  assert (payload_member "generator_runtime" json
           = `String Masc_mcp.(Keeper_config.default_runtime_id ()));
-  assert (payload_member "evaluator_cascade" json = `String "verifier");
+  assert (payload_member "evaluator_runtime" json = `String "verifier");
   assert (payload_member "task_id" json = `String "t1")
 )
 
-let () = test "build_verdict_sse_payload: same cascade = cross_model false" (fun () ->
+let () = test "build_verdict_sse_payload: same runtime = cross_model false" (fun () ->
   let req = make_review_request () in
   let result =
     make_review_result
-      ~evaluator_cascade:"verifier"
-      ~generator_cascade:"verifier"
+      ~evaluator_runtime:"verifier"
+      ~generator_runtime:"verifier"
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t2" ~req ~result in
   assert (payload_member "cross_model" json = `Bool false);
-  assert (payload_member "generator_cascade" json = `String "verifier")
+  assert (payload_member "generator_runtime" json = `String "verifier")
 )
 
 let () = test "build_verdict_sse_payload: no generator = cross_model false + null" (fun () ->
   let req = make_review_request () in
   let result =
-    make_review_result ~evaluator_cascade:"verifier" () in
+    make_review_result ~evaluator_runtime:"verifier" () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t3" ~req ~result in
   assert (payload_member "cross_model" json = `Bool false);
-  assert (payload_member "generator_cascade" json = `Null)
+  assert (payload_member "generator_runtime" json = `Null)
 )
 
 let () = test "build_verdict_sse_payload: empty generator string = cross_model false" (fun () ->
   (* Defensive: align with Eval_calibration which excludes empty
      strings from the denominator. Without this guard SSE and stats
-     would disagree when a cascade is empty. *)
+     would disagree when a runtime is empty. *)
   let req = make_review_request () in
   let result =
     make_review_result
-      ~evaluator_cascade:"verifier"
-      ~generator_cascade:""
+      ~evaluator_runtime:"verifier"
+      ~generator_runtime:""
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t4" ~req ~result in
   assert (payload_member "cross_model" json = `Bool false);
-  assert (payload_member "generator_cascade" json = `String "")
+  assert (payload_member "generator_runtime" json = `String "")
 )
 
 let () = test "build_verdict_sse_payload: empty evaluator string = cross_model false" (fun () ->
   let req = make_review_request () in
   let result =
     make_review_result
-      ~evaluator_cascade:""
-      ~generator_cascade:Masc_mcp.(Keeper_config.default_runtime_id ())
+      ~evaluator_runtime:""
+      ~generator_runtime:Masc_mcp.(Keeper_config.default_runtime_id ())
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t5" ~req ~result in

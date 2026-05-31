@@ -141,7 +141,7 @@ no string classifiers, no N-of-M, no cap/cooldown.
 | Site | Field shape | Count of caller in main | Maps to variant |
 |------|-------------|-------------------------|-----------------|
 | `lib/keeper/keeper_cdal_contract.ml:21` | `kind: "keeper_turn_capture_v1"` + 10 fields (keeper_name, agent_name, sandbox_profile, sandbox_image, network_mode, tool_access, tool_denylist, allowed_paths, active_goal_ids, current_task_id_at_start) | 1 (all keeper turn captures) | `Keeper_turn_capture_v1` |
-| `lib/masc_contract_catalog.ml:64` | `contract_name`, `description`, `invariants[]` | 3 specs (cascade_critical, keeper_lifecycle, dashboard_telemetry) via `to_risk_contract` | `Contract_catalog_invariants` |
+| `lib/masc_contract_catalog.ml:64` | `contract_name`, `description`, `invariants[]` | 3 specs (runtime_critical, keeper_lifecycle, dashboard_telemetry) via `to_risk_contract` | `Contract_catalog_invariants` |
 | `lib/jsonl_writer/jsonl_writer_contract_fixture.ml:88` | same as catalog | 0 (orphan — no caller reads it) | typed via `of_yojson` auto-route; emit-side stays raw JSON to preserve `jsonl_writer` leaf-lib boundary |
 
 The original draft's `Active_goals` projection would have lost the
@@ -446,7 +446,7 @@ Today's reject message (from `text_has_verification_artifact_ref` hint):
 Phase D reject message (from typed CDAL verdict):
 > "CDAL verdict for task `task-cdal-001` is Violated. Findings:
 > - `check_id=invariant_keeper_lifecycle.zombie_phase_reports_to_supervisor`: observed `fiber_zombie`, expected `KH_zombie reported within 30s`. trace_ref=proof-store://run-789/tool_traces/trace-004
-> - `check_id=invariant_dashboard_telemetry.cascade_hits_visible_realtime`: completeness gap — `dashboard_attribution` events not emitted in the run."
+> - `check_id=invariant_dashboard_telemetry.runtime_hits_visible_realtime`: completeness gap — `dashboard_attribution` events not emitted in the run."
 
 This is the user-visible payoff of typed integration: the operator
 sees *which contract clause failed* instead of "add a PR URL".
@@ -476,7 +476,7 @@ earlier; Phase C is the long-tail completeness work.
 
 | Risk | Mitigation |
 |---|---|
-| Bridge cascade — verdict triggers transition triggers verdict | `Goal_phase_bridge` does NOT call back into `Cdal_eval_v1`. Single-direction reaction |
+| Bridge runtime — verdict triggers transition triggers verdict | `Goal_phase_bridge` does NOT call back into `Cdal_eval_v1`. Single-direction reaction |
 | Stale verdict applied to wrong-version goal | `goal_store.version` checked before transition; mismatch = log warning + skip |
 | `Free` escape hatch becomes long-term workaround | `pr-rfc-check.sh` §10 lint guard + 30-day sunset for accepting `Free` from CDAL evaluator (read-side strict after sunset) |
 | Phase C breaks existing verification flows | Phase C feature-flagged (`MASC_CDAL_GOAL_VERIFIER_ENFORCE=false` default). Operator opts in per-goal via `policy_allows_cdal_auto_approve` |
@@ -535,7 +535,7 @@ block" pain that triggered this amendment.
 ## 12. Out of scope (future work)
 
 - Cross-keeper CDAL verdict aggregation (one goal, multiple keepers).
-- CDAL verdict as input to cascade routing decisions.
+- CDAL verdict as input to runtime routing decisions.
 - Real-time SSE event for `cdal_goal_phase_transition` (separate from
   existing `'cdal_verdict'` / `'verification'`).
 - Frontend UI for displaying verdict ↔ phase lineage (research HTML

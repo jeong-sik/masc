@@ -169,10 +169,10 @@ val render_keeper_prompt_feedback : aggregate -> string
     rather than concrete provider or model names. *)
 
 (** Per-provider rollup of {!model_stats} aggregated across every model id
-    whose [provider] matches. Feeds the cascade health surface (removed)'s
+    whose [provider] matches. Feeds the runtime health surface (removed)'s
     [providers] array so the UI can render per-provider throughput and
     latency next to the existing behavioural (success_rate, cooldown)
-    fields from {!Cascade_health_tracker}.
+    fields from {!Runtime_health_tracker}.
 
     All perf fields are [entry_count]-weighted averages of the underlying
     [model_stats] values. Latency percentiles are approximations (a true
@@ -215,7 +215,7 @@ val provider_rollup : aggregate -> provider_stats list
     @since 0.173.0 *)
 
 val provider_stats_to_json : provider_stats -> Yojson.Safe.t
-(** JSON shape consumed by {!Dashboard_cascade}:
+(** JSON shape consumed by {!Dashboard_runtime}:
     {[
       {
         "provider": "runtime",

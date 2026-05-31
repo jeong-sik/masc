@@ -64,9 +64,9 @@ val receipt_error_kind : Yojson.Safe.t -> string option
 val receipt_error_message : Yojson.Safe.t -> string option
 val receipt_sandbox_kind : Yojson.Safe.t -> string option
 val receipt_approval_profile : Yojson.Safe.t -> string option
-val receipt_cascade_name : Yojson.Safe.t -> string option
-val receipt_cascade_outcome : Yojson.Safe.t -> string option
-val receipt_cascade_fallback_applied : Yojson.Safe.t -> bool
+val receipt_runtime_id : Yojson.Safe.t -> string option
+val receipt_runtime_outcome : Yojson.Safe.t -> string option
+val receipt_runtime_fallback_applied : Yojson.Safe.t -> bool
 val receipt_outcome : Yojson.Safe.t -> string option
 val receipt_started_at : Yojson.Safe.t -> string option
 val receipt_ended_at : Yojson.Safe.t -> string option
@@ -82,11 +82,11 @@ val trust_latest_event : Yojson.Safe.t -> Yojson.Safe.t option
 val trust_latest_event_ts : Yojson.Safe.t -> string option
 val trust_latest_event_ts_unix : Yojson.Safe.t -> float option
 val trust_sandbox_risk : Yojson.Safe.t -> bool
-val trust_cascade_risk : Yojson.Safe.t -> bool
+val trust_runtime_risk : Yojson.Safe.t -> bool
 
 val receipt_has_error : Yojson.Safe.t -> bool
 val receipt_has_sandbox_risk : Yojson.Safe.t -> bool
-val receipt_has_cascade_risk : Yojson.Safe.t -> bool
+val receipt_has_runtime_risk : Yojson.Safe.t -> bool
 
 val iso_max : string -> string -> string
 val latest_iso : ?fallback:string -> string list -> string option
@@ -158,7 +158,7 @@ val goal_health_reason :
   child_blocked:bool ->
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   stagnation_seconds:int ->
@@ -178,7 +178,7 @@ val tree_health :
 val tree_badges :
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   activity_unobserved:bool ->

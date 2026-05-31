@@ -1,7 +1,7 @@
 (** Dashboard_briefing_agents — agent briefs + per-entity context
     records for the mission dashboard.
 
-    {b Cascade chain}: starts with [include Dashboard_utils], so
+    {b Runtime chain}: starts with [include Dashboard_utils], so
     {!Dashboard_briefing_assembly} (which does [include
     Dashboard_briefing_agents]) re-exports the full
     Dashboard_utils + this module surface to
@@ -12,7 +12,7 @@
     \[read_recent_room_event_lines\], \[is_session_concluded\],
     \[status_of_archived_session\], \[archived_reason_for_session\],
     \[archived_agent_meta_map\], \[keeper_alias_by_agent_name\])
-    stay private — none are referenced bare in the cascade
+    stay private — none are referenced bare in the runtime
     consumer.  Future "expose archive utilities" PR can reopen
     explicitly. *)
 
@@ -20,7 +20,7 @@ include module type of struct
   include Dashboard_utils
 end
 
-(** {1 Dashboard JSON helpers (cascade-visible)} *)
+(** {1 Dashboard JSON helpers (runtime-visible)} *)
 
 val dedup_strings : string list -> string list
 (** [dedup_strings items] is [List.sort_uniq String.compare items].
@@ -44,7 +44,7 @@ val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
 
     Each context record bundles (a) sort / rank fields used by
     cross-section ordering and (b) the rendered JSON payload.
-    Concrete records because cascade consumers
+    Concrete records because runtime consumers
     ({!Dashboard_briefing_assembly},
     {!Dashboard_briefing}) construct them field-by-field. *)
 

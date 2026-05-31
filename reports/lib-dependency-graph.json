@@ -84,7 +84,7 @@
       31
     ],
     [
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       30
     ]
   ],
@@ -175,7 +175,7 @@
       "Agent_tool_surfaces",
       "Auth",
       "Capability_registry",
-      "Cascade_observation",
+      "Runtime_observation",
       "Config",
       "Llm_metric_bridge",
       "Mcp_server",
@@ -253,24 +253,24 @@
       "coupling_ratio": 0.75
     },
     {
-      "prefix": "cascade_transport",
+      "prefix": "runtime_transport",
       "module_count": 15,
       "members": [
-        "Cascade_transport",
-        "Cascade_transport_auth_bridging",
-        "Cascade_transport_authorization",
-        "Cascade_transport_cli_argv_sanitize",
-        "Cascade_transport_cli_config",
-        "Cascade_transport_cli_ctors",
-        "Cascade_transport_cli_mcp_config_json",
-        "Cascade_transport_cli_overrides",
-        "Cascade_transport_json_stream_cli_local",
-        "Cascade_transport_label_resolution",
-        "Cascade_transport_mcp_policy_helpers",
-        "Cascade_transport_mcp_tool_classifier",
-        "Cascade_transport_non_http_registry",
-        "Cascade_transport_runtime_mcp_policy_of_tool_names",
-        "Cascade_transport_runtime_policy_provider"
+        "Runtime_transport",
+        "Runtime_transport_auth_bridging",
+        "Runtime_transport_authorization",
+        "Runtime_transport_cli_argv_sanitize",
+        "Runtime_transport_cli_config",
+        "Runtime_transport_cli_ctors",
+        "Runtime_transport_cli_mcp_config_json",
+        "Runtime_transport_cli_overrides",
+        "Runtime_transport_json_stream_cli_local",
+        "Runtime_transport_label_resolution",
+        "Runtime_transport_mcp_policy_helpers",
+        "Runtime_transport_mcp_tool_classifier",
+        "Runtime_transport_non_http_registry",
+        "Runtime_transport_runtime_mcp_policy_of_tool_names",
+        "Runtime_transport_runtime_policy_provider"
       ],
       "internal_edges": 14,
       "external_dep_count": 6,
@@ -299,12 +299,12 @@
       "coupling_ratio": 0.69
     },
     {
-      "prefix": "cascade_phonebook",
+      "prefix": "runtime_phonebook",
       "module_count": 3,
       "members": [
-        "Cascade_phonebook_parser",
-        "Cascade_phonebook_resolve",
-        "Cascade_phonebook_types"
+        "Runtime_phonebook_parser",
+        "Runtime_phonebook_resolve",
+        "Runtime_phonebook_types"
       ],
       "internal_edges": 2,
       "external_dep_count": 1,
@@ -387,7 +387,7 @@
       "members": [
         "Keeper_registry",
         "Keeper_registry_broadcast",
-        "Keeper_registry_cascade_attempt",
+        "Keeper_registry_runtime_attempt",
         "Keeper_registry_entry_action_dispatch",
         "Keeper_registry_error_recording",
         "Keeper_registry_error_tracking",
@@ -400,7 +400,7 @@
         "Keeper_registry_spawn_slots",
         "Keeper_registry_tool_usage_persistence",
         "Keeper_registry_types",
-        "Keeper_registry_types_cascade",
+        "Keeper_registry_types_runtime",
         "Keeper_registry_types_decision",
         "Keeper_registry_types_failure",
         "Keeper_registry_types_kill_class",
@@ -441,35 +441,35 @@
       "coupling_ratio": 0.48
     },
     {
-      "prefix": "cascade_catalog",
+      "prefix": "runtime_catalog",
       "module_count": 8,
       "members": [
-        "Cascade_catalog_runtime",
-        "Cascade_catalog_runtime_cache",
-        "Cascade_catalog_runtime_json",
-        "Cascade_catalog_runtime_named_providers",
-        "Cascade_catalog_runtime_probe",
-        "Cascade_catalog_runtime_resolve",
-        "Cascade_catalog_runtime_validate",
-        "Cascade_catalog_validator"
+        "Runtime_catalog_runtime",
+        "Runtime_catalog_runtime_cache",
+        "Runtime_catalog_runtime_json",
+        "Runtime_catalog_runtime_named_providers",
+        "Runtime_catalog_runtime_probe",
+        "Runtime_catalog_runtime_resolve",
+        "Runtime_catalog_runtime_validate",
+        "Runtime_catalog_validator"
       ],
       "internal_edges": 11,
       "external_dep_count": 12,
       "coupling_ratio": 0.478
     },
     {
-      "prefix": "cascade_config",
+      "prefix": "runtime_config",
       "module_count": 9,
       "members": [
-        "Cascade_config",
-        "Cascade_config_builder",
-        "Cascade_config_loader",
-        "Cascade_config_parser",
-        "Cascade_config_provider_binding",
-        "Cascade_config_provider_filter",
-        "Cascade_config_resolve",
-        "Cascade_config_selection",
-        "Cascade_config_strategy_resolve"
+        "Runtime_config",
+        "Runtime_config_builder",
+        "Runtime_config_loader",
+        "Runtime_config_parser",
+        "Runtime_config_provider_binding",
+        "Runtime_config_provider_filter",
+        "Runtime_config_resolve",
+        "Runtime_config_selection",
+        "Runtime_config_strategy_resolve"
       ],
       "internal_edges": 11,
       "external_dep_count": 13,
@@ -479,7 +479,7 @@
       "prefix": "server_dashboard",
       "module_count": 56,
       "members": [
-        "Server_dashboard_cascade_profile_gate",
+        "Server_dashboard_runtime_profile_gate",
         "Server_dashboard_compact_receipt_json",
         "Server_dashboard_fleet_readiness",
         "Server_dashboard_http",
@@ -700,19 +700,19 @@
       "coupling_ratio": 0.321
     },
     {
-      "prefix": "dashboard_cascade",
+      "prefix": "dashboard_runtime",
       "module_count": 10,
       "members": [
-        "Dashboard_cascade",
-        "Dashboard_cascade_audit_runs",
-        "Dashboard_cascade_capacity",
-        "Dashboard_cascade_config",
-        "Dashboard_cascade_health",
-        "Dashboard_cascade_health_json",
-        "Dashboard_cascade_helpers",
-        "Dashboard_cascade_recommendations",
-        "Dashboard_cascade_slo",
-        "Dashboard_cascade_strategy_trace"
+        "Dashboard_runtime",
+        "Dashboard_runtime_audit_runs",
+        "Dashboard_runtime_capacity",
+        "Dashboard_runtime_config",
+        "Dashboard_runtime_health",
+        "Dashboard_runtime_health_json",
+        "Dashboard_runtime_helpers",
+        "Dashboard_runtime_recommendations",
+        "Dashboard_runtime_slo",
+        "Dashboard_runtime_strategy_trace"
       ],
       "internal_edges": 8,
       "external_dep_count": 17,
@@ -799,11 +799,11 @@
         "Server_routes_http_routes_artifacts",
         "Server_routes_http_routes_attribution",
         "Server_routes_http_routes_autonomous",
-        "Server_routes_http_routes_cascade",
+        "Server_routes_http_routes_runtime",
         "Server_routes_http_routes_channel_gate",
         "Server_routes_http_routes_credentials",
         "Server_routes_http_routes_dashboard",
-        "Server_routes_http_routes_dashboard_cascade_meta",
+        "Server_routes_http_routes_dashboard_runtime_meta",
         "Server_routes_http_routes_dashboard_setup",
         "Server_routes_http_routes_frontend",
         "Server_routes_http_routes_keeper_repos",
@@ -991,12 +991,12 @@
       "coupling_ratio": 0.25
     },
     {
-      "prefix": "cascade_health",
+      "prefix": "runtime_health",
       "module_count": 3,
       "members": [
-        "Cascade_health_filter",
-        "Cascade_health_tracker",
-        "Cascade_health_tracker_config"
+        "Runtime_health_filter",
+        "Runtime_health_tracker",
+        "Runtime_health_tracker_config"
       ],
       "internal_edges": 1,
       "external_dep_count": 3,
@@ -1138,16 +1138,16 @@
       "coupling_ratio": 0.231
     },
     {
-      "prefix": "cascade_attempt",
+      "prefix": "runtime_attempt",
       "module_count": 7,
       "members": [
-        "Cascade_attempt_fsm",
-        "Cascade_attempt_fsm_capacity_backpressure",
-        "Cascade_attempt_fsm_http_error",
-        "Cascade_attempt_liveness",
-        "Cascade_attempt_liveness_config",
-        "Cascade_attempt_liveness_observer",
-        "Cascade_attempt_liveness_runtime"
+        "Runtime_attempt_fsm",
+        "Runtime_attempt_fsm_capacity_backpressure",
+        "Runtime_attempt_fsm_http_error",
+        "Runtime_attempt_liveness",
+        "Runtime_attempt_liveness_config",
+        "Runtime_attempt_liveness_observer",
+        "Runtime_attempt_liveness_runtime"
       ],
       "internal_edges": 3,
       "external_dep_count": 10,
@@ -1158,21 +1158,21 @@
       "module_count": 38,
       "members": [
         "Keeper_turn",
-        "Keeper_turn_cascade_budget",
-        "Keeper_turn_cascade_budget_admission",
-        "Keeper_turn_cascade_budget_event_bus",
-        "Keeper_turn_cascade_budget_provider_timeout",
-        "Keeper_turn_cascade_budget_routing",
+        "Keeper_turn_runtime_budget",
+        "Keeper_turn_runtime_budget_admission",
+        "Keeper_turn_runtime_budget_event_bus",
+        "Keeper_turn_runtime_budget_provider_timeout",
+        "Keeper_turn_runtime_budget_routing",
         "Keeper_turn_cleanup_failure_site",
         "Keeper_turn_disposition",
         "Keeper_turn_driver",
         "Keeper_turn_driver_admission",
         "Keeper_turn_driver_backpressure",
-        "Keeper_turn_driver_cascade_health",
+        "Keeper_turn_driver_runtime_health",
         "Keeper_turn_driver_helpers",
         "Keeper_turn_driver_named_resolution",
         "Keeper_turn_driver_provider_attempt",
-        "Keeper_turn_driver_try_cascade",
+        "Keeper_turn_driver_try_runtime",
         "Keeper_turn_driver_try_provider",
         "Keeper_turn_driver_wrappers",
         "Keeper_turn_fsm",
@@ -1215,7 +1215,7 @@
         "Keeper_unified_prompt",
         "Keeper_unified_turn",
         "Keeper_unified_turn_attempt_watchdog",
-        "Keeper_unified_turn_cascade_resolution",
+        "Keeper_unified_turn_runtime_resolution",
         "Keeper_unified_turn_event_bus",
         "Keeper_unified_turn_execution",
         "Keeper_unified_turn_failure",
@@ -1337,12 +1337,12 @@
       "coupling_ratio": 0.154
     },
     {
-      "prefix": "cascade_event",
+      "prefix": "runtime_event",
       "module_count": 3,
       "members": [
-        "Cascade_event_bridge",
-        "Cascade_event_bridge_error_json",
-        "Cascade_event_bridge_inference"
+        "Runtime_event_bridge",
+        "Runtime_event_bridge_error_json",
+        "Runtime_event_bridge_inference"
       ],
       "internal_edges": 2,
       "external_dep_count": 11,
@@ -1556,14 +1556,14 @@
       "coupling_ratio": 0.0
     },
     {
-      "prefix": "keeper_cascade",
+      "prefix": "keeper_runtime",
       "module_count": 5,
       "members": [
-        "Keeper_cascade_engine",
-        "Keeper_cascade_profile",
-        "Keeper_cascade_routing",
-        "Keeper_cascade_selector",
-        "Keeper_cascade_sync_failure_site"
+        "Keeper_runtime_engine",
+        "Keeper_runtime_profile",
+        "Keeper_runtime_routing",
+        "Keeper_runtime_selector",
+        "Keeper_runtime_sync_failure_site"
       ],
       "internal_edges": 0,
       "external_dep_count": 11,
@@ -1677,7 +1677,7 @@
     "Anti_rationalization": [
       "Agent_sdk_response",
       "Approval_callbacks",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_turn_driver",
       "Keeper_turn_driver_wrappers",
       "Masc_oas_bridge",
@@ -1691,7 +1691,7 @@
       "Attribution"
     ],
     "Audit_log": [
-      "Cascade_events"
+      "Runtime_events"
     ],
     "Auth": [
       "Prometheus",
@@ -1733,8 +1733,8 @@
     "Auto_responder": [
       "Agent_sdk_response",
       "Approval_callbacks",
-      "Cascade_runner",
-      "Keeper_cascade_profile",
+      "Runtime_runner",
+      "Keeper_runtime_profile",
       "Keeper_turn_driver",
       "Masc_oas_bridge",
       "Tool_name"
@@ -1799,177 +1799,177 @@
       "Tool_help_registry",
       "Tool_shard"
     ],
-    "Cascade_agent_context": [
-      "Cascade_transport",
-      "Cascade_wire_overlay",
+    "Runtime_agent_context": [
+      "Runtime_transport",
+      "Runtime_wire_overlay",
       "Masc_grpc_transport"
     ],
-    "Cascade_attempt_fsm": [
-      "Cascade_attempt_fsm_http_error",
-      "Cascade_config",
-      "Cascade_error_classify",
-      "Cascade_fsm",
-      "Cascade_oas_runner",
-      "Cascade_saturation_signal",
+    "Runtime_attempt_fsm": [
+      "Runtime_attempt_fsm_http_error",
+      "Runtime_config",
+      "Runtime_error_classify",
+      "Runtime_fsm",
+      "Runtime_oas_runner",
+      "Runtime_saturation_signal",
       "Dashboard_oas_bridge",
       "Keeper_metrics",
       "Keeper_types",
       "Prometheus"
     ],
-    "Cascade_attempt_fsm_capacity_backpressure": [
-      "Cascade_error_classify",
-      "Cascade_health_tracker"
+    "Runtime_attempt_fsm_capacity_backpressure": [
+      "Runtime_error_classify",
+      "Runtime_health_tracker"
     ],
-    "Cascade_attempt_fsm_http_error": [],
-    "Cascade_attempt_liveness": [],
-    "Cascade_attempt_liveness_config": [
-      "Cascade_attempt_liveness"
+    "Runtime_attempt_fsm_http_error": [],
+    "Runtime_attempt_liveness": [],
+    "Runtime_attempt_liveness_config": [
+      "Runtime_attempt_liveness"
     ],
-    "Cascade_attempt_liveness_observer": [
+    "Runtime_attempt_liveness_observer": [
       "Prometheus"
     ],
-    "Cascade_attempt_liveness_runtime": [
-      "Cascade_attempt_liveness"
+    "Runtime_attempt_liveness_runtime": [
+      "Runtime_attempt_liveness"
     ],
-    "Cascade_candidate_skip_reason": [],
-    "Cascade_capability_profile": [
-      "Cascade_capability_schema",
+    "Runtime_candidate_skip_reason": [],
+    "Runtime_capability_profile": [
+      "Runtime_capability_schema",
       "Provider_tool_support"
     ],
-    "Cascade_capability_schema": [
+    "Runtime_capability_schema": [
       "Provider_tool_support"
     ],
-    "Cascade_capacity_probe": [
-      "Cascade_client_capacity",
-      "Cascade_http_probe",
-      "Cascade_throttle"
+    "Runtime_capacity_probe": [
+      "Runtime_client_capacity",
+      "Runtime_http_probe",
+      "Runtime_throttle"
     ],
-    "Cascade_catalog_runtime": [
-      "Cascade_catalog_runtime_cache",
-      "Cascade_catalog_runtime_json",
-      "Cascade_catalog_runtime_named_providers",
-      "Cascade_catalog_runtime_resolve",
-      "Cascade_catalog_runtime_validate",
-      "Cascade_config_loader",
-      "Cascade_strategy",
+    "Runtime_catalog_runtime": [
+      "Runtime_catalog_runtime_cache",
+      "Runtime_catalog_runtime_json",
+      "Runtime_catalog_runtime_named_providers",
+      "Runtime_catalog_runtime_resolve",
+      "Runtime_catalog_runtime_validate",
+      "Runtime_config_loader",
+      "Runtime_strategy",
       "Provider_tool_support"
     ],
-    "Cascade_catalog_runtime_cache": [
-      "Cascade_config_loader",
-      "Cascade_strategy",
+    "Runtime_catalog_runtime_cache": [
+      "Runtime_config_loader",
+      "Runtime_strategy",
       "Provider_tool_support"
     ],
-    "Cascade_catalog_runtime_json": [
-      "Cascade_catalog_runtime_cache",
-      "Cascade_strategy"
+    "Runtime_catalog_runtime_json": [
+      "Runtime_catalog_runtime_cache",
+      "Runtime_strategy"
     ],
-    "Cascade_catalog_runtime_named_providers": [
-      "Cascade_catalog_runtime_cache",
-      "Cascade_config",
-      "Cascade_config_loader",
-      "Cascade_config_provider_binding",
-      "Cascade_metrics",
-      "Cascade_strategy",
+    "Runtime_catalog_runtime_named_providers": [
+      "Runtime_catalog_runtime_cache",
+      "Runtime_config",
+      "Runtime_config_loader",
+      "Runtime_config_provider_binding",
+      "Runtime_metrics",
+      "Runtime_strategy",
       "Provider_tool_support"
     ],
-    "Cascade_catalog_runtime_probe": [
-      "Cascade_catalog_runtime_cache",
+    "Runtime_catalog_runtime_probe": [
+      "Runtime_catalog_runtime_cache",
       "Prometheus"
     ],
-    "Cascade_catalog_runtime_resolve": [
-      "Cascade_catalog_runtime_cache",
-      "Cascade_config",
-      "Cascade_config_loader",
-      "Cascade_metrics"
+    "Runtime_catalog_runtime_resolve": [
+      "Runtime_catalog_runtime_cache",
+      "Runtime_config",
+      "Runtime_config_loader",
+      "Runtime_metrics"
     ],
-    "Cascade_catalog_runtime_validate": [
-      "Cascade_catalog_runtime_cache",
-      "Cascade_config",
-      "Cascade_config_loader",
-      "Cascade_declarative_adapter",
-      "Cascade_declarative_hotpath",
-      "Cascade_metrics",
-      "Cascade_routes",
-      "Cascade_strategy",
-      "Cascade_toml_materializer"
+    "Runtime_catalog_runtime_validate": [
+      "Runtime_catalog_runtime_cache",
+      "Runtime_config",
+      "Runtime_config_loader",
+      "Runtime_declarative_adapter",
+      "Runtime_declarative_hotpath",
+      "Runtime_metrics",
+      "Runtime_routes",
+      "Runtime_strategy",
+      "Runtime_toml_materializer"
     ],
-    "Cascade_client_capacity": [
-      "Cascade_client_capacity_history",
-      "Cascade_throttle"
+    "Runtime_client_capacity": [
+      "Runtime_client_capacity_history",
+      "Runtime_throttle"
     ],
-    "Cascade_client_capacity_history": [
-      "Cascade_http_probe",
+    "Runtime_client_capacity_history": [
+      "Runtime_http_probe",
       "Prometheus"
     ],
-    "Cascade_config": [
-      "Cascade_config_loader",
-      "Cascade_config_parser",
-      "Cascade_config_provider_binding",
-      "Cascade_config_provider_filter",
-      "Cascade_config_resolve",
-      "Cascade_config_selection",
-      "Cascade_config_strategy_resolve",
-      "Cascade_health_filter",
-      "Cascade_model_resolve"
+    "Runtime_config": [
+      "Runtime_config_loader",
+      "Runtime_config_parser",
+      "Runtime_config_provider_binding",
+      "Runtime_config_provider_filter",
+      "Runtime_config_resolve",
+      "Runtime_config_selection",
+      "Runtime_config_strategy_resolve",
+      "Runtime_health_filter",
+      "Runtime_model_resolve"
     ],
-    "Cascade_config_builder": [
-      "Cascade_runner",
-      "Cascade_runtime"
+    "Runtime_config_builder": [
+      "Runtime_runner",
+      "Runtime_runtime"
     ],
-    "Cascade_config_loader": [
-      "Cascade_metrics",
-      "Cascade_phonebook_parser",
-      "Cascade_phonebook_types",
-      "Cascade_toml_materializer"
+    "Runtime_config_loader": [
+      "Runtime_metrics",
+      "Runtime_phonebook_parser",
+      "Runtime_phonebook_types",
+      "Runtime_toml_materializer"
     ],
-    "Cascade_config_parser": [
-      "Cascade_config_loader",
-      "Cascade_metrics",
-      "Cascade_model_resolve",
-      "Cascade_state",
+    "Runtime_config_parser": [
+      "Runtime_config_loader",
+      "Runtime_metrics",
+      "Runtime_model_resolve",
+      "Runtime_state",
       "Provider_kind_resolver"
     ],
-    "Cascade_config_provider_binding": [],
-    "Cascade_config_provider_filter": [
-      "Cascade_metrics",
-      "Cascade_model_resolve"
+    "Runtime_config_provider_binding": [],
+    "Runtime_config_provider_filter": [
+      "Runtime_metrics",
+      "Runtime_model_resolve"
     ],
-    "Cascade_config_resolve": [
-      "Cascade_config_loader",
-      "Cascade_routes"
+    "Runtime_config_resolve": [
+      "Runtime_config_loader",
+      "Runtime_routes"
     ],
-    "Cascade_config_selection": [
-      "Cascade_config_loader",
-      "Cascade_health_tracker",
-      "Cascade_metrics"
+    "Runtime_config_selection": [
+      "Runtime_config_loader",
+      "Runtime_health_tracker",
+      "Runtime_metrics"
     ],
-    "Cascade_config_strategy_resolve": [
-      "Cascade_config_loader",
-      "Cascade_strategy"
+    "Runtime_config_strategy_resolve": [
+      "Runtime_config_loader",
+      "Runtime_strategy"
     ],
-    "Cascade_declarative_adapter": [
-      "Cascade_config",
-      "Cascade_config_provider_binding",
-      "Cascade_strategy",
+    "Runtime_declarative_adapter": [
+      "Runtime_config",
+      "Runtime_config_provider_binding",
+      "Runtime_strategy",
       "Provider_tool_support"
     ],
-    "Cascade_declarative_hotpath": [
-      "Cascade_declarative_adapter",
-      "Cascade_strategy",
+    "Runtime_declarative_hotpath": [
+      "Runtime_declarative_adapter",
+      "Runtime_strategy",
       "Provider_tool_support"
     ],
-    "Cascade_diagnostic_probe": [],
-    "Cascade_error_classify": [
-      "Cascade_error_from_sdk"
+    "Runtime_diagnostic_probe": [],
+    "Runtime_error_classify": [
+      "Runtime_error_from_sdk"
     ],
-    "Cascade_error_from_sdk": [
-      "Cascade_internal_error",
+    "Runtime_error_from_sdk": [
+      "Runtime_internal_error",
       "Keeper_types"
     ],
-    "Cascade_event_bridge": [
+    "Runtime_event_bridge": [
       "Agent_sdk_metrics_bridge",
-      "Cascade_event_bridge_error_json",
-      "Cascade_event_bridge_inference",
+      "Runtime_event_bridge_error_json",
+      "Runtime_event_bridge_inference",
       "Context_overflow_action_tracker",
       "Coord",
       "Inference_utils",
@@ -1979,92 +1979,92 @@
       "Sse",
       "Transport_metrics"
     ],
-    "Cascade_event_bridge_error_json": [
+    "Runtime_event_bridge_error_json": [
       "Keeper_agent_error",
       "Keeper_turn_terminal_code"
     ],
-    "Cascade_event_bridge_inference": [
+    "Runtime_event_bridge_inference": [
       "Prometheus"
     ],
-    "Cascade_events": [
+    "Runtime_events": [
       "Agent_sdk_metrics_bridge",
       "Keeper_lifecycle_events",
       "Keeper_state_machine",
       "Masc_event_bus"
     ],
-    "Cascade_fsm": [
-      "Cascade_health_filter",
-      "Cascade_metrics"
+    "Runtime_fsm": [
+      "Runtime_health_filter",
+      "Runtime_metrics"
     ],
-    "Cascade_health_filter": [],
-    "Cascade_health_tracker": [
-      "Cascade_health_tracker_config",
-      "Cascade_metrics",
+    "Runtime_health_filter": [],
+    "Runtime_health_tracker": [
+      "Runtime_health_tracker_config",
+      "Runtime_metrics",
       "Keeper_metrics",
       "Prometheus"
     ],
-    "Cascade_health_tracker_config": [],
-    "Cascade_http_probe": [
-      "Cascade_throttle",
+    "Runtime_health_tracker_config": [],
+    "Runtime_http_probe": [
+      "Runtime_throttle",
       "Keeper_metrics",
       "Prometheus"
     ],
-    "Cascade_http_probe_url": [
-      "Cascade_capacity_probe"
+    "Runtime_http_probe_url": [
+      "Runtime_capacity_probe"
     ],
-    "Cascade_internal_error": [
+    "Runtime_internal_error": [
       "Json_field",
       "Keeper_types",
       "Prometheus"
     ],
-    "Cascade_metrics": [
-      "Cascade_metrics_registry",
+    "Runtime_metrics": [
+      "Runtime_metrics_registry",
       "Prometheus"
     ],
-    "Cascade_metrics_registry": [],
-    "Cascade_model_resolve": [
+    "Runtime_metrics_registry": [],
+    "Runtime_model_resolve": [
       "Provider_runtime_projection"
     ],
-    "Cascade_oas_runner": [
-      "Cascade_capability_profile",
-      "Cascade_runner",
-      "Cascade_runtime",
+    "Runtime_oas_runner": [
+      "Runtime_capability_profile",
+      "Runtime_runner",
+      "Runtime_runtime",
       "Keeper_identity",
       "Llm_metric_bridge",
       "Provider_tool_support",
       "Tool_catalog"
     ],
-    "Cascade_observation": [
-      "Cascade_metrics",
+    "Runtime_observation": [
+      "Runtime_metrics",
       "Llm_metric_bridge"
     ],
-    "Cascade_phonebook_parser": [
-      "Cascade_phonebook_types"
+    "Runtime_phonebook_parser": [
+      "Runtime_phonebook_types"
     ],
-    "Cascade_phonebook_resolve": [
-      "Cascade_phonebook_types",
-      "Cascade_routing_policy"
+    "Runtime_phonebook_resolve": [
+      "Runtime_phonebook_types",
+      "Runtime_routing_policy"
     ],
-    "Cascade_phonebook_types": [],
-    "Cascade_pool": [
-      "Cascade_health_tracker"
+    "Runtime_phonebook_types": [],
+    "Runtime_pool": [
+      "Runtime_health_tracker"
     ],
-    "Cascade_preflight_state": [
+    "Runtime_preflight_state": [
       "Prometheus"
     ],
-    "Cascade_routes": [
-      "Cascade_config_loader",
-      "Cascade_metrics",
-      "Cascade_phonebook_resolve",
-      "Cascade_routing_policy"
+    "Runtime_routes": [
+      "Runtime_config_loader",
+      "Runtime_metrics",
+      "Runtime_phonebook_resolve",
+      "Runtime_routing_policy"
     ],
-    "Cascade_routing_policy": [
-      "Cascade_phonebook_types"
+    "Runtime_routing_policy": [
+      "Runtime_phonebook_types"
     ],
-    "Cascade_runner": [
-      "Cascade_agent_context",
-      "Cascade_observation",
-      "Cascade_transport",
+    "Runtime_runner": [
+      "Runtime_agent_context",
+      "Runtime_observation",
+      "Runtime_transport",
       "Dashboard_oas_bridge",
       "Fd_accountant",
       "Keeper_oas_checkpoint",
@@ -2072,135 +2072,135 @@
       "Provider_tool_support",
       "Tool_bridge"
     ],
-    "Cascade_runtime": [
-      "Cascade_catalog_runtime",
-      "Cascade_config",
-      "Cascade_config_provider_binding",
-      "Cascade_metrics",
-      "Cascade_routes",
-      "Cascade_throttle",
-      "Keeper_cascade_profile",
+    "Runtime_runtime": [
+      "Runtime_catalog_runtime",
+      "Runtime_config",
+      "Runtime_config_provider_binding",
+      "Runtime_metrics",
+      "Runtime_routes",
+      "Runtime_throttle",
+      "Keeper_runtime_profile",
       "Provider_runtime_projection",
       "Provider_tool_support"
     ],
-    "Cascade_runtime_candidate": [
-      "Cascade_attempt_fsm",
-      "Cascade_attempt_liveness",
-      "Cascade_client_capacity",
-      "Cascade_config_provider_binding",
-      "Cascade_health_tracker",
-      "Cascade_http_probe",
-      "Cascade_http_probe_url",
-      "Cascade_oas_runner",
-      "Cascade_runner",
-      "Cascade_strategy",
+    "Runtime_runtime_candidate": [
+      "Runtime_attempt_fsm",
+      "Runtime_attempt_liveness",
+      "Runtime_client_capacity",
+      "Runtime_config_provider_binding",
+      "Runtime_health_tracker",
+      "Runtime_http_probe",
+      "Runtime_http_probe_url",
+      "Runtime_oas_runner",
+      "Runtime_runner",
+      "Runtime_strategy",
       "Provider_kind_resolver",
       "Provider_tool_support"
     ],
-    "Cascade_saturation_signal": [],
-    "Cascade_server_flavor": [
-      "Cascade_phonebook_types"
+    "Runtime_saturation_signal": [],
+    "Runtime_server_flavor": [
+      "Runtime_phonebook_types"
     ],
-    "Cascade_state": [],
-    "Cascade_strategy": [
-      "Cascade_health_tracker",
-      "Cascade_metrics",
-      "Cascade_throttle"
+    "Runtime_state": [],
+    "Runtime_strategy": [
+      "Runtime_health_tracker",
+      "Runtime_metrics",
+      "Runtime_throttle"
     ],
-    "Cascade_strategy_trace": [
+    "Runtime_strategy_trace": [
       "Prometheus"
     ],
-    "Cascade_throttle": [
+    "Runtime_throttle": [
       "Lockfree_atomic"
     ],
-    "Cascade_tier_admission": [
-      "Cascade_saturation_signal"
+    "Runtime_tier_admission": [
+      "Runtime_saturation_signal"
     ],
-    "Cascade_tier_wait_scheduler": [
-      "Cascade_tier_admission"
+    "Runtime_tier_wait_scheduler": [
+      "Runtime_tier_admission"
     ],
-    "Cascade_toml_materializer": [],
-    "Cascade_transport": [
+    "Runtime_toml_materializer": [],
+    "Runtime_transport": [
       "Auth",
-      "Cascade_transport_auth_bridging",
-      "Cascade_transport_authorization",
-      "Cascade_transport_cli_argv_sanitize",
-      "Cascade_transport_cli_config",
-      "Cascade_transport_cli_ctors",
-      "Cascade_transport_cli_mcp_config_json",
-      "Cascade_transport_cli_overrides",
-      "Cascade_transport_label_resolution",
-      "Cascade_transport_mcp_policy_helpers",
-      "Cascade_transport_mcp_tool_classifier",
-      "Cascade_transport_non_http_registry",
-      "Cascade_transport_runtime_mcp_policy_of_tool_names",
-      "Cascade_transport_runtime_policy_provider",
+      "Runtime_transport_auth_bridging",
+      "Runtime_transport_authorization",
+      "Runtime_transport_cli_argv_sanitize",
+      "Runtime_transport_cli_config",
+      "Runtime_transport_cli_ctors",
+      "Runtime_transport_cli_mcp_config_json",
+      "Runtime_transport_cli_overrides",
+      "Runtime_transport_label_resolution",
+      "Runtime_transport_mcp_policy_helpers",
+      "Runtime_transport_mcp_tool_classifier",
+      "Runtime_transport_non_http_registry",
+      "Runtime_transport_runtime_mcp_policy_of_tool_names",
+      "Runtime_transport_runtime_policy_provider",
       "Provider_tool_support",
       "Tool_catalog"
     ],
-    "Cascade_transport_auth_bridging": [],
-    "Cascade_transport_authorization": [
+    "Runtime_transport_auth_bridging": [],
+    "Runtime_transport_authorization": [
       "Auth",
       "Tool_catalog"
     ],
-    "Cascade_transport_cli_argv_sanitize": [
+    "Runtime_transport_cli_argv_sanitize": [
       "Inference_utils"
     ],
-    "Cascade_transport_cli_config": [
-      "Cascade_config"
+    "Runtime_transport_cli_config": [
+      "Runtime_config"
     ],
-    "Cascade_transport_cli_ctors": [],
-    "Cascade_transport_cli_mcp_config_json": [],
-    "Cascade_transport_cli_overrides": [],
-    "Cascade_transport_json_stream_cli_local": [
+    "Runtime_transport_cli_ctors": [],
+    "Runtime_transport_cli_mcp_config_json": [],
+    "Runtime_transport_cli_overrides": [],
+    "Runtime_transport_json_stream_cli_local": [
       "Inference_utils"
     ],
-    "Cascade_transport_label_resolution": [
-      "Cascade_config"
+    "Runtime_transport_label_resolution": [
+      "Runtime_config"
     ],
-    "Cascade_transport_mcp_policy_helpers": [
-      "Cascade_transport_authorization"
+    "Runtime_transport_mcp_policy_helpers": [
+      "Runtime_transport_authorization"
     ],
-    "Cascade_transport_mcp_tool_classifier": [
+    "Runtime_transport_mcp_tool_classifier": [
       "Tool_catalog"
     ],
-    "Cascade_transport_non_http_registry": [],
-    "Cascade_transport_runtime_mcp_policy_of_tool_names": [
+    "Runtime_transport_non_http_registry": [],
+    "Runtime_transport_runtime_mcp_policy_of_tool_names": [
       "Auth",
       "Auth_resolve",
       "Tool_catalog"
     ],
-    "Cascade_transport_runtime_policy_provider": [],
-    "Cascade_trust": [
-      "Cascade_health_tracker"
+    "Runtime_transport_runtime_policy_provider": [],
+    "Runtime_trust": [
+      "Runtime_health_tracker"
     ],
-    "Cascade_trust_persist": [
+    "Runtime_trust_persist": [
       "Shutdown"
     ],
-    "Cascade_wire_overlay": [],
-    "Cascade_worker_defaults": [],
+    "Runtime_wire_overlay": [],
+    "Runtime_worker_defaults": [],
     "Provider_capability": [
       "Prometheus"
     ],
     "Provider_health": [
       "Coord"
     ],
-    "Cascade_catalog_validator": [
-      "Cascade_capability_profile",
-      "Cascade_catalog_runtime",
-      "Cascade_config",
-      "Cascade_config_loader",
-      "Cascade_declarative_adapter",
-      "Cascade_declarative_hotpath",
+    "Runtime_catalog_validator": [
+      "Runtime_capability_profile",
+      "Runtime_catalog_runtime",
+      "Runtime_config",
+      "Runtime_config_loader",
+      "Runtime_declarative_adapter",
+      "Runtime_declarative_hotpath",
       "Provider_tool_support"
     ],
-    "Cascade_inference": [
-      "Cascade_catalog_runtime",
-      "Cascade_config",
-      "Cascade_error_classify",
-      "Cascade_metrics",
-      "Cascade_runtime",
-      "Keeper_cascade_profile"
+    "Runtime_inference": [
+      "Runtime_catalog_runtime",
+      "Runtime_config",
+      "Runtime_error_classify",
+      "Runtime_metrics",
+      "Runtime_runtime",
+      "Keeper_runtime_profile"
     ],
     "Cdal_evidence_gate": [
       "Cdal_verdict_gate"
@@ -2241,10 +2241,10 @@
       "Tools"
     ],
     "Config_doctor": [
-      "Cascade_catalog_runtime",
-      "Cascade_catalog_validator",
-      "Cascade_routes",
-      "Cascade_runner",
+      "Runtime_catalog_runtime",
+      "Runtime_catalog_validator",
+      "Runtime_routes",
+      "Runtime_runner",
       "Keeper_identity",
       "Keeper_sandbox_runtime",
       "Keeper_turn_driver_helpers",
@@ -2252,7 +2252,7 @@
       "Server_base_path_diagnostics"
     ],
     "Context_compact_oas": [
-      "Cascade_runtime"
+      "Runtime_runtime"
     ],
     "Context_overflow_action_tracker": [
       "Prometheus"
@@ -2338,7 +2338,7 @@
       "Dashboard"
     ],
     "Dashboard_execution_fixture": [
-      "Cascade_runtime_candidate",
+      "Runtime_runtime_candidate",
       "Version"
     ],
     "Dashboard_execution_helpers": [
@@ -2406,12 +2406,12 @@
     "Dashboard_governance_judge": [
       "Agent_sdk_response",
       "Approval_callbacks",
-      "Cascade_runner",
-      "Cascade_runtime",
+      "Runtime_runner",
+      "Runtime_runtime",
       "Dashboard_http_helpers",
       "Judge_diagnostics",
       "Judge_json_recovery",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_tool_response",
       "Keeper_turn_driver_wrappers",
       "Masc_oas_bridge",
@@ -2424,7 +2424,7 @@
       "Prometheus"
     ],
     "Dashboard_harness_health": [
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Coord",
       "Dashboard_yjs",
       "Eval_calibration",
@@ -2485,7 +2485,7 @@
       "Keeper_types_support"
     ],
     "Dashboard_http_keeper_metrics": [
-      "Cascade_runtime_candidate",
+      "Runtime_runtime_candidate",
       "Dashboard_execution_helpers",
       "Dashboard_http_helpers",
       "Keeper_context_core",
@@ -2540,7 +2540,7 @@
       "Keeper_types"
     ],
     "Dashboard_http_keeper_types": [
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_supervisor"
     ],
     "Dashboard_http_monitoring": [
@@ -2619,13 +2619,13 @@
     "Dashboard_operator_judge": [
       "Agent_sdk_response",
       "Approval_callbacks",
-      "Cascade_runner",
-      "Cascade_runtime",
+      "Runtime_runner",
+      "Runtime_runtime",
       "Coord",
       "Dashboard",
       "Dashboard_http_helpers",
       "Judge_diagnostics",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_tool_response",
       "Keeper_turn_driver_wrappers",
       "Masc_oas_bridge",
@@ -2671,61 +2671,61 @@
       "Runtime_params",
       "Tempo"
     ],
-    "Dashboard_cascade": [],
-    "Dashboard_cascade_audit_runs": [
-      "Dashboard_cascade_helpers"
+    "Dashboard_runtime": [],
+    "Dashboard_runtime_audit_runs": [
+      "Dashboard_runtime_helpers"
     ],
-    "Dashboard_cascade_capacity": [
-      "Cascade_capacity_probe",
-      "Cascade_client_capacity",
-      "Cascade_client_capacity_history",
-      "Cascade_throttle",
-      "Dashboard_cascade_helpers"
+    "Dashboard_runtime_capacity": [
+      "Runtime_capacity_probe",
+      "Runtime_client_capacity",
+      "Runtime_client_capacity_history",
+      "Runtime_throttle",
+      "Dashboard_runtime_helpers"
     ],
-    "Dashboard_cascade_config": [
-      "Cascade_catalog_runtime",
-      "Cascade_catalog_validator",
-      "Cascade_config_loader",
-      "Cascade_runtime",
-      "Cascade_toml_materializer",
-      "Dashboard_cascade_helpers",
-      "Keeper_cascade_profile",
+    "Dashboard_runtime_config": [
+      "Runtime_catalog_runtime",
+      "Runtime_catalog_validator",
+      "Runtime_config_loader",
+      "Runtime_runtime",
+      "Runtime_toml_materializer",
+      "Dashboard_runtime_helpers",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_registry",
       "Keeper_types",
       "Keeper_types_profile"
     ],
-    "Dashboard_cascade_health": [
-      "Cascade_trust",
+    "Dashboard_runtime_health": [
+      "Runtime_trust",
       "Model_inference_metrics"
     ],
-    "Dashboard_cascade_health_json": [
-      "Cascade_catalog_runtime",
-      "Cascade_runtime",
-      "Dashboard_cascade_health",
-      "Dashboard_cascade_helpers",
-      "Dashboard_cascade_recommendations",
+    "Dashboard_runtime_health_json": [
+      "Runtime_catalog_runtime",
+      "Runtime_runtime",
+      "Dashboard_runtime_health",
+      "Dashboard_runtime_helpers",
+      "Dashboard_runtime_recommendations",
       "Model_inference_metrics"
     ],
-    "Dashboard_cascade_helpers": [
-      "Cascade_toml_materializer"
+    "Dashboard_runtime_helpers": [
+      "Runtime_toml_materializer"
     ],
-    "Dashboard_cascade_recommendations": [
-      "Cascade_trust"
+    "Dashboard_runtime_recommendations": [
+      "Runtime_trust"
     ],
-    "Dashboard_cascade_slo": [
-      "Cascade_strategy_trace",
-      "Dashboard_cascade_helpers"
+    "Dashboard_runtime_slo": [
+      "Runtime_strategy_trace",
+      "Dashboard_runtime_helpers"
     ],
-    "Dashboard_cascade_strategy_trace": [
-      "Cascade_strategy_trace",
-      "Dashboard_cascade_helpers"
+    "Dashboard_runtime_strategy_trace": [
+      "Runtime_strategy_trace",
+      "Dashboard_runtime_helpers"
     ],
     "Dashboard_provider_runs": [
-      "Cascade_config",
-      "Cascade_inference",
+      "Runtime_config",
+      "Runtime_inference",
       "Discovery_cache",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_turn_driver_wrappers",
       "Masc_oas_bridge",
       "Tool_local_runtime_core"
@@ -2993,8 +2993,8 @@
       "Keeper_types"
     ],
     "Agent_tool_preflight_runtime": [
-      "Cascade_runtime",
-      "Keeper_cascade_profile",
+      "Runtime_runtime",
+      "Keeper_runtime_profile",
       "Keeper_types"
     ],
     "Agent_tool_remote_mcp_runtime": [
@@ -3091,8 +3091,8 @@
       "Keeper_types"
     ],
     "Keeper_agent_error": [
-      "Cascade_error_classify",
-      "Cascade_observation",
+      "Runtime_error_classify",
+      "Runtime_observation",
       "Keeper_execution_receipt",
       "Keeper_turn_terminal_code"
     ],
@@ -3110,18 +3110,18 @@
       "Keeper_turn_intent"
     ],
     "Keeper_agent_result": [
-      "Cascade_observation",
-      "Cascade_runner",
+      "Runtime_observation",
+      "Runtime_runner",
       "Keeper_agent_prompt_metrics",
       "Keeper_agent_tool_surface",
       "Keeper_tool_outcome"
     ],
     "Keeper_agent_run": [
-      "Cascade_error_classify",
-      "Cascade_inference",
-      "Cascade_runner",
-      "Cascade_runtime",
-      "Cascade_runtime_candidate",
+      "Runtime_error_classify",
+      "Runtime_inference",
+      "Runtime_runner",
+      "Runtime_runtime",
+      "Runtime_runtime_candidate",
       "Coord",
       "Governance_pipeline",
       "Keeper_agent_run_actionable_contract",
@@ -3186,7 +3186,7 @@
       "Prometheus"
     ],
     "Keeper_agent_run_finalize_response": [
-      "Cascade_runner",
+      "Runtime_runner",
       "Keeper_agent_result",
       "Keeper_agent_run_contract_helpers",
       "Keeper_agent_run_post_turn_memory",
@@ -3236,14 +3236,14 @@
       "Prometheus"
     ],
     "Keeper_agent_run_receipt": [
-      "Cascade_observation",
+      "Runtime_observation",
       "Keeper_agent_error",
       "Keeper_agent_memory_episode",
       "Keeper_agent_result",
       "Keeper_agent_run_phase5_task_link",
       "Keeper_agent_run_receipt_append",
       "Keeper_agent_tool_surface",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_execution_receipt",
       "Keeper_id",
       "Keeper_run_tools",
@@ -3262,7 +3262,7 @@
       "Telemetry_coverage_gap"
     ],
     "Keeper_agent_run_response_text": [
-      "Cascade_runner",
+      "Runtime_runner",
       "Keeper_memory_policy",
       "Keeper_text_processing"
     ],
@@ -3374,26 +3374,26 @@
       "Prometheus",
       "Telemetry_coverage_gap"
     ],
-    "Keeper_cascade_engine": [],
-    "Keeper_cascade_profile": [
-      "Cascade_catalog_runtime",
-      "Cascade_catalog_runtime_cache",
-      "Cascade_config_loader",
-      "Cascade_declarative_adapter",
-      "Cascade_declarative_hotpath",
-      "Cascade_metrics",
-      "Cascade_routes"
+    "Keeper_runtime_engine": [],
+    "Keeper_runtime_profile": [
+      "Runtime_catalog_runtime",
+      "Runtime_catalog_runtime_cache",
+      "Runtime_config_loader",
+      "Runtime_declarative_adapter",
+      "Runtime_declarative_hotpath",
+      "Runtime_metrics",
+      "Runtime_routes"
     ],
-    "Keeper_cascade_routing": [
-      "Cascade_metrics",
+    "Keeper_runtime_routing": [
+      "Runtime_metrics",
       "Keeper_agent_tool_surface",
       "Keeper_config",
       "Keeper_state_machine"
     ],
-    "Keeper_cascade_selector": [
+    "Keeper_runtime_selector": [
       "Keeper_health_probe"
     ],
-    "Keeper_cascade_sync_failure_site": [],
+    "Keeper_runtime_sync_failure_site": [],
     "Keeper_cdal_contract": [
       "Keeper_id",
       "Keeper_types"
@@ -3426,7 +3426,7 @@
     "Keeper_compact_audit_failure_site": [],
     "Keeper_compact_audit_retention_outcome": [],
     "Keeper_compact_policy": [
-      "Cascade_runtime_candidate",
+      "Runtime_runtime_candidate",
       "Context_compact_oas",
       "Dashboard_harness_health",
       "Keeper_context_core",
@@ -3446,8 +3446,8 @@
       "Prometheus"
     ],
     "Keeper_config": [
-      "Cascade_catalog_runtime",
-      "Keeper_cascade_profile",
+      "Runtime_catalog_runtime",
+      "Keeper_runtime_profile",
       "Runtime_params"
     ],
     "Keeper_config_rp_helpers": [
@@ -3462,7 +3462,7 @@
       "Keeper_hash_algo"
     ],
     "Keeper_context_core": [
-      "Cascade_runtime_candidate",
+      "Runtime_runtime_candidate",
       "Keeper_checkpoint_failure_operation",
       "Keeper_checkpoint_store",
       "Keeper_memory_policy",
@@ -3494,8 +3494,8 @@
     ],
     "Keeper_context_core_pair_repair_stats": [],
     "Keeper_context_runtime": [
-      "Cascade_runtime",
-      "Cascade_runtime_candidate",
+      "Runtime_runtime",
+      "Runtime_runtime_candidate",
       "Coord",
       "Keeper_compact_policy",
       "Keeper_config",
@@ -3591,9 +3591,9 @@
       "Keeper_sandbox_runner"
     ],
     "Keeper_error_classify": [
-      "Cascade_capability_profile",
+      "Runtime_capability_profile",
       "Keeper_agent_tool_surface",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_context_runtime",
       "Keeper_turn_driver",
@@ -3632,7 +3632,7 @@
     "Keeper_execution_receipt_failure_site": [],
     "Keeper_execution_receipt_outcome_kind": [],
     "Keeper_execution_receipt_types": [
-      "Cascade_runner",
+      "Runtime_runner",
       "Keeper_agent_tool_surface",
       "Keeper_contract_classifier",
       "Keeper_error_classify",
@@ -3829,8 +3829,8 @@
     ],
     "Keeper_heartbeat_smart": [],
     "Keeper_heartbeat_snapshot": [
-      "Cascade_events",
-      "Cascade_runtime",
+      "Runtime_events",
+      "Runtime_runtime",
       "Governance_registry",
       "Keeper_config",
       "Keeper_context_core",
@@ -3955,7 +3955,7 @@
     "Keeper_invariant_check": [],
     "Keeper_keepalive": [
       "Agent_tool_shared_runtime",
-      "Cascade_events",
+      "Runtime_events",
       "Coord",
       "Keeper_current_task_reconcile",
       "Keeper_event_bus",
@@ -3968,7 +3968,7 @@
       "Keeper_memory",
       "Keeper_metrics",
       "Keeper_registry",
-      "Keeper_registry_cascade_attempt",
+      "Keeper_registry_runtime_attempt",
       "Keeper_registry_error_recording",
       "Keeper_registry_lookup",
       "Keeper_registry_tool_usage_persistence",
@@ -4036,7 +4036,7 @@
       "Keeper_types"
     ],
     "Keeper_memory_llm_summary": [
-      "Cascade_catalog_runtime",
+      "Runtime_catalog_runtime",
       "Keeper_memory_bank",
       "Keeper_memory_llm_summary_outcome",
       "Keeper_metrics",
@@ -4119,7 +4119,7 @@
     "Keeper_metrics": [],
     "Keeper_metrics_sse_failure_kind": [],
     "Keeper_model_labels": [
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Keeper_types"
     ],
     "Keeper_msg_async": [
@@ -4150,8 +4150,8 @@
     "Keeper_persona_authoring": [
       "Agent_sdk_response",
       "Approval_callbacks",
-      "Cascade_runner",
-      "Keeper_cascade_profile",
+      "Runtime_runner",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_fs",
       "Keeper_persona_authoring_slug",
@@ -4161,7 +4161,7 @@
       "Masc_oas_bridge"
     ],
     "Keeper_persona_authoring_contract": [
-      "Keeper_cascade_profile"
+      "Keeper_runtime_profile"
     ],
     "Keeper_persona_authoring_slug": [
       "Keeper_config"
@@ -4230,7 +4230,7 @@
       "Prometheus",
       "Sse"
     ],
-    "Keeper_registry_cascade_attempt": [
+    "Keeper_registry_runtime_attempt": [
       "Coord",
       "Keeper_registry",
       "Keeper_registry_types",
@@ -4303,7 +4303,7 @@
       "Keeper_transition_audit",
       "Keeper_types"
     ],
-    "Keeper_registry_types_cascade": [],
+    "Keeper_registry_types_runtime": [],
     "Keeper_registry_types_decision": [],
     "Keeper_registry_types_failure": [
       "Keeper_registry_types_kill_class"
@@ -4334,8 +4334,8 @@
       "Keeper_types"
     ],
     "Keeper_run_context": [
-      "Cascade_inference",
-      "Cascade_runtime",
+      "Runtime_inference",
+      "Runtime_runtime",
       "Coord",
       "Goal_store",
       "Keeper_agent_checkpoint_hygiene",
@@ -4365,8 +4365,8 @@
       "Memory_hooks"
     ],
     "Keeper_run_tools": [
-      "Cascade_observation",
-      "Cascade_runner",
+      "Runtime_observation",
+      "Runtime_runner",
       "Keeper_agent_error",
       "Keeper_agent_prompt_metrics",
       "Keeper_agent_result",
@@ -4389,9 +4389,9 @@
       "Keeper_types"
     ],
     "Keeper_run_tools_hooks": [
-      "Cascade_inference",
-      "Cascade_observation",
-      "Cascade_runner",
+      "Runtime_inference",
+      "Runtime_observation",
+      "Runtime_runner",
       "Coord",
       "Keeper_agent_error",
       "Keeper_agent_prompt_metrics",
@@ -4432,10 +4432,10 @@
     ],
     "Keeper_run_tools_setup": [
       "Agent_tool_dispatch_runtime",
-      "Cascade_catalog_runtime",
-      "Cascade_config",
-      "Cascade_observation",
-      "Cascade_runner",
+      "Runtime_catalog_runtime",
+      "Runtime_config",
+      "Runtime_observation",
+      "Runtime_runner",
       "Coord",
       "Keeper_agent_error",
       "Keeper_agent_prompt_metrics",
@@ -4474,10 +4474,10 @@
       "Keeper_types"
     ],
     "Keeper_runtime": [
-      "Cascade_catalog_runtime",
+      "Runtime_catalog_runtime",
       "Coord",
       "Governance_registry",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_identity",
       "Keeper_keepalive",
@@ -4763,9 +4763,9 @@
     ],
     "Keeper_spec_intf": [],
     "Keeper_stale_watchdog": [
-      "Cascade_catalog_runtime",
-      "Cascade_health_filter",
-      "Cascade_runtime_candidate",
+      "Runtime_catalog_runtime",
+      "Runtime_health_filter",
+      "Runtime_runtime_candidate",
       "Keeper_execution_receipt",
       "Keeper_heartbeat_loop",
       "Keeper_id",
@@ -4806,9 +4806,9 @@
       "Keeper_types_support"
     ],
     "Keeper_status_bridge": [
-      "Cascade_toml_materializer",
+      "Runtime_toml_materializer",
       "Keeper_approval_queue",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_memory_policy",
       "Keeper_registry",
@@ -4881,7 +4881,7 @@
       "Prometheus"
     ],
     "Keeper_supervisor": [
-      "Cascade_events",
+      "Runtime_events",
       "Coord",
       "Governance_registry",
       "Keeper_approval_queue",
@@ -4894,7 +4894,7 @@
       "Keeper_meta_merge",
       "Keeper_metrics",
       "Keeper_registry",
-      "Keeper_registry_cascade_attempt",
+      "Keeper_registry_runtime_attempt",
       "Keeper_registry_error_recording",
       "Keeper_state_machine",
       "Keeper_supervisor_alive_but_stuck",
@@ -4937,7 +4937,7 @@
       "Keeper_meta_merge",
       "Keeper_metrics",
       "Keeper_registry",
-      "Keeper_registry_cascade_attempt",
+      "Keeper_registry_runtime_attempt",
       "Keeper_registry_error_recording",
       "Keeper_registry_event_queue",
       "Keeper_registry_types",
@@ -4986,7 +4986,7 @@
       "Prometheus"
     ],
     "Keeper_supervisor_publish_lifecycle": [
-      "Cascade_events",
+      "Runtime_events",
       "Keeper_lifecycle_audit",
       "Keeper_lifecycle_events",
       "Keeper_state_machine"
@@ -5028,7 +5028,7 @@
       "Prometheus"
     ],
     "Keeper_supervisor_startup_helpers": [
-      "Cascade_error_classify",
+      "Runtime_error_classify",
       "Keeper_metrics",
       "Keeper_supervisor_types",
       "Keeper_types",
@@ -5291,8 +5291,8 @@
     ],
     "Keeper_turn": [
       "Agent_tool_preflight_runtime",
-      "Cascade_catalog_runtime",
-      "Cascade_runtime",
+      "Runtime_catalog_runtime",
+      "Runtime_runtime",
       "Coord",
       "Keeper_accountability",
       "Keeper_agent_run",
@@ -5313,7 +5313,7 @@
       "Keeper_registry",
       "Keeper_social_model",
       "Keeper_state_machine",
-      "Keeper_turn_cascade_budget",
+      "Keeper_turn_runtime_budget",
       "Keeper_turn_helpers",
       "Keeper_turn_lifecycle",
       "Keeper_turn_setup",
@@ -5327,12 +5327,12 @@
       "Prometheus",
       "Tool_name"
     ],
-    "Keeper_turn_cascade_budget": [
-      "Cascade_internal_error",
+    "Keeper_turn_runtime_budget": [
+      "Runtime_internal_error",
       "Coord",
       "Keeper_agent_tool_surface",
       "Keeper_approval_queue",
-      "Keeper_cascade_sync_failure_site",
+      "Keeper_runtime_sync_failure_site",
       "Keeper_context_runtime",
       "Keeper_meta_merge",
       "Keeper_metrics",
@@ -5341,27 +5341,27 @@
       "Keeper_runtime_resolved",
       "Keeper_state_machine",
       "Keeper_supervisor_pause_policy",
-      "Keeper_turn_cascade_budget_admission",
-      "Keeper_turn_cascade_budget_event_bus",
-      "Keeper_turn_cascade_budget_routing",
+      "Keeper_turn_runtime_budget_admission",
+      "Keeper_turn_runtime_budget_event_bus",
+      "Keeper_turn_runtime_budget_routing",
       "Keeper_turn_driver",
       "Keeper_turn_helpers",
       "Keeper_types",
       "Prometheus"
     ],
-    "Keeper_turn_cascade_budget_admission": [
-      "Cascade_internal_error"
+    "Keeper_turn_runtime_budget_admission": [
+      "Runtime_internal_error"
     ],
-    "Keeper_turn_cascade_budget_event_bus": [],
-    "Keeper_turn_cascade_budget_provider_timeout": [
+    "Keeper_turn_runtime_budget_event_bus": [],
+    "Keeper_turn_runtime_budget_provider_timeout": [
       "Keeper_runtime_resolved"
     ],
-    "Keeper_turn_cascade_budget_routing": [
+    "Keeper_turn_runtime_budget_routing": [
       "Agent_stress",
-      "Cascade_capability_profile",
-      "Cascade_routes",
+      "Runtime_capability_profile",
+      "Runtime_routes",
       "Keeper_agent_tool_surface",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_context_runtime",
       "Keeper_types"
@@ -5371,98 +5371,98 @@
     "Keeper_turn_driver": [
       "Admission_queue",
       "Agent_sdk_response",
-      "Cascade_capacity_probe",
-      "Cascade_catalog_runtime",
-      "Cascade_client_capacity",
-      "Cascade_error_classify",
-      "Cascade_health_tracker",
-      "Cascade_oas_runner",
-      "Cascade_observation",
-      "Cascade_preflight_state",
-      "Cascade_runner",
-      "Cascade_runtime_candidate",
-      "Cascade_strategy",
-      "Cascade_strategy_trace",
-      "Keeper_cascade_engine",
-      "Keeper_cascade_profile",
+      "Runtime_capacity_probe",
+      "Runtime_catalog_runtime",
+      "Runtime_client_capacity",
+      "Runtime_error_classify",
+      "Runtime_health_tracker",
+      "Runtime_oas_runner",
+      "Runtime_observation",
+      "Runtime_preflight_state",
+      "Runtime_runner",
+      "Runtime_runtime_candidate",
+      "Runtime_strategy",
+      "Runtime_strategy_trace",
+      "Keeper_runtime_engine",
+      "Keeper_runtime_profile",
       "Keeper_identity",
       "Keeper_runtime_manifest",
       "Keeper_turn_driver_admission",
       "Keeper_turn_driver_named_resolution",
-      "Keeper_turn_driver_try_cascade",
+      "Keeper_turn_driver_try_runtime",
       "Keeper_turn_driver_try_provider",
       "Keeper_types",
       "Masc_grpc_transport",
       "Provider_health"
     ],
     "Keeper_turn_driver_admission": [
-      "Cascade_attempt_fsm",
-      "Cascade_catalog_runtime_named_providers",
-      "Cascade_runtime_candidate",
-      "Cascade_saturation_signal",
-      "Cascade_tier_admission",
-      "Cascade_tier_wait_scheduler",
+      "Runtime_attempt_fsm",
+      "Runtime_catalog_runtime_named_providers",
+      "Runtime_runtime_candidate",
+      "Runtime_saturation_signal",
+      "Runtime_tier_admission",
+      "Runtime_tier_wait_scheduler",
       "Keeper_metrics",
       "Prometheus"
     ],
     "Keeper_turn_driver_backpressure": [
-      "Cascade_internal_error"
+      "Runtime_internal_error"
     ],
-    "Keeper_turn_driver_cascade_health": [
-      "Cascade_attempt_fsm",
-      "Cascade_client_capacity",
-      "Cascade_error_classify",
-      "Cascade_health_tracker",
-      "Cascade_runner",
-      "Cascade_runtime_candidate"
+    "Keeper_turn_driver_runtime_health": [
+      "Runtime_attempt_fsm",
+      "Runtime_client_capacity",
+      "Runtime_error_classify",
+      "Runtime_health_tracker",
+      "Runtime_runner",
+      "Runtime_runtime_candidate"
     ],
     "Keeper_turn_driver_helpers": [
-      "Cascade_error_classify",
-      "Cascade_runtime_candidate",
+      "Runtime_error_classify",
+      "Runtime_runtime_candidate",
       "Keeper_tool_alias"
     ],
     "Keeper_turn_driver_named_resolution": [
-      "Cascade_catalog_runtime_named_providers",
-      "Cascade_runtime"
+      "Runtime_catalog_runtime_named_providers",
+      "Runtime_runtime"
     ],
     "Keeper_turn_driver_provider_attempt": [
-      "Cascade_attempt_fsm",
-      "Cascade_health_tracker",
-      "Cascade_runtime_candidate"
+      "Runtime_attempt_fsm",
+      "Runtime_health_tracker",
+      "Runtime_runtime_candidate"
     ],
-    "Keeper_turn_driver_try_cascade": [
+    "Keeper_turn_driver_try_runtime": [
       "Agent_sdk_response",
-      "Cascade_attempt_liveness_config",
-      "Cascade_candidate_skip_reason",
-      "Cascade_error_classify",
-      "Cascade_fsm",
-      "Cascade_health_tracker",
-      "Cascade_health_tracker_config",
-      "Cascade_metrics",
-      "Cascade_oas_runner",
-      "Cascade_observation",
-      "Cascade_runtime_candidate",
-      "Cascade_tier_admission",
-      "Keeper_cascade_engine",
-      "Keeper_registry_cascade_attempt",
+      "Runtime_attempt_liveness_config",
+      "Runtime_candidate_skip_reason",
+      "Runtime_error_classify",
+      "Runtime_fsm",
+      "Runtime_health_tracker",
+      "Runtime_health_tracker_config",
+      "Runtime_metrics",
+      "Runtime_oas_runner",
+      "Runtime_observation",
+      "Runtime_runtime_candidate",
+      "Runtime_tier_admission",
+      "Keeper_runtime_engine",
+      "Keeper_registry_runtime_attempt",
       "Keeper_runtime_manifest",
       "Keeper_turn_driver_admission",
       "Keeper_turn_driver_backpressure",
-      "Keeper_turn_driver_cascade_health",
+      "Keeper_turn_driver_runtime_health",
       "Keeper_turn_driver_try_provider",
       "Keeper_types",
       "Provider_capability"
     ],
     "Keeper_turn_driver_try_provider": [
-      "Cascade_attempt_liveness",
-      "Cascade_attempt_liveness_config",
-      "Cascade_attempt_liveness_observer",
-      "Cascade_config_builder",
-      "Cascade_oas_runner",
-      "Cascade_runner",
-      "Cascade_runtime_candidate",
+      "Runtime_attempt_liveness",
+      "Runtime_attempt_liveness_config",
+      "Runtime_attempt_liveness_observer",
+      "Runtime_config_builder",
+      "Runtime_oas_runner",
+      "Runtime_runner",
+      "Runtime_runtime_candidate",
       "Keeper_approval_queue",
-      "Keeper_cascade_engine",
+      "Keeper_runtime_engine",
       "Keeper_identity",
       "Keeper_runtime_manifest",
       "Keeper_runtime_resolved",
@@ -5473,9 +5473,9 @@
     "Keeper_turn_driver_wrappers": [
       "Admission_queue",
       "Agent_sdk_response",
-      "Cascade_config_builder",
-      "Cascade_oas_runner",
-      "Cascade_runner",
+      "Runtime_config_builder",
+      "Runtime_oas_runner",
+      "Runtime_runner",
       "Keeper_turn_driver",
       "Masc_grpc_transport",
       "Tool_bridge"
@@ -5487,7 +5487,7 @@
       "Prometheus"
     ],
     "Keeper_turn_helpers": [
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Coord",
       "Keeper_agent_tool_surface",
       "Keeper_context_runtime",
@@ -5524,9 +5524,9 @@
       "Prometheus"
     ],
     "Keeper_turn_liveness": [
-      "Cascade_capacity_probe",
-      "Cascade_runtime_candidate",
-      "Keeper_cascade_profile",
+      "Runtime_capacity_probe",
+      "Runtime_runtime_candidate",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_types"
     ],
@@ -5583,10 +5583,10 @@
       "Keeper_types"
     ],
     "Keeper_turn_up_args": [
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Coord",
       "Keeper_alerting_path",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_meta_contract",
       "Keeper_sandbox",
@@ -5594,7 +5594,7 @@
     ],
     "Keeper_turn_up_create": [
       "Auth",
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Goal_store",
       "Governance_registry",
       "Keeper_alerting_path",
@@ -5680,18 +5680,18 @@
       "Prometheus"
     ],
     "Keeper_types_profile_toml_normalizers": [
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_social_model_types",
       "Keeper_types_profile_per_provider_timeout",
       "Keeper_types_profile_persona"
     ],
     "Keeper_types_profile_toml_parser": [
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_toml_loader",
       "Prometheus"
     ],
     "Keeper_types_support": [
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Coord",
       "Keeper_fs"
     ],
@@ -5713,7 +5713,7 @@
       "Sse"
     ],
     "Keeper_unified_metrics_decision": [
-      "Cascade_runner",
+      "Runtime_runner",
       "Coord",
       "Keeper_agent_run",
       "Keeper_agent_tool_surface",
@@ -5742,7 +5742,7 @@
       "Prometheus"
     ],
     "Keeper_unified_metrics_json_support": [
-      "Cascade_observation",
+      "Runtime_observation",
       "Keeper_agent_run",
       "Keeper_agent_tool_surface",
       "Keeper_context_runtime",
@@ -5758,7 +5758,7 @@
       "Prometheus"
     ],
     "Keeper_unified_metrics_snapshot": [
-      "Cascade_observation",
+      "Runtime_observation",
       "Coord",
       "Keeper_agent_run",
       "Keeper_context_runtime",
@@ -5799,7 +5799,7 @@
       "Coord",
       "Keeper_agent_error",
       "Keeper_agent_run",
-      "Keeper_cascade_sync_failure_site",
+      "Keeper_runtime_sync_failure_site",
       "Keeper_config",
       "Keeper_context_runtime",
       "Keeper_execution_receipt",
@@ -5821,7 +5821,7 @@
       "Keeper_types_profile",
       "Keeper_unified_metrics",
       "Keeper_unified_prompt",
-      "Keeper_unified_turn_cascade_resolution",
+      "Keeper_unified_turn_runtime_resolution",
       "Keeper_unified_turn_event_bus",
       "Keeper_unified_turn_execution",
       "Keeper_unified_turn_failure",
@@ -5836,9 +5836,9 @@
       "Prometheus"
     ],
     "Keeper_unified_turn_attempt_watchdog": [],
-    "Keeper_unified_turn_cascade_resolution": [
-      "Keeper_cascade_engine",
-      "Keeper_cascade_routing",
+    "Keeper_unified_turn_runtime_resolution": [
+      "Keeper_runtime_engine",
+      "Keeper_runtime_routing",
       "Keeper_context_runtime",
       "Keeper_metrics",
       "Keeper_model_labels",
@@ -5852,13 +5852,13 @@
       "Keeper_event_bus",
       "Keeper_event_bus_drain_site",
       "Keeper_metrics",
-      "Keeper_turn_cascade_budget",
+      "Keeper_turn_runtime_budget",
       "Keeper_turn_helpers",
       "Keeper_unified_turn_types",
       "Prometheus"
     ],
     "Keeper_unified_turn_execution": [
-      "Cascade_internal_error",
+      "Runtime_internal_error",
       "Coord",
       "Keeper_agent_run",
       "Keeper_agent_tool_surface",
@@ -5872,7 +5872,7 @@
       "Keeper_registry",
       "Keeper_state_machine",
       "Keeper_tool_registry",
-      "Keeper_turn_cascade_budget",
+      "Keeper_turn_runtime_budget",
       "Keeper_turn_driver",
       "Keeper_turn_fsm",
       "Keeper_turn_slot",
@@ -5893,7 +5893,7 @@
       "Keeper_oas_execution_error_phase",
       "Keeper_registry",
       "Keeper_supervisor_pause_policy",
-      "Keeper_turn_cascade_budget",
+      "Keeper_turn_runtime_budget",
       "Keeper_types",
       "Keeper_types_profile",
       "Keeper_unified_turn_types",
@@ -5906,7 +5906,7 @@
       "Keeper_metrics",
       "Keeper_registry",
       "Keeper_supervisor_pause_policy",
-      "Keeper_turn_cascade_budget",
+      "Keeper_turn_runtime_budget",
       "Keeper_turn_fsm",
       "Keeper_turn_helpers",
       "Keeper_turn_livelock",
@@ -5928,12 +5928,12 @@
       "Keeper_state_machine"
     ],
     "Keeper_unified_turn_pre_dispatch": [
-      "Cascade_error_classify",
-      "Cascade_inference",
-      "Cascade_runtime",
+      "Runtime_error_classify",
+      "Runtime_inference",
+      "Runtime_runtime",
       "Keeper_config",
       "Keeper_context_runtime",
-      "Keeper_turn_cascade_budget",
+      "Keeper_turn_runtime_budget",
       "Keeper_turn_helpers",
       "Keeper_types",
       "Keeper_types_profile",
@@ -5960,7 +5960,7 @@
       "Keeper_types"
     ],
     "Keeper_unified_turn_success": [
-      "Cascade_runner",
+      "Runtime_runner",
       "Coord",
       "Keeper_accountability",
       "Keeper_agent_run",
@@ -5993,12 +5993,12 @@
     ],
     "Keeper_unified_turn_types": [
       "Agent_tool_dispatch_runtime",
-      "Cascade_error_classify",
+      "Runtime_error_classify",
       "Coord",
       "Keeper_behavioral_regime",
       "Keeper_error_classify",
       "Keeper_registry",
-      "Keeper_turn_cascade_budget",
+      "Keeper_turn_runtime_budget",
       "Keeper_turn_disposition",
       "Keeper_turn_fsm",
       "Keeper_turn_helpers",
@@ -6111,10 +6111,10 @@
       "Keeper_types"
     ],
     "Keeper_world_observation_provider_cooldown": [
-      "Cascade_health_tracker",
-      "Cascade_runtime",
-      "Cascade_runtime_candidate",
-      "Keeper_cascade_profile",
+      "Runtime_health_tracker",
+      "Runtime_runtime",
+      "Runtime_runtime_candidate",
+      "Keeper_runtime_profile",
       "Keeper_config",
       "Keeper_types"
     ],
@@ -6186,8 +6186,8 @@
       "Discovery_cache"
     ],
     "Worker_container": [
-      "Cascade_config",
-      "Cascade_worker_defaults",
+      "Runtime_config",
+      "Runtime_worker_defaults",
       "Telemetry_eio",
       "Tool_catalog",
       "Worker_dev_tools",
@@ -6214,7 +6214,7 @@
       "Prometheus"
     ],
     "Masc_oas_bridge": [
-      "Cascade_error_classify",
+      "Runtime_error_classify",
       "Masc_eio_env",
       "Prometheus"
     ],
@@ -6234,7 +6234,7 @@
     ],
     "Mcp_server": [
       "Board_dispatch",
-      "Cascade_observation",
+      "Runtime_observation",
       "Coord",
       "Session",
       "Subscriptions",
@@ -6462,7 +6462,7 @@
       "Model_inference_metrics_reader"
     ],
     "Model_inference_metrics_parser": [
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Model_inference_metrics_entry"
     ],
     "Model_inference_metrics_reader": [
@@ -6527,7 +6527,7 @@
     ],
     "Operator_control_snapshot_cache": [],
     "Operator_control_snapshot_identity_fields": [
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_types",
       "Operator_pending_confirm"
     ],
@@ -6669,7 +6669,7 @@
       "Keeper_metrics",
       "Prometheus_builtin_metric_names"
     ],
-    "Prometheus_cascade_metric_names": [],
+    "Prometheus_runtime_metric_names": [],
     "Prometheus_core_metric_names": [],
     "Prometheus_format": [],
     "Prometheus_hotpath": [
@@ -6700,7 +6700,7 @@
       "Prometheus"
     ],
     "Provider_kind_resolver": [
-      "Cascade_model_resolve"
+      "Runtime_model_resolve"
     ],
     "Provider_runtime_projection": [],
     "Provider_tool_support": [
@@ -6711,7 +6711,7 @@
       "Graphql_client"
     ],
     "Relay": [
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Governance_registry",
       "Runtime_params"
     ],
@@ -6783,7 +6783,7 @@
       "Board",
       "Board_dispatch",
       "Board_votes",
-      "Cascade_event_bridge",
+      "Runtime_event_bridge",
       "Coord",
       "Dashboard",
       "Dashboard_governance_judge",
@@ -6833,7 +6833,7 @@
       "Agent_registry_eio",
       "Auth",
       "Cache_eio",
-      "Cascade_trust_persist",
+      "Runtime_trust_persist",
       "Coord",
       "Dashboard_snapshot",
       "Dispatch_outcome",
@@ -6862,12 +6862,12 @@
       "Tool_usage_log",
       "Transport_metrics"
     ],
-    "Server_dashboard_cascade_profile_gate": [
-      "Cascade_catalog_runtime",
-      "Cascade_catalog_validator",
-      "Cascade_runtime",
-      "Dashboard_cascade",
-      "Keeper_cascade_profile"
+    "Server_dashboard_runtime_profile_gate": [
+      "Runtime_catalog_runtime",
+      "Runtime_catalog_validator",
+      "Runtime_runtime",
+      "Dashboard_runtime",
+      "Keeper_runtime_profile"
     ],
     "Server_dashboard_compact_receipt_json": [
       "Server_dashboard_http_json_utils"
@@ -7081,7 +7081,7 @@
       "Coord",
       "Dashboard_http_keeper",
       "Keeper_behavioral_regime_observer",
-      "Keeper_cascade_routing",
+      "Keeper_runtime_routing",
       "Keeper_chat_store",
       "Keeper_config",
       "Keeper_decision_audit",
@@ -7420,7 +7420,7 @@
     "Server_openai_compat": [
       "Agent_sdk_response",
       "Approval_callbacks",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_turn",
       "Keeper_turn_driver",
       "Keeper_types",
@@ -7435,7 +7435,7 @@
       "Server_routes_http_routes_artifacts",
       "Server_routes_http_routes_attribution",
       "Server_routes_http_routes_autonomous",
-      "Server_routes_http_routes_cascade",
+      "Server_routes_http_routes_runtime",
       "Server_routes_http_routes_channel_gate",
       "Server_routes_http_routes_credentials",
       "Server_routes_http_routes_dashboard",
@@ -7466,7 +7466,7 @@
       "Tool_task"
     ],
     "Server_routes_http_dashboard_provider_logs": [
-      "Cascade_runtime",
+      "Runtime_runtime",
       "Server_utils"
     ],
     "Server_routes_http_keeper_stream": [
@@ -7521,8 +7521,8 @@
       "Server_auth",
       "Server_utils"
     ],
-    "Server_routes_http_routes_cascade": [
-      "Dashboard_cascade",
+    "Server_routes_http_routes_runtime": [
+      "Dashboard_runtime",
       "Mcp_server",
       "Server_auth",
       "Server_utils"
@@ -7569,7 +7569,7 @@
       "Server_utils",
       "Tool_name"
     ],
-    "Server_routes_http_routes_dashboard_cascade_meta": [
+    "Server_routes_http_routes_dashboard_runtime_meta": [
       "Coord",
       "Keeper_registry",
       "Keeper_types"
@@ -7586,7 +7586,7 @@
       "Server_routes_http_dashboard_dev_token",
       "Server_routes_http_dashboard_handlers",
       "Server_routes_http_keeper_stream",
-      "Server_routes_http_routes_dashboard_cascade_meta",
+      "Server_routes_http_routes_dashboard_runtime_meta",
       "Server_timing",
       "Server_utils",
       "Telemetry_unified"
@@ -7743,7 +7743,7 @@
       "Backend_mutex_metrics",
       "Board_dispatch",
       "Build_identity",
-      "Cascade_catalog_runtime",
+      "Runtime_catalog_runtime",
       "Coord",
       "Dashboard",
       "Discovery_cache",
@@ -8017,7 +8017,7 @@
       "Agent_sdk_response",
       "Approval_callbacks",
       "Coord",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_turn_driver",
       "Masc_oas_bridge"
     ],
@@ -8159,8 +8159,8 @@
       "Tool_spec"
     ],
     "Tool_local_runtime_bench": [
-      "Cascade_config",
-      "Cascade_runtime",
+      "Runtime_config",
+      "Runtime_runtime",
       "Inference_utils",
       "Local_runtime_pool",
       "Masc_eio_env"
@@ -8364,7 +8364,7 @@
     ],
     "Tool_token": [],
     "Tool_unified": [
-      "Cascade_observation",
+      "Runtime_observation",
       "Config",
       "Tool_capability",
       "Tool_catalog",
@@ -8444,7 +8444,7 @@
       "Agent_sdk_response",
       "Approval_callbacks",
       "Eval_gate",
-      "Keeper_cascade_profile",
+      "Keeper_runtime_profile",
       "Keeper_turn_driver_wrappers"
     ],
     "Version": [],
@@ -8486,9 +8486,9 @@
     ],
     "Worker_oas": [
       "Approval_callbacks",
-      "Cascade_runner",
-      "Cascade_runtime",
-      "Cascade_worker_defaults",
+      "Runtime_runner",
+      "Runtime_runtime",
+      "Runtime_worker_defaults",
       "Eval_gate",
       "Keeper_disclosure_strategy",
       "Masc_context_injector",
@@ -8503,7 +8503,7 @@
       "Worker_execution_backend"
     ],
     "Worker_runtime_docker": [
-      "Cascade_config",
+      "Runtime_config",
       "Docker_spawn_throttle",
       "Worker_container",
       "Worker_container_types",

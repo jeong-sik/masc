@@ -1,5 +1,5 @@
-(** Authorization header helpers for runtime MCP transport,
-    extracted from cascade_transport.ml.
+(** Authorization header helpers for runtime runtime MCP transport,
+    extracted from runtime_transport.ml.
 
     Pure functions over runtime-MCP policy + per-keeper auth headers;
     no protocol/transport state owned here. *)

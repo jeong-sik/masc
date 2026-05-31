@@ -72,7 +72,7 @@ val fail_open_health_filtered_candidates :
     ~health_filtered_candidates] preserves health-filtered candidates unless
     the health/cooldown filter would empty an otherwise tool-capable candidate
     set. In that all-cooldown case it returns the pre-health-filter candidates
-    plus [true], allowing the cascade to attempt at least one provider and
+    plus [true], allowing the runtime to attempt at least one provider and
     surface the real upstream result instead of stopping at
     [no_providers_available]. *)
 

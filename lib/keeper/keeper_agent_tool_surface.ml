@@ -424,7 +424,7 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
           [ "keeper_board_curation_submit" ]
   then
     (* Keep the curation submit tool visible, but do not force exact
-       tool_choice. Several keeper cascades can use runtime MCP tools while
+       tool_choice. Several keeper runtimes can use runtime MCP tools while
        lacking inline exact-tool-choice support; exact forcing turns those
        productive lanes into spurious pause-human failures. *)
     Agent_sdk.Types.Any

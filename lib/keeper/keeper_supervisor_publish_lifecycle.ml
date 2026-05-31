@@ -4,7 +4,7 @@
     [publish_lifecycle] is the supervisor's single event-emission
     helper.  It (a) records the event into the per-keeper lifecycle
     audit ring for the dashboard (#12798), and (b) republishes onto
-    the cascade event bus when the process-wide MASC event bus is set.
+    the runtime event bus when the process-wide MASC event bus is set.
 
     [publish_phase_lifecycle ~phase] is a thin convenience that
     constructs a [Keeper_lifecycle_events.Phase_event phase] and

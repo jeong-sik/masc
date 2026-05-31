@@ -329,10 +329,10 @@ module KeeperKeepalive = struct
       No timeout may exceed this value regardless of env override.
 
       Default: 900 (15 minutes), lifted from 600 in PR #13861's
-      RFC-0012/0022 update permitting per-cascade turn_timeout_sec
-      overrides. Local-LLM cascades that legitimately run 27 B turns
-      ≥600 s can now opt in via env or the upcoming cascade.toml
-      override; remote cascades stay at the global default 600.
+      RFC-0012/0022 update permitting per-runtime turn_timeout_sec
+      overrides. Local-LLM runtimes that legitimately run 27 B turns
+      ≥600 s can now opt in via env or the upcoming keeper_runtime.toml
+      override; remote runtimes stay at the global default 600.
 
       Promotion to 1 800 s requires a follow-up RFC plus one week of
       [masc_keeper_turns_total{terminated_by="turn_timeout"}] and p95
@@ -340,16 +340,16 @@ module KeeperKeepalive = struct
   let timeout_hard_ceiling_sec = 900.0
 
   (** Wall-clock timeout in seconds for a single unified turn (including all
-      retries and cascade fallbacks). Prevents indefinite blocking when an
+      retries and runtime fallbacks). Prevents indefinite blocking when an
       upstream LLM hangs at the TCP level.
       Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 900].
 
       The default stays at 600 (the prior hard ceiling) so existing
-      remote cascades keep their budget unchanged; the lifted ceiling
-      only fires when an operator opts in via env or cascade override.
+      remote runtimes keep their budget unchanged; the lifted ceiling
+      only fires when an operator opts in via env or runtime override.
       RFC-0156: post-removal there is no per-provider OAS cap layered
       below this — [oas_call_timeout_sec] reuses [turn_timeout_sec]
-      directly; cascade rotation is driven by [stream_idle_timeout_sec]
+      directly; runtime rotation is driven by [stream_idle_timeout_sec]
       + HTTP error + completion contract. *)
   let turn_timeout_sec =
     Float.max
@@ -364,7 +364,7 @@ module KeeperKeepalive = struct
 
       With admission max_concurrent=1 (MLX decode serial), a keeper may wait
       for the full duration of the preceding keeper's turn. Observed turn
-      durations: 180-963s. Default 180s covers the common case (GLM cascade
+      durations: 180-963s. Default 180s covers the common case (GLM runtime
       completes in ~180s) while avoiding indefinite waits.
 
       Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 180.0.
@@ -451,7 +451,7 @@ module KeeperKeepalive = struct
 
   (* RFC-0156: OAS total timeout removed. Resolved OAS-call timeout = override
      when set, else turn_timeout_sec (wall-clock cap). stream_idle_timeout
-     handles per-stream cap; cascade rotation triggers on stream_idle + HTTP
+     handles per-stream cap; runtime rotation triggers on stream_idle + HTTP
      error + completion contract. Historic names
      ([oas_timeout_for_estimated_input_tokens] /
      [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored the
@@ -473,7 +473,7 @@ module KeeperKeepalive = struct
 
   (** Total HTTP body-consumption deadline for one OAS streaming call.
       Wraps the body callback in [Eio.Time.with_timeout_exn] in agent_sdk;
-      on expiry [Retry.Timeout] surfaces and cascade falls forward to the
+      on expiry [Retry.Timeout] surfaces and runtime falls forward to the
       next provider at the attempt boundary. Complements
       [stream_idle_timeout_sec] (which only caps inter-line silence):
       this catches the case where a single bulk read hangs without
@@ -729,44 +729,44 @@ module KeeperTelemetry = struct
   let payload_telemetry_enabled () = get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
 end
 
-(** {1 Cascade Saturation Signal (RFC-0153 Phase A.2)}
+(** {1 Runtime Saturation Signal (RFC-0153 Phase A.2)}
 
-    Feature flag for typed [Cascade_saturation_signal.t] emission from
-    structured cascade/provider errors. The signal is consumed by Phase C
+    Feature flag for typed [Runtime_saturation_signal.t] emission from
+    structured runtime/provider errors. The signal is consumed by Phase C
     (adaptive throttling).
 
     Default off. Phase A.2 emit is purely additive — it increments a new
-    Prometheus counter ([masc_keeper_cascade_saturation_signal_total])
-    with a typed [kind] label sourced from {!Cascade_saturation_signal.kind}. *)
-module CascadeSaturationSignal = struct
+    Prometheus counter ([masc_keeper_runtime_saturation_signal_total])
+    with a typed [kind] label sourced from {!Runtime_saturation_signal.kind}. *)
+module RuntimeSaturationSignal = struct
   let enabled () =
     get_bool ~default:false "MASC_CASCADE_SATURATION_SIGNAL_ENABLED"
 end
 
-(** {1 Cascade Runtime Overrides}
+(** {1 Runtime Runtime Overrides}
 
-    Runtime-only narrowing of the MASC cascade provider set. The underlying
-    cascade profile (loaded from [cascade.toml]) is unchanged; this filter is
-    applied by the named-cascade execution path via [~provider_filter] on every
-    keeper turn, so switching between full cascade and a single-provider
+    Runtime-only narrowing of the MASC runtime provider set. The underlying
+    runtime profile (loaded from [keeper_runtime.toml]) is unchanged; this filter is
+    applied by the named-runtime execution path via [~provider_filter] on every
+    keeper turn, so switching between full runtime and a single-provider
     fallback is a pure env-var change with no file or code edit.
 
     Use case: GLM endpoint outage (e.g. z.ai quota exhausted), Ollama-only
     hard mode, or A/B testing a single provider. *)
-module KeeperCascade = struct
-  (** Comma-separated provider kind allowlist for every keeper cascade call.
+module KeeperRuntimeProviderFilter = struct
+  (** Comma-separated provider kind allowlist for every keeper runtime call.
       Values are OAS [Provider_config.string_of_provider_kind]:
       [ollama], [provider_k], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
       [provider_c], [cli_tool_c], [cli_tool_b], [cli_tool_a].
       Matching is case-insensitive; empty entries are dropped.
 
       Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Keeper_turn_driver.run_named], which applies it during MASC cascade
+      into [Keeper_turn_driver.run_named], which applies it during MASC runtime
       provider resolution. The runtime keeps only matching providers from
       the resolved profile; if the filter leaves zero providers, OAS falls back
       to the unfiltered profile (see [apply_provider_filter] safety net).
 
-      [None] (env var unset or blank) = full cascade, unfiltered.
+      [None] (env var unset or blank) = full runtime, unfiltered.
 
       Env: [MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST]. Default: unset. *)
   let provider_allowlist () : string list option =
@@ -788,7 +788,7 @@ end
 (** {1 Transient Retry Backoff}
 
     Outer-loop retry parameters for transient network errors and
-    recoverable cascade failures.  These govern the keeper's exponential
+    recoverable runtime failures.  These govern the keeper's exponential
     backoff between re-attempts when all OAS providers fail transiently
     (e.g. TCP keepalive expiry).  They do NOT affect OAS internal
     per-provider retry (3 attempts with its own backoff). *)

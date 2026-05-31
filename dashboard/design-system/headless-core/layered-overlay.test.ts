@@ -148,18 +148,18 @@ describe('createLayeredOverlay', () => {
 describe('createLayeredOverlay — conflictsWith (RFC-0028 §3 / §10)', () => {
   const CONFLICT_LAYERS: ReadonlyArray<OverlayLayer> = [
     { kind: 'time', label: 'Time', description: '' },
-    { kind: 'cascade', label: 'Cascade', description: '' },
+    { kind: 'runtime', label: 'Runtime', description: '' },
     {
       kind: 'keeper-trace',
       label: 'Keeper Trace',
       description: '',
-      conflictsWith: ['cascade'],
+      conflictsWith: ['runtime'],
     },
   ]
 
   it('activating a layer with conflictsWith drops every active conflicting layer', () => {
     const c = createLayeredOverlay(CONFLICT_LAYERS)
-    c.toggle('cascade')
+    c.toggle('runtime')
     c.toggle('keeper-trace')
     expect([...c.active()]).toEqual(['keeper-trace'])
   })
@@ -167,26 +167,26 @@ describe('createLayeredOverlay — conflictsWith (RFC-0028 §3 / §10)', () => {
   it('activating the conflicted-with layer drops the layer that declared the conflict', () => {
     const c = createLayeredOverlay(CONFLICT_LAYERS)
     c.toggle('keeper-trace')
-    c.toggle('cascade')
-    // Symmetric: cascade activating drops keeper-trace because keeper-trace
-    // declared cascade in its conflictsWith.
-    expect([...c.active()]).toEqual(['cascade'])
+    c.toggle('runtime')
+    // Symmetric: runtime activating drops keeper-trace because keeper-trace
+    // declared runtime in its conflictsWith.
+    expect([...c.active()]).toEqual(['runtime'])
   })
 
   it('preserves a non-conflicting layer alongside the new one', () => {
     const c = createLayeredOverlay(CONFLICT_LAYERS)
     c.toggle('time')
-    c.toggle('cascade')
+    c.toggle('runtime')
     c.toggle('keeper-trace')
-    // 'time' is not in any conflictsWith → stays. 'cascade' goes.
+    // 'time' is not in any conflictsWith → stays. 'runtime' goes.
     expect([...c.active()].sort()).toEqual(['keeper-trace', 'time'])
   })
 
   it('setActive resolves multi-layer conflicts deterministically (registration order)', () => {
     const c = createLayeredOverlay(CONFLICT_LAYERS)
-    c.setActive(new Set(['cascade', 'keeper-trace', 'time']))
-    // 'cascade' is registered first → wins; 'keeper-trace' (later) loses.
-    expect([...c.active()].sort()).toEqual(['cascade', 'time'])
+    c.setActive(new Set(['runtime', 'keeper-trace', 'time']))
+    // 'runtime' is registered first → wins; 'keeper-trace' (later) loses.
+    expect([...c.active()].sort()).toEqual(['runtime', 'time'])
   })
 
   it('self-conflict declarations are ignored (kindA === kindB never conflicts)', () => {

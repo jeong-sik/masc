@@ -106,7 +106,7 @@ val execute_tool_eio :
     only passes them through to internal helpers — does
     not over-constrain the caller chain. *)
 
-(** {1 Cascade re-exports} *)
+(** {1 Runtime re-exports} *)
 
 val wait_for_message_eio :
   clock:_ Eio.Time.clock ->

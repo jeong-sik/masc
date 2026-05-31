@@ -77,7 +77,7 @@ let keeper_internal_tools =
     "keeper_tool_search"
     (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
        a regular tool — does not need a keeper shard entry.
-       keeper_unified: cascade name, not a tool. *)
+       keeper_unified: runtime name, not a tool. *)
   ]
 ;;
 

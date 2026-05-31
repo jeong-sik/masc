@@ -69,6 +69,11 @@ if [[ -z "$CONFIG_DIR" ]]; then
   CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/masc-divergent-config.${RUN_ID}.XXXXXX")"
   TEMP_CONFIG_DIR="$CONFIG_DIR"
   mkdir -p "$CONFIG_DIR/prompts" "$CONFIG_DIR/keepers" "$CONFIG_DIR/personas"
+  if [[ -f "$REPO_ROOT/config/keeper_runtime.toml" ]]; then
+    cp "$REPO_ROOT/config/keeper_runtime.toml" "$CONFIG_DIR/keeper_runtime.toml"
+  else
+    printf '# self-contained harness runtime seed\n' >"$CONFIG_DIR/keeper_runtime.toml"
+  fi
   if [[ -f "$REPO_ROOT/config/tool_policy.toml" ]]; then
     cp "$REPO_ROOT/config/tool_policy.toml" "$CONFIG_DIR/tool_policy.toml"
   fi

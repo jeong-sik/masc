@@ -155,8 +155,8 @@ end
 (** {1 Model Routing Defaults} *)
 
 module Model_defaults = struct
-  (** Default cascade label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
-  let default_cascade_opt () =
+  (** Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
+  let default_runtime_opt () =
     Sys.getenv_opt "MASC_DEFAULT_CASCADE" |> trim_opt
 
   (** Default provider name. *)
@@ -167,10 +167,10 @@ module Model_defaults = struct
   let default_model_opt () =
     Sys.getenv_opt "MASC_DEFAULT_MODEL" |> trim_opt
 
-  (** Routing cascade for team session routing. Defaults to the logical
-      [routes.routing] key; runtime callers normalize it through the cascade
+  (** Routing runtime for team session routing. Defaults to the logical
+      [routes.routing] key; runtime callers normalize it through the runtime
       route table. *)
-  let routing_cascade () =
+  let routing_runtime () =
     match Sys.getenv_opt "MASC_ROUTING_CASCADE" |> trim_opt with
     | Some s -> s
     | None -> "routing"

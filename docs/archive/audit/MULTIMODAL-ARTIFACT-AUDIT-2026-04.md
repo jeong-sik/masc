@@ -3,7 +3,7 @@
 **Date**: 2026-04-30
 **Scope**: artifact + hydrator + multimodal HTTP/dashboard layers
 **Pattern**: 4-phase audit (`docs/process/AUDIT-CHAIN-4-PHASE-PATTERN.md`, PR #12193 / §4.5 in PR #12223)
-**Position**: Fifth application of codified pattern (after Dashboard #12202/#12208, Auth #12209/#12217, Server HTTP #12213/#12218, Cascade #12222/Phase 2 sibling).
+**Position**: Fifth application of codified pattern (after Dashboard #12202/#12208, Auth #12209/#12217, Server HTTP #12213/#12218, Runtime #12222/Phase 2 sibling).
 
 ## 1. Surface
 
@@ -77,10 +77,10 @@ Per §4.5 of the pattern doc, Phase 2 will:
 | 4 | Dashboard observability | first to invoke codified pattern |
 | 5 | Auth/credential | second |
 | 6 | Server HTTP routes | third |
-| 7 | Cascade dispatch | fourth |
+| 7 | Runtime dispatch | fourth |
 | 8 | **Multimodal artifact (this PR)** | fifth |
 
-§4.5 outcome categories are now first-class predictions in Phase 1 framing — this is the second chain (after Cascade #12222) to use them as explicit Phase 1 → Phase 2 commitments.
+§4.5 outcome categories are now first-class predictions in Phase 1 framing — this is the second chain (after Runtime #12222) to use them as explicit Phase 1 → Phase 2 commitments.
 
 ## 7. References
 

@@ -80,15 +80,15 @@ let write_heartbeat_snapshot
   let metrics_store =
     Keeper_types_support.keeper_metrics_store ctx.config meta_current.name
   in
-  let cascade_models =
+  let runtime_models =
     Provider_runtime_projection.default_execution_model_strings
       ((Keeper_meta_contract.runtime_id_of_meta meta_current))
   in
-  let max_cascade_context =
+  let max_runtime_context =
     let resolution =
       Keeper_context_runtime.resolve_max_context_resolution
         ~requested_override:meta_current.max_context_override
-        cascade_models
+        runtime_models
     in
     resolution.effective_budget
   in
@@ -98,7 +98,7 @@ let write_heartbeat_snapshot
     load_context_from_checkpoint
       ~max_checkpoint_messages:meta_current.compaction.max_checkpoint_messages
       ~trace_id:(Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
-      ~primary_model_max_tokens:max_cascade_context
+      ~primary_model_max_tokens:max_runtime_context
       ~base_dir
   in
   (* Fallback: when OAS checkpoint is absent (e.g. after server restart
@@ -315,7 +315,7 @@ let write_heartbeat_snapshot
         ~max_tokens:
           (match ctx_opt with
            | Some c -> Keeper_context_core.max_tokens_of_context c
-           | None -> max_cascade_context)
+           | None -> max_runtime_context)
         ~repetition_risk
         ~goal_alignment
         ~response_alignment
@@ -414,7 +414,7 @@ let write_heartbeat_snapshot
           `Int
             (match ctx_opt with
              | Some c -> Keeper_context_core.max_tokens_of_context c
-             | None -> max_cascade_context)
+             | None -> max_runtime_context)
         ; "message_count", `Int message_count_v
         ; ( "continuity_state"
           , match continuity_snapshot with

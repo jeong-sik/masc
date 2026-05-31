@@ -62,7 +62,7 @@ val per_provider_timeout_for_turn
     @param build_turn_prompt Callback: receives the base keeper system prompt
            and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
-    @param cascade_name Typed runtime cascade profile name for model selection
+    @param runtime_id Typed runtime runtime profile name for model selection
     @param world_observation Structured keeper world snapshot used by
            required-tool contract checks. When omitted, the contract gate
            does not infer world state from prompt text.
@@ -91,7 +91,7 @@ val run_turn
   -> build_turn_prompt:
        (base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
   -> user_message:string
-  -> cascade_name:string
+  -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
   -> ?required_tool_names:string list
@@ -112,7 +112,7 @@ val run_turn
   -> ?tool_overlay:Agent_sdk.Tool_op.t ref
   -> ?priority:Llm_provider.Request_priority.t
   -> ?degraded_retry_applied:bool
-  -> ?degraded_retry_runtime_id:string
+  -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
   -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
   -> ?is_retry:bool

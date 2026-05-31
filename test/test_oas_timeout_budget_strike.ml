@@ -78,7 +78,7 @@ let test_cycle_failed_log_level_is_policy_aware () =
     "provider timeout cycle failure is warn"
     true
     (EC.should_warn_keeper_cycle_failed
-       (provider_timeout_error ~phase:"cascade_attempt_watchdog"));
+       (provider_timeout_error ~phase:"runtime_attempt_watchdog"));
   Alcotest.(check bool)
     "turn wall-clock timeout remains error"
     false

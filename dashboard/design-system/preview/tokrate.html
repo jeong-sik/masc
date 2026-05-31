@@ -115,7 +115,7 @@
   <div class="page">
     <a class="back" href="index.html">← design system</a>
     <h1>Tok/sec · streaming metrics</h1>
-    <p class="sub">Live token throughput from the cascade. The fleet's pulse, at different zoom levels: a spark chip in the KPI strip, a dial in the cockpit, a provider breakdown in the rail. All tabular, all mono, all brass-on-black.</p>
+    <p class="sub">Live token throughput from the runtime. The fleet's pulse, at different zoom levels: a spark chip in the KPI strip, a dial in the cockpit, a provider breakdown in the rail. All tabular, all mono, all brass-on-black.</p>
 
     <h2>KPI tiles <span class="tag">cockpit strip</span></h2>
     <div class="seg">
@@ -259,7 +259,7 @@
 <span class="out">async function tick() {
   if (this.state !== 'running') return;
   emit('heartbeat');
-  await this.runCascade('provider-b');
+  await this.runRuntime('provider-b');
   return this.state;</span><span class="partial"> // advance cursor</span><span class="cursor"></span>
       </div>
     </div>

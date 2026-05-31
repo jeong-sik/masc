@@ -152,7 +152,7 @@ was first written.
 
 ### SSOT-2: `dashboard/src/styles/variables.css` (live-surface bright)
 
-- Hand-written, loads **after** tokens.generated.css (cascades over)
+- Hand-written, loads **after** tokens.generated.css (runtimes over)
 - Tailwind 400/500 family: `--ok: #4ade80`, `--warn: #fbbf24`, `--bad: #ef4444`, `--accent: #47b8ff`
 - variables.css comment confirms: "visual fidelity prefers consistency
   with the live surface over the SPEC source's muted palette"
@@ -183,7 +183,7 @@ a feature, not drift. Track C-beta was closed as no-op for this reason.
 
 - Hand-written, 489 LOC, 53 hex defs, header: "MASC Cockpit — Dark Brass tokens"
 - Loads as the **second** foundation import in `main.ts`,
-  **between `tokens.generated.css` and `variables.css`** in cascade
+  **between `tokens.generated.css` and `variables.css`** in runtime
   (tokens.generated → tokens.css → variables.css → ...)
 - Defines the `--bg-0..4`, `--fg-1..4`, `--line-1..3`, `--brass-1..3`,
   `--brass-glow` namespace consumed by 28+ CSS files via `var(--bg-2)` etc.
@@ -198,10 +198,10 @@ a feature, not drift. Track C-beta was closed as no-op for this reason.
   accent used ONLY for active/running state. Status colors reserved for
   data, never chrome. Everything else is grayscale."*
 
-### Cascade order vs. SSOT label
+### Runtime order vs. SSOT label
 
 The SSOT numbers are **labels (chronological discovery order)**, not
-load positions. Actual cascade order in `main.ts`:
+load positions. Actual runtime order in `main.ts`:
 
 | Position | File | SSOT label |
 |----------|------|------------|
@@ -211,7 +211,7 @@ load positions. Actual cascade order in `main.ts`:
 | 4..N | component CSS files | — |
 | last CSS import | `paper-theme.css` (after all component CSS) | SSOT-3 |
 
-Later positions cascade over earlier ones for any shared selector. SSOT-3
+Later positions runtime over earlier ones for any shared selector. SSOT-3
 is `[data-theme="paper"]` scoped, so it only activates on attribute set.
 
 ### Phase 2 work classification matrix
@@ -300,7 +300,7 @@ the first artboard slot of the matched section.
 
 Audited 20 anchor IDs (`ide-backbone, ide-tree, ide-edit, ide-pr,
 ide-graph, ide-term, goal-zone, task-zone, account, board-zone, msgs,
-composer-v2, cascade, audit, safe-auto, cost, heur, keeper-v2,
+composer-v2, runtime, audit, safe-auto, cost, heur, keeper-v2,
 decisions, episodes`) — all present in cb-*.jsx and
 functional via HashBridge. **Do not assume "SPA = anchors broken"
 without checking HashBridge first.**

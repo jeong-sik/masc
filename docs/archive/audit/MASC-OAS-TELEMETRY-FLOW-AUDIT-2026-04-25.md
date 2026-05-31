@@ -35,7 +35,7 @@ Primary mismatch: keeper/OAS tool calls reached `.masc/tool_calls`, but the traj
 
 Keeper tool-call logs, trajectory tool-call rows, execution receipts, and unified projections now use the same canonical nested fields where the producing lane has enough context:
 
-- `runtime_contract`: keeper/agent identity, trace/session/generation/turn, task/goal ids, sandbox/network/shared-memory/approval context, tool surface counts and required/missing tools, provider/model/cascade profile.
+- `runtime_contract`: keeper/agent identity, trace/session/generation/turn, task/goal ids, sandbox/network/shared-memory/approval context, tool surface counts and required/missing tools, provider/model/runtime profile.
 - `action_radius`: tool/action key, target kind/path, sandbox target, observed path-like inputs, success, duration, and error.
 
 Existing top-level fields remain in place for backwards-compatible dashboard readers.

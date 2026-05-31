@@ -4,16 +4,16 @@ last_verified: 2026-04-17
 code_refs:
   - lib/keeper/keeper_state_machine.ml
   - lib/keeper/keeper_config.ml
-  - lib/keeper/keeper_cascade_routing.ml
+  - lib/keeper/keeper_runtime_routing.ml
 ---
 
-# Adaptive Heartbeat and Cascade Scheduling RFC
+# Adaptive Heartbeat and Runtime Scheduling RFC
 
 **Status**: Draft
 **Date**: 2026-03-29
-**Scope**: Keeper keepalive, Keeper supervisor, Keeper registry, Room resilience, Cascade inference
+**Scope**: Keeper keepalive, Keeper supervisor, Keeper registry, Room resilience, Runtime inference
 **Tracking**: [#3635](https://github.com/jeong-sik/masc-mcp/issues/3635)
-**One sentence**: 키퍼 하트비트를 work-as-heartbeat 기반 적응형으로 전환하고, restart 경로에 mass-failure 억제를 추가하며, cascade 레벨 스케줄링 방향을 제시한다.
+**One sentence**: 키퍼 하트비트를 work-as-heartbeat 기반 적응형으로 전환하고, restart 경로에 mass-failure 억제를 추가하며, runtime 레벨 스케줄링 방향을 제시한다.
 
 ## Related Documents
 
@@ -45,7 +45,7 @@ code_refs:
 - Phase 1 (Work-as-Heartbeat): `Go with caveats` — Phase 0 측정 결과에 따라 scope 조정
 - Phase 2 (Restart Resilience): `Go` — self-preservation은 supervisor 경로만 수정
 - Phase 2b (Phi Accrual): `No-Go` — gRPC heartbeat가 production에서 활성화된 후에만 착수
-- Phase 3 (Cascade Scheduler): `No-Go` — Phase 0-2 baseline 2주 이상 확보 후 별도 RFC
+- Phase 3 (Runtime Scheduler): `No-Go` — Phase 0-2 baseline 2주 이상 확보 후 별도 RFC
 
 ## 1. Problem Statement
 
@@ -481,7 +481,7 @@ sweep_and_recover에서:
 | 2b.3 | Shadow mode 로깅 | phi 값 + 실제 상태 병기 |
 | 2b.4 | `test/test_phi_accrual.ml` | 순수 단위 테스트 |
 
-### Phase 3: Cascade Scheduler (별도 RFC)
+### Phase 3: Runtime Scheduler (별도 RFC)
 
 이 RFC에서는 방향만 기술한다. 상세 설계는 Phase 0-2 baseline 2주 이상 확보 후 별도 RFC로 작성한다.
 
@@ -495,9 +495,9 @@ sweep_and_recover에서:
 4. **Cache-aware scheduling**: Helium (arXiv:2603.16104) 패턴 — same-room keeper 간 context prefix 공유
 
 Phase 3 착수 조건:
-- Phase 0 측정 데이터에서 cascade 레벨 비효율이 확인됨
+- Phase 0 측정 데이터에서 runtime 레벨 비효율이 확인됨
 - Phase 1+2 배포 후 2주 이상 baseline 확보
-- Cascade scheduler 별도 RFC 작성 + 리뷰
+- Runtime scheduler 별도 RFC 작성 + 리뷰
 
 ## 5. Boundary Health
 
@@ -507,7 +507,7 @@ Phase 3 착수 조건:
 | Phase 1 | LOW | keeper_keepalive 내부 (local ref, 모듈 경계 변경 없음) | Feature flag로 즉시 복원 |
 | Phase 2 | MEDIUM | keeper_supervisor 내부 수정 | 1 cycle 억제만 (30s), 다음 cycle에서 재평가 |
 | Phase 2b | MEDIUM | gRPC heartbeat ↔ phi detector (new module) | Shadow mode + kill switch |
-| Phase 3 | HIGH | cascade ↔ keeper (new scheduler layer) | 별도 RFC로 분리 |
+| Phase 3 | HIGH | runtime ↔ keeper (new scheduler layer) | 별도 RFC로 분리 |
 
 **가장 큰 위험들**:
 1. Phase 1에서 presence skip이 downstream consumer(dashboard, SSE)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `Room.heartbeat_in_room`을 명시적으로 호출하여 방지.

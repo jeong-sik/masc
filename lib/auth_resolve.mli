@@ -1,7 +1,7 @@
-(** Typed bearer-token resolution for cascade dispatch.
+(** Typed bearer-token resolution for runtime dispatch.
 
     Replaces the silent fall-back chain inside
-    [oas_worker_exec_transport] that hid empty-Bearer-401 cascades
+    [oas_worker_exec_transport] that hid empty-Bearer-401 runtimes
     behind generic HTTP error logs.
 
     Step 1a of the bloodflow restoration plan introduces only the
@@ -69,12 +69,12 @@ val resolve :
        runtime-mcp policy fall through to [MASC_MCP_TOKEN] env. *)
 
 val emit_resolution_trace :
-  cascade:string ->
+  runtime:string ->
   keeper_id:string option ->
   provider_label:string ->
   outcome:(token, auth_error) result ->
   unit
 (** Emit a structured trace event for a resolution attempt — both
-    success and failure are surfaced, so cascade traces show
+    success and failure are surfaced, so runtime traces show
     "fell back from internal_keeper_token (Token_hash_missing) to
     Mcp_bearer_env (resolved)" before any HTTP 401 occurs. *)

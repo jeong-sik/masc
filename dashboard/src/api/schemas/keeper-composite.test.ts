@@ -9,7 +9,7 @@ import {
 // circuit_breaker, phase_diagnosis, execution, runtime_attention,
 // recommended_actions) are added per-test. Value shapes here mirror what
 // `keeper_composite_observer.ml` `snapshot_to_json` emits: lowercase
-// snake_case phase / turn_phase / decision / cascade / compaction (via
+// snake_case phase / turn_phase / decision / runtime / compaction (via
 // `Keeper_state_machine.phase_to_string` etc.). Capitalized variants
 // like `"Stable"` are forward-looking — they appear only in schema-
 // permissiveness tests below, never in real backend payloads today.
@@ -20,12 +20,12 @@ const VALID_SNAPSHOT = {
   phase: 'running',
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
-  cascade: { state: 'idle' },
+  runtime: { state: 'idle' },
   compaction: { stage: 'accumulating' },
   measurement: { captured: true },
   invariants: {
     phase_turn_alignment: true,
-    no_cascade_before_measurement: true,
+    no_runtime_before_measurement: true,
     compaction_atomicity: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
@@ -126,9 +126,9 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.decision.stage).toBe('mystery')
   })
 
-  it('preserves unknown cascade state values for operator visibility', () => {
-    const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, cascade: { state: 'wat' } })
-    expect(result.cascade.state).toBe('wat')
+  it('preserves unknown runtime state values for operator visibility', () => {
+    const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, runtime: { state: 'wat' } })
+    expect(result.runtime.state).toBe('wat')
   })
 
   it('parses snapshot with last_outcome present', () => {
@@ -138,7 +138,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         turn_id: 5,
         ended_at: 1713398500,
         decision_stage: 'guard_ok',
-        cascade_state: 'done',
+        runtime_state: 'done',
         selected_model: 'agent-llm-a-sonnet',
       },
     })
@@ -165,17 +165,17 @@ describe('parseKeeperCompositeSnapshot', () => {
         duration_ms: 87736,
         error: {
           kind: 'config',
-          message_preview: 'unknown field fallback_cascade',
+          message_preview: 'unknown field fallback_runtime',
           message_truncated: false,
         },
-        cascade: {
+        runtime: {
           name: 'primary',
           selected_model: 'cli-tool-d:auto',
           attempt_count: 2,
           fallback_applied: true,
           outcome: 'exhausted',
           degraded_retry_applied: false,
-          degraded_retry_cascade: null,
+          degraded_retry_runtime: null,
           fallback_reason: 'turn_timeout',
         },
         tool_surface: {
@@ -195,7 +195,7 @@ describe('parseKeeperCompositeSnapshot', () => {
 
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
-    expect(result.execution?.cascade?.fallback_reason).toBe('turn_timeout')
+    expect(result.execution?.runtime?.fallback_reason).toBe('turn_timeout')
     expect(result.execution?.tool_surface?.turn_lane).toBe('tool_required')
     expect(result.execution?.tool_surface?.tool_surface_class).toBe('runtime_mcp')
     expect(result.execution?.tool_surface?.visible_tool_count).toBe(2)
@@ -204,7 +204,7 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.execution?.unexpected_tool_count).toBe(1)
     expect(result.execution?.tool_surface?.unexpected_tools).toEqual(['keeper_board_list'])
     expect(result.execution?.tool_surface?.unexpected_tool_count).toBe(1)
-    expect(result.execution?.error?.message_preview).toContain('fallback_cascade')
+    expect(result.execution?.error?.message_preview).toContain('fallback_runtime')
   })
 
   it('parses backend-recommended runtime actions', () => {

@@ -144,7 +144,7 @@ let log_detected_loop keeper_name progress_class streak threshold =
     Log.Keeper.warn
       "PASSIVE_LOOP: keeper=%s streak=%d threshold=%d \
        — keeper is completing turns with only read-only/status tools. \
-       Check task assignment, persona contract, or cascade proactive \
+       Check task assignment, persona contract, or runtime proactive \
        setting.  Counter latched; will not re-fire until an \
        execution/completion turn resets the streak."
       keeper_name streak threshold

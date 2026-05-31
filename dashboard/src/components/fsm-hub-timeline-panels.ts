@@ -46,7 +46,7 @@ const SWIMLANE_LANES: Array<{
   { key: 'phase', label: 'Keeper 생명주기', short: 'KSM' },
   { key: 'turn', label: '턴 주기', short: 'KTC' },
   { key: 'decision', label: '의사결정', short: 'KDP' },
-  { key: 'cascade', label: '캐스케이드', short: 'KCL' },
+  { key: 'runtime', label: '캐스케이드', short: 'KCL' },
   { key: 'compaction', label: '컨텍스트 압축', short: 'KMC' },
 ]
 
@@ -283,7 +283,7 @@ export function SwimlaneTimeline({
                 prev.phase !== obs.phase ||
                 prev.turn !== obs.turn ||
                 prev.decision !== obs.decision ||
-                prev.cascade !== obs.cascade ||
+                prev.runtime !== obs.runtime ||
                 prev.compaction !== obs.compaction
               )
               const dotCls = hasTransition
@@ -293,7 +293,7 @@ export function SwimlaneTimeline({
                 ...(prev.phase !== obs.phase ? ['KSM'] : []),
                 ...(prev.turn !== obs.turn ? ['KTC'] : []),
                 ...(prev.decision !== obs.decision ? ['KDP'] : []),
-                ...(prev.cascade !== obs.cascade ? ['KCL'] : []),
+                ...(prev.runtime !== obs.runtime ? ['KCL'] : []),
                 ...(prev.compaction !== obs.compaction ? ['KMC'] : []),
               ]
               const tip = `${fmtAbs(obs.ts)}${changedLanes.length > 0 ? ` · ${changedLanes.join(', ')} changed` : ' · no change'}`
@@ -456,7 +456,7 @@ export function TransitionTrail({
 
 /** Top-N transition frequency ranking. Surfaces the (from → to) pairs the
     keeper takes most often inside the in-memory observation window — useful
-    for spotting churn (e.g. KCL idle ↔ trying repeating means cascade is
+    for spotting churn (e.g. KCL idle ↔ trying repeating means runtime is
     flapping) and for confirming the keeper exercises every lane it owns. */
 export function TopTransitionsPanel({
   transitions,

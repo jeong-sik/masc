@@ -1,5 +1,5 @@
 (** Runtime-MCP policy header helpers, extracted from
-    [cascade_transport.ml]. Two pure transforms over
+    [runtime_transport.ml]. Two pure transforms over
     [Llm_provider.Llm_transport.runtime_mcp_policy]:
 
     - [runtime_mcp_policy_with_masc_agent_name] injects x-masc-agent-name

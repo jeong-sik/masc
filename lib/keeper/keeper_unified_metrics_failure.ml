@@ -117,18 +117,18 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
    | Some err ->
        (match Keeper_turn_driver.classify_masc_internal_error err with
         | Some (Keeper_turn_driver.Runtime_exhausted
-	                  { cascade_name
+	                  { runtime_id
 	                  ; reason = Keeper_meta_contract.No_tool_capable _
 	                  ; _
 	                  }) ->
-            let cascade_name =
-              cascade_name
+            let runtime_id =
+              runtime_id
             in
             Prometheus.inc_counter
               Keeper_metrics.(to_string NoToolProvider)
               ~labels:
                 [ ("keeper", meta.name)
-                ; ("cascade", cascade_name)
+                ; ("runtime", runtime_id)
                 ]
               ()
         | _ -> ())

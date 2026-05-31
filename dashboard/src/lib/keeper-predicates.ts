@@ -140,7 +140,7 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
  *  surface, not an owner-specific recoverable blocker. Wakeup should be
  *  driven by the owning timeout/admission/capacity cause instead. */
 const WAKEUP_RECOVERABLE_BLOCKERS = new Set<string>([
-  'cascade_exhausted',
+  'runtime_exhausted',
   'turn_timeout',
 ])
 

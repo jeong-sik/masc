@@ -163,7 +163,7 @@ P2-P3 가 unified family interface. P4 staleness. P5 tunability. P6 observabilit
 
 2. **Q2**: Probe staleness 의 *기본값* — 5s vs 30s? 빠른 회복 trade-off vs probe cost. **잠정**: 5s (현 코드 patten 추정). P4 의 PBT 가 5s 가정 검증.
 
-3. **Q3**: Disk pressure circuit breaker 의 *trip 조건* — ENOSPC 1회 vs N회? cascade error 와 분리? **잠정**: ENOSPC 1회 trip + cooldown 60s. P2 의 첫 commit 가 spec 명시.
+3. **Q3**: Disk pressure circuit breaker 의 *trip 조건* — ENOSPC 1회 vs N회? runtime error 와 분리? **잠정**: ENOSPC 1회 trip + cooldown 60s. P2 의 첫 commit 가 spec 명시.
 
 4. **Q4**: RFC-0103 (log retention) 의 *default disabled* 가 disk pressure trigger root — 그러나 본 RFC 는 *pressure 자체* 만, retention 정책 별도. **잠정**: 본 RFC 가 RFC-0103 cross-reference, retention 정책 변경 별도 RFC.
 

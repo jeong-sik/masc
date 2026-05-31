@@ -48,7 +48,7 @@ The taxonomy is built around **operator action**. If a log line does not change 
 | Marker (must NOT) | Triggered by model output, network flake, or any retry-able failure |
 | Cardinality | Low — a healthy fleet should produce ≤1/day per `Error` site |
 | Example (good) | `Log.Misc.error "tool_usage_log: init failed: %s" exn` — durable store init failed, dashboard now blind |
-| Anti-pattern | `Log.Keeper.error "keeper cycle FAILED ... cascade=keeper_unified ..."` for `required_tool_contract_violation` — model behavior, fleet-wide expected, not actionable |
+| Anti-pattern | `Log.Keeper.error "keeper cycle FAILED ... runtime=keeper_unified ..."` for `required_tool_contract_violation` — model behavior, fleet-wide expected, not actionable |
 
 ### `Warn`
 

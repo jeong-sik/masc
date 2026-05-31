@@ -79,8 +79,8 @@ val decode_tool_list : string -> string list option
 val decode_contract_violation_reason :
   string -> (string * string list * string list) option
 type runtime_rotation_attempt = {
-  from_runtime_id : string;
-  to_runtime_id : string;
+  from_runtime : string;
+  to_runtime : string;
   reason : Keeper_error_classify.degraded_retry_reason;
   outcome : runtime_rotation_outcome;
   slot_release_at_phase : slot_release_phase option;
@@ -125,7 +125,7 @@ type t = {
   runtime_outcome : runtime_outcome;
   oas_internal_runtime_allowed : bool;
   degraded_retry_applied : bool;
-  degraded_retry_runtime_id : string option;
+  degraded_retry_runtime : string option;
   fallback_reason :
     Keeper_error_classify.degraded_retry_reason option;
   runtime_rotation_attempts : runtime_rotation_attempt list;

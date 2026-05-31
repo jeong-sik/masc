@@ -435,7 +435,7 @@ let log_call
       ?required_tools
       ?required_tool_candidates
       ?missing_required_tools
-      ?cascade_profile
+      ?runtime_profile
       ?result_bytes
       ?truncated_to
       ()
@@ -579,17 +579,17 @@ let log_call
         | Some _ -> missing_required_tools
         | None -> ctx.missing_required_tools
       in
-      let cascade_profile =
-        match cascade_profile with
-        | Some _ -> cascade_profile
-        | None -> ctx.cascade_profile
+      let runtime_profile =
+        match runtime_profile with
+        | Some _ -> runtime_profile
+        | None -> ctx.runtime_profile
       in
       let model_field =
         if model = "" then [] else [ "model", `String "runtime" ]
       in
-      let cascade_profile_field =
-        match cascade_profile with
-        | Some value when String.trim value <> "" -> [ "cascade_profile", `String value ]
+      let runtime_profile_field =
+        match runtime_profile with
+        | Some value when String.trim value <> "" -> [ "runtime_profile", `String value ]
         | _ -> []
       in
       let result_bytes_field =
@@ -706,7 +706,7 @@ let log_call
           ?required_tools
           ?required_tool_candidates
           ?missing_required_tools
-          ?cascade_profile
+          ?runtime_profile
           ()
       in
       let error = if success then None else Some safe_output in
@@ -743,7 +743,7 @@ let log_call
            ]
            @ route_evidence_field
            @ model_field
-           @ cascade_profile_field
+           @ runtime_profile_field
            @ lane_field
            @ tool_choice_field
            @ thinking_enabled_field

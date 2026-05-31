@@ -22,8 +22,8 @@ let contains_substring haystack needle =
 let repo_config_dir_from start_dir =
   let rec loop dir =
     let config_dir = Filename.concat dir "config" in
-    let cascade_toml = Filename.concat config_dir "cascade.toml" in
-    if Sys.file_exists cascade_toml
+    let runtime_toml = Filename.concat config_dir "keeper_runtime.toml" in
+    if Sys.file_exists runtime_toml
     then Some config_dir
     else (
       let parent = Filename.dirname dir in
@@ -36,7 +36,7 @@ let worktree_config_dir () =
   | Some config_dir -> config_dir
   | None ->
     failf
-      "unable to locate repo config/cascade.toml from cwd=%s"
+      "unable to locate repo config/keeper_runtime.toml from cwd=%s"
       (Sys.getcwd ())
 
 let with_worktree_config_root f =
@@ -79,20 +79,20 @@ let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
   { base with models }
 
 (* Behavioral: stale model from a different provider is excluded from result.
-   MASC does not assert specific vendor labels — only cascade behavior.
+   MASC does not assert specific vendor labels — only runtime behavior.
    The stale pin must have no effect: result equals the no-pin baseline. *)
-let test_stale_last_model_is_not_reused_outside_current_cascade () =
+let test_stale_last_model_is_not_reused_outside_current_runtime () =
   let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
   check bool "baseline is non-empty" true (baseline <> []);
   let labels = labels_for_turn (make_meta ~last_model_used:"provider_k:provider_k-5.1" ()) in
-  check (list string) "stale pin has no effect on cascade labels" baseline labels
+  check (list string) "stale pin has no effect on runtime labels" baseline labels
 
-(* Behavioral: when last_model_used matches a configured cascade model,
+(* Behavioral: when last_model_used matches a configured runtime model,
    it stays first in the returned labels. *)
-let test_matching_last_model_is_preserved_when_still_in_cascade () =
+let test_matching_last_model_is_preserved_when_still_in_runtime () =
   let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
   match baseline with
-  | [] -> fail "cascade resolved to empty labels"
+  | [] -> fail "runtime resolved to empty labels"
   | first :: _ ->
     let labels = labels_for_turn (make_meta ~last_model_used:first ()) in
     match labels with
@@ -100,7 +100,7 @@ let test_matching_last_model_is_preserved_when_still_in_cascade () =
     | actual_first :: _ ->
       check string "matching model stays first" first actual_first
 
-let test_legacy_explicit_models_do_not_override_cascade_resolution () =
+let test_legacy_explicit_models_do_not_override_runtime_resolution () =
   let explicit =
     [ "ollama:qwen3.5:35b-a3b-nvfp4"; "provider_k-coding:provider_k-5.1" ]
   in
@@ -108,7 +108,7 @@ let test_legacy_explicit_models_do_not_override_cascade_resolution () =
   let labels =
     labels_for_turn (make_meta ~last_model_used:"" ~models:explicit ())
   in
-  check (list string) "legacy explicit models do not override cascade" baseline labels
+  check (list string) "legacy explicit models do not override runtime" baseline labels
 
 let test_meta_of_json_rejects_legacy_models () =
   match
@@ -145,12 +145,12 @@ let () =
     [
       ( "effective_model_labels_for_turn",
         [
-          test_case "drops stale provider_k pin outside current cascade" `Quick
-            test_stale_last_model_is_not_reused_outside_current_cascade;
+          test_case "drops stale provider_k pin outside current runtime" `Quick
+            test_stale_last_model_is_not_reused_outside_current_runtime;
           test_case "keeps llama pin when still allowed" `Quick
-            test_matching_last_model_is_preserved_when_still_in_cascade;
+            test_matching_last_model_is_preserved_when_still_in_runtime;
           test_case "ignores legacy explicit models for runtime labels" `Quick
-            test_legacy_explicit_models_do_not_override_cascade_resolution;
+            test_legacy_explicit_models_do_not_override_runtime_resolution;
           test_case "rejects legacy models while parsing keeper meta" `Quick
             test_meta_of_json_rejects_legacy_models;
           test_case "resolves config from sandbox cwd" `Quick

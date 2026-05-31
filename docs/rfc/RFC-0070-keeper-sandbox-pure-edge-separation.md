@@ -566,7 +566,7 @@ Phases are independently mergeable and revertible. Phase 5 closes the loop by ma
 
 | Risk | Mitigation |
 |------|------------|
-| dune dep cascade — Phase 2 adds 2 new sub-libs (`keeper_sandbox_plan`, `docker_client`). MEMORY `feedback_rfc_oas_011_cdal_runtime_admin_merge_cascade` documented a 4-PR cascade pattern when dep closure underverified. | Single PR per Phase 1 / 2 / 3; verify `dune build --root . @check` *before* push; defer caller cutover until Phase 4 (no cascade until then) |
+| dune dep runtime — Phase 2 adds 2 new sub-libs (`keeper_sandbox_plan`, `docker_client`). MEMORY `feedback_rfc_oas_011_cdal_runtime_admin_merge_runtime` documented a 4-PR runtime pattern when dep closure underverified. | Single PR per Phase 1 / 2 / 3; verify `dune build --root . @check` *before* push; defer caller cutover until Phase 4 (no runtime until then) |
 | Alert flood from quarantine path | Alert dedup TTL: same `Container_name.t` quarantine event suppresses re-alert within 1h. Recorded in `Quarantine.t` state. |
 | Mock vs real daemon divergence | Phase 4 integration test runs both paths; mock impl reviewed against `docker --version` output diff suite. |
 | RFC-0036 lifecycle hook (`Keeper_lifecycle_hooks`) coexists with this RFC's `Sandbox_cleanup.cleanup_tick` | Per §2 / §3.4: the two are **sibling** paths (not layered). The lifecycle hook fires on `Tombstone_reaped`; `cleanup_tick` produces `cleanup_outcome` consumed by the internal `Quarantine.t`. No `Sandbox_cleanup.adapter` is introduced. The Result.t escalation stays internal to the sandbox subsystem. |

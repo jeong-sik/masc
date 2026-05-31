@@ -1,7 +1,7 @@
 (* test/test_keeper_supervisor_observability_10125.ml
 
    #10125 reports a 4h+ silent fleet death after server
-   restart: 14 keepers exit on cascade exhaustion and the
+   restart: 14 keepers exit on runtime exhaustion and the
    supervisor sweep never restarts (the
    "keeper supervisor sweep started" log line is missing
    for the entire post-restart session).

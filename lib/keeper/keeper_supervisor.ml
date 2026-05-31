@@ -22,9 +22,9 @@ let sweep_and_recover (ctx : _ context) =
   in
   let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
-  (* Refresh the cascade health cache before Phase 3.5 reads it.  Without this
+  (* Refresh the runtime health cache before Phase 3.5 reads it.  Without this
      call the cache stayed cold (PR #14146 introduced the cache and
-     [Phase 3.5] guard but never wired a writer), so every cascade looked
+     [Phase 3.5] guard but never wired a writer), so every runtime looked
      unhealthy and auto-resume was silently disabled across the fleet.
      [run_once] is a registry scan — bounded, no I/O — so running it
      inline on every 30 s sweep is cheap.  [Safe_ops.protect] keeps a
@@ -247,12 +247,7 @@ let sweep_and_recover (ctx : _ context) =
          summary);
 	    if Keeper_registry.try_resolve_done entry (`Crashed msg)
 	    then (
-	      let outcome =
-	        Keeper_registry_runtime_attempt.enrich_fiber_unresolved_outcome
-	          ~base_path
-	          ~keeper_name:entry.name
-	          msg
-	      in
+	      let outcome = msg in
 	      ignore
 	        (Keeper_registry.dispatch_event_and_log
 	           ~base_path
@@ -543,7 +538,7 @@ let sweep_and_recover (ctx : _ context) =
                     Unhealthy   — block, the probe saw restart pressure.
                     Healthy     — proceed with timer check.
                     Unknown     — proceed with timer check.  No probe data
-                                  yet (e.g. all keepers in the cascade
+                                  yet (e.g. all keepers in the runtime
                                   paused so the registry has no entries
                                   to score).  Defaulting to "block" here
                                   is the bug PR #14146 shipped: it turned
@@ -554,13 +549,13 @@ let sweep_and_recover (ctx : _ context) =
         (match runtime_status with
          | Keeper_health_probe.Unhealthy reason ->
            Log.Keeper.info
-             "%s: auto-resume blocked; cascade %s is unhealthy (%s)"
+             "%s: auto-resume blocked; runtime %s is unhealthy (%s)"
              name
              runtime_id
              reason;
            Prometheus.inc_counter
              Keeper_metrics.(to_string AutoResumeBlockedTotal)
-             ~labels:[ "keeper", name; "runtime_id", runtime_id ]
+             ~labels:[ "keeper", name; "runtime", runtime_id ]
              ()
          | Keeper_health_probe.Unknown | Keeper_health_probe.Healthy ->
            let resume_after_sec =

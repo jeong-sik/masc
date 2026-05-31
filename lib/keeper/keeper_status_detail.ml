@@ -287,7 +287,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            else now_ts -. m.runtime.proactive_rt.last_visible_ts
          in
          let trace_history_count = List.length m.runtime.trace_history in
-         let runtime_cascade_metrics = `Null in
+         let runtime_runtime_metrics = `Null in
          let last_compaction_saved_tokens =
            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
          in
@@ -687,7 +687,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
          in
          let model_observability =
            model_observability_json
-             ~current_cascade_name:(runtime_id_of_meta m)
+             ~current_runtime_id:(runtime_id_of_meta m)
              ~runtime_blocker_fields
              latest_metrics
          in
@@ -750,7 +750,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("disposition", Json_util.string_opt_to_json disposition);
            ("disposition_reason", Json_util.string_opt_to_json disposition_reason);
            ("next_model_hint", `Null);
-           ("runtime_cascade_metrics", runtime_cascade_metrics);
+           ("runtime_runtime_metrics", runtime_runtime_metrics);
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);

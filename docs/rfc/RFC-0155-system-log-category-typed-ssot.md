@@ -65,7 +65,7 @@ type t =
   | Docker_start_pressure
   | Keeper_stale_watchdog_lifecycle
   | Provider_timeout
-  | Provider_cascade_exhaustion
+  | Provider_runtime_exhaustion
   | Required_tool_contract_mismatch
   | Task_state_probe_misuse
   | Verifier_action_guard
@@ -86,7 +86,7 @@ val error : category:System_log_category.t -> ('a, Format.formatter, unit) forma
 ```
 
 - `category` named argument **required** — 호출자 누락 시 컴파일 에러.
-- 변경은 *radical breaking* (~70+ call site). 따라서 본 RFC body 가 머지된 *후* `Wave A scout / Wave B sweep / Wave C legacy purge` 3-PR cascade 로 분할 마이그레이션 (§3).
+- 변경은 *radical breaking* (~70+ call site). 따라서 본 RFC body 가 머지된 *후* `Wave A scout / Wave B sweep / Wave C legacy purge` 3-PR runtime 로 분할 마이그레이션 (§3).
 
 ### 2.3 emit envelope 변경
 

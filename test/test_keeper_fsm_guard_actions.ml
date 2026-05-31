@@ -104,7 +104,7 @@ let test_buggy_thunk_reraises () =
 
 let test_non_assert_exception_propagates_unchanged () =
   (* RFC-0072 Phase 5 widened the catch to all exceptions so typed
-     transition violations (Cascade_transition_violation /
+     transition violations (Runtime_transition_violation /
      Turn_phase_transition_violation, which would otherwise create a
      Keeper_registry → this-module dependency cycle if named) are also
      captured. That means any exception escaping the thunk bumps the

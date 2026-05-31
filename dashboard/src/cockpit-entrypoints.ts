@@ -179,8 +179,8 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'covered' },
 
   // Observe Plane legacy design subtabs.
-  { mode: 'observe', aliases: ['cs-deep', 'cascade-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['cs-cmp', 'cascade-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
+  { mode: 'observe', aliases: ['cs-deep', 'runtime-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
+  { mode: 'observe', aliases: ['cs-cmp', 'runtime-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-led', 'audit-ledger'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-act', 'audit-by-actor'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'actor' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-sum', 'audit-summary'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'summary' } }, coverage: 'covered' },

@@ -186,4 +186,4 @@ Use direct `sb provider-k-text` for:
 - skeptical review of product docs and roadmap text
 - release-note and spec ambiguity checks
 
-Do not describe `sb provider-k-cascade` results as proof that direct Provider-K itself worked. That path is a multi-model chain, not a pure Provider-K call.
+Do not describe `sb provider-k-runtime` results as proof that direct Provider-K itself worked. That path is a multi-model chain, not a pure Provider-K call.

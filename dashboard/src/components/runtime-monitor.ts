@@ -116,7 +116,7 @@ async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, wind
 }
 
 // Current-reachability axis: does the provider respond right now?
-// Orthogonal to cascade-config-panel.ts:providerTone which scores historical
+// Orthogonal to runtime-config-panel.ts:providerTone which scores historical
 // performance (success_rate, cooldown). Both signals can be shown together
 // without being duplicates.
 function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string {

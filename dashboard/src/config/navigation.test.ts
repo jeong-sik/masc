@@ -162,7 +162,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('git-graph')
     expect(ids).not.toContain('safe-autonomy')
     expect(ids).not.toContain('cost')
-    expect(ids).not.toContain('cascade-inspector')
+    expect(ids).not.toContain('runtime-inspector')
     expect(ids).not.toContain('attribution')
     expect(ids).not.toContain('activity')
     expect(ids).not.toContain('tool-quality')
@@ -199,10 +199,10 @@ describe('monitoring navigation labels', () => {
     const labels = sections.map(item => item.label)
     const uniq = new Set(labels)
     expect(uniq.size).toBe(labels.length)
-    // Regression guard: the word "Cascade" must not appear in sidebar
-    // labels after the cascade-to-runtime renaming.
-    const cascadeOccurrences = labels.filter(l => l.includes('Cascade')).length
-    expect(cascadeOccurrences).toBe(0)
+    // Regression guard: the word "Runtime" must not appear in sidebar
+    // labels after the runtime-to-runtime renaming.
+    const runtimeOccurrences = labels.filter(l => l.includes('Runtime')).length
+    expect(runtimeOccurrences).toBe(0)
   })
 })
 

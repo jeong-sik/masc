@@ -111,7 +111,7 @@ val request :
     [idle_timeout_sec] is cancelled.
 
     Progress fields are returned on both the [Ok] and [Error] branches
-    so cascade rotation receipts can attach them without a side-channel.
+    so runtime rotation receipts can attach them without a side-channel.
 
     Design rationale: docs/rfc/RFC-0129-http-idle-timeout-and-streaming-progress.md *)
 

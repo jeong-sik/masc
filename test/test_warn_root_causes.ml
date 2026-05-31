@@ -206,7 +206,7 @@ let test_concurrent_atomic_writes_never_empty () =
 let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
-       {|"keeper:%s cascade=%s missing OAS checkpoint after run"|});
+       {|"keeper:%s runtime=%s missing OAS checkpoint after run"|});
   check bool "memory write failures log at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
        {|"keeper:%s memory_write failed: %s"|});

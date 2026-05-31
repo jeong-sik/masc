@@ -1,7 +1,7 @@
 (** Keeper_user_visible_reply_source — closed sum naming the five
     paths through {!Keeper_text_processing.user_visible_reply_text}.
 
-    The function picks the first non-empty source from a cascade:
+    The function picks the first non-empty source from a runtime:
     {ol
     {- Stripped raw reply (markup + [STATE] removed)}
     {- Caller-supplied [fallback] argument}

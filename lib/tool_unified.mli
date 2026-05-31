@@ -30,5 +30,5 @@ val tool_info_to_json : tool_info -> Yojson.Safe.t
 
 (** [summary_report ()] aggregates total/top-20 call counts,
     never-called tools, visibility distribution, dispatch registration
-    counts, and cascade metrics for the dashboard. *)
+    counts, and runtime metrics for the dashboard. *)
 val summary_report : unit -> Yojson.Safe.t

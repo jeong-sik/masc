@@ -16,10 +16,10 @@
 \*   productive_elapsed         | the [current_turn_phase_elapsed_ms ()] closure
 \*                              | inside keeper_unified_turn.ml's turn loop
 \*   RetryScheduled             | the [Degraded_retry_allowed _] branch of
-\*                              | keeper_turn_cascade_budget.ml's classifier
+\*                              | keeper_turn_runtime_budget.ml's classifier
 \*   ProductivePhaseExhausted   | the [Degraded_retry_slot_phase_exhausted _]
 \*                              | branch of the same classifier
-\*   release_at_phase           | cascade_rotation_attempt.slot_release_at_phase
+\*   release_at_phase           | runtime_rotation_attempt.slot_release_at_phase
 \*                              | (keeper_execution_receipt.ml)
 \*
 \* Alphabet projection (spec scope).  The runtime's slot-release alphabet is
@@ -34,7 +34,7 @@
 \* spec pins), and adds two spec-internal markers: "none" (<-> the [option]
 \* None / no rotation) and "finish" (a clean productive-phase finish releases
 \* the slot; the runtime records no [slot_release_phase] for that case, since
-\* [slot_release_at_phase] lives on [cascade_rotation_attempt], which only
+\* [slot_release_at_phase] lives on [runtime_rotation_attempt], which only
 \* exists for degraded retries).  So ReleasePhaseSet is not a 1:1 image of
 \* [slot_release_phase]; it is the leak-relevant projection plus the
 \* no-rotation / clean-finish endpoints the model needs to be closed.

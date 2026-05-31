@@ -44,7 +44,7 @@ type fiber_drop_cause =
   | Graceful_shutdown
   (** Supervisor saw shutdown in progress (flag, cancel context, or
             explicit shutdown reason). Emitted at INFO severity, does not
-            count toward restart budget or trigger cascade enrichment. *)
+            count toward restart budget or trigger runtime enrichment. *)
   | Cancelled_by_parent
   (** Fiber observed [Eio.Cancel.Cancelled] from a parent switch
             (supervisor restart, sibling failure propagating cancel)
@@ -68,7 +68,7 @@ type failure_reason =
           window count >= [escalation_threshold]. The supervisor's
           [`Crashed] branch checks this variant and skips [to_restart],
           persisting [meta.paused = true] instead so an operator must
-          investigate the underlying cascade/provider/fd issue before
+          investigate the underlying runtime/provider/fd issue before
           resuming the keeper. *)
   | Stale_fleet_batch of { distinct_count : int }
   (** Legacy wire value for stale watchdog fleet-batch state. Current
@@ -77,7 +77,7 @@ type failure_reason =
           supervisor treats it like a restartable watchdog crash. *)
   | Provider_timeout_loop of { count : int }
   (** Latched when the same keeper exhausts the OAS turn budget on
-          consecutive cycles. This is a provider/cascade/runtime throughput
+          consecutive cycles. This is a provider/runtime/runtime throughput
           failure, so the supervisor pauses instead of restarting into the
           same slow model and burning another multi-minute budget. *)
   | Provider_runtime_error of
@@ -85,7 +85,7 @@ type failure_reason =
       ; detail : string
       ; provider_id : string option
       ; http_status : int option
-      ; cascade_name : string option
+      ; runtime_id : string option
       }
   | Tool_required_unsatisfied of
       { code : string
@@ -96,8 +96,8 @@ type failure_reason =
   (** Fiber exited without resolving [done_r].
           Issue #18901: cause payload distinguishes graceful shutdown
           artifacts (SIGTERM/SIGINT during turn — INFO severity, no
-          cascade) from genuine missed-resolution bugs (ERROR severity,
-          cascade attempt enrichment + supervisor pause). Compile-time
+          runtime) from genuine missed-resolution bugs (ERROR severity,
+          runtime attempt enrichment + supervisor pause). Compile-time
           exhaustive match forces the emit site to commit to a cause
           rather than letting a race between [Shutdown.is_shutting_down_global]
           flag and fiber finally collapse both into the same telemetry. *)
@@ -120,7 +120,7 @@ let failure_reason_to_string = function
     Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
   | Provider_timeout_loop { count } ->
     Printf.sprintf "provider_timeout_loop(count=%d)" count
-  | Provider_runtime_error { code; detail; provider_id; http_status; cascade_name = _ } ->
+  | Provider_runtime_error { code; detail; provider_id; http_status; runtime_id = _ } ->
     let prov =
       Option.fold provider_id ~none:""
         ~some:(Printf.sprintf " provider=%s")

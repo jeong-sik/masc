@@ -11,7 +11,7 @@
     - the [None / None] forms remain byte-identical to pre-PR-1 output
     - JSON serializer round-trips the optional fields
 
-    Data flow (cascade [Provider_error.ServerError] → these fields) is
+    Data flow (runtime [Provider_error.ServerError] → these fields) is
     PR-2 scope; PR-1 only ships the typed carrier. *)
 
 open Alcotest
@@ -76,7 +76,7 @@ let test_provider_runtime_error_carrier_none () =
       ; detail = "provider_c unicode crash"
       ; provider_id = None
       ; http_status = None
-      ; cascade_name = None
+      ; runtime_id = None
       }
   in
   (check string)
@@ -91,7 +91,7 @@ let test_provider_runtime_error_carrier_some () =
       ; detail = "Timeout after 300.0s"
       ; provider_id = Some "runpod_mtp"
       ; http_status = Some 502
-      ; cascade_name = None
+      ; runtime_id = None
       }
   in
   let s = R.failure_reason_to_string r in

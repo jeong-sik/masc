@@ -1,6 +1,6 @@
 (** Single-binding → [Provider_config.t] materialization (RFC-0206 §5).
 
-    Re-homed from the deleted [Cascade_declarative_adapter]. Keeps only the
+    Re-homed from the deleted [Runtime_declarative_adapter]. Keeps only the
     binding materialization path:
 
     - TOML provider.id -> declared provider metadata (via {!Runtime_schema})
@@ -13,14 +13,14 @@
 
     The three identity helpers ([normalize_provider_id], [headers_with_auth],
     [normalize_openai_compat_request_path]) lived only in the deleted
-    [Cascade_config_provider_binding] and are inlined here so this module has
-    no [Cascade_*] dependency.
+    [Runtime_config_provider_binding] and are inlined here so this module has
+    no [Runtime_*] dependency.
 
     @stability Internal *)
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
-(* --- Inlined from the deleted [Cascade_config_provider_binding] --- *)
+(* --- Inlined from the deleted [Runtime_config_provider_binding] --- *)
 
 (* Trim, lowercase, and replace [-] with [_] in a provider identifier so
    label/binding lookups are case- and separator-insensitive. *)

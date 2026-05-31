@@ -48,7 +48,7 @@ stamps the same value at threshold — idempotent overwrite.
 ```
 
 - `reset_turn_failures` cited at 966-967, actual call site at **3004** — **+2038 line drift**.
-- `Auto-pause site below (line 2275)` — actual `cascade_auto_paused || tool_contract_auto_paused` block at **2394 / 2406** — **+119 line drift**.
+- `Auto-pause site below (line 2275)` — actual `runtime_auto_paused || tool_contract_auto_paused` block at **2394 / 2406** — **+119 line drift**.
 
 Three more stale anchors, same drift mode as iter 93's KDP (+1094 to +1279).
 
@@ -56,7 +56,7 @@ Three more stale anchors, same drift mode as iter 93's KDP (+1094 to +1279).
 
 Both sites switch to symbol-anchor (iter 64 N-2.a):
 - Site 1: `"[run_keeper_cycle] (line 1042+)"` → reference to `KeeperTaskAcquisition.tla preamble [run_keeper_cycle] reference` + inline explanation that the line number was removed in iter 64 N-2.a. The `~line 2559` AssignTask anchor → "the channel decision below" + grep hint (the disjunction is a unique 3-clause `<>` chain).
-- Site 2: `at line 966-967` → "in the `[MutationBoundaryReached]`/checkpoint-saved arm of the post-turn match" (symbol-anchored to the pattern arm). `Auto-pause site below (line 2275)` → "the `[cascade_auto_paused || tool_contract_auto_paused]` branch" (symbol-anchored to the named locals).
+- Site 2: `at line 966-967` → "in the `[MutationBoundaryReached]`/checkpoint-saved arm of the post-turn match" (symbol-anchored to the pattern arm). `Auto-pause site below (line 2275)` → "the `[runtime_auto_paused || tool_contract_auto_paused]` branch" (symbol-anchored to the named locals).
 
 ## Why N-2.c's existing scripts didn't catch it
 
@@ -73,7 +73,7 @@ Wiring isn't the issue; widening the regex (or extending the script to coalesce 
   - `KeeperTaskAcquisition.tla:3` preamble `[run_keeper_cycle]` reference. ✓
   - `pending_mentions <> []` disjunction at `keeper_unified_turn.ml:2621`. ✓
   - `reset_turn_failures` call at `keeper_unified_turn.ml:3004` (inside `MutationBoundaryReached` arm). ✓
-  - `cascade_auto_paused` binding at `keeper_unified_turn.ml:2394`, `||` predicate at 2406. ✓
+  - `runtime_auto_paused` binding at `keeper_unified_turn.ml:2394`, `||` predicate at 2406. ✓
 - `dune build` not run — comments-only edit (OCaml comments are stripped in lexing; no AST/type-check impact). Same posture as iter 91 (#14992) and iter 93 (#14998) for comment-only changes.
 
 ## Follow-up

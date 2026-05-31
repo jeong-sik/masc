@@ -3,7 +3,7 @@
 **Iteration**: 38 (/loop FSM/TLA+/OCaml drift hunt — first KCL/Phase E entry)
 **Date**: 2026-05-12
 **Spec**: `specs/keeper-state-machine/KeeperCompositeLifecycle.tla:135-144` (projection sets) + 624 LOC total
-**Source specs observed**: KTC, KSM, KDP, KCR/KCL (cascade), KMC, KCAF, KPTO
+**Source specs observed**: KTC, KSM, KDP, KCR/KCL (runtime), KMC, KCAF, KPTO
 **Risk**: HIGH — KCL's `TurnPhaseSet` is **2 members stale** vs KTC's post-iter-28 widening (#14793).  Joint invariants conditioning on `ktc_turn_phase` cannot reach routing/exhausted, so any joint property over those phases is **vacuously true** in TLC.  Highest-stakes drift class (cross-spec) — the validator chain (R-B-1.c iter 19-21-28-32-33) doesn't catch this because it scans OCaml→spec, not spec→spec.
 **Type**: Audit-only.  **New drift class discovered**: cross-spec projection staleness.
 
@@ -16,7 +16,7 @@ asserts joint invariants that no single-axis spec can express
 
 7 joint invariants:
 - PhaseTurnAlignment
-- NoCascadeBeforeMeasurement
+- NoRuntimeBeforeMeasurement
 - CompactionAtomicity
 - EventPriorityMonotone
 - AttemptFSMRespectsAdmission

@@ -46,7 +46,7 @@ let summary = function
   | Turn_wall_clock_timeout ->
     "keeper turn hit the wall-clock timeout"
   | Runtime_attempts_exhausted ->
-    "cascade attempts exhausted; inspect per-attempt root causes"
+    "runtime attempts exhausted; inspect per-attempt root causes"
   | Required_tool_use_no_tool_call ->
     "required keeper tool use was requested, but the model returned no keeper tool call"
   | Required_tool_use_unsatisfied ->

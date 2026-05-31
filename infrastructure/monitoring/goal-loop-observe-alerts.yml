@@ -80,7 +80,7 @@ groups:
         expr: |
           histogram_quantile(
             0.99,
-            sum by (le, keeper_name, cascade_profile) (
+            sum by (le, keeper_name, runtime_profile) (
               rate(masc_keeper_semaphore_wait_seconds_bucket[5m])
             )
           ) > 180

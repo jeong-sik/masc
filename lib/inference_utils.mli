@@ -2,7 +2,7 @@
 
     Usage helpers, UTF-8 sanitization, and concurrency diagnostics.
 
-    @since 2.125.0 — extracted from Cascade *)
+    @since 2.125.0 — extracted from Runtime *)
 
 (** Parse an environment variable as int, clamped to [[min_v, max_v]].
     Returns [default] when unset or unparseable. *)

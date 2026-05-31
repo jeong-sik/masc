@@ -1054,7 +1054,7 @@ export function RuntimeLensSection({
   const clockGroups = lens.clock_groups
   const swimlanes = [
     lens.swimlanes.keeper,
-    lens.swimlanes.masc_policy_cascade,
+    lens.swimlanes.masc_policy_runtime,
     lens.swimlanes.oas_agent,
     lens.swimlanes.provider,
     lens.swimlanes.tool_runtime,
@@ -1076,7 +1076,7 @@ export function RuntimeLensSection({
         <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
         <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
-        <${SignalRow} label="runtime drift" value=${drift.cascade_override ? `${drift.default_cascade_name ?? '-'} -> ${drift.live_cascade_name ?? '-'}` : drift.status} />
+        <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
         <${SignalRow} label="runtime proof" value=${`${proof.status} / ${proof.matched_tool_call_count} calls`} />
         <${SignalRow} label="sandbox proof" value=${proof.docker_visible ? formatLensList(proof.sandbox_profiles, 'docker') : 'not observed'} />

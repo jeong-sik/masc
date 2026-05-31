@@ -239,7 +239,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
@@ -248,7 +248,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
@@ -380,7 +380,7 @@ let record_streaming_cancelled_observation
       ~(config : Coord.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
-      ~(cascade_name : string)
+      ~(runtime_id : string)
       ~(keeper_turn_id : int)
       ()
   : unit
@@ -406,7 +406,7 @@ let record_streaming_cancelled_observation
     ~config
     ~meta:run_meta
     ~generation:run_generation
-    ~cascade_name
+    ~runtime_id
     ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"

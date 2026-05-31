@@ -4,7 +4,7 @@
 
     Routes:
     - model:"keeper:<name>" -> dispatches to Keeper_turn.handle_keeper_msg
-    - model:"default" or other -> direct MASC named-cascade execution via [Keeper_turn_driver.run_named]
+    - model:"default" or other -> direct MASC named-runtime execution via [Keeper_turn_driver.run_named]
 
     Request/response format follows the OpenAI Chat Completions API spec. *)
 
@@ -101,20 +101,20 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
   else
     Error body
 
-(** Route to direct MASC named-cascade execution via [Keeper_turn_driver.run_named].
+(** Route to direct MASC named-runtime execution via [Keeper_turn_driver.run_named].
     RFC-0105: the [Error] tag carries the typed [Openai_compat_error_map.t]
     mapping rather than a flattened [string], preserving HTTP status / kind / code
     classification from the underlying [Agent_sdk.Error.t]. *)
-let route_cascade ~message ~system_prompt ~max_tokens ~temperature
+let route_runtime ~message ~system_prompt ~max_tokens ~temperature
   : (string, Openai_compat_error_map.t) result =
-  let cascade_name =
+  let runtime_id =
     Runtime.get_default_runtime_id ()
   in
   match
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Server_openai_compat (fun () ->
       Keeper_turn_driver.run_named
-        ~cascade_name
+        ~runtime_id
         ~goal:message
         ~system_prompt
         ~max_turns:1
@@ -130,7 +130,7 @@ let route_cascade ~message ~system_prompt ~max_tokens ~temperature
     Error (Openai_compat_error_map.of_sdk_error err)
 
 (** Handle a POST /v1/chat/completions request.
-    Parses the OpenAI-format request body, routes to keeper or cascade,
+    Parses the OpenAI-format request body, routes to keeper or runtime,
     and returns an OpenAI-format response. *)
 let handle_chat_completions ~config ~sw ~clock (body : string)
   : Httpun.Status.t * string =
@@ -186,7 +186,7 @@ let handle_chat_completions ~config ~sw ~clock (body : string)
             String.concat "\n" sys_msgs
           with Failure _ -> ""
         in
-        match route_cascade ~message:user_message ~system_prompt
+        match route_runtime ~message:user_message ~system_prompt
                 ~max_tokens ~temperature with
         | Ok reply ->
           (`OK, completion_response ~model ~content:reply)

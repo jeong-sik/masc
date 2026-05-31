@@ -124,7 +124,7 @@
      The sweeps migrated every Tailwind arbitrary-color class to
      `var(--token)` references drawn from variables.css. Under
      [data-theme="paper"] each one must map to the design-system
-     warm-paper equivalent so the cascade rerenders correctly
+     warm-paper equivalent so the runtime rerenders correctly
      without touching any component. Ordered by role. */
 
   /* ok — Running, emerald-group */

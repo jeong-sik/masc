@@ -38,7 +38,7 @@ callsite 변경이 없도록 한다.
 | `lib/local/worker_container_types.ml:184` | `post_sync` |
 | `lib/voice/voice_bridge_core.ml:118` | `make_closing_client` |
 | `lib/auto_responder.ml:226` | `post_sync` |
-| `lib/cascade/cascade_http_probe.ml:154` | `get_sync` |
+| `lib/runtime/runtime_http_probe.ml:154` | `get_sync` |
 | `lib/graphql_client.ml:181` | `post_sync` |
 | `lib/opentelemetry_client_cohttp_eio.ml:147` | `make_closing_client` |
 
@@ -235,7 +235,7 @@ Phase D step 2 가 그 결정 위에 구현.
 | **D.2** | piaf wrapper or cohttp patched 구현 + 13 callsite migration (shim 유지) | D.1 + Phase B 결과 | ~400 |
 | **D.3** | stream callsite migration (voice_bridge 2개) | D.2 | ~80 |
 | **D.4** | Prometheus export + dashboard tile | D.2 | ~120 |
-| **D.5** | cascade-storm reproducer (16 keepers × 5 turn) — fd 평탄 검증 | D.2 + D.4 | ~150 |
+| **D.5** | runtime-storm reproducer (16 keepers × 5 turn) — fd 평탄 검증 | D.2 + D.4 | ~150 |
 
 ## 5. Trade-offs & open questions
 
@@ -251,7 +251,7 @@ Phase D step 2 가 그 결정 위에 구현.
 
 ## 6. 검증
 
-- D.2 의 cascade-storm reproducer: 16 keepers × 5 turn, `lsof -p <pid>`
+- D.2 의 runtime-storm reproducer: 16 keepers × 5 turn, `lsof -p <pid>`
   peak measurement. RFC-0101 throttle 비활성화 상태에서 < 256 FD peak
   목표.
 - D.3 voice_bridge stream callsite: 기존 streaming behavior 유지

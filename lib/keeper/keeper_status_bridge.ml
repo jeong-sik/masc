@@ -23,18 +23,15 @@ let coordination_surface_json (meta : keeper_meta) =
     ]
 ;;
 
-let effective_declarative_cascade_name
+let effective_declarative_runtime_id
       (defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
   (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
   match defaults.model, defaults.manifest_path with
-  | Some cascade_name, _ ->
-    Keeper_runtime_profile.normalize_keeper_runtime_declared_name cascade_name
+  | Some runtime_id, _ -> String.trim runtime_id
   | None, Some _ -> (Keeper_config.default_runtime_id ())
-  | None, None ->
-    Keeper_runtime_profile.normalize_keeper_runtime_declared_name
-      (runtime_id_of_meta meta)
+  | None, None -> String.trim (runtime_id_of_meta meta)
 ;;
 
 type override_field_detail =
@@ -57,7 +54,7 @@ let maybe_string_option_override =
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list
   =
-  let effective_runtime_id_name = effective_declarative_cascade_name defaults meta in
+  let effective_runtime_id = effective_declarative_runtime_id defaults meta in
   []
   |> maybe_string_override
        "prompt.goal"
@@ -80,13 +77,13 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        defaults.tool_denylist
        meta.tool_denylist
   |> (fun acc ->
-  let cascade_name = runtime_id_of_meta meta in
-  if effective_runtime_id_name <> cascade_name
+  let runtime_id = runtime_id_of_meta meta in
+  if effective_runtime_id <> runtime_id
   then
     override_field
       "model.runtime_id"
-      ~default_value:(`String effective_runtime_id_name)
-      ~live_value:(`String cascade_name)
+      ~default_value:(`String effective_runtime_id)
+      ~live_value:(`String runtime_id)
     :: acc
   else acc)
   |> maybe_bool_override
@@ -531,18 +528,15 @@ let optional_existing_path_json ?source = function
   | None -> `Null
 ;;
 
-(* RFC-0058 §9 Phase 9.3: on-disk cascade JSON is no longer generated or
-   consumed. [cascade_runtime_json_path] / [cascade_runtime_json_editable]
+(* RFC-0058 §9 Phase 9.3: on-disk runtime JSON is no longer generated or
+   consumed. [runtime_runtime_json_path] / [runtime_runtime_json_editable]
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the
    TOML path + the single-arm [source_kind]. *)
 let runtime_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
-  let source =
-    Cascade_toml_materializer.source_info ~config_path:resolution.cascade.path
-  in
   [ ( "runtime_catalog_source_kind"
-    , `String (Cascade_toml_materializer.source_kind_to_string source.kind) )
-  ; "runtime_catalog_source_path", `String source.source_path
+    , `String "runtime" )
+  ; "runtime_catalog_source_path", `String resolution.config_root.path
   ]
 ;;
 

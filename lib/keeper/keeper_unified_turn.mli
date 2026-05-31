@@ -30,7 +30,7 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
 
 (** Per-attempt watchdog used around the OAS call. It fires before the
     enclosing keeper-turn wall-clock timeout so recoverable provider stalls can
-    still rotate through the degraded cascade path. *)
+    still rotate through the degraded runtime path. *)
 val attempt_watchdog_timeout_sec
   :  remaining_turn_budget_s:float
   -> provider_timeout_budget
@@ -40,7 +40,7 @@ val allow_wall_clock_retry_budget_for_attempt
   :  is_retry:bool
   -> degraded_rotation_first_attempt:bool
   -> attempt:int
-  -> attempted_runtime_ids:string list
+  -> attempted_runtimes:string list
   -> bool
 
 val provider_retry_budget_available_for_turn
@@ -57,7 +57,7 @@ val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
 (** Reclassify a structural OAS timeout only when the current attempt
     actually dispatched with an provider timeout budget. This prevents a
     pre-retry turn-budget exhaustion from borrowing a stale previous
-    attempt budget and incorrectly rotating cascades. *)
+    attempt budget and incorrectly rotating runtimes. *)
 val reclassify_provider_timeout_for_attempt
   :  provider_timeout_budget:provider_timeout_budget option
   -> Agent_sdk.Error.sdk_error
@@ -69,11 +69,11 @@ type degraded_retry_budget_decision =
   | Degraded_retry_budget_exhausted of Keeper_error_classify.degraded_retry
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
-val next_fail_open_cascade_for_turn_with_budget
-  :  base_runtime_id:string
-  -> effective_runtime_id:string
+val next_fail_open_runtime_for_turn_with_budget
+  :  base_runtime:string
+  -> effective_runtime:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
-  -> attempted_runtime_ids:string list
+  -> attempted_runtimes:string list
   -> estimated_input_tokens:int
   -> max_turns:int
   -> ?time_spent_in_turn_s:float
@@ -142,7 +142,7 @@ val context_overflow_event_of_error
   -> Keeper_state_machine.event
 
 (** Resolve the initial keeper turn context budget.
-    Uses the first available model in the cascade rather than the largest
+    Uses the first available model in the runtime rather than the largest
     fallback model, so lifecycle context math matches the provider that will
     receive the first request. Exposed for regression tests. *)
 val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> string list -> int
@@ -173,13 +173,13 @@ val ensure_local_discovery_ready
   -> string list
   -> (unit, string) result
 
-(* cascade→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
+(* runtime→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
    (Keeper_turn_liveness 에서 적출됨 — 단일 runtime 에서 죽은 코드). *)
 
 (** Typed phase-gate output for the first turn pipeline boundary.
     [run_keeper_cycle] converts this record into the manifest
     [Phase_gate_decided] row and then dispatches the matching terminal or
-    cascade-routing branch. *)
+    runtime-routing branch. *)
 type turn_plan_status =
   | Turn_plan_dispatch
   | Turn_plan_skipped
@@ -204,16 +204,16 @@ val decide_turn_plan_at_phase_gate
 val turn_plan_manifest_status : turn_plan -> string
 val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
 
-(** Resolve the next cascade to try after an auto-recoverable failure.
-    Uses the current effective cascade, the turn tool requirement, and
+(** Resolve the next runtime to try after an auto-recoverable failure.
+    Uses the current effective runtime, the turn tool requirement, and
     the default degraded rotation candidate, then suppresses suggestions
-    that would loop back to a cascade already attempted during the current
+    that would loop back to a runtime already attempted during the current
     turn. Exposed for targeted tests. *)
-val next_fail_open_cascade_for_turn
-  :  base_runtime_id:string
-  -> effective_runtime_id:string
+val next_fail_open_runtime_for_turn
+  :  base_runtime:string
+  -> effective_runtime:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
-  -> attempted_runtime_ids:string list
+  -> attempted_runtimes:string list
   -> Agent_sdk.Error.sdk_error
   -> Keeper_error_classify.degraded_retry option
 
@@ -224,7 +224,7 @@ val record_streaming_cancelled_observation
   :  config:Coord.config
   -> run_meta:Keeper_meta_contract.keeper_meta
   -> run_generation:int
-  -> cascade_name:string
+  -> runtime_id:string
   -> keeper_turn_id:int
   -> unit
   -> unit

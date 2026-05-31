@@ -2,8 +2,8 @@
     contexts, session assembly, internal signals, and
     timeline rendering for the mission dashboard.
 
-    {b Cascade chain}: includes
-    {!Dashboard_briefing_agents} (which itself cascades
+    {b Runtime chain}: includes
+    {!Dashboard_briefing_agents} (which itself runtimes
     {!Dashboard_utils}), so callers reach the agent-brief
     + per-entity context records ({!attention_context},
     {!session_context}, {!agent_context},
@@ -13,7 +13,7 @@
     identity propagates end-to-end via
     [include module type of struct include M end].
 
-    External surface beyond the cascade (8 own-module
+    External surface beyond the runtime (8 own-module
     entries) — all consumed by {!Dashboard_briefing} when
     rendering the mission HTTP envelope, plus
     [build_keeper_briefs] reached directly by

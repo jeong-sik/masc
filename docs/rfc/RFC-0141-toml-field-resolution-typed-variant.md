@@ -43,7 +43,7 @@ regenerated post-PR-2/3. The §7 acceptance metric —
 
 ### Related RFC
 
-- **RFC-0142** (cascade_error_classify decomposition, Active 2026-05-21):
+- **RFC-0142** (runtime_error_classify decomposition, Active 2026-05-21):
   the sister Json_field migration. Same audit cohort.
 - **RFC-0148** (Tool_error closed sum, Implemented 2026-05-20),
   **RFC-0154** (System_error_class typed SSOT, Implemented
@@ -152,7 +152,7 @@ Each PR is self-contained, builds clean, and lints clean. PR-3 + PR-4 stack on P
 
 - Wholesale `Otoml` replacement.
 - Generic `'k -> 'v t` map; the helper is intentionally tied to TOML-shaped paths.
-- Other subsystems' Otoml usage (e.g. `cascade_decl/`). Those are tracked separately in RFC-0142 / future RFCs.
+- Other subsystems' Otoml usage (e.g. `runtime_decl/`). Those are tracked separately in RFC-0142 / future RFCs.
 
 ## 7. Test plan
 

@@ -3,7 +3,7 @@
    Tests the pure, transport-independent pieces of the connection pool:
    Host_key normalization, default_config sanity, response/stats type
    shapes.  Live piaf integration (acquire/release lifecycle,
-   keep-alive reuse) is exercised in the D.2e cascade-storm reproducer.
+   keep-alive reuse) is exercised in the D.2e runtime-storm reproducer.
 
    The Pool_no_double_close TLA+ spec
    ([specs/keeper-switch-hierarchy/Pool_no_double_close.tla])

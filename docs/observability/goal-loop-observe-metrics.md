@@ -88,7 +88,7 @@ through the normal dashboard provisioning path or File -> Import.
 The contract uses bounded labels from the prompt:
 
 - `keeper_name`
-- `cascade_profile`
+- `runtime_profile`
 - `provider_name`
 - `profile_name`
 - `model_id`

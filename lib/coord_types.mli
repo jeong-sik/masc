@@ -17,7 +17,7 @@ type context =
   }
 
 (** Credential availability snapshot used by status rendering /
-    cascade gating.  [credential_candidates] enumerates env-var
+    runtime gating.  [credential_candidates] enumerates env-var
     names probed during resolution. *)
 type credential_state =
   { credential_required : bool

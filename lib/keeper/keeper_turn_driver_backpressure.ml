@@ -17,7 +17,7 @@ let synthetic_retry_after_sec =
 let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.NetworkError
       { kind = Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
-    Some Cascade_slot
+    Some Runtime_slot
   | Llm_provider.Http_client.ProviderFailure
       { kind = Llm_provider.Http_client.Capacity_exhausted _; _ } ->
     Some Provider_capacity
@@ -42,7 +42,7 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
     Some
       (Capacity_backpressure
          {
-           cascade_name = runtime_id;
+           runtime_id;
            source =
              Option.value source ~default:Provider_capacity;
            detail = message;
@@ -60,8 +60,8 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
     Some
       (Capacity_backpressure
          {
-           cascade_name = runtime_id;
-           source = Option.value source ~default:Cascade_slot;
+           runtime_id;
+           source = Option.value source ~default:Runtime_slot;
            detail = message;
            retry_after = Synthetic_default synthetic_retry_after_sec;
          })
@@ -80,7 +80,7 @@ let capacity_backpressure_of_pending ~runtime_id = function
     Some
       (Capacity_backpressure
          {
-           cascade_name = runtime_id;
+           runtime_id;
            source;
            detail;
            retry_after;
@@ -99,7 +99,7 @@ let capacity_backpressure_of_sdk_error
       (sdk_error_of_masc_internal_error
          (Capacity_backpressure
             {
-              cascade_name = runtime_id;
+              runtime_id;
               source = Provider_capacity;
               detail;
               retry_after =
@@ -113,7 +113,7 @@ let capacity_backpressure_of_sdk_error
       (sdk_error_of_masc_internal_error
          (Capacity_backpressure
             {
-              cascade_name = runtime_id;
+              runtime_id;
               source = Provider_capacity;
               detail = msg;
               retry_after = Synthetic_default synthetic_retry_after_sec;

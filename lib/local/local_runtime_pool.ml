@@ -487,7 +487,7 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
 
 (* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —
    zero production callers; see [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
-   §7.1. If leasing semantics return, design at the OAS cascade layer per RFC-0026. *)
+   §7.1. If leasing semantics return, design at the OAS runtime layer per RFC-0026. *)
 
 let snapshot_to_yojson (snapshot : runtime_snapshot) =
   `Assoc

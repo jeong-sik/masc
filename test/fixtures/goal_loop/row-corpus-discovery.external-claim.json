@@ -99,11 +99,11 @@
       "note": "Duplicate docx has the same digest as the first footnote docx and does not provide the missing strict rows."
     },
     {
-      "artifact_name": "keeper_cascade_completion.agent.final.md",
+      "artifact_name": "keeper_runtime_completion.agent.final.md",
       "artifact_kind": "markdown",
       "result": "CONFIRMS_CORPUS_GAP_OPEN",
       "sha256": "e7457705309b352f3b298e7b617faff614962c762fb35022eb8990bb38cbc36b",
-      "note": "Independent cascade completion report lists GOAL LOOP audit corpus not replayable as #13265 Open, with 206-finding replay unavailable."
+      "note": "Independent runtime completion report lists GOAL LOOP audit corpus not replayable as #13265 Open, with 206-finding replay unavailable."
     },
     {
       "artifact_name": "research/masc_dim10.md",

@@ -178,6 +178,7 @@ describe('ConfigResolutionPanel', () => {
     )
 
     const cards = Array.from(container.querySelectorAll('[title]'))
+    expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config/keeper_runtime.toml')
     expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config')
     expect(container.textContent?.match(/env override/g)?.length ?? 0).toBe(1)
     expect(container.textContent).toContain('cwd fallback')

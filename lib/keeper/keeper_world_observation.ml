@@ -775,8 +775,8 @@ let keeper_cycle_decision
           match provider_cooldown_remaining_sec with
           | Some _ ->
             fallback_runtime_for_provider_cooldown
-              ~base_runtime_id:runtime_id
-              ~effective_runtime_id:runtime_id
+              ~base_runtime:runtime_id
+              ~effective_runtime:runtime_id
           | None -> None
         in
         let verdict =

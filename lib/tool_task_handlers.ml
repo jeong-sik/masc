@@ -206,7 +206,7 @@ let keeper_transition_action_denylist (ctx : context) =
 
 let review_completion_notes
     ~(completion_contract : string list option)
-    ~(evaluator_cascade : string option)
+    ~(evaluator_runtime : string option)
     ~(ctx : context)
     ~(task_opt : Masc_domain.task option)
     ~(task_id : string)
@@ -242,7 +242,7 @@ let review_completion_notes
       in
       match (Anti_rationalization.review
          ?sw:ctx.sw
-         ?evaluator_cascade
+         ?evaluator_runtime
          ?completion_contract
          ~on_verdict ~few_shot_block ar_req).verdict with
       | Anti_rationalization.Reject reason -> Some reason
@@ -631,6 +631,6 @@ let transition_known_args =
     "agent_name";
     "force";
     "completion_contract";
-    "evaluator_cascade";
+    "evaluator_runtime";
     "handoff_context";
   ]

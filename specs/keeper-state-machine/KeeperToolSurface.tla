@@ -8,8 +8,8 @@
 \* This spec is ORTHOGONAL to the four existing keeper specs:
 \*
 \*   - KeeperStateMachine.tla         (keeper lifecycle)
-\*   - KeeperCascadeRouting.tla       (cascade item/group routing)
-\*   - KeeperCascadeAttemptFSM.tla    (RFC-0065 B1 — cascade attempt FSM)
+\*   - KeeperRuntimeRouting.tla       (runtime item/group routing)
+\*   - KeeperRuntimeAttemptFSM.tla    (RFC-0065 B1 — runtime attempt FSM)
 \*   - KeeperRolloverDecision.tla     (rollover gate, RFC-0065 Phase 4)
 \*
 \* B2 covers what those do not: the surface-construction pipeline

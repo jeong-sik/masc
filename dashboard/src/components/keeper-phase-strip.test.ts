@@ -17,7 +17,7 @@ describe('eventLabel', () => {
   })
 
   it('extracts type from object', () => {
-    expect(eventLabel({ type: 'cascade_select' })).toBe('cascade_select')
+    expect(eventLabel({ type: 'runtime_select' })).toBe('runtime_select')
   })
 
   it('extracts type as string from number', () => {

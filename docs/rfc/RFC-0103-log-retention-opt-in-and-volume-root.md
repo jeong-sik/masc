@@ -75,7 +75,7 @@ default disabled 면:
 - 4 모듈의 `retention_days ()` default → `None`
   - `lib/keeper_tool_call_log.ml`
   - `lib/tool_usage_log.ml`
-  - `lib/cascade/cascade_event_bridge.ml` (oas-events)
+  - `lib/runtime/runtime_event_bridge.ml` (oas-events)
   - `lib/keeper/keeper_runtime_manifest.ml`
 - env vars 유지: `MASC_*_RETENTION_DAYS` (positive int 일 때만 enable)
 - invalid env 값 (non-positive 또는 non-int) = disabled (안전한 default)

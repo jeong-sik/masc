@@ -67,7 +67,7 @@ val paused_meta_auto_resume_due : now:float -> keeper_meta -> bool
 (** True when [meta] is an auto-paused keeper whose self-healing backoff has
     elapsed.  Intentional/operator pauses and reconcile-gated pauses are
     excluded.  Only an explicit [auto_resume_after_sec] makes a paused keeper
-    auto-recoverable.  This pure predicate deliberately does not inspect cascade
+    auto-recoverable.  This pure predicate deliberately does not inspect runtime
     health or approval queues; callers that can see those runtime surfaces must
     still apply them before mutating state. *)
 

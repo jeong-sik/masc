@@ -298,7 +298,7 @@ RFC-0089 (substring classifier closure) family 의 *infrastructure-level extensi
 | #N+0 | RFC body + Phase 0a + 0b + 1 (소규모 cluster, independent commits) | docs/rfc, lib/fs_compat, lib/dated_jsonl, lib/keeper_tool_call_log, test | origin/main |
 | #N+1 | Phase 2 impl (큰 작업, 별도 PR) | lib/fs_compat per-domain fd cache, test | origin/main |
 
-각 PR 은 *독립 머지 가능* (RFC-0108 §4.3 학습 반영, `feedback_post_merge_push_check_required` + `feedback_stacked_pr_sha_cascade_on_amend`).
+각 PR 은 *독립 머지 가능* (RFC-0108 §4.3 학습 반영, `feedback_post_merge_push_check_required` + `feedback_stacked_pr_sha_runtime_on_amend`).
 
 ### 4.2 RFC-0108 §3.3 표기 갱신 (Phase 2 PR 과 동봉)
 

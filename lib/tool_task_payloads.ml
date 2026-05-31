@@ -130,19 +130,19 @@ let verdict_to_string (result : Anti_rationalization.review_result) =
   | Anti_rationalization.Approve -> "approve"
   | Anti_rationalization.Reject reason -> "reject:" ^ reason
 
-(** True when both cascades are non-empty AND distinct.
+(** True when both runtimes are non-empty AND distinct.
 
     Must match {!Eval_calibration.calibration_stats} inclusion criteria
-    exactly (both [not (String.equal evaluator_cascade "")] and [not (String.equal generator_cascade "")])
+    exactly (both [not (String.equal evaluator_runtime "")] and [not (String.equal generator_runtime "")])
     so that a real-time SSE event and the aggregated cross_model_rate
     agree on which verdicts count as cross-model. *)
 let is_cross_model_verdict (result : Anti_rationalization.review_result) : bool =
-  match result.generator_cascade with
+  match result.generator_runtime with
   | None -> false
   | Some g ->
     not (String.equal g "")
-    && not (String.equal result.evaluator_cascade "")
-    && not (String.equal g result.evaluator_cascade)
+    && not (String.equal result.evaluator_runtime "")
+    && not (String.equal g result.evaluator_runtime)
 
 (** Build the [verdict_recorded] SSE payload for a finished review.
 
@@ -165,8 +165,8 @@ let build_verdict_sse_payload
             ("agent_name", `String req.agent_name);
             ("gate", `String (Anti_rationalization.gate_to_string result.gate));
             ("verdict", `String (verdict_to_string result));
-            ("evaluator_cascade", `String result.evaluator_cascade);
-            ( "generator_cascade", Json_util.string_opt_to_json result.generator_cascade );
+            ("evaluator_runtime", `String result.evaluator_runtime);
+            ( "generator_runtime", Json_util.string_opt_to_json result.generator_runtime );
             ("cross_model", `Bool (is_cross_model_verdict result));
             ( "fallback_reason", Json_util.string_opt_to_json result.fallback_reason );
           ] );

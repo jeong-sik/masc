@@ -43,7 +43,7 @@ type stress_kind =
   | Fallback_approval            (** anti-rat or post-verifier fell back to approve *)
   | Timeout                      (** OAS/LLM call timed out *)
   | Provider_timeout             (** provider stream timed out *)
-  | Capacity_pressure            (** admission, cascade, or provider capacity pressure *)
+  | Capacity_pressure            (** admission, runtime, or provider capacity pressure *)
   | Turn_liveness                (** stale turn, heartbeat, or fiber liveness issue *)
   | Parse_degraded               (** LLM response required fallback parsing *)
   | Task_released                (** agent released a task (gave up) *)

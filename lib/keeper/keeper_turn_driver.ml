@@ -1,6 +1,6 @@
-(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
 
-    Public API for running OAS agents through MASC-managed named cascade
+    Public API for running OAS agents through MASC-managed named runtime
     profiles ([run_named])
     or explicit model label ([run_model_by_label]), with optional MASC
     tool bridging variants.
@@ -13,8 +13,8 @@ open Result.Syntax
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
 include Runtime_oas_runner
-include Runtime_attempt_fsm
 include Keeper_internal_error
+include Keeper_runtime_attempt
 include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
@@ -88,10 +88,6 @@ let run_named
     ?per_provider_timeout_s
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let runtime_engine = Keeper_runtime_engine.keeper_managed in
-  match Keeper_runtime_engine.guard_keeper_hot_path runtime_engine with
-  | Error msg -> Error (Agent_sdk.Error.Internal msg)
-  | Ok () ->
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
@@ -99,7 +95,7 @@ let run_named
     String.trim runtime_id
   in
   let error_runtime_id = runtime_id in
-  let projection_runtime_id = runtime_id in
+  let runtime_runtime_id = runtime_id in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   (* Keeper-internal tools cannot degrade to a text-only CLI palette: the
      model would see no callable schema and emit misleading diagnostics. *)
@@ -114,7 +110,7 @@ let run_named
       ~net
       ?provider_filter
       ~runtime_id
-      ~projection_runtime_id
+      ~runtime_runtime_id
       ()
   in
   (match
@@ -122,16 +118,14 @@ let run_named
        named_resolution.candidate_cfgs_result )
    with
    | Error detail, _ | _, Error detail ->
-       Log.Misc.error "cascade %s: %s" runtime_id detail;
+       Log.Misc.error "runtime %s: %s" runtime_id detail;
        Error (runtime_catalog_error_to_sdk_error detail)
    | Ok configured_labels, Ok candidate_cfgs ->
   let original_candidate_cfgs = candidate_cfgs in
   let original_candidates =
     runtime_candidates_of_providers original_candidate_cfgs
   in
-  let required_capability_profile =
-    Keeper_runtime_profile.required_capability_profile_of_runtime_id runtime_id
-  in
+  let required_capability_profile = None in
   let tool_filtered_candidate_cfgs =
     filter_candidate_providers_for_tool_support
       ~keeper_name
@@ -168,7 +162,7 @@ let run_named
                  (String.concat ", " materialized_tool_names)
              in
              Log.Keeper.warn
-               "keeper:%s cascade %s: pre-dispatch skipped provider=%s reason=%s"
+               "keeper:%s runtime %s: pre-dispatch skipped provider=%s reason=%s"
                keeper_name
                runtime_id
                provider_label
@@ -227,7 +221,7 @@ let run_named
             | None -> true
             | Some (_provider_health_key, msg) ->
                 Log.Misc.debug
-                  "cascade %s: prefilter skipped %s (provider_key=%s cooldown: %s)"
+                  "runtime %s: prefilter skipped %s (provider_key=%s cooldown: %s)"
                   runtime_id runtime_candidate_label runtime_candidate_label msg;
                 false)
   in
@@ -259,7 +253,7 @@ let run_named
   (* RFC: MASC/OAS Error-Warn Reduction Goal — 2026-05-18 §P3.
      For each unhealthy endpoint, record the preflight-skip event in
      [Keeper_preflight_health_tracker.global]. After N consecutive skips of
-     the same (runtime_id, endpoint, reason) fingerprint we escalate to
+     the same (runtime, endpoint, reason) fingerprint we escalate to
      ERROR once and register the endpoint in the in-process disabled
      list — subsequent identical skips return [`Already_disabled] and
      are dropped to DEBUG, so the log volume drops from ~35-50/30min
@@ -332,68 +326,18 @@ let run_named
             runtime_id url)
     local_endpoint_health;
   let candidates = local_prefiltered_candidates in
-  let optional_capacity_override ~knob resolve =
-    match resolve () with
-    | Ok value -> value
-    | Error detail ->
-      Log.Misc.warn
-        "cascade %s: failed to resolve %s capacity override: %s"
-        runtime_id
-        knob
-        detail;
-      None
-  in
   let register_capacity_controls candidates =
     List.iter
       Runtime_candidate.register_declared_client_capacity
       candidates;
-    let capacity_keys =
-      Runtime_candidate.capacity_keys candidates
-      |> List.map String.trim
-      |> List.filter (fun key -> not (String.equal key ""))
-      |> Json_util.dedupe_keep_order
-    in
-    let cli_max_concurrent =
-      optional_capacity_override ~knob:"cli_max_concurrent" (fun () ->
-        Runtime_catalog.resolve_cli_max_concurrent
-          ~sw
-          ~net
-          ~name:runtime_id
-          ())
-    in
-    (match cli_max_concurrent with
-     | Some max_concurrent ->
-       Runtime_client_capacity.auto_register_cli_with_override
-         ~capacity_keys
-         ~max_concurrent
-     | None ->
-       Runtime_client_capacity.auto_register_cli_for_candidates ~capacity_keys);
-    let http_probe_default_max_concurrent = 1 in
-    let http_probe_max_concurrent =
-      match
-        optional_capacity_override ~knob:"ollama_max_concurrent" (fun () ->
-          Runtime_catalog.resolve_ollama_max_concurrent
-            ~sw
-            ~net
-            ~name:runtime_id
-            ())
-      with
-      | Some max_concurrent -> max_concurrent
-      | None ->
-        (* DET-OK: absent or unresolved HTTP-probe capacity uses the stable
-           single-flight default at the runtime boundary; configured values are
-           still explicit [Some n] inputs from the runtime catalog. *)
-        http_probe_default_max_concurrent
-    in
     List.iter
-      (Runtime_candidate.register_http_probe_capable
-         ~max_concurrent:http_probe_max_concurrent)
+      (Runtime_candidate.register_http_probe_capable ~max_concurrent:1)
       candidates
   in
   register_capacity_controls candidates;
   if health_cooldown_fail_open then
     Log.Misc.warn
-      "cascade %s: all tool-capable candidates are in health/cooldown; \
+      "runtime %s: all tool-capable candidates are in health/cooldown; \
        fail-open to surface provider result instead of no_providers_available \
        configured_label_count=%d original_candidate_count=%d \
        tool_filtered_candidate_count=%d local_prefiltered_candidate_count=%d"
@@ -404,21 +348,11 @@ let run_named
       local_prefiltered_candidate_count;
   let _ = base_provider_attempt_provenance in
   let filter_provider_health_fail_open candidates =
-    match Provider_health.active () with
-    | None -> candidates
-    | Some health ->
-      Provider_health.filter_healthy health
-        ~provider_id:Runtime_candidate.health_key
-        candidates
+    candidates
   in
   let record_provider_health_result candidate ~success ~http_status =
-    match Provider_health.active () with
-    | None -> ()
-    | Some health ->
-      Provider_health.record_attempt_result health
-        ~provider_id:(Runtime_candidate.health_key candidate)
-        ~success
-        ~http_status
+    let _ = candidate, success, http_status in
+    ()
   in
   let record_provider_health_error candidate = function
     | Provider_error.ServerError { code; _ } ->
@@ -469,7 +403,7 @@ let run_named
           "providers unavailable after local preflight/health/cooldown filter"
       in
       Log.Misc.error
-        "cascade %s: %s; classification=%s configured_label_count=%d \
+        "runtime %s: %s; classification=%s configured_label_count=%d \
          original_candidate_count=%d tool_filtered_candidate_count=%d \
          required_lane_filtered_candidate_count=%d local_prefiltered_candidate_count=%d \
          health_filtered_candidate_count=%d require_tool_choice_support=%b \
@@ -520,12 +454,11 @@ let run_named
          in
          Keeper_runtime_manifest.make_for_context manifest_ctx
            ~event:Keeper_runtime_manifest.Pre_dispatch_blocked
-           ~runtime_id:runtime_id
+           ~runtime_id
            ~status:"error"
            ~decision:
              (`Assoc
-               (Keeper_runtime_engine.manifest_fields runtime_engine
-                @ [
+                [
                     ("reason", `String (kind_of_masc_internal_error internal_error));
                     ( "required_tool_names",
                       `List
@@ -571,7 +504,7 @@ let run_named
                     ( "require_tool_choice_support",
                       `Bool require_tool_choice_support );
                     ("require_tool_support", `Bool require_tool_support);
-                  ]))
+                  ])
            ()
          |> append
        | _ -> ());
@@ -648,7 +581,6 @@ let run_named
     on_resume;
     agent_ref;
     event_bus;
-    runtime_engine;
     runtime_manifest_context;
     runtime_manifest_append;
     runtime_manifest_required_tool_names;
@@ -660,16 +592,9 @@ let run_named
     | Some manifest_ctx, Some append ->
       let decision =
         match decision with
-        | None -> Some (`Assoc (Keeper_runtime_engine.manifest_fields runtime_engine))
-        | Some (`Assoc fields) ->
-            Some
-              (`Assoc
-                (Keeper_runtime_engine.manifest_fields runtime_engine @ fields))
-      | Some other ->
-            Some
-              (`Assoc
-                (Keeper_runtime_engine.manifest_fields runtime_engine
-                 @ [ ("decision", other) ]))
+        | None -> Some (`Assoc [])
+        | Some (`Assoc _ as assoc) -> Some assoc
+        | Some other -> Some (`Assoc [ ("decision", other) ])
       in
       let decision =
         match runtime_manifest_context with
@@ -697,7 +622,7 @@ let run_named
         | None -> decision
       in
       Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-        ?oas_turn_count ~logical_seq:!seq_ref ~runtime_id:runtime_id ?status ?decision
+        ?oas_turn_count ~logical_seq:!seq_ref ~runtime_id ?status ?decision
         ()
       |> append
     | _ -> ()
@@ -728,7 +653,6 @@ let run_named
     emit_runtime_manifest;
     runtime_manifest_context;
     runtime_manifest_append;
-    runtime_engine;
     turn_start;
     seq_ref;
     health_cooldown_fail_open;
@@ -754,21 +678,17 @@ let run_named
       ?last_capacity_backpressure
       try_runtime_ctx remaining last_err
   in
-  (* Runtime dispatch no longer resolves a cascade strategy catalog.
-     Candidate ordering is produced by the runtime candidate resolution layer;
-     this driver only applies the health fail-open filter and executes the
-     provider attempts in that order. *)
-  let runtime_strategy_name = "linear_failover" in
-  let () = runtime_strategy_name_ref := Some runtime_strategy_name in
+  let () = runtime_strategy_name_ref := Some "linear" in
   let _ = sw, net in
-  let runtime_exhausted_after_filter () =
+  let runtime_exhausted_after_filter ~cycle =
+    let _ = cycle in
     let observation =
       Keeper_observation.runtime_observation_with_metrics
         ~runtime_id:error_runtime_id
         ?strategy:!runtime_strategy_name_ref ~configured_labels
         ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
     in
-    Keeper_observation.record_cascade ~keeper_name
+    Keeper_observation.record_runtime ~keeper_name
       ~runtime_id:error_runtime_id
       ~outcome:`Failure ~observation:(Some observation) ();
     Error
@@ -779,13 +699,10 @@ let run_named
               reason = Keeper_meta_contract.Candidates_filtered_after_cycles;
             }))
   in
-  let cycle_loop () =
-    let ordered =
-      candidates
-      |> filter_provider_health_fail_open
-    in
+  let rec cycle_loop n =
+    let ordered = filter_provider_health_fail_open candidates in
     match ordered with
-    | [] -> runtime_exhausted_after_filter ()
+    | [] -> runtime_exhausted_after_filter ~cycle:n
     | _ ->
       try_runtime ?per_provider_timeout_s ordered None
   in
@@ -794,7 +711,7 @@ let run_named
   in
   match Admission_queue.with_permit ?wait_timeout_sec
     ~priority:queue_priority ~keeper_name:name ~runtime_id:admission_runtime_id
-    cycle_loop with
+    (fun () -> cycle_loop 0) with
   | Ok result -> result
   | Error (`Host_resource_saturated reason) ->
       Error

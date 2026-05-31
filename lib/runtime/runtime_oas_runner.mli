@@ -1,4 +1,4 @@
-(** Runtime_oas_runner — Eio context, cascade resolution, runtime MCP policy.
+(** Runtime_oas_runner — Eio context, runtime resolution, runtime MCP policy.
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Provides runtime profile defaults, Eio context validation,
@@ -13,7 +13,7 @@ val default_config_path : unit -> string option
 (** Alias for [Runtime.config_path]. *)
 
 val default_model_strings : runtime_id:string -> string list
-(** Alias for [Runtime.default_model_strings]. *)
+(** Alias for [Runtime_runtime.default_model_strings]. *)
 
 (** {1 Eio context validation} *)
 
@@ -41,7 +41,7 @@ val resolve_runtime_providers :
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   runtime_id:string -> unit ->
   (Llm_provider.Provider_config.t list, string) result
-(** Resolve runtime provider configs via MASC Cascade_config. *)
+(** Resolve runtime provider configs via MASC Runtime_config. *)
 
 val keeper_agent_name_opt : string -> string option
 (** Derive the agent name from a keeper name; [None] when the name is empty. *)
@@ -86,7 +86,7 @@ type filter_rejection_reason =
   | Codex_keeper_bound_actor_required
   | Tool_lane_unsupported
   | Required_tool_use of Provider_tool_support.rejection_reason
-(** Why a provider was rejected by the cascade filter.  Order mirrors the
+(** Why a provider was rejected by the runtime filter.  Order mirrors the
     filter's short-circuit priority. *)
 
 val filter_rejection_reason_label : filter_rejection_reason -> string

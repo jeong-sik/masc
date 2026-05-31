@@ -10,8 +10,8 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 - **Lifeline** — 60s heartbeat sparkline
 - **Sidebar** — Fleet list with keeper heartbeats + Goals list
 - **Swimlanes** — 5 keepers × timeline with brass "now" column
-- **Deck** — tab group (Board / Tasks / Goals / Verified / Providers / Cascade) with content
-- **Rail** — activity feed + cascade trace
+- **Deck** — tab group (Board / Tasks / Goals / Verified / Providers / Runtime) with content
+- **Rail** — activity feed + runtime trace
 - **Composer** — keeper.claim() input
 - **Status Bar** — build + online providers
 - **Planes / Crew / Drawer / Focus / WidgetSolo / StatusTray** — extended surfaces (multi-plane layout with a reachable Crew mode, multi-keeper crew, slide-out drawer, focus overlay, single-widget solo view, status tray)
@@ -28,7 +28,7 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 - `drawer.css`, `focus-mode.css`, `status-tray.css`, `widget-solo.css` — surface-specific styles
 
 ### Seed data
-- `data.js` — Phase 1 seed data (keepers, goals, tasks, events, providers, cascade)
+- `data.js` — Phase 1 seed data (keepers, goals, tasks, events, providers, runtime)
 - `data-p2.js` — Phase 2 seed data (branches, nudges, board posts, messages, audit, costs, decisions, episodes — sourced from real `.masc/*` records)
 - `data-crew.js` — Phase 3 crew seed data (multi-keeper crew / Planes view)
 

@@ -81,8 +81,8 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
     : keeper.latest_tool_names
   return [
     {
-      label: 'cascade',
-      value: displayValue(keeper.cascade_name ?? keeper.cascade_canonical ?? keeper.selected_cascade_canonical),
+      label: 'runtime',
+      value: displayValue(keeper.runtime_id ?? keeper.runtime_canonical ?? keeper.selected_runtime_canonical),
     },
     {
       label: 'sandbox',

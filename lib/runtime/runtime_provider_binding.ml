@@ -1,8 +1,8 @@
-(** Provider identity helpers shared across {!Cascade_config} submodules.
+(** Provider identity helpers shared across {!Runtime_config} submodules.
 
-    Extracted from the original [cascade_config.ml] godfile to give the
+    Extracted from the original [runtime_config.ml] godfile to give the
     parsing/selection/resolve/strategy submodules a stable lowest layer.
-    Surface is unchanged: {!Cascade_config} re-exports every function in
+    Surface is unchanged: {!Runtime_config} re-exports every function in
     this module so external callers continue to use the facade.
 
     @stability Internal *)
@@ -28,7 +28,7 @@ let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
   Llm_provider.Provider_registry.provider_name_of_config cfg
 ;;
 
-let cascade_prefix_of_provider_kind kind =
+let runtime_prefix_of_provider_kind kind =
   let provider_name = provider_name_of_kind kind in
   match runtime_binding_of_label provider_name with
   | Some binding -> binding.Runtime_binding.id

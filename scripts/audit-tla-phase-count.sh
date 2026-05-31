@@ -219,7 +219,7 @@ while IFS= read -r entry; do
   fi
 
   # Domain disambiguation: "phase" is overloaded in this codebase —
-  # cascade FSM has 6 phases, turn cycle has 3 axes, decision pipeline
+  # runtime FSM has 6 phases, turn cycle has 3 axes, decision pipeline
   # has 5, etc.  Any subset/projection count is ≤7 and is never a
   # keeper-count drift signal.  Only flag values in the range
   # [SSOT_COUNT-3 .. SSOT_COUNT+5] so we catch realistic stale keeper

@@ -26,7 +26,7 @@ val label_resolution_error_to_string : label_resolution_error -> string
 val label_resolution_error_to_sdk_error :
   label_resolution_error -> Agent_sdk.Error.sdk_error
 
-(** Resolve a model label string to a provider config via the MASC cascade
+(** Resolve a model label string to a provider config via the MASC runtime
     parser.  Explicit labels never silently fall through to discovery-only
     models — unresolved labels return [Error (Invalid_model_label _)]. *)
 val resolve_provider_config_of_label :

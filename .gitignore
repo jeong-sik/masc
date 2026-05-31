@@ -30,7 +30,7 @@ Thumbs.db
 data/tool-metrics/
 
 # Local heartbeat model-pool override
-config/llm_cascade.json
+config/llm_runtime.json
 
 # Database files
 *.db

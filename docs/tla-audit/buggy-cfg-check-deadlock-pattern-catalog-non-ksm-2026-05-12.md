@@ -14,7 +14,7 @@ Same procedure: extract `NextBuggy` shape, cross-check `CHECK_DEADLOCK` directiv
 
 | Dir | Total | `CHECK_DEADLOCK FALSE` present | Missing CD |
 |---|---:|---:|---:|
-| `specs/cascade/` | 1 | 1 | 0 |
+| `specs/runtime/` | 1 | 1 | 0 |
 | `specs/multimodal/` | 2 | 2 | 0 |
 | `specs/bug-models/` | 25 | 23 | 2 |
 | `specs/server-state/` | 1 | 0 | 1 |
@@ -34,7 +34,7 @@ Same procedure: extract `NextBuggy` shape, cross-check `CHECK_DEADLOCK` directiv
 | `specs/bug-models/AmbiguousPartialCommitBug-buggy.cfg` | `StartTurn ∨ ReadOnlyToolCall ∨ MutatingToolCall ∨ TurnSuccess ∨ BugProviderError ∨ Done` (no `Next`) | **D′ (enumerated-replace)** | **12** | `Invariant Safety is violated` — 87 distinct states, 27 left on queue. NOT deadlock. |
 | `specs/bug-models/AuthIdentityFSM-buggy.cfg` | `Next ∨ SilentRewrite` | D (add-bug) | **12** | `Invariant SafetyInvariant is violated`. |
 | `specs/server-state/ServerState-buggy.cfg` | `Next ∨ BugAction` | D | **12** | `Invariant InvariantViolated is violated`. |
-| `specs/admission-queue/AdmissionQueue-buggy.cfg` | `Next ∨ FdGuardSkip ∨ ReleaseSkipped` | D | **12** | `Invariant CascadeNameCanonical is violated`. |
+| `specs/admission-queue/AdmissionQueue-buggy.cfg` | `Next ∨ FdGuardSkip ∨ ReleaseSkipped` | D | **12** | `Invariant RuntimeNameCanonical is violated`. |
 | `specs/auth/AuthIdentityFSM-buggy.cfg` | `Next ∨ SilentRewrite` (duplicate of `specs/bug-models/`) | D | **12** | `Invariant SafetyInvariant is violated`. |
 | `specs/task-lifecycle/TaskLifecycle-buggy.cfg` | `NextClean ∨ BugSkipVerification ∨ BugSkipClaim` (`NextClean` is the clean transition disjunction) | **D** (effective add-bug — `NextClean` ≈ `Next` rename) | **12** | `Invariant InProgressRequiresClaim is violated`. |
 | `specs/keeper-turn-fsm/KeeperTurnFSM-buggy.cfg` | `Next ∨ StopSignalSwallowedAsDone ∨ SilentReceiptDrop` | D | **12** | `Invariant StopSignalRespected is violated`. |
@@ -85,7 +85,7 @@ Same reasoning as iter 98: pre-emptive `CHECK_DEADLOCK FALSE` widening to the 13
 
 ## Verification
 
-- Corpus enumeration: `for d in specs/cascade specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do ls $d/*-buggy.cfg; done | wc -l` → 35.
-- Missing-CD detection: `for d in specs/cascade specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do for f in "$d"/*-buggy.cfg; do grep -q CHECK_DEADLOCK "$f" || echo "$f"; done; done` → 7 paths.
+- Corpus enumeration: `for d in specs/runtime specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do ls $d/*-buggy.cfg; done | wc -l` → 35.
+- Missing-CD detection: `for d in specs/runtime specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do for f in "$d"/*-buggy.cfg; do grep -q CHECK_DEADLOCK "$f" || echo "$f"; done; done` → 7 paths.
 - TLC runs: 7 invocations of `tlc -config <spec>-buggy.cfg <spec>.tla`, each `exit 12` with invariant-violation diagnostic. Total wall time ~30s.
 - Base: `162f89631` (iter 97 #15008 in base; iter 98 #15011 — this memo extends #15011's argument).

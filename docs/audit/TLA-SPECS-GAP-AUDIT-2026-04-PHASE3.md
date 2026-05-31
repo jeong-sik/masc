@@ -16,7 +16,7 @@ Phase 1 §5 said:
 
 Phase 3 honours that boundary: it does *not* write the buggy cfgs. It enumerates **what each Bug Model would need to model** so the work can fan out across follow-up PRs, each authored by someone with the domain context to pick a *realistic* `BugAction`.
 
-The 8 specs are listed below in fan-out order, prioritised by hot-path proximity (autonomous loop and resilience interact with cascade orchestration; ecosystem/multimodal/shared specs are slower-moving).
+The 8 specs are listed below in fan-out order, prioritised by hot-path proximity (autonomous loop and resilience interact with runtime orchestration; ecosystem/multimodal/shared specs are slower-moving).
 
 ## 2. RFC stubs
 

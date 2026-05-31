@@ -55,7 +55,7 @@ Specs that carry detailed OCaml↔TLA+ mapping tables but never mention Zombie:
 
 - **KConditionsGovernPhase** — line 61 explicitly says "Adding new OCaml phases does NOT require updating this spec".  Stale "12-phase variant" is misleading but spec is intentionally scope-limited.  Shape A fix only.
 - **KCompactionLifecycle** (KMC) — already iter 43 renamed sets (KMC_*) with documented projection scope.  No "12 phases" reference.  No action needed.
-- **KCAF, KCL, KTC, KCascadeLifecycle, KDP** — already updated in prior iters (28/39/42/43).  Various phase coverages documented per-spec.
+- **KCAF, KCL, KTC, KRuntimeLifecycle, KDP** — already updated in prior iters (28/39/42/43).  Various phase coverages documented per-spec.
 - **KToolSurface, KDwellMonotone, KLaunchPending** — surface-level / dwell-only / launch-only; no full FSM modeling.  Shape A fix only (count comment).
 - **KEventQueue, KOASAdvanced, KWorkPipeline** — different domain (event/OAS/work), not KSM phase modeling.
 

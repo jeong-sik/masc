@@ -219,11 +219,11 @@ let test_dashboard_shell_http_json_includes_paths () =
          match config_resolution |> member "config_root" |> member "path" with
          | `String value -> String.length value > 0
          | _ -> false));
-  check bool "shell cascade authoring path surfaced when available" true
+  check bool "shell runtime authoring path surfaced when available" true
     (match config_resolution with
      | `Null -> true
      | _ -> (
-         match config_resolution |> member "cascade_authoring" |> member "path" with
+         match config_resolution |> member "runtime_authoring" |> member "path" with
          | `String value -> String.length value > 0
          | _ -> false));
   check bool "shell runtime resolution is object or null" true

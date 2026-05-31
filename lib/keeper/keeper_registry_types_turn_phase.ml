@@ -79,7 +79,7 @@ let packed_turn_phase_label : packed_turn_phase -> string = function
 ;;
 
 (* RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
-   [Cascade_transition] shape — idempotent self-loops are NOT represented
+   [Runtime_transition] shape — idempotent self-loops are NOT represented
    (they are mutator-boundary no-ops; the resolver returns
    [Resolved_idempotent] for them).  This module enumerates the 23 valid
    cross-state transitions of the 7-variant [turn_phase] FSM.  The 19
@@ -150,7 +150,7 @@ end
 
 (* RFC-0072 Phase 4: typed error for turn_phase transition spec violations.
    Each of the 19 forbidden pairs has its own constructor; mirrors the
-   cascade-side [cascade_transition_spec_violation] (PR #14903). *)
+   runtime-side [runtime_transition_spec_violation] (PR #14903). *)
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
   | Idle_to_executing
@@ -195,7 +195,7 @@ let turn_phase_transition_spec_violation_to_tag = function
 ;;
 
 (* RFC-0072 Phase 5: typed exception for forbidden turn_phase transitions.
-   Mirrors [Cascade_transition_violation] — the typed
+   Mirrors [Runtime_transition_violation] — the typed
    [turn_phase_transition_spec_violation] payload travels on the exception
    instead of through a string message. Raised by
    [validate_turn_phase_transition] / [set_turn_phase]. The registered
@@ -229,7 +229,7 @@ let () =
     | _ -> None)
 ;;
 
-(* RFC-0072 Phase 4: resolver mirroring [resolve_cascade_transition]. *)
+(* RFC-0072 Phase 4: resolver mirroring [resolve_runtime_transition]. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
   | Resolved_turn_idempotent

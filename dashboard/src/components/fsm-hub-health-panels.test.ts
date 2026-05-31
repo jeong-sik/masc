@@ -117,9 +117,9 @@ describe('invariantDescription', () => {
     expect(desc).toContain('Running')
   })
 
-  it('returns description for no_cascade_before_measurement', () => {
-    const desc = invariantDescription('no_cascade_before_measurement')
-    expect(desc).toContain('Cascade selection')
+  it('returns description for no_runtime_before_measurement', () => {
+    const desc = invariantDescription('no_runtime_before_measurement')
+    expect(desc).toContain('Runtime selection')
     expect(desc).toContain('measurement')
   })
 
@@ -150,7 +150,7 @@ describe('invariantDescription', () => {
   it('all known descriptions are non-empty strings', () => {
     const keys = [
       'phase_turn_alignment',
-      'no_cascade_before_measurement',
+      'no_runtime_before_measurement',
       'compaction_atomicity',
       'event_priority_monotone',
     ]

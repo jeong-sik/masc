@@ -220,7 +220,7 @@ acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-developm
 
 - **Source**: `<base-path>/.masc/logs/` 7 file, 2026-05-16 03:46 ~ 2026-05-17 03:46.
 - **Method**: `rg --no-filename "^\[20[0-9-]+ [0-9:]+\] \[(WARN|ERROR)\]"` + pattern
-  categorization (`watchdog` / `current_task` / `cascade_exhausted` / etc.). raw
+  categorization (`watchdog` / `current_task` / `runtime_exhausted` / etc.). raw
   log lines 2,292 → 20 카테고리 + Other.
 - **Top 1 ERROR pattern**: retired path-tokenizer diagnostic family, 90 raw + 60
   caller mirror + 59 retry + 44 registry = 253 (24h Top 20 ERROR 의 ~40%).

@@ -110,7 +110,7 @@ describe('bridgeBdiSnapshotsToTrace — RFC-0028 PR-δ bdi-snapshot producer', (
 
   it('maps fields correctly: id, tsMs, keeperName, source, intention', () => {
     bridgeBdiSnapshotsToTrace(
-      [snap('scholar', '2026-05-06T01:00:00Z', 'verify cascade route')],
+      [snap('scholar', '2026-05-06T01:00:00Z', 'verify runtime route')],
       new Set(),
     )
     const event = keeperTraceState.value.events[0]!
@@ -119,13 +119,13 @@ describe('bridgeBdiSnapshotsToTrace — RFC-0028 PR-δ bdi-snapshot producer', (
     expect(event.keeperName).toBe('scholar')
     expect(event.source).toBe('bdi-snapshot')
     if (event.source === 'bdi-snapshot') {
-      expect(event.intention).toBe('verify cascade route')
+      expect(event.intention).toBe('verify runtime route')
     }
   })
 
   it('maps optional IDE route context into the trace event', () => {
     bridgeBdiSnapshotsToTrace(
-      [snap('scholar', '2026-05-06T01:00:00Z', 'verify cascade route', {
+      [snap('scholar', '2026-05-06T01:00:00Z', 'verify runtime route', {
         file_path: 'runtime.ts',
         line: 7,
         goal_id: 'goal-runtime',

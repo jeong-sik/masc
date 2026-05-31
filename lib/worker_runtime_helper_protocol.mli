@@ -15,7 +15,7 @@
 
 type error_kind =
   | Spec_parse  (** Subprocess failed to parse its input spec. *)
-  | Runtime     (** OAS runtime / cascade execution failure. *)
+  | Runtime     (** OAS runtime / runtime execution failure. *)
   | Timeout     (** Subprocess hit its execution time budget. *)
   | Internal    (** Catch-all for unexpected failures. *)
 

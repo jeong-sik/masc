@@ -91,7 +91,7 @@ type trajectory_line =
 (* ================================================================ *)
 
 (* model_token_pricing and estimate_turn_cost removed (#3029).
-   Pricing belongs to OAS cascade, not MASC.
+   Pricing belongs to OAS runtime, not MASC.
    MASC records cost_usd from OAS responses via emit_cost_event. *)
 
 (** Rough per-call cost estimates for keeper tools.

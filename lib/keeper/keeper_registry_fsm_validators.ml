@@ -1,39 +1,6 @@
-(** Runtime sub-FSM transition validators.
-
-    Extracted from keeper_registry.ml (lines 727-771) as part of the
-    godfile decomp campaign. Each validator wraps a pure transition
-    resolver from [Keeper_registry_types] in
-    [Keeper_fsm_guard_runtime.wrap_unit] so a forbidden pair bumps
-    [metric_fsm_guard_violation] (action/stage labels) before the
-    typed transition-violation exception is raised.
-
-    Pure side-effect calls on top of pure resolvers — no registry
-    state read or written. *)
+(** Runtime sub-FSM transition validators. *)
 
 open Keeper_registry_types
-
-let runtime_transition ~from ~to_ =
-  (* Wrapped in [Keeper_fsm_guard_runtime.wrap_unit] for symmetry with
-     [turn_phase_transition] and the setters
-     ([set_turn_runtime_state] / [set_turn_phase]): a forbidden pair
-     reached via this validator bumps [metric_fsm_guard_violation]
-     (action=runtime_transition, stage=guard) before re-raising the typed
-     [Runtime_transition_violation] with its backtrace intact. Without
-     this wrap, a direct call to this validator on a forbidden pair was
-     uninstrumented (RFC-0072 Phase 5 left it as a thin shim). *)
-  Keeper_fsm_guard_runtime.wrap_unit
-    ~action:"runtime_transition"
-    ~stage:"guard"
-    (fun () ->
-       match resolve_runtime_transition ~from ~target:to_ with
-       | Resolved_idempotent | Resolved_transition _ -> ()
-       | Resolved_violation violation ->
-         raise_runtime_transition_violation
-           ~where:"validate_runtime_transition"
-           ~from
-           ~to_
-           ~violation)
-;;
 
 (* RFC-0072 Phase 4b + Phase 5: collapse the 49-pair turn_phase matrix onto
    [resolve_turn_phase_transition] (PR #14912) and raise the typed

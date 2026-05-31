@@ -1,10 +1,10 @@
-(** Cascade per-attempt deadline value carrying a wall-clock time horizon.
+(** Runtime per-attempt deadline value carrying a wall-clock time horizon.
 
     RFC-0192 § 2 invariant carrier:
     [effective_attempt_budget(i) = min(default_amplifier, deadline - now())]
 
     PR-1 establishes the type and math helpers; PR-2 wires it into
-    [Cascade_tier_wait_scheduler.try_admission_or_wait]; PR-3 has
+    [Runtime_tier_wait_scheduler.try_admission_or_wait]; PR-3 has
     [Keeper_agent_run] compute it from [admission_wait_timeout_sec] and
     thread through the keeper turn driver chain.
 
@@ -43,7 +43,7 @@ val remaining_at : now_s:float -> t -> float
     [min amplifier (remaining_at ~now_s deadline)].
 
     [amplifier] is the per-attempt default (existing
-    [Env_config_keeper.CascadeTierWait.timeout_s ()]) and acts as the
+    [Env_config_keeper.RuntimeTierWait.timeout_s ()]) and acts as the
     upper bound. [deadline] acts as the lower bound. The result is
     never negative. *)
 val composed_attempt_budget_at :

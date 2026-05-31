@@ -34,8 +34,8 @@ type verdict_record = {
   agent_name : string;
   verdict : Anti_rationalization.verdict;
   gate : Anti_rationalization.gate;
-  evaluator_cascade : string;
-  generator_cascade : string option;
+  evaluator_runtime : string;
+  generator_runtime : string option;
   fallback_reason : string option;
   timestamp : float;
 }

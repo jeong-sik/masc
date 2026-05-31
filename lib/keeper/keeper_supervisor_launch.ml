@@ -224,12 +224,7 @@ let launch_supervised_fiber
                    |> Option.value ~default:"stale_turn_timeout"
                  | None -> "stale_turn_timeout"
 	               in
-	               let outcome =
-	                 Keeper_registry_runtime_attempt.enrich_fiber_unresolved_outcome
-	                   ~base_path
-	                   ~keeper_name:meta.name
-	                   reason
-	               in
+	               let outcome = reason in
 	               (match
 	                  Keeper_registry.dispatch_event
 	                    ~base_path
@@ -312,12 +307,7 @@ let launch_supervised_fiber
                | _ -> Keeper_registry.Exception (Printexc.to_string exn)
 	             in
 	             let reason = Keeper_registry.failure_reason_to_string fr in
-	             let outcome =
-	               Keeper_registry_runtime_attempt.enrich_fiber_unresolved_outcome
-	                 ~base_path
-	                 ~keeper_name:meta.name
-	                 reason
-	             in
+	             let outcome = reason in
 	             Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
 	             (match
 	                Keeper_registry.dispatch_event
@@ -426,12 +416,7 @@ let launch_supervised_fiber
 	                  Keeper_registry.failure_reason_to_string
 	                    (Keeper_registry.Fiber_unresolved Unexpected)
 	                in
-	                let outcome =
-	                  Keeper_registry_runtime_attempt.enrich_fiber_unresolved_outcome
-	                    ~base_path
-	                    ~keeper_name:meta.name
-	                    reason
-	                in
+	                let outcome = reason in
 	                Keeper_registry.set_failure_reason
 	                  ~base_path
                   meta.name

@@ -178,8 +178,8 @@ val decode_contract_violation_reason
   -> (string * string list * string list) option
 
 type runtime_rotation_attempt =
-  { from_runtime_id : string
-  ; to_runtime_id : string
+  { from_runtime : string
+  ; to_runtime : string
   ; reason : Keeper_error_classify.degraded_retry_reason
   ; outcome : runtime_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
@@ -225,7 +225,7 @@ type t =
   ; runtime_outcome : runtime_outcome
   ; oas_internal_runtime_allowed : bool
   ; degraded_retry_applied : bool
-  ; degraded_retry_runtime_id : string option
+  ; degraded_retry_runtime : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; runtime_rotation_attempts : runtime_rotation_attempt list
   ; stop_reason : Runtime_agent.stop_reason option
@@ -263,7 +263,7 @@ type operator_disposition_kind =
   | Disp_pass
   | Disp_pause_human
   | Disp_alert_exhausted
-  | Disp_fail_open_next_runtime_id
+  | Disp_fail_open_next_runtime
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped

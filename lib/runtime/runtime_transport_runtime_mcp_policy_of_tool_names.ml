@@ -1,5 +1,5 @@
 (** Runtime-MCP policy builder for tool-name lists, extracted from
-    [cascade_transport.ml] (godfile decomp).
+    [runtime_transport.ml] (godfile decomp).
 
     - [runtime_mcp_policy_of_tool_names] — builds a runtime MCP policy
       pinned to the local [masc] HTTP server. Resolves
@@ -69,7 +69,7 @@ let runtime_mcp_policy_of_tool_names
             | None -> []
           in
           Auth_resolve.emit_resolution_trace
-            ~cascade:"runtime_mcp_policy"
+            ~runtime:"runtime_mcp_policy"
             ~keeper_id:(Some keeper_name)
             ~provider_label:"masc-mcp"
             ~outcome:
@@ -99,7 +99,7 @@ let runtime_mcp_policy_of_tool_names
               Error (Auth_resolve.Api_key_env_unset { var_name = "MASC_MCP_TOKEN" })
           in
           Auth_resolve.emit_resolution_trace
-            ~cascade:"runtime_mcp_policy"
+            ~runtime:"runtime_mcp_policy"
             ~keeper_id:keeper_name
             ~provider_label:"masc-mcp"
             ~outcome:resolved;

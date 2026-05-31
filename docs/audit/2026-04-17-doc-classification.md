@@ -66,8 +66,8 @@ frontmatter.
 | BENCHMARK-RUNBOOK.md | A | 3 rg hits in scripts | keep+frontmatter | low |
 | BOOT-ENV-STATE-INVENTORY.md | A | 3 rg hits | keep+frontmatter | low |
 | CAPABILITY-REGISTRY-SSOT.md | A | active capability registry design | keep+frontmatter | med |
-| cascade/README.md | B | personal note, defers to spec/ | delete | low |
-| cascade/STRATEGY-GUIDE.md | B | personal note, not team contract | delete | low |
+| runtime/README.md | B | personal note, defers to spec/ | delete | low |
+| runtime/STRATEGY-GUIDE.md | B | personal note, not team contract | delete | low |
 | CELLULAR-AGENT.md | A | implements handoff pattern (`lib/handover_eio.ml`, `lib/tool_handover.ml`) | keep+frontmatter | low |
 | COMMAND-PLANE-RUNBOOK.md | B | explicitly DEPRECATED; no current HTTP surface | delete | low |
 | COMMON-PITFALLS.md | A | active developer reference from commit analysis | keep+frontmatter | low |
@@ -143,7 +143,7 @@ frontmatter.
 | OAS-MIGRATION-AUDIT.md | B | completed audit, migration in Track A | delete | med |
 | OAS-MIGRATION-NEXT-STEPS.md | B | migration status (baseline done) | delete | low |
 | OAS-UTILIZATION-AUDIT.md | B | audit doc, structural gaps noted | delete | low |
-| observability/cascade-metrics.md | A | live metrics + alerting rules | keep+frontmatter | low |
+| observability/runtime-metrics.md | A | live metrics + alerting rules | keep+frontmatter | low |
 | observability/composite-fsm-matrix-design.md | A | design + TLA+ spec (5 FSM axes) | keep+frontmatter | low |
 | PERFORMANCE-SLO.md | B | SLO targets, no code enforcement | delete | low |
 | PRODUCT-OPERATING-PLAN.md | A | live product promise / execution plan | keep+frontmatter | low |
@@ -198,7 +198,7 @@ frontmatter.
 | SUPERVISOR-MODE.md | A | 5 hits; active operator mode surface | keep+frontmatter | low |
 | SWARM-DELIVERY-RUNBOOK.md | A | 2 hits; runbook for swarm delivery | keep+frontmatter | low |
 | SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md | B | "validated 2026-04-16", but only 1 ref | archive | low |
-| tla-audit/cascade-fsm-gap-2026-04-13.md | B | "historical audit only"; bug fixed | archive | low |
+| tla-audit/runtime-fsm-gap-2026-04-13.md | B | "historical audit only"; bug fixed | archive | low |
 | tla-audit/decision-fsm-gap-2026-04-13.md | B | "historical audit only"; bug fixed | archive | low |
 | tla-audit/state-fsm-gap-2026-04-13.md | B | "historical audit only"; bug fixed | archive | low |
 | TOML-RELOAD-MATRIX.md | A | 1 hit in `check-doc-truth.sh` | keep+frontmatter | low |
@@ -229,8 +229,8 @@ just means: confirm one more time that the body really is vision-only.
 | `GLOSSARY.md` | `spec/00-glossary.md` | header explicitly marks loser as superseded |
 | `MERGED-ARCHITECTURE-SSOT.md` | `spec/SPEC-INDEX.md` + `spec/01-system-overview.md` | header marks both spec files as canonical |
 | `QUICKSTART.md` | `QUICK-START.md` | loser is a 3-line redirect; pure noise |
-| `cascade/README.md` | `docs/spec/` (system-wide) | personal note, redundant |
-| `cascade/STRATEGY-GUIDE.md` | `docs/observability/cascade-metrics.md` | personal note, not team contract |
+| `runtime/README.md` | `docs/spec/` (system-wide) | personal note, redundant |
+| `runtime/STRATEGY-GUIDE.md` | `docs/observability/runtime-metrics.md` | personal note, not team contract |
 
 ## Next steps (separate PRs, not in this audit)
 

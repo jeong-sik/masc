@@ -541,7 +541,7 @@ function dockerStatusLabel(c: KeeperConfig): string {
   return 'local'
 }
 
-function cascadeSelectionSummary(c: KeeperConfig): string {
+function runtimeSelectionSummary(c: KeeperConfig): string {
   const selected = c.execution.selected_runtime_id || MISSING_DATA_DASH
   const canonical = c.execution.selected_runtime_canonical || selected
   const manifest = c.sources.default_manifest_path
@@ -732,7 +732,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${Callout}
         title="편집 가능 범위"
-        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 런타임은 keeper별 설정이 아니라 resolved runtime 설정로 결정됩니다."
+        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 런타임은 keeper별 설정이 아니라 resolved config root의 keeper_runtime.toml 해석 결과로 결정됩니다."
       />
 
       ${promptSection}
@@ -747,7 +747,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${MajorSectionHeader} title="소스" />
       <${Callout}
         title="Runtime 선택"
-        body=${cascadeSelectionSummary(c)}
+        body=${runtimeSelectionSummary(c)}
       />
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
       <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
@@ -778,7 +778,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="활성 런타임" value=${c.execution.active_model ? 'runtime' : MISSING_DATA_DASH} />
       <${ConfigRow} label="runtime timeout" value=${perProviderTimeoutLabel(c.execution)} />
       <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-        cascade fallback 중 마지막 runtime을 제외한 runtime들에만 적용됩니다.
+        runtime fallback 중 마지막 runtime을 제외한 runtime들에만 적용됩니다.
       </div>
       <${BoolRow} label="검증" value=${c.execution.verify} />
       <div class="mt-1.5">

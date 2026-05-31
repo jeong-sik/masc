@@ -8,7 +8,7 @@ export type CompositeObservation = {
   phase: KeeperCompositeSnapshot['phase']
   turn: KeeperCompositeSnapshot['turn_phase']
   decision: KeeperCompositeSnapshot['decision']['stage']
-  cascade: KeeperCompositeSnapshot['cascade']['state']
+  runtime: KeeperCompositeSnapshot['runtime']['state']
   compaction: KeeperCompositeSnapshot['compaction']['stage']
   // 6th axis (LT-16-KCB Phase 3). Unknown backend-ahead values are kept
   // as raw strings; only a missing rollout-era key falls back to `clean`.
@@ -25,7 +25,7 @@ export function extractLaneValue(
     case 'phase': return snapshot.phase
     case 'turn': return snapshot.turn_phase
     case 'decision': return snapshot.decision.stage
-    case 'cascade': return snapshot.cascade.state
+    case 'runtime': return snapshot.runtime.state
     case 'compaction': return snapshot.compaction.stage
     case 'breaker': return snapshot.circuit_breaker?.state ?? 'clean'
   }
@@ -105,7 +105,7 @@ export const MAX_TRANSITION_HISTORY = 20
 
 const ZERO_VIOLATIONS: InvariantViolationCounts = {
   phase_turn_alignment: 0,
-  no_cascade_before_measurement: 0,
+  no_runtime_before_measurement: 0,
   compaction_atomicity: 0,
   event_priority_monotone: 0,
   phase_derivation_agreement: 0,
@@ -139,14 +139,14 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
   { field: 'KSM', key: 'phase' },
   { field: 'KTC', key: 'turn' },
   { field: 'KDP', key: 'decision' },
-  { field: 'KCL', key: 'cascade' },
+  { field: 'KCL', key: 'runtime' },
   { field: 'KMC', key: 'compaction' },
   { field: 'KCB', key: 'breaker' },
 ]
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
   phase_turn_alignment: '단계 ⇔ 턴',
-  no_cascade_before_measurement: 'Cascade 순서',
+  no_runtime_before_measurement: 'Runtime 순서',
   compaction_atomicity: '압축 원자성',
   event_priority_monotone: '이벤트 우선순위',
   phase_derivation_agreement: 'Phase 유도 일치',
@@ -156,7 +156,7 @@ export const LANE_LABELS: Record<LaneKey, string> = {
   phase: 'Keeper 생명주기',
   turn: '턴 주기',
   decision: '의사결정',
-  cascade: '캐스케이드',
+  runtime: '캐스케이드',
   compaction: '컨텍스트 압축',
   breaker: '서킷 브레이커',
 }
@@ -463,10 +463,10 @@ export function computeKeeperVerdict(input: {
   return { kind: 'no_verdict', toolContract }
 }
 
-/** Scope tag for cascade-outcome rendering.
+/** Scope tag for runtime-outcome rendering.
  *
- *  `cascade_outcome` is emitted per-provider-attempt (the last hop in
- *  a cascade ladder), while `stop_cause` is emitted per-turn (the
+ *  `runtime_outcome` is emitted per-provider-attempt (the last hop in
+ *  a runtime ladder), while `stop_cause` is emitted per-turn (the
  *  terminal verdict for the whole turn budget). Rendering the
  *  per-attempt success under the generic "런타임 레인" label next to
  *  a per-turn failure such as `turn_timeout` reads as a
@@ -477,10 +477,10 @@ export function computeKeeperVerdict(input: {
  *  terminal failure — the attempt-level success is still preserved
  *  inside the stop-cause line via the `code · summary` columns, just
  *  not re-rendered as a competing top-level lane. */
-export type CascadeAttemptScope = 'attempt' | 'turn'
+export type RuntimeAttemptScope = 'attempt' | 'turn'
 
-export interface CascadeAttemptObservation {
-  scope: CascadeAttemptScope
+export interface RuntimeAttemptObservation {
+  scope: RuntimeAttemptScope
   outcome: string | null
   attempts: number | null
   fallbackApplied: boolean
@@ -498,7 +498,7 @@ export interface CascadeAttemptObservation {
 const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'turn_timeout',
   'turn_wall_clock_timeout',
-  'cascade_exhausted',
+  'runtime_exhausted',
   'heartbeat_consecutive_failures',
   'turn_consecutive_failures',
   'tool_required_unsatisfied',
@@ -554,7 +554,7 @@ const OPERATOR_DISPOSITION_LABELS: Record<string, string> = {
   pass: '진행',
   pause_human: '운영자 일시정지',
   alert_exhausted: '경보 소진',
-  fail_open_next_runtime_id: '다음 cascade 로 fail-open',
+  fail_open_next_runtime: '다음 runtime 로 fail-open',
   pass_next_model: '다음 모델로 진행',
   user_cancelled: '사용자 취소',
   skipped: '건너뜀',
@@ -575,7 +575,7 @@ export function operatorDispositionLabel(value: string | null | undefined): stri
  *  by #16355. */
 const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   healthy: '정상',
-  cascade_exhausted: '캐스케이드 소진',
+  runtime_exhausted: '캐스케이드 소진',
   preflight_config_error: '실행 전 설정 오류',
   degraded_retry: '저하 상태 재시도',
   runtime_fallback: '캐스케이드 폴백',
@@ -586,7 +586,7 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
-  unmapped_runtime_state: '매핑되지 않은 cascade 상태',
+  unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 
 export function operatorDispositionReasonLabel(
@@ -596,9 +596,9 @@ export function operatorDispositionReasonLabel(
   return OPERATOR_DISPOSITION_REASON_LABELS[value] ?? value
 }
 
-/** Korean labels for `execution.cascade.outcome` /
- *  `keeper.cascade_outcome`. Backend emits 4 closed-sum values via
- *  `Keeper_execution_receipt.cascade_outcome_to_string`
+/** Korean labels for `execution.runtime.outcome` /
+ *  `keeper.runtime_outcome`. Backend emits 4 closed-sum values via
+ *  `Keeper_execution_receipt.runtime_outcome_to_string`
  *  (lib/keeper/keeper_execution_receipt.ml:144-149). Kept separate
  *  from `STATE_DISPLAY_NAMES` because `completed` and
  *  `not_observed` are generic tokens other axes may emit (same
@@ -611,7 +611,7 @@ const CASCADE_OUTCOME_LABELS: Record<string, string> = {
   not_dispatched: '디스패치 안 됨',
 }
 
-export function cascadeOutcomeLabel(value: string | null | undefined): string | null {
+export function runtimeOutcomeLabel(value: string | null | undefined): string | null {
   if (!value) return null
   return CASCADE_OUTCOME_LABELS[value] ?? value
 }
@@ -625,7 +625,7 @@ export function cascadeOutcomeLabel(value: string | null | undefined): string | 
  *  - `Keeper_agent_error.to_terminal_reason_code` (lib/keeper/keeper_agent_error.ml:134-143)
  *    maps Agent SDK Retry variants to `api_error_*` codes
  *    (`api_error_server:<http_status>` is parameterized).
- *  - `Keeper_agent_run` emits `"completed"` on Cascade_runner.Completed.
+ *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
  *  - `keeper_execution_receipt.ml:492` recognises the
  *    `completion_contract_violation:<detail>` prefix.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
@@ -683,7 +683,7 @@ export type StateEntries = {
   phase: number
   turn: number
   decision: number
-  cascade: number
+  runtime: number
   compaction: number
 }
 

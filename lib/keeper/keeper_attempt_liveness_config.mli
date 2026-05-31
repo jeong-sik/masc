@@ -1,4 +1,4 @@
-(** Tri-state env flag + living budget selection for the cascade
+(** Tri-state env flag + living budget selection for the runtime
     attempt-liveness gate (RFC-0022 PR-2/4 §2).
 
     The flag [MASC_CASCADE_ATTEMPT_LIVENESS] selects one of three modes:

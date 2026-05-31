@@ -35,7 +35,7 @@ A 24-hour log sample (2026-05-08, basepath `<base-path>/.masc/logs/system_log_20
 contains 42 WARN of the form:
 
 ```
-operator_disposition: unmapped (outcome=error cascade_outcome=not_dispatched
+operator_disposition: unmapped (outcome=error runtime_outcome=not_dispatched
   terminal_reason=turn_livelock:stuck_age_exceeded ...)
 ```
 

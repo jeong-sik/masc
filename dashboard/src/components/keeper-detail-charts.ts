@@ -216,7 +216,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
         </svg>
       <//>
 
-      ${'' /* Cascade fallback events */}
+      ${'' /* Runtime fallback events */}
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <${DetailRow}>

@@ -3,7 +3,7 @@
     Pure functions that map [auto] to runtime binding defaults or local
     discovery. Provider-specific alias/catalog truth belongs upstream in OAS.
 
-    @since 0.92.0 extracted from Cascade_config
+    @since 0.92.0 extracted from Runtime_config
 
     @stability Internal
     @since 0.93.1 *)

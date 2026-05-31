@@ -112,19 +112,19 @@ let receipt_approval_profile json =
   | Some approval -> Json_util.get_string approval "profile"
   | None -> None
 
-let receipt_cascade_name json =
-  match Json_util.assoc_member_opt "cascade" json with
-  | Some cascade -> Json_util.get_string cascade "name"
+let receipt_runtime_id json =
+  match Json_util.assoc_member_opt "runtime" json with
+  | Some runtime -> Json_util.get_string runtime "name"
   | None -> None
 
-let receipt_cascade_outcome json =
-  match Json_util.assoc_member_opt "cascade" json with
-  | Some cascade -> Json_util.get_string cascade "outcome"
+let receipt_runtime_outcome json =
+  match Json_util.assoc_member_opt "runtime" json with
+  | Some runtime -> Json_util.get_string runtime "outcome"
   | None -> None
 
-let receipt_cascade_fallback_applied json =
-  (match Json_util.assoc_member_opt "cascade" json with
-  | Some cascade -> Json_util.get_bool cascade "fallback_applied"
+let receipt_runtime_fallback_applied json =
+  (match Json_util.assoc_member_opt "runtime" json with
+  | Some runtime -> Json_util.get_bool runtime "fallback_applied"
   | None -> None)
   |> Option.value ~default:false
 
@@ -179,10 +179,10 @@ let trust_sandbox_risk json =
     (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
     "sandbox_violation"
 
-let trust_cascade_risk json =
+let trust_runtime_risk json =
   String.equal
     (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
-    "cascade_exhausted"
+    "runtime_exhausted"
 
 let receipt_has_error json =
   match receipt_error_kind json with
@@ -198,10 +198,10 @@ let receipt_has_sandbox_risk json =
   | Some "docker" -> false
   | Some _ | None -> false
 
-let receipt_has_cascade_risk json =
-  receipt_cascade_fallback_applied json
+let receipt_has_runtime_risk json =
+  receipt_runtime_fallback_applied json
   ||
-  match receipt_cascade_outcome json with
+  match receipt_runtime_outcome json with
   | Some "passed_to_next_model" -> true
   | _ -> false
 

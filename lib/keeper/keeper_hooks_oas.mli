@@ -12,7 +12,7 @@
 
 val keeper_denied_tools : string list
 (** Tool names that are always denied for keeper-bound execution
-    regardless of cascade or persona policy. *)
+    regardless of runtime or persona policy. *)
 
 (** usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
     moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)

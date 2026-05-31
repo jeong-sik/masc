@@ -82,7 +82,7 @@ type failure_reason =
           window count >= [escalation_threshold]. The supervisor's
           [`Crashed] branch checks this variant and skips [to_restart],
           persisting [meta.paused = true] instead so an operator must
-          investigate the underlying cascade/provider/fd issue before
+          investigate the underlying runtime/provider/fd issue before
           resuming the keeper. *)
   | Stale_fleet_batch of { distinct_count : int }
       (** Legacy wire value for stale watchdog fleet-batch state. Current
@@ -98,10 +98,10 @@ type failure_reason =
       ; detail : string
       ; provider_id : string option
       ; http_status : int option
-      ; cascade_name : string option
+      ; runtime_id : string option
       }
       (** Latched from the keeper turn terminal reason when the provider,
-          adapter, or cascade fails before useful keeper progress. A later
+          adapter, or runtime fails before useful keeper progress. A later
           idle watchdog should preserve this root cause instead of recasting
           the keeper as generically stale. *)
   | Tool_required_unsatisfied of { code : string; detail : string }
@@ -402,7 +402,7 @@ exception
     }
 
 (** Raises [Compaction_transition_violation] with the typed payload.
-    Same rationale as the turn_phase / cascade raise helpers above. *)
+    Same rationale as the turn_phase / runtime raise helpers above. *)
 val raise_compaction_transition_violation
   :  where:string
   -> from:packed_compaction_stage

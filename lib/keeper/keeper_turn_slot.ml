@@ -205,11 +205,11 @@ let reset_autonomous_completion_for_test () : unit =
    structured timeout-budget path
    (see [Keeper_unified_turn.resolve_bounded_provider_timeout_budget_with_turn_budget]).
    Re-running on the same fiber gives the same context and the same
-   shape of failure repeats, but provider/cascade budget pressure is not
+   shape of failure repeats, but provider/runtime budget pressure is not
    keeper fiber corruption. Crossing [provider_timeout_strike_limit]
    is therefore routed through [Keeper_failure_policy] before any
    lifecycle effect is applied. Without independent keeper-liveness
-   loss, the keeper stays alive while provider cooldown, cascade
+   loss, the keeper stays alive while provider cooldown, runtime
    backpressure, and turn retry policy do the actual throttling.
 
    Counter is in-memory for the common same-server case and is reset on
@@ -482,7 +482,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
        with
        | Eio.Time.Timeout ->
          (* Routine, not WARN: the keeper-specific heartbeat loop already
-           emits the operator-facing skip warning with owner/cascade
+           emits the operator-facing skip warning with owner/runtime
            context, while the metric below preserves attribution.
            2026-05-05: also dump the actual holders so operators are
            not blind to *which* peer is starving the queue. *)

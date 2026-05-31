@@ -17,7 +17,7 @@
 type t =
   | Healthy
   (** Turn ended without error and reached the configured terminal
-          cascade. *)
+          runtime. *)
   | Stale_turn_timeout_idle
   (** [Keeper_registry.Stale_turn_timeout (Idle_turn _)]: the keeper
           was [Running] but never observed a turn-start. *)

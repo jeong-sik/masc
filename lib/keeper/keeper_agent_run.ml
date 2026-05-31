@@ -54,7 +54,7 @@ end
     @param build_turn_prompt Callback: receives the base keeper system prompt
            and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
-    @param cascade_name Runtime cascade profile name for model selection
+    @param runtime_id Runtime runtime profile name for model selection
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default from keeper runtime config)
     @param guardrails Optional OAS guardrails for tool safety gates
@@ -73,7 +73,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
-      ~(cascade_name : string)
+      ~(runtime_id : string)
       ?world_observation
       ?(turn_affordances = [])
       ?(required_tool_names = [])
@@ -95,7 +95,7 @@ let run_turn
       ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ?priority
       ?(degraded_retry_applied = false)
-      ?degraded_retry_runtime_id
+      ?degraded_retry_runtime
       ?fallback_reason
       ?(runtime_rotation_attempts = [])
       ?(is_retry = false)
@@ -134,12 +134,12 @@ let run_turn
      through to the global atomic = server root_sw.
 
      The [with_turn_switch] binding propagates with [Eio.Fiber.fork]
-     children, so cascade attempts and tool invocations spawned inside
+     children, so runtime attempts and tool invocations spawned inside
      the turn body all see [turn_sw] automatically. *)
   Eio.Switch.run @@ fun turn_sw ->
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
-  let cascade_name_string = cascade_name in
+  let runtime_id_string = runtime_id in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx =
@@ -148,7 +148,7 @@ let run_turn
       ~meta
       ~base_dir
       ~max_context
-      ~cascade_name
+      ~runtime_id
       ?temperature
       ?max_tokens
       ?shared_context
@@ -163,7 +163,7 @@ let run_turn
   let max_tokens, pre_dispatch_max_tokens_error =
     match
       Runtime_inference.validate_max_tokens_within_ceiling
-        ~cascade_name
+        ~runtime_id
         ~provider_ceiling:max_output_ceiling
         ctx.max_tokens
     with
@@ -193,7 +193,7 @@ let run_turn
   let gemini_mcp_disabled = ctx.gemini_mcp_disabled in
   let approval_mode_effective = ctx.approval_mode_effective in
   let approval_mode_derived = ctx.approval_mode_derived in
-  let keeper_oas_context = ctx.keeper_oas_context in
+  let _keeper_oas_context = ctx.keeper_oas_context in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
   let turn_start = Mtime_clock.now () in
@@ -217,7 +217,7 @@ let run_turn
       ~agent_name:meta.agent_name
       ~trace_id
       ~generation
-      ~cascade_name:cascade_name_string
+      ~runtime_id:runtime_id_string
       ~turn_start
       ~seq_ref
   in
@@ -329,7 +329,7 @@ let run_turn
       ~start_turn_count
       ~generation
       ~max_turns
-      ~cascade_name
+      ~runtime_id
       ~is_retry
       ~turn_affordances
       ~required_tool_names
@@ -446,7 +446,7 @@ let run_turn
       else None
     in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
-    let keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+    let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
       Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
     in
@@ -531,7 +531,7 @@ let run_turn
                   ~timeout_s:bridge_timeout_s
                   (fun () ->
                           Keeper_turn_driver.run_named
-                            ~cascade_name:cascade_name_string
+                            ~runtime_id:runtime_id_string
                             ~base_path:config.base_path
                             ~keeper_name:meta.name
                     ?provider_filter
@@ -568,7 +568,7 @@ let run_turn
                             | _ -> ())
                          | _ -> ());
                         Keeper_runtime_manifest.append_best_effort
-                          ~site:"cascade_runtime"
+                          ~site:"runtime_runtime"
                           config
                           manifest)
                    ~runtime_manifest_required_tool_names:
@@ -723,7 +723,7 @@ let run_turn
                    Error
                      (Keeper_agent_run_tool_surface_violation.to_sdk_error
                         ~keeper_name:meta.name
-                        ~cascade_name:(Keeper_meta_contract.runtime_id_of_meta meta)
+                        ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                         ~requested_tool_names_seen:acc.requested_tool_names_seen
                         ~unexpected_tool_names))
                  else (
@@ -877,7 +877,7 @@ let run_turn
                           ~acc ~memory
                           ~actual_keeper_tool_names ~actual_keeper_tool_names_ref
                           ~result ~checkpoint_persistence_error
-                          ~post_turn_t0 ?provider_filter ~cascade_name_string
+                          ~post_turn_t0 ?provider_filter ~runtime_id_string
                           ~prompt_metrics ~ctx_composition ~usage
                           ~receipt_response_text_present_ref ~history_assistant_source
                           ~pre_dispatch_compacted:ctx.pre_dispatch_compacted
@@ -892,7 +892,7 @@ let run_turn
          ~meta
          ~generation
          ~manifest_keeper_turn_id
-         ~cascade_name
+         ~runtime_id
          ~keeper_visible_sandbox_root
          ~receipt_started_at
          ~runtime_manifest_context
@@ -904,7 +904,7 @@ let run_turn
          ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
          ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
          ~degraded_retry_applied
-         ~degraded_retry_runtime_id
+         ~degraded_retry_runtime
          ~fallback_reason
          ~runtime_rotation_attempts
          ~turn_result

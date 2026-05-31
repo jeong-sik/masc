@@ -6,7 +6,7 @@
     .mli.  Callers reach the run helpers + lookup utilities
     through {!Worker_runtime}.
 
-    {b Cascade chain}: starts with [include Worker_container],
+    {b Runtime chain}: starts with [include Worker_container],
     transitively bringing the {!Worker_container} +
     {!Worker_container_types} surfaces into scope (notably
     [list_masc_tools], [parse_text_tool_calls], [run_result]).

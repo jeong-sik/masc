@@ -22,7 +22,7 @@
 | Environment variables | 50+ | 설정 파일 없이 env var만으로 운영 |
 | Dashboard | Preact + HTM SPA | Vite 빌드, assets/dashboard/ |
 | Transport | HTTP/1.1 (default), h2c (opt-in), WebSocket, WebRTC (experimental) | Multi-protocol |
-| OAS integration | v0.87.0 delegation | Cascade, Memory, Swarm 일부 |
+| OAS integration | v0.87.0 delegation | Runtime, Memory, Swarm 일부 |
 | Board backend | filesystem/JSONL | PostgreSQL runtime backend is not a target |
 
 ### 시스템 구성 비율 (LOC 기준, ARCHITECTURE-COMPLEXITY-ANALYSIS 발췌)
@@ -147,7 +147,7 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 | **Foundation** | Types, Base, Config, Log | types/, core/, masc_log/, env_config | ~15K |
 | **Room** | Room lifecycle, Task, Heartbeat, Board | room/, tool_room, tool_task, tool_heartbeat, board | ~20K |
 | **Keeper** | Keeper runtime, Memory, Succession | keeper/, tool_keeper, agent_memory | ~25K |
-| **Chain** | Cascade, OAS bridge, Swarm engine | cascade, oas_worker, chain, spawn | ~30K |
+| **Chain** | Runtime, OAS bridge, Swarm engine | runtime, oas_worker, chain, spawn | ~30K |
 | **Server** | HTTP, MCP protocol, Transport, Auth | mcp_server_eio, transport, tool_auth | ~20K |
 | **Dashboard** | Preact SPA, SSE bridge, API routes | dashboard/, web_dashboard | ~15K |
 | **OAS Bridge** | OAS integration facade, Provider registry | oas_*, provider_registry | ~10K |
@@ -157,7 +157,7 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 1. Foundation (types, base, log) -- 의존 없는 leaf
 2. Room (room lifecycle)
 3. Keeper (keeper runtime)
-4. Chain (cascade, spawn)
+4. Chain (runtime, spawn)
 5. Server (transport, protocol)
 6. Dashboard (frontend build pipeline 분리)
 7. OAS Bridge (facade 정리)
@@ -194,7 +194,7 @@ lib/room/        lib/time_compat/ lib/types/
 | Module | Priority | 근거 |
 |--------|----------|------|
 | room.ml | High | Core lifecycle, 다른 모든 모듈이 의존 |
-| cascade.ml | High | OAS bridge의 핵심 계약 |
+| runtime.ml | High | OAS bridge의 핵심 계약 |
 | keeper_autonomy.ml | High | Keeper 자율 실행 계약 |
 | spawn.ml | Medium | 61 references, Swarm 핵심 |
 
@@ -250,7 +250,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 01-system-overview.md       -- 시스템 개요
 02-types-and-invariants.md  -- 타입과 불변식
 03-room-coordination.md     -- Room 조율
-04-chain-engine.md          -- Chain/Cascade 엔진
+04-chain-engine.md          -- Chain/Runtime 엔진
 05-keeper-agent.md          -- Keeper 에이전트
 06-command-plane.md         -- Command Plane
 09-server-transport.md      -- 서버/전송

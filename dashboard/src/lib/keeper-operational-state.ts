@@ -290,18 +290,18 @@ export function compositeIsTurnIdle(snapshot: { turn_phase: string }): boolean {
   return snapshot.turn_phase === 'idle'
 }
 
-/** Composite snapshot has entered the post-cascade-exhaustion failure
- *  mode: KSM has folded to `failing` AND the cascade lane reports
+/** Composite snapshot has entered the post-runtime-exhaustion failure
+ *  mode: KSM has folded to `failing` AND the runtime lane reports
  *  `exhausted` (no provider path left). Two sites in
  *  `fsm-hub-invariant-analysis` (`nextExpectedStep` /
  *  `deriveOperationalInsight`) need this exact conjunction; an SSOT
  *  prevents the predicate from drifting when either enum evolves.
  *  Phase wire format stays lowercase per the open-string composite
  *  schema. */
-export function isFailingAfterCascadeExhausted(
-  snapshot: { phase: string; cascade: { state: string } },
+export function isFailingAfterRuntimeExhausted(
+  snapshot: { phase: string; runtime: { state: string } },
 ): boolean {
-  return snapshot.phase === 'failing' && snapshot.cascade.state === 'exhausted'
+  return snapshot.phase === 'failing' && snapshot.runtime.state === 'exhausted'
 }
 
 /** Composite compaction is owning the current turn — either the KSM

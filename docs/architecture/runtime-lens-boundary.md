@@ -4,7 +4,7 @@
 **Last updated**: 2026-05-14
 
 This document codifies *where* the Runtime Lens redaction is applied
-in the cascade subsystem, so that future iterations don't reintroduce
+in the runtime subsystem, so that future iterations don't reintroduce
 the over-application that #15040 originally shipped. The TL;DR: the
 lens redacts at **external boundaries**, not at every serializer.
 
@@ -21,18 +21,18 @@ surfaces.
 
 | Surface | Owner | Redaction site |
 |---|---|---|
-| Prometheus metric labels | `record_probe_metrics` (`lib/cascade/cascade_catalog_runtime.ml`) | `provider_name="runtime"`, `model_id="runtime"`. Pinned by `test/test_keeper_hooks_oas_telemetry.ml` (4 assertions, 43 tests pass). |
+| Prometheus metric labels | `record_probe_metrics` (`lib/runtime/runtime_catalog_runtime.ml`) | `provider_name="runtime"`, `model_id="runtime"`. Pinned by `test/test_keeper_hooks_oas_telemetry.ml` (4 assertions, 43 tests pass). |
 | Dashboard OAS bridge | `lib/dashboard/dashboard_oas_bridge.ml` | `provider_id` / `model_id` collapsed to `public_runtime_*_label`. |
 | Dashboard harness health | `lib/dashboard/dashboard_harness_health.ml` | Same. |
 | Provider error responses | `lib/core/provider_error.ml` | `provider` / `model_name` redacted in error envelopes. |
-| Keeper unified metrics (redacted variants) | `lib/keeper/keeper_unified_metrics.ml` (`redacted_cascade_attempt_to_json` etc.) | `model_id` / `model_label` omitted entirely (stronger than placeholder). |
+| Keeper unified metrics (redacted variants) | `lib/keeper/keeper_unified_metrics.ml` (`redacted_runtime_attempt_to_json` etc.) | `model_id` / `model_label` omitted entirely (stronger than placeholder). |
 
 ## Where it must NOT apply (internal observability — emit real)
 
 | Surface | Owner | Carve-out site | Test |
 |---|---|---|---|
-| "Validated active cascade catalog" boot log | `Cascade_catalog_runtime.candidate_probe_to_yojson` (called from `server_runtime_bootstrap.ml`) | #15070 commit `fd50aa68f6` | `test/test_cascade_catalog_runtime_yojson.ml` "candidate_probe real identity" |
-| Audit log (`record_cascade_audit`) | `Cascade_observation.cascade_attempt_to_json` / `cascade_fallback_event_to_json` (called from `cascade_observation_to_json`) | #15070 commit `f567e57272` | `test/test_cascade_catalog_runtime_yojson.ml` "cascade_observation audit-log real identity" |
+| "Validated active runtime catalog" boot log | `Runtime_catalog_runtime.candidate_probe_to_yojson` (called from `server_runtime_bootstrap.ml`) | #15070 commit `fd50aa68f6` | `test/test_runtime_catalog_runtime_yojson.ml` "candidate_probe real identity" |
+| Audit log (`record_runtime_audit`) | `Runtime_observation.runtime_attempt_to_json` / `runtime_fallback_event_to_json` (called from `runtime_observation_to_json`) | #15070 commit `f567e57272` | `test/test_runtime_catalog_runtime_yojson.ml` "runtime_observation audit-log real identity" |
 
 ## Decision rule for future serializers
 
@@ -43,12 +43,12 @@ identity, ask:
    - HTTP response to OAS / external API client → **redact** via `public_runtime_*_label`.
    - Prometheus scrape target → **redact** (cardinality + boundary).
    - Dashboard JSON consumed by FE → **redact** (FE never needs ground truth identity).
-   - `Log.Server.info` / `Log.Keeper.info` / `record_*_audit` → **emit real values**. These are operator inspection surfaces inside the masc-mcp process. Without real identity, a misconfigured cascade.toml is indistinguishable from a healthy one.
+   - `Log.Server.info` / `Log.Keeper.info` / `record_*_audit` → **emit real values**. These are operator inspection surfaces inside the masc-mcp process. Without real identity, a misconfigured keeper_runtime.toml is indistinguishable from a healthy one.
 
 2. **Is there already a `redacted_*` companion?** If yes, treat the
    non-prefixed variant as internal and emit real. (See
-   `Keeper_unified_metrics.redacted_cascade_attempt_to_json` paired
-   with `Cascade_observation.cascade_attempt_to_json`.)
+   `Keeper_unified_metrics.redacted_runtime_attempt_to_json` paired
+   with `Runtime_observation.runtime_attempt_to_json`.)
 
 3. **Does a sibling field in the same envelope emit real values?** If
    yes, the inner record should match. #15040 introduced
@@ -58,7 +58,7 @@ identity, ask:
 
 ## Regression guard
 
-`test/test_cascade_catalog_runtime_yojson.ml` pins both carve-out
+`test/test_runtime_catalog_runtime_yojson.ml` pins both carve-out
 sites with 8 test cases (4 status variants × 2 surfaces + 2 anti-regression
 substring checks). A PR that reintroduces `public_runtime_*_label` at
 either site fails this test before merge.
@@ -77,7 +77,7 @@ let test_my_serializer_emits_real_identity () =
     (substring text "\"model_id\":\"runtime\"")
 ```
 
-Borrow the helpers from `test/test_cascade_catalog_runtime_yojson.ml`
+Borrow the helpers from `test/test_runtime_catalog_runtime_yojson.ml`
 (`assoc_string`, the `contains` substring scanner) when adding the
 companion test for a new internal serializer.
 
@@ -85,8 +85,8 @@ companion test for a new internal serializer.
 
 - **#15040** (`44b89707295`, 2026-05-13): introduced the Runtime Lens.
   Redacted both external boundaries and *all* base serializers
-  (`candidate_probe_to_yojson`, `cascade_attempt_to_json`,
-  `cascade_fallback_event_to_json`) to `public_runtime_*_label`.
+  (`candidate_probe_to_yojson`, `runtime_attempt_to_json`,
+  `runtime_fallback_event_to_json`) to `public_runtime_*_label`.
   Operational regression: boot log + audit log became opaque.
 - **#15070** (`b0c741bb7d`, 2026-05-13): carve-out for the two
   internal-observability sites. Real values restored. External

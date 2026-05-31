@@ -88,7 +88,7 @@ type t = {
 }
 (** Complete voice configuration. *)
 
-(** {1 Constants (cascade-visible)} *)
+(** {1 Constants (runtime-visible)} *)
 
 val default_elevenlabs_base_url : string
 (** [https://api.elevenlabs.io/v1] — pinned as a fallback when

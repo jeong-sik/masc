@@ -239,11 +239,11 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   guard_ok: '모든 safety guard 통과, 도구 실행으로 진행',
   gate_rejected: 'safety gate 가 행동 차단 (비용, deny list 등)',
   tool_policy_selected: '도구 목록 적용됨, 도구 필터링 완료',
-  // KCL (Cascade)
-  selecting: 'cascade 목록에서 최적 provider 선택 중',
+  // KCL (Runtime)
+  selecting: 'runtime 목록에서 최적 provider 선택 중',
   trying: '선택된 provider 로 inference 시도 중',
   done: 'Provider 가 정상 응답함',
-  exhausted: 'cascade 의 모든 provider 실패',
+  exhausted: 'runtime 의 모든 provider 실패',
   // KMC (Compaction)
   accumulating: '메시지 수집 중; 컨텍스트 아직 가득 차지 않음',
   // KSM (Phase) — wire format is lowercase per phase_to_string.
@@ -442,7 +442,7 @@ export function TurnPipelineStrip({
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">
         <${PipelineStep} shortLabel="KTC" label="턴 주기" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} />
         <${PipelineStep} shortLabel="KDP" label="의사결정" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} limited />
-        <${PipelineStep} shortLabel="KCL" label="캐스케이드" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} limited />
+        <${PipelineStep} shortLabel="KCL" label="캐스케이드" value=${snapshot.runtime.state} sinceTs=${stateEntries?.runtime ?? null} limited />
         <${PipelineStep} shortLabel="KMC" label="컨텍스트 압축" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} isLast />
       </div>
     </div>
@@ -454,13 +454,13 @@ export function CompositeGraphPanel({ snapshot }: { snapshot: KeeperCompositeSna
     phase: snapshot.phase,
     turnPhase: snapshot.turn_phase,
     decisionStage: snapshot.decision.stage,
-    cascadeState: snapshot.cascade.state,
+    runtimeState: snapshot.runtime.state,
     compactionStage: snapshot.compaction.stage,
   }), [
     snapshot.phase,
     snapshot.turn_phase,
     snapshot.decision.stage,
-    snapshot.cascade.state,
+    snapshot.runtime.state,
     snapshot.compaction.stage,
   ])
 

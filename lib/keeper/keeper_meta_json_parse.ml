@@ -120,12 +120,27 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_instructions = personality.instructions in
     let pk_runtime_id_result =
       (* RFC-0206: [runtime_id] is the canonical persisted/input name if a
-         pre-scrub JSON payload still carries model-selection state. *)
+         pre-scrub JSON payload still carries model-selection state.
+         [runtime_id] is accepted only as a legacy alias for older files.
+         If both appear with different non-empty values, fail loud instead of
+         silently choosing one model-selection identity. *)
       let runtime_id_opt =
         Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim
       in
-      match runtime_id_opt with
-      | Some runtime_id when runtime_id <> "" -> Ok runtime_id
+      let legacy_runtime_id_opt =
+        Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim
+      in
+      match runtime_id_opt, legacy_runtime_id_opt with
+      | Some runtime_id, Some legacy_runtime_id
+        when runtime_id <> "" && legacy_runtime_id <> ""
+             && runtime_id <> legacy_runtime_id ->
+        Error
+          (Printf.sprintf
+             "keeper meta parse error: runtime_id (%s) and legacy runtime_id (%s) \
+              disagree"
+             runtime_id legacy_runtime_id)
+      | Some runtime_id, _ when runtime_id <> "" -> Ok runtime_id
+      | _, Some legacy_runtime_id when legacy_runtime_id <> "" -> Ok legacy_runtime_id
       | _ -> Ok (Keeper_config.default_runtime_id ())
     in
     (match pk_runtime_id_result with

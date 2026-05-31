@@ -54,10 +54,10 @@ val stream_idle_timeout_sec : unit -> float
 val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
 
 (** Total HTTP body-consumption deadline override.
-    [None] (env unset) lets the cascade attempt fall back to the per-
+    [None] (env unset) lets the runtime attempt fall back to the per-
     attempt [max_execution_time]. [Some s] is forwarded to
     [Runtime_agent_context.body_timeout_s] -> [Builder.with_body_timeout],
-    surfacing [Retry.Timeout] before the turn cap so cascade falls
+    surfacing [Retry.Timeout] before the turn cap so runtime falls
     forward at the attempt boundary.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)

@@ -146,10 +146,10 @@ end
 (** {1 Model routing defaults} *)
 
 module Model_defaults : sig
-  val default_cascade_opt : unit -> string option
+  val default_runtime_opt : unit -> string option
   val default_provider_opt : unit -> string option
   val default_model_opt : unit -> string option
-  val routing_cascade : unit -> string
+  val routing_runtime : unit -> string
   (** [MASC_ROUTING_CASCADE] override, otherwise logical key ["routing"]. *)
 
   val goal_models_opt : unit -> string option

@@ -583,7 +583,7 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         + (Prometheus.metric_total Keeper_metrics.(to_string TurnErrorAfterTools) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string TurnCleanupFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string CleanupTrackingFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CascadeSyncFailures) |> int_of_float)
+        + (Prometheus.metric_total Keeper_metrics.(to_string RuntimeSyncFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string LocalDiscoveryFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string ThinkingPersistFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string CheckpointFailures) |> int_of_float)

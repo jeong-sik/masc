@@ -24,7 +24,7 @@ let risk_class_to_json rc =
    Privileged, External_call — now triggers a non-exhaustive-match
    compile error instead of silently inheriting the false branch.
    Defends against the inverse of the
-   "Variant addition partial-match cascade" pattern. *)
+   "Variant addition partial-match runtime" pattern. *)
 let is_cacheable = function
   | Read -> true
   | Write | Network | Destructive -> false

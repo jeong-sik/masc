@@ -30,7 +30,7 @@ function makeVerdict(overrides: Partial<HarnessVerdictItem> = {}): HarnessVerdic
     agent_name: 'agent-alpha',
     gate: 'code_quality',
     verdict: 'approve',
-    evaluator_cascade: 'evaluator-cascade',
+    evaluator_runtime: 'evaluator-runtime',
     ...overrides,
   }
 }
@@ -370,9 +370,9 @@ describe('verdictSummary', () => {
 
 describe('filterVerdicts', () => {
   const items: HarnessVerdictItem[] = [
-    makeVerdict({ task_id: 't-1', task_title: 'Refactor keeper loop', agent_name: 'alpha', gate: 'code_quality', evaluator_cascade: 'cas-a', verdict: 'approve' }),
-    makeVerdict({ task_id: 't-2', task_title: 'Add dashboard filter', agent_name: 'beta', gate: 'documentation', evaluator_cascade: 'cas-b', verdict: 'reject:vague notes' }),
-    makeVerdict({ task_id: 't-3', task_title: 'Token counter fix', agent_name: 'gamma', gate: 'code_quality', evaluator_cascade: 'cas-c', verdict: 'approve:conditional' }),
+    makeVerdict({ task_id: 't-1', task_title: 'Refactor keeper loop', agent_name: 'alpha', gate: 'code_quality', evaluator_runtime: 'cas-a', verdict: 'approve' }),
+    makeVerdict({ task_id: 't-2', task_title: 'Add dashboard filter', agent_name: 'beta', gate: 'documentation', evaluator_runtime: 'cas-b', verdict: 'reject:vague notes' }),
+    makeVerdict({ task_id: 't-3', task_title: 'Token counter fix', agent_name: 'gamma', gate: 'code_quality', evaluator_runtime: 'cas-c', verdict: 'approve:conditional' }),
   ]
 
   it('returns the input reference when query is empty', () => {
@@ -398,7 +398,7 @@ describe('filterVerdicts', () => {
     expect(result.map(r => r.task_id)).toEqual(['t-1', 't-3'])
   })
 
-  it('matches by evaluator_cascade substring', () => {
+  it('matches by evaluator_runtime substring', () => {
     const result = filterVerdicts(items, 'cas-b')
     expect(result.map(r => r.task_id)).toEqual(['t-2'])
   })
@@ -429,7 +429,7 @@ describe('filterVerdicts', () => {
 
   it('handles items with empty string fields safely', () => {
     const sparse: HarnessVerdictItem[] = [
-      makeVerdict({ task_id: '', task_title: '', agent_name: '', gate: '', evaluator_cascade: '', verdict: 'approve' }),
+      makeVerdict({ task_id: '', task_title: '', agent_name: '', gate: '', evaluator_runtime: '', verdict: 'approve' }),
     ]
     expect(filterVerdicts(sparse, 'approve')).toHaveLength(1)
     expect(filterVerdicts(sparse, 'anything-else')).toHaveLength(0)

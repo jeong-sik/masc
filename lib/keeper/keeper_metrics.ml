@@ -146,7 +146,7 @@ type t =
   | ToolUsageFlushFailures
   | TurnTimeoutCommitted
   | TurnErrorAfterTools
-  | CascadeSyncFailures
+  | RuntimeSyncFailures
   | LocalDiscoveryFailures
   | ThinkingPersistFailures
   | CheckpointFailures
@@ -213,7 +213,7 @@ type t =
   | StaleTerminationBatch
   | StaleBroadcastEmitFailures
   | OasRunTimeout
-  | CascadeSaturationSignal
+  | RuntimeSaturationSignal
   | ToolUseFailure
   | ToolNotAllowed
   | TurnGateRejectedTerminal
@@ -231,7 +231,7 @@ type t =
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
-  | CascadeHttpProbeJsonParseFailures
+  | RuntimeHttpProbeJsonParseFailures
 
 (** String conversion
 
@@ -383,7 +383,7 @@ let to_string = function
   | ToolUsageFlushFailures -> "masc_keeper_tool_usage_flush_failures_total"
   | TurnTimeoutCommitted -> "masc_keeper_turn_timeout_committed_total"
   | TurnErrorAfterTools -> "masc_keeper_turn_error_after_tools_total"
-  | CascadeSyncFailures -> "masc_keeper_cascade_sync_failures_total"
+  | RuntimeSyncFailures -> "masc_keeper_runtime_sync_failures_total"
   | LocalDiscoveryFailures -> "masc_keeper_local_discovery_failures_total"
   | ThinkingPersistFailures -> "masc_keeper_thinking_persist_failures_total"
   | CheckpointFailures -> "masc_keeper_checkpoint_failures_total"
@@ -457,7 +457,7 @@ let to_string = function
   | StaleTerminationBatch -> "masc_keeper_stale_termination_batch_total"
   | StaleBroadcastEmitFailures -> "masc_keeper_stale_broadcast_emit_failures"
   | OasRunTimeout -> "masc_keeper_oas_run_timeout_total"
-  | CascadeSaturationSignal -> "masc_keeper_cascade_saturation_signal_total"
+  | RuntimeSaturationSignal -> "masc_keeper_runtime_saturation_signal_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | TurnGateRejectedTerminal -> "masc_keeper_turn_gate_rejected_terminal_total"
@@ -477,6 +477,6 @@ let to_string = function
       "masc_keeper_memory_bank_load_history_swallowed_exceptions_total"
   | MemoryRecallReadErrors ->
       "masc_keeper_memory_recall_read_errors_total"
-  | CascadeHttpProbeJsonParseFailures ->
-      "masc_cascade_http_probe_json_parse_failures_total"
+  | RuntimeHttpProbeJsonParseFailures ->
+      "masc_runtime_http_probe_json_parse_failures_total"
 ;;

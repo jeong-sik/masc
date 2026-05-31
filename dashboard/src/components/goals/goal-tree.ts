@@ -22,7 +22,7 @@ import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
 import { executionOutcomeLabel } from '../fsm-hub-types'
 import { operatorDispositionReasonLabel } from '../fsm-hub-types'
-import { cascadeOutcomeLabel } from '../fsm-hub-types'
+import { runtimeOutcomeLabel } from '../fsm-hub-types'
 import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
@@ -173,7 +173,7 @@ function badgeLabel(badge: string): string {
   switch (badge) {
     case 'awaiting_approval': return '승인 대기'
     case 'sandbox': return '샌드박스'
-    case 'cascade': return 'Cascade'
+    case 'runtime': return 'Runtime'
     case 'task_verification_pending': return 'Task 검증 대기'
     case 'stalled': return '정체'
     case 'activity_unobserved': return '활동 관측 부족'
@@ -185,7 +185,7 @@ function badgeLabel(badge: string): string {
 function badgeClass(badge: string): string {
   switch (badge) {
     case 'awaiting_approval':
-    case 'cascade':
+    case 'runtime':
     case 'task_verification_pending':
     case 'stalled':
       return 'border-warn/30 bg-warn/10 text-warn'
@@ -1171,7 +1171,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const providerAttempts = execution?.provider_attempt_count
   const providerFallback = execution?.provider_fallback_applied
   const providerSelectedModel = execution?.provider_selected_model?.trim() || null
-  const executionCascadeOutcome = execution?.cascade_outcome?.trim() || null
+  const executionRuntimeOutcome = execution?.runtime_outcome?.trim() || null
   const sandboxRoot = execution?.sandbox_root?.trim() || null
   const latestTerminalCode = trust?.latest_terminal_reason?.code?.trim() || null
   const latestTerminalSummary = trust?.latest_terminal_reason?.summary?.trim() || null
@@ -1203,7 +1203,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || typeof providerAttempts === 'number'
     || providerFallback === true
     || Boolean(providerSelectedModel)
-    || Boolean(executionCascadeOutcome)
+    || Boolean(executionRuntimeOutcome)
     || Boolean(sandboxRoot)
     || trustHasPendingFirstEvidence(trust?.approval_state ?? null)
 
@@ -1233,9 +1233,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>승인</div>
         <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
         <div>캐스케이드</div>
-        <div class="text-right text-text-body">${keeper.cascade_name ?? executionCascadeOutcome ?? '-'}</div>
+        <div class="text-right text-text-body">${keeper.runtime_id ?? executionRuntimeOutcome ?? '-'}</div>
         <div>결과</div>
-        <div class="text-right text-text-body" title=${keeper.cascade_outcome ?? executionCascadeOutcome ?? ''}>${cascadeOutcomeLabel(keeper.cascade_outcome ?? executionCascadeOutcome) ?? '-'}</div>
+        <div class="text-right text-text-body" title=${keeper.runtime_outcome ?? executionRuntimeOutcome ?? ''}>${runtimeOutcomeLabel(keeper.runtime_outcome ?? executionRuntimeOutcome) ?? '-'}</div>
       </div>
       ${shouldShowTrustSummary ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-3">
@@ -1294,8 +1294,8 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
                 ${providerSelectedModel ? ` ${providerSelectedModel}` : ''}
               </span>
             ` : null}
-            ${executionCascadeOutcome ? html`
-              <span>cascade ${executionCascadeOutcome}</span>
+            ${executionRuntimeOutcome ? html`
+              <span>runtime ${executionRuntimeOutcome}</span>
             ` : null}
             ${sandboxRoot ? html`
               <span title=${sandboxRoot}>sandbox ${sandboxRoot}</span>

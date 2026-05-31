@@ -1,5 +1,5 @@
 // MASC Dashboard — Status Surface
-// Monitor is keeper-fleet first. Tool, cascade/runtime, evidence, and
+// Monitor is keeper-fleet first. Tool, runtime/runtime, evidence, and
 // hidden diagnostic/deep-link routes remain routeable through this dispatcher.
 
 import { html } from 'htm/preact'

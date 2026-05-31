@@ -9,7 +9,7 @@
       backoff).
     - {!preview_of_action} for UI confirmation panes.
 
-    {b Include cascade:} starts with [include Operator_control_snapshot]
+    {b Include runtime:} starts with [include Operator_control_snapshot]
     so {!Operator_control}'s [include] propagates the snapshot
     surface (notably the [\\'a context] type) through.  Internal
     helpers ([judgment_surface_enums], [normalize_judgment_*],

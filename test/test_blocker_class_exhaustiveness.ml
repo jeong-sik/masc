@@ -17,16 +17,16 @@ open Kmc
     added to the type, append it here — the compiler will refuse to build if
     the match in [to_string] / [of_serialized_string] is incomplete. *)
 let all_variants : blocker_class list =
-  [ Cascade_exhausted (No_tool_capable None)
-  ; Cascade_exhausted (Other_detail "test")
-  ; Cascade_exhausted Connection_refused
-  ; Cascade_exhausted Dns_failure
-  ; Cascade_exhausted No_providers_available
-  ; Cascade_exhausted All_providers_failed
-  ; Cascade_exhausted Candidates_filtered_after_cycles
-  ; Cascade_exhausted Max_turns_exceeded
-  ; Cascade_exhausted (Structural_attempt_timeout { detail = "30" })
-  ; Cascade_exhausted Capacity_exhausted
+  [ Runtime_exhausted (No_tool_capable None)
+  ; Runtime_exhausted (Other_detail "test")
+  ; Runtime_exhausted Connection_refused
+  ; Runtime_exhausted Dns_failure
+  ; Runtime_exhausted No_providers_available
+  ; Runtime_exhausted All_providers_failed
+  ; Runtime_exhausted Candidates_filtered_after_cycles
+  ; Runtime_exhausted Max_turns_exceeded
+  ; Runtime_exhausted (Structural_attempt_timeout { detail = "30" })
+  ; Runtime_exhausted Capacity_exhausted
   ; Capacity_backpressure
   ; Ambiguous_post_commit_timeout
   ; Ambiguous_post_commit_failure
@@ -67,7 +67,7 @@ let test_roundtrip () =
             "blocker_class_of_serialized_string returned None for %S (from variant)"
             s
         | Some result ->
-          (* Cascade_exhausted with non-No_tool_capable payloads all collapse
+          (* Runtime_exhausted with non-No_tool_capable payloads all collapse
              to [Other_detail] on deserialization — that is the expected
              lossy round-trip.  Only [No_tool_capable] must be exact. *)
           let s' = blocker_class_to_string result in
@@ -78,19 +78,19 @@ let test_roundtrip () =
 (* ── No_tool_capable specific test ─────────────────────────────── *)
 
 let test_no_tool_capable_mapping () =
-  let s = blocker_class_to_string (Cascade_exhausted (No_tool_capable None)) in
+  let s = blocker_class_to_string (Runtime_exhausted (No_tool_capable None)) in
   check string "No_tool_capable serializes correctly" "runtime_exhausted_no_tool_capable" s;
   match blocker_class_of_serialized_string "runtime_exhausted_no_tool_capable" with
   | None -> fail "deserialization of runtime_exhausted_no_tool_capable returned None"
-  | Some (Cascade_exhausted (No_tool_capable None)) -> ()
+  | Some (Runtime_exhausted (No_tool_capable None)) -> ()
   | Some other ->
     let s' = blocker_class_to_string other in
-    failf "expected Cascade_exhausted No_tool_capable, got %S" s'
+    failf "expected Runtime_exhausted No_tool_capable, got %S" s'
 ;;
 
 (* ── Uniqueness test ───────────────────────────────────────────── *)
 
-(** [Cascade_exhausted] sub-variants (except [No_tool_capable]) all collapse to
+(** [Runtime_exhausted] sub-variants (except [No_tool_capable]) all collapse to
     the same ["runtime_exhausted"] string — this is the intended lossy design.
     We test uniqueness on the *canonical* strings (one per top-level variant). *)
 let test_string_uniqueness () =
@@ -98,7 +98,7 @@ let test_string_uniqueness () =
   let rec check_unique seen = function
     | [] -> ()
     | s :: rest ->
-      (* "runtime_exhausted" appears for every Cascade_exhausted sub-variant
+      (* "runtime_exhausted" appears for every Runtime_exhausted sub-variant
          except No_tool_capable — skip duplicates of that specific string. *)
       if s = "runtime_exhausted" then check_unique seen rest
       else if List.mem s seen
@@ -137,7 +137,7 @@ module KSB = Masc_mcp.Keeper_status_bridge_blocker
 
 (** Every [Agent_sdk.Error.Agent _] sub-variant must map to a [Some blocker_class]
     through the two-layer pipeline in [blocker_class_of_sdk_error]:
-    1. [classify_masc_internal_error] — for cascade-layer structured errors
+    1. [classify_masc_internal_error] — for runtime-layer structured errors
     2. Direct SDK pattern match — for Agent sub-variants
 
     When a new Agent sub-variant is added to the SDK, this test forces the
@@ -220,7 +220,7 @@ let test_structural_timeout_maps_to_oas_timeout () =
     SdkE.Api
       (SdkRetry.Timeout
          { message =
-             "Turn wall-clock budget exhausted during cascade attempt \
+             "Turn wall-clock budget exhausted during runtime attempt \
               (budget=554.9s)" })
   in
   match KSB.blocker_class_of_sdk_error structural with

@@ -1,6 +1,6 @@
 (** Runtime = Provider + Model + Spec(binding).
 
-    cascade→Runtime 전환 (RFC-0206). cascade 의 routes/cascade_name/tier/profile
+    runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
     타입은 자립 모듈 {!Runtime_schema} 소유. *)
@@ -22,7 +22,7 @@ val load_list : config_path:string -> (t list * t, string) result
 (** {1 Lazy default runtime singleton}
 
     Initialized once at startup via {!init_default}.  All consumer
-    code that previously resolved a cascade name now calls
+    code that previously resolved a runtime name now calls
     {!get_default_runtime_id} instead. *)
 
 val init_default : config_path:string -> (unit, string) result
@@ -41,12 +41,12 @@ val config_path : unit -> string option
 
 val default_max_context : unit -> int
 (** Context-window budget of the default runtime's model (RFC-0206
-    single-binding). Replaces the deleted [Cascade_runtime.resolve_*_max_context]
+    single-binding). Replaces the deleted [Runtime_runtime.resolve_*_max_context]
     label scans. Falls back to [Runtime_constants.fallback_context_window]
     before {!init_default} runs. *)
 
 val default_model_api_name : unit -> string
 (** API model name of the default runtime, sent to the runtime completion
     endpoint (RFC-0206 single-binding). Replaces the deleted
-    [Cascade_runtime.default_local_model_label_and_id]. Falls back to ["auto"]
+    [Runtime_runtime.default_local_model_label_and_id]. Falls back to ["auto"]
     before {!init_default} runs. *)

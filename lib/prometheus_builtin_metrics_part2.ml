@@ -104,13 +104,13 @@ let register
     `Counter;
   add
     metric_llm_provider_circuit_state
-    "Current OAS cascade circuit state, labeled by provider, model, and provider_key. \
+    "Current OAS runtime circuit state, labeled by provider, model, and provider_key. \
      `Gauge values: 0=closed, 1=open, 2=half-open"
     `Gauge;
   add
     metric_fallback_triggered
-    "Total fallback events across the LLM cascade pipeline, labeled by kind \
-     (cascade_empty|capability_drop|cli_unsupported|...) and detail"
+    "Total fallback events across the LLM runtime pipeline, labeled by kind \
+     (runtime_empty|capability_drop|cli_unsupported|...) and detail"
     `Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
      never registered.  Auto-create still works, but registering here
@@ -294,9 +294,9 @@ let register
     `Counter;
   add
     Keeper_metrics.(to_string AutoResumeBlockedTotal)
-    "Total keepers whose auto-resume was blocked because the cascade health probe \
-     reported unhealthy. Labeled by keeper and cascade. A positive rate means the health \
-     gate is protecting the fleet from resuming into a still-failing cascade."
+    "Total keepers whose auto-resume was blocked because the runtime health probe \
+     reported unhealthy. Labeled by keeper and runtime. A positive rate means the health \
+     gate is protecting the fleet from resuming into a still-failing runtime."
     `Counter;
   add
     Keeper_metrics.(to_string SupervisorCleanupFailures)

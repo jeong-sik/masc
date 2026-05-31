@@ -510,6 +510,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Search_files -> "search_files"
     | Tool_name.Keeper.Fs_edit
     | Tool_name.Keeper.Fs_read
+    | Tool_name.Keeper.Fs_write
     | Tool_name.Keeper.Ide_annotate -> "fs"
     | Tool_name.Keeper.Library_read
     | Tool_name.Keeper.Library_search

@@ -1,7 +1,7 @@
 (** Runtime_agent — Config, build, and run for OAS agent execution.
 
     Contains the [config] type, [build], [run], and [run_with_masc_tools]
-    functions. All model-selection and cascade logic lives in
+    functions. All model-selection and runtime logic lives in
     {!Keeper_observation} and {!Keeper_turn_driver}.
 
     @since God file decomposition — extracted from oas_worker.ml *)
@@ -79,7 +79,7 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  cascade_observation : Keeper_observation.cascade_observation option;
+  runtime_observation : Keeper_observation.runtime_observation option;
   stop_reason : stop_reason;
 }
 
@@ -236,14 +236,14 @@ let provider_config_preserving_http_transport
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
-          "rfc0095-trace: cascade_runner http_transport.complete_sync invoked";
+          "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
         http_transport.complete_sync (patch_request req));
       complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
-          "rfc0095-trace: cascade_runner http_transport.complete_stream invoked";
+          "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
         http_transport.complete_stream ?on_telemetry ~on_event
           (patch_request req));
     }
@@ -562,7 +562,7 @@ let run
           turns;
           trace_ref;
           run_validation;
-          cascade_observation = None;
+          runtime_observation = None;
           stop_reason = Completed;
         }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
@@ -584,7 +584,7 @@ let run
           turns;
           trace_ref;
           run_validation;
-          cascade_observation = None;
+          runtime_observation = None;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
         }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
@@ -614,7 +614,7 @@ let run
             turns;
             trace_ref;
             run_validation;
-            cascade_observation = None;
+            runtime_observation = None;
             stop_reason;
           }
       | None ->
@@ -653,10 +653,10 @@ let run
         ~total_duration_ms:run_total_duration_ms
         ~status:(Dashboard_oas_bridge.Error { transient = false })
         error_response;
-      (* Demoted from WARN to DEBUG (task-239): this fires once per cascade,
-         but a cascade caller (Keeper_turn_driver.run_named) retries on the
+      (* Demoted from WARN to DEBUG (task-239): this fires once per runtime,
+         but a runtime caller (Keeper_turn_driver.run_named) retries on the
          next provider.  Emitting WARN/ERROR here creates noise on
-         recovered cascades.  The cascade layer logs [cascade-fallback] at
+         recovered runtimes.  The runtime layer logs [runtime-fallback] at
          INFO when it retries and emits ERROR only on full exhaustion. *)
       Log.Misc.debug "oas_worker: agent errored: %s" detail;
       close_agent_for_cleanup ~propagate_cancel:false ~config agent;
@@ -687,7 +687,7 @@ let run
       ^ Yojson.Safe.to_string
           (`Assoc
             [ "kind", `String "internal_unhandled_exception"
-            ; "site", `String "cascade_runner.execute"
+            ; "site", `String "runtime_runner.execute"
             ; "exn_repr", `String (Printexc.to_string exn)
             ])
     in

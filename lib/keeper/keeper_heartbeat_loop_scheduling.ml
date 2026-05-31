@@ -34,8 +34,7 @@ type keepalive_scheduling_decision = {
 }
 
 let decide_keepalive_scheduling
-      ?(runtime_resilience_of_name =
-        Keeper_runtime_resilience.runtime_resilience_of_name)
+      ?(runtime_resilience_of_name = fun _ -> None)
       ?(runtime_status_of_name =
         fun ~runtime_id -> Keeper_health_probe.get_runtime_status ~runtime_id)
       ~stop
@@ -50,7 +49,7 @@ let decide_keepalive_scheduling
   let runtime_resilience = runtime_resilience_of_name runtime_id in
   let runtime_backpressure =
     runtime_backpressure_decision
-      ~runtime_resilience:(Some runtime_resilience)
+      ~runtime_resilience
       ~should_run_turn:requested_should_run_turn
       ~runtime_id
       ~runtime_status:(runtime_status_of_name ~runtime_id)

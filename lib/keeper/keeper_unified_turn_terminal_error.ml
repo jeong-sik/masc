@@ -1,6 +1,6 @@
 module EC = Keeper_error_classify
 
-let handle ~config ~keeper_name ~attempt ~attempted_runtime_ids err =
+let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
   if EC.is_runtime_exhausted_error err
   then (
     Keeper_registry.mark_turn_runtime_exhausted
@@ -11,12 +11,12 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtime_ids err =
       ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]
       ();
     Log.Keeper.warn
-      "%s: all cascades exhausted (terminal) — last_err=%s attempt=%d \
-       attempted_runtime_ids=[%s]"
+      "%s: all runtimes exhausted (terminal) — last_err=%s attempt=%d \
+       attempted_runtimes=[%s]"
       keeper_name
       (Agent_sdk.Error.to_string err)
       attempt
-      (String.concat ", " attempted_runtime_ids);
+      (String.concat ", " attempted_runtimes);
     Prometheus.inc_counter
       Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:

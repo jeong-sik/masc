@@ -11,7 +11,7 @@
       last line of the body (parsed by
       {!split_http_body_and_status}).
 
-    {b Include cascade:} starts with [include Tool_local_runtime_core]
+    {b Include runtime:} starts with [include Tool_local_runtime_core]
     so siblings ({!Tool_local_runtime_bench},
     {!Tool_local_runtime_verify}, {!Tool_local_runtime_probe})
     receive the core surface transitively via

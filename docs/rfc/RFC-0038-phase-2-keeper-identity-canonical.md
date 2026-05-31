@@ -6,9 +6,9 @@ created: 2026-05-09
 status: Draft
 supersedes: -
 related:
-  - RFC-0038 Phase 1 (opaque identifier types — Provider_id, Cascade_name)
+  - RFC-0038 Phase 1 (opaque identifier types — Provider_id, Runtime_name)
   - RFC-0020 (keeper event queue layer separation — identity transport)
-  - RFC-0041 (cascade routing group/item hierarchy — identity 참조)
+  - RFC-0041 (runtime routing group/item hierarchy — identity 참조)
   - PR #14038 (fix: compare task owners by stable identity — reference fix)
 ---
 
@@ -18,7 +18,7 @@ related:
 
 ## §0 Summary
 
-RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `Cascade_name.t = private string`)를 도입했으나 keeper identity는 여전히 raw string으로 비교된다. 이로 인해:
+RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `Runtime_name.t = private string`)를 도입했으나 keeper identity는 여전히 raw string으로 비교된다. 이로 인해:
 - `nick0cave` vs `keeper-nick0cave-agent` vs generated nickname이 **같은 keeper를 참조하나 string equality로 reject**
 - task ownership `release/done/cancel` 경로에서 false rejection
 - agent-code-connector P1 review: alias 매칭 통과 후 `transition_task_r`이 canonical assignee의 `current_task` 클리어를 누락 → backlog/agent metadata drift
@@ -105,14 +105,14 @@ let keeper_name_from_agent_name agent_name =
 
 ### §1.3 RFC-0038 Phase 1과의 격차
 
-Phase 1은 `Provider_id.t = private string`, `Cascade_name.t = private string`를 도입.
+Phase 1은 `Provider_id.t = private string`, `Runtime_name.t = private string`를 도입.
 Phase 2는 keeper identity를 동일 패턴으로 확장: `Keeper_identity.t = private string` with **canonical form guarantee**.
 
 ## §2 Goals / Non-goals
 
 ### Goals
 - keeper identity alias 생성 경로를 canonical form으로 normalize
-- `Keeper_identity.t` opaque type 도입 (`Provider_id`, `Cascade_name` 패턴 확장)
+- `Keeper_identity.t` opaque type 도입 (`Provider_id`, `Runtime_name` 패턴 확장)
 - `same_task_actor`를 type level 강제: alias 매칭이 아니라 canonical comparison
 - `transition_task_r`에서 canonical assignee로 state 갱신
 
@@ -212,7 +212,7 @@ let transition_task_r ~identity ~task_state =
 
 1. nickname → canonical form mapping table의 persistence (SQLite? pgvector? memory-only?)
 2. generated nickname이 셔플되면 이전 identity mapping은 invalid? or versioned?
-3. `Keeper_identity.t`가 RFC-0038의 `Provider_id`, `Cascade_name`와 동일한 module (opaque) convention을 따르는가, or separate?
+3. `Keeper_identity.t`가 RFC-0038의 `Provider_id`, `Runtime_name`와 동일한 module (opaque) convention을 따르는가, or separate?
 4. agent-code-connector P1 review에서 지적한 `transition_task_r` backward-compat: 기존 task record의 `owner` 필드는 그대로 두고 비교 시점만 canonicalize하는 방식 vs migration
 5. sub-agent Topic C.2 결과로 alias 생성 사이트 추가
 
@@ -229,7 +229,7 @@ let transition_task_r ~identity ~task_state =
 
 ### 사내
 
-- RFC-0038 Phase 1 (opaque identifier types — `Provider_id.t`, `Cascade_name.t`)
+- RFC-0038 Phase 1 (opaque identifier types — `Provider_id.t`, `Runtime_name.t`)
 - PR #14038 — reference fix + agent-code-connector P1 review
 - `instructions/software-development.md` §2 Unknown → Permissive Default anti-pattern
 - (sub-agent Topic C.1) `same_task_actor` caller 전수 + `transition_task_r` 연결 — `.tmp/rfc-0038-p2-caller-context.md`

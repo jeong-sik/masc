@@ -4,7 +4,7 @@
     "metrics": [
       "masc_keeper_turn_completed_total{keeper_name}",
       "masc_keeper_turn_scheduled_total{keeper_name}",
-      "masc_keeper_semaphore_wait_seconds_bucket{keeper_name,cascade_profile}",
+      "masc_keeper_semaphore_wait_seconds_bucket{keeper_name,runtime_profile}",
       "masc_keeper_semaphore_wait_timeout_total{keeper,channel}",
       "masc_keeper_alive_but_stuck_seconds{keeper_name}",
       "masc_keeper_alive_but_stuck_threshold_seconds{keeper_name}",
@@ -131,8 +131,8 @@
       "id": 2,
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, keeper_name, cascade_profile) (rate(masc_keeper_semaphore_wait_seconds_bucket[5m])))",
-          "legendFormat": "{{keeper_name}} {{cascade_profile}}",
+          "expr": "histogram_quantile(0.99, sum by (le, keeper_name, runtime_profile) (rate(masc_keeper_semaphore_wait_seconds_bucket[5m])))",
+          "legendFormat": "{{keeper_name}} {{runtime_profile}}",
           "refId": "A"
         },
         {

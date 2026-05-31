@@ -64,7 +64,7 @@ Recommended environment surface:
 | `TARGET_SCENARIOS` | comma-separated scenario list |
 | `PORT` | server port override |
 | `KEEPER_NAME` | target durable keeper name |
-| `KEEPER_MODELS` | deterministic model cascade override |
+| `KEEPER_MODELS` | deterministic model runtime override |
 | `PLANNED_TEST` | planned fault injection marker, default `1` |
 
 ### 3.2 Default Scenario Set

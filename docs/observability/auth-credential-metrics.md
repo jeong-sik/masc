@@ -208,7 +208,7 @@ heartbeat, not a fiber stall.
 
 ### Why not the in-app dashboard
 
-`dashboard/src/` does not consume `/metrics`. Cascade, keeper turn FSM,
+`dashboard/src/` does not consume `/metrics`. Runtime, keeper turn FSM,
 and all other Prometheus domains share the same gap — none surface in
 the in-app dashboard. Adding only auth-credential there would be an
 N-of-M patch (AGENT-LLM-A.md software-development §workaround #3). The
@@ -226,6 +226,6 @@ in the meantime.
 
 ## Related
 
-- `docs/observability/cascade-metrics.md` -- same observability pattern for cascade routing decisions.
+- `docs/observability/runtime-metrics.md` -- same observability pattern for runtime routing decisions.
 - `docs/observability/goal-loop-observe-metrics.md` -- the boot-time exporter contract that this surface plugs into (`metric_config_credential_archived_starvation_total` is part of the GoalLoop contract presence check).
 - `RFC-0019 Keeper Credential Unification` -- the narrower split-brain reconciliation in PR #15112 sits inside the architecture sketched in RFC-0019 §4.

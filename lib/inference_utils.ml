@@ -1,10 +1,10 @@
 (** Inference_utils — inference utility functions.
 
     Usage helpers, UTF-8 sanitization, token estimation, and
-    concurrency diagnostics.  Extracted from the former [Cascade]
-    module during the Cascade deletion refactor.
+    concurrency diagnostics.  Extracted from the former [Runtime]
+    module during the Runtime deletion refactor.
 
-    @since 2.125.0 — extracted from Cascade *)
+    @since 2.125.0 — extracted from Runtime *)
 
 (* ================================================================ *)
 (* Helpers                                                           *)

@@ -55,7 +55,7 @@ let cooldown_threshold =
 
 (** Cooldown duration in seconds.  During cooldown, the provider is
     skipped (not attempted).  Default: 30s, matching the provider
-    circuit-breaker OPEN threshold used by the cascade.  Hard quota and
+    circuit-breaker OPEN threshold used by the runtime.  Hard quota and
     terminal provider errors use separate long cooldowns. *)
 let cooldown_sec =
   read_float_setting
@@ -106,7 +106,7 @@ let cooldown_config_for ~provider_key =
 (** Cooldown duration for provider calls classified as hard-quota exhaustion
     (account balance depleted, monthly quota reached, resource exhausted).
     Unlike transient 429s, hard-quota errors will not recover within a short
-    window: retrying on the next cascade tick just wastes a turn.  This
+    window: retrying on the next runtime tick just wastes a turn.  This
     cooldown is applied immediately on the first such error (no threshold)
     and is significantly longer than {!cooldown_sec}. *)
 let hard_quota_cooldown_sec =
@@ -116,7 +116,7 @@ let hard_quota_cooldown_sec =
     ()
 
 (** Cooldown duration for provider calls classified as terminal structural
-    failures, where retrying the same provider on the next cascade tick is
+    failures, where retrying the same provider on the next runtime tick is
     expected to reproduce the same failure until operator/runtime state changes. *)
 let terminal_failure_cooldown_sec =
   read_float_setting

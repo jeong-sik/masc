@@ -1,4 +1,4 @@
-(* #10049: auto-construct CLI MCP config JSON for keepers whose cascade
+(* #10049: auto-construct CLI MCP config JSON for keepers whose runtime
    includes CLI providers but whose env
    (OAS_CLAUDE_MCP_CONFIG) is unset.
 

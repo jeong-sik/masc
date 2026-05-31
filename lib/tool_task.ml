@@ -197,7 +197,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     | [] -> None
     | items -> Some items
   in
-  let evaluator_cascade = get_string_opt args "evaluator_cascade" in
+  let evaluator_runtime = get_string_opt args "evaluator_runtime" in
   let handoff_context =
     parse_handoff_context ~agent_name:ctx.agent_name ~action args
   in
@@ -309,7 +309,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
             (match persisted_completion_contract ~task_opt with
              | Some persisted -> Some persisted
              | None -> completion_contract)
-          ~evaluator_cascade
+          ~evaluator_runtime
           ~ctx
           ~task_opt
           ~task_id
@@ -322,7 +322,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   match review_gate_rejection with
   | Some reason ->
     (* RFC-0189: review gate rejected the completion attempt — the
-       Cdal evaluator cascade returned an actionable verdict the
+       Cdal evaluator runtime returned an actionable verdict the
        caller can address. [Workflow_rejection]. *)
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)

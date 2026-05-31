@@ -39,12 +39,12 @@ export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'tools', label: 'Tools', description: 'MCP tool 호출' },
   { kind: 'approve', label: 'Approve', description: 'APPROVE thread 마커' },
   { kind: 'notes', label: 'Notes', description: 'NOTE/SUGGEST 마커' },
-  { kind: 'cascade', label: 'Cascade', description: 'provider/model/cost/latency gutter chip' },
+  { kind: 'runtime', label: 'Runtime', description: 'provider/model/cost/latency gutter chip' },
   {
     kind: 'keeper-trace',
     label: 'Trace',
-    description: '4-source stitched gutter chip (anchored-thread / cascade-hop / bdi-snapshot / decision-log)',
-    conflictsWith: ['cascade'],
+    description: '4-source stitched gutter chip (anchored-thread / runtime-hop / bdi-snapshot / decision-log)',
+    conflictsWith: ['runtime'],
   },
   { kind: 'explode', label: 'EXPLODE', description: 'per-keeper ghost copies', mutuallyExclusive: true },
 ]

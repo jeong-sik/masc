@@ -37,7 +37,7 @@ let record_failure_and_maybe_escalate
       ~base_path:config.base_path
       meta.name
       (Some (Keeper_registry.Turn_consecutive_failures count));
-  let cascade_auto_paused =
+  let runtime_auto_paused =
     EC.is_runtime_exhausted_error err
     && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
     && not updated_meta.paused
@@ -49,7 +49,7 @@ let record_failure_and_maybe_escalate
       err
   in
   let auto_pause_succeeded =
-    if cascade_auto_paused || tool_contract_auto_paused
+    if runtime_auto_paused || tool_contract_auto_paused
     then (
       let released_task_id =
         if tool_contract_auto_paused
@@ -69,7 +69,7 @@ let record_failure_and_maybe_escalate
           ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
       with
       | Ok _ ->
-        if cascade_auto_paused
+        if runtime_auto_paused
         then (
           Keeper_registry.set_failure_reason
             ~base_path:config.base_path
@@ -78,7 +78,7 @@ let record_failure_and_maybe_escalate
           Log.Keeper.warn
             "%s: auto-paused after %d runtime_exhausted failures \
              (pause_threshold=%d, crash_threshold=%d); operator must resume after \
-             cascade fix"
+             runtime fix"
             meta.name
             count
             Keeper_behavioral_regime.turn_fail_streak_threshold
@@ -96,7 +96,7 @@ let record_failure_and_maybe_escalate
         true
       | Error sync_err ->
         let auto_pause_kind =
-          if cascade_auto_paused then "cascade" else "tool_contract"
+          if runtime_auto_paused then "runtime" else "tool_contract"
         in
         Log.Keeper.error
           "%s: %s auto-pause sync failed: %s (persistent failure remains on the crash path)"
@@ -104,11 +104,11 @@ let record_failure_and_maybe_escalate
           auto_pause_kind
           sync_err;
         Prometheus.inc_counter
-          Keeper_metrics.(to_string CascadeSyncFailures)
+          Keeper_metrics.(to_string RuntimeSyncFailures)
           ~labels:
             [ "keeper", meta.name
             ; ( "site"
-              , if cascade_auto_paused
+              , if runtime_auto_paused
                 then "auto_pause"
                 else "tool_contract_auto_pause" )
             ]

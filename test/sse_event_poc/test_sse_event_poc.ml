@@ -3,7 +3,7 @@
    Compares three JSON emit paths for the same agent_started payload:
 
    1. [baseline] — direct `Assoc construction + Yojson.Safe.to_string.
-      This is what [lib/cascade/cascade_event_bridge.ml] emits today
+      This is what [lib/runtime/runtime_event_bridge.ml] emits today
       inside the AgentStarted arm of [native_event_to_json] (lines 556-560).
 
    2. [manual] — hand-coded variant in [Sse_event_poc.Sse_event_manual],

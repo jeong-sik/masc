@@ -155,7 +155,7 @@ type keeper_runtime_mcp_log_context = {
   visible_tool_count : int option;
   required_tools : string list option;
   missing_required_tools : string list option;
-  cascade_profile : string option;
+  runtime_profile : string option;
 }
 
 let runtime_mcp_tool_surface_class allowed_tool_names =
@@ -257,7 +257,7 @@ let runtime_mcp_keeper_log_context_of_entry
     visible_tool_count = Some (List.length allowed_tool_names);
     required_tools = Some required_tools;
     missing_required_tools = Some missing_required_tools;
-    cascade_profile = Some (Keeper_meta_contract.runtime_id_of_meta entry.meta);
+    runtime_profile = Some (Keeper_meta_contract.runtime_id_of_meta entry.meta);
   }
 
 let runtime_mcp_keeper_error_preview message =
@@ -369,7 +369,7 @@ let record_runtime_mcp_keeper_trajectory
       ?visible_tool_count:ctx.visible_tool_count
       ?required_tools:ctx.required_tools
       ?missing_required_tools:ctx.missing_required_tools
-      ?cascade_profile:ctx.cascade_profile
+      ?runtime_profile:ctx.runtime_profile
       ()
   in
   let error = if success then None else Some safe_output in
@@ -457,7 +457,7 @@ let record_runtime_mcp_keeper_tool_trace
     ?visible_tool_count:ctx.visible_tool_count
     ?required_tools:ctx.required_tools
     ?missing_required_tools:ctx.missing_required_tools
-    ?cascade_profile:ctx.cascade_profile
+    ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)
     ();
   record_runtime_mcp_keeper_trajectory

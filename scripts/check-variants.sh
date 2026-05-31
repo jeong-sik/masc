@@ -203,10 +203,10 @@ fi
 # ── Check 2: turn_phase (OCaml) vs TurnPhaseSet in TLA+ ─────────────────────
 
 echo ""
-echo "=== Check 2: turn_phase (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
+echo "=== Check 2: turn_phase (OCaml) vs KeeperRuntimeLifecycle.tla domain ==="
 
 KR_TYPES_ML="lib/keeper/keeper_registry_types.ml"
-KCL_TLA="specs/keeper-state-machine/KeeperCascadeLifecycle.tla"
+KCL_TLA="specs/keeper-state-machine/KeeperRuntimeLifecycle.tla"
 
 if [ -f "$KR_TYPES_ML" ]; then
   # turn_phase constructors (strip "Turn_" prefix, lowercase for TLA+ comparison)
@@ -237,32 +237,32 @@ else
   echo "WARN: ${KR_TYPES_ML} not found — turn_phase check skipped"
 fi
 
-# ── Check 3: cascade_state (OCaml) vs CascadeSet in TLA+ ────────────────────
+# ── Check 3: runtime_state (OCaml) vs RuntimeSet in TLA+ ────────────────────
 
 echo ""
-echo "=== Check 3: cascade_state (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
+echo "=== Check 3: runtime_state (OCaml) vs KeeperRuntimeLifecycle.tla domain ==="
 
 if [ -f "$KR_TYPES_ML" ]; then
-  ocaml_cascade=$(extract_ocaml_type "$KR_TYPES_ML" "cascade_state" \
-    | sed 's/Cascade_//' | tr '[:upper:]' '[:lower:]' | sort -u)
+  ocaml_runtime=$(extract_ocaml_type "$KR_TYPES_ML" "runtime_state" \
+    | sed 's/Runtime_//' | tr '[:upper:]' '[:lower:]' | sort -u)
 
-  if [ -n "$ocaml_cascade" ]; then
+  if [ -n "$ocaml_runtime" ]; then
     if [ -f "$KCL_TLA" ]; then
-      # Extract from the CascadeSet == {"..."} definition in the TLA+ spec.
+      # Extract from the RuntimeSet == {"..."} definition in the TLA+ spec.
       # Reads the canonical set literal — no hardcoded values needed here.
-      tla_cascade=$(extract_tla_set_literals "$KCL_TLA" "CascadeSet")
-      if [ -n "$tla_cascade" ]; then
-        check_pair "OCaml(cascade_state)" "$ocaml_cascade" "TLA+(CascadeSet)" "$tla_cascade"
+      tla_runtime=$(extract_tla_set_literals "$KCL_TLA" "RuntimeSet")
+      if [ -n "$tla_runtime" ]; then
+        check_pair "OCaml(runtime_state)" "$ocaml_runtime" "TLA+(RuntimeSet)" "$tla_runtime"
       else
-        echo "INFO: CascadeSet definition not found in ${KCL_TLA} — cascade_state check skipped"
-        echo "      (Add 'CascadeSet == {\"idle\", ...}' to the spec for automated sync)"
+        echo "INFO: RuntimeSet definition not found in ${KCL_TLA} — runtime_state check skipped"
+        echo "      (Add 'RuntimeSet == {\"idle\", ...}' to the spec for automated sync)"
       fi
     else
-      echo "INFO: ${KCL_TLA} not found — TLA+ cascade_state check skipped"
+      echo "INFO: ${KCL_TLA} not found — TLA+ runtime_state check skipped"
     fi
   fi
 else
-  echo "WARN: ${KR_TYPES_ML} not found — cascade_state check skipped"
+  echo "WARN: ${KR_TYPES_ML} not found — runtime_state check skipped"
 fi
 
 # ── Check 4: PHASE_STYLES coverage (TypeScript) vs KeeperPhase ───────────────

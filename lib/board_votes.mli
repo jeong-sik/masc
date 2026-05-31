@@ -1,14 +1,14 @@
 (** Board_votes — voting + karma + flair on top of the
     Board_core store.
 
-    Cascade-include extends {!Board_core} (which itself
+    Runtime-include extends {!Board_core} (which itself
     includes {!Board_core_classify} and {!Board_core_payload})
     via [include module type of struct include Board_core end].
     Type identity propagates end-to-end across the chain
     (cycle 187 rationale).
 
     The {!Board} top-level facade ([lib/board.ml]) is the
-    final hop in the cascade — it does
+    final hop in the runtime — it does
     [include Board_votes] and re-exports every entry below
     plus the entire Board_core surface to the wider codebase.
 

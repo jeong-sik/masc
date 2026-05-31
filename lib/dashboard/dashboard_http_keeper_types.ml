@@ -11,12 +11,13 @@ let runtime_warning_ctx_ratio =
   Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
 
 (* RFC-0149 §3.3 — typed Result resolver for dashboard call sites.  The
-   legacy [live_keeper_cascade_name] facade + its silent-fallback carrier
-   ([Keeper_cascade_profile.resolve_live]) were removed in the §3.3
+   legacy [live_keeper_runtime_id] facade + its silent-fallback carrier
+   ([Keeper_runtime_profile.resolve_live]) were removed in the §3.3
    sunset closeout. *)
-let live_keeper_cascade_name_result (raw : string) :
+let live_keeper_runtime_id_result (raw : string) :
     (string, [ `Unresolved of string ]) result =
-  Keeper_cascade_profile.resolve_live_result raw
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then Error (`Unresolved raw) else Ok trimmed
 
 let compute_health_score
     ~restart_count ~max_restarts ~recent_crash_count

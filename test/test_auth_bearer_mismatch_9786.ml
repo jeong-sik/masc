@@ -5,7 +5,7 @@ module Types = Masc_domain
    #9786: agent A presents a token that resolves to credential
    owner B.  The Auth layer rejects with an [Unauthorized] error
    but the failure was invisible to Prometheus — dashboards could
-   only see downstream cascades (masc_claim_next failures, keeper
+   only see downstream runtimes (masc_claim_next failures, keeper
    degraded proactive state) with no upstream cause.
 
    This test pins the new

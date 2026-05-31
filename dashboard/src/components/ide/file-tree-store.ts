@@ -19,7 +19,7 @@
 import { signal, computed } from '@preact/signals'
 
 export interface FileTreeNode {
-  readonly path: string         // 'runtime/cascade/router.ts'
+  readonly path: string         // 'runtime/runtime/router.ts'
   readonly label: string        // 'router.ts' (display, last segment)
   readonly depth: number        // 0 = root
   readonly parent: string | null

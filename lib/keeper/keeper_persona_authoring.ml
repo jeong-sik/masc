@@ -202,7 +202,7 @@ let field_catalog_entries =
     ; field_catalog_entry
         ~path:"keeper.per_provider_timeout"
         ~typ:"number"
-        ~field_effect:"Per-provider cascade timeout override for this keeper."
+        ~field_effect:"Per-provider runtime timeout override for this keeper."
         ()
     ; field_catalog_entry
         ~path:"keeper.always_approve"
@@ -368,23 +368,13 @@ let normalize_social_model raw =
 
 let normalize_runtime_id raw =
   let normalized = String.trim raw in
-  let catalog =
-    try Keeper_runtime_profile.catalog_names () with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> []
-  in
-  let known =
-    [ Keeper_config.default_runtime_id () ]
-    @ catalog
-  in
-  if List.mem (String.lowercase_ascii normalized) known
+  if normalized <> ""
   then Ok normalized
   else
     Error
       (Printf.sprintf
-         "invalid keeper.runtime_id '%s' (known: %s)"
-         raw
-         (String.concat ", " known))
+         "invalid keeper.runtime_id '%s'"
+         raw)
 ;;
 
 let add_optional_string key fields keeper_json =
@@ -443,10 +433,20 @@ let normalize_keeper_json ~handle keeper_json =
           in
           Result.bind social_model_result (fun social_model ->
             let runtime_id_result =
-              match json_trimmed_string_opt "runtime_id" keeper_json with
-              | Some raw ->
+              match
+                ( json_trimmed_string_opt "runtime_id" keeper_json
+                , json_trimmed_string_opt "runtime_id" keeper_json )
+              with
+              | Some runtime_id, Some legacy_runtime_id
+                when runtime_id <> legacy_runtime_id ->
+                Error
+                  (Printf.sprintf
+                     "keeper.runtime_id (%s) and legacy keeper.runtime_id (%s) must match"
+                     runtime_id
+                     legacy_runtime_id)
+              | Some raw, _ | None, Some raw ->
                 Result.map (fun value -> Some value) (normalize_runtime_id raw)
-              | None -> Ok None
+              | None, None -> Ok None
             in
             Result.map
               (fun runtime_id ->
@@ -852,7 +852,10 @@ let handle_persona_generate ctx args =
              in
              match trimmed_arg "runtime_id" with
              | Some value -> value
-             | None -> Archetypes.default_generation_cascade_name
+             | None ->
+               (match trimmed_arg "runtime_id" with
+                | Some value -> value
+                | None -> Archetypes.default_generation_runtime_id)
            in
            let temperature =
              get_float_opt args "temperature"
@@ -884,7 +887,7 @@ let handle_persona_generate ctx args =
                ~caller:Env_config_oas_bridge.Keeper_persona_authoring
                (fun () ->
                  Keeper_turn_driver.run_named
-                   ~cascade_name:runtime_id
+                   ~runtime_id:runtime_id
                    ~goal:prompt
                    ~max_turns:1
                    ~temperature

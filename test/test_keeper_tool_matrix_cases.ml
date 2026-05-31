@@ -73,7 +73,7 @@ let init_keeper_bridge () =
   (* Use find_project_root — the test cwd is _build/default/test/ which
      does not contain config/tool_policy.toml, so Sys.getcwd fails the
      direct shortcut and falls into the exe-relative walk that picks up
-     the partial _build/default/config/cascade.json. *)
+     the partial _build/default/config/runtime.json. *)
   let base_path = Masc_test_deps.find_project_root () in
   (match KET.init_policy_config ~base_path with
    | Ok () -> ()
@@ -299,8 +299,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* The completion text intentionally contains the "follow-up"
          excuse pattern so the anti-rationalization gate fast-rejects
          on Gate 2 (excuse pattern) without invoking the cross_verifier
-         LLM cascade. The matrix runs in environments where the
-         evaluator cascade is unreachable, and the LLM path's 180s
+         LLM runtime. The matrix runs in environments where the
+         evaluator runtime is unreachable, and the LLM path's 180s
          timeout would always exceed the 25s per-case budget. The
          expectation table accepts the structured rejection. *)
       `Assoc

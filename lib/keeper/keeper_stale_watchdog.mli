@@ -13,7 +13,7 @@ val slot_holder_age_for_test :
     and autonomous holder tables. *)
 
 type batch_root_cause =
-  | Cascade_unhealthy
+  | Runtime_unhealthy
   | Provider_timeout
   | Provider_auth
   | Fd_exhaustion

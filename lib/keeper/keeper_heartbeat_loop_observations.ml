@@ -112,14 +112,6 @@ let runtime_backpressure_observation_reasons ~reason =
   base @ class_reasons @ [ "reason_" ^ skip_reason_component reason ]
 ;;
 
-let runtime_resilience_backpressure_reason
-      (resilience : Keeper_runtime_resilience.runtime_resilience)
-  =
-  Option.map
-    (fun blocker -> "runtime_resilience_" ^ blocker)
-    resilience.blocker
-;;
-
 let runtime_backpressure_decision
       ~runtime_resilience
       ~should_run_turn
@@ -129,7 +121,7 @@ let runtime_backpressure_decision
   let resilience_reason =
     match runtime_resilience with
     | None -> None
-    | Some resilience -> runtime_resilience_backpressure_reason resilience
+    | Some blocker -> Some ("runtime_resilience_" ^ blocker)
   in
   match should_run_turn, runtime_status, resilience_reason with
   | true, Keeper_health_probe.Unhealthy reason, _ ->
@@ -184,7 +176,7 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
   (* Enumerate every [masc_internal_error] variant + [None] so the
      compiler flags any new constructor here. Mirrors the fix in
      [degraded_retry_bypasses_slot_phase_guard] (PR #14716) and
-     [cascade_permanently_dead] (PR #14762); this site was missed in
+     [runtime_permanently_dead] (PR #14762); this site was missed in
      both sweeps — the same predicate shape exists in three places
      and only this one still had a catch-all. *)
   match Keeper_turn_driver.classify_masc_internal_error err with

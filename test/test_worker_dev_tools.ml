@@ -439,7 +439,7 @@ let test_shell_exec_timeout_floor_for_load_bearing_commands () =
   check "git branch -a" 5.0 15.0;
   check "grep -rn \"timeout\" lib" 5.0 15.0;
   check "find lib -name \"*.ml\" -type f" 5.0 15.0;
-  check "scripts/dune-local.sh build lib/cascade" 5.0 15.0;
+  check "scripts/dune-local.sh build lib/runtime" 5.0 15.0;
   check "echo hello" 5.0 5.0;
   check "git status -sb" 30.0 30.0
 ;;

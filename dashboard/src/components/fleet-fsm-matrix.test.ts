@@ -60,12 +60,12 @@ function snapshot(
     phase: 'Running',
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
-    cascade: { state: 'idle' },
+    runtime: { state: 'idle' },
     compaction: { stage: 'accumulating' },
     measurement: { captured: true },
     invariants: {
       phase_turn_alignment: allHold,
-      no_cascade_before_measurement: allHold,
+      no_runtime_before_measurement: allHold,
       compaction_atomicity: allHold,
       event_priority_monotone: allHold,
       phase_derivation_agreement: allHold,
@@ -95,7 +95,7 @@ function execution(
     tool_contract_result: 'satisfied_execution',
     duration_ms: 12_000,
     error: null,
-    cascade: null,
+    runtime: null,
     tool_surface: null,
     ...overrides,
   }
@@ -167,7 +167,7 @@ describe('tallyInvariantViolations', () => {
     const s = [snapshot({ name: 'a' }), snapshot({ name: 'b' })]
     expect(tallyInvariantViolations(s)).toEqual({
       phase_turn_alignment: 0,
-      no_cascade_before_measurement: 0,
+      no_runtime_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,
@@ -183,14 +183,14 @@ describe('tallyInvariantViolations', () => {
     const t = tallyInvariantViolations(s)
     expect(t.phase_turn_alignment).toBe(2)
     expect(t.compaction_atomicity).toBe(1)
-    expect(t.no_cascade_before_measurement).toBe(0)
+    expect(t.no_runtime_before_measurement).toBe(0)
     expect(t.event_priority_monotone).toBe(0)
   })
 
   it('treats an empty fleet as clean', () => {
     expect(tallyInvariantViolations([])).toEqual({
       phase_turn_alignment: 0,
-      no_cascade_before_measurement: 0,
+      no_runtime_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,
@@ -311,7 +311,7 @@ describe('runtimeAttentionForSnapshot', () => {
       is_live: true,
       turn_phase: 'executing',
       decision: { stage: 'tool_policy_selected' },
-      cascade: { state: 'trying' },
+      runtime: { state: 'trying' },
       live_turn: {
         turn_id: 42,
         started_at: generatedAt - 30,
@@ -321,13 +321,13 @@ describe('runtimeAttentionForSnapshot', () => {
       execution: execution({
         recorded_at: '2026-04-25T07:30:00Z',
         outcome: 'receipt_failed',
-        terminal_reason_code: 'cascade_exhausted',
+        terminal_reason_code: 'runtime_exhausted',
         operator_disposition: 'alert_exhausted',
-        operator_disposition_reason: 'cascade_exhausted',
+        operator_disposition_reason: 'runtime_exhausted',
         tool_contract_result: 'unknown',
         error: {
           kind: 'internal',
-          message_preview: 'cascade exhausted',
+          message_preview: 'runtime exhausted',
           message_truncated: false,
         },
       }),
@@ -353,7 +353,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.label).toBe('live')
     expect(attention.cause).toContain('live turn 관측 중')
     expect(attention.title).toContain('receipt=previous_turn')
-    expect(attention.title).toContain('previous_terminal=cascade_exhausted')
+    expect(attention.title).toContain('previous_terminal=runtime_exhausted')
   })
 
   it('keeps raw lifecycle separate by flagging stale liveness without changing phase', () => {
@@ -423,7 +423,7 @@ describe('runtimeAttentionForSnapshot', () => {
         turn_id: 7,
         ended_at: generatedAt - 300,
         decision_stage: 'guard_ok',
-        cascade_state: 'done',
+        runtime_state: 'done',
         selected_model: 'custom:mock',
       },
       execution: execution({
@@ -484,7 +484,7 @@ describe('runtimeAttentionForSnapshot', () => {
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.nextStep).toBe('provider timeout budget/cascade lane 확인')
+    expect(attention.nextStep).toBe('provider timeout budget/runtime lane 확인')
   })
 })
 
@@ -602,7 +602,7 @@ describe('pushObservation', () => {
     expect(alpha.phase).toEqual(['Running'])
     expect(alpha.turn).toEqual(['idle'])
     expect(alpha.decision).toEqual(['undecided'])
-    expect(alpha.cascade).toEqual(['idle'])
+    expect(alpha.runtime).toEqual(['idle'])
     expect(alpha.compaction).toEqual(['accumulating'])
   })
 
@@ -658,7 +658,7 @@ describe('filterKeeperSnapshots', () => {
   const beta = snapshot({
     name: 'gen14-beta',
     phase: 'Overflowed',
-    cascade: { state: 'trying' },
+    runtime: { state: 'trying' },
   })
   const gamma = snapshot({
     name: 'gen12-gamma',
@@ -684,7 +684,7 @@ describe('filterKeeperSnapshots', () => {
     expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
   })
 
-  it('matches cascade (KCL) axis value', () => {
+  it('matches runtime (KCL) axis value', () => {
     const out = filterKeeperSnapshots(rows, 'trying')
     expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
   })

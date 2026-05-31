@@ -4,7 +4,7 @@
     Production symptom (live log 2026-05-05 ~01:50 KST, masc-mcp):
 
       [WARN] [Keeper] <name>: skipping turn (semaphore wait > 60s,
-        peers holding slot, cascade=..., autonomous_available=6
+        peers holding slot, runtime=..., autonomous_available=6
         turn_available=12)
 
     fired across 14 keepers simultaneously while

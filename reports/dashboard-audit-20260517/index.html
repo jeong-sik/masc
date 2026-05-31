@@ -95,7 +95,7 @@
           <tr>
             <td class="ok">Fixed</td>
             <td>Surface readiness parity was out of sync with current nav.</td>
-            <td class="evidence">Readiness registry now includes `cascade-config`, `doctor`, `transport-health`, `feature-health`; Observatory/Cognition labels and main exposure match nav.</td>
+            <td class="evidence">Readiness registry now includes `runtime-config`, `doctor`, `transport-health`, `feature-health`; Observatory/Cognition labels and main exposure match nav.</td>
             <td>`scripts/check-dashboard-surface-parity.sh` passes.</td>
           </tr>
           <tr>
@@ -131,7 +131,7 @@
           <tr>
             <td class="warn">P1</td>
             <td>Monitor IA is too wide for a first-level operator story.</td>
-            <td class="evidence">Monitor has runtime, cascade config, agents, goal loop, fleet health, doctor, transport, feature flags, observatory, cognition; `journey` hidden.</td>
+            <td class="evidence">Monitor has runtime, runtime config, agents, goal loop, fleet health, doctor, transport, feature flags, observatory, cognition; `journey` hidden.</td>
             <td>Group diagnostics; keep first-level Monitor focused on runtime, keepers, goals, fleet, activity/cognition only if readiness is current.</td>
           </tr>
         </tbody>

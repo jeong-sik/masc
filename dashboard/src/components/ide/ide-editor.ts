@@ -64,7 +64,7 @@ import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
-const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'cascade', 'keeper-trace', 'explode'] as const
+const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'runtime', 'keeper-trace', 'explode'] as const
 type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
 
 export type IdeEditorView = 'source' | 'split-diff' | 'unified' | 'blame'
@@ -462,7 +462,7 @@ function focusTraceLineContext(
 function traceLineFocusSurface(event: EditorKeeperTraceLineEvent): string {
   if (event.source === 'activity-event') return event.surface?.trim() || 'Activity'
   if (event.source === 'anchored-thread') return 'Thread'
-  if (event.source === 'cascade-hop') return 'Cascade'
+  if (event.source === 'runtime-hop') return 'Runtime'
   if (event.source === 'bdi-snapshot') return 'BDI'
   return 'Decision'
 }
@@ -1185,7 +1185,7 @@ const LAYER_LABEL: Record<IdeLayerKind, string> = {
   tools: 'Tools',
   approve: 'Approve',
   notes: 'Notes',
-  cascade: 'Cascade',
+  runtime: 'Runtime',
   'keeper-trace': 'Trace',
   explode: 'EXPLODE',
 }
@@ -1200,7 +1200,7 @@ function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: Re
   if (kind === 'tools') return '0 anchored'
   if (kind === 'approve') return '0 approval'
   if (kind === 'notes') return annotationCount === 1 ? '1 note' : `${annotationCount} notes`
-  if (kind === 'cascade') return '0 hits'
+  if (kind === 'runtime') return '0 hits'
   if (kind === 'keeper-trace') return 'stitched trace'
   if (kind === 'explode') return 'exclusive ghost view'
   return ''

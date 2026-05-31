@@ -325,7 +325,7 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
          keeper/turn id.  See [keeper_fsm_guard_runtime.mli] for the
          "any escaping exception is the spec-violation channel"
          contract that lets this be a plain exception rather than
-         the typed [Keeper_registry.Cascade_transition_violation]
+         the typed [Keeper_registry.Runtime_transition_violation]
          (naming the typed exception here would form a module
          dependency cycle). *)
       let detail =

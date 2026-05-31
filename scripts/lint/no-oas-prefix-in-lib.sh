@@ -6,9 +6,9 @@
 #   exposed as the agent_sdk opam library. masc-mcp is a *consumer* of
 #   agent_sdk. The `oas_*` prefix in masc-mcp's own lib/ historically
 #   accumulated as a dumping ground that conflated three concerns
-#   (Agent SDK invocation / cascade strategy / keeper bookkeeping) into
+#   (Agent SDK invocation / runtime strategy / keeper bookkeeping) into
 #   a single layer. RFC-0047 retired the prefix across 9 phases (16
-#   files redistributed to lib/cascade/, lib/keeper/, or renamed to
+#   files redistributed to lib/runtime/, lib/keeper/, or renamed to
 #   agent_sdk_*). This gate prevents recurrence.
 #
 # Signal:
@@ -40,7 +40,7 @@ if [ -n "$violations" ]; then
   echo "$violations" | sed 's/^/  - /'
   echo ""
   echo "Move into the layer where the file actually belongs:"
-  echo "  - Cascade strategy           -> lib/cascade/cascade_*.ml"
+  echo "  - Runtime strategy           -> lib/runtime/runtime_*.ml"
   echo "  - Keeper bookkeeping         -> lib/keeper/keeper_*.ml"
   echo "  - Pure agent_sdk wrapping    -> lib/agent_sdk_*.ml"
   echo ""

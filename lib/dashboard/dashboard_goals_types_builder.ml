@@ -109,7 +109,7 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_meta_contract.keeper
             ( "severity",
               `String
                 (match blocker_class with
-                 | Some "cascade_exhausted"
+                 | Some "runtime_exhausted"
                  | Some "completion_contract_violation" ->
                      "bad"
                  | _ -> "warn") );
@@ -313,9 +313,9 @@ let rec build_tree context goals goal =
     List.exists receipt_has_sandbox_risk direct_receipts
     || List.exists (fun (_, trust) -> trust_sandbox_risk trust) direct_runtime_trusts
   in
-  let direct_cascade_risk =
-    List.exists receipt_has_cascade_risk direct_receipts
-    || List.exists (fun (_, trust) -> trust_cascade_risk trust) direct_runtime_trusts
+  let direct_runtime_risk =
+    List.exists receipt_has_runtime_risk direct_receipts
+    || List.exists (fun (_, trust) -> trust_runtime_risk trust) direct_runtime_trusts
   in
   let blocked_by_receipt =
     List.exists receipt_has_error direct_receipts
@@ -402,7 +402,7 @@ let rec build_tree context goals goal =
   in
   let direct_badges =
     tree_badges ~pending_approvals:(List.length direct_pending_approvals)
-      ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
+      ~sandbox_risk:direct_sandbox_risk ~runtime_risk:direct_runtime_risk
       ~fsm_risk:direct_fsm_risk ~stalled
       ~activity_unobserved:(String.equal stagnation_status "unobserved")
   in
@@ -427,7 +427,7 @@ let rec build_tree context goals goal =
       (List.filter
          (fun json ->
            receipt_has_error json || receipt_has_sandbox_risk json
-           || receipt_has_cascade_risk json)
+           || receipt_has_runtime_risk json)
          direct_receipts)
     + List.length
         (List.filter
@@ -481,7 +481,7 @@ let rec build_tree context goals goal =
   let status_reason =
     goal_health_reason ~goal_phase:goal.Goal_store.phase ~blocked_by_receipt
       ~child_blocked ~pending_approvals:pending_approval_count
-      ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
+      ~sandbox_risk:direct_sandbox_risk ~runtime_risk:direct_runtime_risk
       ~fsm_risk:direct_fsm_risk ~stalled
       ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
       ~activity_observation ~stagnation_status

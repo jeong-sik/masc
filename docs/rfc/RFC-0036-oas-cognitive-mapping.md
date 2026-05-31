@@ -73,7 +73,7 @@ Without an explicit mapping, future cognitive PRs will:
 - Reproducing RFC-0035 or the Master Report.
 - Changing existing oas public API. The two proposed extensions below
   add new types / new module — no rename, no signature change.
-- Touching the cascade / provider / hooks layers (those already have
+- Touching the runtime / provider / hooks layers (those already have
   their own RFCs in masc-mcp space).
 - Centralising version policy. oas already has
   `scripts/sync-version-truth.sh` (3-surface sync) and

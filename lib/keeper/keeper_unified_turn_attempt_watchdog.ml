@@ -15,7 +15,7 @@ let dispatch
          (Timeout
             { message =
                 Printf.sprintf
-                  "Turn wall-clock budget exhausted during cascade attempt \
+                  "Turn wall-clock budget exhausted during runtime attempt \
                    (budget=%.1fs, watchdog=%.1fs)"
                   oas_timeout_s
                   attempt_watchdog_s

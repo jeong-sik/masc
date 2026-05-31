@@ -126,7 +126,7 @@ describe('isCrashedPhase — SSE-safe casing checker', () => {
 
 describe('keeperIsStuckOnRecoverableBlocker', () => {
   it.each([
-    ['cascade_exhausted'], ['turn_timeout'],
+    ['runtime_exhausted'], ['turn_timeout'],
   ])('blocker_class=%s ⇒ stuck-recoverable', (cls) => {
     expect(keeperIsStuckOnRecoverableBlocker(k({ runtime_blocker_class: cls as Keeper['runtime_blocker_class'] }))).toBe(true)
   })

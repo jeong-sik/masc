@@ -16,7 +16,7 @@ type t =
   | Turn_start
   | Runtime_exhausted
   | Terminal_non_exhaustion
-  | Recoverable_cascade_transient
+  | Recoverable_runtime_transient
   | Cycle_failed
   | Persistent_escalation
   | Resilience_audit_store

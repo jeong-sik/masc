@@ -15,7 +15,7 @@ val keeper_dir_ : Coord.config -> string
 val session_base_dir_ : Coord.config -> string
 
 (** Check API key availability for the given model labels via
-    [Cascade_runtime]. *)
+    [Runtime_runtime]. *)
 val ensure_api_keys_for_labels : string list -> (unit, string) result
 
 (** Single-file metrics path kept for fallback reads. *)

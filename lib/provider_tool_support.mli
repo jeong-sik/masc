@@ -1,24 +1,24 @@
 (** Provider_tool_support — provider capability negotiation +
-    cascade rejection classification.
+    runtime rejection classification.
 
     SSOT for "can this provider serve a tool-using turn?" decisions.
     Three layers:
     - {!capabilities}: per-provider boolean record (inline / runtime-MCP).
     - {!supports_required_tool_use}: yes/no gate.
     - {!classify_rejection} / {!apply_required_tool_use_filter}: #10474
-      priority-ordered rejection observability for cascade dashboards.
+      priority-ordered rejection observability for runtime dashboards.
 
     Internal helpers ({!normalize_cli_caps_when},
     {!supports_runtime_mcp_http_headers}) stay private. *)
 
 (** {1 Capability record} *)
 
-(** Local capability projection consumed by cascade filtering.
+(** Local capability projection consumed by runtime filtering.
 
     Distinct from {!Llm_provider.Capabilities.capabilities}: this
     record collapses [supports_tools && supports_tool_choice] into a
     single [supports_inline_tool_choice] and adds runtime-MCP HTTP
-    headers as a first-class field (queried via cascade.toml provider
+    headers as a first-class field (queried via keeper_runtime.toml provider
     capabilities and OAS runtime bindings). *)
 type capabilities =
   { supports_inline_tools : bool
@@ -65,7 +65,7 @@ val oas_capabilities_of_config
     - [supports_runtime_mcp_tools] / [supports_runtime_tool_events]:
       passthrough.
     - [supports_runtime_mcp_http_headers]: queried via the local
-      cascade.toml provider-tool policy projection. *)
+      keeper_runtime.toml provider-tool policy projection. *)
 val capabilities_of_config
   :  ?override:runtime_capabilities_override
   -> Llm_provider.Provider_config.t
@@ -145,7 +145,7 @@ val provider_supports_runtime_mcp_policy
 
 (** [supports_required_tool_use ?runtime_mcp_policy
       ~require_tool_choice_support ~require_tool_support cfg]
-    returns the cascade filter gate.  Truth table:
+    returns the runtime filter gate.  Truth table:
 
     {ul
     {- [(false, false)] -> [true] (filter disabled).}
@@ -177,7 +177,7 @@ type rejection_reason =
   | Runtime_mcp_caps_missing
   (** Provider lacks [supports_runtime_mcp_tools] or
           [supports_runtime_tool_events].  Inline path was also
-          unavailable; cascade authoring problem. *)
+          unavailable; runtime authoring problem. *)
   | Inline_tool_choice_unsupported
   (** Only [require_tool_choice] mode and provider has no
           [supports_inline_tool_choice]. *)
@@ -212,7 +212,7 @@ val classify_rejection
 (** {1 Provider labels (debug / metric)} *)
 
 (** [provider_debug_label cfg] returns ["<kind>:<model_id>"] for
-    human-readable warn lines (cascade-dead diagnostics). *)
+    human-readable warn lines (runtime-dead diagnostics). *)
 val provider_debug_label : Llm_provider.Provider_config.t -> string
 
 (** [provider_kind_label cfg] returns the provider kind alone — used
@@ -221,18 +221,18 @@ val provider_kind_label : Llm_provider.Provider_config.t -> string
 
 (** {1 Prometheus filter-rejection counter (#10474)} *)
 
-(** Pinned literal: ["masc_cascade_filter_rejection_total"].
+(** Pinned literal: ["masc_runtime_filter_rejection_total"].
 
-    Cardinality bound: cascades (~10) × provider_kinds (~10) ×
+    Cardinality bound: runtimes (~10) × provider_kinds (~10) ×
     reasons (5) ≈ 500 series ceiling. *)
-val cascade_filter_rejection_metric : string
+val runtime_filter_rejection_metric : string
 
-(** [record_filter_rejection ~cascade ~provider_cfg ~reason]
-    increments {!cascade_filter_rejection_metric} with labels
-    [(cascade, provider_kind, reason)].  Counter is the
-    machine-consumable signal for cascade-dead dashboards. *)
+(** [record_filter_rejection ~runtime ~provider_cfg ~reason]
+    increments {!runtime_filter_rejection_metric} with labels
+    [(runtime, provider_kind, reason)].  Counter is the
+    machine-consumable signal for runtime-dead dashboards. *)
 val record_filter_rejection
-  :  cascade:string
+  :  runtime:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> reason:rejection_reason
   -> unit
@@ -244,7 +244,7 @@ val record_filter_rejection
     {!record_filter_rejection} call per rejected provider, and warns
     via {!Log.Misc.warn} when {b every} provider was filtered out.
 
-    The cascade-dead warn line embeds [label],
+    The runtime-dead warn line embeds [label],
     [provider_debug_label] for each input provider, and
     [runtime_mcp_http_headers] (the policy's HTTP-header demand
     flag).  Returns the kept providers in input order. *)

@@ -132,9 +132,9 @@ let test_get_mode_returns_valid () =
 let test_auto_responder_uses_shared_model_runtime () =
   check bool "uses Keeper_turn_driver.run_named" true
     (file_contains_pattern "lib/auto_responder.ml"
-       {|Keeper_turn_driver.run_named ~cascade_name|});
-  check bool "no direct run_prompt_cascade" false
-    (file_contains_pattern "lib/auto_responder.ml" "Llm_orchestration.run_prompt_cascade");
+       {|Keeper_turn_driver.run_named ~runtime_id|});
+  check bool "no direct run_prompt_runtime" false
+    (file_contains_pattern "lib/auto_responder.ml" "Llm_orchestration.run_prompt_runtime");
   check bool "legacy Llm_direct dispatch removed"
     false
     (file_contains_pattern "lib/auto_responder.ml" "Llm_direct.dispatch")

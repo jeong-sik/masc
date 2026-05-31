@@ -55,12 +55,12 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : str
         ~source:Keeper_continuity_summary_source.Progress_snapshot;
       render_bounded_snapshot snapshot
     | None ->
-      let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
+      let runtime_models = Keeper_model_labels.configured_model_labels_of_meta meta in
       let primary_max_context =
         let resolution =
           Keeper_context_runtime.resolve_max_context_resolution
             ~requested_override:meta.max_context_override
-            cascade_models
+            runtime_models
         in
         resolution.effective_budget
       in

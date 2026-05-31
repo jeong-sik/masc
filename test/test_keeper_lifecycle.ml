@@ -11,7 +11,7 @@ module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
 module KST = Masc_mcp.Keeper_state_machine
-module KCB = Masc_mcp.Keeper_turn_cascade_budget
+module KCB = Masc_mcp.Keeper_turn_runtime_budget
 module P = Masc_mcp.Prometheus
 module TCG = Masc_mcp.Telemetry_coverage_gap
 

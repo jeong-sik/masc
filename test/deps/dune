@@ -70,7 +70,7 @@
    (re_export masc_mcp.keeper_invariant)
    ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
    (re_export masc_mcp.compaction_trigger)
-   ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
+   ;; RFC-0058 Phase 1 — Declarative runtime TOML parser sub-library.
    (re_export masc_mcp.ag_ui)
    (re_export masc_mcp.config)
    (re_export masc_mcp.fs_compat)
@@ -90,8 +90,8 @@
    (re_export masc_mcp.tool_schemas)
    (re_export masc_mcp.tool_catalog_surfaces)
    (re_export masc_mcp.config_dir_resolver)
-   ;; RFC-0163 Phase D1 — Cascade_name leaf extracted to lib/cascade_name/.
-   ;; Re-export so test code using bare `Cascade_name.X` resolves.
+   ;; RFC-0163 Phase D1 — Runtime_name leaf extracted to lib/runtime_id/.
+   ;; Re-export so test code using bare `Runtime_name.X` resolves.
    ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
    ;; lib/tool_types/. Re-export so test code using bare
    ;; `Tool_args.X` / `Tool_result.X` resolves.

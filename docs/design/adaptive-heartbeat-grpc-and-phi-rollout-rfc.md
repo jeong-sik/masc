@@ -64,7 +64,7 @@ code_refs:
 - local room heartbeat를 gRPC heartbeat로 대체하지 않는다.
 - phi-accrual을 첫 rollout부터 restart gate로 쓰지 않는다.
 - gRPC ack latency를 room/filesystem health proxy로 쓰지 않는다.
-- cascade scheduler rollout을 이 문서에서 다루지 않는다.
+- runtime scheduler rollout을 이 문서에서 다루지 않는다.
 
 ## 4. Why Canonical Path Must Land First
 

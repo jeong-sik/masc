@@ -162,7 +162,7 @@ let transition_reason_to_string = function
    speech_act=Stay_silent clears response_text but preserves state.
 
    Same budget discipline as cap_snapshot (400 char primary, 200 char
-   option fields) kept as labeled-optional knobs so a cascade-level
+   option fields) kept as labeled-optional knobs so a runtime-level
    policy can plug different budgets per speech model. *)
 let default_belief_summary_max_chars = 400
 let default_option_field_max_chars = 200

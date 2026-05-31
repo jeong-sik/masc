@@ -3,7 +3,7 @@
 
     Per-base-path config for keeper turn budgets, semaphore timeouts, and
     other runtime parameters that previously lived only in environment
-    variables.  Closes the architectural gap where tools/personas/cascade
+    variables.  Closes the architectural gap where tools/personas/runtime
     are per-base-path but keeper runtime tuning was global.
 
     Precedence (highest first):

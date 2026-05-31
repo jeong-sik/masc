@@ -155,7 +155,7 @@ let schema_field_types ?base_path id : (string * declared_type) list =
         cancellation semantics are preserved. Closed error_kind vocab
         keeps Prometheus label cardinality bounded.
         Same pattern as iter 28 (#15820, mcp-ws transport) and iter 29
-        (#15840, cascade_http_probe). *)
+        (#15840, runtime_http_probe). *)
      | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
      | exception Yojson.Json_error msg ->
        let preview_len = min 200 (String.length json_str) in

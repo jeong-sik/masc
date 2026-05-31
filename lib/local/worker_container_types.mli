@@ -34,7 +34,7 @@
     and reaches a few additional helpers unqualified
     ({!list_masc_tools}, {!inject_default_agent_name},
     {!safe_text_for_followup}); those are pinned below at the
-    boundary the include cascade actually consumes. *)
+    boundary the include runtime actually consumes. *)
 
 (** {1 Worker run / meta types} *)
 

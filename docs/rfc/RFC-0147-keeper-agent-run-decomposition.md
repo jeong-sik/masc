@@ -14,7 +14,7 @@ renumbered_from: "0144 → 0145 → 0147"
 
 # RFC-0147 — Keeper Agent Run Decomposition
 
-> **Renumbered 2026-05-20 (2nd cascade)**: 본 RFC 는 원래 RFC-0144 (PR
+> **Renumbered 2026-05-20 (2nd runtime)**: 본 RFC 는 원래 RFC-0144 (PR
 > #16773, merged `bf142ff67f`) 로 작성되었으나, 동시 작성된 PR #16769
 > (`RFC-0144 — Workaround Sunset Tracking for Keeper Dedup Carryovers`,
 > merged `99b14ac45f`) 와 번호 충돌 → PR #16779 가 본 RFC 를 RFC-0145 로

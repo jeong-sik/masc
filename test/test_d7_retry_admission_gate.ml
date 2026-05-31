@@ -1,7 +1,7 @@
 (** RFC-OAS-XXX (Team JJ §6) POC — typed retry admission gate.
 
     Verifies that
-    [Keeper_turn_cascade_budget.decide_retry_admission_for_turn]
+    [Keeper_turn_runtime_budget.decide_retry_admission_for_turn]
     returns:
       - [Ok ()] when remaining turn budget is well above the
         per-attempt floor ([provider_timeout_guard_sec +
@@ -13,9 +13,9 @@
     The min floor is a typed boundary: the gate's reason field is a
     closed-sum reason record, not a substring or counter — see
     anti-pattern self-check note in
-    [keeper_turn_cascade_budget.ml]. *)
+    [keeper_turn_runtime_budget.ml]. *)
 
-module KCB = Masc_mcp.Keeper_turn_cascade_budget
+module KCB = Masc_mcp.Keeper_turn_runtime_budget
 
 (* The runtime snapshot freezes from env defaults; test/dune sets
    MASC_BASE_PATH="" so the snapshot is deterministic. We do not

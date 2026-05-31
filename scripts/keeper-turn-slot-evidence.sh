@@ -105,7 +105,7 @@ for f in "${files[@]}"; do
       | ([ $recent[] | (.latency_ms | n) | select(. > 0) ]) as $latencies
       | ([ $recent[] | select(is_normal_success) ]) as $normal
       | ([ $normal[] | (.latency_ms | n) | select(. > 0) ]) as $normal_latencies
-      | ([ $recent[] | select((.degraded_retry_applied == true) or (.degraded_retry_cascade != null)) ]) as $retries
+      | ([ $recent[] | select((.degraded_retry_applied == true) or (.degraded_retry_runtime != null)) ]) as $retries
       | [
           ($all | length),
           ($recent | length),

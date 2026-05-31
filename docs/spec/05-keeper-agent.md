@@ -16,7 +16,7 @@ code_refs:
 | Modules | 67 (.ml) + 5 (.mli-only) |
 | LOC | ~17.8K |
 | MCP Tools | `tool_keeper` |
-| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Room`, `Cascade_inference`, `Verifier_oas` |
+| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Room`, `Runtime_inference`, `Verifier_oas` |
 
 ---
 
@@ -93,7 +93,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
-- **Model**: `cascade_name`, `last_model_used`, derived `active_model`
+- **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
 - **Scope**: `mention_targets`, `joined_room_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
@@ -288,7 +288,7 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 
 ### 5.3 OAS 통합 구성
 
-`run_turn`이 OAS에 전달: `cascade_name`(모델 선택), `tools`(keeper_tools_oas + extend_turns), `hooks`(cost/destructive guard), `context_reducer`(keep_last 30 + Prune_tool_outputs + Merge_contiguous), `memory`(institution + procedures + bank + episodes), `initial_messages`(checkpoint 복원).
+`run_turn`이 OAS에 전달: `runtime_id`(모델 선택), `tools`(keeper_tools_oas + extend_turns), `hooks`(cost/destructive guard), `context_reducer`(keep_last 30 + Prune_tool_outputs + Merge_contiguous), `memory`(institution + procedures + bank + episodes), `initial_messages`(checkpoint 복원).
 
 ---
 

@@ -21,7 +21,7 @@ let goal_phase_to_health = function
       None
 
 let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
-    ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
+    ~pending_approvals ~sandbox_risk ~runtime_risk ~fsm_risk ~stalled
     ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
     ~activity_observation ~stagnation_status =
   match goal_phase_to_health goal_phase with
@@ -42,8 +42,8 @@ let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
           pending_approvals
       else if sandbox_risk then
         "Linked keeper is constrained by the current sandbox or scope."
-      else if cascade_risk then
-        "Latest keeper run fell back within the configured cascade."
+      else if runtime_risk then
+        "Latest keeper run fell back within the configured runtime."
       else if fsm_risk then
         "Linked task is waiting on FSM verification or remediation."
       else if Option.is_some linkage_warning_reason then
@@ -76,12 +76,12 @@ let tree_health ~goal_phase ~blocked_by_receipt ~child_blocked ~at_risk =
       else if at_risk then "at_risk"
       else "on_track"
 
-let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
+let tree_badges ~pending_approvals ~sandbox_risk ~runtime_risk ~fsm_risk ~stalled
     ~activity_unobserved =
   let badges = ref [] in
   if pending_approvals > 0 then badges := "awaiting_approval" :: !badges;
   if sandbox_risk then badges := "sandbox" :: !badges;
-  if cascade_risk then badges := "cascade" :: !badges;
+  if runtime_risk then badges := "runtime" :: !badges;
   if fsm_risk then badges := "task_verification_pending" :: !badges;
   if stalled then badges := "stalled" :: !badges;
   if activity_unobserved then badges := "activity_unobserved" :: !badges;
@@ -155,12 +155,12 @@ let goal_fsm_to_json ~effective_policy (goal : Goal_store.goal)
 
 let display_disposition_of_receipt_json receipt =
   (* Previously this defaulted to the literal "unknown", which then hit
-     the [| "unknown" -> "Alert"/"unmapped_cascade_state"] arm below.
+     the [| "unknown" -> "Alert"/"unmapped_runtime_state"] arm below.
      That conflated two distinct producer-side failure modes:
      (1) missing [operator_disposition] field — the receipt was emitted
          without the disposition at all (producer bug);
      (2) [operator_disposition = "unknown"] — the producer explicitly
-         declared the state unmapped at the cascade layer.
+         declared the state unmapped at the runtime layer.
 
      Using a bracketed sentinel as the default lets the match below
      fall through to the [_ -> "Alert"/"unmapped_operator_disposition"]
@@ -186,7 +186,7 @@ let display_disposition_of_receipt_json receipt =
   | "skipped" ->
       ("Pass", "phase_skipped", operator_disposition, operator_disposition_reason)
   | "pass_next_model" ->
-      ("Pass", "cascade_fallback", operator_disposition, operator_disposition_reason)
+      ("Pass", "runtime_fallback", operator_disposition, operator_disposition_reason)
   | "blocked" | "blocked_runtime" ->
       ( "Blocked",
         reason "runtime_blocked",
@@ -197,7 +197,7 @@ let display_disposition_of_receipt_json receipt =
         reason "needs_human_attention",
         operator_disposition,
         operator_disposition_reason )
-  | "fail_open_next_cascade" ->
+  | "fail_open_next_runtime" ->
       ( "Blocked",
         reason "degraded_retry",
         operator_disposition,
@@ -205,10 +205,10 @@ let display_disposition_of_receipt_json receipt =
   | "user_cancelled" ->
       ("Blocked", reason "cancelled", operator_disposition, operator_disposition_reason)
   | "alert_exhausted" ->
-      ("Alert", reason "cascade_exhausted", operator_disposition, operator_disposition_reason)
+      ("Alert", reason "runtime_exhausted", operator_disposition, operator_disposition_reason)
   | "unknown" ->
       ( "Alert",
-        reason "unmapped_cascade_state",
+        reason "unmapped_runtime_state",
         operator_disposition,
         operator_disposition_reason )
   | _ ->

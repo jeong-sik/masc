@@ -22,7 +22,7 @@
 lib/goal/goal_janitor.ml:194:E2
 lib/coord/coord_agent.ml:184:E2
 lib/mcp_server_eio_resource.ml:46:E2
-lib/cascade/cascade_event_bridge.ml:573:E1
+lib/runtime/runtime_event_bridge.ml:573:E1
 lib/auth.ml:1291:E1
 lib/board_core.ml:1370:E1
 lib/board_core.ml:1595:E1

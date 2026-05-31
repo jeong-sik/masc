@@ -108,7 +108,7 @@ let runtime_rotation_outcome_to_string = function
 (* Receipt-level summary of how the in-turn runtime attempt sequence
    ended.  Closed set across two producer paths:
      - [Keeper_agent_error.runtime_outcome_of_observation] — 3 values
-       sourced from [Cascade_legacy_runner.runtime_observation].
+       sourced from [Runtime_legacy_runner.runtime_observation].
      - [keeper_turn_helpers.build_pending_receipt] — emits
        [Runtime_not_dispatched] for pre-dispatch pending receipts.
    JSON wire form is the lowercase string via
@@ -261,8 +261,8 @@ let decode_contract_violation_reason (wire : string)
 ;;
 
 type runtime_rotation_attempt =
-  { from_runtime_id : string
-  ; to_runtime_id : string
+  { from_runtime : string
+  ; to_runtime : string
   ; reason : Keeper_error_classify.degraded_retry_reason
   ; outcome : runtime_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
@@ -308,7 +308,7 @@ type t =
   ; runtime_outcome : runtime_outcome
   ; oas_internal_runtime_allowed : bool
   ; degraded_retry_applied : bool
-  ; degraded_retry_runtime_id : string option
+  ; degraded_retry_runtime : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; runtime_rotation_attempts : runtime_rotation_attempt list
   ; stop_reason : Runtime_agent.stop_reason option

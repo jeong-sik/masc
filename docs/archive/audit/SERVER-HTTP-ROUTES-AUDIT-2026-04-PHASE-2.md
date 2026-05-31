@@ -39,7 +39,7 @@ Per-domain-module Prometheus search:
 | `artifacts` | 0 | C2 silent |
 | `attribution` | 0 | C2 silent |
 | `autonomous` | 0 | C2 silent |
-| `cascade` | 0 | C2 silent |
+| `runtime` | 0 | C2 silent |
 | `dashboard` | 0 | C2 silent |
 | `git_graph` | 0 | C2 silent |
 | `legendary_bash` | 0 | C2 silent |
@@ -56,13 +56,13 @@ Total silent: **14**. Phase 1 estimated 14–16 — confirmed at the lower bound
 
 ### 2.3 C3 — Error envelope shapes (3 distinct)
 
-Sampled error returns across activity, artifacts, cascade, dashboard, room:
+Sampled error returns across activity, artifacts, runtime, dashboard, room:
 
 | Shape | Example | Modules |
 |---|---|---|
 | A | `{"error": "<string>"}` | activity, dashboard, room |
 | B | `{"error": "<string>", "<field>": ...}` extended | artifacts |
-| C | `{"ok": false, "error": "<string>"}` wrapper | cascade |
+| C | `{"ok": false, "error": "<string>"}` wrapper | runtime |
 
 Phase 1 estimated 10–14 inconsistencies. Phase 2 finds **3 shape classes** (a 3-4× narrowing), some of which differ across modules but cluster into a small set. Convergence to one envelope is feasible in Phase 3 with a shared `error_response` helper.
 

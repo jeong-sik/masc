@@ -1,6 +1,6 @@
 ---
 rfc: "0072"
-title: "Type-encoded keeper sub-FSM transitions (cascade + turn_phase)"
+title: "Type-encoded keeper sub-FSM transitions (runtime + turn_phase)"
 status: Implemented
 created: 2026-05-12
 updated: 2026-05-20
@@ -11,7 +11,7 @@ related: ["0002", "0039", "0042", "0046"]
 implementation_prs: [14880,14903,14908,14912,14918,14927,14938]
 ---
 
-# RFC-0072 — Type-encoded keeper sub-FSM transitions (cascade + turn_phase)
+# RFC-0072 — Type-encoded keeper sub-FSM transitions (runtime + turn_phase)
 
 ## 1. Background
 
@@ -20,21 +20,21 @@ Keeper composite lifecycle (`RFC-0003`) is partitioned into 4 sub-FSM axes that 
 | Axis | Type | Variants | Validator | Status |
 |---|---|---|---|---|
 | Decision stage | `decision_stage` | 4 | `validate_decision_transition` | **Compile-time enforced** (PR #14887 + #14893) |
-| Cascade state | `cascade_state` | 5 | `validate_cascade_transition` | Runtime `invalid_arg` |
+| Runtime state | `runtime_state` | 5 | `validate_runtime_transition` | Runtime `invalid_arg` |
 | Turn phase | `turn_phase` | 8+ | `validate_turn_phase_transition` | Runtime `invalid_arg` |
 | Compaction stage | `compaction_stage` | (TBD) | `validate_compaction_transition` | Runtime (separate audit) |
 
 PR #14887 (`set_turn_decision_stage`) + PR #14893 (`validate_decision_transition`) closed the decision axis by **input type refinement**: a `decision_stage_active` type that excludes `Decision_undecided` makes the 3 forbidden `<active>_to_undecided` transitions unrepresentable.
 
-This RFC proposes extending the type-encoded enforcement to the **cascade** and **turn_phase** axes.
+This RFC proposes extending the type-encoded enforcement to the **runtime** and **turn_phase** axes.
 
 ## 2. Problem
 
-The decision axis was uniquely closable by single-target refinement because its 3 forbidden pairs all target the same state (`Decision_undecided`). The cascade and turn_phase axes do not have this property.
+The decision axis was uniquely closable by single-target refinement because its 3 forbidden pairs all target the same state (`Decision_undecided`). The runtime and turn_phase axes do not have this property.
 
-### 2.1 Cascade — 7 forbidden pairs scattered by source
+### 2.1 Runtime — 7 forbidden pairs scattered by source
 
-`cascade_state` = { Idle, Selecting, Trying, Done, Exhausted } (5 variants). The 25-pair matrix admits 18 transitions and forbids 7:
+`runtime_state` = { Idle, Selecting, Trying, Done, Exhausted } (5 variants). The 25-pair matrix admits 18 transitions and forbids 7:
 
 | Source | Forbidden targets |
 |---|---|
@@ -61,22 +61,22 @@ A single-axis type exclusion (decision pattern) cannot encode this — `Trying`,
 
 ### 2.3 Current enforcement is runtime-only
 
-Both validators raise `Invalid_argument` at the moment a forbidden pair is dispatched through `set_turn_cascade_state` / `set_turn_phase`. The keeper lifecycle has a known incident class — `keeper_registry.ml:721 (2026-05-08)` raised `Assert_failure` from a sparse FSM match. The cascade / turn_phase validators are the next frontier of the same risk.
+Both validators raise `Invalid_argument` at the moment a forbidden pair is dispatched through `set_turn_runtime_state` / `set_turn_phase`. The keeper lifecycle has a known incident class — `keeper_registry.ml:721 (2026-05-08)` raised `Assert_failure` from a sparse FSM match. The runtime / turn_phase validators are the next frontier of the same risk.
 
 ### 2.4 Caller fan-out
 
 | Function | Production callers | Test callers | Total |
 |---|---|---|---|
-| `set_turn_cascade_state` | 4 (`keeper_unified_turn.ml` ×2, `keeper_run_tools.ml` ×2) | 12+ | ~16 |
+| `set_turn_runtime_state` | 4 (`keeper_unified_turn.ml` ×2, `keeper_run_tools.ml` ×2) | 12+ | ~16 |
 | `set_turn_phase` | TBD (audit) | TBD | TBD |
-| `validate_cascade_transition` | 0 (test-only) | 5+ | 5+ |
+| `validate_runtime_transition` | 0 (test-only) | 5+ | 5+ |
 | `validate_turn_phase_transition` | 0 (test-only) | 4+ | 4+ |
 
-A naive single-PR refactor of `set_turn_cascade_state`'s caller chain hits the **A1 abort signal** (>150 LOC impl) of `~/me/.claude/plans/fuzzy-twirling-chipmunk.md`. The work must be phased.
+A naive single-PR refactor of `set_turn_runtime_state`'s caller chain hits the **A1 abort signal** (>150 LOC impl) of `~/me/.claude/plans/fuzzy-twirling-chipmunk.md`. The work must be phased.
 
 ## 3. Goal
 
-For both cascade and turn_phase sub-FSMs:
+For both runtime and turn_phase sub-FSMs:
 
 1. Replace runtime `invalid_arg` from forbidden transition pairs with **compile-time impossibility**.
 2. Make the *valid transition set* a first-class value (GADT with one constructor per admitted pair), so adding a new variant or transition is a deliberate type-level commit.
@@ -89,69 +89,69 @@ Out of scope for this RFC: compaction axis (separate audit needed — variants a
 
 ### 4.1 GADT pattern (precedent: existing `Decision_transition` module)
 
-`lib/keeper/keeper_registry.ml` already defines `Decision_transition` GADT enumerating the 9 valid cross-state decision transitions (currently unused in production). The cascade axis mirrors this with **18 valid transitions**:
+`lib/keeper/keeper_registry.ml` already defines `Decision_transition` GADT enumerating the 9 valid cross-state decision transitions (currently unused in production). The runtime axis mirrors this with **18 valid transitions**:
 
 ```ocaml
-module Cascade_transition = struct
+module Runtime_transition = struct
   type ('from, 'to_) t =
     (* idempotents (5) *)
-    | Idle_to_idle : (cascade_idle, cascade_idle) t
-    | Selecting_to_selecting : (cascade_selecting, cascade_selecting) t
-    | Trying_to_trying : (cascade_trying, cascade_trying) t
-    | Done_to_done : (cascade_done, cascade_done) t
-    | Exhausted_to_exhausted : (cascade_exhausted, cascade_exhausted) t
+    | Idle_to_idle : (runtime_idle, runtime_idle) t
+    | Selecting_to_selecting : (runtime_selecting, runtime_selecting) t
+    | Trying_to_trying : (runtime_trying, runtime_trying) t
+    | Done_to_done : (runtime_done, runtime_done) t
+    | Exhausted_to_exhausted : (runtime_exhausted, runtime_exhausted) t
 
     (* boot path (1) *)
-    | Idle_to_selecting : (cascade_idle, cascade_selecting) t
+    | Idle_to_selecting : (runtime_idle, runtime_selecting) t
 
     (* dispatch (1) *)
-    | Selecting_to_trying : (cascade_selecting, cascade_trying) t
+    | Selecting_to_trying : (runtime_selecting, runtime_trying) t
 
     (* retry / re-entry (3) *)
-    | Selecting_to_idle : (cascade_selecting, cascade_idle) t
-    | Trying_to_idle : (cascade_trying, cascade_idle) t
-    | Trying_to_selecting : (cascade_trying, cascade_selecting) t
+    | Selecting_to_idle : (runtime_selecting, runtime_idle) t
+    | Trying_to_idle : (runtime_trying, runtime_idle) t
+    | Trying_to_selecting : (runtime_trying, runtime_selecting) t
 
     (* completion / exhaustion (2) *)
-    | Trying_to_done : (cascade_trying, cascade_done) t
-    | Trying_to_exhausted : (cascade_trying, cascade_exhausted) t
+    | Trying_to_done : (runtime_trying, runtime_done) t
+    | Trying_to_exhausted : (runtime_trying, runtime_exhausted) t
 
     (* compaction-driven retry (6) *)
-    | Done_to_idle : (cascade_done, cascade_idle) t
-    | Done_to_selecting : (cascade_done, cascade_selecting) t
-    | Done_to_trying : (cascade_done, cascade_trying) t
-    | Exhausted_to_idle : (cascade_exhausted, cascade_idle) t
-    | Exhausted_to_selecting : (cascade_exhausted, cascade_selecting) t
-    | Exhausted_to_trying : (cascade_exhausted, cascade_trying) t
+    | Done_to_idle : (runtime_done, runtime_idle) t
+    | Done_to_selecting : (runtime_done, runtime_selecting) t
+    | Done_to_trying : (runtime_done, runtime_trying) t
+    | Exhausted_to_idle : (runtime_exhausted, runtime_idle) t
+    | Exhausted_to_selecting : (runtime_exhausted, runtime_selecting) t
+    | Exhausted_to_trying : (runtime_exhausted, runtime_trying) t
 end
 ```
 
 A similar `Turn_phase_transition` module enumerates valid turn-phase pairs.
 
-### 4.2 Caller adapter — preserve `set_turn_cascade_state` ergonomics
+### 4.2 Caller adapter — preserve `set_turn_runtime_state` ergonomics
 
-Forcing every caller to construct a `Cascade_transition.t` value would break the "target-only" pattern that 16 call sites currently rely on. Instead:
+Forcing every caller to construct a `Runtime_transition.t` value would break the "target-only" pattern that 16 call sites currently rely on. Instead:
 
 ```ocaml
-(* set_turn_cascade_state stays target-only at the API surface *)
-val set_turn_cascade_state :
-  base_path:string -> string -> packed_cascade_state -> unit
+(* set_turn_runtime_state stays target-only at the API surface *)
+val set_turn_runtime_state :
+  base_path:string -> string -> packed_runtime_state -> unit
 
 (* Internal: read current state, construct the transition GADT.
-   If the (from, target) pair is not representable in Cascade_transition.t,
+   If the (from, target) pair is not representable in Runtime_transition.t,
    the internal helper is *type-unreachable* — meaning, by spec invariant,
    it cannot happen.  When it does (spec violation by a future caller), we
    surface a typed [transition_spec_violation] error instead of invalid_arg. *)
-val resolve_cascade_transition :
-  from:packed_cascade_state -> target:packed_cascade_state ->
-  (packed_cascade_transition, cascade_transition_spec_violation) result
+val resolve_runtime_transition :
+  from:packed_runtime_state -> target:packed_runtime_state ->
+  (packed_runtime_transition, runtime_transition_spec_violation) result
 ```
 
-Where `cascade_transition_spec_violation` is a typed sum capturing each forbidden pair as a named constructor, eliminating string-based diagnostic messages.
+Where `runtime_transition_spec_violation` is a typed sum capturing each forbidden pair as a named constructor, eliminating string-based diagnostic messages.
 
 ### 4.3 Validator becomes a resolver shim raising a typed exception
 
-The original plan (mirroring PR #14893's `validate_decision_transition`) was to make `validate_cascade_transition` a compile-time fixture: an explicit `()`-returning match where forbidden pairs are unrepresentable. That works for the decision axis because the `to_` argument can be refined to `decision_stage_active` (a non-GADT enum that *excludes* the forbidden targets). It does **not** generalise to the cascade/turn_phase axes: the inputs are `packed_*` existentials (`Packed : 'a witness -> packed_*`), so a match over `(packed, packed)` pairs cannot have its forbidden arms removed without making the function partial — and the GADT-through-`Packed` exhaustivity check produces a Warning-8 false positive (the #14893 → #14909 regression).
+The original plan (mirroring PR #14893's `validate_decision_transition`) was to make `validate_runtime_transition` a compile-time fixture: an explicit `()`-returning match where forbidden pairs are unrepresentable. That works for the decision axis because the `to_` argument can be refined to `decision_stage_active` (a non-GADT enum that *excludes* the forbidden targets). It does **not** generalise to the runtime/turn_phase axes: the inputs are `packed_*` existentials (`Packed : 'a witness -> packed_*`), so a match over `(packed, packed)` pairs cannot have its forbidden arms removed without making the function partial — and the GADT-through-`Packed` exhaustivity check produces a Warning-8 false positive (the #14893 → #14909 regression).
 
 So the realised design (Phase 2-4b) is: `validate_*` and `set_turn_*` dispatch on `resolve_*_transition`'s typed `*_resolve_outcome` sum (3 constructors: transition / idempotent / violation), and on the violation arm they `raise` a **typed exception** carrying the `*_transition_spec_violation` payload — not `invalid_arg`-with-a-formatted-string (Phase 5). A `Printexc.register_printer` reproduces the prior message text for log output. This keeps the transition matrix a single source of truth in the resolver while making the violation channel typed and catchable.
 
@@ -165,27 +165,27 @@ Compaction has a separate transition matrix (`compaction_accumulating`, `compact
 
 ## 5. Migration plan
 
-### Phase 1 — Cascade_transition GADT introduction (no behavior change)
+### Phase 1 — Runtime_transition GADT introduction (no behavior change)
 
-- Define `Cascade_transition.t` GADT in `keeper_registry.ml`
-- Implement `resolve_cascade_transition` (returns `Result.t` typed error)
-- Existing `validate_cascade_transition` left unchanged
+- Define `Runtime_transition.t` GADT in `keeper_registry.ml`
+- Implement `resolve_runtime_transition` (returns `Result.t` typed error)
+- Existing `validate_runtime_transition` left unchanged
 - Tests: GADT exhaustivity check (compile-time)
 - LOC: ~80
 - Risk: low (additive)
 
-### Phase 2 — `set_turn_cascade_state` internal dispatch via GADT
+### Phase 2 — `set_turn_runtime_state` internal dispatch via GADT
 
-- Internal implementation reads `obs.cascade_state`, calls `resolve_cascade_transition`, dispatches via GADT match
+- Internal implementation reads `obs.runtime_state`, calls `resolve_runtime_transition`, dispatches via GADT match
 - On `Error spec_violation`: emit typed error (no `invalid_arg`)
 - External API signature unchanged
 - LOC: ~50
 - Risk: medium (internal logic change in hot path; covered by existing tests)
 
-### Phase 3 — `validate_cascade_transition` compile-time fixture
+### Phase 3 — `validate_runtime_transition` compile-time fixture
 
 - Refactor function body to 18-pair `()` match (same shape as #14893 for decision)
-- Update tests: delete `test_invalid_cascade_transitions` and `test_cascade_message_includes_labels`
+- Update tests: delete `test_invalid_runtime_transitions` and `test_runtime_message_includes_labels`
 - LOC: ~70
 - Risk: low (test surface change consistent with #14893 precedent)
 
@@ -193,19 +193,19 @@ Compaction has a separate transition matrix (`compaction_accumulating`, `compact
 
 Same 3-phase structure applied to `turn_phase`. Separate sub-PRs because the variant count is larger and the matrix shape differs.
 
-- Phase 4a (PR #14912): realign the dead-code `Turn_phase_transition` GADT to the cascade shape (drop idempotent self-loops, 30→23 cross-state constructors), add `turn_phase_transition_spec_violation` (19 forbidden), add `resolve_turn_phase_transition`. Additive.
-- Phase 4b (PR #14918): route `validate_turn_phase_transition` + `set_turn_phase` through the resolver; collapse the 49-arm matrix to a 3-arm `turn_phase_resolve_outcome` match; fix the idempotent-self-loop spurious-broadcast bug (mirrors cascade Phase 2).
+- Phase 4a (PR #14912): realign the dead-code `Turn_phase_transition` GADT to the runtime shape (drop idempotent self-loops, 30→23 cross-state constructors), add `turn_phase_transition_spec_violation` (19 forbidden), add `resolve_turn_phase_transition`. Additive.
+- Phase 4b (PR #14918): route `validate_turn_phase_transition` + `set_turn_phase` through the resolver; collapse the 49-arm matrix to a 3-arm `turn_phase_resolve_outcome` match; fix the idempotent-self-loop spurious-broadcast bug (mirrors runtime Phase 2).
 
 ### Phase 5 — Typed transition exceptions (closeout of R-1, R-2)
 
-The 4 `invalid_arg` sites left by Phases 1-4b (`validate_cascade_transition`, `set_turn_cascade_state`, `validate_turn_phase_transition`, `set_turn_phase`) raise `Invalid_argument` with the `*_transition_spec_violation` tag projected into a string. Phase 5 replaces them with two typed exceptions:
+The 4 `invalid_arg` sites left by Phases 1-4b (`validate_runtime_transition`, `set_turn_runtime_state`, `validate_turn_phase_transition`, `set_turn_phase`) raise `Invalid_argument` with the `*_transition_spec_violation` tag projected into a string. Phase 5 replaces them with two typed exceptions:
 
 ```ocaml
-exception Cascade_transition_violation of
+exception Runtime_transition_violation of
   { where : string
-  ; from : packed_cascade_state
-  ; to_ : packed_cascade_state
-  ; violation : cascade_transition_spec_violation
+  ; from : packed_runtime_state
+  ; to_ : packed_runtime_state
+  ; violation : runtime_transition_spec_violation
   }
 
 exception Turn_phase_transition_violation of
@@ -229,7 +229,7 @@ Decision: apply the **typed-exception + diagnostic-label** half of the pattern (
 
 What ships:
 - `compaction_transition_spec_violation` (3 constructors: `Accumulating_to_done` / `Done_to_accumulating` / `Done_to_compacting`) + `_to_tag`.
-- `exception Compaction_transition_violation of { where; from; to_; violation }` + `Printexc.register_printer` + `raise_*` helper + `packed_compaction_stage_label` (constructor-name label, mirrors `packed_cascade_state_label`).
+- `exception Compaction_transition_violation of { where; from; to_; violation }` + `Printexc.register_printer` + `raise_*` helper + `packed_compaction_stage_label` (constructor-name label, mirrors `packed_runtime_state_label`).
 - `validate_compaction_transition` body: `assert (match … -> bool)` → `match … with <6 valid> -> () | <3 forbidden> -> raise_compaction_transition_violation …`, still inside `wrap_unit` (`metric_fsm_guard_violation` action=`compaction_transition`, stage=`guard` still fires). Match stays exhaustive.
 - Tests: `test_invalid_compaction_transitions` catches `Compaction_transition_violation _` (was `Assert_failure _`) + checks payload endpoints; new `test_compaction_violation_payload` (typed `violation` tag + `Printexc.to_string` render).
 - LOC: ~+95 / -25. Risk: low (success path unchanged; failure path gains labels).
@@ -240,7 +240,7 @@ What ships:
 
 GADTs are an advanced OCaml feature. Future maintainers without GADT familiarity may misunderstand the pattern. Mitigation: each GADT module has docstring linking back to this RFC + to `Decision_transition` (precedent module). The 18-pair enumeration is more transparent than the witness-type pattern alone.
 
-### 6.2 `resolve_cascade_transition`'s `Error` case at runtime
+### 6.2 `resolve_runtime_transition`'s `Error` case at runtime
 
 Even with GADT, runtime can still hit spec violations if a future code change creates a forbidden pair (the type system doesn't prevent it — only documents the contract). Difference from `invalid_arg`: the error path is *typed* and *catchable* by the caller. Production behavior unchanged (still aborts), but the typed error gives observability.
 
@@ -250,18 +250,18 @@ Phase 3 deletes runtime-raise tests because the contract moves to the type syste
 
 ### 6.4 Caller fan-out underestimation
 
-The audit in §2.4 counted explicit `set_turn_cascade_state` calls. There may be indirect callers via helpers (e.g., `prepare_turn_retry_after_compaction`) not yet enumerated. Phase 1 begins with a complete `rg` sweep before any signature change.
+The audit in §2.4 counted explicit `set_turn_runtime_state` calls. There may be indirect callers via helpers (e.g., `prepare_turn_retry_after_compaction`) not yet enumerated. Phase 1 begins with a complete `rg` sweep before any signature change.
 
 ## 7. Acceptance criteria
 
-- **R-1**: `cascade_state` axis has 0 `invalid_arg` sites in `lib/` — **met by Phase 5** (the 2 cascade sites raise `Cascade_transition_violation` instead).
+- **R-1**: `runtime_state` axis has 0 `invalid_arg` sites in `lib/` — **met by Phase 5** (the 2 runtime sites raise `Runtime_transition_violation` instead).
 - **R-2**: `turn_phase` axis has 0 `invalid_arg` sites in `lib/` — **met by Phase 5** (the 2 turn_phase sites raise `Turn_phase_transition_violation` instead).
-- **R-3**: All `cascade_state` valid transitions are first-class GADT constructors — met by Phase 1.
-- **R-4**: Adding a new `cascade_state` (or `turn_phase`) variant requires editing the resolver and triggers Warning 8 at all match sites — met by Phase 1 / Phase 4a.
+- **R-3**: All `runtime_state` valid transitions are first-class GADT constructors — met by Phase 1.
+- **R-4**: Adding a new `runtime_state` (or `turn_phase`) variant requires editing the resolver and triggers Warning 8 at all match sites — met by Phase 1 / Phase 4a.
 - **R-5**: Existing test coverage is preserved or replaced by compile-time / typed-payload enforcement (no behavior regression) — met by Phase 3 / 4b / 5 / 6.
 - **R-6**: Phase 1, 2, 3, 4 (a/b), 5, and 6 each ship in independent PRs, each <150 LOC impl.
 - **R-7**: `compaction_stage` forbidden transitions raise a typed exception (not `Assert_failure`), carrying the rejected pair + violation tag — met by Phase 6. (No GADT for this axis: deliberate, see §5 Phase 6.)
-- **R-8**: All 4 keeper sub-FSM axes (decision / cascade / turn_phase / compaction) are closed — decision via input refinement (#14887/#14893), cascade + turn_phase via resolver + typed exception (#14903→#14935), compaction via typed exception (Phase 6). No `_ -> false` catch-all and no untyped runtime rejection (`invalid_arg` / bare `Assert_failure`) remains on any axis's validator.
+- **R-8**: All 4 keeper sub-FSM axes (decision / runtime / turn_phase / compaction) are closed — decision via input refinement (#14887/#14893), runtime + turn_phase via resolver + typed exception (#14903→#14935), compaction via typed exception (Phase 6). No `_ -> false` catch-all and no untyped runtime rejection (`invalid_arg` / bare `Assert_failure`) remains on any axis's validator.
 
 ## 8. Open questions
 
@@ -273,7 +273,7 @@ The audit in §2.4 counted explicit `set_turn_cascade_state` calls. There may be
 
 - **PR #14887** (`fix(keeper_registry): make set_turn_decision_stage's forbidden _to_undecided unrepresentable`) — decision-axis input refinement pattern.
 - **PR #14893** (`refactor(keeper_registry): make validate_decision_transition compile-time enforced`) — decision-axis validator → compile-time fixture pattern.
-- **`Decision_transition` GADT** (lib/keeper/keeper_registry.ml:349) — existing GADT pattern, unused, serves as template for `Cascade_transition` and `Turn_phase_transition`.
+- **`Decision_transition` GADT** (lib/keeper/keeper_registry.ml:349) — existing GADT pattern, unused, serves as template for `Runtime_transition` and `Turn_phase_transition`.
 - **RFC-0003** (Keeper Composite Lifecycle Observer) — defines the 4-axis composite FSM.
 - **RFC-0039** (Keeper Turn FSM — Streaming Escape & Cross-Axis Synchronization) — turn_phase axis context.
 - **RFC-0042** (Closed sum type for keeper turn terminal code) — closed-sum enforcement precedent in adjacent surface.

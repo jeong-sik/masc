@@ -260,7 +260,7 @@ let runtime_auto_approval_blocked = function
        let continue_gate = Keeper_meta_contract.blocker_class_continue_gate info.klass in
        let typed_blocked =
          match info.klass with
-         | Keeper_meta_contract.Completion_contract_violation | Keeper_meta_contract.Cascade_exhausted _
+         | Keeper_meta_contract.Completion_contract_violation | Keeper_meta_contract.Runtime_exhausted _
            -> true
          | _ -> false
        in
@@ -286,7 +286,7 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
     permitted to override.
 
     - Hard forbidden = the request is at Critical risk OR a runtime
-      blocker (cascade_exhausted, completion_contract_violation,
+      blocker (runtime_exhausted, completion_contract_violation,
       sandbox/manual block) is set.  Routine matchers must not
       bypass these — this is where real safety walls live.
     - Soft forbidden = the tool name or op string trips

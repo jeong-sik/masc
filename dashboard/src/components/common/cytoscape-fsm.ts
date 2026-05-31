@@ -19,7 +19,7 @@ export interface FsmEdge {
   source: string
   target: string
   label?: string
-  type?: 'normal' | 'error' | 'recovery' | 'cascade'
+  type?: 'normal' | 'error' | 'recovery' | 'runtime'
 }
 
 export interface FsmGraphSpec {
@@ -100,7 +100,7 @@ const EDGE_COLOR_TOKENS: Record<string, string> = {
   normal: '--color-fg-3',
   error: '--color-status-err',
   recovery: '--color-status-ok',
-  cascade: '--color-status-warn',
+  runtime: '--color-status-warn',
 }
 
 interface CytoscapeFsmProps {

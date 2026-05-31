@@ -217,7 +217,7 @@ describe('summarizeKeeperMonitoring', () => {
       phase: 'running',
       turn_phase: 'idle',
       decision: { stage: 'idle' },
-      cascade: { state: 'idle' },
+      runtime: { state: 'idle' },
       compaction: { stage: 'idle' },
       circuit_breaker: { state: 'closed' },
       is_live: false,

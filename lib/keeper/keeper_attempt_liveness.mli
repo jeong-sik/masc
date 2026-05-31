@@ -1,4 +1,4 @@
-(** Cascade attempt-level streaming liveness gate (RFC-0022 PR-1/4).
+(** Runtime attempt-level streaming liveness gate (RFC-0022 PR-1/4).
 
     Pure FSM that fails the *current runtime attempt* — not the turn —
     when a provider stops emitting evidence of forward motion. Three
@@ -8,14 +8,14 @@
     - {!Inter_chunk_idle}   — gap between consecutive chunks exceeds [inter_chunk_max]
     - {!Wall_exceeded}      — total attempt wall-clock exceeds [attempt_wall_max]
 
-    See [docs/rfc/RFC-0022-cascade-attempt-liveness.md] §4 for the design.
+    See [docs/rfc/RFC-0022-runtime-attempt-liveness.md] §4 for the design.
 
     {1 Layer separation}
 
     This is the in-attempt layer (§1 of RFC-0022). It must not collide
     with:
 
-    - RFC-0009 {b pre-attempt} provider trust (cascade order)
+    - RFC-0009 {b pre-attempt} provider trust (runtime order)
     - RFC-0012 {b cross-attempt} turn-level mid-progress watchdog
 
     Every chunk that advances this module's clock must also advance
@@ -25,8 +25,8 @@
     {1 Scope of this PR}
 
     This PR-1 ships the pure FSM module + property tests only.
-    Production cascade behaviour is unchanged: no caller in
-    [cascade_runtime.ml] consumes [step] yet. Wiring lands in PR-2 of
+    Production runtime behaviour is unchanged: no caller in
+    [runtime_runtime.ml] consumes [step] yet. Wiring lands in PR-2 of
     the RFC-0022 stack, behind [MASC_CASCADE_ATTEMPT_LIVENESS=observe]
     by default (§9 Phase A).
 
@@ -141,7 +141,7 @@ val is_terminal : state -> bool
     - {b monotonically non-decreasing} across consecutive events fed
       to the same FSM instance
 
-    Validation lives in the wiring layer (PR-2 [cascade_runtime.ml]
+    Validation lives in the wiring layer (PR-2 [runtime_runtime.ml]
     + PR-3 [keeper_hooks_oas.ml]) — this module is a pure FSM and
     trusts its inputs. Feeding non-finite or out-of-order timestamps
     produces undefined liveness behaviour. *)
@@ -206,7 +206,7 @@ val null_recorder : recorder
        the FSM can transition to [Failed] before the chunk reopens
        the streaming clock.}}
 
-    Concretely the PR-2 wiring (`cascade_runtime.ml`) drives this via
+    Concretely the PR-2 wiring (`runtime_runtime.ml`) drives this via
     a single fiber that drains the chunk queue and emits a [Tick]
     after each empty poll; PR-3 (`keeper_hooks_oas.ml`) carries the
     same ordering guarantee into the RFC-0012 lockstep clock. Callers

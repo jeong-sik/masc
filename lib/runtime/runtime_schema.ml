@@ -1,7 +1,7 @@
-(** Self-standing Runtime configuration types (RFC-0206, cascade→Runtime rebirth).
+(** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
 
     Provider × Model × Binding declarative schema (RFC-0058 layers 1-3),
-    re-homed from the deleted [Cascade_declarative_types] as types owned by
+    re-homed from the deleted [Runtime_declarative_types] as types owned by
     [lib/runtime/]. The routing layers (RFC-0058 layer 4 aliases, layer 5
     routes/profiles, and the strategy ADT) are intentionally NOT ported: a
     Runtime is a single pre-selected (provider × model) binding, so there is
@@ -59,7 +59,7 @@ let capabilities_default =
 ;;
 
 (** [providers.<id>] — connection + behavior. The deleted
-    [cascade_provider]'s [log]/[healthcheck] sub-records are dropped from v1:
+    [runtime_provider]'s [log]/[healthcheck] sub-records are dropped from v1:
     no live Runtime consumer reads them, and the TOML parser parses-and-ignores
     those sub-tables (RFC-0206 §3). [headers] is retained for per-provider HTTP
     header injection. *)
@@ -176,7 +176,7 @@ type binding =
 (** {1 Top-level config}
 
     Routes/aliases/profiles/system_targets/strategy from the deleted
-    [cascade_config] are dropped (RFC-0206 §5): the single-binding Runtime model
+    [runtime_config] are dropped (RFC-0206 §5): the single-binding Runtime model
     has no routing layer. *)
 type config =
   { providers : provider list

@@ -16,7 +16,7 @@
 
     The phase-event publisher [publish_phase_lifecycle] is injected
     explicitly so this module does not need to know about the
-    [Keeper_lifecycle_events] / [Cascade_events] surface. *)
+    [Keeper_lifecycle_events] / [Runtime_events] surface. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -157,7 +157,7 @@ let handle_stale_storm_pause
       (Printf.sprintf
          "STALE STORM AUTO-PAUSED (count=%d in 6h window). Auto-resume is disabled \
           until the root cause clears; operator must resume manually via masc_keeper_up \
-          or API after investigating the underlying cascade/tool/runtime loop. See \
+          or API after investigating the underlying runtime/tool/runtime loop. See \
           issue #10765."
          count)
 ;;
@@ -182,7 +182,7 @@ let handle_provider_timeout_pause
          "PROVIDER TIMEOUT LOOP AUTO-PAUSED (count=%d). Supervisor will attempt \
           self-healing auto-resume with exponential back-off (see \
           MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). Operator may also tune or reroute the \
-          cascade/model before resuming manually; restarting into the same slow-provider \
+          runtime/model before resuming manually; restarting into the same slow-provider \
           timeout loop is avoided by the back-off delay."
          count)
 ;;
@@ -250,7 +250,7 @@ let failure_reason_policy_decision
     Unlike [handle_crash_auto_pause] (which operates on a supervisor
     registry [entry] and receives an injected publisher), this
     function works with the [config] + [meta] pair available inside
-    turn logic (S3 overflow, S5 livelock, S4 cascade-exhausted).  It
+    turn logic (S3 overflow, S5 livelock, S4 runtime-exhausted).  It
     writes [paused=true] via [write_meta_with_merge] (heartbeat-field
     CAS merge, same as the overflow path), updates the registry,
     dispatches [Operator_pause] via

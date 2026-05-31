@@ -51,7 +51,7 @@ val set_turn_context :
   ?required_tools:string list ->
   ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
-  ?cascade_profile:string ->
+  ?runtime_profile:string ->
   unit ->
   unit
 (** [set_turn_context ...] stores the current effective turn policy for
@@ -156,14 +156,14 @@ val log_call :
   ?required_tools:string list ->
   ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
-  ?cascade_profile:string ->
+  ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
-    non-empty values are redacted to the neutral runtime lane. [cascade_profile]
+    non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before

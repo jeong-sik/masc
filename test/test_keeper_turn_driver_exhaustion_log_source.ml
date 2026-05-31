@@ -1,8 +1,8 @@
-(** Source guard for cascade exhaustion log severity.
+(** Source guard for runtime exhaustion log severity.
 
     [require_tool_use] completion-contract violations are deterministic
     provider/model behavior and already have typed handling. They should remain
-    visible, but not inflate the operator ERROR stream when every cascade
+    visible, but not inflate the operator ERROR stream when every runtime
     returns the same contract violation. *)
 
 open Alcotest
@@ -56,7 +56,7 @@ let target = "lib/keeper/keeper_turn_driver.ml"
 
 let test_completion_contract_exhaustion_is_warn () =
   let src = load_source target in
-  let anchor = "log \"cascade %s exhausted: all tiers failed" in
+  let anchor = "log \"runtime %s exhausted: all tiers failed" in
   match window_around ~anchor ~before:260 ~after:120 src with
   | None -> fail "completion-contract severity branch missing"
   | Some block ->
@@ -70,14 +70,14 @@ let test_completion_contract_exhaustion_is_warn () =
       (contains ~needle:"else Log.Misc.error" block);
     check bool "guard applies to all-tiers-failed exhaustion log" true
       (contains
-         ~needle:"log \"cascade %s exhausted: all tiers failed"
+         ~needle:"log \"runtime %s exhausted: all tiers failed"
          block)
 
 let test_no_unconditional_error_for_all_tiers_failed () =
   let src = load_source target in
-  check int "all-tiers-failed cascade exhaustion is not unconditional ERROR" 0
+  check int "all-tiers-failed runtime exhaustion is not unconditional ERROR" 0
     (count_occurrences
-       ~needle:"Log.Misc.error \"cascade %s exhausted: all tiers failed"
+       ~needle:"Log.Misc.error \"runtime %s exhausted: all tiers failed"
        src)
 
 let () =

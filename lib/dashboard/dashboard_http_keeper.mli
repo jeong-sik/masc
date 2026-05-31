@@ -27,7 +27,7 @@
     backend resolvers, and the
     [Keeper_transition_audit] adapters). *)
 
-(** {1 Cascade re-exports for [Server_dashboard_http_core]}
+(** {1 Runtime re-exports for [Server_dashboard_http_core]}
 
     [Server_dashboard_http_core] does
     [include Dashboard_http_keeper], so every symbol it
@@ -42,7 +42,7 @@ val keeper_names : Coord.config -> string list
 val running_keeper_count : Coord.config -> int
 (** Counts keepers whose meta indicates an active
     keep-alive runtime.  Used by the dashboard fleet
-    summary on the cascade consumer side. *)
+    summary on the runtime consumer side. *)
 
 (** {1 Outcomes rollup} *)
 
@@ -114,7 +114,7 @@ val keeper_config_json :
   [ `OK | `Not_found ] * Yojson.Safe.t
 (** Returns the keeper's effective configuration JSON
     (resolved model, allowed tools, runtime limits,
-    cascade settings).  Pairs with a status tag —
+    runtime settings).  Pairs with a status tag —
     [`Not_found] when [Keeper_meta_store.read_meta] fails or
     returns [None], [`OK] otherwise.  The handler avoids
     [bootstrap_runtime] mutations to keep the HTTP

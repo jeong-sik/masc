@@ -4,7 +4,7 @@
     bloodflow restoration plan.  The first cut intentionally reads
     only execution-receipts JSONL since that's the path that already
     populates [turn_count] (post-Step 0a it carries the structured
-    [keeper_turn_id] for silent skip / cascade error / livelock
+    [keeper_turn_id] for silent skip / runtime error / livelock
     paths too).
 
     Follow-up stacks will widen the source set:
@@ -128,15 +128,15 @@ let dump_receipts ~base_path ~keeper ~turn_id =
               (string_field json "terminal_reason_code")
               ~default:"-"
           in
-          let cascade =
-            Option.value (string_field json "cascade_name") ~default:"-"
+          let runtime =
+            Option.value (string_field json "runtime_id") ~default:"-"
           in
           let ended =
             Option.value (string_field json "ended_at") ~default:"-"
           in
           Printf.printf
-            "%s [receipt %s] cascade=%s outcome=%s reason=%s\n"
-            ended f cascade outcome reason)
+            "%s [receipt %s] runtime=%s outcome=%s reason=%s\n"
+            ended f runtime outcome reason)
         matches
 
 (** Scan [.masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl]
@@ -248,8 +248,8 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
           let ts = Option.value (string_field json "ts") ~default:"-" in
           let event = Option.value (string_field json "event") ~default:"-" in
           let status = Option.value (string_field json "status") ~default:"-" in
-          let cascade =
-            Option.value (string_field json "cascade_name") ~default:"-"
+          let runtime =
+            Option.value (string_field json "runtime_id") ~default:"-"
           in
           let decision =
             match Yojson.Safe.Util.member "decision" json with
@@ -257,8 +257,8 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
             | decision_json -> Yojson.Safe.to_string decision_json
           in
           Printf.printf
-            "%s [manifest %s] event=%s status=%s cascade=%s decision=%s\n"
-            ts f event status cascade decision)
+            "%s [manifest %s] event=%s status=%s runtime=%s decision=%s\n"
+            ts f event status runtime decision)
         matches
 
 (** Scan [.masc/logs/system_log_*.jsonl] for [\[fsm:transition\]]

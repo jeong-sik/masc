@@ -39,7 +39,7 @@ keeper_heartbeat_loop.ml:195   write_meta failed (heartbeat)             -> warn
 keeper_keepalive.ml:513        write_meta failed (bootstrap)             -> warn + continue
 keeper_supervisor.ml:720       supervisor presence sync write_meta       -> warn + continue
 keeper_supervisor.ml:2061      auto-resume meta write failed             -> warn + skip resume
-keeper_turn_cascade_budget.ml:675  overflow pause write_meta failed      -> warn + continue
+keeper_turn_runtime_budget.ml:675  overflow pause write_meta failed      -> warn + continue
 keeper_agent_memory_episode.ml:103 episode_create failed                 -> error log + None
 keeper_agent_memory_episode.ml:192 failed_turn_episode_create failed     -> error log + None
 keeper_checkpoint_store.ml:279     OAS snapshot archive write failed     -> warn + drop archive

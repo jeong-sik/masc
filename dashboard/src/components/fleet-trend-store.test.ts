@@ -14,7 +14,7 @@ function makeRow(name: string, overrides: Partial<FleetRow> = {}): FleetRow {
     activity_label: '최근 활동',
     activity_source: 'last_activity',
     model: 'test-model',
-    cascade_label: null,
+    runtime_label: null,
     provider_label: null,
     fallback_label: null,
     tool_calls: 5,

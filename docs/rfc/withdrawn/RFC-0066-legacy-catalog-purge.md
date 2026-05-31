@@ -5,7 +5,7 @@ status: Withdrawn
 created: 2026-05-11
 withdrawn_date: 2026-05-21
 superseded_by: RFC-0058
-withdrawn_reason: "Self-positioned as 'closeout phase' of RFC-0058 (declarative cascade config). The declarative 5-layer schema absorbed the legacy catalog purge goal. Issue #14624 root-cause tracker closed via RFC-0058 work. Archived for history."
+withdrawn_reason: "Self-positioned as 'closeout phase' of RFC-0058 (declarative runtime config). The declarative 5-layer schema absorbed the legacy catalog purge goal. Issue #14624 root-cause tracker closed via RFC-0058 work. Archived for history."
 ---
 
 # RFC-0066 — Legacy `*_models` Catalog Purge
@@ -15,30 +15,30 @@ withdrawn_reason: "Self-positioned as 'closeout phase' of RFC-0058 (declarative 
 **Date**: 2026-05-11
 **Supersedes**: —
 **Related**:
-- RFC-0058 (declarative cascade config) — established the 5-layer declarative schema this RFC is the closeout phase for
-- Issue #14624 (architectural: `Keeper_config.default_cascade_name` init-time cache + legacy catalog declarative-blindness) — root-cause tracker this RFC retires
+- RFC-0058 (declarative runtime config) — established the 5-layer declarative schema this RFC is the closeout phase for
+- Issue #14624 (architectural: `Keeper_config.default_runtime_id` init-time cache + legacy catalog declarative-blindness) — root-cause tracker this RFC retires
 - PR #14611, #14616, #14620, #14623 (Phase 9.3 fallout sweep) — test-side patches that surfaced the dependency
 
 ---
 
 ## 1. Problem
 
-After RFC-0058 §9 (Phase 9.1–9.4) eliminated the on-disk `cascade.json`, the codebase still carries a *legacy catalog discovery* path that scans flat `<profile>_models` JSON keys emitted by the materializer's per-profile fallback layout. Production `cascade.toml` has migrated entirely to the declarative `[providers.X]` / `[cascade.X]` namespaces; the legacy `Cascade_config_loader.load_catalog` returns `[]` on every production read.
+After RFC-0058 §9 (Phase 9.1–9.4) eliminated the on-disk `runtime.json`, the codebase still carries a *legacy catalog discovery* path that scans flat `<profile>_models` JSON keys emitted by the materializer's per-profile fallback layout. Production `keeper_runtime.toml` has migrated entirely to the declarative `[providers.X]` / `[runtime.X]` namespaces; the legacy `Runtime_config_loader.load_catalog` returns `[]` on every production read.
 
 The mismatch causes a known production divergence:
 
 | Layer | Production result | Test result (per-profile fixture) |
 |---|---|---|
-| `Cascade_catalog_runtime` (declarative path) | `"primary"` (live snapshot) | `"primary"` (legacy reader sees flat key) |
-| `Keeper_config.default_cascade_name` (legacy path, init-time cached) | `"default"` (catalog empty at init) | `"primary"` |
+| `Runtime_catalog_runtime` (declarative path) | `"primary"` (live snapshot) | `"primary"` (legacy reader sees flat key) |
+| `Keeper_config.default_runtime_id` (legacy path, init-time cached) | `"default"` (catalog empty at init) | `"primary"` |
 
-18 production call sites of `Keeper_config.default_cascade_name` therefore reference a stale fallback that has no corresponding entry in the live catalog: `Keeper_turn_cascade_budget` comparisons never match, `Keeper_turn_up_create/update` defaults to an invalid cascade name, `Dashboard_cascade` advertises a non-existent profile in `config_path` defaults, and so on. Six Pattern C test failures in PR #14620 are the visible symptom; #14624 documents the layered cause.
+18 production call sites of `Keeper_config.default_runtime_id` therefore reference a stale fallback that has no corresponding entry in the live catalog: `Keeper_turn_runtime_budget` comparisons never match, `Keeper_turn_up_create/update` defaults to an invalid runtime name, `Dashboard_runtime` advertises a non-existent profile in `config_path` defaults, and so on. Six Pattern C test failures in PR #14620 are the visible symptom; #14624 documents the layered cause.
 
-A surgical fix (route `Keeper_config.default_cascade_name` through `Cascade_catalog_runtime`) does not close the gap: `lookup_active_profile` falls back to `normalize_declared_name` which calls `cascade_name_for_use`, which itself reads the legacy catalog. The mismatch survives unless the legacy path is removed.
+A surgical fix (route `Keeper_config.default_runtime_id` through `Runtime_catalog_runtime`) does not close the gap: `lookup_active_profile` falls back to `normalize_declared_name` which calls `runtime_id_for_use`, which itself reads the legacy catalog. The mismatch survives unless the legacy path is removed.
 
 ### Goal
 
-Delete `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_profile` and their `<profile>_models` materializer arm. Migrate every reader to `Cascade_catalog_runtime` (the live snapshot, declarative-aware). Treat the declarative schema as the sole catalog source of truth.
+Delete `Runtime_config_loader.load_catalog` / `load_profile_weighted` / `load_profile` and their `<profile>_models` materializer arm. Migrate every reader to `Runtime_catalog_runtime` (the live snapshot, declarative-aware). Treat the declarative schema as the sole catalog source of truth.
 
 ### Non-goals
 
@@ -52,28 +52,28 @@ Delete `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_pr
 
 ### 2.1 Legacy catalog API
 
-`lib/cascade/cascade_config_loader.ml`:
+`lib/runtime/runtime_config_loader.ml`:
 - `load_catalog : config_path:string -> (catalog_entry list, string) result` — scans `<name>_models` keys at the root of the materialized JSON.
 - `load_profile_weighted : config_path:string -> name:string -> weighted_entry list` — pulls the `<name>_models` array, parses each item.
 - `load_profile : config_path:string -> name:string -> string list` — derived from `load_profile_weighted`.
-- The removed per-profile bridge converted flat keys into `Cascade_ref.cascade_profile`.
+- The removed per-profile bridge converted flat keys into `Runtime_ref.runtime_profile`.
 - `is_deprecated_logical_profile_name` — retired; catalog discovery no longer
   hides route-alias-shaped profile names.
 
-`lib/cascade/cascade_toml_materializer.ml:404`:
+`lib/runtime/runtime_toml_materializer.ml:404`:
 - Per-profile field arm `models = [...]` → JSON `<profile>_models = [...]`. Emitted only when an operator authors a `[<profile>]\nmodels = [...]` block. Production has none.
 
-### 2.2 Production cascade.toml shape
+### 2.2 Production keeper_runtime.toml shape
 
-Inspected `config/cascade.toml` at HEAD `49566db3d` (2026-05-11): top-level namespaces are exclusively `providers.`, `models.`, `routes.`, `tier.`, `cascade.`, `profiles.`. Zero per-profile `[X]\nmodels = [...]` blocks. The flat materializer arm contributes nothing to the production runtime path.
+Inspected `config/keeper_runtime.toml` at HEAD `49566db3d` (2026-05-11): top-level namespaces are exclusively `providers.`, `models.`, `routes.`, `tier.`, `runtime.`, `profiles.`. Zero per-profile `[X]\nmodels = [...]` blocks. The flat materializer arm contributes nothing to the production runtime path.
 
 ### 2.3 Live declarative reader
 
-`lib/cascade/cascade_catalog_runtime.ml` already loads `cascade.toml` through `Cascade_declarative_hotpath.try_load_declarative`, validates it, and exposes:
+`lib/runtime/runtime_catalog_runtime.ml` already loads `keeper_runtime.toml` through `Runtime_declarative_hotpath.try_load_declarative`, validates it, and exposes:
 - `known_profile_names : ?sw/net/clock:_ -> unit -> (string list, string) result`
 - `resolve_declared_name : ?sw/net/clock:_ -> raw_name:string -> unit -> (string, string) result`
-- `models_of_cascade_name : ?sw/net/clock:_ -> string -> (string list, string) result`
-- `inspect_active` returns the full snapshot with profile metadata (`keeper_assignable`, `fallback_cascade`, `required_capability_profile`, etc.).
+- `models_of_runtime_id : ?sw/net/clock:_ -> string -> (string list, string) result`
+- `inspect_active` returns the full snapshot with profile metadata (`keeper_assignable`, `fallback_runtime`, `required_capability_profile`, etc.).
 
 The snapshot already carries every field `catalog_entry` exposes; readers can be ported one-to-one.
 
@@ -82,7 +82,7 @@ The snapshot already carries every field `catalog_entry` exposes; readers can be
 After the Pattern A sweep (PR #14616), ~30 test fixtures across 6 suites write per-profile `[X]\nmodels = [...]` TOML and rely on the materializer's flat key arm + legacy reader. They pass today because the materializer still emits the flat keys; under this RFC's Phase 4 they would all fail.
 
 Affected suites at RFC drafting time were the catalog runtime suite plus several
-TOML materialization and dashboard cascade fixtures. The purge branch deletes
+TOML materialization and dashboard runtime fixtures. The purge branch deletes
 the standalone legacy flat-TOML suites instead of rewriting them.
 
 ---
@@ -93,9 +93,9 @@ the standalone legacy flat-TOML suites instead of rewriting them.
 
 | Legacy call | Replacement | Notes |
 |---|---|---|
-| `load_catalog ~config_path` | `Cascade_catalog_runtime.inspect_active ()` → extract `snapshot.profiles` | Snapshot carries the equivalent `catalog_entry` fields. Path arg dropped; resolver/runtime own the path. |
-| `load_profile_weighted ~config_path ~name` | `Cascade_catalog_runtime.models_of_cascade_name name` plus `lookup_active_profile` for the full weighted entries | Returns `Result`; callers gain explicit error surfacing. |
-| `load_profile ~config_path ~name` | `models_of_cascade_name` (drops weight metadata, same as legacy) | Direct substitute. |
+| `load_catalog ~config_path` | `Runtime_catalog_runtime.inspect_active ()` → extract `snapshot.profiles` | Snapshot carries the equivalent `catalog_entry` fields. Path arg dropped; resolver/runtime own the path. |
+| `load_profile_weighted ~config_path ~name` | `Runtime_catalog_runtime.models_of_runtime_id name` plus `lookup_active_profile` for the full weighted entries | Returns `Result`; callers gain explicit error surfacing. |
+| `load_profile ~config_path ~name` | `models_of_runtime_id` (drops weight metadata, same as legacy) | Direct substitute. |
 | `is_deprecated_logical_profile_name` | Removed — no compatibility filter remains in catalog discovery. | Route/profile mistakes surface through normal validation instead of a silent filter. |
 
 ### 3.2 Materializer arm removal
@@ -106,28 +106,28 @@ explicitly rather than silently being ignored.
 
 ### 3.3 Snapshot reentrancy
 
-`Cascade_catalog_runtime` already caches the active snapshot keyed by `source_path` mtime, and `inspect_active` is reentrancy-safe (mutex-guarded `_cache`). Hot-path callers (`Keeper_config.default_cascade_name`, `keeper_turn_cascade_budget`, etc.) can call it freely; each call resolves to a cheap `Hashtbl.find_opt` after the first mtime check.
+`Runtime_catalog_runtime` already caches the active snapshot keyed by `source_path` mtime, and `inspect_active` is reentrancy-safe (mutex-guarded `_cache`). Hot-path callers (`Keeper_config.default_runtime_id`, `keeper_turn_runtime_budget`, etc.) can call it freely; each call resolves to a cheap `Hashtbl.find_opt` after the first mtime check.
 
-For very hot paths that pre-RFC read the cached-string, introduce `default_cascade_name : unit -> string` returning the live answer (or the spec-driven `Cascade_routes.first_alias_or_key Keeper_turn` if the snapshot is unavailable). Callers add `()`. The blast radius is 18 sites, all internal.
+For very hot paths that pre-RFC read the cached-string, introduce `default_runtime_id : unit -> string` returning the live answer (or the spec-driven `Runtime_routes.first_alias_or_key Keeper_turn` if the snapshot is unavailable). Callers add `()`. The blast radius is 18 sites, all internal.
 
 ### 3.4 Test fixture migration
 
 Two strategies:
 
-1. **Per-profile → declarative cascade**: each `[X]\nmodels = ["provider:auto"]` block becomes
+1. **Per-profile → declarative runtime**: each `[X]\nmodels = ["provider:auto"]` block becomes
    ```toml
    [tier.X]
    members = ["X-binding"]   # references a binding name
 
-   [cascade.X]
+   [runtime.X]
    tiers = ["X"]
 
    [routes.keeper_turn]      # if X was the keeper default
-   target = "cascade.X"
+   target = "runtime.X"
    ```
    Plus the matching `[providers.<provider>]` + `[<provider>.<model>]` binding blocks.
 
-2. **Obsolete fixture removal**: delete the flat JSON-shaped `test_cascade_catalog_runtime` suite instead of preserving its transformer. Declarative parser/validator/hotpath suites own the TOML-only contract.
+2. **Obsolete fixture removal**: delete the flat JSON-shaped `test_runtime_catalog_runtime` suite instead of preserving its transformer. Declarative parser/validator/hotpath suites own the TOML-only contract.
 
 Strategy (2) is cheap for the 23-fixture catalog_runtime suite. Strategy (1) is required for the per-fixture-tailored tests where fixture content is itself the subject of assertion.
 
@@ -135,21 +135,21 @@ Strategy (2) is cheap for the 23-fixture catalog_runtime suite. Strategy (1) is 
 
 ## 4. Phases
 
-### Phase 1 — `Keeper_cascade_profile` reader migration (Task #29, target PR)
+### Phase 1 — `Keeper_runtime_profile` reader migration (Task #29, target PR)
 
-Replace the 3 sites in `lib/keeper/keeper_cascade_profile.ml` (`catalog_entries`, `catalog_names`, `catalog_names_result`) with `Cascade_catalog_runtime` queries. Add `Keeper_config.default_cascade_name : unit -> string` returning the live snapshot's first profile (with the existing static fallback for boot ordering). Update 18 callers to `()`.
+Replace the 3 sites in `lib/keeper/keeper_runtime_profile.ml` (`catalog_entries`, `catalog_names`, `catalog_names_result`) with `Runtime_catalog_runtime` queries. Add `Keeper_config.default_runtime_id : unit -> string` returning the live snapshot's first profile (with the existing static fallback for boot ordering). Update 18 callers to `()`.
 
 Acceptance:
 - All existing tests pass (Pattern A fixtures still emit flat JSON which the materializer keeps emitting — Phase 1 doesn't touch the materializer arm).
-- `Cascade_catalog_runtime.resolve_declared_name ~raw_name:""` returns the same name as `Keeper_config.default_cascade_name ()` in test fixtures that install a catalog.
-- Production behavior of `keeper_turn_cascade_budget`/`keeper_turn_up_create`/etc. now references the *live* default cascade name (`"primary"` per current config), not the init-cached `"default"`.
+- `Runtime_catalog_runtime.resolve_declared_name ~raw_name:""` returns the same name as `Keeper_config.default_runtime_id ()` in test fixtures that install a catalog.
+- Production behavior of `keeper_turn_runtime_budget`/`keeper_turn_up_create`/etc. now references the *live* default runtime name (`"primary"` per current config), not the init-cached `"default"`.
 
 ### Phase 2 — Remaining lib callers migration (Task #30)
 
-`lib/dashboard_cascade.ml`, `lib/cascade_catalog_validator.ml`, `lib/cascade/cascade_routes.ml`, `lib/cascade/cascade_catalog_runtime.ml` (internal callers — yes, the runtime itself calls the legacy loader in one spot), `lib/cascade/cascade_config.ml` (4 sites). Each ports to the snapshot reader.
+`lib/dashboard_runtime.ml`, `lib/runtime_catalog_validator.ml`, `lib/runtime/runtime_routes.ml`, `lib/runtime/runtime_catalog_runtime.ml` (internal callers — yes, the runtime itself calls the legacy loader in one spot), `lib/runtime/runtime_config.ml` (4 sites). Each ports to the snapshot reader.
 
 Acceptance:
-- `rg "Cascade_config_loader\.load_(catalog|profile_weighted|profile)\b" lib/` returns zero hits.
+- `rg "Runtime_config_loader\.load_(catalog|profile_weighted|profile)\b" lib/` returns zero hits.
 - All existing tests still pass (still Phase A test fixtures emit flat JSON).
 
 ### Phase 3 — Test fixture migration (Task #31)
@@ -158,24 +158,24 @@ Migrate fixtures suite-by-suite, or delete fixtures whose only assertion is
 legacy flat-TOML compatibility.
 
 Acceptance:
-- All cascade-area suites pass on declarative-only fixtures.
+- All runtime-area suites pass on declarative-only fixtures.
 - Materializer arm `<profile>_models` flat key emission is now unused at runtime; gating that with a CI-asserted "no flat key emission" test is acceptable scope creep.
 
 ### Phase 4 — Delete legacy API (Task #32)
 
 Remove:
-- `Cascade_config_loader.load_catalog` + `.mli` signature.
+- `Runtime_config_loader.load_catalog` + `.mli` signature.
 - `load_profile_weighted` + `.mli`.
 - `load_profile` + `.mli`.
-- The per-profile bridge that converted flat keys into `Cascade_ref.cascade_profile`.
+- The per-profile bridge that converted flat keys into `Runtime_ref.runtime_profile`.
 - `weighted_entry` type if no other reader consumes it.
 - `catalog_entry` type — replaced by the snapshot's profile representation.
-- The per-profile field arms in `Cascade_toml_materializer`.
+- The per-profile field arms in `Runtime_toml_materializer`.
 
 Final acceptance:
 - `rg "load_catalog\|load_profile" lib/` returns zero hits.
-- `rg "_models" lib/cascade/` returns zero hits in the *materializer* path; only the declarative `[models.X]` namespace remains.
-- `dune build` clean; all cascade tests pass; CI green.
+- `rg "_models" lib/runtime/` returns zero hits in the *materializer* path; only the declarative `[models.X]` namespace remains.
+- `dune build` clean; all runtime tests pass; CI green.
 
 ---
 
@@ -183,11 +183,11 @@ Final acceptance:
 
 ### 5.1 Snapshot bootstrap ordering
 
-`Keeper_config` module-init currently reads `Keeper_cascade_profile.cascade_name_for_use Keeper_turn` at load time. If we replace it with a function that consults `Cascade_catalog_runtime`, callers during very early boot (before catalog install) get the static fallback path. This matches today's behavior (init-cached `"default"` = static spec fallback), so no regression — but it does mean the *first* runtime caller after catalog install sees the new value, not the cached one. Document explicitly: callers that need bootstrap-stable values should pin them at the call site.
+`Keeper_config` module-init currently reads `Keeper_runtime_profile.runtime_id_for_use Keeper_turn` at load time. If we replace it with a function that consults `Runtime_catalog_runtime`, callers during very early boot (before catalog install) get the static fallback path. This matches today's behavior (init-cached `"default"` = static spec fallback), so no regression — but it does mean the *first* runtime caller after catalog install sees the new value, not the cached one. Document explicitly: callers that need bootstrap-stable values should pin them at the call site.
 
 ### 5.2 Per-profile-only operator configs
 
-Audit each known operator setup (kidsnote, internal envs). If any operator has a per-profile `cascade.toml` they wrote by hand, Phase 4 breaks them. Mitigation: Phase 4 ships with a migration script (`scripts/cascade/migrate_flat_to_declarative.sh`) that converts per-profile blocks to the equivalent cascade/binding triple, and a one-release deprecation window where the materializer arm logs a `WARN` on use.
+Audit each known operator setup (kidsnote, internal envs). If any operator has a per-profile `keeper_runtime.toml` they wrote by hand, Phase 4 breaks them. Mitigation: Phase 4 ships with a migration script (`scripts/runtime/migrate_flat_to_declarative.sh`) that converts per-profile blocks to the equivalent runtime/binding triple, and a one-release deprecation window where the materializer arm logs a `WARN` on use.
 
 ### 5.3 Test suite migration churn
 
@@ -195,7 +195,7 @@ Audit each known operator setup (kidsnote, internal envs). If any operator has a
 
 ### 5.4 Hidden flat-key consumers outside `lib/`
 
-`rg` only scans the current source tree. Forks, downstream plugins, and operator scripts that read `cascade.json` directly would break. Mitigation: Phase 4 PR body includes a "downstream check" callout asking maintainers to grep their forks.
+`rg` only scans the current source tree. Forks, downstream plugins, and operator scripts that read `runtime.json` directly would break. Mitigation: Phase 4 PR body includes a "downstream check" callout asking maintainers to grep their forks.
 
 ---
 
@@ -203,17 +203,17 @@ Audit each known operator setup (kidsnote, internal envs). If any operator has a
 
 Cumulative across phases:
 
-1. `Keeper_config.default_cascade_name ()` returns the live snapshot's first profile (not the init-cached spec fallback) when a catalog is installed. Closes #14624.
-2. `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_profile` and the old per-profile bridge deleted. No lib reader of `<profile>_models` flat JSON keys remains.
-3. `Cascade_toml_materializer` no longer emits `<profile>_models` keys. Per-profile `[X]\nmodels = [...]` TOML blocks parse-error explicitly.
-4. All cascade-area test suites (8 suites, ~166 tests) green on declarative-only fixtures.
+1. `Keeper_config.default_runtime_id ()` returns the live snapshot's first profile (not the init-cached spec fallback) when a catalog is installed. Closes #14624.
+2. `Runtime_config_loader.load_catalog` / `load_profile_weighted` / `load_profile` and the old per-profile bridge deleted. No lib reader of `<profile>_models` flat JSON keys remains.
+3. `Runtime_toml_materializer` no longer emits `<profile>_models` keys. Per-profile `[X]\nmodels = [...]` TOML blocks parse-error explicitly.
+4. All runtime-area test suites (8 suites, ~166 tests) green on declarative-only fixtures.
 5. CI green; `dune build` clean; no new ocamlformat violations in changed files (existing pre-existing violations not reformatted per project policy).
 
 ---
 
 ## 7. Related documents
 
-- RFC-0058 (declarative cascade config) — establishes the schema this RFC closes out
+- RFC-0058 (declarative runtime config) — establishes the schema this RFC closes out
 - Issue #14624 — root-cause tracker, closed by this RFC
 - PR #14611, #14616, #14620, #14623 — the Phase 9.3 fallout sweep that surfaced the dependency
 - `~/me/feedback_lint_string_classifier_is_workaround_not_fundamental.md` — methodological precedent for "remove the structural cause rather than guard the symptom"

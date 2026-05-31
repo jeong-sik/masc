@@ -272,7 +272,7 @@ let test_task_id_null_when_none () =
     | _ -> Alcotest.fail "Expected task_id to be null when not set")
 
 (* model_pricing tests removed — model_token_pricing / estimate_turn_cost
-   deleted from Trajectory (#3029). Pricing belongs to OAS cascade. *)
+   deleted from Trajectory (#3029). Pricing belongs to OAS runtime. *)
 
 (* ================================================================ *)
 (* Test: aggregate_tool_stats                                        *)

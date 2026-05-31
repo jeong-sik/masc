@@ -67,7 +67,7 @@ When the backend changes a response shape:
 `/api/v1/keepers/:name/composite` — see
 `dashboard/src/api/schemas/keeper-composite.ts`. The schema defines:
 
-- Phase / turn / decision / cascade / compaction enums with explicit
+- Phase / turn / decision / runtime / compaction enums with explicit
   fallback for unknown values (backend may ship new states before
   frontend).
 - Structural contract for `measurement`, `invariants`, `last_outcome`.

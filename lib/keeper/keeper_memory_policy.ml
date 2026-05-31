@@ -79,7 +79,7 @@ let keeper_policy_observation_of_room_message
     message_chars = String.length msg.content;
     total_turns = meta.runtime.usage.total_turns;
     active_goal_count = List.length meta.active_goal_ids;
-    joined_room_count = List.length meta.joined_room_ids;
+    joined_room_count = 0;
     last_turn_ago_s;
   }
 

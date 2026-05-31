@@ -56,7 +56,6 @@ val normalize_agent_last_seen : joined_at:Yojson.Safe.t option -> Yojson.Safe.t 
 val short_json_repr : Yojson.Safe.t -> string
 
 type task_action =
-type task_action =
   | Claim
   | Start
   | Done_action

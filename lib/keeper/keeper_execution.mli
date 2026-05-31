@@ -52,14 +52,6 @@ val generate_trace_id : ?now:float -> unit -> string
 (** Resolve effective model labels for a turn. *)
 val effective_model_labels_for_turn : keeper_meta -> string list
 
-(** {1 Coord Cursor} *)
-
-(** Get last-seen sequence number for a room. *)
-val room_cursor_for : keeper_meta -> string -> int
-
-(** Set last-seen sequence number for a room. *)
-val set_room_cursor : keeper_meta -> string -> int -> keeper_meta
-
 (** {1 Mention Detection} *)
 
 (** Check if any target mention is directly present in content. *)

@@ -400,7 +400,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta)
     Log.Keeper.error "workspace_presence_failed keeper=%s exn=%s" meta.name exn_msg;
     meta, [ { room_id = ""; exn_msg } ]
 
-let exact_direct_mention_presentlet exact_direct_mention_present ~(targets : string list) (content : string) :
+let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 

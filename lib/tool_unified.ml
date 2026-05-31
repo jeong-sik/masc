@@ -21,7 +21,7 @@ module Float = Stdlib.Float
     - Tool_catalog: visibility, lifecycle, metadata
     - Tool_registry: call statistics (count, success, failure, duration)
     - Tool_dispatch: registration status
-    - Tool_capability: read_only, join_required
+    - Tool_capability: read_only
 *)
 
 type tool_info = {
@@ -30,7 +30,6 @@ type tool_info = {
   lifecycle : Tool_catalog.lifecycle;
   is_registered : bool;
   is_read_only : bool;
-  is_join_required : bool;
   call_stats : Tool_registry.call_stats option;
 }
 
@@ -46,7 +45,6 @@ let tool_info name : tool_info =
     lifecycle = meta.lifecycle;
     is_registered = Tool_dispatch.is_registered name;
     is_read_only = Tool_capability.has Tool_capability.Read_only name;
-    is_join_required = Tool_capability.has Tool_capability.Requires_join name;
     call_stats = stats;
   }
 
@@ -72,7 +70,6 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
     ("lifecycle", `String (Tool_catalog.lifecycle_to_string info.lifecycle));
     ("is_registered", `Bool info.is_registered);
     ("is_read_only", `Bool info.is_read_only);
-    ("is_join_required", `Bool info.is_join_required);
     ("call_stats", stats_json);
   ]
 

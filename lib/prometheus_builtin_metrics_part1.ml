@@ -216,12 +216,6 @@ let register
     "Wall-clock unixtime of the most recent successful supervisor sweep beat (labels: \
      base_path).  Stale (> 2 × interval) means the sweep stalled."
     `Gauge;
-  add
-    metric_tool_join_required_guard
-    "Total join-required guard rejections before tool execution (labels: tool, \
-     agent_name, reason=room_uninitialized|agent_not_joined)"
-    `Counter;
-  add
     metric_tool_metrics_persist_dropped
     "Total JSONL records dropped by tool_metrics_persist because the bounded \
      write queue is full. No labels."

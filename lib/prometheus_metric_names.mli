@@ -124,12 +124,6 @@ val metric_backend_mutex_held_sec : string
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)
 
-(** #9770: count fires of the [join_required] guard in
-    [Mcp_server_eio_execute].  Labels:
-    [tool, agent_name, reason] with reason
-    [room_uninitialized | agent_not_joined]. *)
-val metric_tool_join_required_guard : string
-
 (** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
 val metric_tool_metrics_persist_dropped : string
 

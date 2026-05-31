@@ -70,12 +70,8 @@ val all_assertion_kinds : assertion_kind list
     constructor automatically updates this list. *)
 val valid_assertion_strings : string list
 
-(** [assertion_kind_of_string_lenient s] parses a permissive
-    label form (case-insensitive, allows variants like
-    ["room_set"] / ["roomSet"] / ["room"]).  Returns [None] on
-    unknown.  Lenient parsing is intentional for human-typed
-    governance commands; drift to strict matching would break
-    operator UX. *)
+(** [assertion_kind_of_string_lenient s] parses a canonical assertion label.
+    Returns [None] on unknown. *)
 val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 (** {1 Dispatch} *)

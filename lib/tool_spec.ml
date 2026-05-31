@@ -33,7 +33,6 @@ type t = {
   module_tag : Tool_dispatch.module_tag;
   handler_binding : handler_binding;
   is_read_only : bool;
-  requires_join : bool;
   mcp_context_required : bool;
   is_destructive : bool;
   is_idempotent : bool;
@@ -60,7 +59,6 @@ let create
     ~input_schema
     ~handler_binding
     ?(is_read_only = false)
-    ?(requires_join = false)
     ?(mcp_context_required = false)
     ?(is_destructive = false)
     ?(is_idempotent = false)
@@ -76,7 +74,7 @@ let create
     ?requires_actor_binding
     () =
   { name; description; module_tag; input_schema; handler_binding;
-    is_read_only; requires_join; mcp_context_required; is_destructive; is_idempotent;
+    is_read_only; mcp_context_required; is_destructive; is_idempotent;
     visibility; implementation_status;
     canonical_name; replacement; reason;
     allow_direct_call_when_hidden; title; required_permission; effect_domain;
@@ -126,7 +124,6 @@ let register (spec : t) =
   let requires_actor_binding =
     match spec.requires_actor_binding with
     | Some _ as value -> value
-    | None when spec.requires_join -> Some true
     | None ->
         Option.bind existing (fun (meta : Tool_catalog.metadata) ->
           meta.requires_actor_binding)
@@ -147,7 +144,6 @@ let register (spec : t) =
       reason = spec.reason;
       allow_direct_call_when_hidden = effective_allow_direct;
       readonly = Some spec.is_read_only;
-      requires_join = Some spec.requires_join;
       mcp_context_required = Some spec.mcp_context_required;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;

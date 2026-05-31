@@ -354,8 +354,6 @@ let remote_tool_names : string list =
 (* ================================================================ *)
 
 let tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "masc_surface_audit" ]
-let tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm" ]
-
 (* Tools with explicit catalog metadata that must be preserved. *)
 let tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_surface_audit" ]
 let tool_spec_hidden_destructive = [ "masc_operator_action" ]
@@ -383,7 +381,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ~requires_join:(List.mem s.name tool_spec_requires_join)
            ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
            ~is_destructive
            ~allow_direct_call_when_hidden:is_hidden

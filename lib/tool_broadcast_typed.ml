@@ -68,5 +68,4 @@ let tool = Typed_tool_masc.create
   ~parse:parse_broadcast
   ~handler:handle_broadcast
   ~encode:encode_broadcast
-  ~requires_join:true
   ()

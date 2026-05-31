@@ -10,7 +10,7 @@ Scope:
 This is the audit snapshot. The follow-up implementation and product-readiness
 status live in the goal/plan document below.
 
-Follow-up goal/plan: `docs/design/keeper-runtime-truth-unification-goal.md`
+Follow-up goal/plan: runtime naming cleanup moved into implementation PRs; the stale design note was removed.
 
 ## TL;DR
 
@@ -263,7 +263,7 @@ flowchart TD
 ### Ownership
 
 - `docs/OAS-MASC-BOUNDARY.md` states config ownership directly: runtime schema, parsing, label semantics, and selection policy are MASC-owned.
-- The keeper hot path resolves providers through MASC `Runtime_catalog_runtime` and `Keeper_turn_driver`; it does not use OAS `Llm_provider.Complete_runtime` for provider iteration.
+- The keeper hot path resolves providers through MASC runtime resolution and `Keeper_turn_driver`; it does not use OAS `Llm_provider.Complete_runtime` for provider iteration.
 - OAS still has reusable provider/runtime primitives (`Provider_config`, `Complete.complete`, `Complete_runtime.complete_runtime`), but in this path it is the single-provider execution engine.
 
 ### Config Decision Points

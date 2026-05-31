@@ -63,7 +63,6 @@ class IMessageBot:
     def _load_bindings(self) -> None:
         self._bindings = load_bindings(
             self.cfg.binding_store_path,
-            legacy_path=self.cfg.legacy_binding_store_path,
             logger=logger,
         )
 

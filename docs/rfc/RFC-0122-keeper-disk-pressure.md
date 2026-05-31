@@ -177,7 +177,7 @@ P2-P3 가 unified family interface. P4 staleness. P5 tunability. P6 observabilit
 
 - **Risk 1**: `Resource_pressure.S` functor refactor 가 RFC-0101 (FD) 의 *기존 caller* 깨뜨림. → P3 의 alias 가 기존 API 보존. Caller migration P3 안에서 점진적.
 - **Risk 2**: Probe staleness 가 *기존 production* 보다 strict — 운영자 부담. → P4 의 default 가 *기존 behavior 보존* (max_cached_age = infinity by default), opt-in tuning.
-- **Risk 3**: Env knob (P5) 도입이 *config doctor* 부담. → P5 가 default 값 검증 후 doc 갱신.
+- **Risk 3**: Env knob (P5) 도입이 config validation 부담. → P5 가 default 값 검증 후 doc 갱신.
 - **Risk 4**: Circuit breaker telemetry (P6) 가 *false positive* — fleet 가 disk pressure 없는데 trigger. → telemetry 가 4주 baseline 후 threshold 설정, alerting 별도.
 
 Rollback: P2-P3 functor 비활성 가능 (각 모듈 standalone 유지). P4 staleness default infinity 시 영향 0. P5/P6 env knob/counter 명시적 disable.

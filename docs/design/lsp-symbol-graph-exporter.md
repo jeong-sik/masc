@@ -146,10 +146,10 @@ The static seed check is intentionally not a live exporter proof. To verify
 whether the local runner can attempt a future live export, run:
 
 ```bash
-scripts/ide/export-symbol-graph --doctor-live-lsp
+scripts/ide/export-symbol-graph
 ```
 
-The doctor prints JSON for the languages present in the artifact and checks
+The exporter prints JSON for the languages present in the artifact and checks
 only executable availability, currently `ocaml-lsp-server` for OCaml files and
 `typescript-language-server` for TypeScript files. It does not call
 `/api/v1/ide/lsp`, open a WebSocket, spawn LSP servers, update

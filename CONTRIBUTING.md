@@ -217,7 +217,6 @@ operator-facing `Log.*.info`).
 
 Before adding a new `*_to_yojson` function or Prometheus emitter that
 touches provider/model identity, read
-[`docs/architecture/runtime-lens-boundary.md`](docs/architecture/runtime-lens-boundary.md)
 and apply its 3-question decision rule (who reads it / is there a
 `redacted_*` companion / sibling field consistency).
 

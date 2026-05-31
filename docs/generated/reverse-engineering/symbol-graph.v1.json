@@ -12,7 +12,7 @@
     ],
     "manifest": "docs/design/lsp-symbol-graph-exporter.md",
     "check_command": "scripts/ide/export-symbol-graph --check",
-    "live_lsp_prereq_command": "scripts/ide/export-symbol-graph --doctor-live-lsp",
+    "live_lsp_prereq_command": "scripts/ide/export-symbol-graph",
     "required_live_lsp_executables": {
       "ocaml": [
         "ocaml-lsp-server"
@@ -710,7 +710,7 @@
     },
     {
       "code": "live_lsp_prerequisites_not_part_of_static_check",
-      "reason": "The static seed validator proves schema and path/test ownership only. Live export also requires local language-server executables, checked separately by scripts/ide/export-symbol-graph --doctor-live-lsp.",
+      "reason": "The static seed validator proves schema and path/test ownership only. Live export also requires local language-server executables, checked separately by scripts/ide/export-symbol-graph.",
       "follow_up": "Install or pin ocaml-lsp-server and typescript-language-server before replacing static ranges with live LSP documentSymbol/references responses."
     },
     {

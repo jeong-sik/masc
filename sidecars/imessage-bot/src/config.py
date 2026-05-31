@@ -28,13 +28,6 @@ DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/imessage/status.json"
 DEFAULT_CURSOR_PATH: Final[str] = ".gate/runtime/imessage/cursor.json"
 CHAT_DB_PATH: Final[str] = os.path.expanduser("~/Library/Messages/chat.db")
 
-# Legacy layout from the pre-v0.9.0 release (OCaml side migrated in #7468 B3b).
-# bot.py's _load_bindings uses this as a read-fallback — if the new
-# binding_store_path does not exist and the legacy one does, the legacy file
-# is loaded and the next write lands at the new default.
-LEGACY_BINDING_STORE_PATH: Final[str] = ".masc/connectors/imessage/bindings.json"
-
-
 def _runtime_toml_path() -> Path:
     raw = os.getenv("MASC_BASE_PATH", "").strip()
     root = Path(raw).expanduser() if raw else Path.cwd()
@@ -119,11 +112,6 @@ class BotConfig(BaseSettings):
     binding_audit_path: str = Field(default=DEFAULT_BINDING_AUDIT_PATH)
     status_path: str = Field(default=DEFAULT_STATUS_PATH)
     cursor_path: str = Field(default=DEFAULT_CURSOR_PATH)
-    # Legacy read-fallback (pre-v0.9.0 layout). Not env-configurable — intended
-    # to be a stable constant; operators still on an even older layout should
-    # set IMESSAGE_BINDING_STORE_PATH explicitly.
-    legacy_binding_store_path: str = Field(default=LEGACY_BINDING_STORE_PATH)
-
     # chat.db
     chat_db_path: str = Field(default=CHAT_DB_PATH)
 

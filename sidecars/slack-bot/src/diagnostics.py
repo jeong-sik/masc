@@ -58,7 +58,6 @@ async def run_diagnostics() -> Diagnostics:
     doc.register(check_default_keeper_exists)
     doc.register(check_gate_reachable)
     doc.register(check_binding_paths_writable)
-    doc.register(check_legacy_binding_path)
     return doc
 
 
@@ -349,22 +348,3 @@ async def check_binding_paths_writable() -> Check:
             callback=_attempt_chmod if auto_fix_targets else None,
         ),
     )
-
-
-async def check_legacy_binding_path() -> Check:
-    cfg = _config_or_none()
-    if cfg is None:
-        return Check(name="legacy binding path", severity=Severity.skip, message="config 로드 실패로 건너뜀")
-    base = os.getenv("MASC_BASE_PATH", "").strip()
-    legacy_raw = cfg.legacy_binding_store_path
-    p = Path(legacy_raw).expanduser()
-    legacy = p if p.is_absolute() else (Path(base).expanduser() / p if base else Path.cwd() / p)
-    if legacy.exists():
-        return Check(
-            name="legacy binding path",
-            severity=Severity.warn,
-            detail=str(legacy),
-            message="pre-v0.9.0 binding store 가 남아 있습니다.",
-            hint="봇을 기동하면 다음 save 시 신 포맷으로 이관됩니다.",
-        )
-    return Check(name="legacy binding path", severity=Severity.ok, detail="none", message="")

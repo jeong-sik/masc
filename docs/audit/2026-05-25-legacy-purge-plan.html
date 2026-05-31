@@ -734,7 +734,7 @@
           <tr>
             <td>Dashboard dev-token legacy file fallback</td>
             <td><span class="status done">merged #18788</span></td>
-            <td>Stop reading, migrating, or deleting legacy <code>.masc/auth/dashboard-dev.token</code>. The runtime now only accepts the canonical <code>.masc/auth/dashboard.token</code> dev-token file, and doctor reports only that canonical file as present.</td>
+            <td>Stop reading, migrating, or deleting legacy <code>.masc/auth/dashboard-dev.token</code>. The runtime now only accepts the canonical <code>.masc/auth/dashboard.token</code> dev-token file, and diagnostics report only that canonical file as present.</td>
             <td>Merged as <code>c0691f6c7</code>. Tests assert the old file is ignored and left untouched while <code>ensure_dashboard_dev_token</code> mints/reuses only the canonical dashboard token.</td>
           </tr>
           <tr>

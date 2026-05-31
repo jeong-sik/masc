@@ -193,7 +193,7 @@ let tool_definitions = [
   ("masc_deep_review",
    {|Request adversarial code review with isolated context. The reviewer sees ONLY the specified files and your question — no JIRA, Slack, memory, or design docs. Use this to catch structural bugs that domain context might mask.|},
    [
-     ("target_files", "array", true, "List of file paths relative to room base (e.g., [\"lib/foo.ml\"])");
+     ("target_files", "array", true, "List of file paths relative to coord base (e.g., [\"lib/foo.ml\"])");
      ("question", "string", true, "Specific question for the reviewer (e.g., 'Are there off-by-one errors?')");
    ]);
 ]

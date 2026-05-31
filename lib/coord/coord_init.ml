@@ -1,6 +1,6 @@
 (** Coord Init - Coord initialization, reset, pause, and resume.
 
-    Extracted from Coord module. Handles room directory bootstrapping,
+    Extracted from Coord module. Handles coord directory bootstrapping,
     state creation, and pause/resume lifecycle. *)
 
 open Masc_domain
@@ -10,10 +10,10 @@ open Coord_backlog
 open Coord_broadcast
 open Coord_backlog
 
-(** Initialize MASC room *)
+(** Initialize MASC coord *)
 let init config ~agent_name =
   invalidate_initialized_cache ();
-  (* Ensure root .masc structure exists even when initializing a non-default room. *)
+  (* Ensure root .masc structure exists even when initializing a non-default coord. *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
   let root_keepers_dir = Filename.concat root_dir "keepers" in
@@ -92,19 +92,19 @@ let init config ~agent_name =
     write_state config state;
     invalidate_initialized_cache ();
     (* Preserve a migrated backlog when blocking bootstrap has already
-       promoted legacy room state into the flattened root namespace. *)
+       promoted legacy coord state into the flattened root namespace. *)
     if not (path_exists config (backlog_path config))
     then (
       let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
       write_backlog config backlog);
-    let result = "MASC room created!" in
+    let result = "MASC coord created!" in
     (* Auto-join if agent specified — uses Coord_lifecycle.join via the caller *)
     match agent_name with
     | Some _name -> result (* Caller is responsible for joining after init *)
     | None -> result)
 ;;
 
-(** Pause the room - stops orchestrator from spawning new agents *)
+(** Pause the coord - stops orchestrator from spawning new agents *)
 let pause config ~by ~reason =
   let _ =
     update_state config (fun s ->
@@ -125,7 +125,7 @@ let pause config ~by ~reason =
   ()
 ;;
 
-(** Resume the room *)
+(** Resume the coord *)
 let resume config ~by =
   let state = read_state config in
   if not state.paused
@@ -145,7 +145,7 @@ let resume config ~by =
     `Resumed)
 ;;
 
-(** Reset room - delete .masc/ folder *)
+(** Reset coord - delete .masc/ folder *)
 let reset config =
   if not (is_initialized config)
   then "MASC not initialized. Nothing to reset."
@@ -163,5 +163,5 @@ let reset config =
     in
     rm_rf (masc_dir config);
     invalidate_initialized_cache ();
-    Printf.sprintf "MASC room reset! (.masc/ deleted at %s)" config.base_path)
+    Printf.sprintf "MASC coord reset! (.masc/ deleted at %s)" config.base_path)
 ;;

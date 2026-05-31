@@ -119,7 +119,7 @@ let test_local_shell_failure_class_reaches_tool_called () =
       let tools =
         match
           Worker_container.build_local_shell_tools
-            ~room_config:(Some config)
+            ~coord_config:(Some config)
             ~worker_name:"local-worker-test"
             ~workdir:base_dir
         with

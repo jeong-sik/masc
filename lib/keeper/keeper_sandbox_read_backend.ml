@@ -90,7 +90,7 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
   @ Keeper_sandbox_runtime.docker_config_mount_args
       ~base_path
       ~container_root:croot
-  @ Keeper_sandbox_runtime.docker_room_state_mount_args
+  @ Keeper_sandbox_runtime.docker_coord_state_mount_args
       ~base_path
       ~container_root:croot
   @ [

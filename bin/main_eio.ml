@@ -261,7 +261,7 @@ let dispatch_route ~router ~request ~path reqd =
              ~status:"server_error" ~message:"Server not initialized" ())
           reqd
       | Some state ->
-        let config = state.Mcp_server.room_config in
+        let config = state.Mcp_server.coord_config in
         (match state.Mcp_server.sw, state.Mcp_server.clock with
         | Some sw, Some clock ->
             let (status, resp_body) =
@@ -426,7 +426,7 @@ let dispatch_route ~router ~request ~path reqd =
       let format = Option.value ~default:"nested" (query_param request "format") in
       let voter = board_voter_query request in
       let config =
-        Option.map (fun state -> state.Mcp_server.room_config) !server_state
+        Option.map (fun state -> state.Mcp_server.coord_config) !server_state
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes:false

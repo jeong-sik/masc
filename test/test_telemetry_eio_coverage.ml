@@ -73,7 +73,7 @@ let write_dated_file dir month day lines =
    event Type Tests
    ============================================================ *)
 
-let test_event_agent_joined () =
+let test_event_agent_session_bounded () =
   let e = Telemetry_eio.Agent_joined {
     agent_id = "agent_llm_a-001";
     capabilities = ["code"; "review"];
@@ -392,7 +392,7 @@ let test_metrics_json_roundtrip () =
    event_to_json Tests
    ============================================================ *)
 
-let test_event_to_json_agent_joined () =
+let test_event_to_json_agent_session_bounded () =
   let e = Telemetry_eio.Agent_joined {
     agent_id = "test";
     capabilities = ["a"; "b"];
@@ -589,7 +589,7 @@ let test_track_applies_default_retention_days () =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
         in
         write_dated_file telemetry_dir "2020-01" "01" [ {|{"old":true}|} ];
-        Telemetry_eio.track_agent_joined config ~agent_id:"retention-test" ();
+        Telemetry_eio.track_agent_session_bounded config ~agent_id:"retention-test" ();
         check bool "old telemetry file pruned by default retention" false
           (Sys.file_exists old_file))))
 
@@ -611,7 +611,7 @@ let test_track_applies_telemetry_max_bytes () =
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
         write_dated_file telemetry_dir "2020-01" "02"
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
-        Telemetry_eio.track_agent_joined config ~agent_id:"max-bytes-test" ();
+        Telemetry_eio.track_agent_session_bounded config ~agent_id:"max-bytes-test" ();
         check bool "old telemetry file 1 pruned by max bytes" false
           (Sys.file_exists old_file_1);
         check bool "old telemetry file 2 pruned by max bytes" false
@@ -626,7 +626,7 @@ let test_track_applies_telemetry_max_bytes () =
 let () =
   run "Telemetry Eio Coverage" [
     "event", [
-      test_case "agent_joined" `Quick test_event_agent_joined;
+      test_case "agent_session_bounded" `Quick test_event_agent_session_bounded;
       test_case "agent_left" `Quick test_event_agent_left;
       test_case "task_started" `Quick test_event_task_started;
       test_case "task_completed" `Quick test_event_task_completed;
@@ -655,7 +655,7 @@ let () =
         test_parse_event_records_drop_increments_counter;
     ];
     "event_to_json", [
-      test_case "agent_joined" `Quick test_event_to_json_agent_joined;
+      test_case "agent_session_bounded" `Quick test_event_to_json_agent_session_bounded;
       test_case "task_completed" `Quick test_event_to_json_task_completed;
     ];
     "count_active_agents", [

@@ -63,7 +63,7 @@ let record_collaborations_async ~tag ~context ~agent ~peers =
     between the departing agent and every other active agent.
     Runs asynchronously — returns immediately.
     20 peers = 1 HTTP request (alias batching). *)
-let on_agent_leave ~leaving_agent ~active_agents =
+let on_agent_session_ended ~leaving_agent ~active_agents =
   let peers = List.filter (fun name -> name <> leaving_agent) active_agents in
   if peers <> [] then
     record_collaborations_async

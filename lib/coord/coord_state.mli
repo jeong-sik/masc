@@ -10,19 +10,19 @@ val normalized_string_list : string list -> string list
     entries; object-shaped historical entries are ignored during repair. *)
 val recover_active_agent_name : Yojson.Safe.t -> string option
 
-val recover_room_state :
+val recover_coord_state :
   Coord_utils_backend_setup.config ->
-  Yojson.Safe.t -> Masc_domain.room_state
+  Yojson.Safe.t -> Masc_domain.coord_state
 
 val write_state :
-  Coord_utils_backend_setup.config -> Masc_domain.room_state -> unit
+  Coord_utils_backend_setup.config -> Masc_domain.coord_state -> unit
 
-val read_state : Coord_utils_backend_setup.config -> Masc_domain.room_state
+val read_state : Coord_utils_backend_setup.config -> Masc_domain.coord_state
 
 val update_state :
   Coord_utils_backend_setup.config ->
-  (Masc_domain.room_state -> Masc_domain.room_state) ->
-  Masc_domain.room_state
+  (Masc_domain.coord_state -> Masc_domain.coord_state) ->
+  Masc_domain.coord_state
 
 val next_seq : Coord_utils_backend_setup.config -> int
 val is_paused : Coord_utils_backend_setup.config -> bool

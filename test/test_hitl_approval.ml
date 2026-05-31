@@ -170,7 +170,7 @@ let with_test_config f =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      f state.room_config)
+      f state.coord_config)
 
 let with_eio_base_path f =
   Eio_main.run @@ fun env ->
@@ -1016,7 +1016,7 @@ let test_callback_production_tool_edit_file_requires_approval () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let config = state.room_config in
+  let config = state.coord_config in
   Eio.Fiber.fork ~sw (fun () ->
     let cb =
       GP.to_oas_approval_callback
@@ -1282,7 +1282,7 @@ let test_callback_always_approve_respects_forbidden () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let config = state.room_config in
+      let config = state.coord_config in
       let meta =
         meta_from_json
           (`Assoc [

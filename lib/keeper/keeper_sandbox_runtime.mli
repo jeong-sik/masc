@@ -224,13 +224,13 @@ val docker_config_mount_args
     outside [<container_root>] because that path is itself a bind-mounted
     playground; host-absolute [.masc] targets must never be used as Docker
     mount destinations. *)
-val docker_room_state_mount_specs
+val docker_coord_state_mount_specs
   :  base_path:string
   -> container_root:string
   -> string list
 
-(** Docker [-v ...] argv fragment for {!docker_room_state_mount_specs}. *)
-val docker_room_state_mount_args
+(** Docker [-v ...] argv fragment for {!docker_coord_state_mount_specs}. *)
+val docker_coord_state_mount_args
   :  base_path:string
   -> container_root:string
   -> string list

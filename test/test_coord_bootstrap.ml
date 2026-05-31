@@ -8,21 +8,21 @@ module Types = Masc_domain
 
     The module has two exposed functions:
 
-    - [default_room_state config] — pure (modulo [now_iso ()] for
-      [started_at]) constructor for [Masc_domain.room_state].
-    - [ensure_room_bootstrap config] — idempotent FS bootstrap
-      that creates [.masc/<dirs>] and seed [room_state.json] /
+    - [default_coord_state config] — pure (modulo [now_iso ()] for
+      [started_at]) constructor for [Masc_domain.coord_state].
+    - [ensure_coord_bootstrap config] — idempotent FS bootstrap
+      that creates [.masc/<dirs>] and seed [coord_state.json] /
       [backlog.json] under both root and scoped layouts.
 
     Properties pinned:
 
-    1. {b default_room_state constants} — every field except
+    1. {b default_coord_state constants} — every field except
        [started_at] and [project] is a fixed default; [project]
        derives from [Filename.basename config.base_path].
-    2. {b ensure_room_bootstrap idempotency} — running it twice
+    2. {b ensure_coord_bootstrap idempotency} — running it twice
        on the same tmpdir leaves the seed files unchanged
        (mtime-stable) and produces no extra directories.
-    3. {b ensure_room_bootstrap creates expected dirs} — after
+    3. {b ensure_coord_bootstrap creates expected dirs} — after
        a single call, [.masc/agents/], [.masc/tasks/],
        [.masc/messages/] exist plus the root mirrors. *)
 
@@ -59,12 +59,12 @@ let with_tmp f =
     ~finally:(fun () -> try rm_rf dir with _ -> ())
     (fun () -> f dir)
 
-(* ── (1) default_room_state ─────────────────────────────── *)
+(* ── (1) default_coord_state ─────────────────────────────── *)
 
-let test_default_room_state_constants () =
+let test_default_coord_state_constants () =
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      let st = B.default_room_state config in
+      let st = B.default_coord_state config in
       assert (st.protocol_version = "0.1.0");
       assert (st.message_seq = 0);
       assert (st.active_agents = []);
@@ -78,17 +78,17 @@ let test_default_room_state_constants () =
       (* started_at is non-empty (now_iso ()). *)
       assert (st.started_at <> ""))
 
-let test_default_room_state_project_from_base_path () =
+let test_default_coord_state_project_from_base_path () =
   (* project = Filename.basename config.base_path *)
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      let st = B.default_room_state config in
+      let st = B.default_coord_state config in
       assert (st.project = Filename.basename dir))
 
-let test_default_room_state_started_at_iso_format () =
+let test_default_coord_state_started_at_iso_format () =
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      let st = B.default_room_state config in
+      let st = B.default_coord_state config in
       (* ISO 8601: starts with 4-digit year + "-". *)
       let s = st.started_at in
       assert (String.length s >= 19);
@@ -98,12 +98,12 @@ let test_default_room_state_started_at_iso_format () =
       assert (s.[7] = '-');
       assert (s.[10] = 'T'))
 
-(* ── (2) ensure_room_bootstrap creates dirs ──────────────── *)
+(* ── (2) ensure_coord_bootstrap creates dirs ──────────────── *)
 
-let test_ensure_room_bootstrap_creates_scoped_dirs () =
+let test_ensure_coord_bootstrap_creates_scoped_dirs () =
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      B.ensure_room_bootstrap config;
+      B.ensure_coord_bootstrap config;
       let masc = Filename.concat dir ".masc" in
       assert (Sys.file_exists masc);
       assert (Sys.is_directory masc);
@@ -114,12 +114,12 @@ let test_ensure_room_bootstrap_creates_scoped_dirs () =
           assert (Sys.is_directory p))
         [ "agents"; "tasks"; "messages" ])
 
-let test_ensure_room_bootstrap_creates_root_dirs () =
+let test_ensure_coord_bootstrap_creates_root_dirs () =
   (* The root layout (under [.masc/] sibling) — agents / keepers /
      traces / tasks / messages — should also exist after bootstrap. *)
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      B.ensure_room_bootstrap config;
+      B.ensure_coord_bootstrap config;
       let root_dir =
         Coord_utils.masc_root_dir config
       in
@@ -130,11 +130,11 @@ let test_ensure_room_bootstrap_creates_root_dirs () =
           assert (Sys.is_directory p))
         [ "agents"; "keepers"; "traces"; "tasks"; "messages" ])
 
-let test_ensure_room_bootstrap_seeds_state_json () =
+let test_ensure_coord_bootstrap_seeds_state_json () =
   (* The scoped state JSON file should be created. *)
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      B.ensure_room_bootstrap config;
+      B.ensure_coord_bootstrap config;
       let state_path = Coord_utils.state_path config in
       assert (Sys.file_exists state_path);
       let backlog_path =
@@ -144,35 +144,35 @@ let test_ensure_room_bootstrap_seeds_state_json () =
 
 (* ── (3) idempotency ──────────────────────────────────────── *)
 
-let test_ensure_room_bootstrap_idempotent () =
+let test_ensure_coord_bootstrap_idempotent () =
   (* Running twice must not corrupt or duplicate — file presence
      after the second call equals after the first. *)
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      B.ensure_room_bootstrap config;
+      B.ensure_coord_bootstrap config;
       let state_path = Coord_utils.state_path config in
       let mtime1 = (Unix.stat state_path).st_mtime in
       (* Second invocation must NOT rewrite the seed file (the
          impl skips when path_exists). *)
-      B.ensure_room_bootstrap config;
+      B.ensure_coord_bootstrap config;
       let mtime2 = (Unix.stat state_path).st_mtime in
       assert (mtime1 = mtime2);
       (* Seeded files still exist. *)
       assert (Sys.file_exists state_path))
 
-let test_ensure_room_bootstrap_does_not_clobber_existing_state () =
+let test_ensure_coord_bootstrap_does_not_clobber_existing_state () =
   (* If a state file already exists with custom content, bootstrap
      must NOT overwrite it. *)
   with_tmp (fun dir ->
       let config = Coord.default_config dir in
-      B.ensure_room_bootstrap config;
+      B.ensure_coord_bootstrap config;
       let state_path = Coord_utils.state_path config in
       (* Replace the seeded state with a sentinel JSON. *)
       let oc = open_out state_path in
       output_string oc "{\"sentinel\":\"do not clobber\"}";
       close_out oc;
       (* Re-bootstrap. *)
-      B.ensure_room_bootstrap config;
+      B.ensure_coord_bootstrap config;
       let ic = open_in state_path in
       let body = input_line ic in
       close_in ic;
@@ -187,12 +187,12 @@ let test_ensure_room_bootstrap_does_not_clobber_existing_state () =
 (* ── runner ───────────────────────────────────────────────── *)
 
 let () =
-  test_default_room_state_constants ();
-  test_default_room_state_project_from_base_path ();
-  test_default_room_state_started_at_iso_format ();
-  test_ensure_room_bootstrap_creates_scoped_dirs ();
-  test_ensure_room_bootstrap_creates_root_dirs ();
-  test_ensure_room_bootstrap_seeds_state_json ();
-  test_ensure_room_bootstrap_idempotent ();
-  test_ensure_room_bootstrap_does_not_clobber_existing_state ();
+  test_default_coord_state_constants ();
+  test_default_coord_state_project_from_base_path ();
+  test_default_coord_state_started_at_iso_format ();
+  test_ensure_coord_bootstrap_creates_scoped_dirs ();
+  test_ensure_coord_bootstrap_creates_root_dirs ();
+  test_ensure_coord_bootstrap_seeds_state_json ();
+  test_ensure_coord_bootstrap_idempotent ();
+  test_ensure_coord_bootstrap_does_not_clobber_existing_state ();
   print_endline "test_coord_bootstrap: all assertions passed"

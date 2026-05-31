@@ -172,7 +172,7 @@ let status_summary_string
     ~(planning_state : planning_context_state)
     ~(suggested_next : string list)
     ~(attention_items : string list)
-    ~(state : Masc_domain.room_state)
+    ~(state : Masc_domain.coord_state)
     ~(backlog : Masc_domain.backlog) =
   
   let max_agents_display = 40 in

@@ -283,7 +283,7 @@ let test_snapshot_governance_cases_skip_bad_entries_with_metric () =
   let json = Meta_cognition.snapshot_json ~limit:5 ctx.config in
   let open Yojson.Safe.Util in
   Alcotest.(check int) "valid governance case still counted" 1
-    (json |> member "room_state" |> member "governance_case_count" |> to_int);
+    (json |> member "coord_state" |> member "governance_case_count" |> to_int);
   Alcotest.(check (float 0.1)) "broken file increments entry_load_error" 1.0
     (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
      -. before_entry);

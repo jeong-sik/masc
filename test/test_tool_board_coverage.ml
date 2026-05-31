@@ -1124,7 +1124,7 @@ let test_board_curation_submit_roundtrips_to_read () =
 
 let inline_board_dispatch ~sw ~clock name args =
   let state = Mcp_server.create_state ~base_path:_test_base_path in
-  Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.room_config
+  Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.coord_config
     ~agent_name:"inline-curator" ~arguments:args ~state ~sw ~clock ~name
     ~start_time:(Unix.gettimeofday ())
 

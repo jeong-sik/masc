@@ -242,13 +242,13 @@ let test_status_response_roundtrip () =
             }
           ]
       ; message_count = 10
-      ; room_path = "/tmp/test"
+      ; workspace_path = "/tmp/test"
       }
   in
   let bytes = T.StatusResponse.to_bytes resp in
   let decoded = T.StatusResponse.of_bytes bytes in
   Alcotest.(check int) "message_count" 10 decoded.message_count;
-  Alcotest.(check string) "room_path" "/tmp/test" decoded.room_path;
+  Alcotest.(check string) "workspace_path" "/tmp/test" decoded.workspace_path;
   Alcotest.(check int) "agents count" 1 (List.length decoded.agents);
   Alcotest.(check int) "tasks count" 1 (List.length decoded.tasks);
   let task = List.hd decoded.tasks in
@@ -341,11 +341,11 @@ let test_grpc_server_registers_health_service () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        with_temp_dir "masc-grpc-health" (fun dir ->
-         let room_config = Coord_utils.default_config dir in
+         let coord_config = Coord_utils.default_config dir in
          let server =
            Masc_mcp.Masc_grpc_server.create_server
              ~port:Masc_mcp.Masc_grpc_server.default_port
-             ~room_config
+             ~coord_config
              ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
          in
          let services = Grpc_eio.Server.list_services server in
@@ -372,18 +372,18 @@ let test_get_status_projects_backlog_tasks () =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_temp_dir "masc-grpc-status" (fun dir ->
-    let room_config = Coord_utils.default_config dir in
-    ignore (Masc_mcp.Coord.init room_config ~agent_name:(Some "alpha"));
+    let coord_config = Coord_utils.default_config dir in
+    ignore (Masc_mcp.Coord.init coord_config ~agent_name:(Some "alpha"));
     ignore
       (Masc_mcp.Coord.add_task
-         room_config
+         coord_config
          ~title:"Fix stale projection"
          ~priority:1
          ~description:"Use backlog SSOT for gRPC status");
-    ignore (Masc_mcp.Coord.claim_next room_config ~agent_name:"alpha");
+    ignore (Masc_mcp.Coord.claim_next coord_config ~agent_name:"alpha");
     let service =
       Masc_mcp.Masc_grpc_service.create_service
-        ~room_config
+        ~coord_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
     in
     match Grpc_eio.Service.get_method service "GetStatus" with
@@ -485,10 +485,10 @@ let test_join_handler_invalid_bytes_raise_grpc_status () =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_temp_dir "masc-grpc-invalid-join" (fun dir ->
-    let room_config = Coord_utils.default_config dir in
+    let coord_config = Coord_utils.default_config dir in
     let service =
       Masc_mcp.Masc_grpc_service.create_service
-        ~room_config
+        ~coord_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
     in
     match Grpc_eio.Service.get_method service "Join" with
@@ -507,10 +507,10 @@ let test_join_handler_invalid_bytes_raise_grpc_status () =
 
 let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
   with_temp_dir "masc-grpc-invalid-subscribe" (fun dir ->
-    let room_config = Coord_utils.default_config dir in
+    let coord_config = Coord_utils.default_config dir in
     let service =
       Masc_mcp.Masc_grpc_service.create_service
-        ~room_config
+        ~coord_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
     in
     match Grpc_eio.Service.get_method service "Subscribe" with
@@ -532,10 +532,10 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_temp_dir "masc-grpc-invalid-heartbeat" (fun dir ->
-    let room_config = Coord_utils.default_config dir in
+    let coord_config = Coord_utils.default_config dir in
     let service =
       Masc_mcp.Masc_grpc_service.create_service
-        ~room_config
+        ~coord_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with

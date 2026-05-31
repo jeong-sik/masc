@@ -15,8 +15,8 @@ module Keeper_stream = Server_routes_http_keeper_stream
   router
   |> Http.Router.get "/api/v1/status" (fun request reqd ->
        with_read_auth (fun state _req reqd ->
-         let config = state.Mcp_server.room_config in
-         let status = Room_protocol.status config in
+         let config = state.Mcp_server.coord_config in
+         let status = Coord_protocol.status config in
          let json = `Assoc [
            ("cluster", `String status.cluster);
            ("project", `String status.project);
@@ -27,14 +27,14 @@ module Keeper_stream = Server_routes_http_keeper_stream
        ) request reqd)
   |> Http.Router.get "/api/v1/tasks" (fun request reqd ->
        with_read_auth (fun state req reqd ->
-         let config = state.Mcp_server.room_config in
+         let config = state.Mcp_server.coord_config in
          let status_filter = query_param req "status" in
          let include_done = bool_query_param req "include_done" ~default:false in
          let include_cancelled = bool_query_param req "include_cancelled" ~default:false in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let filtered =
-           Room_protocol.tasks ?status_filter ~include_done
+           Coord_protocol.tasks ?status_filter ~include_done
              ~include_cancelled config
          in
          let total = List.length filtered in
@@ -52,7 +52,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
                ("priority", `Int t.priority);
                ( "assignee",
                  Json_util.string_opt_to_json
-                   (Room_protocol.task_assignee t) );
+                   (Coord_protocol.task_assignee t) );
                ("created_at", `String t.created_at);
              ]
            in
@@ -73,12 +73,12 @@ module Keeper_stream = Server_routes_http_keeper_stream
        ) request reqd)
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
        with_read_auth (fun state req reqd ->
-         let config = state.Mcp_server.room_config in
+         let config = state.Mcp_server.coord_config in
          let status_filter = query_param req "status" in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let agents =
-           Room_protocol.agents ?status_filter config
+           Coord_protocol.agents ?status_filter config
          in
          let total = List.length agents in
          let page =
@@ -108,12 +108,12 @@ module Keeper_stream = Server_routes_http_keeper_stream
        ) request reqd)
   |> Http.Router.get "/api/v1/messages" (fun request reqd ->
        with_read_auth (fun state req reqd ->
-         let config = state.Mcp_server.room_config in
+         let config = state.Mcp_server.coord_config in
          let since_seq = int_query_param req "since_seq" ~default:0 in
          let limit = int_query_param req "limit" ~default:20 in
          let agent_filter = query_param req "agent" in
          let filtered =
-           Room_protocol.messages ?agent_filter ~since_seq ~limit:500 config
+           Coord_protocol.messages ?agent_filter ~since_seq ~limit:500 config
          in
          let total = List.length filtered in
          let page = filtered |> List.filteri (fun idx _ -> idx < limit) in

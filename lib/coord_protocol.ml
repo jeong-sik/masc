@@ -6,13 +6,13 @@ type status = {
 }
 
 let status config =
-  let room_state = Coord.read_state config in
+  let coord_state = Coord.read_state config in
   let tempo = Tempo.get_tempo config in
   {
     cluster = Env_config_core.cluster_name ();
-    project = room_state.project;
+    project = coord_state.project;
     tempo_interval_s = tempo.current_interval_s;
-    paused = room_state.paused;
+    paused = coord_state.paused;
   }
 
 let task_status_matches status_filter (task : Masc_domain.task) =

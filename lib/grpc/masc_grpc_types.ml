@@ -362,7 +362,7 @@ module StatusResponse = struct
     { agents : agent_info list
     ; tasks : task_info list
     ; message_count : int
-    ; room_path : string
+    ; workspace_path : string
     }
 
   let of_bytes bytes =
@@ -370,7 +370,7 @@ module StatusResponse = struct
     { agents = List.map agent_info_of_proto p.agents
     ; tasks = List.map task_info_of_proto p.tasks
     ; message_count = p.message_count
-    ; room_path = p.room_path
+    ; workspace_path = p.workspace_path
     }
   ;;
 
@@ -380,7 +380,7 @@ module StatusResponse = struct
       { agents = List.map agent_info_to_proto t.agents
       ; tasks = List.map task_info_to_proto t.tasks
       ; message_count = t.message_count
-      ; room_path = t.room_path
+      ; workspace_path = t.workspace_path
       }
   ;;
 end

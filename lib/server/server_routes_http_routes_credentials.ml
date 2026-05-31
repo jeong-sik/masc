@@ -145,7 +145,7 @@ let add_routes router =
   router
   |> Http.Router.get "/api/v1/credentials" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
+         let base_path = state.Mcp_server.coord_config.base_path in
          match Credential_store.load_all ~base_path with
          | Error msg ->
              Http.Response.json_value ~status:`Internal_server_error
@@ -172,7 +172,7 @@ let add_routes router =
        ) request reqd)
   |> Http.Router.prefix_get "/api/v1/credentials/" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
+         let base_path = state.Mcp_server.coord_config.base_path in
          let path = Http.Request.path request in
          match extract_path_param ~prefix:"/api/v1/credentials/" path with
          | None | Some "" ->
@@ -228,7 +228,7 @@ let add_routes router =
                  match credential_of_json json with
                  | Error msg -> response `Bad_request msg
                  | Ok credential ->
-                     let base_path = state.Mcp_server.room_config.base_path in
+                     let base_path = state.Mcp_server.coord_config.base_path in
                      (* Sanity-check the credential id so it can be
                         embedded in a path safely (used both for
                         server-derived gh_config_dir and for any
@@ -356,7 +356,7 @@ let add_routes router =
   |> Http.Router.prefix_delete "/api/v1/credentials/" (fun request reqd ->
          with_token_permission_auth ~permission:Masc_domain.CanAdmin
            (fun state _agent_name req reqd ->
-             let base_path = state.Mcp_server.room_config.base_path in
+             let base_path = state.Mcp_server.coord_config.base_path in
              let path = Http.Request.path request in
              match extract_path_param ~prefix:"/api/v1/credentials/" path with
              | None | Some "" ->

@@ -127,7 +127,7 @@ let start ~sw ~env ~clock ~state =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:state.Mcp_server.room_config
+        ~config:state.Mcp_server.coord_config
     in
     let policy_label =
       match policy with

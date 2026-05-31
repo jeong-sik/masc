@@ -143,7 +143,7 @@ module StatusResponse : sig
     { agents : agent_info list
     ; tasks : task_info list
     ; message_count : int
-    ; room_path : string
+    ; workspace_path : string
     }
 
   val of_bytes : string -> t

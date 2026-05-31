@@ -68,7 +68,7 @@ message StatusResponse {
   repeated Agent agents = 1;
   repeated Task tasks = 2;
   int32 message_count = 3;
-  string room_path = 4;
+  string workspace_path = 4;
   string project_name = 5;
 }
 

@@ -92,7 +92,7 @@ let test_join_uses_default_namespace () =
             |> Yojson.Safe.Util.member "type"
             |> Yojson.Safe.Util.to_string
           in
-          check string "event type is agent_join" "agent_join" event_type))
+          check string "event type is agent_session_bound" "agent_session_bound" event_type))
 
 let () =
   run "flat_namespace"

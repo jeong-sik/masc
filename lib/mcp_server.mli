@@ -173,7 +173,7 @@ val schema_markdown : string
 (** {1 Server state} *)
 
 type server_state = {
-  mutable room_config : Coord.config;
+  mutable coord_config : Coord.config;
   session_registry : Session.registry;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
@@ -185,7 +185,7 @@ type server_state = {
   net : Eio_context.eio_net option;
 }
 (** Runtime state threaded through every request handler.
-    [room_config] is mutable so room-switch tools can swap
+    [coord_config] is mutable so room-switch tools can swap
     backends mid-flight.  Eio handles are [option] because
     the legacy non-Eio bootstrap ({!create_state}) still
     needs to construct a state without an active switch. *)

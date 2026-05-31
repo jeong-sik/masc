@@ -100,7 +100,7 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
                    (Printexc.to_string exn))))
 
 let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.coord_config in
   (* Fast-path: if the proactive execution refresh hasn't produced a result
      yet, return "initializing" immediately instead of blocking for 15-20s
      on cold-start on-demand compute. The frontend retries every 3s via
@@ -243,7 +243,7 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
   if not (cached_surface_has_success Server_dashboard_http_execution_surfaces.execution_cache) then
     None
   else
-    let config = state.Mcp_server.room_config in
+    let config = state.Mcp_server.coord_config in
     let shell_json = cached_shell_json_for_namespace ~config in
     let execution_json =
       cached_surface_json Server_dashboard_http_execution_surfaces.execution_cache

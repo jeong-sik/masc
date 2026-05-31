@@ -55,7 +55,7 @@ let stop_keeper_fn
   : (string -> unit) Atomic.t
   = Atomic.make (fun _name -> ())
 
-(** Relation materializer: agent session end — wraps Relation_materializer.on_agent_leave. *)
+(** Relation materializer: agent session end — wraps Relation_materializer.on_agent_session_ended. *)
 let relation_on_leave_fn
   : (leaving_agent:string -> active_agents:string list -> unit) Atomic.t
   = Atomic.make (fun ~leaving_agent:_ ~active_agents:_ -> ())

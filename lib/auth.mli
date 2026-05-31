@@ -24,7 +24,7 @@ val save_private_text_file : string -> string -> unit
 
 val auth_dir : string -> string
 val agents_dir : string -> string
-val room_secret_file : string -> string
+val coord_secret_file : string -> string
 val auth_config_file : string -> string
 val credential_file : string -> string -> string
 val internal_keeper_token_hash_file : string -> string
@@ -286,11 +286,11 @@ val authorize_tool_v2 :
 
 (** {1 Room Secret} *)
 
-val init_room_secret : string -> string
-(** [init_room_secret config] generates and persists a room secret.
+val init_coord_secret : string -> string
+(** [init_coord_secret config] generates and persists a room secret.
     Returns the raw secret (shown once). *)
 
-val verify_room_secret : string -> string -> bool
+val verify_coord_secret : string -> string -> bool
 
 (** {1 Auth Toggle} *)
 
@@ -298,7 +298,7 @@ val enable_auth :
   string -> require_token:bool -> agent_name:string ->
   string * string option
 (** [enable_auth config ~require_token ~agent_name] returns
-    [(room_secret, bootstrap_token)]. *)
+    [(coord_secret, bootstrap_token)]. *)
 
 val disable_auth : string -> unit
 

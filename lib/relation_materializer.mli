@@ -14,7 +14,7 @@
 
     @since 2.112.0 *)
 
-val on_agent_leave :
+val on_agent_session_ended :
   leaving_agent:string ->
   active_agents:string list ->
   unit

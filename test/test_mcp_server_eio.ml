@@ -326,7 +326,7 @@ let test_create_state () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   Alcotest.(check string) "base_path preserved"
-    base_path state.room_config.base_path;
+    base_path state.coord_config.base_path;
   cleanup_dir base_path
 
 let test_type_compatibility () =
@@ -335,7 +335,7 @@ let test_type_compatibility () =
   let state : Mcp_eio.server_state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   let state2 : Mcp.server_state = state in  (* Type unification at compile time *)
   (* Verify the unified type preserves field access *)
-  Alcotest.(check string) "base_path via unified type" base_path state2.room_config.base_path;
+  Alcotest.(check string) "base_path via unified type" base_path state2.coord_config.base_path;
   cleanup_dir base_path
 
 let test_eio_context_delegation () =
@@ -948,12 +948,12 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   (* masc_init and setup join are not under test here; initialise the room
      fixture directly so downstream managed-profile assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
-  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
   let _joined =
-    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Coord.join state.coord_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   let _added =
-    Masc_mcp.Coord.add_task state.room_config ~title:"managed-claim"
+    Masc_mcp.Coord.add_task state.coord_config ~title:"managed-claim"
       ~priority:2 ~description:""
   in
   let request = Yojson.Safe.to_string (`Assoc [
@@ -993,12 +993,12 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   (* masc_init and setup join are not under test here; initialise the room
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
-  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
   let _joined =
-    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Coord.join state.coord_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-claim"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"transition-claim"
        ~priority:2 ~description:"");
   let request =
     Yojson.Safe.to_string
@@ -1025,7 +1025,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   in
   let steps = workflow_next_step_names response in
   Alcotest.(check (option string)) "claim binds current_task" (Some "task-001")
-    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+    (Masc_mcp.Planning_eio.get_current_task state.coord_config);
   Alcotest.(check bool) "claim guidance omits plan_set_task" false
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
@@ -1048,12 +1048,12 @@ let test_handle_request_tools_call_transition_done_guidance () =
   (* masc_init and setup join are not under test here; initialise the room
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
-  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
   let _joined =
-    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Coord.join state.coord_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-done"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"transition-done"
        ~priority:2 ~description:"");
   let claim_result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1115,12 +1115,12 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   (* masc_init and setup join are not under test here; initialise the room
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
-  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
   let _joined =
-    Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Coord.join state.coord_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"deprecated-claim"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"deprecated-claim"
        ~priority:2 ~description:"");
   let request =
     Yojson.Safe.to_string
@@ -1460,16 +1460,16 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
     match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  ignore (Masc_mcp.Coord.join state.coord_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"explicit-alias-claim-next"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"explicit-alias-claim-next"
        ~priority:2 ~description:"");
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
@@ -1478,7 +1478,7 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
   in
   check_auth_preflight_result ~tool_name:"masc_claim_next"
     (Tool_result.is_success result) ((Tool_result.message result));
-  check_task_still_todo state.room_config "task-001";
+  check_task_still_todo state.coord_config "task-001";
   cleanup_dir base_path
 
 let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token () =
@@ -1491,16 +1491,16 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
     match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  ignore (Masc_mcp.Coord.join state.coord_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"explicit-alias-transition"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"explicit-alias-transition"
        ~priority:2 ~description:"");
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
@@ -1515,7 +1515,7 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
   in
   check_auth_preflight_result ~tool_name:"masc_transition"
     (Tool_result.is_success result) ((Tool_result.message result));
-  check_task_still_todo state.room_config "task-001";
+  check_task_still_todo state.coord_config "task-001";
   cleanup_dir base_path
 
 let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token () =
@@ -1528,7 +1528,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
     match Masc_mcp.Auth.create_token base_path ~agent_name:"qa-king" ~role:Masc_domain.Admin with
@@ -1536,7 +1536,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"hyphenated-generated-alias-claim-next"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"hyphenated-generated-alias-claim-next"
        ~priority:2 ~description:"");
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"sid-hyphenated-generated-alias"
@@ -1550,9 +1550,9 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
     (contains_substring ((Tool_result.message result)) "task-001");
   Alcotest.(check (option string)) "current task set after claim_next"
     (Some "task-001")
-    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+    (Masc_mcp.Planning_eio.get_current_task state.coord_config);
   Alcotest.(check bool) "explicit alias joined" true
-    (Masc_mcp.Coord.is_agent_joined state.room_config
+    (Masc_mcp.Coord.is_agent_session_bounded state.coord_config
        ~agent_name:"qa-king-warm-heron");
   cleanup_dir base_path
 
@@ -1566,11 +1566,11 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  ignore (Masc_mcp.Coord.join state.coord_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"claim-next-auth-preflight"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"claim-next-auth-preflight"
        ~priority:2 ~description:"");
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock state
@@ -1579,9 +1579,9 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
   in
   check_auth_preflight_result ~tool_name:"masc_claim_next"
     (Tool_result.is_success result) ((Tool_result.message result));
-  check_task_still_todo state.room_config "task-001";
+  check_task_still_todo state.coord_config "task-001";
   Alcotest.(check (option string)) "no current task after rejected claim_next" None
-    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+    (Masc_mcp.Planning_eio.get_current_task state.coord_config);
   cleanup_dir base_path
 
 let test_execute_tool_transition_requires_auth_before_mutation () =
@@ -1594,11 +1594,11 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
-  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  ignore (Masc_mcp.Coord.join state.coord_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
-    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-auth-preflight"
+    (Masc_mcp.Coord.add_task state.coord_config ~title:"transition-auth-preflight"
        ~priority:2 ~description:"");
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock state
@@ -1613,9 +1613,9 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
   in
   check_auth_preflight_result ~tool_name:"masc_transition"
     (Tool_result.is_success result) ((Tool_result.message result));
-  check_task_still_todo state.room_config "task-001";
+  check_task_still_todo state.coord_config "task-001";
   Alcotest.(check (option string)) "no current task after rejected transition" None
-    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+    (Masc_mcp.Planning_eio.get_current_task state.coord_config);
   cleanup_dir base_path
 
 let test_execute_tool_add_task_with_admin_token_without_join () =
@@ -1628,7 +1628,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
     match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
@@ -1650,7 +1650,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   Alcotest.(check bool) "response mentions added task" true
     (contains_substring ((Tool_result.message result)) "Added task-001");
   let task =
-    match Masc_mcp.Coord.get_tasks_raw state.room_config with
+    match Masc_mcp.Coord.get_tasks_raw state.coord_config with
     | [ task ] -> task
     | tasks ->
         Alcotest.failf "expected exactly one task, found %d" (List.length tasks)
@@ -1765,7 +1765,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 117);
@@ -1800,7 +1800,7 @@ let test_handle_request_tools_call_logs_structured_mcp_details () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+      ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
       let request =
         Yojson.Safe.to_string
           (`Assoc
@@ -1875,7 +1875,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
         (Keeper_registry.register ~base_path keeper_name
            (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+      ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
       let request =
         Yojson.Safe.to_string
           (`Assoc
@@ -2522,7 +2522,7 @@ let test_handle_request_resources_read_matrix () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:(Some "fixture-root"));
+  ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:(Some "fixture-root"));
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
   in

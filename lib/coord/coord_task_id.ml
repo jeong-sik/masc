@@ -1,6 +1,6 @@
 (** Coord Task ID - Task ID parsing and archive management.
 
-    Extracted from room_state.ml. *)
+    Extracted from coord_state.ml. *)
 
 open Masc_domain
 open Coord_utils

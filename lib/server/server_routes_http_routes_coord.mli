@@ -1,4 +1,4 @@
-(** Server_routes_http_routes_room — Read-only HTTP routes for
+(** Server_routes_http_routes_coord — Read-only HTTP routes for
     project/room state.
 
     Registers [GET /api/v1/status], [/api/v1/tasks], [/api/v1/agents],

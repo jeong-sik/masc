@@ -395,11 +395,11 @@ end
 
 let create_server
       ~(port : int)
-      ~(room_config : Coord_utils_backend_setup.config)
+      ~(coord_config : Coord_utils_backend_setup.config)
       ~(tool_dispatcher : string -> string -> (string, string) result)
   : Grpc_eio.Server.t
   =
-  let service = Masc_grpc_service.create_service ~room_config ~tool_dispatcher in
+  let service = Masc_grpc_service.create_service ~coord_config ~tool_dispatcher in
   let health = Grpc_eio.Health.create ~default_status:Grpc_eio.Health.Serving () in
   Grpc_eio.Health.register_service health ~service:Masc_grpc_service.service_name;
   Grpc_eio.Health.set_status
@@ -446,12 +446,12 @@ let create_server
 
     @param sw Eio switch for structured concurrency.
     @param env Eio environment (for network access).
-    @param room_config The MASC room configuration.
+    @param coord_config The MASC room configuration.
     @param tool_dispatcher Function that dispatches tool calls. *)
 let start
       ~(sw : Eio.Switch.t)
       ~(env : Eio_unix.Stdenv.base)
-      ~(room_config : Coord_utils_backend_setup.config)
+      ~(coord_config : Coord_utils_backend_setup.config)
       ~(tool_dispatcher : string -> string -> (string, string) result)
   : unit
   =
@@ -464,7 +464,7 @@ let start
     let port = configured_port () in
     Eio.Fiber.fork ~sw (fun () ->
       try
-        let server = create_server ~port ~room_config ~tool_dispatcher in
+        let server = create_server ~port ~coord_config ~tool_dispatcher in
         Log.Server.info
           "gRPC coordination server starting on port %d (health + reflection enabled)"
           port;

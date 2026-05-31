@@ -352,7 +352,7 @@ let start_container (t : t) ~(timeout_sec : float) =
            @ Keeper_sandbox_runtime.docker_config_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
-           @ Keeper_sandbox_runtime.docker_room_state_mount_args
+           @ Keeper_sandbox_runtime.docker_coord_state_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
            @ cred_mounts

@@ -4,7 +4,7 @@ open Alcotest
 open Masc_mcp
 
 let temp_dir () =
-  let dir = Filename.temp_file "test_room_state_recovery_" "" in
+  let dir = Filename.temp_file "test_coord_state_recovery_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -315,7 +315,7 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
 let () =
   run "Coord_state_recovery"
     [
-      ( "room_state",
+      ( "coord_state",
         [
           test_case "repairs empty object" `Quick
             test_read_state_repairs_empty_object;

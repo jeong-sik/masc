@@ -1,5 +1,5 @@
 let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
-  let room_state = Coord.read_state config in
+  let coord_state = Coord.read_state config in
   let cluster = Env_config_core.cluster_name () in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
@@ -9,9 +9,9 @@ let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
     ; "coordination_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
-    ; "project", `String room_state.project
+    ; "project", `String coord_state.project
     ; "tempo_interval_s", `Float tempo.current_interval_s
-    ; "paused", `Bool room_state.paused
+    ; "paused", `Bool coord_state.paused
     ; "version", `String build.release_version
     ; "build", Build_identity.to_yojson build
     ]

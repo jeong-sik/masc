@@ -12,7 +12,7 @@
     every dashboard execution consumer.  Plus dotted
     callers ({!get_agent_profile} from
     [server_dashboard_http_core] +
-    [server_routes_http_routes_room]).
+    [server_routes_http_routes_coord]).
 
     External surface (38 entries — 8 records + 30
     helpers).

@@ -1,6 +1,6 @@
 (** Coord Broadcast - Message broadcasting and activity emission.
 
-    Extracted from room_state.ml. Depends on Coord_state for
+    Extracted from coord_state.ml. Depends on Coord_state for
     next_seq and normalized_string_list. *)
 
 open Masc_domain

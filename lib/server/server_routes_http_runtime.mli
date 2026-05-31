@@ -105,7 +105,7 @@ val health_path_diagnostics :
 (** [health_path_diagnostics ()] resolves the base-path
     diagnostics for the [/health] response.  When the runtime
     state is initialised, reads from
-    [state.room_config.base_path]; otherwise falls back to the
+    [state.coord_config.base_path]; otherwise falls back to the
     default base path computed from env. *)
 
 val make_health_json :

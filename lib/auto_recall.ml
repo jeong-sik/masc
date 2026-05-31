@@ -83,14 +83,14 @@ let estimate_tokens = Inference_utils.estimate_tokens
 (** Fetch from MASC cache *)
 (* Issue #8597 #2: dropped [~query] — cache filtering is by tag
    (config.cache_tags), not by query string. *)
-let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config) =
+let fetch_from_cache (coord_config : Coord_utils.config) ~(config : recall_config) =
   let entries =
     match config.cache_tags with
-    | [] -> Cache_eio.list room_config ()
+    | [] -> Cache_eio.list coord_config ()
     | tags ->
         (* Fetch entries matching any of the specified tags *)
         List.concat_map (fun tag ->
-          Cache_eio.list room_config ~tag ()
+          Cache_eio.list coord_config ~tag ()
         ) tags
         |> List.sort_uniq (fun a b -> compare a.Cache_eio.key b.Cache_eio.key)
   in
@@ -110,8 +110,8 @@ let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config
 (** Fetch recent broadcasts *)
 (* Issue #8597 #2: dropped [~query] — broadcast fetch is limit-based
    (config.max_broadcasts), not query-ranked. *)
-let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_config) =
-  let messages = Coord.get_messages_raw room_config
+let fetch_from_broadcasts (coord_config : Coord_utils.config) ~(config : recall_config) =
+  let messages = Coord.get_messages_raw coord_config
     ~since_seq:0
     ~limit:config.max_broadcasts
   in
@@ -136,8 +136,8 @@ let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_c
    maps to file scanning (max_files=10 / max_preview_bytes=500 are
    hard-coded; cache_tags / max_broadcasts / max_tokens belong to other
    sources). The arg was structurally received, semantically ignored. *)
-let fetch_from_file_context (room_config : Coord_utils.config) ~query =
-  let masc_dir = Coord_utils.masc_dir room_config in
+let fetch_from_file_context (coord_config : Coord_utils.config) ~query =
+  let masc_dir = Coord_utils.masc_dir coord_config in
   let work_dir = Filename.dirname masc_dir in (* Parent of .masc *)
   
   (* Get recently modified files without shelling out (no find/xargs). *)
@@ -247,23 +247,23 @@ let fetch_from_file_context (room_config : Coord_utils.config) ~query =
     Each leaf consumes only the args it needs (#8597 #2):
     - [Masc_cache] / [Recent_broadcasts] use [config] (tags / limit)
     - [File_context] uses [query] for relevance ranking *)
-let fetch_source room_config ~config ~query = function
-  | Masc_cache -> fetch_from_cache room_config ~config
-  | Recent_broadcasts -> fetch_from_broadcasts room_config ~config
-  | File_context -> fetch_from_file_context room_config ~query
+let fetch_source coord_config ~config ~query = function
+  | Masc_cache -> fetch_from_cache coord_config ~config
+  | Recent_broadcasts -> fetch_from_broadcasts coord_config ~config
+  | File_context -> fetch_from_file_context coord_config ~query
 
 (** {1 Main API} *)
 
 (** Fetch context from configured sources
 
-    @param room_config MASC room configuration
+    @param coord_config MASC room configuration
     @param config Recall configuration
     @param query Optional query string for relevance ranking
 
     @return Recall result with items sorted by relevance, truncated to token budget
 *)
 let fetch_context
-    (room_config : Coord_utils.config)
+    (coord_config : Coord_utils.config)
     ~(config : recall_config)
     ?(query : string = "")
     ()
@@ -272,7 +272,7 @@ let fetch_context
     { items = []; total_tokens = 0; truncated = false }
   else
     (* Fetch from all configured sources *)
-    let all_items = List.concat_map (fetch_source room_config ~config ~query) config.sources in
+    let all_items = List.concat_map (fetch_source coord_config ~config ~query) config.sources in
 
     (* Sort by relevance (highest first) *)
     let sorted = List.sort (fun a b -> compare b.relevance a.relevance) all_items in
@@ -296,7 +296,7 @@ let fetch_context
     @param sw Eio switch
     @param env Eio environment with network access
     @param clock Eio clock
-    @param room_config MASC room configuration
+    @param coord_config MASC room configuration
     @param config Recall configuration
     @param query Query string for relevance
 
@@ -304,12 +304,12 @@ let fetch_context
 *)
 let fetch_context_eio
     ~sw:_ ~env:_ ~clock:_
-    (room_config : Coord_utils.config)
+    (coord_config : Coord_utils.config)
     ~(config : recall_config)
     ?(query : string = "")
     ()
     : recall_result =
-  fetch_context room_config ~config ~query ()
+  fetch_context coord_config ~config ~query ()
 
 (** {1 Formatting} *)
 

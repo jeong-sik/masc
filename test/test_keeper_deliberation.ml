@@ -70,8 +70,8 @@ let test_triage_agent_change () =
   match D.triage obs with
   | D.Skip _ -> fail "expected Triggered for agent change"
   | D.Triggered triggers ->
-      check bool "contains AgentJoinedOrLeft" true
-        (List.mem D.AgentJoinedOrLeft triggers)
+      check bool "contains AgentSessionBoundedOrLeft" true
+        (List.mem D.AgentSessionBoundedOrLeft triggers)
 
 let test_triage_board_mention () =
   let obs = { base_obs with board_mention_count = 2 } in

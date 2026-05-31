@@ -237,7 +237,7 @@ let handle_list_tools_eio
       Some
         (Telemetry_eio.summarize_tool_usage
            ?fs:state.Mcp_server.fs
-           state.Mcp_server.room_config)
+           state.Mcp_server.coord_config)
     else None
   in
   let tools =
@@ -397,7 +397,7 @@ let handle_get_prompt_eio state id params =
        in
        (match
           Mcp_prompt_surface.get_json
-            ~config:state.Mcp_server.room_config
+            ~config:state.Mcp_server.coord_config
             ~name
             ~arguments
             Config.raw_all_tool_schemas
@@ -466,7 +466,7 @@ let handle_dashboard_hello_eio state id ?mcp_session_id params =
   | Some session_id, Some (`Assoc fields) ->
     let token = optional_string_member "token" fields in
     Server_mcp_transport_ws.dashboard_hello
-      ~base_path:state.Mcp_server.room_config.base_path
+      ~base_path:state.Mcp_server.coord_config.base_path
       ~session_id
       ?token
       ()
@@ -848,7 +848,7 @@ let run_stdio ~handle_request ~sw ~env state =
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
-  Log.Mcp.info "Default room: %s" Mcp_server.(state.room_config.Coord.base_path);
+  Log.Mcp.info "Default room: %s" Mcp_server.(state.coord_config.Coord.base_path);
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
   let read_framed_message_after_first_line first_line =
     let rec read_headers acc =

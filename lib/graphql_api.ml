@@ -6,7 +6,7 @@ module Types = Masc_domain
 open Masc_domain
 
 type ctx = {
-  room_config: Coord_utils.config;
+  coord_config: Coord_utils.config;
 }
 
 type response_status = [ `OK | `Bad_request ]
@@ -356,45 +356,45 @@ let message_typ =
         ~resolve:(fun _ (message : Masc_domain.message) -> message.relevance);
     ]
 
-let room_state_typ =
-  Schema.obj "RoomState"
+let coord_state_typ =
+  Schema.obj "CoordState"
     ~fields:[
       Schema.field "protocolVersion"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.protocol_version);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.protocol_version);
       Schema.field "project"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.project);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.project);
       Schema.field "startedAt"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.started_at);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.started_at);
       Schema.field "messageSeq"
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.message_seq);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.message_seq);
       Schema.field "activeAgents"
         ~typ:(Schema.non_null (Schema.list (Schema.non_null Schema.string)))
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.active_agents);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.active_agents);
       Schema.field "paused"
         ~typ:(Schema.non_null Schema.bool)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.paused);
       Schema.field "pauseReason"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.pause_reason);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.pause_reason);
       Schema.field "pausedBy"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused_by);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.paused_by);
       Schema.field "pausedAt"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused_at);
+        ~resolve:(fun _ (state : Masc_domain.coord_state) -> state.paused_at);
     ]
 
 let task_edge_typ =
@@ -628,9 +628,9 @@ let messages_connection config first after =
 let schema =
   Schema.schema [
     Schema.field "status"
-      ~typ:(Schema.non_null room_state_typ)
+      ~typ:(Schema.non_null coord_state_typ)
       ~args:Arg.[]
-      ~resolve:(fun info () -> Coord.read_state info.ctx.room_config);
+      ~resolve:(fun info () -> Coord.read_state info.ctx.coord_config);
     Schema.field "tasks"
       ~typ:(Schema.non_null task_connection_typ)
       ~args:Arg.[
@@ -638,7 +638,7 @@ let schema =
         Arg.arg "after" ~typ:Arg.string;
       ]
       ~resolve:(fun info () first after ->
-        tasks_connection info.ctx.room_config first after);
+        tasks_connection info.ctx.coord_config first after);
     Schema.field "agents"
       ~typ:(Schema.non_null agent_connection_typ)
       ~args:Arg.[
@@ -646,7 +646,7 @@ let schema =
         Arg.arg "after" ~typ:Arg.string;
       ]
       ~resolve:(fun info () first after ->
-        agents_connection info.ctx.room_config first after);
+        agents_connection info.ctx.coord_config first after);
     Schema.field "messages"
       ~typ:(Schema.non_null message_connection_typ)
       ~args:Arg.[
@@ -654,7 +654,7 @@ let schema =
         Arg.arg "after" ~typ:Arg.string;
       ]
       ~resolve:(fun info () first after ->
-        messages_connection info.ctx.room_config first after);
+        messages_connection info.ctx.coord_config first after);
   ]
 
 let handle_request ~config body_str =
@@ -679,7 +679,7 @@ let handle_request ~config body_str =
                { status = `Bad_request; body = graphql_error err }
            | Ok doc ->
                let variables = variables_of_yojson variables_json in
-               let ctx = { room_config = config } in
+               let ctx = { coord_config = config } in
                let result =
                  if variables = [] then
                    Schema.execute schema ctx ?operation_name doc

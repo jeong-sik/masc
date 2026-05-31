@@ -45,7 +45,7 @@ let init config ~agent_name =
       ; speculation_budget = None
       }
     in
-    write_json_root config (root_state_path config) (room_state_to_yojson root_state))
+    write_json_root config (root_state_path config) (coord_state_to_yojson root_state))
   else (
     (* Sync PG state to local file on startup so filesystem fallback has fresh data *)
     let root_json = read_json_root config (root_state_path config) in

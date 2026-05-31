@@ -478,7 +478,7 @@ let schema_markdown =
 
 (** MCP Server state *)
 type server_state = {
-  mutable room_config: Coord.config;
+  mutable coord_config: Coord.config;
   session_registry: Session.registry;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
@@ -497,7 +497,7 @@ let create_state ~base_path =
     Session.push_notification_to_active_agents registry ~event
   );
   let state = {
-    room_config = config;
+    coord_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = None;
@@ -508,7 +508,7 @@ let create_state ~base_path =
     net = None;
   } in
   Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_session_bound state.room_config ~agent_name:name
+    try Coord.is_agent_session_bound state.coord_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 
@@ -541,7 +541,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     Session.push_notification_to_active_agents registry ~event
   );
   let state = {
-    room_config = config;
+    coord_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = Some sw;
@@ -551,10 +551,10 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  (* Board post kind auto-classification: reads state.room_config so
+  (* Board post kind auto-classification: reads state.coord_config so
      room changes via set_room are reflected automatically. *)
   Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_session_bound state.room_config ~agent_name:name
+    try Coord.is_agent_session_bound state.coord_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 

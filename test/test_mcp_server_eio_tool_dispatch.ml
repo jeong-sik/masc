@@ -94,7 +94,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
           else Tool_dispatch.Pass);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let raw_token = create_admin_token base_path in
-      let _room_path = Masc_mcp.Coord.masc_dir state.room_config in
+      let _workspace_path = Masc_mcp.Coord.masc_dir state.coord_config in
       let hook_result =
         Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
           ~name:"masc_tool_help"

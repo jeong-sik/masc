@@ -436,13 +436,13 @@ module Pure = struct
     { inst with memory = { inst.memory with procedural } }
   ;;
 
-  let agent_join inst ~agent_id =
+  let agent_session_bound inst ~agent_id =
     if List.mem agent_id inst.current_agents
     then inst
     else { inst with current_agents = agent_id :: inst.current_agents }
   ;;
 
-  let agent_leave inst ~agent_id =
+  let agent_session_ended inst ~agent_id =
     if List.mem agent_id inst.current_agents
     then
       { inst with
@@ -577,13 +577,13 @@ let codify_pattern ~fs config inst ~name ~description ~trigger ~steps =
 ;;
 
 let join ~fs config inst ~agent_id =
-  let inst' = Pure.agent_join inst ~agent_id in
+  let inst' = Pure.agent_session_bound inst ~agent_id in
   save_institution ~fs config inst';
   inst'
 ;;
 
 let leave ~fs config inst ~agent_id =
-  let inst' = Pure.agent_leave inst ~agent_id in
+  let inst' = Pure.agent_session_ended inst ~agent_id in
   save_institution ~fs config inst';
   inst'
 ;;

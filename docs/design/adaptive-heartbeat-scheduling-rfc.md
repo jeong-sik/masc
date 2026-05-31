@@ -4,7 +4,6 @@ last_verified: 2026-04-17
 code_refs:
   - lib/keeper/keeper_state_machine.ml
   - lib/keeper/keeper_config.ml
-  - lib/keeper/keeper_runtime_routing.ml
 ---
 
 # Adaptive Heartbeat and Runtime Scheduling RFC

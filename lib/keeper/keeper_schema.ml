@@ -117,10 +117,10 @@ let keeper_schemas : tool_schema list = [
           ("default", `Bool Persona_contract.default_generation_proactive_enabled);
           ("description", `String "Default keeper.proactive_enabled for the draft.");
         ]);
-        ("cascade_name", `Assoc [
+        ("runtime_id", `Assoc [
           ("type", `String "string");
           ("default", `String Persona_contract.default_generation_cascade_name);
-          ("description", `String "Named cascade used to draft the persona.");
+          ("description", `String "Runtime id used to draft the persona.");
         ]);
         ("temperature", `Assoc [
           ("type", `String "number");
@@ -289,10 +289,6 @@ let keeper_schemas : tool_schema list = [
         ("runtime_id", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: Runtime binding id for keeper execution. Replaces legacy models/allowed_models/active_model inputs.");
-        ]);
-        ("cascade_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Legacy alias for runtime_id. If both are provided they must match.");
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");

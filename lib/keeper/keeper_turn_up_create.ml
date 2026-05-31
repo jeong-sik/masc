@@ -607,7 +607,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
           ("runtime_id", `String (runtime_id_of_meta meta));
-          ("cascade_name", `String (cascade_name_of_meta meta));
           ("social_model", `String meta.social_model);
           ("tool_access", tool_access_to_json meta.tool_access);
           ("tool_denylist",

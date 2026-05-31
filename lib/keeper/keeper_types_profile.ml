@@ -77,27 +77,6 @@ let ensure_dir = Keeper_fs.ensure_dir
 (* ── TOML parsing, normalizers, merge, discover ──────────────────── *)
 include Keeper_types_profile_toml
 
-(* ── JSON room-seq helpers ───────────────────────────────────────── *)
-
-let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
-  `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)
-
-let room_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
-  match json with
-  | `Assoc fields ->
-      fields
-      |> List.filter_map (fun (room_id, value) ->
-             if not (validate_name room_id) then
-               None
-             else
-               match value with
-               | `Int seq -> Some (room_id, seq)
-               | `Intlit raw ->
-                   Some (room_id, Safe_ops.int_of_string_with_default ~default:0 raw)
-               | _ -> None)
-  | _ -> []
-
-
 include Keeper_types_profile_defaults
 
 type persona_summary = Keeper_types_profile_persona.persona_summary =

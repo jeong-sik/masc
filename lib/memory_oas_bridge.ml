@@ -452,7 +452,6 @@ let emit_stress_for_failure ~keeper_name ~error_kind =
       Agent_stress.record
         {
           agent_name = keeper_name;
-          room_id = "";
           kind = stress_kind;
           timestamp = Unix.gettimeofday ();
         }

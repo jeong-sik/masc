@@ -6,7 +6,7 @@
 
 type broadcast_output = {
   delivered : bool;
-  coord_message : string;
+  broadcast_message : string;
   mention : string option;
 }
 

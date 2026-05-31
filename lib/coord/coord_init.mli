@@ -6,8 +6,6 @@
 
 open Masc_domain
 open Coord_utils
-open Coord_state
-open Coord_broadcast
 
 (** Initialise workspace state; session-binds [agent_name] when given. *)
 val init :

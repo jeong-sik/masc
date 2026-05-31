@@ -6,21 +6,20 @@
     when the tombstone ratio exceeds a threshold.
 
     RFC-0128 §4.2: callers may select a {!Ide_paths.partition}
-    ([Legacy] / [By_url _] / [Orphan]) via the optional [?partition]
-    argument on every public function. PR-1b adds the parameter with
-    default [Legacy] so existing behaviour is unchanged. PR-1c moves
-    the keeper write path and HTTP read path to [By_url _]. *)
+    ([By_url _] / [Orphan]) via the optional [?partition]
+    argument on every public function. The default is [Orphan] so
+    unpartitioned writes do not recreate the retired flat store. *)
 
 open Ide_annotation_types
 
 val store_path : base_dir:string -> string
-(** [store_path ~base_dir] returns [base_dir/.masc-ide/] (the legacy
+(** [store_path ~base_dir] returns [base_dir/.masc-ide/] (the root
     flat directory). For partition-aware paths see
     {!Ide_paths.partition_store_dir}. *)
 
 val ensure_store : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
 (** Create the partition's directory if absent. Idempotent. Default
-    [partition] is {!Ide_paths.Legacy}. *)
+    [partition] is {!Ide_paths.Orphan}. *)
 
 val create
   :  base_dir:string
@@ -44,7 +43,7 @@ val create
   -> unit
   -> (annotation, string) result
 (** Append a new annotation to the chosen partition. Default
-    [partition] is {!Ide_paths.Legacy}. *)
+    [partition] is {!Ide_paths.Orphan}. *)
 
 val list
   :  base_dir:string
@@ -54,7 +53,7 @@ val list
   -> annotation list
 (** Read all annotations for the chosen partition. Tombstoned entries
     are excluded. Sorted by [created_at_ms] descending (newest first).
-    Default [partition] is {!Ide_paths.Legacy}. *)
+    Default [partition] is {!Ide_paths.Orphan}. *)
 
 val delete
   :  base_dir:string
@@ -66,12 +65,12 @@ val delete
 (** Soft-delete: append a tombstone record. Only the original
     [keeper_id] may delete its own annotation. The [?partition] must
     match the one the annotation was created under. Default
-    [partition] is {!Ide_paths.Legacy}. *)
+    [partition] is {!Ide_paths.Orphan}. *)
 
 val compact : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
 (** Rewrite the annotation file excluding tombstones. Called
     automatically when the tombstone ratio exceeds [COMPACT_THRESHOLD].
-    Default [partition] is {!Ide_paths.Legacy}. *)
+    Default [partition] is {!Ide_paths.Orphan}. *)
 
 val annotation_kind_of_string : string -> annotation_kind option
 (** Parse kind string, returning [None] for unknown values. *)

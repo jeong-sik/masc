@@ -772,7 +772,7 @@ let docker_preflight ~timeout_sec () =
          then
            Some
              "Fix the keeper sandbox hardening configuration \
-              (seccomp/rootless/userns) and rerun doctor."
+              (seccomp/rootless/userns) and rerun sandbox diagnostics."
          else None)
       ]
       |> List.filter_map (fun action -> action)

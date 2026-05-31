@@ -317,7 +317,7 @@ val maybe_cleanup_stale_containers
     sweep. Test-only. *)
 val reset_last_cleanup_for_tests : unit -> unit
 
-(** Global keeper sandbox preflight used by [doctor] and diagnostics.
+(** Global keeper sandbox preflight used by sandbox diagnostics.
     Returns [None] when
     [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false]. *)
 val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
@@ -328,7 +328,7 @@ val docker_preflight_failure_message : docker_preflight -> string
 (** Fail-fast keeper-up preflight for [sandbox_profile=docker].
     This stays on the lightweight request path: it checks runtime
     hardening and image presence, while the full required-command
-    inventory remains in [docker_preflight] for doctor/status surfaces. *)
+    inventory remains in [docker_preflight] for diagnostic/status surfaces. *)
 val ensure_keeper_startup_preflight
   :  timeout_sec:float
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile

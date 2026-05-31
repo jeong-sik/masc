@@ -382,7 +382,9 @@ let finalize (t : t) : unit =
     match t.mode with
     | Cfg.Off -> ()
     | Cfg.Observe | Cfg.Enforce ->
-        let outcome = outcome_of_state !(t.state) in
+        (* RFC-0206: the cascade observation that consumed [outcome_of_state]
+           was removed with the cascade purge; success-sampling below reads
+           [t.state] directly. *)
         (match !(t.state), t.candidate_key, !(t.first_chunk_at), !(t.last_chunk_at) with
          | L.Success, Some candidate_key, Some first_chunk_at, Some last_chunk_at ->
            t.success_sample :=

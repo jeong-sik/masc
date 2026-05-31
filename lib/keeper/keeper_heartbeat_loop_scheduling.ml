@@ -46,7 +46,7 @@ let decide_keepalive_scheduling
   let requested_should_run_turn =
     (not (Atomic.get stop)) && turn_decision.should_run
   in
-  let cascade_name = cascade_name_of_meta meta in
+  let cascade_name = runtime_id_of_meta meta in
   let cascade_resilience = cascade_resilience_of_name cascade_name in
   let cascade_backpressure =
     cascade_backpressure_decision

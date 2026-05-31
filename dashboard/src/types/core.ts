@@ -931,7 +931,7 @@ export interface Keeper {
   cascade_name?: string | null
   cascade_ref?: CascadeRef | null
   cascade_canonical?: string | null
-  selected_cascade_canonical?: string | null
+  selected_runtime_canonical?: string | null
   status: string
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
@@ -1212,8 +1212,8 @@ interface KeeperConfigExecution {
   per_provider_timeout_sec?: number | null
   per_provider_timeout_mode: 'override' | 'turn_budget_heuristic'
   verify: boolean
-  selected_cascade_name: string
-  selected_cascade_canonical: string
+  selected_runtime_id: string
+  selected_runtime_canonical: string
   cascade_ref?: CascadeRef | null
 }
 

@@ -613,10 +613,6 @@ let runtime_id_of_meta (_m : keeper_meta) : string =
   Runtime.get_default_runtime_id ()
 ;;
 
-let cascade_name_of_meta (m : keeper_meta) : string =
-  runtime_id_of_meta m
-;;
-
 
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"

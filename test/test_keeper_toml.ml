@@ -924,23 +924,6 @@ max_turns_per_call_scheduled_autonomous = 0
        check int "zero autonomous falls back" 10
          (KTP.effective_max_turns_per_call_scheduled_autonomous d))
 
-let test_profile_accepts_legacy_cascade_name_alias () =
-  let input = {|
-[keeper]
-goal = "test"
-cascade_name = "oas-coding_first"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok defaults ->
-       check (option string)
-         "legacy cascade_name aliases runtime id"
-         (Some "oas-coding_first")
-         defaults.model)
-
 let test_persona_resolver_defaults_to_research_tool_access () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -1938,8 +1921,6 @@ let () =
             test_profile_rejects_removed_initiative_keys;
           test_case "legacy allowed_providers rejected" `Quick
             test_profile_rejects_legacy_allowed_providers;
-          test_case "legacy cascade_name aliases runtime id" `Quick
-            test_profile_accepts_legacy_cascade_name_alias;
           test_case "max_turns overrides parsed and applied" `Quick
             test_profile_max_turns_overrides;
           test_case "max_turns defaults when absent" `Quick

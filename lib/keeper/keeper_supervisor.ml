@@ -537,7 +537,7 @@ let sweep_and_recover (ctx : _ context) =
         when Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
         ->
-        let cascade_name = Keeper_meta_contract.cascade_name_of_meta meta in
+        let cascade_name = Keeper_meta_contract.runtime_id_of_meta meta in
         let cascade_status = Keeper_health_probe.get_cascade_status ~cascade_name in
         (* Three-valued admission:
                     Unhealthy   — block, the probe saw restart pressure.

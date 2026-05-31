@@ -259,7 +259,7 @@ let scan_cascade_health ~base_path =
   let by_cascade = Hashtbl.create 8 in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       let cascade = Keeper_meta_contract.cascade_name_of_meta entry.meta in
+       let cascade = Keeper_meta_contract.runtime_id_of_meta entry.meta in
        let acc =
          match Hashtbl.find_opt by_cascade cascade with
          | Some acc -> acc

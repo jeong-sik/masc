@@ -72,7 +72,7 @@ let project_compact_runtime_trust runtime_trust =
 ;;
 
 let degraded_keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
-  let cascade_name = non_empty_trimmed_string_opt (Keeper_meta_contract.cascade_name_of_meta meta) in
+  let cascade_name = non_empty_trimmed_string_opt (Keeper_meta_contract.runtime_id_of_meta meta) in
   let cascade_json = Json_util.string_opt_to_json cascade_name in
   [ "runtime_id", cascade_json
   ; "runtime_canonical", cascade_json

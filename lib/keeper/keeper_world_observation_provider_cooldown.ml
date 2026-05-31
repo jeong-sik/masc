@@ -72,7 +72,7 @@ let provider_capacity_blocked_task_count
   if claimable_task_count <= 0
   then 0
   else (
-    let cascade_name = cascade_name_of_meta meta in
+    let cascade_name = runtime_id_of_meta meta in
     match
       provider_cooldown_remaining_sec
         ~cascade_name:(cascade_name)

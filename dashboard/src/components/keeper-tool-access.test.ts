@@ -7,7 +7,7 @@ import type { KeeperConfig } from '../types'
 
 function makeConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
-    execution: { selected_cascade_name: 'spark' },
+    execution: { selected_runtime_id: 'spark' },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     handoff: { auto: true, threshold: 0.8 },
@@ -34,7 +34,7 @@ describe('KeeperToolAccessSummary', () => {
 
   it('shows em dash for null cascade name', () => {
     const container = document.createElement('div')
-    render(h(KeeperToolAccessSummary, { config: makeConfig({ execution: { selected_cascade_name: null } }) }), container)
+    render(h(KeeperToolAccessSummary, { config: makeConfig({ execution: { selected_runtime_id: null } }) }), container)
     const dds = container.querySelectorAll('dd')
     expect(dds[0]!.textContent).toBe('—')
   })

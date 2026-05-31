@@ -443,20 +443,10 @@ let normalize_keeper_json ~handle keeper_json =
           in
           Result.bind social_model_result (fun social_model ->
             let runtime_id_result =
-              match
-                ( json_trimmed_string_opt "runtime_id" keeper_json
-                , json_trimmed_string_opt "cascade_name" keeper_json )
-              with
-              | Some runtime_id, Some legacy_cascade_name
-                when runtime_id <> legacy_cascade_name ->
-                Error
-                  (Printf.sprintf
-                     "keeper.runtime_id (%s) and legacy keeper.cascade_name (%s) must match"
-                     runtime_id
-                     legacy_cascade_name)
-              | Some raw, _ | None, Some raw ->
+              match json_trimmed_string_opt "runtime_id" keeper_json with
+              | Some raw ->
                 Result.map (fun value -> Some value) (normalize_runtime_id raw)
-              | None, None -> Ok None
+              | None -> Ok None
             in
             Result.map
               (fun runtime_id ->
@@ -862,10 +852,7 @@ let handle_persona_generate ctx args =
              in
              match trimmed_arg "runtime_id" with
              | Some value -> value
-             | None ->
-               (match trimmed_arg "cascade_name" with
-                | Some value -> value
-                | None -> Archetypes.default_generation_cascade_name)
+             | None -> Archetypes.default_generation_cascade_name
            in
            let temperature =
              get_float_opt args "temperature"

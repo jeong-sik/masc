@@ -383,12 +383,6 @@ val runtime_id_of_meta : keeper_meta -> string
     Ignores [m] because keeper-level provider/model selection has been
     collapsed to the single default Runtime binding. *)
 
-(** {1 Legacy cascade compatibility} *)
-
-val cascade_name_of_meta : keeper_meta -> string
-(** Compatibility alias for {!runtime_id_of_meta}.
-    Kept while older JSON fields and call sites still use [cascade_name]. *)
-
 (** {1 Outcome <-> string} *)
 
 val proactive_cycle_outcome_to_string :

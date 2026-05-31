@@ -70,8 +70,8 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       per_provider_timeout_sec: null,
       per_provider_timeout_mode: 'turn_budget_heuristic',
       verify: true,
-      selected_cascade_name: 'tier-group.keeper_unified',
-      selected_cascade_canonical: 'tier-group.keeper_unified',
+      selected_runtime_id: 'tier-group.keeper_unified',
+      selected_runtime_canonical: 'tier-group.keeper_unified',
     },
     compaction: {
       profile: 'balanced',
@@ -515,8 +515,8 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(mocks.fetchCascadeProfiles).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('keeper TOML의 cascade_name')
-    expect(container.textContent).toContain('Cascade 선택')
+    expect(container.textContent).toContain('runtime_id')
+    expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
     expect(container.textContent).toContain('broken_profile')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
@@ -560,8 +560,8 @@ describe('KeeperConfigPanel', () => {
           per_provider_timeout_sec: null,
           per_provider_timeout_mode: 'turn_budget_heuristic',
           verify: true,
-          selected_cascade_name: 'tier.resilient_breaker',
-          selected_cascade_canonical: 'tier.resilient_breaker',
+          selected_runtime_id: 'tier.resilient_breaker',
+          selected_runtime_canonical: 'tier.resilient_breaker',
         },
       }),
     )

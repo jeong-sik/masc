@@ -244,7 +244,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("effective_system_prompt", `String effective_system_prompt);
         ]
       in
-      let cascade_name = Keeper_meta_contract.cascade_name_of_meta m in
+      let cascade_name = Keeper_meta_contract.runtime_id_of_meta m in
       (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the

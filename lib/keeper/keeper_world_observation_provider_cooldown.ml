@@ -9,7 +9,7 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-let fallback_cascade_for_provider_cooldown
+let fallback_runtime_for_provider_cooldown
       ~(base_runtime_id : string)
       ~(effective_runtime_id : string)
   : string option
@@ -79,7 +79,7 @@ let provider_capacity_blocked_task_count
     with
     | Some _
       when Option.is_none
-             (fallback_cascade_for_provider_cooldown
+             (fallback_runtime_for_provider_cooldown
                 ~base_runtime_id:runtime_id
                 ~effective_runtime_id:runtime_id) ->
       claimable_task_count

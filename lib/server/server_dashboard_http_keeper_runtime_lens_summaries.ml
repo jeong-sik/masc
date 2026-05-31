@@ -74,10 +74,10 @@ let config_drift_summary_json ~config ~keeper_name =
       ; ("status", `String "read_error")
       ; ("error", `String message)
       ; ("has_live_override", `Bool false)
-      ; ("cascade_override", `Bool false)
+      ; ("runtime_override", `Bool false)
       ; ("override_fields", `List [])
-      ; ("default_cascade_name", `Null)
-      ; ("live_cascade_name", `Null)
+      ; ("default_runtime_id", `Null)
+      ; ("live_runtime_id", `Null)
       ; ("active_config_root", `Null)
       ; ("active_config_root_source", `Null)
       ]
@@ -87,38 +87,38 @@ let config_drift_summary_json ~config ~keeper_name =
       ; ("status", `String "keeper_missing")
       ; ("error", `Null)
       ; ("has_live_override", `Bool false)
-      ; ("cascade_override", `Bool false)
+      ; ("runtime_override", `Bool false)
       ; ("override_fields", `List [])
-      ; ("default_cascade_name", `Null)
-      ; ("live_cascade_name", `Null)
+      ; ("default_runtime_id", `Null)
+      ; ("live_runtime_id", `Null)
       ; ("active_config_root", `Null)
       ; ("active_config_root_source", `Null)
       ]
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = Json_util.get_string_list sources "override_fields" in
-    let cascade_detail = find_override_field_source "model.runtime_id" sources in
-    let default_cascade_name, live_cascade_name =
-      match cascade_detail with
+    let runtime_detail = find_override_field_source "model.runtime_id" sources in
+    let default_runtime_id, live_runtime_id =
+      match runtime_detail with
       | Some detail ->
         ( Json_util.get_string detail "default_value",
           Json_util.get_string detail "live_value" )
       | None -> (None, None)
     in
-    let cascade_override = Option.is_some cascade_detail in
+    let runtime_override = Option.is_some runtime_detail in
     `Assoc
       [ ("present", `Bool true)
-      ; ("status", `String (if cascade_override then "drift" else "ok"))
+      ; ("status", `String (if runtime_override then "drift" else "ok"))
       ; ("error", `Null)
       ; ( "has_live_override",
           `Bool
             (Option.value
                (Json_util.get_bool sources "has_live_override")
                ~default:false) )
-      ; ("cascade_override", `Bool cascade_override)
+      ; ("runtime_override", `Bool runtime_override)
       ; ("override_fields", Json_util.json_string_list override_fields)
-      ; ("default_cascade_name", Json_util.string_opt_to_json default_cascade_name)
-      ; ("live_cascade_name", Json_util.string_opt_to_json live_cascade_name)
+      ; ("default_runtime_id", Json_util.string_opt_to_json default_runtime_id)
+      ; ("live_runtime_id", Json_util.string_opt_to_json live_runtime_id)
       ; ( "active_config_root",
           Json_util.string_opt_to_json (Json_util.get_string sources "active_config_root") )
       ; ( "active_config_root_source",

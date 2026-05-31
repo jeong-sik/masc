@@ -135,32 +135,32 @@ let composite_config_drift_json ~config ~keeper_name =
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = Json_util.get_string_list sources "override_fields" in
-    let cascade_detail = find_override_field_source "model.runtime_id" sources in
-    let default_cascade_name, live_cascade_name =
-      match cascade_detail with
+    let runtime_detail = find_override_field_source "model.runtime_id" sources in
+    let default_runtime_id, live_runtime_id =
+      match runtime_detail with
       | Some detail ->
         Json_util.get_string detail "default_value",
         Json_util.get_string detail "live_value"
       | None -> None, None
     in
-    let cascade_override = Option.is_some cascade_detail in
+    let runtime_override = Option.is_some runtime_detail in
     `Assoc
       [ "present", `Bool true
-      ; "status", `String (if cascade_override then "drift" else "ok")
-      ; "cascade_override", `Bool cascade_override
+      ; "status", `String (if runtime_override then "drift" else "ok")
+      ; "runtime_override", `Bool runtime_override
       ; "override_fields", Json_util.json_string_list override_fields
-      ; "default_cascade_name", Json_util.string_opt_to_json default_cascade_name
-      ; "live_cascade_name", Json_util.string_opt_to_json live_cascade_name
+      ; "default_runtime_id", Json_util.string_opt_to_json default_runtime_id
+      ; "live_runtime_id", Json_util.string_opt_to_json live_runtime_id
       ; "active_config_root", Json_util.string_opt_to_json (json_string "active_config_root" sources)
       ]
   | Ok None ->
     `Assoc
       [ "present", `Bool false
       ; "status", `String "keeper_missing"
-      ; "cascade_override", `Bool false
+      ; "runtime_override", `Bool false
       ; "override_fields", `List []
-      ; "default_cascade_name", `Null
-      ; "live_cascade_name", `Null
+      ; "default_runtime_id", `Null
+      ; "live_runtime_id", `Null
       ; "active_config_root", `Null
       ]
   | Error message ->
@@ -168,10 +168,10 @@ let composite_config_drift_json ~config ~keeper_name =
       [ "present", `Bool false
       ; "status", `String "read_error"
       ; "error", `String message
-      ; "cascade_override", `Bool false
+      ; "runtime_override", `Bool false
       ; "override_fields", `List []
-      ; "default_cascade_name", `Null
-      ; "live_cascade_name", `Null
+      ; "default_runtime_id", `Null
+      ; "live_runtime_id", `Null
       ; "active_config_root", `Null
       ]
 ;;
@@ -330,7 +330,7 @@ let composite_execution_claim_no_eligible execution =
 let composite_execution_config_drift execution =
   match json_member "config_drift" execution with
   | `Assoc _ as config_drift ->
-    Option.value ~default:false (json_bool "cascade_override" config_drift)
+    Option.value ~default:false (json_bool "runtime_override" config_drift)
   | _ -> false
 ;;
 
@@ -440,7 +440,7 @@ let composite_runtime_attention ~snapshot ~execution =
       (match json_string "terminal_reason_code" execution with
        | Some value -> String_util.trim_to_option value
        | _ when needs_attention && composite_execution_config_drift execution ->
-         Some "keeper_cascade_override_drift"
+         Some "keeper_runtime_override_drift"
        | _ when blocked -> Some "runtime_blocked"
        | _ -> None)
   in

@@ -209,29 +209,21 @@ function isRepoFallbackSource(source: string): boolean {
   return source === 'cwd' || source === 'exe_relative'
 }
 
-function sameResolvedPath(left: DashboardConfigResolutionItem, right: DashboardConfigResolutionItem): boolean {
-  return normalizePath(left.path) === normalizePath(right.path)
-}
-
 function ConfigTopologySummary({
   resolution,
 }: {
   resolution: DashboardConfigResolution
 }) {
-  const authoringMatchesRuntime = sameResolvedPath(resolution.cascade_authoring, resolution.cascade)
   const repoFallbackActive = isRepoFallbackSource(resolution.config_root.source)
 
   return html`
     <div class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
       <div class="flex flex-wrap items-center gap-2">
         <${StatusChip} tone="neutral" uppercase=${false}>TOML-only<//>
-        <${StatusChip} tone=${authoringMatchesRuntime ? 'ok' : 'warn'} uppercase=${false}>
-          ${authoringMatchesRuntime ? 'authoring=runtime' : 'authoring/runtime split'}
-        <//>
         <${StatusChip} tone=${repoFallbackActive ? 'warn' : 'neutral'} uppercase=${false}>
           ${repoFallbackActive ? 'repo config active' : 'repo seed not active'}
         <//>
-        <span class="text-xs text-[var(--color-fg-muted)]">cascade.toml source follows the resolved config root</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">runtime config follows the resolved config root</span>
       </div>
     </div>
   `
@@ -606,18 +598,6 @@ export function ConfigResolutionPanel({
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                   isRoot=${true}
-                />
-                <${ConfigRow}
-                  label="cascade authoring"
-                  item=${resolution.cascade_authoring}
-                  rootPath=${rootPath}
-                  rootSource=${rootSource}
-                />
-                <${ConfigRow}
-                  label="cascade source"
-                  item=${resolution.cascade}
-                  rootPath=${rootPath}
-                  rootSource=${rootSource}
                 />
                 <${ConfigRow}
                   label="prompts"

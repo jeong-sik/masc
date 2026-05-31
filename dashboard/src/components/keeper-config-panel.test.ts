@@ -132,8 +132,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       precedence: ['live_meta', 'toml', 'persona'],
       has_live_override: true,
       override_fields: ['goal', 'instructions'],
-      cascade_catalog_source_kind: 'toml',
-      cascade_catalog_source_path: '/tmp/config/cascade.toml',
     },
     tools: {
       tool_access: { kind: 'preset', preset: 'delivery' },
@@ -522,7 +520,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('tier-group.keeper_unified')
     expect(container.textContent).toContain('broken_profile')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
-    expect(container.textContent).toContain('/tmp/config/cascade.toml')
     expect(container.textContent).toContain('런타임 설정')
     expect(container.textContent).toContain('active_goal_ids')
     expect(container.textContent).toContain('Ship runtime clarity')

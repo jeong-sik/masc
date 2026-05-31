@@ -2151,19 +2151,6 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   }
 }
 
-function normalizeCascadeCatalogSourceKind(
-  value: unknown,
-): KeeperConfig['sources']['cascade_catalog_source_kind'] {
-  const sourceKind = asNullableString(value)
-  switch (sourceKind) {
-    case 'json':
-    case 'toml':
-      return sourceKind
-    default:
-      return null
-  }
-}
-
 
 function normalizeKeeperSandboxEnvironment(
   raw: unknown,
@@ -2324,10 +2311,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       precedence: normalizeStringList(sources.precedence),
       has_live_override: asLooseBoolean(sources.has_live_override),
       override_fields: normalizeStringList(sources.override_fields),
-      cascade_catalog_source_kind:
-        normalizeCascadeCatalogSourceKind(sources.cascade_catalog_source_kind),
-      cascade_catalog_source_path:
-        asNullableString(sources.cascade_catalog_source_path),
     },
     metrics: {
       generation: asInt(metrics.generation) ?? 0,

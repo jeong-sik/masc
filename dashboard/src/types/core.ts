@@ -1309,8 +1309,6 @@ interface KeeperConfigSources {
   precedence: string[]
   has_live_override: boolean
   override_fields: string[]
-  cascade_catalog_source_kind: 'json' | 'toml' | null
-  cascade_catalog_source_path: string | null
 }
 
 interface KeeperConfigMetrics {

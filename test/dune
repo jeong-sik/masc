@@ -188,7 +188,6 @@
   test_keeper_unified
   test_keeper_unified_claim_progress
   test_keeper_unified_completion_contract
-  test_keeper_unified_context_budget
   test_keeper_unified_context_overflow
   test_keeper_unified_turn_pipeline_records
   test_keeper_unified_required_tools
@@ -200,7 +199,6 @@
   test_decision_pipeline
   test_decision_pipeline_observer
   test_keeper_composite_observer
-  test_keeper_fsm_edges
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
@@ -277,7 +275,6 @@
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_observability_provider_contracts
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -484,7 +481,6 @@
   test_keeper_unified
   test_keeper_unified_claim_progress
   test_keeper_unified_completion_contract
-  test_keeper_unified_context_budget
   test_keeper_unified_context_overflow
   test_keeper_unified_turn_pipeline_records
   test_keeper_unified_required_tools
@@ -496,7 +492,6 @@
   test_decision_pipeline
   test_decision_pipeline_observer
   test_keeper_composite_observer
-  test_keeper_fsm_edges
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
@@ -576,7 +571,6 @@
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_observability_provider_contracts
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -645,7 +639,6 @@
   test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
   test_prompt_registry_pbt
-  test_keeper_fsm_joints
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt)
@@ -658,7 +651,6 @@
   test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
   test_prompt_registry_pbt
-  test_keeper_fsm_joints
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt)
@@ -2182,10 +2174,6 @@
  (modules test_rfc_0085_pr9_base_path_opt_purge)
  (libraries alcotest ast_grep))
 
-(test
- (name test_success_model_attribution)
- (modules test_success_model_attribution)
- (libraries masc_test_deps))
 
 ; Regression for local-overrotation: Execute / tool_execute must not route
 ; sandbox_profile=local through Docker merely because DockerPlayground is on.

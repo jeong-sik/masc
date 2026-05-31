@@ -88,9 +88,7 @@ val run_status_json :
     silent fallbacks would break operator-visible "run
     expired" feedback. *)
 
-(** {1 Provider snapshot inspection (test-visible)}
-    Pinned for behaviour-tests under
-    {!test/test_observability_provider_contracts}. *)
+(** {1 Provider snapshot inspection (test-visible)} *)
 
 type discovery_info = {
   discovered_model : string option;

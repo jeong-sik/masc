@@ -136,7 +136,12 @@ let latest_cascade_for_current_config ~current_cascade_name latest_metrics =
   | None -> None
   | Some cascade ->
       let cascade_name_matches =
-        match Json_util.assoc_string_opt "cascade_name" cascade with
+        let observed_runtime_id =
+          match Json_util.assoc_string_opt "runtime_id" cascade with
+          | Some value -> Some value
+          | None -> Json_util.assoc_string_opt "cascade_name" cascade
+        in
+        match observed_runtime_id with
         | Some observed_name -> String.equal observed_name current_cascade_name
         | None -> true
       in
@@ -149,12 +154,12 @@ let model_observability_json ~current_cascade_name ~runtime_blocker_fields lates
   let runtime_blocker_class =
     assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
   in
-  let cascade_name =
+  let runtime_id =
     Option.value ~default:"" (nonempty_trimmed current_cascade_name)
   in
   `Assoc
-    [ ( "cascade_name"
-      , if cascade_name = "" then `Null else `String cascade_name )
+    [ ( "runtime_id"
+      , if runtime_id = "" then `Null else `String runtime_id )
     ; "recent_turn_observation", `Bool (Option.is_some latest_cascade)
     ; "configured_labels", `List []
     ; "resolved_candidates", `List []

@@ -702,12 +702,12 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
               (row |> member "diagnostic" |> member "health_state" <> `Null);
             check bool "diagnostic next action surfaced" true
               (row |> member "diagnostic" |> member "next_action_path" <> `Null);
-            check string "raw cascade surfaced on execution keeper row"
+            check string "runtime id surfaced on execution keeper row"
               Lib.(Keeper_config.default_cascade_name ())
-              (row |> member "cascade_name" |> to_string);
-            check string "canonical cascade surfaced on execution keeper row"
+              (row |> member "runtime_id" |> to_string);
+            check string "canonical runtime surfaced on execution keeper row"
               Lib.(Keeper_config.default_cascade_name ())
-              (row |> member "cascade_canonical" |> to_string);
+              (row |> member "runtime_canonical" |> to_string);
             check bool "primary model omitted on execution keeper row" true
               (row |> member "primary_model" = `Null);
             check bool "active model label omitted on execution keeper row" true

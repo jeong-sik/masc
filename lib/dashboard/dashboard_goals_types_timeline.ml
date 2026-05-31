@@ -171,7 +171,7 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
       ( "sandbox_profile",
         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) );
       ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
-      ("cascade_name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
+      ("runtime_id", `String (Keeper_meta_contract.cascade_name_of_meta meta));
       ( "approval_profile",
         Json_util.string_opt_to_json (Option.bind latest_receipt receipt_approval_profile) );
       ( "cascade_outcome",

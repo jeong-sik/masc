@@ -2094,9 +2094,9 @@ let test_keeper_status_exposes_model_observability () =
       let runtime_trust = status_json |> member "runtime_trust" in
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
-        ("cascade name surfaced\n" ^ status_dump)
+        ("runtime id surfaced\n" ^ status_dump)
         (Some Masc_mcp.(Keeper_config.default_cascade_name ()))
-        (observability |> member "cascade_name" |> to_string_option);
+        (observability |> member "runtime_id" |> to_string_option);
       Alcotest.(check bool) "recent turn observation true" true
         (observability |> member "recent_turn_observation" |> to_bool);
       Alcotest.(check (list string)) "configured labels omitted" []
@@ -2236,9 +2236,9 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       let observability = status_json |> member "model_observability" in
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
-        ("current cascade name wins over stale metrics\n" ^ status_dump)
+        ("current runtime id wins over stale metrics\n" ^ status_dump)
         (Some (Keeper_meta_contract.cascade_name_of_meta meta))
-        (observability |> member "cascade_name" |> to_string_option);
+        (observability |> member "runtime_id" |> to_string_option);
       Alcotest.(check bool) "stale observation ignored" false
         (observability |> member "recent_turn_observation" |> to_bool);
       Alcotest.(check (list string))
@@ -2873,13 +2873,13 @@ proactive_enabled = true
         (json |> member "proactive" |> member "enabled" |> to_bool);
       Alcotest.(check string) "default source kind" "toml"
         (json |> member "sources" |> member "default_source_kind" |> to_string);
-      Alcotest.(check string) "selected cascade name"
+      Alcotest.(check string) "selected runtime id"
         Masc_mcp.(Keeper_config.default_cascade_name ())
-        (json |> member "execution" |> member "selected_cascade_name"
+        (json |> member "execution" |> member "selected_runtime_id"
        |> to_string);
-      Alcotest.(check string) "selected cascade canonical"
+      Alcotest.(check string) "selected runtime canonical"
         Masc_mcp.(Keeper_config.default_cascade_name ())
-        (json |> member "execution" |> member "selected_cascade_canonical"
+        (json |> member "execution" |> member "selected_runtime_canonical"
        |> to_string);
       let expected_default_models =
         Masc_mcp.Cascade_runtime.models_of_cascade_name
@@ -3033,13 +3033,13 @@ proactive_enabled = true
         Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
       in
       Alcotest.(check bool) "stale config still found" true (stale_status = `OK);
-      Alcotest.(check string) "stale cascade raw name preserved"
+      Alcotest.(check string) "stale runtime id preserved"
         "vendor_mix_balanced"
-        (stale_json |> member "execution" |> member "selected_cascade_name"
+        (stale_json |> member "execution" |> member "selected_runtime_id"
        |> to_string);
       Alcotest.(check string) "stale cascade falls back to live default"
         Masc_mcp.(Keeper_config.default_cascade_name ())
-        (stale_json |> member "execution" |> member "selected_cascade_canonical"
+        (stale_json |> member "execution" |> member "selected_runtime_canonical"
        |> to_string);
       Alcotest.(check (list string)) "stale cascade models use live default"
         expected_default_models

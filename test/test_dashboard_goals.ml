@@ -85,7 +85,7 @@ let rewrite_goal_updated_at config ~goal_id ~updated_at =
   in
   Goal_store.write_state config { state with updated_at; goals }
 
-let test_cascade_name = "cascade.test"
+let test_runtime_id = "cascade.test"
 
 let make_keeper_meta ~name ~goal_id =
   match
@@ -96,7 +96,7 @@ let make_keeper_meta ~name ~goal_id =
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "Goal-linked keeper");
-          ("cascade_name", `String test_cascade_name);
+          ("runtime_id", `String test_runtime_id);
         ])
   with
   | Ok meta -> { meta with active_goal_ids = [ goal_id ] }

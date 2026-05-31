@@ -1997,8 +1997,8 @@ let test_keeper_continuity_harness_auth_contracts () =
   check bool "continuity harness sends bearer token through MCP helper" true
     (file_contains_pattern harness
        {|mcp_call_tool "$req_id" "$tool_name" "$args_json" "${MCP_SESSION_ID:-}" "$MCP_TOKEN" "$MCP_URL"|});
-  check bool "continuity harness uses cascade_name instead of legacy models" true
-    (file_contains_pattern harness {|cascade_name:$cascade_name|});
+  check bool "continuity harness uses runtime_id instead of legacy models" true
+    (file_contains_pattern harness {|runtime_id:$cascade_name|});
   check bool "continuity harness no longer sends legacy models" true
     (file_not_contains_pattern harness {|models:$models|});
   check bool "continuity harness no longer sends removed keepalive args" true
@@ -2012,11 +2012,11 @@ let test_keeper_continuity_harness_auth_contracts () =
     (file_contains_pattern harness {|wait_for_keeper_status_condition|});
   check bool "continuity harness proves liveness with total_turns" true
     (file_contains_pattern harness {|.meta.total_turns|});
-  check bool "keeper_up schema exposes cascade_name" true
-    (file_contains_pattern "lib/keeper/keeper_schema.ml" {|("cascade_name"|});
-  check bool "keeper_up parser stores cascade_name arg" true
+  check bool "keeper_up schema exposes runtime_id" true
+    (file_contains_pattern "lib/keeper/keeper_schema.ml" {|("runtime_id"|});
+  check bool "keeper_up parser stores runtime_id arg" true
     (file_contains_pattern "lib/keeper/keeper_turn_up_args.ml"
-       {|cascade_name_opt_res = parse_cascade_name_opt args|})
+       {|runtime_id_opt_res = parse_runtime_id_opt args|})
 
 let test_mission_briefing_memory_guard_contracts () =
   check bool "mission briefing snapshot disables keeper payload" true

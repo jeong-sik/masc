@@ -132,7 +132,7 @@ let apply_default_opt opt current = match opt with Some _ -> opt | None -> curre
 let invalid_profile_defaults_error ~keeper_name detail =
   if String_util.contains_substring detail "cascade_name" then
     Printf.sprintf
-      "invalid profile.cascade_name for keeper %s: unknown cascade_name: %s"
+      "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
       keeper_name detail
   else
     Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
@@ -140,7 +140,7 @@ let invalid_profile_defaults_error ~keeper_name detail =
 let effective_declarative_cascade_name
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model. *)
+  (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
   match defaults.model, defaults.manifest_path with
   | Some cascade_name, _ ->
       Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
@@ -204,13 +204,12 @@ let ensure_keeper_meta config name =
         ()
     with
     | Error detail ->
-        (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model.
-           Field-label strings kept for backward-compat in error messages. *)
+        (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
         let field =
           match defaults.model, defaults.manifest_path with
-          | Some _, _ -> "profile.cascade_name"
+          | Some _, _ -> "profile.runtime_id"
           | None, Some _ -> "manifest.default_cascade_name"
-          | None, None -> "meta.cascade_name"
+          | None, None -> "meta.runtime_id"
         in
         let raw_value =
           match defaults.model, defaults.manifest_path with
@@ -327,7 +326,7 @@ let ensure_keeper_meta config name =
       meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
     let social_model_changed = meta.social_model <> target_social_model in
-    (* [meta.cascade_name] may be a raw TOML/JSON value while
+    (* [meta runtime id] may be a raw TOML/JSON value while
        [resolved_target_cascade_name] is the validated runtime catalog
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)

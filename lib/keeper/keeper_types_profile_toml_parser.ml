@@ -126,7 +126,38 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
-  (* model field: simple provider:model string, no validation needed *)
+  let runtime_id_result =
+    let trimmed key =
+      match str key with
+      | None -> None
+      | Some raw ->
+        let value = String.trim raw in
+        if value = "" then None else Some value
+    in
+    let runtime_id = trimmed "runtime_id" in
+    let legacy_model = trimmed "model" in
+    let legacy_cascade_name = trimmed "cascade_name" in
+    let conflict left_name left_value right_name right_value =
+      Error
+        (Printf.sprintf
+           "keeper.%s (%s) and legacy keeper.%s (%s) must match"
+           left_name left_value right_name right_value)
+    in
+    match runtime_id, legacy_model, legacy_cascade_name with
+    | Some runtime_id, Some legacy_model, _
+      when runtime_id <> legacy_model ->
+      conflict "runtime_id" runtime_id "model" legacy_model
+    | Some runtime_id, _, Some legacy_cascade_name
+      when runtime_id <> legacy_cascade_name ->
+      conflict "runtime_id" runtime_id "cascade_name" legacy_cascade_name
+    | None, Some legacy_model, Some legacy_cascade_name
+      when legacy_model <> legacy_cascade_name ->
+      conflict "model" legacy_model "cascade_name" legacy_cascade_name
+    | Some runtime_id, _, _ -> Ok (Some runtime_id)
+    | None, Some legacy_model, _ -> Ok (Some legacy_model)
+    | None, None, Some legacy_cascade_name -> Ok (Some legacy_cascade_name)
+    | None, None, None -> Ok None
+  in
   let result =
     Result.bind result (fun () ->
         let has_proactive_idle = has "proactive_idle_sec" in
@@ -143,8 +174,12 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let result =
     Result.bind result (fun () -> tool_access_defaults_result)
   in
+  let result =
+    Result.bind result (fun tool_custom_list ->
+      Result.map (fun runtime_id_opt -> tool_custom_list, runtime_id_opt) runtime_id_result)
+  in
   Result.map
-    (fun tool_custom_list ->
+    (fun (tool_custom_list, runtime_id_opt) ->
       {
         id = None;
         manifest_path = None;
@@ -199,7 +234,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
         social_model = normalize_social_model_opt (str "social_model");
-        model = str "model";
+        model = runtime_id_opt;
         models = None;
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
@@ -244,7 +279,9 @@ let parsed_field_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
+  ; "runtime_id"
   ; "model"
+  ; "cascade_name"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -291,7 +328,9 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
+  ; "runtime_id"
   ; "model"
+  ; "cascade_name"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]

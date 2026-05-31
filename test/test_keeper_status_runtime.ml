@@ -996,8 +996,8 @@ let test_runtime_surface_exposes_cascade_attempt_facts () =
   let facts = runtime |> member "runtime_blocker_facts" in
   check string "facts source" "keeper_runtime.last_cascade_attempt"
     (facts |> member "source" |> to_string);
-  check string "facts cascade" "cascade.strict_tool_candidates"
-    (facts |> member "cascade_name" |> to_string);
+  check string "facts runtime id" "cascade.strict_tool_candidates"
+    (facts |> member "runtime_id" |> to_string);
   let last_attempt = facts |> member "last_cascade_attempt" in
   check string "attempt provider_id" attempt.provider_id
     (last_attempt |> member "provider_id" |> to_string);

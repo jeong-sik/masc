@@ -83,9 +83,9 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
   let claim_status = Json_util.get_string claim_scope "status" in
   let claim_mode = Json_util.get_string claim_scope "mode" in
   let claim_excluded_count = Json_util.get_int claim_scope "excluded_count" in
-  let cascade_override =
+  let runtime_override =
     Option.value
-      (Json_util.get_bool config_drift "cascade_override")
+      (Json_util.get_bool config_drift "runtime_override")
       ~default:false
   in
   let pre_dispatch_reason =
@@ -142,19 +142,19 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            gaps
        | _ -> gaps)
   |> (fun gaps ->
-       if cascade_override then
+       if runtime_override then
          add
-           { code = "keeper_cascade_override_drift"
+           { code = "keeper_runtime_override_drift"
            ; severity = "warn"
-           ; lane = "masc_policy_cascade"
+           ; lane = "masc_policy_runtime"
            ; detail =
                Some
                  (Printf.sprintf "default=%s live=%s"
                     (Option.value
-                       (Json_util.get_string config_drift "default_cascade_name")
+                       (Json_util.get_string config_drift "default_runtime_id")
                        ~default:"unknown")
                     (Option.value
-                       (Json_util.get_string config_drift "live_cascade_name")
+                       (Json_util.get_string config_drift "live_runtime_id")
                        ~default:"unknown"))
            }
            gaps
@@ -165,7 +165,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          add
            { code = "route_tool_capability_gap"
            ; severity = "bad"
-           ; lane = "masc_policy_cascade"
+           ; lane = "masc_policy_runtime"
            ; detail = Some "pre-dispatch blocked because route cannot materialize required tools"
            }
            gaps
@@ -190,7 +190,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          add
            { code = "provider_lane_unresolved"
            ; severity = "bad"
-           ; lane = "masc_policy_cascade"
+           ; lane = "masc_policy_runtime"
            ; detail = Some "tool surface/provider attempt exists without provider_lane_resolved"
            }
            gaps
@@ -224,7 +224,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          add
            { code = "provider_lane_unresolved"
            ; severity = "warn"
-           ; lane = "masc_policy_cascade"
+           ; lane = "masc_policy_runtime"
            ; detail = Some "required tools exist but provider lane materialization is unknown"
            }
            gaps
@@ -393,7 +393,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          then
            { code = "cascade_decision_missing"
            ; severity = "warn"
-           ; lane = "masc_policy_cascade"
+           ; lane = "masc_policy_runtime"
            ; detail = Some "turn started but no cascade_routed event recorded"
            }
            :: gaps

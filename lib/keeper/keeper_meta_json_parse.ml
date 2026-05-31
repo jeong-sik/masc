@@ -118,31 +118,50 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_needs = personality.needs in
     let pk_desires = personality.desires in
     let pk_instructions = personality.instructions in
-    let pk_cascade_name =
+    let pk_cascade_name_result =
       (* RFC-0206: [runtime_id] is the canonical persisted/input name if a
          pre-scrub JSON payload still carries model-selection state.
-         [cascade_name] is accepted only as a legacy alias for older files. *)
-      match Safe_ops.json_string_opt "runtime_id" json with
-      | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
-      | Some _ | None ->
-        Safe_ops.json_string ~default:(Keeper_config.default_cascade_name ()) "cascade_name" json
+         [cascade_name] is accepted only as a legacy alias for older files.
+         If both appear with different non-empty values, fail loud instead of
+         silently choosing one model-selection identity. *)
+      let runtime_id_opt =
+        Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim
+      in
+      let legacy_cascade_name_opt =
+        Safe_ops.json_string_opt "cascade_name" json |> Option.map String.trim
+      in
+      match runtime_id_opt, legacy_cascade_name_opt with
+      | Some runtime_id, Some legacy_cascade_name
+        when runtime_id <> "" && legacy_cascade_name <> ""
+             && runtime_id <> legacy_cascade_name ->
+        Error
+          (Printf.sprintf
+             "keeper meta parse error: runtime_id (%s) and legacy cascade_name (%s) \
+              disagree"
+             runtime_id legacy_cascade_name)
+      | Some runtime_id, _ when runtime_id <> "" -> Ok runtime_id
+      | _, Some legacy_cascade_name when legacy_cascade_name <> "" -> Ok legacy_cascade_name
+      | _ -> Ok (Keeper_config.default_cascade_name ())
     in
-    Ok
-      { pk_name
-      ; pk_agent_name
-      ; pk_trace_id
-      ; pk_trace_history
-      ; pk_goal
-      ; pk_short_goal
-      ; pk_mid_goal
-      ; pk_long_goal
-      ; pk_social_model
-      ; pk_cascade_name
-      ; pk_will
-      ; pk_needs
-      ; pk_desires
-      ; pk_instructions
-      }
+    (match pk_cascade_name_result with
+     | Error e -> Error e
+     | Ok pk_cascade_name ->
+       Ok
+         { pk_name
+         ; pk_agent_name
+         ; pk_trace_id
+         ; pk_trace_history
+         ; pk_goal
+         ; pk_short_goal
+         ; pk_mid_goal
+         ; pk_long_goal
+         ; pk_social_model
+         ; pk_cascade_name
+         ; pk_will
+         ; pk_needs
+         ; pk_desires
+         ; pk_instructions
+         })
 ;;
 
 (* Fail-loud sandbox policy field parsing.

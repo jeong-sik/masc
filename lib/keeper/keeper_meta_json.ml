@@ -61,6 +61,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "board_reactive_turn_count", `Int rt.board_reactive_turn_count
     ; "mention_reactive_turn_count", `Int rt.mention_reactive_turn_count
     ; "noop_turn_count", `Int rt.noop_turn_count
+    ; "last_seen_message_seq", `Int rt.last_seen_message_seq
     ; "last_speech_act", `String rt.last_speech_act
     ; "last_social_transition_reason", `String rt.last_social_transition_reason
     ; "last_active_desire", `String rt.last_active_desire
@@ -143,6 +144,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "board_reactive_turn_count"
   ; "mention_reactive_turn_count"
   ; "noop_turn_count"
+  ; "last_seen_message_seq"
   ; "last_speech_act"
   ; "last_social_transition_reason"
   ; "last_active_desire"

@@ -49,18 +49,27 @@ let create
   }
 ;;
 
+(* Monotonically increasing counter to disambiguate containers created
+   within the same millisecond by the same process.  Without this, 64
+   concurrent keepers starting simultaneously can produce duplicate
+   container names, causing [docker run --name X] to fail with "name
+   already in use". *)
+let container_counter : int Atomic.t = Atomic.make 0
+
 let container_name_of (t : t) =
   let net_suffix =
     match t.network_mode with
     | Network_none -> "none"
     | Network_inherit -> "inherit"
   in
+  let seq = Atomic.fetch_and_add container_counter 1 in
   Printf.sprintf
-    "masc-keeper-turn-%s-%s-%d-%d"
+    "masc-keeper-turn-%s-%s-%d-%d-%d"
     (Coord_utils.safe_filename t.meta.name)
     net_suffix
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
+    seq
 ;;
 
 let container_path_of_host (t : t) ~host_path =
@@ -685,13 +694,17 @@ let cleanup (t : t) =
   | Not_started -> ()
   | Running { container_name } ->
     t.state <- Not_started;
+    let rm_timeout =
+      Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
+    in
     let rm_argv =
       Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
     in
-    let st, out =
-      run_argv_with_status_retry_eintr
-        ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
-        rm_argv
+    let status_label st =
+      match st with
+      | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
+      | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
+      | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n
     in
     let still_exists () =
       (* Use `docker ps -a` so a stopped-but-still-existing container is not
@@ -708,10 +721,7 @@ let cleanup (t : t) =
         @ [ "ps"; "-a"; "-q"; "--filter"; "name=" ^ container_name ]
       in
       let check_st, check_out =
-        run_argv_with_status_retry_eintr
-          ~timeout_sec:
-            (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
-          check_argv
+        run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout check_argv
       in
       match check_st with
       | Unix.WEXITED 0 -> String.trim check_out <> ""
@@ -721,39 +731,56 @@ let cleanup (t : t) =
            as unknown"
           t.meta.name
           container_name
-          (match check_st with
-           | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
-           | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
-           | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
+          (status_label check_st)
           (Exec_policy.truncate_for_log check_out);
         false
     in
-    (* Probe existence once and reuse across the success/failure branches —
-       each [still_exists] call runs [docker ps -a], which adds latency per
-       cleanup turn. *)
-    let exists_after = still_exists () in
+    let st, out =
+      run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout rm_argv
+    in
+    (* First attempt succeeded and container is gone — done. *)
     (match st with
-     | Unix.WEXITED 0 when not exists_after -> ()
+     | Unix.WEXITED 0 when not (still_exists ()) -> ()
      | _ ->
-       if exists_after
-       then (
-         Log.Keeper.warn
-           "%s: docker rm -f %s failed and container still exists (status=%s, out=%s)"
-           t.meta.name
-           container_name
-           (match st with
-            | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
-            | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
-            | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
-           out;
-         Prometheus.inc_counter
-           Keeper_metrics.(to_string TurnCleanupFailures)
-           ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
-           ())
-       else
-         Log.Keeper.info
-           "%s: docker rm -f %s reported failure but container is gone"
-           t.meta.name
-           container_name);
-    ()
+       (* First attempt failed or container still exists.
+          Retry once — transient daemon issues can resolve within seconds,
+          and a single retry catches the common "docker rm raced with
+          container exit" case without unbounded retries. *)
+       let final_st, final_out =
+         match st with
+         | Unix.WEXITED 0 ->
+           (* rm reported success but container still exists — unlikely
+              but re-probe after a brief yield for daemon state to
+              settle. *)
+           st, out
+         | _ ->
+           Log.Keeper.info
+             "%s: docker rm -f %s failed (status=%s), retrying once"
+             t.meta.name
+             container_name
+             (status_label st);
+           run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout rm_argv
+       in
+       let exists_after_final = still_exists () in
+       (match final_st with
+        | Unix.WEXITED 0 when not exists_after_final -> ()
+        | _ ->
+          if exists_after_final
+          then (
+            Log.Keeper.warn
+              "%s: docker rm -f %s failed after retry and container still exists \
+               (status=%s, out=%s)"
+              t.meta.name
+              container_name
+              (status_label final_st)
+              (Exec_policy.truncate_for_log final_out);
+            Prometheus.inc_counter
+              Keeper_metrics.(to_string TurnCleanupFailures)
+              ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
+              ())
+          else
+            Log.Keeper.info
+              "%s: docker rm -f %s reported failure but container is gone"
+              t.meta.name
+              container_name))
 ;;

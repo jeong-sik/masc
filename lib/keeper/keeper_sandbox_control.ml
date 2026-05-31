@@ -53,12 +53,19 @@ let rec ensure_dir path =
     if parent <> path then ensure_dir parent;
     Unix.mkdir path 0o755)
 
+(* Monotonically increasing counter to disambiguate managed containers
+   created within the same millisecond by the same process.  Mirrors
+   {!Keeper_turn_sandbox_runtime.container_counter}. *)
+let managed_container_counter : int Atomic.t = Atomic.make 0
+
 let managed_container_name ~(meta : keeper_meta) ~(network_label : string) =
-  Printf.sprintf "masc-keeper-managed-%s-%s-%d-%d"
+  let seq = Atomic.fetch_and_add managed_container_counter 1 in
+  Printf.sprintf "masc-keeper-managed-%s-%s-%d-%d-%d"
     (Coord_utils.safe_filename meta.name)
     (Coord_utils.safe_filename network_label)
     (Unix.getpid ())
     (now_ms ())
+    seq
 
 let configured_effective_network network_mode = network_mode
 

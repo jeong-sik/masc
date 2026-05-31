@@ -238,7 +238,7 @@ let docker_rm_no_such_container text =
 
 let cleanup_oneshot_container ~container_name =
   let argv = Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ] in
-  let status, output =
+  let run_rm () =
     Docker_spawn_throttle.with_slot (fun () ->
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:`System_sandbox
@@ -249,15 +249,27 @@ let cleanup_oneshot_container ~container_name =
         ~timeout_sec:(docker_cleanup_rm_timeout_sec ())
         argv)
   in
+  let status, output = run_rm () in
   match status with
   | Unix.WEXITED 0 -> ()
   | _ when docker_rm_no_such_container output -> ()
   | _ ->
-    Log.Keeper.warn
-      "docker oneshot cleanup failed for %s (status=%s, output=%s)"
+    (* Retry once — transient daemon issues (e.g. concurrent container
+       removal racing with our rm) can resolve on a second attempt. *)
+    Log.Keeper.info
+      "docker oneshot cleanup for %s failed (status=%s), retrying once"
       container_name
-      (Keeper_sandbox_exec_failure.status_label status)
-      (Exec_policy.truncate_for_log output)
+      (Keeper_sandbox_exec_failure.status_label status);
+    let retry_status, retry_output = run_rm () in
+    (match retry_status with
+     | Unix.WEXITED 0 -> ()
+     | _ when docker_rm_no_such_container retry_output -> ()
+     | _ ->
+       Log.Keeper.warn
+         "docker oneshot cleanup failed for %s after retry (status=%s, output=%s)"
+         container_name
+         (Keeper_sandbox_exec_failure.status_label retry_status)
+         (Exec_policy.truncate_for_log retry_output))
 ;;
 
 let fd_admission_error ~(config : Coord.config) =
@@ -391,7 +403,15 @@ let optional_ro_mount ~host ~container =
   if host = ""
   then []
   else if not (Sys.file_exists host)
-  then []
+  then
+    (* Log the skipped mount so operators can distinguish "mount
+       deliberately omitted" from "mount expected but path missing"
+       when debugging container-internal file access failures. *)
+    ( Log.Keeper.debug
+        "optional_ro_mount skipped: host path %S does not exist (container=%S)"
+        host
+        container
+    ; [] )
   else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
 ;;
 

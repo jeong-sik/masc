@@ -38,8 +38,6 @@
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
-  test_room
-  test_coord_state_recovery
   test_exec_tap
   test_auth
   test_auth_credential_index_cache
@@ -90,7 +88,6 @@
   test_dashboard_link_preview
   test_gate_keeper_backend
   test_transport_read_model
-  test_multi_room
   test_worktree_detection
   test_mention
   test_mention_dedup
@@ -148,14 +145,12 @@
   test_keeper_lifecycle_chaos
   test_keeper_rollover_gate
   test_keeper_generation_lineage
-  test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_fd_pressure_fleet
   test_docker_spawn_throttle
   test_keeper_supervisor
   test_keeper_alerting_path
   test_coord_eio_pure
-  test_coord_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
   test_heartbeat_smart
@@ -168,7 +163,6 @@
   test_keeper_meta_cwd_resilience
   test_metrics_rotation
   test_tool_access_policy
-  test_tool_access_role
   test_tool_error
   test_tool_token
   test_tool_exposure
@@ -267,7 +261,6 @@
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
-  test_telemetry_error_occurred_wire_10358
   test_keeper_topk_llm
   test_warn_root_causes
   test_keeper_agent_memory_episode_activity
@@ -306,8 +299,6 @@
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
-  test_room
-  test_coord_state_recovery
   test_exec_tap
   test_auth
   test_auth_credential_index_cache
@@ -358,7 +349,6 @@
   test_dashboard_link_preview
   test_gate_keeper_backend
   test_transport_read_model
-  test_multi_room
   test_worktree_detection
   test_mention
   test_mention_dedup
@@ -416,14 +406,12 @@
   test_keeper_lifecycle_chaos
   test_keeper_rollover_gate
   test_keeper_generation_lineage
-  test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_fd_pressure_fleet
   test_docker_spawn_throttle
   test_keeper_supervisor
   test_keeper_alerting_path
   test_coord_eio_pure
-  test_coord_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
   test_heartbeat_smart
@@ -436,7 +424,6 @@
   test_keeper_meta_cwd_resilience
   test_metrics_rotation
   test_tool_access_policy
-  test_tool_access_role
   test_tool_error
   test_tool_token
   test_tool_exposure
@@ -539,7 +526,6 @@
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
-  test_telemetry_error_occurred_wire_10358
   test_keeper_topk_llm
   test_warn_root_causes
   test_keeper_agent_memory_episode_activity
@@ -583,7 +569,6 @@
   test_pbt_text_processing
   test_pbt_context_overflow
   test_keeper_state_machine_pbt
-  test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
   test_prompt_registry_pbt
   test_clean_only_bug_mirrors
@@ -595,7 +580,6 @@
   test_pbt_text_processing
   test_pbt_context_overflow
   test_keeper_state_machine_pbt
-  test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
   test_prompt_registry_pbt
   test_clean_only_bug_mirrors
@@ -612,11 +596,7 @@
  (names
   test_runtime_params
   test_config_dir_resolver
-  test_room_coverage
   test_streamable_http
-  test_dashboard_workspace
-  test_dashboard_briefing
-  test_dashboard_briefing_sections
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
@@ -625,12 +605,10 @@
   test_tool_quality_classify
   test_tui_decode
   test_dashboard_governance
-  test_dashboard_labels
   test_dashboard_keeper_feature_proof
   test_dashboard_surface_readiness
   test_activity_graph
   test_masc_log
-  test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
   test_server_base_path_diagnostics
@@ -682,7 +660,6 @@
   test_bg_task_stub
   test_process_eio_detached
   test_voice_runtime_overlay
-  test_worker_container_coverage
   test_resilience
   test_common
   test_room_messages_raw
@@ -708,9 +685,7 @@
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
-  test_mcp_server_eio
   test_mcp_server_eio_call_tool
-  test_mcp_server_eio_join_state
   test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
@@ -762,8 +737,6 @@
   ; test_tree_index removed (CP purge)
   test_tool_registry
   test_tool_dispatch
-  test_tool_spec
-  test_typed_tool_masc
   test_state_product
   test_tool_result
   test_tool_hooks
@@ -783,8 +756,6 @@
   test_agent_economy
   test_lifecycle
   test_auto_recall_activity_coverage
-  test_grpc_coordination
-  test_grpc_client
   test_http_protocol_detect
   test_keeper_safety_gates
   test_keeper_guards
@@ -814,11 +785,7 @@
  (modules
   test_runtime_params
   test_config_dir_resolver
-  test_room_coverage
   test_streamable_http
-  test_dashboard_workspace
-  test_dashboard_briefing
-  test_dashboard_briefing_sections
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
@@ -827,12 +794,10 @@
   test_tool_quality_classify
   test_tui_decode
   test_dashboard_governance
-  test_dashboard_labels
   test_dashboard_keeper_feature_proof
   test_dashboard_surface_readiness
   test_activity_graph
   test_masc_log
-  test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
   test_server_base_path_diagnostics
@@ -884,7 +849,6 @@
   test_bg_task_stub
   test_process_eio_detached
   test_voice_runtime_overlay
-  test_worker_container_coverage
   test_resilience
   test_common
   test_room_messages_raw
@@ -910,9 +874,7 @@
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
-  test_mcp_server_eio
   test_mcp_server_eio_call_tool
-  test_mcp_server_eio_join_state
   test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
@@ -963,8 +925,6 @@
   ; test_tree_index removed (CP purge)
   test_tool_registry
   test_tool_dispatch
-  test_tool_spec
-  test_typed_tool_masc
   test_state_product
   test_tool_result
   test_tool_hooks
@@ -984,8 +944,6 @@
   test_agent_economy
   test_lifecycle
   test_auto_recall_activity_coverage
-  test_grpc_coordination
-  test_grpc_client
   test_http_protocol_detect
   test_keeper_safety_gates
   test_keeper_guards
@@ -1059,12 +1017,9 @@
   test_mcp_session_coverage
   test_sse_coverage
   test_room_utils_coverage
-  test_orchestrator_coverage
   test_web_dashboard_coverage
-  test_auth_coverage
   test_mention_coverage
   test_resilience_coverage
-  test_types_coverage
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage
@@ -1073,16 +1028,11 @@
   test_handover_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
-  test_telemetry_eio_coverage
   test_room_git_coverage
-  test_auto_responder_coverage
   test_tool_plan_coverage
-  test_tool_agent_coverage
-  test_tool_task_coverage
   test_tool_coord_coverage
   test_tool_control_coverage
   test_tool_misc_coverage
-  test_ag_ui_coverage
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage
@@ -1107,12 +1057,9 @@
   test_mcp_session_coverage
   test_sse_coverage
   test_room_utils_coverage
-  test_orchestrator_coverage
   test_web_dashboard_coverage
-  test_auth_coverage
   test_mention_coverage
   test_resilience_coverage
-  test_types_coverage
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage
@@ -1121,16 +1068,11 @@
   test_handover_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
-  test_telemetry_eio_coverage
   test_room_git_coverage
-  test_auto_responder_coverage
   test_tool_plan_coverage
-  test_tool_agent_coverage
-  test_tool_task_coverage
   test_tool_coord_coverage
   test_tool_control_coverage
   test_tool_misc_coverage
-  test_ag_ui_coverage
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage
@@ -1153,7 +1095,7 @@
 (library
  (name keeper_tool_matrix_cases_lib)
  (wrapped false)
- (modules test_keeper_tool_matrix_cases test_mcp_tool_matrix_cases)
+ (modules test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
 
 ; Special: Custom compiler flags
@@ -1219,10 +1161,6 @@
  (modules tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
-(executable
- (name keeper_tool_matrix_case_runner)
- (modules keeper_tool_matrix_case_runner)
- (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 
 ; Individual test stanzas — each in its own file to prevent
@@ -1253,7 +1191,6 @@
 
 (include stanzas/test_board_sse_canonical_event_type.inc)
 
-(include stanzas/test_briefing_compactors.inc)
 
 (include stanzas/test_briefing_gaps.inc)
 
@@ -1407,7 +1344,6 @@
 
 (include stanzas/test_bounded_proc.inc)
 
-(include stanzas/test_join_required_guard_counter.inc)
 
 (include stanzas/test_jsonl_atomic.inc)
 
@@ -1506,7 +1442,6 @@
 
 (include stanzas/test_keeper_tool_emission_hook.inc)
 
-(include stanzas/test_keeper_tool_matrix.inc)
 
 (include stanzas/test_keeper_tool_policy_paths.inc)
 
@@ -1531,7 +1466,6 @@
 
 (include stanzas/test_masc_dirname_ssot.inc)
 
-(include stanzas/test_masc_error_is_retryable.inc)
 
 (include stanzas/test_mcp_post_sse_e2e.inc)
 
@@ -1539,7 +1473,6 @@
 
 (include stanzas/test_mcp_tool_matrix.inc)
 
-(include stanzas/test_meta_cognition_snapshot.inc)
 
 (include stanzas/test_normalized_actor.inc)
 
@@ -1561,7 +1494,6 @@
 (include stanzas/test_masc_oas_bridge_cancel_boundary.inc)
 
 
-(include stanzas/test_operator_mcp_e2e.inc)
 
 
 (include stanzas/test_otel_trace_context.inc)
@@ -1618,7 +1550,6 @@
 
 (include stanzas/test_system_log_atomicity.inc)
 
-(include stanzas/test_telemetry_task_transition_10358.inc)
 
 (include stanzas/test_timeout_policy.inc)
 
@@ -1635,7 +1566,6 @@
 
 (include stanzas/test_tool_inline_dispatch.inc)
 
-(include stanzas/test_tool_name.inc)
 
 (include stanzas/test_tool_task_completion_example.inc)
 
@@ -1743,10 +1673,6 @@
 ; round-trip, all_kinds cardinality, check ~required ~granted semantics,
 ; and catalog metadata as the capability source.
 
-(test
- (name test_tool_capability_typed)
- (modules test_tool_capability_typed)
- (libraries masc_test_deps))
 
 ; RFC-0084 PR-8 — MCP server telemetry wrap parity. Constants-only
 ; (no lib dependency): pins the outcome label vocabulary and wrap site

@@ -159,32 +159,26 @@ let credential_state (ctx : context) ~actual_name =
    share the single-warn-arm shape; [Eio.Cancel.Cancelled] is re-raised
    explicitly so cancellation propagation is preserved across all of
    them. *)
-let safe_resolve_agent_name (ctx : context) ~session_bound =
-  if not session_bound
-  then ctx.agent_name
-  else (
-    try Coord.resolve_agent_name ctx.config ctx.agent_name with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Coord.warn
-        "resolve_agent_name failed for %s: %s"
-        ctx.agent_name
-        (Stdlib.Printexc.to_string exn);
-      ctx.agent_name)
+let safe_resolve_agent_name (ctx : context)  =
+  try Coord.resolve_agent_name ctx.config ctx.agent_name with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Coord.warn
+      "resolve_agent_name failed for %s: %s"
+      ctx.agent_name
+      (Stdlib.Printexc.to_string exn);
+    ctx.agent_name
 ;;
 
-let safe_current_task (ctx : context) ~session_bound =
-  if not session_bound
-  then None
-  else (
-    try Planning_eio.get_current_task ctx.config with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Coord.warn
-        "get_current_task failed for %s: %s"
-        ctx.agent_name
-        (Stdlib.Printexc.to_string exn);
-      None)
+let safe_current_task (ctx : context)  =
+  try Planning_eio.get_current_task ctx.config with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Coord.warn
+      "get_current_task failed for %s: %s"
+      ctx.agent_name
+      (Stdlib.Printexc.to_string exn);
+    None
 ;;
 
 let safe_get_agents (ctx : context) =
@@ -333,12 +327,12 @@ let status_summary_string (ctx : context) =
         (Stdlib.Printexc.to_string exn);
       false
   in
-  let actual_name = safe_resolve_agent_name ctx ~session_bound in
+  let actual_name = safe_resolve_agent_name ctx  in
   let credential_state = credential_state ctx ~actual_name in
   let credential_blocked =
     credential_state.credential_required && not credential_state.credential_available
   in
-  let current_task = safe_current_task ctx ~session_bound in
+  let current_task = safe_current_task ctx  in
   let effective_cluster_name = effective_cluster_name ctx.config in
   let active_task_assignees = Coord.active_task_assignees_by_task_id backlog in
   let agents =
@@ -576,7 +570,6 @@ let status_summary_string (ctx : context) =
   in
   Coord_status_rendering.status_summary_string
     ~ctx
-    ~joined:session_bound
     ~actual_name
     ~credential_state
     ~credential_blocked
@@ -636,7 +629,7 @@ type agent_state =
 
 let inspect_state ctx =
   let binding =
-    let actual_name = safe_resolve_agent_name ctx ~session_bound:true in
+    let actual_name = safe_resolve_agent_name ctx in
     let matches_you assignee =
       String.equal assignee ctx.agent_name || String.equal assignee actual_name
     in
@@ -646,7 +639,7 @@ let inspect_state ctx =
     in
     resolve_current_binding
       ~assigned_task_ids
-      ~planning_current:(safe_current_task ctx ~session_bound:true)
+      ~planning_current:(safe_current_task ctx)
   in
   let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
   let current_task_set = binding.current_task_set in

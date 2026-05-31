@@ -86,12 +86,6 @@ let test_autonomous_transitions () =
     ~expected
     ~actual:Autonomous.Autonomous_phase.Transition.all_symbols
 
-let test_cascade_strategy () =
-  assert_set ~label:"CascadeStrategy.StrategyKindSet"
-    ~expected:
-      (set "specs/boundary/CascadeStrategy.tla" "StrategyKindSet")
-    ~actual:Masc_mcp.Cascade_strategy.all_symbols
-
 let test_sandbox_dispatch_profile () =
   assert_set ~label:"SandboxDispatch.ProfileSet"
     ~expected:(set "specs/boundary/SandboxDispatch.tla" "ProfileSet")
@@ -103,6 +97,5 @@ let () =
   test_resilience_degradation ();
   test_autonomous_phase ();
   test_autonomous_transitions ();
-  test_cascade_strategy ();
   test_sandbox_dispatch_profile ();
   print_endline "test_tla_literal_parity: OK"

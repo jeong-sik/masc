@@ -429,8 +429,7 @@ let compute_invariants
 (* Prometheus bump — one counter tick per violated invariant per snapshot.
    Called from [observe]. PromQL rate/increase distinguishes transient
    from steady-state violations. Labels bounded: keeper × invariant (5)
-   ≤ ~250 series on a 50-keeper host. Mirrors the naming pattern in
-   [Cascade_strategy_trace.bump_prometheus_counter]. *)
+   ≤ ~250 series on a 50-keeper host. *)
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
     if not satisfied then

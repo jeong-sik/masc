@@ -6,20 +6,20 @@
     [Agent_sdk.Error.Internal _] boundary for keeper turn failures.  It is the
     re-homed successor of the deleted [cascade_internal_error] /
     [cascade_error_from_sdk] / [cascade_error_classify] modules (RFC-0206
-    cascade purge): the dispatch engine that constructed many of these variants
+    runtime purge): the dispatch engine that constructed many of these variants
     is gone, but the envelope itself outlives it — provider/turn failures still
     need structured carrying.
 
     The originating-runtime field is now a plain [string] (the former
     [Cascade_name.t] type is deleted).  JSON keys and the per-kind label
     strings are preserved verbatim because the operator dashboard
-    ([dashboard/src]) parses [kind] / [cascade_name] off the wire. *)
+    ([dashboard/src]) parses [kind] / [runtime_id] off the wire. *)
 
-(* The originating runtime id is a plain string post-cascade.  Kept as a named
+(* The originating runtime id is a plain string runtime.  Kept as a named
    identity helper so the JSON codec below reads identically to its pre-purge
-   form (each variant serialises the id under the historical ["cascade_name"]
+   form (each variant serialises the id under the historical ["runtime_id"]
    key the dashboard still parses). *)
-let cascade_name_to_string (s : string) = s
+let runtime_id_to_string (s : string) = s
 
 type provider_rejection = {
   provider_label : string;
@@ -29,17 +29,17 @@ type provider_rejection = {
 type capacity_backpressure_source =
   | Provider_capacity
   | Client_capacity
-  | Cascade_slot
+  | Runtime_slot
 
 let capacity_backpressure_source_to_string = function
   | Provider_capacity -> "provider_capacity"
   | Client_capacity -> "client_capacity"
-  | Cascade_slot -> "cascade_slot"
+  | Runtime_slot -> "runtime_slot"
 
 let capacity_backpressure_source_of_string = function
   | "provider_capacity" -> Some Provider_capacity
   | "client_capacity" -> Some Client_capacity
-  | "cascade_slot" -> Some Cascade_slot
+  | "runtime_slot" -> Some Runtime_slot
   | _ -> None
 
 (* RFC-0158: typed denial reason carried by {!Retry_admission_denied}. *)
@@ -90,22 +90,22 @@ type capacity_retry_after =
   | No_retry_hint
 
 type masc_internal_error =
-  | Cascade_exhausted of {
-      cascade_name : string;
-      reason : Keeper_meta_contract.cascade_exhaustion_reason;
+  | Runtime_exhausted of {
+      runtime_id : string;
+      reason : Keeper_meta_contract.runtime_exhaustion_reason;
     }
   | Capacity_backpressure of {
-      cascade_name : string;
+      runtime_id : string;
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
     }
   | Resumable_cli_session of {
-      cascade_name : string;
+      runtime_id : string;
       detail : string;
       exit_code : int option;
     }
-  (* [No_tool_capable_provider] reclassified into [Cascade_exhausted
+  (* [No_tool_capable_provider] reclassified into [Runtime_exhausted
      { reason = No_tool_capable _ }] — see keeper_meta_contract.ml. *)
   | Accept_rejected of {
       scope : string;
@@ -114,7 +114,7 @@ type masc_internal_error =
     }
   | Admission_queue_timeout of {
       keeper_name : string;
-      cascade_name : string;
+      runtime_id : string;
       wait_sec : float;
     }
   | Admission_queue_rejected of {
@@ -134,7 +134,7 @@ type masc_internal_error =
       phase : string;
     }
   | Max_tokens_ceiling_violation of {
-      cascade_name : string;
+      runtime_id : string;
       requested_max_tokens : int;
       provider_ceiling : int;
       reason : string;
@@ -203,16 +203,16 @@ let string_opt_of_assoc key json =
 ;;
 
 let masc_internal_error_to_json = function
-  | Cascade_exhausted { cascade_name; reason } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+  | Runtime_exhausted { runtime_id; reason } ->
+    let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
       [
-        ("kind", `String "cascade_exhausted");
-        ("cascade_name", `String cascade_name);
-        ("reason", Keeper_meta_contract.cascade_exhaustion_reason_to_json reason);
+        ("kind", `String "runtime_exhausted");
+        ("runtime_id", `String runtime_id);
+        ("reason", Keeper_meta_contract.runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { cascade_name; source; detail; retry_after } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+    let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
       | Explicit s ->
@@ -224,17 +224,17 @@ let masc_internal_error_to_json = function
     `Assoc
       ([
          ("kind", `String "capacity_backpressure");
-         ("cascade_name", `String cascade_name);
+         ("runtime_id", `String runtime_id);
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
        ]
       @ retry_after_fields)
-  | Resumable_cli_session { cascade_name; detail; exit_code } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+  | Resumable_cli_session { runtime_id; detail; exit_code } ->
+    let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
       [
         ("kind", `String "resumable_cli_session");
-        ("cascade_name", `String cascade_name);
+        ("runtime_id", `String runtime_id);
         ("detail", `String detail);
         ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
@@ -246,13 +246,13 @@ let masc_internal_error_to_json = function
         ("model", Json_util.string_opt_to_json model);
         ("reason", `String reason);
       ]
-  | Admission_queue_timeout { keeper_name; cascade_name; wait_sec } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+  | Admission_queue_timeout { keeper_name; runtime_id; wait_sec } ->
+    let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
       [
         ("kind", `String "admission_queue_timeout");
         ("keeper_name", `String keeper_name);
-        ("cascade_name", `String cascade_name);
+        ("runtime_id", `String runtime_id);
         ("wait_sec", `Float wait_sec);
       ]
   | Admission_queue_rejected { keeper_name; reason } ->
@@ -291,12 +291,12 @@ let masc_internal_error_to_json = function
         ("phase", `String phase);
       ]
   | Max_tokens_ceiling_violation
-      { cascade_name; requested_max_tokens; provider_ceiling; reason } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+      { runtime_id; requested_max_tokens; provider_ceiling; reason } ->
+    let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
       [
         ("kind", `String "max_tokens_ceiling_violation");
-        ("cascade_name", `String cascade_name);
+        ("runtime_id", `String runtime_id);
         ("requested_max_tokens", `Int requested_max_tokens);
         ("provider_ceiling", `Int provider_ceiling);
         ("reason", `String reason);
@@ -343,7 +343,7 @@ let summarize_list ?(empty = "none") values =
   | _ -> String.concat ", " values
 
 let summary_of_masc_internal_error = function
-  | Capacity_backpressure { cascade_name; source; detail; retry_after } ->
+  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
       let retry_after_suffix =
         match retry_after with
         | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
@@ -353,8 +353,8 @@ let summary_of_masc_internal_error = function
       in
       Some
         (Printf.sprintf
-           "Capacity backpressure blocked cascade %s; source=%s; detail=%s%s"
-           (cascade_name_to_string cascade_name)
+           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s"
+           (runtime_id_to_string runtime_id)
            (capacity_backpressure_source_to_string source)
            detail
            retry_after_suffix)
@@ -379,11 +379,11 @@ let summary_of_masc_internal_error = function
            phase source budget_sec remaining min_required_sec
            estimated_input_tokens keeper_turn_timeout_sec)
   | Max_tokens_ceiling_violation
-      { cascade_name; requested_max_tokens; provider_ceiling; reason } ->
+      { runtime_id; requested_max_tokens; provider_ceiling; reason } ->
     Some
       (Printf.sprintf
-         "Invalid max_tokens budget for cascade %s; requested_max_tokens=%d; provider_ceiling=%d; reason=%s"
-         (cascade_name_to_string cascade_name)
+         "Invalid max_tokens budget for runtime %s; requested_max_tokens=%d; provider_ceiling=%d; reason=%s"
+         (runtime_id_to_string runtime_id)
          requested_max_tokens
          provider_ceiling
          reason)
@@ -394,16 +394,16 @@ let summary_of_masc_internal_error = function
            is_retry
            (retry_admission_denial_to_yojson denial_reason
             |> Yojson.Safe.to_string))
-  | Cascade_exhausted { cascade_name; reason = Keeper_meta_contract.No_tool_capable (Some detail) } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+  | Runtime_exhausted { runtime_id; reason = Keeper_meta_contract.No_tool_capable (Some detail) } ->
+    let runtime_id = runtime_id_to_string runtime_id in
     Some
       (Printf.sprintf
-         "No tool-capable provider for cascade %s; required_tools=[%s]; rejected_candidate_count=%d; configured_candidate_count=%d"
-         cascade_name
+         "No tool-capable provider for runtime %s; required_tools=[%s]; rejected_candidate_count=%d; configured_candidate_count=%d"
+         runtime_id
          (summarize_list detail.required_tool_names)
          (List.length detail.provider_rejections)
          (List.length detail.configured_labels))
-  | Cascade_exhausted _
+  | Runtime_exhausted _
   | Resumable_cli_session _
   | Accept_rejected _
   | Admission_queue_timeout _
@@ -425,11 +425,11 @@ let () =
     ~help:
       "Total MASC-internal errors emitted as Agent_sdk.Error.Internal \
        payloads, classified by structured error kind. Labels: kind, \
-       cascade_name (originating runtime id or \"unknown\")."
+       runtime_id (originating runtime id or \"unknown\")."
     ()
 
 let kind_of_masc_internal_error = function
-  | Cascade_exhausted _ -> "cascade_exhausted"
+  | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure _ -> "capacity_backpressure"
   | Resumable_cli_session _ -> "resumable_cli_session"
   | Accept_rejected _ -> "accept_rejected"
@@ -444,15 +444,15 @@ let kind_of_masc_internal_error = function
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
 
-let cascade_name_of_masc_internal_error = function
-  | Cascade_exhausted { cascade_name; _ }
-  | Capacity_backpressure { cascade_name; _ }
-  | Resumable_cli_session { cascade_name; _ }
-  | Admission_queue_timeout { cascade_name; _ }
-  | Max_tokens_ceiling_violation { cascade_name; _ } ->
-      let cascade_name = cascade_name_to_string cascade_name in
-      if String.equal (String.trim cascade_name) "" then "unknown"
-      else cascade_name
+let runtime_id_of_masc_internal_error = function
+  | Runtime_exhausted { runtime_id; _ }
+  | Capacity_backpressure { runtime_id; _ }
+  | Resumable_cli_session { runtime_id; _ }
+  | Admission_queue_timeout { runtime_id; _ }
+  | Max_tokens_ceiling_violation { runtime_id; _ } ->
+      let runtime_id = runtime_id_to_string runtime_id in
+      if String.equal (String.trim runtime_id) "" then "unknown"
+      else runtime_id
   | Accept_rejected _
   | Admission_queue_rejected _
   | Turn_timeout _
@@ -468,7 +468,7 @@ let sdk_error_of_masc_internal_error err =
     ~labels:
       [
         ("kind", kind_of_masc_internal_error err);
-        ("cascade_name", cascade_name_of_masc_internal_error err);
+        ("runtime_id", runtime_id_of_masc_internal_error err);
       ]
     ();
   Agent_sdk.Error.Internal
@@ -501,28 +501,28 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
   match json with
   | `Assoc fields -> (
       match List.assoc_opt "kind" fields with
-      | Some (`String "cascade_exhausted") -> (
-          match string_opt_of_assoc "cascade_name" json with
-          | Some cascade_name ->
+      | Some (`String "runtime_exhausted") -> (
+          match string_opt_of_assoc "runtime_id" json with
+          | Some runtime_id ->
             let reason_opt =
               match List.assoc_opt "reason"
                       (match json with `Assoc fields -> fields | _ -> []) with
               | Some json_val ->
-                  Keeper_meta_contract.cascade_exhaustion_reason_of_json json_val
+                  Keeper_meta_contract.runtime_exhaustion_reason_of_json json_val
               | None -> None
             in
             (match reason_opt with
              | Some reason ->
-               Some (Cascade_exhausted { cascade_name; reason })
+               Some (Runtime_exhausted { runtime_id; reason })
              | None -> None)
           | None -> None)
       | Some (`String "capacity_backpressure") -> (
           match
-            string_opt_of_assoc "cascade_name" json,
+            string_opt_of_assoc "runtime_id" json,
             string_opt_of_assoc "source" json,
             string_opt_of_assoc "detail" json
           with
-          | Some cascade_name, Some source, Some detail ->
+          | Some runtime_id, Some source, Some detail ->
             (match capacity_backpressure_source_of_string source with
              | Some source ->
                let retry_after_synthetic =
@@ -541,23 +541,23 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                in
                Some
                  (Capacity_backpressure
-                    { cascade_name; source; detail; retry_after })
+                    { runtime_id; source; detail; retry_after })
              | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (
-          match string_opt_of_assoc "cascade_name" json, string_opt_of_assoc "detail" json with
-          | Some cascade_name, Some detail ->
+          match string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "detail" json with
+          | Some runtime_id, Some detail ->
             Some
               (Resumable_cli_session
                  {
-                   cascade_name;
+                   runtime_id;
                    detail;
                    exit_code = int_opt_of_assoc "exit_code" json;
                  })
           | _ -> None)
       | Some (`String "no_tool_capable_provider") -> (
-          match string_opt_of_assoc "cascade_name" json with
-          | Some cascade_name ->
+          match string_opt_of_assoc "runtime_id" json with
+          | Some runtime_id ->
             let configured_labels =
               string_list_of_assoc "configured_labels" json
             in
@@ -581,9 +581,9 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               }
             in
             Some
-              (Cascade_exhausted
+              (Runtime_exhausted
                  {
-                   cascade_name;
+                   runtime_id;
                    reason = Keeper_meta_contract.No_tool_capable (Some detail);
                  })
           | None -> None)
@@ -600,9 +600,9 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           | _ -> None)
       | Some (`String "admission_queue_timeout") -> (
           match string_opt_of_assoc "keeper_name" json,
-                string_opt_of_assoc "cascade_name" json
+                string_opt_of_assoc "runtime_id" json
           with
-          | Some keeper_name, Some cascade_name ->
+          | Some keeper_name, Some runtime_id ->
             let wait_sec =
               match json with
               | `Assoc fields -> (
@@ -612,7 +612,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               | _ -> 0.0
             in
             Some
-              (Admission_queue_timeout { keeper_name; cascade_name; wait_sec })
+              (Admission_queue_timeout { keeper_name; runtime_id; wait_sec })
           | _ -> None)
       | Some (`String "admission_queue_rejected") -> (
           match string_opt_of_assoc "keeper_name" json,
@@ -663,15 +663,15 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           | _ -> None)
       | Some (`String "max_tokens_ceiling_violation") -> (
           match
-            string_opt_of_assoc "cascade_name" json,
+            string_opt_of_assoc "runtime_id" json,
             int_opt_of_assoc "requested_max_tokens" json,
             int_opt_of_assoc "provider_ceiling" json
           with
-          | Some cascade_name, Some requested_max_tokens, Some provider_ceiling ->
+          | Some runtime_id, Some requested_max_tokens, Some provider_ceiling ->
             Some
               (Max_tokens_ceiling_violation
                  {
-                   cascade_name;
+                   runtime_id;
                    requested_max_tokens;
                    provider_ceiling;
                    reason =

@@ -730,7 +730,7 @@ let test_room_bootstrap_preserves_backend_state () =
     Alcotest.(check int) "backlog preserved" 7 saved_backlog.version
   )
 
-let test_room_bootstrap_ignores_invalid_room_id_in_flat_mode () =
+let test_room_bootstrap_ignores_invalid_coord_id_in_flat_mode () =
   with_memory_test_env (fun config ->
     Coord.ensure_coord_bootstrap config;
     Alcotest.(check bool) "root state initialized" true
@@ -1820,7 +1820,7 @@ let () =
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;
-      Alcotest.test_case "bootstrap ignores invalid room id in flat mode" `Quick test_room_bootstrap_ignores_invalid_room_id_in_flat_mode;
+      Alcotest.test_case "bootstrap ignores invalid room id in flat mode" `Quick test_room_bootstrap_ignores_invalid_coord_id_in_flat_mode;
       Alcotest.test_case "read_backlog_r recovers from last good snapshot" `Quick
         test_read_backlog_r_recovers_from_last_good_snapshot;
       Alcotest.test_case "read_backlog_r reports parse error when recovery also invalid" `Quick

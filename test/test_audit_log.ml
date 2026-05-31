@@ -61,7 +61,7 @@ let entry ~timestamp ~agent_id ~action ~outcome =
     Audit_log.timestamp;
     agent_id;
     action;
-    room_id = None;
+    coord_id = None;
     details = `Null;
     outcome;
     cost_estimate = None;

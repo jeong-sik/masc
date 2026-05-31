@@ -10,7 +10,7 @@ open Coord_identity
 open Coord_broadcast
 open Coord_identity
 
-(* Single-namespace: room_id/namespace_id concepts retired (#unify-namespace).
+(* Single-namespace: coord_id/namespace_id concepts retired (#unify-namespace).
    All coordination scoped by cluster basepath only. *)
 
 (** Bounded snapshot of a corrupt agent JSON file for error diagnostics.

@@ -147,7 +147,7 @@ val dashboard_shell_status_json : Coord.config -> Yojson.Safe.t
 val dashboard_task_json : Coord.config -> Masc_domain.task -> Yojson.Safe.t
 val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
-(* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
+(* dashboard_current_coord_id removed — namespace retired (#unify-namespace). *)
 val dashboard_tasks_safe : Coord.config -> Masc_domain.task list
 val dashboard_agents_safe : Coord.config -> Masc_domain.agent list
 val dashboard_messages_safe :

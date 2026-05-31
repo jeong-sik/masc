@@ -848,7 +848,7 @@ let run_stdio ~handle_request ~sw ~env state =
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
-  Log.Mcp.info "Default room: %s" Mcp_server.(state.coord_config.Coord.base_path);
+  Log.Mcp.info "Default coord: %s" Mcp_server.(state.coord_config.Coord.base_path);
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
   let read_framed_message_after_first_line first_line =
     let rec read_headers acc =

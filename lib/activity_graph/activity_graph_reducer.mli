@@ -54,7 +54,7 @@ val reduce_event :
 (** [reduce_event ~nodes ~edges value] folds [value] into the
     accumulators in place.  Effects (in order):
 
-    + Ensure a [room:<room_id>] node exists with status [Coord]
+    + Ensure a [coord:<coord_id>] node exists with status [Coord]
       and the event's [ts_iso].
     + If [value.actor = Some actor], ensure the entity node with
       fallback status [Active] and add a [belongs_to] edge to the

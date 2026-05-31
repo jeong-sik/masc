@@ -317,7 +317,7 @@ let test_read_self_heals_historic_invalid_utf8_event_file () =
       let event_path = Filename.concat month_dir "01.jsonl" in
       let raw_line =
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
-         \"room_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"coord_id\":\"default\",\"kind\":\"message.broadcast\",\
          \"payload\":{\"content\":\"bad\xffpayload\"},\"tags\":[]}\n"
       in
       Fs_compat.save_file event_path raw_line;

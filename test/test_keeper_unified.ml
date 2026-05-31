@@ -30,23 +30,23 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 (* #19327 cascade purge: Cascade_name is a plain string alias. *)
-let oas_error_cascade_name raw =
+let oas_error_runtime_id raw =
   Masc_mcp.Keeper_runtime_profile.normalize_declared_name raw
   |> Cascade_name.of_string_exn
 ;;
 
 let phase_recovery_runtime_id () =
-  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+  Masc_mcp.Keeper_runtime_profile.runtime_id_for_use
     Masc_mcp.Keeper_runtime_profile.Phase_recovery
 ;;
 
-let tool_required_cascade_name () =
-  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+let tool_required_runtime_id () =
+  Masc_mcp.Keeper_runtime_profile.runtime_id_for_use
     Masc_mcp.Keeper_runtime_profile.Tool_required
 ;;
 
-let keeper_turn_cascade_name () =
-  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+let keeper_turn_runtime_id () =
+  Masc_mcp.Keeper_runtime_profile.runtime_id_for_use
     Masc_mcp.Keeper_runtime_profile.Keeper_turn
 ;;
 
@@ -59,7 +59,7 @@ let normalize_keeper_runtime_declared_name raw =
    resolve to the Keeper_turn route, not pass the dead name through to capability
    resolution (which crash-loops the keeper with no_tool_capable_provider). *)
 let test_keeper_runtime_declared_name_substitutes_unresolvable_with_keeper_turn () =
-  let expected = keeper_turn_cascade_name () in
+  let expected = keeper_turn_runtime_id () in
   check
     string
     "legacy tier-group.* declared name resolves to keeper_turn route"
@@ -83,16 +83,16 @@ let test_keeper_runtime_declared_name_preserves_logical_use_route () =
   check
     string
     "logical-use keeper_turn resolves to the keeper_turn route target"
-    (keeper_turn_cascade_name ())
+    (keeper_turn_runtime_id ())
     (normalize_keeper_runtime_declared_name "keeper_turn");
   check
     string
     "logical-use tool_required resolves to the tool_required route target"
-    (tool_required_cascade_name ())
+    (tool_required_runtime_id ())
     (normalize_keeper_runtime_declared_name "tool_required")
 ;;
 
-let safe_lane_cascade_name = Masc_mcp.Cascade_capability_profile.safe_lane_cascade_name
+let safe_lane_runtime_id = Masc_mcp.Cascade_capability_profile.safe_lane_runtime_id
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -1179,7 +1179,7 @@ let test_scheduled_turn_uses_cooldown_only () =
     "cooldown opens scheduled turn for current task"
     true
     (WO.keeper_cycle_decision
-       ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+       ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
        ~meta
        obs)
       .should_run
@@ -1292,7 +1292,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
   in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> Some 3599)
       ~meta
       base_observation
   in
@@ -1320,15 +1320,15 @@ let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown
   let default_meta = minimal_meta in
   let blocked =
     WO.provider_capacity_blocked_task_count
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> Some 3599)
       ~meta:default_meta
       ~claimable_task_count:3
       ()
   in
-  check int "default cascade cooldown blocks claimable backlog" 3 blocked;
+  check int "default runtime cooldown blocks claimable backlog" 3 blocked;
   let healthy =
     WO.provider_capacity_blocked_task_count
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
       ~meta:default_meta
       ~claimable_task_count:3
       ()
@@ -1339,7 +1339,7 @@ let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown
   in
   let fail_open_blocked =
     WO.provider_capacity_blocked_task_count
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> Some 3599)
       ~meta:fail_open_meta
       ~claimable_task_count:3
       ()
@@ -1366,7 +1366,7 @@ let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> Some 3599)
       ~meta
       base_observation
   in
@@ -1389,11 +1389,11 @@ let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
      | WO.Run _ -> false)
 ;;
 
-let healthy_cascade_resilience cascade_name
+let healthy_cascade_resilience runtime_id
   : Masc_mcp.Keeper_cascade_resilience.cascade_resilience
   =
   { ok = true
-  ; cascade_name
+  ; runtime_id
   ; model_labels = []
   ; pure_local = false
   ; fallback_cascade = None
@@ -1403,15 +1403,15 @@ let healthy_cascade_resilience cascade_name
   }
 ;;
 
-let blocked_cascade_resilience cascade_name =
-  { (healthy_cascade_resilience cascade_name) with
+let blocked_cascade_resilience runtime_id =
+  { (healthy_cascade_resilience runtime_id) with
     ok = false
   ; blocker = Some "test_blocker"
   ; error = Some "blocked"
   }
 ;;
 
-let healthy_cascade_status ~cascade_name:_ = Masc_mcp.Keeper_health_probe.Healthy
+let healthy_cascade_status ~runtime_id:_ = Masc_mcp.Keeper_health_probe.Healthy
 
 let test_keepalive_scheduling_seam_preserves_reactive_run () =
   let meta = make_meta "heartbeat-scheduling-reactive" in
@@ -1511,7 +1511,7 @@ let test_idle_decay_triggers_turn () =
     "idle decay triggers turn before base cooldown"
     true
     (WO.keeper_cycle_decision
-       ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+       ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
        ~meta
        base_observation)
       .should_run
@@ -1533,7 +1533,7 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
   let obs = { base_observation with idle_seconds = 120; failed_task_count = 2 } in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
       ~meta
       obs
   in
@@ -1583,7 +1583,7 @@ let test_scheduled_turn_ignores_unclaimable_backlog () =
   in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
       ~meta
       obs
   in
@@ -1717,7 +1717,7 @@ let test_task_reactive_cooldown_floor_never_hits_zero () =
     let obs = { base_observation with idle_seconds = 120; failed_task_count = 1 } in
     let decision =
       WO.keeper_cycle_decision
-        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
         ~meta
         obs
     in
@@ -1752,7 +1752,7 @@ let test_task_backlog_cooldown_applies_noop_backoff_once () =
     in
     let decision =
       WO.keeper_cycle_decision
-        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
         ~meta
         obs
     in
@@ -1789,7 +1789,7 @@ let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
   in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
       ~meta
       obs
   in
@@ -1822,7 +1822,7 @@ let test_bootstrap_turn_fires_when_never_started () =
   let obs = { base_observation with idle_seconds = 0 } in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
       ~meta
       obs
   in
@@ -1854,7 +1854,7 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
   let obs = { base_observation with idle_seconds = 0 } in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
       ~meta
       obs
   in
@@ -1878,7 +1878,7 @@ let test_provider_cooldown_blocks_bootstrap_turn () =
   let obs = { base_observation with idle_seconds = 0 } in
   let decision =
     WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> Some 3599)
       ~meta
       obs
   in
@@ -1920,7 +1920,7 @@ let test_min_interval_fires_without_work_signal () =
     let obs = { base_observation with idle_seconds = 0 } in
     let decision =
       WO.keeper_cycle_decision
-        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
         ~meta
         obs
     in
@@ -1955,7 +1955,7 @@ let test_min_interval_turn_is_not_tagged_entropic () =
     let obs = { base_observation with idle_seconds = 0 } in
     let decision =
       WO.keeper_cycle_decision
-        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
         ~meta
         obs
     in
@@ -1998,7 +1998,7 @@ let test_min_interval_does_not_fire_before_elapsed () =
     let obs = { base_observation with idle_seconds = 0 } in
     let decision =
       WO.keeper_cycle_decision
-        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
         ~meta
         obs
     in
@@ -2034,7 +2034,7 @@ let test_min_interval_never_fires_for_bootstrap () =
     let obs = { base_observation with idle_seconds = 0 } in
     let decision =
       WO.keeper_cycle_decision
-        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> None)
         ~meta
         obs
     in
@@ -2072,7 +2072,7 @@ let test_provider_cooldown_blocks_min_interval_turn () =
     let obs = { base_observation with idle_seconds = 0 } in
     let decision =
       WO.keeper_cycle_decision
-        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+        ~provider_cooldown_remaining_sec:(fun ~runtime_id:_ -> Some 3599)
         ~meta
         obs
     in
@@ -3635,8 +3635,8 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~input_tok:100
       ~output_tok:50
       ~cascade_observation:
-        { Masc_mcp.Cascade_observation.cascade_name =
-            oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
+        { Masc_mcp.Cascade_observation.runtime_id =
+            oas_error_runtime_id Masc_mcp.(Keeper_config.default_runtime_id ())
         ; strategy = Some "round_robin"
         ; configured_labels = [ "llama:auto" ]
         ; candidate_models = [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ]
@@ -4287,8 +4287,8 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ; run_validation = Some validation
          ; cascade_observation =
              Some
-               { Masc_mcp.Cascade_observation.cascade_name =
-                   oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
+               { Masc_mcp.Cascade_observation.runtime_id =
+                   oas_error_runtime_id Masc_mcp.(Keeper_config.default_runtime_id ())
                ; strategy = Some "round_robin"
                ; configured_labels = [ "llama:auto" ]
                ; candidate_models =
@@ -4398,7 +4398,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          string
          "cascade name persisted"
          Masc_mcp.(Keeper_config.default_runtime_id ())
-         Yojson.Safe.Util.(json |> member "cascade" |> member "cascade_name" |> to_string);
+         Yojson.Safe.Util.(json |> member "cascade" |> member "runtime_id" |> to_string);
        check
          bool
          "fallback applied persisted"
@@ -5725,8 +5725,8 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
          ~config
          ~run_meta:meta
          ~run_generation:meta.runtime.generation
-         ~cascade_name:
-           (oas_error_cascade_name (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta))
+         ~runtime_id:
+           (oas_error_runtime_id (Masc_mcp.Keeper_meta_contract.runtime_id_of_meta meta))
          ~keeper_turn_id:meta.runtime.usage.total_turns
          ();
        let supervisor_request_after =
@@ -6178,8 +6178,8 @@ let wrapped_claude_max_turns_error () =
 let structured_cascade_max_turns_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
     (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
-       { cascade_name =
-           oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
+       { runtime_id =
+           oas_error_runtime_id Masc_mcp.(Keeper_config.default_runtime_id ())
        ; reason = Keeper_meta_contract.Max_turns_exceeded
        })
 ;;
@@ -6229,7 +6229,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-            { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
+            { runtime_id = oas_error_runtime_id "cli_tool_c_keeper"
             ; detail =
                 "cli-tool exited with code 75: \n\
                  To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
@@ -6251,7 +6251,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Admission_queue_timeout
             { keeper_name = "nick0cave"
-            ; cascade_name = oas_error_cascade_name "primary"
+            ; runtime_id = oas_error_runtime_id "primary"
             ; wait_sec = 90.0
             }))
   in
@@ -6385,7 +6385,7 @@ let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
   in
   expect_degraded_retry
     "next degraded retry uses configured fallback"
-    safe_lane_cascade_name
+    safe_lane_runtime_id
     "hard_quota"
     degraded_retry
 ;;
@@ -6401,7 +6401,7 @@ let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
   in
   expect_degraded_retry
     "configured fallback remains after default"
-    safe_lane_cascade_name
+    safe_lane_runtime_id
     "hard_quota"
     degraded_retry
 ;;
@@ -6416,7 +6416,7 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
         [ "scoring"
         ; KC.default_runtime_id ()
         ; (KC.default_runtime_id ())
-        ; safe_lane_cascade_name
+        ; safe_lane_runtime_id
         ]
       (wrapped_claude_limit_error ())
   in
@@ -6434,7 +6434,7 @@ let test_next_fail_open_cascade_for_required_tool_uses_tool_required_route () =
   in
   expect_degraded_retry
     "required tool degraded retry uses configured tool-required route"
-    (tool_required_cascade_name ())
+    (tool_required_runtime_id ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6483,7 +6483,7 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
   in
   expect_degraded_retry
     "catalog degraded retry uses configured fallback first"
-    safe_lane_cascade_name
+    safe_lane_runtime_id
     "hard_quota"
     degraded_retry
 ;;
@@ -6499,7 +6499,7 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
   in
   expect_degraded_retry
     "catalog-only degraded retry uses configured fallback first"
-    safe_lane_cascade_name
+    safe_lane_runtime_id
     "hard_quota"
     degraded_retry
 ;;
@@ -6531,7 +6531,7 @@ let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_ca
   in
   expect_degraded_retry
     "required catalog tool-required-backed recovery"
-    (tool_required_cascade_name ())
+    (tool_required_runtime_id ())
     "required_tool_contract_violation"
     degraded_retry
 ;;
@@ -6544,7 +6544,7 @@ let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manua
       ~base_runtime_id:"strict_exec"
       ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_runtime_ids:[ "strict_exec"; tool_required_cascade_name () ]
+      ~attempted_runtime_ids:[ "strict_exec"; tool_required_runtime_id () ]
       (required_tool_contract_violation_error ())
   in
   check bool
@@ -6819,7 +6819,7 @@ let test_metrics_failure_response_redacts_resumable_cli_session_payload () =
   let sdk_error =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
+         { runtime_id = oas_error_runtime_id "cli_tool_c_keeper"
          ; detail = canonical_detail
          ; exit_code = Some 75
          })
@@ -7641,8 +7641,8 @@ let test_runtime_exhausted_error_detected_from_structured_internal_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
-         { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
+         { runtime_id =
+             oas_error_runtime_id Masc_mcp.(Keeper_config.default_runtime_id ())
          ; reason = Masc_mcp.Keeper_meta_contract.All_providers_failed
          })
   in
@@ -7700,8 +7700,8 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
-         { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
+         { runtime_id =
+             oas_error_runtime_id Masc_mcp.(Keeper_config.default_runtime_id ())
          ; reason = Keeper_meta_contract.Candidates_filtered_after_cycles
          })
   in
@@ -7716,7 +7716,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
+         { runtime_id = oas_error_runtime_id "cli_tool_c_keeper"
          ; detail =
              Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
@@ -7733,7 +7733,7 @@ let test_runtime_exhausted_error_includes_resumable_cli_session_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
+         { runtime_id = oas_error_runtime_id "cli_tool_c_keeper"
          ; detail =
              Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
@@ -9426,7 +9426,7 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
       ~sdk_error:None
       ~reason:
         "Internal error: [masc_oas_error] \
-         {\"kind\":\"runtime_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
+         {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"tool_use_strict\"}"
   in
   check
     string

@@ -1,7 +1,7 @@
 (** Phase-gate stage extracted from [Keeper_unified_turn.run_keeper_cycle]
     per RFC-0136 PR-1.
 
-    Decides whether a keeper turn proceeds to cascade routing or exits at
+    Decides whether a keeper turn proceeds to runtime routing or exits at
     one of three terminal outcomes (supervisor stop, non-executable
     registry phase, or registry phase missing). The gate owns all FSM
     transitions, observability records, and manifest decisions tied to
@@ -10,9 +10,9 @@
 type phase_gate_outcome =
   | Phase_gate_proceed of Keeper_state_machine.phase option
     (** Registry phase is executable (or unknown but recoverable); the
-        caller may proceed to cascade routing. The carried [phase_opt]
+        caller may proceed to runtime routing. The carried [phase_opt]
         is the same value the gate observed in the registry, so the
-        caller's cascade routing dispatches on the gate's view. *)
+        caller's runtime routing dispatches on the gate's view. *)
   | Phase_gate_terminal_ok of Keeper_meta_contract.keeper_meta
     (** Cooperative early-exit: supervisor stop, or non-executable
         phase. [run_keeper_cycle] returns [Ok meta] with [meta]
@@ -34,7 +34,7 @@ val decide_and_record
     observability records, and runtime-manifest decisions.
 
     On [Phase_gate_proceed], the gate has already transitioned the
-    keeper FSM from [Phase_gating] to [Cascade_routing] and appended
+    keeper FSM from [Phase_gating] to [Runtime_routing] and appended
     its decision via [append_phase_gate_decision]. The caller resumes
     with main-path cascade resolution.
 

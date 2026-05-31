@@ -6,7 +6,7 @@ type cancel_reason =
   | Cancelled_input_required
 
 type failure_reason =
-  | Failure_cascade_unavailable of {
+  | Failure_runtime_unavailable of {
       base : string;
       resolved : string option;
     }
@@ -30,7 +30,7 @@ type failure_reason =
 type _ turn_state =
   | Idle : [`Idle] turn_state [@tla.idle]
   | Phase_gating : [`Phase_gating] turn_state [@tla.active]
-  | Cascade_routing : [`Cascade_routing] turn_state [@tla.active]
+  | Runtime_routing : [`Runtime_routing] turn_state [@tla.active]
   | Awaiting_provider : [`Awaiting_provider] turn_state [@tla.active]
   | Streaming : [`Streaming] turn_state [@tla.active]
   | Awaiting_tool_result : [`Awaiting_tool_result] turn_state [@tla.symbol "awaiting_tool"] [@tla.active]
@@ -43,7 +43,7 @@ module Tla_symbol = struct
   type t =
     | Idle [@tla.idle]
     | Phase_gating [@tla.active]
-    | Cascade_routing [@tla.active]
+    | Runtime_routing [@tla.active]
     | Awaiting_provider [@tla.active]
     | Streaming [@tla.active]
     | Awaiting_tool_result [@tla.symbol "awaiting_tool"] [@tla.active]
@@ -57,7 +57,7 @@ end
 let tla_symbol_variant : type a. a turn_state -> Tla_symbol.t = function
   | Idle -> Tla_symbol.Idle
   | Phase_gating -> Tla_symbol.Phase_gating
-  | Cascade_routing -> Tla_symbol.Cascade_routing
+  | Runtime_routing -> Tla_symbol.Runtime_routing
   | Awaiting_provider -> Tla_symbol.Awaiting_provider
   | Streaming -> Tla_symbol.Streaming
   | Awaiting_tool_result -> Tla_symbol.Awaiting_tool_result
@@ -85,7 +85,7 @@ let cancel_reason_label = function
   | Cancelled_input_required -> "input_required"
 
 let failure_reason_label = function
-  | Failure_cascade_unavailable _ -> "cascade_unavailable"
+  | Failure_runtime_unavailable _ -> "runtime_unavailable"
   | Failure_no_tool_capable_provider _ -> "no_tool_capable_provider"
   | Failure_provider_error _ -> "provider_error"
   | Failure_tool_contract_violation _ -> "tool_contract_violation"
@@ -105,8 +105,8 @@ let pp_cancel_reason fmt r =
   Format.pp_print_string fmt (cancel_reason_label r)
 
 let pp_failure_reason fmt = function
-  | Failure_cascade_unavailable { base; resolved } ->
-      Format.fprintf fmt "cascade_unavailable(base=%s,resolved=%s)"
+  | Failure_runtime_unavailable { base; resolved } ->
+      Format.fprintf fmt "runtime_unavailable(base=%s,resolved=%s)"
         base
         (Option.value resolved ~default:"-")
   | Failure_no_tool_capable_provider { cascade_name; detail } ->
@@ -134,8 +134,8 @@ type transition_action =
   | StartTurn
   | PhaseGateSkip
   | PhaseGateOk
-  | CascadeRouted
-  | CascadeUnavailable
+  | RuntimeRouted
+  | RuntimeUnavailable
   | ProviderResponded
   | ProviderTimeout
   | StreamYieldsTool
@@ -156,8 +156,8 @@ let transition_action_label = function
   | StartTurn -> "StartTurn"
   | PhaseGateSkip -> "PhaseGateSkip"
   | PhaseGateOk -> "PhaseGateOk"
-  | CascadeRouted -> "CascadeRouted"
-  | CascadeUnavailable -> "CascadeUnavailable"
+  | RuntimeRouted -> "RuntimeRouted"
+  | RuntimeUnavailable -> "RuntimeUnavailable"
   | ProviderResponded -> "ProviderResponded"
   | ProviderTimeout -> "ProviderTimeout"
   | StreamYieldsTool -> "StreamYieldsTool"
@@ -231,20 +231,20 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
       Some StartTurn
   | Any Phase_gating, Any Done when not stop_signaled_before ->
       Some PhaseGateSkip
-  | Any Phase_gating, Any Cascade_routing when not stop_signaled_before ->
+  | Any Phase_gating, Any Runtime_routing when not stop_signaled_before ->
       Some PhaseGateOk
-  | Any Cascade_routing, Any Awaiting_provider when not stop_signaled_before ->
-      Some CascadeRouted
-  | Any Cascade_routing, Any (Failed (Failure_cascade_unavailable _))
+  | Any Runtime_routing, Any Awaiting_provider when not stop_signaled_before ->
+      Some RuntimeRouted
+  | Any Runtime_routing, Any (Failed (Failure_runtime_unavailable _))
     when not stop_signaled_before ->
-      Some CascadeUnavailable
-  | Any Cascade_routing, Any (Failed (Failure_turn_livelock_blocked _))
+      Some RuntimeUnavailable
+  | Any Runtime_routing, Any (Failed (Failure_turn_livelock_blocked _))
     when not stop_signaled_before ->
       Some LivelockBlocked
-  | Any Cascade_routing, Any (Failed (Failure_no_tool_capable_provider _))
+  | Any Runtime_routing, Any (Failed (Failure_no_tool_capable_provider _))
     when not stop_signaled_before ->
       Some NoToolCapableProvider
-  | Any Cascade_routing, Any (Failed (Failure_provider_error _))
+  | Any Runtime_routing, Any (Failed (Failure_provider_error _))
     when not stop_signaled_before ->
       Some ProviderError
   | Any Awaiting_provider, Any Streaming when not stop_signaled_before ->

@@ -71,19 +71,19 @@ let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat
 let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
-type cascade_backpressure_decision = Observations.cascade_backpressure_decision =
-  | Cascade_admitted
-  | Cascade_backpressured of {
+type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
       cascade_name : string;
       reason : string;
     }
 
-let cascade_backpressure_observation_reasons =
-  Observations.cascade_backpressure_observation_reasons
+let runtime_backpressure_observation_reasons =
+  Observations.runtime_backpressure_observation_reasons
 ;;
 
-let cascade_backpressure_decision =
-  Observations.cascade_backpressure_decision
+let runtime_backpressure_decision =
+  Observations.runtime_backpressure_decision
 ;;
 
 (* Keepalive scheduling decision (record + decide function) extracted to
@@ -92,7 +92,7 @@ let cascade_backpressure_decision =
 type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
-  cascade_backpressure : cascade_backpressure_decision;
+  runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
   admission_reasons : string list;
@@ -101,8 +101,8 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
-let record_cascade_backpressure_observation =
-  Observations.record_cascade_backpressure_observation
+let record_runtime_backpressure_observation =
+  Observations.record_runtime_backpressure_observation
 ;;
 
 let provider_timeout_observation_reasons =
@@ -186,7 +186,7 @@ let run_keepalive_unified_turn
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
-      let cascade_backpressure = scheduling.cascade_backpressure in
+      let runtime_backpressure = scheduling.runtime_backpressure in
       let should_run_turn = scheduling.should_run_turn in
       let meta_after_cursor_persist =
         persist_message_cursor_updates
@@ -227,14 +227,14 @@ let run_keepalive_unified_turn
            [Keeper_stale_watchdog] surface the most recent reasons in
            the kill warn line, distinguishing deliberate-skip dead
            paths from genuinely stuck fibers. *)
-        (match cascade_backpressure with
-         | Cascade_admitted ->
+        (match runtime_backpressure with
+         | Runtime_admitted ->
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
              meta_after_triage.name
              ~reasons:admission_reason_strs
-         | Cascade_backpressured { cascade_name; reason } ->
-           record_cascade_backpressure_observation
+         | Runtime_backpressured { cascade_name; reason } ->
+           record_runtime_backpressure_observation
              ~base_path:ctx.config.base_path
              ~keeper_name:meta_after_triage.name
              ~reason;
@@ -267,8 +267,8 @@ let run_keepalive_unified_turn
           else ""
         in
         let log_not_scheduled =
-          match cascade_backpressure, turn_decision.verdict with
-          | Cascade_admitted, Keeper_world_observation.Skip _ -> Log.Keeper.debug
+          match runtime_backpressure, turn_decision.verdict with
+          | Runtime_admitted, Keeper_world_observation.Skip _ -> Log.Keeper.debug
           | _ -> Log.Keeper.info
         in
         log_not_scheduled

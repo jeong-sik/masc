@@ -121,7 +121,7 @@ let handle
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.name
     ~turn_id:keeper_turn_id
-    ~prev:Keeper_turn_fsm.Cascade_routing
+    ~prev:Keeper_turn_fsm.Runtime_routing
     (Keeper_turn_fsm.Failed
        (Keeper_turn_fsm.Failure_turn_livelock_blocked { reason = reason_string }));
   (* Persist paused state + dispatch Operator_pause so the next heartbeat

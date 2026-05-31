@@ -141,7 +141,7 @@ let dump_receipts ~base_path ~keeper ~turn_id =
 
 (** Scan [.masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl]
     for manifest rows matching [keeper_turn_id].  This is the causal
-    chain source: phase gate, cascade routing, provider attempts, context
+    chain source: phase gate, runtime routing, provider attempts, context
     checkpoints, receipts, and terminal outcome. *)
 let dump_runtime_manifests ~base_path ~keeper ~turn_id =
   let dir = runtime_manifests_dir ~base_path ~keeper in

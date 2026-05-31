@@ -12,7 +12,7 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_runtime_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
 include Keeper_turn_cascade_budget
@@ -44,7 +44,7 @@ let run_keeper_cycle
      this function; an [Error _] branch leaves it false and skips the
      wrap, mirroring the spec's "completed-on-success" semantics. *)
   let cycle_completed = ref false in
-  (* 0. Phase gate + state-aware cascade routing.
+  (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability; select_cascade remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
      phases like Overflowed. *)
@@ -131,7 +131,7 @@ let run_keeper_cycle
      the top of the function body, rather than burying early-exits in
      deeply nested match arms.
 
-     State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade)
+     State-aware runtime routing (TLA+ KeeperCoreTriad.SelectCascade)
      resumes inside [main_path]; at that point [phase_opt] is whatever
      the registry returned for an executable phase. *)
   let main_path phase_opt =
@@ -208,7 +208,7 @@ let run_keeper_cycle
                   ; detail = error_message
                   }
               | _ when EC.is_runtime_exhausted_error err ->
-                Keeper_turn_fsm.Failure_cascade_unavailable
+                Keeper_turn_fsm.Failure_runtime_unavailable
                   { base = effective_cascade_runtime_name
                   ; resolved = None
                   }
@@ -219,7 +219,7 @@ let run_keeper_cycle
             Keeper_turn_fsm.emit_transition
               ~keeper_name:meta.name
               ~turn_id:keeper_turn_id
-              ~prev:Keeper_turn_fsm.Cascade_routing
+              ~prev:Keeper_turn_fsm.Runtime_routing
               (Keeper_turn_fsm.Failed failure_reason);
             Error err
           | Ok initial_execution ->
@@ -256,7 +256,7 @@ let run_keeper_cycle
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name
                  ~turn_id:keeper_turn_id
-                 ~prev:Keeper_turn_fsm.Cascade_routing
+                 ~prev:Keeper_turn_fsm.Runtime_routing
                  Keeper_turn_fsm.Awaiting_provider;
                (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)

@@ -1,9 +1,9 @@
 (** Keepalive scheduling decision for the keeper heartbeat loop. *)
 
-type cascade_backpressure_decision =
-  Keeper_heartbeat_loop_observations.cascade_backpressure_decision =
-  | Cascade_admitted
-  | Cascade_backpressured of {
+type runtime_backpressure_decision =
+  Keeper_heartbeat_loop_observations.runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
       cascade_name : string;
       reason : string;
     }
@@ -11,7 +11,7 @@ type cascade_backpressure_decision =
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
-  cascade_backpressure : cascade_backpressure_decision;
+  runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
   admission_reasons : string list;
@@ -19,7 +19,7 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
-  ?cascade_resilience_of_name:(string -> Keeper_cascade_resilience.cascade_resilience) ->
+  ?runtime_resilience_of_name:(string -> Keeper_runtime_resilience.runtime_resilience) ->
   ?cascade_status_of_name:
     (cascade_name:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->

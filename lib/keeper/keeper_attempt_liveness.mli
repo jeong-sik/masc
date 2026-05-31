@@ -90,7 +90,7 @@ end
 
 (** {1 Failure class}
 
-    Reported back to the cascade FSM so it can attribute the kill to
+    Reported back to the runtime FSM so it can attribute the kill to
     liveness (not a wire error) and advance to the next provider. *)
 
 type failure =
@@ -170,7 +170,7 @@ type output =
       (** No transition observable to caller. *)
 
   | Outcome of failure
-      (** Attempt failed; cascade FSM should advance to next provider. *)
+      (** Attempt failed; runtime FSM should advance to next provider. *)
 
   | Completed
       (** Attempt succeeded. *)

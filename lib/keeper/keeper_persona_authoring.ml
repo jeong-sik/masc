@@ -369,7 +369,7 @@ let normalize_social_model raw =
 let normalize_runtime_id raw =
   let normalized = String.trim raw in
   let catalog =
-    try Keeper_cascade_profile.catalog_names () with
+    try Keeper_runtime_profile.catalog_names () with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> []
   in

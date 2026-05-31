@@ -309,7 +309,7 @@ let update_meta ~base_path name meta =
   update_entry ~base_path name (fun e -> { e with meta })
 ;;
 
-(* Cascade-attempt cluster (cascade_attempt_merge / meta_for_cascade_attempt / record_cascade_attempt / cascade_attempt_suffix / last_cascade_attempt / cascade_attempt_freshness_threshold_sec / enrich... *)
+(* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
   let key = registry_key ~base_path name in

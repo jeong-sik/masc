@@ -32,7 +32,7 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
     measurement: { captured: true },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,

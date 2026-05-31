@@ -118,7 +118,7 @@ let test_no_cascade_before_measurement_table () =
   List.iter (fun cascade ->
     List.iter (fun measured ->
       let expected = expected_no_cascade_before_measurement ~cascade ~measured in
-      let actual = Obs.check_no_cascade_before_measurement
+      let actual = Obs.check_no_runtime_before_measurement
                      ~cascade_state:cascade ~measurement_captured:measured
       in
       let label = Printf.sprintf "I2 cascade=%s × measured=%b"
@@ -146,16 +146,16 @@ let test_no_cascade_before_measurement_table () =
      /\ kdp_decision' = "tool_policy_selected"
      /\ kcl_cascade_state' = "selecting"
    Post-bug state: cascade jumps to selecting with measurement_captured = false.
-   Invariant violated: NoCascadeBeforeMeasurement (I2). *)
+   Invariant violated: NoRuntimeBeforeMeasurement (I2). *)
 let test_bug_cascade_before_measurement_caught () =
   let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state = Packed Cascade_selecting in
   let measured = false in
-  let i2 = Obs.check_no_cascade_before_measurement
+  let i2 = Obs.check_no_runtime_before_measurement
              ~cascade_state:post_bug_cascade
              ~measurement_captured:measured
   in
   Alcotest.(check bool)
-    "BugCascadeBeforeMeasurement → I2 NoCascadeBeforeMeasurement violated"
+    "BugCascadeBeforeMeasurement → I2 NoRuntimeBeforeMeasurement violated"
     false i2
 
 (* TLA+ BugCompactionDesync (lines 424-430):
@@ -195,7 +195,7 @@ let test_phase_turn_alignment_strengthening () =
      /\ cascade_state' = "selecting"
    Post-bug state: cascade jumps to selecting without tool_policy_selected.
    Invariant violated: SelectingRequiresToolPolicy.
-   OCaml mirror: check_no_cascade_before_measurement — selecting past idle
+   OCaml mirror: check_no_runtime_before_measurement — selecting past idle
    requires measurement_captured=true. The bug sets selecting while
    measurement is still unbound (analogous to no tool policy selected). *)
 let test_bug_selecting_without_tool_policy_caught () =
@@ -203,12 +203,12 @@ let test_bug_selecting_without_tool_policy_caught () =
     Masc_mcp.Keeper_registry.Packed Cascade_selecting
   in
   let measured = false in
-  let i2 = Obs.check_no_cascade_before_measurement
+  let i2 = Obs.check_no_runtime_before_measurement
              ~cascade_state:post_bug_cascade
              ~measurement_captured:measured
   in
   Alcotest.(check bool)
-    "BugSelectingWithoutToolPolicy → I2 NoCascadeBeforeMeasurement violated"
+    "BugSelectingWithoutToolPolicy → I2 NoRuntimeBeforeMeasurement violated"
     false i2
 
 (* TLA+ BugSelectWithoutMeasurement (KeeperDecisionPipeline.tla:255-263):
@@ -224,12 +224,12 @@ let test_bug_select_without_measurement_caught () =
     Masc_mcp.Keeper_registry.Packed Cascade_selecting
   in
   let measured = false in
-  let i2 = Obs.check_no_cascade_before_measurement
+  let i2 = Obs.check_no_runtime_before_measurement
              ~cascade_state:post_bug_cascade
              ~measurement_captured:measured
   in
   Alcotest.(check bool)
-    "BugSelectWithoutMeasurement → I2 NoCascadeBeforeMeasurement violated"
+    "BugSelectWithoutMeasurement → I2 NoRuntimeBeforeMeasurement violated"
     false i2
 
 (* TLA+ BugDerivePhaseMismatch (KeeperTraceSpec.tla:137-147):
@@ -443,9 +443,9 @@ let prop_predicates_pure =
       let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
       let i1a = Obs.check_phase_turn_alignment ksm turn in
       let i1b = Obs.check_phase_turn_alignment ksm turn in
-      let i2a = Obs.check_no_cascade_before_measurement
+      let i2a = Obs.check_no_runtime_before_measurement
                   ~cascade_state:cascade ~measurement_captured:measured in
-      let i2b = Obs.check_no_cascade_before_measurement
+      let i2b = Obs.check_no_runtime_before_measurement
                   ~cascade_state:cascade ~measurement_captured:measured in
       let i3a = Obs.check_compaction_atomicity ksm kmc in
       let i3b = Obs.check_compaction_atomicity ksm kmc in
@@ -469,7 +469,7 @@ let prop_predicates_match_spec =
         = expected_compaction_atomicity ksm kmc
       &&
       let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
-      Obs.check_no_cascade_before_measurement
+      Obs.check_no_runtime_before_measurement
           ~cascade_state:cascade ~measurement_captured:measured
         = expected_no_cascade_before_measurement ~cascade ~measured)
 
@@ -490,7 +490,7 @@ let () =
       test_case "Running × Turn_compacting flagged"  `Quick
         test_phase_turn_alignment_strengthening;
     ];
-    "I2 NoCascadeBeforeMeasurement (cascade × measured)", [
+    "I2 NoRuntimeBeforeMeasurement (cascade × measured)", [
       test_case "exhaustive table (5 × 2 = 10 cells)" `Quick
         test_no_cascade_before_measurement_table;
     ];

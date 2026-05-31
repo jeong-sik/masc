@@ -1,3 +1,6 @@
+// DEPRECATED: Use `src/lib/codec.ts` as the canonical import path.
+// This file will be inlined into the codec layer in a follow-up.
+
 import { isRecord, asString, asNumber, asBoolean, extractArray, asStringArray } from './components/common/normalize'
 import { normalizePendingConfirmation } from './pending-confirm'
 import {

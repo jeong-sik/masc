@@ -105,7 +105,7 @@ export const MAX_TRANSITION_HISTORY = 20
 
 const ZERO_VIOLATIONS: InvariantViolationCounts = {
   phase_turn_alignment: 0,
-  no_cascade_before_measurement: 0,
+  no_runtime_before_measurement: 0,
   compaction_atomicity: 0,
   event_priority_monotone: 0,
   phase_derivation_agreement: 0,
@@ -146,7 +146,7 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
   phase_turn_alignment: '단계 ⇔ 턴',
-  no_cascade_before_measurement: 'Cascade 순서',
+  no_runtime_before_measurement: 'Cascade 순서',
   compaction_atomicity: '압축 원자성',
   event_priority_monotone: '이벤트 우선순위',
   phase_derivation_agreement: 'Phase 유도 일치',

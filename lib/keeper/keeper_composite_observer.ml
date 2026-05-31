@@ -86,21 +86,21 @@ let all_tla_actions =
 
 type invariant_key =
   | Invariant_phase_turn_alignment
-  | Invariant_no_cascade_before_measurement
+  | Invariant_no_runtime_before_measurement
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
 let all_invariant_keys =
   [
-    Invariant_phase_turn_alignment; Invariant_no_cascade_before_measurement;
+    Invariant_phase_turn_alignment; Invariant_no_runtime_before_measurement;
     Invariant_compaction_atomicity; Invariant_event_priority_monotone;
     Invariant_phase_derivation_agreement;
   ]
 
 type invariants_check = {
   phase_turn_alignment : bool;
-  no_cascade_before_measurement : bool;
+  no_runtime_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
@@ -284,14 +284,14 @@ let tla_action_of_string = function
 
 let invariant_key_to_string = function
   | Invariant_phase_turn_alignment -> "PhaseTurnAlignment"
-  | Invariant_no_cascade_before_measurement -> "NoCascadeBeforeMeasurement"
+  | Invariant_no_runtime_before_measurement -> "NoRuntimeBeforeMeasurement"
   | Invariant_compaction_atomicity -> "CompactionAtomicity"
   | Invariant_event_priority_monotone -> "EventPriorityMonotone"
   | Invariant_phase_derivation_agreement -> "PhaseDerivationAgreement"
 
 let invariant_key_of_string = function
   | "PhaseTurnAlignment" -> Some Invariant_phase_turn_alignment
-  | "NoCascadeBeforeMeasurement" -> Some Invariant_no_cascade_before_measurement
+  | "NoRuntimeBeforeMeasurement" -> Some Invariant_no_runtime_before_measurement
   | "CompactionAtomicity" -> Some Invariant_compaction_atomicity
   | "EventPriorityMonotone" -> Some Invariant_event_priority_monotone
   | "PhaseDerivationAgreement" -> Some Invariant_phase_derivation_agreement
@@ -369,7 +369,7 @@ let check_compaction_atomicity
   | Keeper_registry.Packed Compaction_done ->
       not (phase = Keeper_state_machine.Compacting)
 
-let check_no_cascade_before_measurement
+let check_no_runtime_before_measurement
     ~(cascade_state : Keeper_registry.packed_cascade_state)
     ~(measurement_captured : bool)
     : bool =
@@ -417,8 +417,8 @@ let compute_invariants
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
-    no_cascade_before_measurement =
-      check_no_cascade_before_measurement
+    no_runtime_before_measurement =
+      check_no_runtime_before_measurement
         ~cascade_state
         ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase compaction_stage;
@@ -442,7 +442,7 @@ let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
         ()
   in
   bump Invariant_phase_turn_alignment inv.phase_turn_alignment;
-  bump Invariant_no_cascade_before_measurement inv.no_cascade_before_measurement;
+  bump Invariant_no_runtime_before_measurement inv.no_runtime_before_measurement;
   bump Invariant_compaction_atomicity inv.compaction_atomicity;
   bump Invariant_event_priority_monotone inv.event_priority_monotone;
   bump Invariant_phase_derivation_agreement inv.phase_derivation_agreement
@@ -562,7 +562,7 @@ let all_snapshots ~(base_path : string) () : snapshot list =
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
   `Assoc [
     "phase_turn_alignment", `Bool inv.phase_turn_alignment;
-    "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
+    "no_runtime_before_measurement", `Bool inv.no_runtime_before_measurement;
     "compaction_atomicity", `Bool inv.compaction_atomicity;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
     "phase_derivation_agreement", `Bool inv.phase_derivation_agreement;

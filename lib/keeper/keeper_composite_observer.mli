@@ -79,7 +79,7 @@ val all_tla_actions : tla_action list
 (** Named TLA invariants mirrored as OCaml variants. *)
 type invariant_key =
   | Invariant_phase_turn_alignment
-  | Invariant_no_cascade_before_measurement
+  | Invariant_no_runtime_before_measurement
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
@@ -92,7 +92,7 @@ val all_invariant_keys : invariant_key list
     that the dashboard should surface to the operator. *)
 type invariants_check = {
   phase_turn_alignment : bool;
-  no_cascade_before_measurement : bool;
+  no_runtime_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
@@ -127,10 +127,10 @@ val check_phase_turn_alignment : Keeper_state_machine.phase -> Keeper_registry.p
     [(kmc_compaction = compacting) <=> (phase = Compacting)]. *)
 val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.packed_compaction_stage -> bool
 
-(** Mirror of TLA+ I2 [NoCascadeBeforeMeasurement]
+(** Mirror of TLA+ I2 [NoRuntimeBeforeMeasurement]
     (KeeperCompositeLifecycle.tla:361): cascade selection past [idle]
     requires a captured measurement. *)
-val check_no_cascade_before_measurement :
+val check_no_runtime_before_measurement :
   cascade_state:Keeper_registry.packed_cascade_state -> measurement_captured:bool -> bool
 
 val check_phase_derivation_agreement :

@@ -21,7 +21,7 @@ let read ~keeper ~invariant =
 
 let all_satisfied : Obs.invariants_check = {
   phase_turn_alignment = true;
-  no_cascade_before_measurement = true;
+  no_runtime_before_measurement = true;
   compaction_atomicity = true;
   event_priority_monotone = true;
   phase_derivation_agreement = true;
@@ -29,7 +29,7 @@ let all_satisfied : Obs.invariants_check = {
 
 let all_violated : Obs.invariants_check = {
   phase_turn_alignment = false;
-  no_cascade_before_measurement = false;
+  no_runtime_before_measurement = false;
   compaction_atomicity = false;
   event_priority_monotone = false;
   phase_derivation_agreement = false;
@@ -87,7 +87,7 @@ let test_bump_noop_when_all_satisfied () =
 let test_bump_increments_each_violated () =
   let keeper = "test-bump-all-violated" in
   let invariants =
-    [ "PhaseTurnAlignment"; "NoCascadeBeforeMeasurement";
+    [ "PhaseTurnAlignment"; "NoRuntimeBeforeMeasurement";
       "CompactionAtomicity"; "EventPriorityMonotone";
       "PhaseDerivationAgreement" ]
   in
@@ -106,21 +106,21 @@ let test_bump_selective_increments () =
   let keeper = "test-bump-mixed" in
   let mixed : Obs.invariants_check = {
     phase_turn_alignment = false;
-    no_cascade_before_measurement = true;  (* satisfied, no bump *)
+    no_runtime_before_measurement = true;  (* satisfied, no bump *)
     compaction_atomicity = false;
     event_priority_monotone = true;        (* satisfied, no bump *)
     phase_derivation_agreement = false;
   } in
   let pt_before = read ~keeper ~invariant:"PhaseTurnAlignment" in
-  let nc_before = read ~keeper ~invariant:"NoCascadeBeforeMeasurement" in
+  let nc_before = read ~keeper ~invariant:"NoRuntimeBeforeMeasurement" in
   let ca_before = read ~keeper ~invariant:"CompactionAtomicity" in
   let ep_before = read ~keeper ~invariant:"EventPriorityMonotone" in
   let pd_before = read ~keeper ~invariant:"PhaseDerivationAgreement" in
   Obs.bump_invariant_violations ~keeper_name:keeper mixed;
   check (float 0.0001) "phase_turn_alignment +1"
     (pt_before +. 1.0) (read ~keeper ~invariant:"PhaseTurnAlignment");
-  check (float 0.0001) "no_cascade_before_measurement unchanged"
-    nc_before (read ~keeper ~invariant:"NoCascadeBeforeMeasurement");
+  check (float 0.0001) "no_runtime_before_measurement unchanged"
+    nc_before (read ~keeper ~invariant:"NoRuntimeBeforeMeasurement");
   check (float 0.0001) "compaction_atomicity +1"
     (ca_before +. 1.0) (read ~keeper ~invariant:"CompactionAtomicity");
   check (float 0.0001) "event_priority_monotone unchanged"
@@ -148,7 +148,7 @@ let test_all_invariant_keys_mapped () =
   in
   check int "5 invariant keys" 5 (List.length strings);
   check (list string) "key names match alert-rule labels"
-    [ "PhaseTurnAlignment"; "NoCascadeBeforeMeasurement";
+    [ "PhaseTurnAlignment"; "NoRuntimeBeforeMeasurement";
       "CompactionAtomicity"; "EventPriorityMonotone";
       "PhaseDerivationAgreement" ]
     strings

@@ -53,7 +53,7 @@ function snapshot(
     measurement: { captured: false },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
@@ -175,7 +175,7 @@ describe('fsm-hub derived state', () => {
         compaction: { stage: 'accumulating' },
         invariants: {
           phase_turn_alignment: false,
-          no_cascade_before_measurement: true,
+          no_runtime_before_measurement: true,
           compaction_atomicity: true,
           event_priority_monotone: true,
           phase_derivation_agreement: true,
@@ -563,7 +563,7 @@ describe('invariantDescription', () => {
   it('returns domain-specific prose for each known invariant key', () => {
     const keys = [
       'phase_turn_alignment',
-      'no_cascade_before_measurement',
+      'no_runtime_before_measurement',
       'compaction_atomicity',
       'event_priority_monotone',
     ]
@@ -576,7 +576,7 @@ describe('invariantDescription', () => {
 
   it('mentions the specific contract each invariant guards', () => {
     expect(invariantDescription('phase_turn_alignment')).toMatch(/KSM|KTC|drift/i)
-    expect(invariantDescription('no_cascade_before_measurement')).toMatch(/cascade|measurement/i)
+    expect(invariantDescription('no_runtime_before_measurement')).toMatch(/cascade|measurement/i)
     expect(invariantDescription('compaction_atomicity')).toMatch(/atomic|half-compacted/i)
     expect(invariantDescription('event_priority_monotone')).toMatch(/priority|priorit/i)
   })

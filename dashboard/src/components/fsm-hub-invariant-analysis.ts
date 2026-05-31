@@ -34,7 +34,7 @@ function invariantDetail(
       return ok
         ? 'KSM/KTC/KMC agree — 지금 누가 compaction 을 소유하는지 일치.'
         : `KSM=${snapshot.phase}, KTC=${snapshot.turn_phase}, KMC=${snapshot.compaction.stage} 가 일치하지 않음.`
-    case 'no_cascade_before_measurement':
+    case 'no_runtime_before_measurement':
       return ok
         ? 'measurement 가 captured 된 뒤에만 cascade work 가 진행됨.'
         : `measurement.captured=${String(snapshot.measurement.captured)} 인데 KCL=${snapshot.cascade.state}.`

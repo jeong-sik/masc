@@ -16,7 +16,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
     measurement: { captured: false },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
@@ -49,7 +49,7 @@ describe('invariantRows', () => {
     const rows = invariantRows(makeSnapshot({
       invariants: {
         phase_turn_alignment: false,
-        no_cascade_before_measurement: true,
+        no_runtime_before_measurement: true,
         compaction_atomicity: true,
         event_priority_monotone: true,
         phase_derivation_agreement: true,
@@ -82,7 +82,7 @@ describe('invariantRows', () => {
       phase: 'running',
       invariants: {
         phase_turn_alignment: true,
-        no_cascade_before_measurement: true,
+        no_runtime_before_measurement: true,
         compaction_atomicity: false,
         event_priority_monotone: true,
         phase_derivation_agreement: true,
@@ -114,7 +114,7 @@ describe('deriveOperationalInsight', () => {
       makeSnapshot({
         invariants: {
           phase_turn_alignment: false,
-          no_cascade_before_measurement: true,
+          no_runtime_before_measurement: true,
           compaction_atomicity: true,
           event_priority_monotone: true,
           phase_derivation_agreement: true,

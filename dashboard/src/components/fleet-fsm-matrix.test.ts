@@ -65,7 +65,7 @@ function snapshot(
     measurement: { captured: true },
     invariants: {
       phase_turn_alignment: allHold,
-      no_cascade_before_measurement: allHold,
+      no_runtime_before_measurement: allHold,
       compaction_atomicity: allHold,
       event_priority_monotone: allHold,
       phase_derivation_agreement: allHold,
@@ -167,7 +167,7 @@ describe('tallyInvariantViolations', () => {
     const s = [snapshot({ name: 'a' }), snapshot({ name: 'b' })]
     expect(tallyInvariantViolations(s)).toEqual({
       phase_turn_alignment: 0,
-      no_cascade_before_measurement: 0,
+      no_runtime_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,
@@ -183,14 +183,14 @@ describe('tallyInvariantViolations', () => {
     const t = tallyInvariantViolations(s)
     expect(t.phase_turn_alignment).toBe(2)
     expect(t.compaction_atomicity).toBe(1)
-    expect(t.no_cascade_before_measurement).toBe(0)
+    expect(t.no_runtime_before_measurement).toBe(0)
     expect(t.event_priority_monotone).toBe(0)
   })
 
   it('treats an empty fleet as clean', () => {
     expect(tallyInvariantViolations([])).toEqual({
       phase_turn_alignment: 0,
-      no_cascade_before_measurement: 0,
+      no_runtime_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,

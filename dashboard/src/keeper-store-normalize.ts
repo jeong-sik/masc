@@ -1,3 +1,6 @@
+// DEPRECATED: Use `src/lib/codec.ts` as the canonical import path.
+// This file will be inlined into the codec layer in a follow-up.
+
 import type {
   CtxCompositionTelemetry,
   Keeper,

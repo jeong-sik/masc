@@ -801,7 +801,7 @@ export function tallyInvariantViolations(
 ): Record<keyof typeof INVARIANT_LABELS, number> {
   const counts = {
     phase_turn_alignment: 0,
-    no_cascade_before_measurement: 0,
+    no_runtime_before_measurement: 0,
     compaction_atomicity: 0,
     event_priority_monotone: 0,
     phase_derivation_agreement: 0,

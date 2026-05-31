@@ -72,7 +72,7 @@ const KeeperCompositeMeasurementSchema = object({
 
 const KeeperCompositeInvariantsSchema = object({
   phase_turn_alignment: boolean(),
-  no_cascade_before_measurement: boolean(),
+  no_runtime_before_measurement: boolean(),
   compaction_atomicity: boolean(),
   event_priority_monotone: boolean(),
   phase_derivation_agreement: boolean(),

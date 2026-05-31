@@ -49,7 +49,7 @@ export interface DashboardMissionSessionBrief {
   session_id: string
   goal: string
   created_by?: string | null
-  origin_kind?: 'human' | 'system' | string
+  origin_kind?: 'human' | 'system'
   namespace?: string | null
   status?: string
   health?: string
@@ -455,7 +455,7 @@ export interface OperatorJudgment {
 export interface OperatorReviewDecision {
   item_id: string
   fingerprint: string
-  decision: 'resolved' | 'deferred' | string
+  decision: 'resolved' | 'deferred'
   actor: string
   reason: string
   at: string
@@ -466,7 +466,7 @@ export interface OperatorReviewDecision {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'root' | 'namespace' | 'room' | string
+  target_type: 'root' | 'namespace' | 'room'
   target_id?: string | null
   health?: string
   judgment_owner?: string | null

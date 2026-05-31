@@ -128,8 +128,8 @@ export interface Attribution {
 
 export interface SSEEvent {
   type: SSEEventType
-  severity?: JournalSeverity | string
-  source?: JournalSource | string
+  severity?: JournalSeverity
+  source?: JournalSource
   agent?: string
   from?: string
   from_agent?: string
@@ -144,13 +144,13 @@ export interface SSEEvent {
   author_identity?: BoardActorIdentity | null
   voter?: string
   voter_identity?: BoardActorIdentity | null
-  direction?: 'up' | 'down' | string
-  target_type?: 'post' | 'comment' | string
+  direction?: 'up' | 'down'
+  target_type?: 'post' | 'comment'
   target_id?: string
   user_id?: string
   emoji?: string
   reacted?: boolean
-  post_kind?: BoardPost['post_kind'] | string
+  post_kind?: BoardPost['post_kind']
   hearth?: string
   agent_name?: string
   keeper_name?: string

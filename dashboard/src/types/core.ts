@@ -143,7 +143,7 @@ export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' 
 
 export interface BoardContributorQuality {
   score: number
-  band?: 'low' | 'watch' | 'strong' | 'excellent' | string
+  band?: 'low' | 'watch' | 'strong' | 'excellent'
   source?: string
   completion_rate?: number
   response_rate?: number
@@ -160,7 +160,7 @@ export interface BoardActorIdentity {
   key: string
   display_name: string
   raw: string
-  source?: 'keeper_registry_agent_name' | 'keeper_registry_name' | 'keeper_alias_contract' | 'raw_agent' | string
+  source?: 'keeper_registry_agent_name' | 'keeper_registry_name' | 'keeper_alias_contract' | 'raw_agent'
   runtime_agent_name?: string
 }
 
@@ -274,7 +274,7 @@ export interface BoardCurationHealthComponent {
 export interface BoardKarmaLedgerEvent {
   recipient: string
   voter: string
-  target_kind: 'post' | 'comment' | string
+  target_kind: 'post' | 'comment'
   target_id: string
   delta: number
   ts: number
@@ -491,7 +491,7 @@ export interface KeeperTrustLatestEvent {
   goal_ids?: string[]
   title: string
   summary: string
-  severity: 'ok' | 'warn' | 'bad' | string
+  severity: 'ok' | 'warn' | 'bad'
   next_human_action?: string | null
 }
 
@@ -533,7 +533,7 @@ export interface KeeperTrustExecutionSummary {
 export interface KeeperTrustTerminalReason {
   code?: string | null
   source?: string | null
-  severity?: 'ok' | 'warn' | 'bad' | string | null
+  severity?: 'ok' | 'warn' | 'bad' | null
   summary?: string | null
   next_action?: string | null
 }
@@ -609,13 +609,13 @@ export interface Goal {
 }
 
 export interface GoalVerifierPrincipal {
-  kind: 'operator' | 'keeper' | string
+  kind: 'operator' | 'keeper'
   id: string
   display_name?: string | null
 }
 
 export interface GoalVerifierPolicy {
-  inherit_mode: 'extend' | 'replace' | string
+  inherit_mode: 'extend' | 'replace'
   principals: GoalVerifierPrincipal[]
   required_verdicts?: number | null
 }
@@ -960,7 +960,7 @@ export interface Keeper {
     mid?: string | null
     long?: string | null
   } | null
-  sandbox_profile?: 'local' | 'docker' | string | null
+  sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
   effective_sandbox_image?: string | null
@@ -1210,7 +1210,7 @@ interface KeeperConfigExecution {
   active_model_label?: string | null
   last_model_used_label?: string | null
   per_provider_timeout_sec?: number | null
-  per_provider_timeout_mode: 'override' | 'turn_budget_heuristic' | string
+  per_provider_timeout_mode: 'override' | 'turn_budget_heuristic'
   verify: boolean
   selected_cascade_name: string
   selected_cascade_canonical: string

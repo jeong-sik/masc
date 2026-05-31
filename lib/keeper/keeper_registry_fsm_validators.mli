@@ -6,13 +6,13 @@
 
 open Keeper_registry_types
 
-(** Validate a cascade_state cross-state transition.
+(** Validate a runtime_state cross-state transition.
     Idempotent self-loops are accepted; the 7 spec-forbidden pairs raise
-    [Cascade_transition_violation] with the typed
-    [cascade_transition_spec_violation] payload. Counter:
-    [metric_fsm_guard_violation] (action=cascade_transition, stage=guard). *)
-val cascade_transition :
-  from:packed_cascade_state -> to_:packed_cascade_state -> unit
+    [Runtime_transition_violation] with the typed
+    [runtime_transition_spec_violation] payload. Counter:
+    [metric_fsm_guard_violation] (action=runtime_transition, stage=guard). *)
+val runtime_transition :
+  from:packed_runtime_state -> to_:packed_runtime_state -> unit
 
 (** Validate a turn_phase cross-state transition.
     Idempotent self-loops are accepted; the 19 spec-forbidden pairs raise

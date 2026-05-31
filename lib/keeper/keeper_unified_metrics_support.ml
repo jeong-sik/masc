@@ -160,7 +160,7 @@ let label_or_unknown raw =
 let record_turn_latency_by_model_bucket
     ~(keeper : string)
     ~(channel : string)
-    ~(cascade_profile : string)
+    ~(runtime_profile : string)
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
   let model_used = runtime_lane_label in
@@ -168,7 +168,7 @@ let record_turn_latency_by_model_bucket
   let provider_kind =
     Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
   in
-  let cascade_profile = label_or_unknown cascade_profile in
+  let runtime_profile = label_or_unknown runtime_profile in
   Prometheus.inc_counter
     Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
@@ -177,7 +177,7 @@ let record_turn_latency_by_model_bucket
       ; ("provider_kind", provider_kind)
       ; ("model_used", model_used)
       ; ("resolved_model_id", resolved_model_id)
-      ; ("cascade_profile", cascade_profile)
+      ; ("runtime_profile", runtime_profile)
       ; ("bucket", bucket)
       ]
     ()

@@ -388,13 +388,13 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          if scan.total_rows > 0
             && runtime_manifest_scan_event_count scan Keeper_runtime_manifest.Turn_started
                > 0
-            && runtime_manifest_scan_event_count scan Keeper_runtime_manifest.Cascade_routed
+            && runtime_manifest_scan_event_count scan Keeper_runtime_manifest.Runtime_routed
                = 0
          then
-           { code = "cascade_decision_missing"
+           { code = "runtime_decision_missing"
            ; severity = "warn"
            ; lane = "masc_policy_runtime"
-           ; detail = Some "turn started but no cascade_routed event recorded"
+           ; detail = Some "turn started but no runtime_routed event recorded"
            }
            :: gaps
          else gaps)

@@ -84,10 +84,10 @@ type proactive_runtime =
 
 (* ── Structured blocker classification ──────────────────────── *)
 
-(** Telemetry detail for [No_tool_capable] cascade exhaustion.
+(** Telemetry detail for [No_tool_capable] runtime exhaustion.
     Carried from the former standalone [No_tool_capable_provider]
     variant of [masc_internal_error] after reclassification into
-    [cascade_exhaustion_reason]. *)
+    [runtime_exhaustion_reason]. *)
 type no_tool_capable_detail =
   { configured_labels : string list
   ; required_tool_names : string list
@@ -95,7 +95,7 @@ type no_tool_capable_detail =
       (** [(provider_label, reason)] pairs *)
   }
 
-type cascade_exhaustion_reason =
+type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
     (** RFC-0142 PR-2 (2026-05-22): typed surface for the dominant Other_detail
@@ -113,23 +113,23 @@ type cascade_exhaustion_reason =
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
-    (** Typed surface for capacity-induced cascade exhaustion.
+    (** Typed surface for capacity-induced runtime exhaustion.
         Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
         through to [Other_detail message], losing auto-recovery eligibility
-        and triggering the harsher [Cascade_exhausted { retryable = false }]
+        and triggering the harsher [Runtime_exhausted { retryable = false }]
         failure policy.  This variant enables the softer
         [Soft_fail_turn + Provider_cooldown] path. *)
   | No_tool_capable of no_tool_capable_detail option
-    (** Cascade exhausted because no configured provider can satisfy the
+    (** Runtime exhausted because no configured provider can satisfy the
         required tool set.  Previously a standalone [blocker_class] variant;
         reclassified here because the cascade rotation filtered all candidates
-        before dispatch — a semantic subset of cascade exhaustion.
+        before dispatch — a semantic subset of runtime exhaustion.
         The optional detail carries telemetry from the former
         [No_tool_capable_provider] variant of [masc_internal_error]. *)
   | Other_detail of string
 
 type blocker_class =
-  | Cascade_exhausted of cascade_exhaustion_reason
+  | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
@@ -176,8 +176,8 @@ type blocker_class =
   | Sdk_input_required
 
 let blocker_class_to_string = function
-  | Cascade_exhausted (No_tool_capable _) -> "cascade_exhausted_no_tool_capable"
-  | Cascade_exhausted _ -> "cascade_exhausted"
+  | Runtime_exhausted (No_tool_capable _) -> "runtime_exhausted_no_tool_capable"
+  | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
   | Ambiguous_post_commit_failure -> "ambiguous_post_commit_failure"
@@ -205,8 +205,8 @@ let blocker_class_to_string = function
 ;;
 
 let blocker_class_of_serialized_string = function
-  | "cascade_exhausted_no_tool_capable" -> Some (Cascade_exhausted (No_tool_capable None))
-  | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
+  | "runtime_exhausted_no_tool_capable" -> Some (Runtime_exhausted (No_tool_capable None))
+  | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
   | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
@@ -234,32 +234,32 @@ let blocker_class_of_serialized_string = function
   | _ -> None
 ;;
 
-let cascade_exhaustion_summary = function
+let runtime_exhaustion_summary = function
   | Connection_refused ->
-    "Cascade exhausted after provider failures; local runtime connection refused."
+    "Runtime exhausted after provider failures; local runtime connection refused."
   | Dns_failure ->
-    "Cascade exhausted; hostname resolution failed (DNS)."
-  | No_providers_available -> "Cascade exhausted; no providers were available."
+    "Runtime exhausted; hostname resolution failed (DNS)."
+  | No_providers_available -> "Runtime exhausted; no providers were available."
   | All_providers_failed ->
-    "Cascade exhausted after all configured providers failed; inspect per-attempt root causes."
+    "Runtime exhausted after all configured providers failed; inspect per-attempt root causes."
   | Candidates_filtered_after_cycles ->
-    "Cascade exhausted after provider candidates were filtered; inspect candidate filter reasons."
+    "Runtime exhausted after provider candidates were filtered; inspect candidate filter reasons."
   | Max_turns_exceeded ->
-    "Cascade exhausted after a provider hit its per-call turn budget."
+    "Runtime exhausted after a provider hit its per-call turn budget."
   | Structural_attempt_timeout _ ->
-    "Cascade exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
+    "Runtime exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
   | Capacity_exhausted ->
-    "Cascade exhausted; all providers reported capacity backpressure."
+    "Runtime exhausted; all providers reported capacity backpressure."
   | No_tool_capable _ ->
-    "Cascade exhausted; no configured provider can satisfy the required tool set."
+    "Runtime exhausted; no configured provider can satisfy the required tool set."
   | Other_detail _ ->
-    "Cascade exhausted; inspect cascade attempts for the dominant root cause."
+    "Runtime exhausted; inspect cascade attempts for the dominant root cause."
 ;;
 
 let blocker_class_continue_gate = function
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure -> true
-  | Cascade_exhausted _
+  | Runtime_exhausted _
   | Capacity_backpressure
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
@@ -284,7 +284,7 @@ let blocker_class_continue_gate = function
   | Sdk_input_required -> false
 ;;
 
-let cascade_exhaustion_reason_to_json = function
+let runtime_exhaustion_reason_to_json = function
   | Connection_refused -> `String "connection_refused"
   | Dns_failure -> `String "dns_failure"
   | No_providers_available -> `String "no_providers_available"
@@ -311,7 +311,7 @@ let cascade_exhaustion_reason_to_json = function
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 ;;
 
-let cascade_exhaustion_reason_of_json = function
+let runtime_exhaustion_reason_of_json = function
   | `String "connection_refused" -> Some Connection_refused
   | `String "dns_failure" -> Some Dns_failure
   | `String "no_providers_available" -> Some No_providers_available
@@ -376,9 +376,9 @@ let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
 let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
   let klass_payload = match info.klass with
-    | Cascade_exhausted reason ->
-      `Assoc [ "name", `String "cascade_exhausted"
-             ; "reason", cascade_exhaustion_reason_to_json reason
+    | Runtime_exhausted reason ->
+      `Assoc [ "name", `String "runtime_exhausted"
+             ; "reason", runtime_exhaustion_reason_to_json reason
              ]
     | _ -> `String (blocker_class_to_string info.klass)
   in
@@ -397,16 +397,16 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
       | Some (`String s) -> blocker_class_of_serialized_string s
       | Some (`Assoc kfields) ->
         (match List.assoc_opt "name" kfields with
-         | Some (`String "cascade_exhausted") ->
+         | Some (`String "runtime_exhausted") ->
            let reason =
              match List.assoc_opt "reason" kfields with
              | Some r ->
-               (match cascade_exhaustion_reason_of_json r with
+               (match runtime_exhaustion_reason_of_json r with
                 | Some r -> r
-                | None -> Other_detail "cascade_exhausted")
-             | None -> Other_detail "cascade_exhausted"
+                | None -> Other_detail "runtime_exhausted")
+             | None -> Other_detail "runtime_exhausted"
            in
-           Some (Cascade_exhausted reason)
+           Some (Runtime_exhausted reason)
          | Some (`String s) -> blocker_class_of_serialized_string s
          | _ -> None)
       | _ -> None

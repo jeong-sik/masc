@@ -133,7 +133,7 @@ let client_capacity_full_decision ~capacity_key =
 ;;
 
 let success_selected_model_raw candidate =
-  Some (Cascade_runtime_candidate.model_health_key candidate)
+  Some (Runtime_candidate.model_health_key candidate)
 
 (* Error/rejected/exhausted observations intentionally leave the concrete
    selected model absent. Downstream attribution uses candidate_models or the
@@ -144,7 +144,7 @@ let health_error_kind label =
   Keeper_binding_health.error_kind_of_string label
 
 let record_candidate_health_success candidate ~latency_ms =
-  Cascade_runtime_candidate.health_keys candidate
+  Runtime_candidate.health_keys candidate
   |> List.iter (fun provider_key ->
     Keeper_binding_health.record_success
       Keeper_binding_health.global
@@ -154,7 +154,7 @@ let record_candidate_health_success candidate ~latency_ms =
 
 let record_candidate_health_rejected candidate ~reason =
   let error_kind = health_error_kind "accept_rejected" in
-  Cascade_runtime_candidate.health_keys candidate
+  Runtime_candidate.health_keys candidate
   |> List.iter (fun provider_key ->
     Keeper_binding_health.record_rejected
       Keeper_binding_health.global
@@ -165,7 +165,7 @@ let record_candidate_health_rejected candidate ~reason =
 
 let record_candidate_health_error candidate sdk_err =
   let error_reason = Agent_sdk.Error.to_string sdk_err in
-  let health_keys = Cascade_runtime_candidate.health_keys candidate in
+  let health_keys = Runtime_candidate.health_keys candidate in
   if sdk_error_is_hard_quota sdk_err
   then (
     let error_kind = health_error_kind "hard_quota" in

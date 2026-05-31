@@ -25,7 +25,7 @@ let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
       ; "route." ^ trimmed
       ]
     in
-    (* RFC-0206: a runtime id is a raw string (no cascade-name prefix
+    (* RFC-0206: a runtime id is a raw string (no runtime-name prefix
        validation / re-qualification). Accept the first non-empty candidate. *)
     let rec first_valid = function
       | [] -> None
@@ -38,7 +38,7 @@ let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
       if log_invalid then
         Log.Keeper.warn
           "keeper:%s execution_receipt degraded_retry_cascade %S is not a \
-           qualified or re-qualifiable cascade name; dropping receipt field"
+           qualified or re-qualifiable runtime name; dropping receipt field"
           keeper_name
           raw;
       None
@@ -48,7 +48,7 @@ let finalize
     ~meta
     ~generation
     ~manifest_keeper_turn_id
-    ~cascade_name
+    ~runtime_id
     ~keeper_visible_sandbox_root
     ~receipt_started_at
     ~runtime_manifest_context
@@ -62,12 +62,12 @@ let finalize
     ~degraded_retry_applied
     ~degraded_retry_cascade
     ~fallback_reason
-    ~cascade_rotation_attempts
+    ~runtime_rotation_attempts
     ~turn_result
     ~receipt_turn_count_ref
     ~receipt_model_used_ref
     ~receipt_stop_reason_ref
-    ~receipt_cascade_observation_ref
+    ~receipt_runtime_observation_ref
     ~receipt_response_text_present_ref
     ~reported_tool_names_ref
     ~observed_tool_names_ref
@@ -143,8 +143,8 @@ let finalize
       Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
       |> Keeper_turn_terminal_code.to_wire
   in
-  let cascade_observation : Keeper_observation.cascade_observation option =
-    !receipt_cascade_observation_ref
+  let runtime_observation : Keeper_observation.runtime_observation option =
+    !receipt_runtime_observation_ref
   in
   let ( extra_system_context_digest
       , extra_system_context_computed_size
@@ -199,21 +199,21 @@ let finalize
     ; network_mode = meta.network_mode
     ; approval_profile = acc.tool_surface.approval_mode_effective
     ; approval_profile_derived = acc.tool_surface.approval_mode_derived
-    ; cascade_name
+    ; runtime_id
     ; cascade_selected_model =
-        Option.bind cascade_observation (fun obs -> obs.selected_model)
-    ; cascade_attempt_count =
-        (match cascade_observation with
+        Option.bind runtime_observation (fun obs -> obs.selected_model)
+    ; runtime_attempt_count =
+        (match runtime_observation with
          | Some obs -> List.length obs.attempts
          | None -> 0)
     ; cascade_fallback_applied =
-        (match cascade_observation with
+        (match runtime_observation with
          | Some obs -> obs.fallback_applied
          | None -> false)
-    ; cascade_outcome =
-        Keeper_agent_error.cascade_outcome_of_observation cascade_observation
+    ; runtime_outcome =
+        Keeper_agent_error.runtime_outcome_of_observation runtime_observation
     ; oas_internal_cascade_allowed =
-        (match cascade_observation with
+        (match runtime_observation with
          | Some obs -> obs.oas_internal_cascade_allowed
          | None -> false)
     ; degraded_retry_applied
@@ -221,7 +221,7 @@ let finalize
         Option.bind degraded_retry_cascade
           (degraded_retry_cascade_of_wire ~keeper_name:meta.name)
     ; fallback_reason
-    ; cascade_rotation_attempts
+    ; runtime_rotation_attempts
     ; stop_reason = !receipt_stop_reason_ref
     ; error_kind
     ; error_message
@@ -248,13 +248,13 @@ let finalize
             (Keeper_execution_receipt.outcome_kind_to_string receipt.outcome) );
         ("terminal_reason_code", `String receipt.terminal_reason_code);
         ( "runtime_id",
-          `String (receipt.cascade_name) );
-        ("cascade_attempt_count", `Int receipt.cascade_attempt_count);
+          `String (receipt.runtime_id) );
+        ("runtime_attempt_count", `Int receipt.runtime_attempt_count);
         ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);
-        ( "cascade_outcome",
+        ( "runtime_outcome",
           `String
-            (Keeper_execution_receipt.cascade_outcome_to_string
-               receipt.cascade_outcome) );
+            (Keeper_execution_receipt.runtime_outcome_to_string
+               receipt.runtime_outcome) );
         ("requested_tools", Json_util.json_string_list receipt.requested_tools);
         ("reported_tools", Json_util.json_string_list receipt.reported_tools);
         ("observed_tools", Json_util.json_string_list receipt.observed_tools);
@@ -296,7 +296,7 @@ let finalize
       ~trace_id:receipt.trace_id ~generation:receipt.generation
       ~keeper_turn_id:manifest_keeper_turn_id ~event
       ?oas_turn_count
-      ~runtime_id:(receipt.cascade_name)
+      ~runtime_id:(receipt.runtime_id)
       ~status ~decision ~receipt_path ?tool_call_log_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

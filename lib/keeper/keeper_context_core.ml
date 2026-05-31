@@ -543,7 +543,7 @@ let checkpoint_model_of_meta (meta : keeper_meta) =
   in
   match List.find_opt (fun value -> String.trim value <> "") candidates with
   | Some value -> value
-  | None -> Cascade_runtime_candidate.default_local_runtime_label ()
+  | None -> Runtime_candidate.default_local_runtime_label ()
 
 let save_oas_checkpoint
     ~(max_checkpoint_messages : int)

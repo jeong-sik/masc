@@ -254,8 +254,8 @@ let assemble_hooks
                 let hook_t0 = Time_compat.now () in
                 acc.current_turn <- turn;
                 (* RFC-0045: signal an SDK-turn boundary so the in-turn FSM
-                  fields ([turn_phase], [cascade_state], [decision_stage])
-                  are reset before the hook writes [Cascade_selecting] /
+                  fields ([turn_phase], [runtime_state], [decision_stage])
+                  are reset before the hook writes [Runtime_selecting] /
                   [Decision_tool_policy_selected] / [Turn_prompting] below.
                   The MASC keeper-turn boundary ([mark_turn_started]) only
                   fires once per [Agent_sdk.run_loop] call; every additional
@@ -293,7 +293,7 @@ let assemble_hooks
                   else None
                 in
                 let cascade_seed =
-                  Cascade_inference.for_cascade ~name:cascade_name_string
+                  Runtime_inference.for_cascade ~name:cascade_name_string
                 in
                 let current_budget =
                   match cascade_seed.thinking_budget with
@@ -649,11 +649,11 @@ let assemble_hooks
                    ~base_path:config.base_path
                    meta.name
                    Keeper_registry.Decision_active_tool_policy_selected;
-                 Keeper_registry.set_turn_cascade_state
+                 Keeper_registry.set_turn_runtime_state
                    ~base_path:config.base_path
                    meta.name
-                   (Keeper_registry.Packed Keeper_registry.Cascade_selecting
-                    : Keeper_registry.packed_cascade_state);
+                   (Keeper_registry.Packed Keeper_registry.Runtime_selecting
+                    : Keeper_registry.packed_runtime_state);
                  (* Spec atomic group: SelectToolPolicy(idle->selecting)
                    is immediately followed by CascadeTrying(selecting->
                    trying).  Both transitions are materialised inside
@@ -661,20 +661,20 @@ let assemble_hooks
                    [SelectingRequiresToolPolicy] requires
                    [decision_stage = Decision_tool_policy_selected],
                    which is only set at this site.  Pre-PR #14153 the
-                   Cascade_trying marking lived inside
+                   Runtime_trying marking lived inside
                    [Keeper_unified_turn.retry_loop] (line 1138 era),
                    producing an [idle -> trying] jump that bypassed
                    selecting; the move here closes that gap by keeping
                    the two transitions adjacent.  On retry attempts
-                   the prior cascade state is [Cascade_trying]; the
+                   the prior cascade state is [Runtime_trying]; the
                    re-entry sequence becomes [trying -> selecting ->
                    trying] which is admitted by
-                   [validate_cascade_transition]. *)
-                 Keeper_registry.set_turn_cascade_state
+                   [validate_runtime_transition]. *)
+                 Keeper_registry.set_turn_runtime_state
                    ~base_path:config.base_path
                    meta.name
-                   (Keeper_registry.Packed Keeper_registry.Cascade_trying
-                    : Keeper_registry.packed_cascade_state);
+                   (Keeper_registry.Packed Keeper_registry.Runtime_trying
+                    : Keeper_registry.packed_runtime_state);
                  let disclosure_json =
                    `Assoc
                      [ "ts_unix", `Float now

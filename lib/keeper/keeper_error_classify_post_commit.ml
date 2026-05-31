@@ -39,7 +39,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Agent_sdk.Error.Orchestration _
       | Agent_sdk.Error.A2a _ -> false)
   (* All other MASC-internal classifications are unambiguous failures. *)
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
 
   | Some (Keeper_turn_driver.Accept_rejected _)

@@ -93,7 +93,7 @@ type tool_surface =
   ; materialized_tools : string list
   }
 
-(** Phase identifier emitted when a cascade rotation releases the in-flight
+(** Phase identifier emitted when a runtime rotation releases the in-flight
     turn slot. Closed set; wire form is [slot_release_phase_to_string]. *)
 type slot_release_phase =
   | Retry_setup_failed
@@ -107,25 +107,25 @@ val slot_release_phase_to_string : slot_release_phase -> string
     form of every variant, used by the RFC-0065 correspondence harness. *)
 val all_symbols : string list
 
-(** Terminal classification of a cascade rotation attempt. Closed set;
-    wire form is [cascade_rotation_outcome_to_string]. *)
-type cascade_rotation_outcome =
+(** Terminal classification of a runtime rotation attempt. Closed set;
+    wire form is [runtime_rotation_outcome_to_string]. *)
+type runtime_rotation_outcome =
   | Rotation_setup_failed
   | Rotation_retry_scheduled
   | Rotation_budget_exhausted
   | Rotation_slot_phase_exhausted
 
-val cascade_rotation_outcome_to_string : cascade_rotation_outcome -> string
+val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
 
-(** Receipt-level summary of how the in-turn cascade attempt sequence
-    ended. Closed set; wire form is [cascade_outcome_to_string]. *)
-type cascade_outcome =
-  | Cascade_passed_to_next_model
-  | Cascade_completed
-  | Cascade_not_observed
-  | Cascade_not_dispatched
+(** Receipt-level summary of how the in-turn runtime attempt sequence
+    ended. Closed set; wire form is [runtime_outcome_to_string]. *)
+type runtime_outcome =
+  | Runtime_passed_to_next_model
+  | Runtime_completed
+  | Runtime_not_observed
+  | Runtime_not_dispatched
 
-val cascade_outcome_to_string : cascade_outcome -> string
+val runtime_outcome_to_string : runtime_outcome -> string
 
 (** Receipt-level tool-contract evaluation result. Closed union of three
     producer paths: (i) initial-state sentinel [Contract_unknown];
@@ -177,11 +177,11 @@ val decode_contract_violation_reason
   :  string
   -> (string * string list * string list) option
 
-type cascade_rotation_attempt =
+type runtime_rotation_attempt =
   { from_cascade : string
   ; to_cascade : string
   ; reason : Keeper_error_classify.degraded_retry_reason
-  ; outcome : cascade_rotation_outcome
+  ; outcome : runtime_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
   ; productive_phase_elapsed_ms : int option
   ; retry_phase_elapsed_ms : int option
@@ -218,16 +218,16 @@ type t =
   ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
-  ; cascade_name : string
+  ; runtime_id : string
   ; cascade_selected_model : string option
-  ; cascade_attempt_count : int
+  ; runtime_attempt_count : int
   ; cascade_fallback_applied : bool
-  ; cascade_outcome : cascade_outcome
+  ; runtime_outcome : runtime_outcome
   ; oas_internal_cascade_allowed : bool
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
-  ; cascade_rotation_attempts : cascade_rotation_attempt list
+  ; runtime_rotation_attempts : runtime_rotation_attempt list
   ; stop_reason : Runtime_agent.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option
@@ -275,7 +275,7 @@ val operator_disposition_kind_to_string : operator_disposition_kind -> string
     form is byte-compatible with the pre-typing string. *)
 type operator_disposition_reason =
   | Reason_healthy
-  | Reason_cascade_exhausted
+  | Reason_runtime_exhausted
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_cascade_fallback
@@ -313,7 +313,7 @@ val operator_broadcast_payload
 val stale_broadcast_payload
   :  keeper_name:string
   -> agent_name:string
-  -> cascade_name:string
+  -> runtime_id:string
   -> trace_id:string
   -> generation:int
   -> failure_reason:Keeper_registry.failure_reason option
@@ -334,7 +334,7 @@ val emit_stale_keeper_broadcast
   :  Coord.config
   -> keeper_name:string
   -> agent_name:string
-  -> cascade_name:string
+  -> runtime_id:string
   -> trace_id:string
   -> generation:int
   -> failure_reason:Keeper_registry.failure_reason option

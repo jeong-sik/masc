@@ -894,7 +894,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
            cold-start diagnostics do not contend with the shell's first render. *)
         Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock);
       start_lazy_startup state;
-      (* RFC-0206: cascade catalog startup validation removed; Runtime.init_default
+      (* RFC-0206: runtime catalog startup validation removed; Runtime.init_default
          already fail-fasts on an invalid runtime config at boot. *)
       Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with

@@ -1,9 +1,9 @@
 module EC = Keeper_error_classify
 
 let handle ~config ~keeper_name ~attempt ~attempted_cascades err =
-  if EC.is_cascade_exhausted_error err
+  if EC.is_runtime_exhausted_error err
   then (
-    Keeper_registry.mark_turn_cascade_exhausted
+    Keeper_registry.mark_turn_runtime_exhausted
       ~base_path:config.Coord.base_path
       keeper_name;
     Prometheus.inc_counter
@@ -21,7 +21,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_cascades err =
       Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", keeper_name
-        ; "phase", Keeper_oas_execution_error_phase.(to_label Cascade_exhausted)
+        ; "phase", Keeper_oas_execution_error_phase.(to_label Runtime_exhausted)
         ]
       ())
   else (

@@ -8,7 +8,7 @@
 type event_kind =
   | Turn_started
   | Phase_gate_decided
-  | Cascade_routed
+  | Runtime_routed
   | Pre_dispatch_blocked
   | Tool_surface_selected
   | Provider_lane_resolved
@@ -31,7 +31,7 @@ let all_event_kinds =
   [
     Turn_started;
     Phase_gate_decided;
-    Cascade_routed;
+    Runtime_routed;
     Pre_dispatch_blocked;
     Tool_surface_selected;
     Provider_lane_resolved;
@@ -54,7 +54,7 @@ let all_event_kinds =
 let event_kind_to_string = function
   | Turn_started -> "turn_started"
   | Phase_gate_decided -> "phase_gate_decided"
-  | Cascade_routed -> "cascade_routed"
+  | Runtime_routed -> "runtime_routed"
   | Pre_dispatch_blocked -> "pre_dispatch_blocked"
   | Tool_surface_selected -> "tool_surface_selected"
   | Provider_lane_resolved -> "provider_lane_resolved"
@@ -76,7 +76,7 @@ let event_kind_to_string = function
 let event_kind_of_string = function
   | "turn_started" -> Some Turn_started
   | "phase_gate_decided" -> Some Phase_gate_decided
-  | "cascade_routed" -> Some Cascade_routed
+  | "runtime_routed" -> Some Runtime_routed
   | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
   | "tool_surface_selected" -> Some Tool_surface_selected
   | "provider_lane_resolved" -> Some Provider_lane_resolved

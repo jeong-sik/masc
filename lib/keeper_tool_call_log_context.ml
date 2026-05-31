@@ -24,7 +24,7 @@ type turn_context =
   ; required_tools : string list option
   ; required_tool_candidates : string list option
   ; missing_required_tools : string list option
-  ; cascade_profile : string option
+  ; runtime_profile : string option
   }
 
 let empty_turn_context =
@@ -51,7 +51,7 @@ let empty_turn_context =
   ; required_tools = None
   ; required_tool_candidates = None
   ; missing_required_tools = None
-  ; cascade_profile = None
+  ; runtime_profile = None
   }
 ;;
 
@@ -82,7 +82,7 @@ let set_turn_context
       ?required_tools
       ?required_tool_candidates
       ?missing_required_tools
-      ?cascade_profile
+      ?runtime_profile
       ()
   =
   Hashtbl.replace
@@ -111,7 +111,7 @@ let set_turn_context
     ; required_tools
     ; required_tool_candidates
     ; missing_required_tools
-    ; cascade_profile
+    ; runtime_profile
     }
 ;;
 
@@ -160,7 +160,7 @@ let runtime_contract_json_for_call ~keeper_name () =
     ?required_tools:ctx.required_tools
     ?required_tool_candidates:ctx.required_tool_candidates
     ?missing_required_tools:ctx.missing_required_tools
-    ?cascade_profile:ctx.cascade_profile
+    ?runtime_profile:ctx.runtime_profile
     ()
 ;;
 

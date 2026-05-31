@@ -53,7 +53,7 @@ type try_provider_ctx =
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; event_bus : Agent_sdk.Event_bus.t option
-  ; cascade_engine : Keeper_cascade_engine.t
+  ; cascade_engine : Keeper_runtime_engine.t
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; runtime_manifest_required_tool_names : string list
@@ -65,7 +65,7 @@ val run_try_provider :
   try_provider_ctx ->
   ?resume_checkpoint:Agent_sdk.Checkpoint.t ->
   ?per_provider_timeout_s:float ->
-  Cascade_runtime_candidate.t ->
+  Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option
   * (string * Keeper_attempt_liveness_config.success_sample) option

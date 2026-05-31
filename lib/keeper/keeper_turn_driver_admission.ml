@@ -23,7 +23,7 @@ let provider_config_identity_key (cfg : Llm_provider.Provider_config.t) =
       cfg.supports_tool_choice_override )
 
 let runtime_candidates_of_providers provider_cfgs =
-  Cascade_runtime_candidate.of_provider_configs provider_cfgs
+  Runtime_candidate.of_provider_configs provider_cfgs
 
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)

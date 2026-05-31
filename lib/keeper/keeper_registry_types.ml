@@ -114,8 +114,8 @@ let completed_turn_outcome_of_observation (obs : turn_observation)
   =
   (* RFC-0206: the cascade selection FSM was removed; turn substantiveness is
      now read off the surviving [turn_phase] projection. Terminal
-     [Turn_finalizing] (the phase the deleted [turn_phase_of_cascade_state]
-     mapped [Cascade_done] onto) = substantive; every other phase = failed.
+     [Turn_finalizing] (the phase the deleted [turn_phase_of_runtime_state]
+     mapped [Runtime_done] onto) = substantive; every other phase = failed.
      Exhaustive match (no wildcard) so a new turn_phase or decision_stage
      variant fails the build rather than silently degrading to Turn_failed. *)
   match obs.decision_stage with

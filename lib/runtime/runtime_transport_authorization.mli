@@ -1,4 +1,4 @@
-(** Authorization header helpers for cascade runtime MCP transport. *)
+(** Authorization header helpers for runtime MCP transport. *)
 
 val upsert_http_header :
   key:string -> value:string -> (string * string) list -> (string * string) list

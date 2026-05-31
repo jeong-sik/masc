@@ -22,7 +22,7 @@
     {1 References}
 
     - MASC/OAS Error-Warn Reduction Goal — 2026-05-18 §P3 (provider
-      cascade exhaustion).
+      runtime exhaustion).
     - System log slice 2026-05-18, last 30min:
       [strict_tool_candidates: preflight skipped 1 unhealthy] x35,
       [provider_k-coding-with-spark: preflight skipped 1 unhealthy] x12. *)

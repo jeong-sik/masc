@@ -2,7 +2,7 @@ type event_kind =
   Keeper_runtime_manifest_types.event_kind =
     Turn_started
   | Phase_gate_decided
-  | Cascade_routed
+  | Runtime_routed
   | Pre_dispatch_blocked
   | Tool_surface_selected
   | Provider_lane_resolved

@@ -1,4 +1,4 @@
-(** Model-label resolution for cascade runtime transport. *)
+(** Model-label resolution for runtime transport. *)
 
 type label_resolution_error = Invalid_model_label of string
 

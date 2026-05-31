@@ -148,11 +148,11 @@ let run_keeper_cycle
         Keeper_unified_turn_cascade_resolution.resolve_cascade
           ~meta
           ~phase_opt
-          ~append_cascade_routed_manifest:(fun ~cascade_name ~decision ->
-            append_manifest ~site:"cascade_routed"
+          ~append_runtime_routed_manifest:(fun ~cascade_name ~decision ->
+            append_manifest ~site:"runtime_routed"
               ~runtime_id:cascade_name
               ~decision
-              Keeper_runtime_manifest.Cascade_routed)
+              Keeper_runtime_manifest.Runtime_routed)
       in
       (* Concrete runtime health/capacity is owned by OAS/provider adapters.
          Keeper routing no longer rewrites cascades from provider cooldown or
@@ -198,7 +198,7 @@ let run_keeper_cycle
             let failure_reason =
               match Keeper_turn_driver.classify_masc_internal_error err with
               | Some
-                  (Keeper_turn_driver.Cascade_exhausted
+                  (Keeper_turn_driver.Runtime_exhausted
                      { cascade_name
                      ; reason = Keeper_meta_contract.No_tool_capable _
                      ; _
@@ -207,7 +207,7 @@ let run_keeper_cycle
                   { cascade_name = cascade_name
                   ; detail = error_message
                   }
-              | _ when EC.is_cascade_exhausted_error err ->
+              | _ when EC.is_runtime_exhausted_error err ->
                 Keeper_turn_fsm.Failure_cascade_unavailable
                   { base = effective_cascade_runtime_name
                   ; resolved = None
@@ -664,7 +664,7 @@ let run_keeper_cycle
                        else
                          match Keeper_turn_driver.classify_masc_internal_error err with
                          | Some
-                             (Keeper_turn_driver.Cascade_exhausted
+                             (Keeper_turn_driver.Runtime_exhausted
                                 { cascade_name
                                 ; reason = Keeper_meta_contract.No_tool_capable _
                                 ; _

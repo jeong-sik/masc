@@ -54,12 +54,12 @@ let build_cascade_execution
            model_labels
        in
        let temperature =
-         Cascade_inference.resolve_temperature
+         Runtime_inference.resolve_temperature
            ~cascade_name
            ~fallback:Keeper_config.keeper_unified_temperature
        in
        let raw_max_tokens =
-         Cascade_inference.resolve_max_tokens
+         Runtime_inference.resolve_max_tokens
            ~cascade_name
            ~fallback:
              (resolve_unified_max_tokens_fallback
@@ -70,7 +70,7 @@ let build_cascade_execution
          None
        in
        (match
-          Cascade_inference.validate_max_tokens_within_ceiling
+          Runtime_inference.validate_max_tokens_within_ceiling
             ~cascade_name
             ~provider_ceiling:max_output_ceiling
             raw_max_tokens

@@ -364,10 +364,10 @@ let checkpoint_persistence_error ~keeper_name ~detail =
        detail)
 ;;
 
-let cascade_outcome_of_observation
-    : _ -> Keeper_execution_receipt.cascade_outcome = function
-  | Some (obs : Keeper_observation.cascade_observation) when obs.fallback_applied ->
-    Keeper_execution_receipt.Cascade_passed_to_next_model
-  | Some _ -> Keeper_execution_receipt.Cascade_completed
-  | None -> Keeper_execution_receipt.Cascade_not_observed
+let runtime_outcome_of_observation
+    : _ -> Keeper_execution_receipt.runtime_outcome = function
+  | Some (obs : Keeper_observation.runtime_observation) when obs.fallback_applied ->
+    Keeper_execution_receipt.Runtime_passed_to_next_model
+  | Some _ -> Keeper_execution_receipt.Runtime_completed
+  | None -> Keeper_execution_receipt.Runtime_not_observed
 ;;

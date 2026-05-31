@@ -1,6 +1,6 @@
 type t =
   | Turn_start
-  | Cascade_exhausted
+  | Runtime_exhausted
   | Terminal_non_exhaustion
   | Recoverable_cascade_transient
   | Cycle_failed
@@ -11,7 +11,7 @@ type t =
 
 let to_label = function
   | Turn_start -> "turn_start"
-  | Cascade_exhausted -> "cascade_exhausted"
+  | Runtime_exhausted -> "runtime_exhausted"
   | Terminal_non_exhaustion -> "terminal_non_exhaustion"
   | Recoverable_cascade_transient -> "recoverable_cascade_transient"
   | Cycle_failed -> "cycle_failed"

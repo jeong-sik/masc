@@ -602,7 +602,7 @@ let prepare_agent_setup
         | Some sw, Some net ->
           let rerank_cascade = Keeper_config.keeper_llm_rerank_cascade () in
           (match
-             Cascade_catalog_runtime.resolve_named_providers_strict
+             Runtime_catalog.resolve_named_providers_strict
                ~sw
                ~net
                ~cascade_name:rerank_cascade

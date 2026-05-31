@@ -26,7 +26,7 @@ let finalize
     ~checkpoint_persistence_error
     ~post_turn_t0
     ?provider_filter
-    ~cascade_name_string
+    ~runtime_id_string
     ~prompt_metrics
     ~ctx_composition
     ~usage
@@ -124,7 +124,7 @@ let finalize
          Ok (Some patched)
        | Error e ->
          Log.Keeper.error
-           "keeper:%s cascade=%s OAS checkpoint save failed: %s"
+           "keeper:%s runtime=%s OAS checkpoint save failed: %s"
            meta.name
            (Keeper_meta_contract.runtime_id_of_meta meta)
            e;
@@ -138,7 +138,7 @@ let finalize
               ~detail:("OAS checkpoint save failed: " ^ e)))
     | None ->
       Log.Keeper.error
-        "keeper:%s cascade=%s missing OAS checkpoint after run"
+        "keeper:%s runtime=%s missing OAS checkpoint after run"
         meta.name
         (Keeper_meta_contract.runtime_id_of_meta meta);
       Prometheus.inc_counter
@@ -167,7 +167,7 @@ let finalize
       ~state_snapshot
       ~post_turn_t0
       ?provider_filter
-      ~cascade_name:cascade_name_string
+      ~runtime_id:runtime_id_string
       ~inference_telemetry:result.response.telemetry
       ();
     Ok
@@ -175,7 +175,7 @@ let finalize
       ; model_used = model
       ; prompt_metrics
       ; ctx_composition
-      ; cascade_observation = result.cascade_observation
+      ; runtime_observation = result.runtime_observation
       ; turn_count = result.turns
       ; tool_calls_made = List.length actual_keeper_tool_names
       ; usage

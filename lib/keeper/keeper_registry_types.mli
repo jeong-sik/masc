@@ -182,7 +182,7 @@ val turn_phase_to_witness : turn_phase -> packed_turn_phase
 val packed_turn_phase_label : packed_turn_phase -> string
 
 (** RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
-    [Cascade_transition].  Enumerates the 23 valid cross-state transitions
+    [Runtime_transition].  Enumerates the 23 valid cross-state transitions
     of the 7-variant [turn_phase] FSM.  The 19 forbidden pairs have no
     constructor and are therefore type-unrepresentable.  Idempotent
     self-loops are not represented (mutator-boundary no-ops). *)
@@ -258,7 +258,7 @@ exception
     }
 
 (** RFC-0072 Phase 4: resolve a (from, target) packed pair to one of three
-    outcomes.  Mirrors [resolve_cascade_transition]. *)
+    outcomes.  Mirrors [resolve_runtime_transition]. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
   | Resolved_turn_idempotent
@@ -319,7 +319,7 @@ val decision_stage_active_to_packed
   -> packed_decision_stage
 
 (** Diagnostic label using the constructor name (e.g.
-    ["Decision_guard_ok"]).  Used by [validate_cascade_transition] /
+    ["Decision_guard_ok"]).  Used by [validate_runtime_transition] /
     [validate_turn_phase_transition] for [Invalid_argument] messages. *)
 val packed_decision_stage_label : packed_decision_stage -> string
 

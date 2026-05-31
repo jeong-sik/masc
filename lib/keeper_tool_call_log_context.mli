@@ -24,7 +24,7 @@ type turn_context =
   ; required_tools : string list option
   ; required_tool_candidates : string list option
   ; missing_required_tools : string list option
-  ; cascade_profile : string option
+  ; runtime_profile : string option
   }
 
 val set_turn_context :
@@ -52,7 +52,7 @@ val set_turn_context :
   ?required_tools:string list ->
   ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
-  ?cascade_profile:string ->
+  ?runtime_profile:string ->
   unit ->
   unit
 

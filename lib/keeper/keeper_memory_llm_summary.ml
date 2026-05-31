@@ -231,7 +231,7 @@ let make
     | Some sw, Some net ->
         let clock = Eio_context.get_clock_opt () in
         (match
-           Cascade_catalog_runtime.resolve_named_providers_strict
+           Runtime_catalog.resolve_named_providers_strict
              ~sw ~net ?clock ?provider_filter ~cascade_name ()
          with
          | Error err ->

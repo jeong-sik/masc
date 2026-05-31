@@ -726,9 +726,15 @@ let reject_removed_model_args ~tool_name (args : Yojson.Safe.t) =
   let present =
     removed_keeper_model_arg_names
     |> List.filter (fun key ->
+      (* A legacy arg counts as "present" only when supplied with a real value.
+         [assoc_member_opt] returns [None] for an absent key; the prior
+         [| _ -> true] arm classified that [None] as present, so a request
+         that simply omitted all three keys (e.g. the [{name}] used by base
+         autoboot materialization) was rejected as if it had passed them.
+         Absent ([None]) and explicit-null are both "not supplied". *)
       match Json_util.assoc_member_opt key args with
-      | Some `Null -> false
-      | _ -> true)
+      | None | Some `Null -> false
+      | Some _ -> true)
   in
   match present with
   | [] -> Ok ()

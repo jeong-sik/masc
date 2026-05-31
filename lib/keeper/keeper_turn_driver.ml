@@ -260,7 +260,7 @@ let run_named
   (* RFC: MASC/OAS Error-Warn Reduction Goal — 2026-05-18 §P3.
      For each unhealthy endpoint, record the preflight-skip event in
      [Keeper_preflight_health_tracker.global]. After N consecutive skips of
-     the same (cascade, endpoint, reason) fingerprint we escalate to
+     the same (runtime_id, endpoint, reason) fingerprint we escalate to
      ERROR once and register the endpoint in the in-process disabled
      list — subsequent identical skips return [`Already_disabled] and
      are dropped to DEBUG, so the log volume drops from ~35-50/30min
@@ -281,7 +281,7 @@ let run_named
       match outcome with
       | `First ->
         Log.Misc.warn
-          "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
+          "runtime %s: preflight skipped 1 unhealthy local endpoint(s) before \
            provider dispatch: [%s] (reason=%s, first occurrence)"
           runtime_id
           endpoint
@@ -289,7 +289,7 @@ let run_named
              Keeper_preflight_health_tracker.Health_check_failed_repeatedly)
       | `Repeated n ->
         Log.Misc.warn
-          "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
+          "runtime %s: preflight skipped 1 unhealthy local endpoint(s) before \
            provider dispatch: [%s] (reason=%s, consecutive=%d)"
           runtime_id
           endpoint
@@ -298,7 +298,7 @@ let run_named
           n
       | `Threshold_disable n ->
         Log.Misc.error
-          "cascade %s: provider [%s] disabled after %d consecutive preflight \
+          "runtime %s: provider [%s] disabled after %d consecutive preflight \
            unhealthy skips (reason=%s); subsequent skips silenced via \
            disabled-list. Recovery requires successful health probe."
           runtime_id
@@ -310,7 +310,7 @@ let run_named
         (* Drop noise: this endpoint is in the disabled list and has
            already emitted its ERROR escalation. *)
         Log.Misc.debug
-          "cascade %s: preflight skipped already-disabled endpoint [%s]"
+          "runtime %s: preflight skipped already-disabled endpoint [%s]"
           runtime_id endpoint)
     unhealthy_local_endpoints;
   (* Recovery: for any endpoint that probed healthy this cycle, clear
@@ -328,7 +328,7 @@ let run_named
         if recovered
         then
           Log.Misc.info
-            "cascade %s: provider [%s] re-enabled after successful health \
+            "runtime %s: provider [%s] re-enabled after successful health \
              probe; removed from disabled-list."
             runtime_id url)
     local_endpoint_health;

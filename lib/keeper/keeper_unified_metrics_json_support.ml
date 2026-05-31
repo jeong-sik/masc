@@ -33,13 +33,13 @@ let provider_context_json ~(meta : keeper_meta)
         | None -> cascade_name_of_meta meta
       in
       `Assoc
-        [ ("cascade_name", `String cascade_name)
+        [ ("runtime_id", `String cascade_name)
         ; "selected_model", `Null
         ; "candidate_models", `List []
         ]
   | None ->
       `Assoc
-        [ ("cascade_name", `String (cascade_name_of_meta meta))
+        [ ("runtime_id", `String (cascade_name_of_meta meta))
         ; ("selected_model", `Null)
         ; "candidate_models", `List []
         ]
@@ -64,7 +64,7 @@ let redacted_cascade_observation_to_json
     obs.cascade_name
   in
   `Assoc
-    [ "cascade_name", `String cascade_name
+    [ "runtime_id", `String cascade_name
     ; "strategy", Json_util.string_opt_to_json obs.strategy
     ; "configured_labels", `List []
     ; "candidate_models", `List []

@@ -1,4 +1,4 @@
-(** MCP tool schemas for MASC room operations (facade).
+(** MCP tool schemas for MASC coord operations (facade).
 
     Concatenates schemas from {!Tool_schemas_coord_core} and
     {!Tool_schemas_coord_extra}. *)

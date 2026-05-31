@@ -97,13 +97,13 @@ let read_key () : string option =
 (** Parse command line arguments *)
 let parse_args () =
   let port = ref (Env_config_core.masc_http_port_int ()) in
-  let room = ref "" in
+  let coord = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
 
   let specs = [
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
-    ("--room", Arg.Set_string room, "Coord name (default: from base path)");
+    ("--coord", Arg.Set_string coord, "Coord name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ("--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or cwd)");
   ] in
@@ -119,8 +119,8 @@ let parse_args () =
       | _ -> Sys.getcwd ()
   in
 
-  (* Resolve room *)
-  let r = if !room <> "" then !room
+  (* Resolve coord *)
+  let r = if !coord <> "" then !coord
     else match Env_config_core.cluster_name_opt () with
       | Some name -> name
       | None -> Filename.basename base
@@ -203,8 +203,8 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
 
 (** Main loop *)
 let main () =
-  let (base_path, room, port, refresh) = parse_args () in
-  let state = create_state ~room ~port ~refresh_interval:refresh in
+  let (base_path, coord, port, refresh) = parse_args () in
+  let state = create_state ~coord ~port ~refresh_interval:refresh in
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in

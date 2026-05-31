@@ -71,7 +71,7 @@ type error_code =
   | Timeout               (** Operation timed out *)
   | Not_implemented       (** Feature exists in schema but not in runtime *)
   | Internal_error        (** Unexpected server-side failure *)
-  | Precondition_failed   (** Required precondition not met (e.g. room not joined) *)
+  | Precondition_failed   (** Required precondition not met (e.g. coord not session-bound) *)
 
 let error_code_to_string = function
   | Validation_error -> "validation_error"

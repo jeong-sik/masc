@@ -19,7 +19,7 @@ val handle_start :
 
     {2 Argument resolution}
 
-    - [path] / [room]: project root.  When both are empty AND
+    - [path] / [coord]: project root.  When both are empty AND
       the runtime already has an initialised project, falls
       back to the existing project rather than erroring.
     - [task_title] (optional): when non-empty, performs a

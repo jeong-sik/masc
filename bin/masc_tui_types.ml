@@ -57,13 +57,13 @@ type state = {
   mutable msg_history: msg_entry list;
   mutable msg_sending: bool;
   mutable detail_scroll: int;
-  room: string;
+  coord: string;
   port: int;
   refresh_interval: float;
 }
 
 (** Create initial state *)
-let create_state ~room ~port ~refresh_interval = {
+let create_state ~coord ~port ~refresh_interval = {
   agents = [];
   tasks = [];
   events = [];
@@ -82,7 +82,7 @@ let create_state ~room ~port ~refresh_interval = {
   msg_history = [];
   msg_sending = false;
   detail_scroll = 0;
-  room;
+  coord;
   port;
   refresh_interval;
 }

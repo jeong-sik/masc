@@ -91,8 +91,8 @@ let dashboard_scope_enum_strings = [ "all"; "current" ]
 let masc_dashboard_spec : tool_spec =
   { name = "masc_dashboard"
   ; description =
-      "Render the MASC dashboard summarizing rooms, agents, and tasks. Set \
-       scope='current' for this room only."
+      "Render the MASC dashboard summarizing coordinators, agents, and tasks. Set \
+       scope='current' for this coord only."
   ; parameters =
       [ { p_name = "compact"
         ; p_type = T_bool { default = None }

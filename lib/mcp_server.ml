@@ -99,7 +99,7 @@ let server_info =
       ("version", `String Version.version);
       ( "description",
         `String
-          "Multi-agent MCP server exposing MASC room coordination, tools, prompts, and resources." );
+          "Multi-agent MCP server exposing MASC coordination, tools, prompts, and resources." );
       ("websiteUrl", `String "https://github.com/yousleepwhen/masc-mcp");
       ("icons", `List (List.map icon_to_json server_icons));
     ]
@@ -214,11 +214,11 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
 let resources : mcp_resource list = [
   make_resource ~uri:"masc://status" ~name:"MASC Status"
     ~title:"Coord Status"
-    ~description:"Current room status snapshot (same as masc_status)"
+    ~description:"Current coord status snapshot (same as masc_status)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://status.json" ~name:"MASC Status (JSON)"
     ~title:"Coord Status (JSON)"
-    ~description:"Current room status snapshot as JSON (for data collection)"
+    ~description:"Current coord status snapshot as JSON (for data collection)"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://tasks" ~name:"Quest Board"
     ~title:"Task Board"
@@ -552,7 +552,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     net = Some net;
   } in
   (* Board post kind auto-classification: reads state.coord_config so
-     room changes via set_room are reflected automatically. *)
+     coord changes via set_coord are reflected automatically. *)
   Tool_board.set_agent_lookup (fun name ->
     try Coord.is_agent_session_bound state.coord_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);

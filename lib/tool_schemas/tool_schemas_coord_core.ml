@@ -1,4 +1,4 @@
-(** MCP tool schemas for room management operations (core).
+(** MCP tool schemas for coord management operations (core).
 
     Only schemas dispatched by Tool_coord remain here.
     Other schemas have been moved to their owning modules:

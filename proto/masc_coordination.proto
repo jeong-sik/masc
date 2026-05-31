@@ -13,21 +13,21 @@ package masc.coordination.v1;
 // Agent lifecycle and coordination service.
 service MascCoordination {
   // Bidirectional heartbeat stream.
-  // Agent sends periodic pings; server responds with acks containing room state.
+  // Agent sends periodic pings; server responds with acks containing coord state.
   rpc Heartbeat(stream HeartbeatPing) returns (stream HeartbeatAck);
 
   // Server-streaming event subscription (replaces SSE for agents).
-  // Returns a stream of room events: broadcasts, task changes, agent session changes.
+  // Returns a stream of coord events: broadcasts, task changes, agent session changes.
   rpc Subscribe(SubscribeRequest) returns (stream Event);
 
   // Unary tool call (replaces POST /mcp tools/call).
   // Dispatches any MCP tool and returns the result.
   rpc ToolCall(ToolCallRequest) returns (ToolCallResponse);
 
-  // Broadcast a message to all agents in the room.
+  // Broadcast a message to all agents in the coord.
   rpc Broadcast(BroadcastRequest) returns (BroadcastResponse);
 
-  // Get current room status.
+  // Get current coord status.
   rpc GetStatus(StatusRequest) returns (StatusResponse);
 
   // LSP proxy call: forwards a JSON-RPC LSP request to the language server

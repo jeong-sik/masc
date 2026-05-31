@@ -35,7 +35,7 @@ let recovery_hint (message : string) : string option =
   let msg = String.lowercase_ascii message in
   if contains msg "not initialized" || contains msg "no .masc/" then
     Some "Run masc_init to initialize, or use masc_start(path=...) for one-step setup."
-  else if contains msg "not joined" || contains msg "join the room" then
+  else if contains msg "not session-bound" || contains msg "bind the session" then
     Some "Call masc_start for one-step setup."
   else if contains msg "task not found" || contains msg "not found" && contains msg "task" then
     Some "Call masc_status to see available tasks."
@@ -45,7 +45,7 @@ let recovery_hint (message : string) : string option =
     Some "Call masc_add_task to create a new task."
   else if contains msg "rate limit" || contains msg "too many" then
     Some "Wait briefly and retry. This is a transient error."
-  else if contains msg "room" && contains msg "set" then
+  else if contains msg "coord" && contains msg "set" then
     Some "Call masc_start(path=...) to set the project scope and join in one step."
   else if contains msg "current_task" || contains msg "no current task" then
     Some "Call masc_plan_set_task(task_id=...) after claiming a task."

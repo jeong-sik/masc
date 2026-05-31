@@ -13,7 +13,7 @@ let tool_names json =
 let test_discover_tools_uses_bm25_ranking_not_substring_or () =
   let schemas =
     [
-      schema "masc_room_read" "Read room messages and channel activity";
+      schema "masc_coord_read" "Read coord messages and channel activity";
       schema "masc_file_read" "Read file contents from the workspace";
       schema "tool_execute" "Create an isolated git branch workspace";
     ]
@@ -31,7 +31,7 @@ let test_discover_tools_uses_bm25_ranking_not_substring_or () =
 let test_discover_tools_returns_empty_for_unmatched_query () =
   let schemas =
     [
-      schema "masc_room_read" "Read room messages and channel activity";
+      schema "masc_coord_read" "Read coord messages and channel activity";
       schema "masc_file_read" "Read file contents from the workspace";
     ]
   in

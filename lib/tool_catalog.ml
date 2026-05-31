@@ -268,7 +268,7 @@ let explicit_metadata : (string * metadata) list =
       { masc_coordination_tool with required_permission = Some Masc_domain.CanSendPortal } );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
        RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
-       masc_admin_reset, masc_gc_force, masc_room_delete, masc_force_leave,
+       masc_admin_reset, masc_gc_force, masc_coord_delete, masc_force_leave,
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true

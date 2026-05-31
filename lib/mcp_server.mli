@@ -185,7 +185,7 @@ type server_state = {
   net : Eio_context.eio_net option;
 }
 (** Runtime state threaded through every request handler.
-    [coord_config] is mutable so room-switch tools can swap
+    [coord_config] is mutable so coord-switch tools can swap
     backends mid-flight.  Eio handles are [option] because
     the legacy non-Eio bootstrap ({!create_state}) still
     needs to construct a state without an active switch. *)

@@ -2,37 +2,37 @@
 status: reference
 last_verified: 2026-04-23
 code_refs:
-  - lib/coord/
-  - lib/coord_goals.ml
+  - lib/workspace/
+  - lib/workspace_goals.ml
   - lib/goal/
   - lib/tool_task.ml
   - lib/tool_agent.ml
   - lib/tool_control.ml
-  - lib/coord/coord_git.ml
-  - lib/coord/coord_task_claim.ml
-  - lib/tool_schemas/tool_schemas_coord_extra.ml
+  - lib/workspace/workspace_git.ml
+  - lib/workspace/workspace_task_claim.ml
+  - lib/tool_schemas/tool_schemas_workspace_extra.ml
 ---
 
-# Room Coordination
+# Workspace Workspace
 
 | 항목 | 값 |
 |------|-----|
 | Status | Draft |
-| Team | Room |
-| Maps to | `lib/coord/` (sub-library, ~7.6K LOC) |
+| Team | Workspace |
+| Maps to | `lib/workspace/` (sub-library, ~7.6K LOC) |
 | Dependencies | 02-types-and-invariants |
 | Modules | 20 (.ml) + 4 (.mli) |
 | LOC | ~7,653 |
-| MCP Tools | `tool_task`, `tool_agent`, `Coord_git`-backed worktree lifecycle, `tool_control` |
+| MCP Tools | `tool_task`, `tool_agent`, `Workspace_git`-backed worktree lifecycle, `tool_control` |
 
 ---
 
 ## 1. Purpose
 
-Room은 MASC의 핵심 조율 단위다. 에이전트가 참여(join)하고, 태스크를 등록/할당받고, 하트비트로 활성 상태를 유지하며, 투표/합의로 의사결정하는 공간.
+Workspace은 MASC의 핵심 조율 단위다. 에이전트가 참여(join)하고, 태스크를 등록/할당받고, 하트비트로 활성 상태를 유지하며, 투표/합의로 의사결정하는 공간.
 
-Room 하나가 소유하는 것:
-- **state**: `room_state` 레코드 (protocol version, active agents, message seq, pause flag)
+Workspace 하나가 소유하는 것:
+- **state**: `workspace_state` 레코드 (protocol version, active agents, message seq, pause flag)
 - **agents**: `.masc/agents/` 디렉토리 내 JSON 파일
 - **tasks**: `.masc/tasks/backlog.json` -- 태스크 큐와 스케줄링
 - **messages**: `.masc/messages/` -- broadcast 메시지 저장
@@ -45,21 +45,21 @@ Room 하나가 소유하는 것:
 
 ```mermaid
 graph TB
-  subgraph "Room Sub-library (masc_room)"
-    RS[room_state] --> RI[room_init]
-    RS --> RL[room_lifecycle<br>join / leave]
-    RS --> RA[room_agent<br>status / caps]
-    RS --> RT[room_task<br>add / claim / transition]
-    RT --> RTS[room_task_schedule<br>claim_next / stale]
-    RS --> RGC[room_gc<br>zombie / archive]
-    RS --> RV[room_vote<br>create / cast]
-    RS --> RWT[coord_git<br>create / remove / list]
-    RWT --> RG[room_git<br>git ops]
-    RS --> RP[room_portal<br>A2A]
-    RS --> RM[room_multi<br>slug / registry]
-    RM --> RR[room_rooms<br>list / create / enter]
-    RS --> RTE[room_tempo<br>pace control]
-    RS --> RCP[room_checkpoint<br>snapshot]
+  subgraph "Workspace Sub-library (masc_workspace)"
+    RS[workspace_state] --> RI[workspace_init]
+    RS --> RL[workspace_lifecycle<br>join / leave]
+    RS --> RA[workspace_agent<br>status / caps]
+    RS --> RT[workspace_task<br>add / claim / transition]
+    RT --> RTS[workspace_task_schedule<br>claim_next / stale]
+    RS --> RGC[workspace_gc<br>zombie / archive]
+    RS --> RV[workspace_vote<br>create / cast]
+    RS --> RWT[workspace_git<br>create / remove / list]
+    RWT --> RG[workspace_git<br>git ops]
+    RS --> RP[workspace_portal<br>A2A]
+    RS --> RM[workspace_multi<br>slug / registry]
+    RM --> RR[workspace_workspaces<br>list / create / enter]
+    RS --> RTE[workspace_tempo<br>pace control]
+    RS --> RCP[workspace_checkpoint<br>snapshot]
   end
 
   subgraph "Support Modules"
@@ -70,7 +70,7 @@ graph TB
   end
 
   subgraph "MCP Tool Layer"
-    TR[tool_room] --> RS
+    TR[tool_workspace] --> RS
     TT[tool_task] --> RT
     TA[tool_agent] --> RA
     TH[tool_heartbeat] --> HB
@@ -79,29 +79,29 @@ graph TB
   end
 ```
 
-### Module Size Distribution (상위 10, `lib/coord/`)
+### Module Size Distribution (상위 10, `lib/workspace/`)
 
 | Module | LOC | 역할 |
 |--------|-----|------|
-| `coord_task` | 1486 | 태스크 CRUD + 상태 전이 |
-| `coord_eio` | 670 | Eio 백엔드 구현 (direct-style async I/O) |
-| `coord_utils_ops` | 513 | filesystem lock + room 공통 연산 |
-| `coord_gc` | 413 | 좀비 정리, stale 아카이브, 메시지 정리 |
-| `coord_git` | 353 | git/worktree 관리 |
-| `coord_utils_backend_setup` | 396 | filesystem backend setup |
-| `coord_query` | 373 | 룸 내 에이전트/태스크 카운트 쿼리 |
-| `coord_task_schedule` | 337 | claim_next, starvation prevention |
-| `coord_utils_paths_backend` | 261 | 경로/백엔드 리졸버 |
-| `coord_portal` | 261 | 1:1 portal messaging |
+| `workspace_task` | 1486 | 태스크 CRUD + 상태 전이 |
+| `workspace_eio` | 670 | Eio 백엔드 구현 (direct-style async I/O) |
+| `workspace_utils_ops` | 513 | filesystem lock + workspace 공통 연산 |
+| `workspace_gc` | 413 | 좀비 정리, stale 아카이브, 메시지 정리 |
+| `workspace_git` | 353 | git/worktree 관리 |
+| `workspace_utils_backend_setup` | 396 | filesystem backend setup |
+| `workspace_query` | 373 | 룸 내 에이전트/태스크 카운트 쿼리 |
+| `workspace_task_schedule` | 337 | claim_next, starvation prevention |
+| `workspace_utils_paths_backend` | 261 | 경로/백엔드 리졸버 |
+| `workspace_portal` | 261 | 1:1 portal messaging |
 
 ---
 
 ## 3. Types
 
-### 3.1 Room State (`room_state`)
+### 3.1 Workspace State (`workspace_state`)
 
 ```ocaml
-type room_state = {
+type workspace_state = {
   protocol_version : string;       (* "0.1.0" *)
   project : string;                (* base_path basename *)
   started_at : string;             (* ISO 8601 *)
@@ -117,7 +117,7 @@ type room_state = {
 }
 ```
 
-### 3.2 Agent (in room)
+### 3.2 Agent (in workspace)
 
 ```ocaml
 type agent = {
@@ -153,10 +153,10 @@ type task_status =
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 ```
 
-### 3.4 Room Info (registry entry)
+### 3.4 Workspace Info (registry entry)
 
 ```ocaml
-type room_info = {
+type workspace_info = {
   id : string;              (* slugified name *)
   name : string;
   description : string option;
@@ -185,19 +185,19 @@ type tempo_config = {
 
 ## 4. State Machines
 
-### 4.1 Room Lifecycle
+### 4.1 Workspace Lifecycle
 
 ```
 [not_initialized] --init--> [active] --pause--> [paused] --resume--> [active]
                                                                   \--reset--> [not_initialized]
 ```
 
-- `init`: `.masc/` 디렉토리 구조 생성 (agents/, tasks/, messages/), `room_state` 초기화
+- `init`: `.masc/` 디렉토리 구조 생성 (agents/, tasks/, messages/), `workspace_state` 초기화
 - `pause`: `paused = true` 설정, broadcast 통보, orchestrator가 새 에이전트 스폰 중단
 - `resume`: `paused = false`, broadcast 통보
 - `reset`: `.masc/` 전체 삭제 (확인 필수)
 
-### 4.2 Agent in Room
+### 4.2 Agent in Workspace
 
 ```
            join (new)
@@ -250,7 +250,7 @@ type tempo_config = {
 - 모든 전이는 `backlog.version + 1`로 버전 증가 (optimistic concurrency)
 - `expected_version` 옵션으로 CAS(compare-and-set) 가능
 
-### 4.4 Task Scheduling (`room_task_schedule`)
+### 4.4 Task Scheduling (`workspace_task_schedule`)
 
 `claim_next_r` 알고리즘:
 
@@ -347,7 +347,7 @@ type decision =
 - 작업 중 에이전트: 100% skip
 - 5분+ idle 에이전트: 33% emission (3x interval)
 
-### 5.3 Zombie Detection (`lib/coord/coord_resilience.mli`)
+### 5.3 Zombie Detection (`lib/workspace/workspace_resilience.mli`)
 
 ```ocaml
 module Zombie : sig
@@ -385,7 +385,7 @@ val run_loop :
 
 ---
 
-## 6. Garbage Collection (`room_gc`)
+## 6. Garbage Collection (`workspace_gc`)
 
 5단계 파이프라인:
 
@@ -400,13 +400,13 @@ val run_loop :
 `gc` 함수는 추가로:
 - 오래된 Todo 태스크 아카이브 (N일 기준)
 - 오래된 메시지 삭제 (open task 참조 메시지는 보존)
-- Board artifact 정리, governance purge (Room_hooks 콜백)
+- Board artifact 정리, governance purge (Workspace_hooks 콜백)
 
 ---
 
 ## 7. Voting & Consensus
 
-### 7.1 Room Vote (`room_vote`)
+### 7.1 Workspace Vote (`workspace_vote`)
 
 단순 다수결 투표 시스템.
 
@@ -447,8 +447,8 @@ type mode =
 ### 9.1 Worktree Preparation
 
 Worktree preparation is an ordinary repository workflow. Agents use typed
-`Execute` with explicit `git` argv from a scoped repository cwd; coordination
-state may record the resulting path, but there is no standalone coordination tool
+`Execute` with explicit `git` argv from a scoped repository cwd; workspace collaboration
+state may record the resulting path, but there is no standalone workspace collaboration tool
 for this workflow.
 
 1. git 저장소 검증 (`.git` 존재 확인)
@@ -466,26 +466,26 @@ for this workflow.
 ### 9.3 Task Worktree Metadata
 
 Per-task workspace ownership is stored on the task as `worktree_info` and
-cleared by `Coord_task_claim.clear_stale_worktree_binding` before a new owner
+cleared by `Workspace_task_claim.clear_stale_worktree_binding` before a new owner
 claims the task. There is no separate `task_sandbox` module.
 
 ---
 
-## 10. Multi-Room & Federation
+## 10. Multi-Workspace & Federation
 
-### 10.1 Room Registry (`room_multi`, `room_rooms`)
+### 10.1 Workspace Registry (`workspace_multi`, `workspace_workspaces`)
 
-- Room ID: `slugify(name)` (소문자, alphanumeric + dash)
-- Registry: `.masc/rooms/registry.json`
-- Current room: `.masc/current_room` 파일 (mtime 캐싱)
-- `"default"` room은 항상 존재 (registry에 없어도 자동 포함)
+- Workspace ID: `slugify(name)` (소문자, alphanumeric + dash)
+- Registry: `.masc/workspaces/registry.json`
+- Current workspace: `.masc/current_workspace` 파일 (mtime 캐싱)
+- `"default"` workspace은 항상 존재 (registry에 없어도 자동 포함)
 
 **작업 흐름**:
 ```
-set_room(path) -> write/read current_room -> current-room-scoped task/agent/message operations
+set_workspace(path) -> write/read current_workspace -> current-workspace-scoped task/agent/message operations
 ```
 
-### 10.2 Portal (A2A, `room_portal`)
+### 10.2 Portal (A2A, `workspace_portal`)
 
 에이전트 간 직접 통신 채널.
 
@@ -505,16 +505,16 @@ type portal = {
 
 ---
 
-## 11. Checkpoint (`room_checkpoint.mli`)
+## 11. Checkpoint (`workspace_checkpoint.mli`)
 
-Room 전체 스냅샷 캡처 및 복원.
+Workspace 전체 스냅샷 캡처 및 복원.
 
 ```ocaml
 type t = Yojson.Safe.t
 
-val capture : room_state:Yojson.Safe.t -> tasks:Yojson.Safe.t -> agents:Yojson.Safe.t -> t
+val capture : workspace_state:Yojson.Safe.t -> tasks:Yojson.Safe.t -> agents:Yojson.Safe.t -> t
 val timestamp : t -> float
-val room_state : t -> Yojson.Safe.t option
+val workspace_state : t -> Yojson.Safe.t option
 val tasks : t -> Yojson.Safe.t option
 val agents : t -> Yojson.Safe.t option
 val diff : t -> t -> Yojson.Safe.t     (* 두 checkpoint 간 차이 *)
@@ -527,7 +527,7 @@ val of_string : string -> t option
 
 ---
 
-## 12. Tempo (`room_tempo`)
+## 12. Tempo (`workspace_tempo`)
 
 클러스터 전체 에이전트 페이싱 제어.
 
@@ -554,12 +554,12 @@ val of_string : string -> t option
 
 | 대상 | Filesystem |
 |------|-----------|
-| Room state | `.masc/state.json` |
+| Workspace state | `.masc/state.json` |
 | Agent | `.masc/agents/{nick}.json` |
 | Backlog | `.masc/tasks/backlog.json` |
 | Messages | `.masc/messages/*.json` |
 
-- PostgreSQL room persistence is not a runtime contract.
+- PostgreSQL workspace persistence is not a runtime contract.
 
 ### 13.3 Nickname Generation
 
@@ -572,19 +572,19 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 
 ## 14. MCP Tool Surface
 
-### 14.1 Room Management (`tool_room`)
+### 14.1 Workspace Management (`tool_workspace`)
 
 | Tool | 동작 |
 |------|------|
-| `masc_status` | 현재 room 상태 조회 |
-| `masc_init` | Room 초기화 (.masc/ 생성) |
-| `masc_reset` | Room 리셋 (.masc/ 삭제, confirm 필수) |
+| `masc_status` | 현재 workspace 상태 조회 |
+| `masc_init` | Workspace 초기화 (.masc/ 생성) |
+| `masc_reset` | Workspace 리셋 (.masc/ 삭제, confirm 필수) |
 | `masc_workflow_guide` | 워크플로우 가이드 출력 |
-| `masc_check` | room 건강 상태 점검 |
+| `masc_check` | workspace 건강 상태 점검 |
 
 참고:
-- named-room inventory/create/enter surface는 제거되었다.
-- 현재는 `current_room` pointer와 per-room lazy bootstrap만 compatibility layer로 남아 있다.
+- named-workspace inventory/create/enter surface는 제거되었다.
+- 현재는 `current_workspace` pointer와 per-workspace lazy bootstrap만 compatibility layer로 남아 있다.
 
 ### 14.2 Task Operations (`tool_task`)
 
@@ -621,7 +621,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_heartbeat_stop` | 하트비트 중단 |
 | `masc_heartbeat_list` | 활성 하트비트 목록 |
 
-### 14.5 Worktree (`Coord_git`)
+### 14.5 Worktree (`Workspace_git`)
 
 별도 worktree MCP tool은 없다. repo/worktree 조작은 `Execute`에서
 `executable="git"`와 typed `argv`를 사용한다.
@@ -630,8 +630,8 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 
 | Tool | 동작 |
 |------|------|
-| `masc_pause` | Room 일시 정지 |
-| `masc_resume` | Room 재개 |
+| `masc_pause` | Workspace 일시 정지 |
+| `masc_resume` | Workspace 재개 |
 | `masc_pause_status` | 정지 상태 조회 |
 
 ### 14.6 Social (`tool_social`, vote 부분)
@@ -646,21 +646,21 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 
 | ID | 규칙 | 검증 위치 |
 |----|------|----------|
-| INV-ROOM-001 | Room state 갱신은 반드시 `with_file_lock`으로 보호된다 | `room_state.update_state` |
-| INV-ROOM-002 | `active_agents`는 중복 없는 리스트다 (`filter ((<>) name)` 후 추가) | `room_lifecycle.join` |
-| INV-ROOM-003 | 에이전트는 join 없이 claim/broadcast를 수행할 수 없다 | `tool_task.handle_claim` (is_agent_joined 검사) |
-| INV-ROOM-004 | 태스크 전이는 assignee 일치 또는 `force=true` 조건을 충족해야 한다 | `room_task.transition_task_r` |
-| INV-ROOM-005 | `backlog.version`은 단조 증가한다 (매 mutation +1) | `room_task`, `room_task_schedule` |
-| INV-ROOM-006 | Zombie threshold: 일반 에이전트 300s, Keeper 3600s | `resilience.Zombie.is_zombie_for_agent` |
-| INV-ROOM-007 | Smart heartbeat: Busy 에이전트는 하트비트를 emit하지 않는다 | `heartbeat_smart.should_emit` |
-| INV-ROOM-008 | GC Phase 3 실패 시 Phase 4(파일 삭제)를 건너뛴다 (데이터 보존) | `room_gc.cleanup_zombies` |
-| INV-ROOM-009 | claim_next는 현재 보유 태스크를 자동 해제한 후 새 태스크를 할당한다 | `room_task_schedule.claim_next_r` (BUG-004) |
-| INV-ROOM-010 | 닉네임은 동일 agent_type에 대해 세션 내 재사용된다 (identity drift 방지) | `room_lifecycle.join` |
-| INV-ROOM-012 | historical: `"default"` room은 named-room registry에서 reserved였다 | removed named-room registry |
-| INV-ROOM-013 | 투표에서 각 에이전트는 1회만 투표할 수 있다 | `room_vote.vote_cast` |
-| INV-ROOM-014 | Portal은 양방향이다 (reverse portal 자동 생성) | `room_portal.portal_open_r` |
-| INV-ROOM-015 | GC 시 open task를 참조하는 메시지는 보존된다 | `room_gc.gc` (mentions_open_task) |
-| INV-ROOM-016 | Room persistence uses filesystem JSON under `.masc/`; PostgreSQL room persistence is not supported | `room_state.write_state`, `room_lifecycle.join` |
+| INV-WORKSPACE-001 | Workspace state 갱신은 반드시 `with_file_lock`으로 보호된다 | `workspace_state.update_state` |
+| INV-WORKSPACE-002 | `active_agents`는 중복 없는 리스트다 (`filter ((<>) name)` 후 추가) | `workspace_lifecycle.join` |
+| INV-WORKSPACE-003 | 에이전트는 join 없이 claim/broadcast를 수행할 수 없다 | `tool_task.handle_claim` (is_agent_joined 검사) |
+| INV-WORKSPACE-004 | 태스크 전이는 assignee 일치 또는 `force=true` 조건을 충족해야 한다 | `workspace_task.transition_task_r` |
+| INV-WORKSPACE-005 | `backlog.version`은 단조 증가한다 (매 mutation +1) | `workspace_task`, `workspace_task_schedule` |
+| INV-WORKSPACE-006 | Zombie threshold: 일반 에이전트 300s, Keeper 3600s | `resilience.Zombie.is_zombie_for_agent` |
+| INV-WORKSPACE-007 | Smart heartbeat: Busy 에이전트는 하트비트를 emit하지 않는다 | `heartbeat_smart.should_emit` |
+| INV-WORKSPACE-008 | GC Phase 3 실패 시 Phase 4(파일 삭제)를 건너뛴다 (데이터 보존) | `workspace_gc.cleanup_zombies` |
+| INV-WORKSPACE-009 | claim_next는 현재 보유 태스크를 자동 해제한 후 새 태스크를 할당한다 | `workspace_task_schedule.claim_next_r` (BUG-004) |
+| INV-WORKSPACE-010 | 닉네임은 동일 agent_type에 대해 세션 내 재사용된다 (identity drift 방지) | `workspace_lifecycle.join` |
+| INV-WORKSPACE-012 | historical: `"default"` workspace은 named-workspace registry에서 reserved였다 | removed named-workspace registry |
+| INV-WORKSPACE-013 | 투표에서 각 에이전트는 1회만 투표할 수 있다 | `workspace_vote.vote_cast` |
+| INV-WORKSPACE-014 | Portal은 양방향이다 (reverse portal 자동 생성) | `workspace_portal.portal_open_r` |
+| INV-WORKSPACE-015 | GC 시 open task를 참조하는 메시지는 보존된다 | `workspace_gc.gc` (mentions_open_task) |
+| INV-WORKSPACE-016 | Workspace persistence uses filesystem JSON under `.masc/`; PostgreSQL workspace persistence is not supported | `workspace_state.write_state`, `workspace_lifecycle.join` |
 
 ---
 
@@ -668,23 +668,23 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 
 | ID | 설명 | 수정 위치 |
 |----|------|----------|
-| BUG-004 | claim_next가 이전 claim을 해제하지 않아 orphaned task 발생 | `room_task_schedule.claim_next_r` (auto-release) |
-| BUG-005 | join 없이 claim 가능했음 | `room_task.claim_task_r` (agent_joined 검사 추가) |
-| BUG-009 | stale Todo 태스크가 큐를 막음 | `room_task_schedule` (auto-archive, threshold 7일) |
+| BUG-004 | claim_next가 이전 claim을 해제하지 않아 orphaned task 발생 | `workspace_task_schedule.claim_next_r` (auto-release) |
+| BUG-005 | join 없이 claim 가능했음 | `workspace_task.claim_task_r` (agent_joined 검사 추가) |
+| BUG-009 | stale Todo 태스크가 큐를 막음 | `workspace_task_schedule` (auto-archive, threshold 7일) |
 | BUG-010 | 빈 title/잘못된 priority 태스크 생성 가능 | `tool_task.handle_add_task` (validation 추가) |
-| BUG-1600 | room-scoped 에이전트 조회 시 root 디렉토리 미검사 | `room_agent.update_agent_r` (dual path 검사) |
+| BUG-1600 | workspace-scoped 에이전트 조회 시 root 디렉토리 미검사 | `workspace_agent.update_agent_r` (dual path 검사) |
 
 ---
 
 ## 17. References
 
-- `lib/coord/dune`: sub-library 정의 (`masc_coord`, wrapped=false)
-- `lib/coord/coord_utils.ml`, `coord_utils_ops.ml`, `coord_utils_paths_backend.ml`, `coord_utils_backend_setup.ml`: 공통 유틸리티
-- `lib/coord/coord_hooks.ml`: 콜백 ref (GC, board, governance)
-- `lib/coord/coord_query.ml`: 룸 내 에이전트/태스크 카운트 쿼리
-- `lib/coord/coord_status.ml`: 상태 요약 출력
-- `lib/coord/coord_git.ml`: git 명령 래퍼 (base branch 해석, worktree create/remove/list)
-- `lib/coord/coord_task_claim.ml`: claim 전 stale worktree binding 정리
-- 02-types-and-invariants: `agent_status`, `task_status`, `room_state` 타입 정의
-- 05-keeper-agent: Keeper가 Room GC와 태스크 해제에 관여하는 경로
-- 09-server-transport: MCP tool dispatch가 Room 함수를 호출하는 경로
+- `lib/workspace/dune`: sub-library 정의 (`masc_workspace`, wrapped=false)
+- `lib/workspace/workspace_utils.ml`, `workspace_utils_ops.ml`, `workspace_utils_paths_backend.ml`, `workspace_utils_backend_setup.ml`: 공통 유틸리티
+- `lib/workspace/workspace_hooks.ml`: 콜백 ref (GC, board, governance)
+- `lib/workspace/workspace_query.ml`: 룸 내 에이전트/태스크 카운트 쿼리
+- `lib/workspace/workspace_status.ml`: 상태 요약 출력
+- `lib/workspace/workspace_git.ml`: git 명령 래퍼 (base branch 해석, worktree create/remove/list)
+- `lib/workspace/workspace_task_claim.ml`: claim 전 stale worktree binding 정리
+- 02-types-and-invariants: `agent_status`, `task_status`, `workspace_state` 타입 정의
+- 05-keeper-agent: Keeper가 Workspace GC와 태스크 해제에 관여하는 경로
+- 09-server-transport: MCP tool dispatch가 Workspace 함수를 호출하는 경로

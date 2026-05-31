@@ -5,7 +5,7 @@ code_refs:
   - lib/keeper/keeper_post_turn.ml
   - lib/keeper/keeper_rollover.ml
   - lib/keeper/keeper_agent_run.ml
-  - lib/coord/coord_task.ml
+  - lib/workspace/workspace_task.ml
   - specs/keeper-state-machine/KeeperGenerationLineage.tla
 ---
 

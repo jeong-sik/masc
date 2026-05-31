@@ -11,7 +11,7 @@ code_refs:
 
 Current-state audit of `masc-mcp` MCP exposure, public design, and documentation boundaries.
 
-As of `2026-04-16`, the supported front door is repo coordination plus keeper/runtime visibility. Operator remains a reduced supporting surface; team-session and command-plane are retired historical surfaces.
+As of `2026-04-16`, the supported front door is repo workspace collaboration plus keeper/runtime visibility. Operator remains a reduced supporting surface; team-session and command-plane are retired historical surfaces.
 
 ## Evidence
 
@@ -101,7 +101,7 @@ flowchart LR
   Heartbeat --> Done[masc_transition done]
 ```
 
-### 2. Repo Coordination + Keeper Runtime
+### 2. Repo Workspace + Keeper Runtime
 
 ```mermaid
 flowchart LR
@@ -125,9 +125,9 @@ tool schema/catalog path.
 
 ```mermaid
 flowchart TD
-  Runtime[Runtime substrate<br/>local64 llama pool voice storage] --> Coordination[Repo coordination]
-  Coordination --> Keeper[OAS-backed keeper runtime]
-  Coordination --> Orchestration[Native chain plane]
+  Runtime[Runtime substrate<br/>local64 llama pool voice storage] --> Workspace[Repo workspace collaboration]
+  Workspace --> Keeper[OAS-backed keeper runtime]
+  Workspace --> Orchestration[Native chain plane]
 
   Secondary[Retired historical surfaces] -. not supported front door .-> Orchestration
 ```
@@ -150,7 +150,7 @@ flowchart TD
 
 ### What this change fixes
 
-- Front-door docs point to repo coordination and keeper runtime first.
+- Front-door docs point to repo workspace collaboration and keeper runtime first.
 - Team-session/command-plane paths are no longer treated as canonical.
 
 ## Orphan Classification

@@ -43,8 +43,8 @@ pub struct OriginalEventWriters<'w> {
 #[derive(SystemParam)]
 pub struct Phase1EventWriters<'w> {
     pub party_selected: MessageWriter<'w, PartySelected>,
-    pub room_created: MessageWriter<'w, RoomCreated>,
-    pub room_started: MessageWriter<'w, RoomStarted>,
+    pub workspace_created: MessageWriter<'w, WorkspaceCreated>,
+    pub workspace_started: MessageWriter<'w, WorkspaceStarted>,
     pub session_started: MessageWriter<'w, SessionStarted>,
     pub phase_changed: MessageWriter<'w, PhaseChanged>,
     pub turn_started: MessageWriter<'w, TurnStarted>,
@@ -61,7 +61,7 @@ pub struct Phase2EventWriters<'w> {
     pub actor_claimed: MessageWriter<'w, ActorClaimed>,
     pub actor_released: MessageWriter<'w, ActorReleased>,
     pub actor_updated: MessageWriter<'w, ActorUpdated>,
-    pub room_ended: MessageWriter<'w, RoomEnded>,
+    pub workspace_ended: MessageWriter<'w, WorkspaceEnded>,
     pub turn_action_resolved: MessageWriter<'w, TurnActionResolved>,
     pub combat_attack: MessageWriter<'w, CombatAttack>,
     pub combat_defense: MessageWriter<'w, CombatDefense>,
@@ -188,19 +188,19 @@ pub fn poll_sse_events(
                 PartySelectedPayload,
                 PartySelected
             ),
-            "room.created" => dispatch_event!(
+            "workspace.created" => dispatch_event!(
                 event_type,
                 &data,
-                phase1.room_created,
-                RoomCreatedPayload,
-                RoomCreated
+                phase1.workspace_created,
+                WorkspaceCreatedPayload,
+                WorkspaceCreated
             ),
-            "room.started" => dispatch_event!(
+            "workspace.started" => dispatch_event!(
                 event_type,
                 &data,
-                phase1.room_started,
-                RoomLifecyclePayload,
-                RoomStarted
+                phase1.workspace_started,
+                WorkspaceLifecyclePayload,
+                WorkspaceStarted
             ),
             "session.started" => dispatch_event!(
                 event_type,
@@ -280,12 +280,12 @@ pub fn poll_sse_events(
                 ActorLifecyclePayload,
                 ActorUpdated
             ),
-            "room.ended" => dispatch_event!(
+            "workspace.ended" => dispatch_event!(
                 event_type,
                 &data,
-                phase2.room_ended,
-                RoomEndedPayload,
-                RoomEnded
+                phase2.workspace_ended,
+                WorkspaceEndedPayload,
+                WorkspaceEnded
             ),
             "turn.action.resolved" => dispatch_event!(
                 event_type,

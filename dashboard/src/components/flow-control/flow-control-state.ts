@@ -62,7 +62,7 @@ export async function fetchPauseStatus(): Promise<void> {
   } catch { flowState.value = 'unknown' }
 }
 
-export async function pauseRoom(): Promise<void> {
+export async function pauseWorkspace(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
     showToast(access.reason ?? 'Missing permission to pause the namespace.', 'error', 6000)
@@ -74,7 +74,7 @@ export async function pauseRoom(): Promise<void> {
   finally { flowLoading.value = false }
 }
 
-export async function resumeRoom(): Promise<void> {
+export async function resumeWorkspace(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
     showToast(access.reason ?? 'Missing permission to resume the namespace.', 'error', 6000)

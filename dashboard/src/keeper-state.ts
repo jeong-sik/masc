@@ -63,7 +63,7 @@ function roleLabel(role: KeeperConversationRole): string {
 function looksLikeWorldStatePrompt(text: string): boolean {
   const trimmed = text.trim()
   return trimmed.startsWith('## Current World State')
-    || (trimmed.includes('### Room State') && trimmed.includes('### Context'))
+    || (trimmed.includes('### Workspace State') && trimmed.includes('### Context'))
 }
 
 function normalizeConversationSource(

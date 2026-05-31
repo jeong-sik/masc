@@ -3,7 +3,7 @@ set -euo pipefail
 
 BASE_PATH="${BASE_PATH:-}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
-ROOM_ID="${ROOM_ID:-default}"
+WORKSPACE_ID="${WORKSPACE_ID:-default}"
 SESSION_ID="${SESSION_ID:-ts-mission-fixture-001}"
 KEEPER_NAME="${KEEPER_NAME:-mission-fixture-keeper}"
 
@@ -16,7 +16,7 @@ mkdir -p "$BASE_PATH"
 
 BASE_PATH="$BASE_PATH" \
 MCP_URL="$MCP_URL" \
-ROOM_ID="$ROOM_ID" \
+WORKSPACE_ID="$WORKSPACE_ID" \
 SESSION_ID="$SESSION_ID" \
 KEEPER_NAME="$KEEPER_NAME" \
 node <<'NODE'
@@ -25,7 +25,7 @@ const path = require('path');
 
 const basePath = process.env.BASE_PATH;
 const mcp = process.env.MCP_URL;
-const roomId = process.env.ROOM_ID || 'default';
+const workspaceId = process.env.WORKSPACE_ID || 'default';
 const sessionId = process.env.SESSION_ID || 'ts-mission-fixture-001';
 const keeperName = process.env.KEEPER_NAME || 'mission-fixture-keeper';
 
@@ -82,7 +82,7 @@ async function mcpCall(name, args) {
   return payload.result;
 }
 
-async function seedRoom() {
+async function seedWorkspace() {
   await mcpCall('masc_init', { agent_name: 'mission-fixture-root' });
   for (const agent of fixtureAgents) {
     await mcpCall('masc_join', {
@@ -141,7 +141,7 @@ function seedExecutionSession() {
     session_id: sessionId,
     goal: 'Validate local64 worker coverage, runtime visibility, and operator census',
     created_by: 'mission-fixture-root',
-    room_id: roomId,
+    workspace_id: workspaceId,
     status: 'interrupted',
     duration_seconds: 2700,
     checkpoint_interval_sec: 60,
@@ -338,13 +338,13 @@ function seedPendingConfirm() {
 }
 
 (async () => {
-  await seedRoom();
+  await seedWorkspace();
   seedExecutionSession();
   seedPendingConfirm();
   console.log(JSON.stringify({
     ok: true,
     basePath,
-    roomId,
+    workspaceId,
     sessionId,
     keeperName,
     agents: fixtureAgents.map(agent => agent.name),

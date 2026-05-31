@@ -4,8 +4,8 @@
  * for the JSON flavour).  Uses fetch + ReadableStream for binary frame
  * parsing.
  *
- * Proto: proto/masc_coordination.proto
- * Service: masc.coordination.v1.MascCoordination
+ * Proto: proto/masc_workspace collaboration.proto
+ * Service: masc.workspace collaboration.v1.MascWorkspace
  */
 
 import type { Transport, TransportEvent, TransportOptions } from './transport'
@@ -24,7 +24,7 @@ import type {
   StatusResponse,
   LspRequest,
   LspResponse,
-} from '../grpc/masc_coordination_pb'
+} from '../grpc/masc_workspace collaboration_pb'
 
 import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
 
@@ -230,7 +230,7 @@ export function createGrpcTransport(
   opts: TransportOptions = {},
 ): GrpcTransport {
   const state = createState()
-  const service = 'masc.coordination.v1.MascCoordination'
+  const service = 'masc.workspace collaboration.v1.MascWorkspace'
 
   const connect = () => {
     state.connected = true

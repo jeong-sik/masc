@@ -90,7 +90,7 @@ RFC-0002는 11-state parent phase FSM을 pure function `derive_phase` + `apply_e
 |------|------|-----------|
 | **C1 Hierarchical parent** | RFC-0002의 11-state를 parent로 삼고 Decision/Runtime/Memory를 guard로 매다는 HSM | **거절** |
 | **C2 Turn-cycle root** | `KeeperTurnCycle.tla`를 composition root로 하고 나머지를 하위에 위치 | **거절** |
-| **C3 Event-driven projection** | `Context_measured` + OAS envelope를 coordination hub로 보고, 관찰 가능한 projection variables + joint invariants만 선언 | **채택** |
+| **C3 Event-driven projection** | `Context_measured` + OAS envelope를 workspace collaboration hub로 보고, 관찰 가능한 projection variables + joint invariants만 선언 | **채택** |
 
 C1을 거절한 구조적 이유: Decision/Runtime/Memory는 turn 내부에서만 의미 있는 상태를 갖는다. 이를 parent-child로 강제하면 `Paused`, `Crashed`, `Restarting` 같은 phase에서도 child FSM의 state를 정의해야 하는데, 현실에서 그 state는 존재하지 않거나 stale하다. 타입이 거짓말하는 spec이 된다.
 

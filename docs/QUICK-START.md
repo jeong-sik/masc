@@ -97,7 +97,7 @@ flowchart TD
     I --> J["heartbeat snapshot 기록"]
     J --> K["board events 수집"]
     K --> L["unified proactive turn"]
-    L --> M["Room heartbeat 갱신"]
+    L --> M["Workspace heartbeat 갱신"]
     M --> N["recurring dispatch"]
     N --> O["improve loop tick"]
     O --> P["jitter 포함 sleep"]
@@ -189,12 +189,12 @@ masc_claim_next()
 
 ## 5. 현재 front door
 
-지원하는 front door는 repo coordination, keeper runtime, 그리고 dashboard/operator read visibility다.
+지원하는 front door는 repo workspace collaboration, keeper runtime, 그리고 dashboard/operator read visibility다.
 
-- repo coordination: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
+- repo workspace collaboration: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
 - keeper runtime: `masc_keeper_up`, `masc_keeper_msg`, `masc_keeper_status`, `masc_keeper_down`
 
-retired orchestration surfaces are historical only. 새 사용자는 repo coordination과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
+retired orchestration surfaces are historical only. 새 사용자는 repo workspace collaboration과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
 
 ## 6. Tool Surface
 

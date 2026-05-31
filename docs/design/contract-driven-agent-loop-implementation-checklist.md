@@ -40,7 +40,7 @@ code_refs:
 ### OAS
 
 - [ ] 이번 변경은 per-run execution policy, capability routing, proof bundle에만 닿는다.
-- [ ] room/task/governance/session acceptability를 OAS가 영속 상태로 소유하지 않는다.
+- [ ] workspace/task/governance/session acceptability를 OAS가 영속 상태로 소유하지 않는다.
 - [ ] provider-specific behavior는 OAS 안에서만 결정되고 MASC에 흘러나오지 않는다.
 - [ ] OAS는 requested mode를 downgrade만 할 수 있고, upgrade하지 않는다.
 - [ ] hook / middleware는 runtime-local deterministic verification과 context injection만 담당한다.
@@ -54,7 +54,7 @@ code_refs:
 - [ ] OAS evidence를 소비하지만 OAS session state를 직접 수정하지 않는다.
 - [ ] MASC는 contract를 통해 requested mode를 제안할 수 있지만, OAS runtime state를 직접 바꾸지 않는다.
 - [ ] stage gate는 MASC workflow policy로 유지되고 OAS 내부 run policy로 내려가지 않는다.
-- [ ] fresh-context adversarial eval을 도입해도 README / design docs / room-task history를 주입하지 않는다.
+- [ ] fresh-context adversarial eval을 도입해도 README / design docs / workspace-task history를 주입하지 않는다.
 
 ### MCP Protocol SDK
 

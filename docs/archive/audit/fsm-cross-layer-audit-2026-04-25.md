@@ -19,7 +19,7 @@ Cross-layer review of the currently active FSM surfaces:
 | Composite FSM | `Keeper_composite_observer` + registry turn fields | `/api/v1/keepers/:name/composite`, FSM Hub, fleet matrix | `KeeperCompositeLifecycle.tla`, dashboard schema/tests |
 | Runtime | `Runtime_fsm.decide`, runtime runtime/strategy | runtime dashboard, execution receipt | `KeeperRuntimeLifecycle.tla`, runtime tests |
 | Task/verification | `Verification.request_status`, `verification_protocol` | board posts, SSE verification events | `TaskLifecycle.tla`, `test_verification_fsm` |
-| Goal/product state | `Goal_store`, `Goal_phase`, state-product modules | dashboard goal tree, goal tools | `StateProduct.tla`, `CoordinationProduct.tla` |
+| Goal/product state | `Goal_store`, `Goal_phase`, state-product modules | dashboard goal tree, goal tools | `StateProduct.tla`, `WorkspaceProduct.tla` |
 | Social ledger | `keeper_social_model_magentic_ledger_fsm` | social-model belief summary | `KeeperSocialModelMagenticLedger.tla`, ledger tests |
 | Server/product state | server startup/state-product modules | runtime/bootstrap surfaces | `ServerState.tla`, `StateProduct.tla` |
 

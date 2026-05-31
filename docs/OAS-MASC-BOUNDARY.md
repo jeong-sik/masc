@@ -17,7 +17,7 @@ OAS (OCaml Agent SDK)와 MASC-MCP 사이의 역할 경계를 정의한다.
 **원칙**: OAS는 MASC를 모른다. OAS의 변경은 모든 소비자에게 유익해야 한다.
 
 ```
-consumer → MASC-MCP (coordination/orchestration) → OAS (agent runtime)
+consumer → MASC-MCP (workspace collaboration/orchestration) → OAS (agent runtime)
 ```
 
 ## 문서 역할 (SSOT)
@@ -33,13 +33,13 @@ consumer → MASC-MCP (coordination/orchestration) → OAS (agent runtime)
 | 관심사 | OAS | MASC |
 |--------|-----|------|
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Memory`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
-| 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | room, board, workflow, policies, operator surfaces |
+| 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies, operator surfaces |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, tool dispatch, auth/join/policy semantics |
 | 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
 | ContextOverflow retry | overflow detection, structured error, standalone/keeper compact retry | 최종 overflow 결과를 keeper state, receipt, operator surfaces에 attribution |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
-| 장기 메모리 프리미티브 | `Memory.t` tiers | institutional memory, pg/jsonl backends, room/task/social semantics |
-| 조율 상태 | 없음 | room, tasks, team sessions, governance, social runtime |
+| 장기 메모리 프리미티브 | `Memory.t` tiers | institutional memory, pg/jsonl backends, workspace/task/social semantics |
+| 조율 상태 | 없음 | workspace, tasks, team sessions, governance, social runtime |
 
 ## 의존 방향
 
@@ -212,7 +212,7 @@ OAS  ──does not know──→ MASC
 
 - MASC owns the delivery contract itself: `contract_id`, acceptance checks, required artifacts, repair budget, evaluator role/runtime, proof/report surfaces.
 - OAS should stay generic and receive only reusable harness/runtime primitives.
-- Current local implementation keeps the contract in MASC coordination state (board posts, keeper FSM, governance queues) and feeds it into worker verification and proof artifacts without teaching OAS about MASC session semantics.
+- Current local implementation keeps the contract in MASC workspace collaboration state (board posts, keeper FSM, governance queues) and feeds it into worker verification and proof artifacts without teaching OAS about MASC session semantics.
 
 ## Candidate Upstream Work
 
@@ -226,9 +226,9 @@ These are the next changes that are generic enough to propose upstream:
 
 These stay in MASC:
 
-- room/task/board/operator/governance semantics
+- workspace/task/board/operator/governance semantics
 - planner session policy and repair-budget policy
-- proof/report JSON/markdown contracts and coordination-specific evidence rules
+- proof/report JSON/markdown contracts and workspace collaboration-specific evidence rules
 
 ## Priority Order
 
@@ -237,7 +237,7 @@ These stay in MASC:
 2. **P2 — marker/text leakage**
    - reduce remaining prompt/fallback dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
 3. **P3 — team-session bridge fidelity** — Resolved (2026-04, team_session module purged; OAS Swarm Runner is sole substrate)
-   - MASC team-session surface removed; coordination needs served via board posts + keeper FSM, swarm runs driven through OAS directly
+   - MASC team-session surface removed; workspace collaboration needs served via board posts + keeper FSM, swarm runs driven through OAS directly
 4. **P4 — memory bridge hardening** — Resolved (2026-04-13, PR #6795 Phase 1 + Phase 2)
    - imperative seed/flush replaced by hook-first injection via `Memory_hooks` (RFC-MASC-004)
 5. **P5 — doc truth alignment**
@@ -249,14 +249,14 @@ These stay in MASC:
 - “Event_bus bridge planned” is no longer true for the current dashboard/SSE path.
 - dashboard OAS runtime health should be read as **durable replay + live tail**, not as a live-only pulse.
 - dashboard runtime `counts` should be read as **active truth**, while keeper inventory belongs to `configured_keepers`.
-- “team_session pending migration” is no longer true; the `lib/team_session/` module has been **removed** — swarm runs go through OAS directly, coordination state lives in board posts and keeper FSM.
+- “team_session pending migration” is no longer true; the `lib/team_session/` module has been **removed** — swarm runs go through OAS directly, workspace collaboration state lives in board posts and keeper FSM.
 
 ## Boundary Review Checklist
 
 Use this checklist when reviewing boundary-touching PRs:
 
 1. **OAS가 MASC를 새로 알게 되는가?**
-   - generic runtime/harness primitive가 아니라 room/task/governance/session semantics가 OAS public contract로 새어 나오면 안 된다.
+   - generic runtime/harness primitive가 아니라 workspace/task/governance/session semantics가 OAS public contract로 새어 나오면 안 된다.
 2. **MASC core가 provider/model 세부를 새로 배우는가?**
    - model ID, vendor, token/cost detail은 config 또는 OAS-facing adapter/bridge에 머물러야 한다.
    - routing/policy code가 vendor/model literal로 분기하면 provider/model-free 위반이다.
@@ -268,13 +268,13 @@ Use this checklist when reviewing boundary-touching PRs:
 ## Boundary Rules for Future Work
 
 1. If the problem is “single agent execution contract”, prefer fixing `oas_worker` / `worker_oas` / OAS-facing adapters.
-2. If the problem is “room, board, governance, operator, workflow semantics”, keep it in MASC.
+2. If the problem is “workspace, board, governance, operator, workflow semantics”, keep it in MASC.
 3. If a bridge is lossy, fix the MASC-side adapter first before proposing OAS API expansion.
 4. Do not claim a subsystem is “migrated” if the runtime path works but key semantics are still dropped.
 
 ## OAS API Surface Drift — Detection & Repair
 
-Three complementary mechanisms keep the OAS/MASC boundary honest. The first keeps upstream OAS coordinator-agnostic; the other two keep MASC's consumer-side type boundary honest.
+Three complementary mechanisms keep the OAS/MASC boundary honest. The first keeps upstream OAS workspace client-agnostic; the other two keep MASC's consumer-side type boundary honest.
 
 ### Layer 0 — SDK independence gate (`scripts/ci/check-masc-oas-boundary.sh`)
 

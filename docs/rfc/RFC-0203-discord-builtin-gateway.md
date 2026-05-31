@@ -46,7 +46,7 @@ Discord ↔ discord_gateway_client (OCaml WSS, Eio fiber)
               ↓ push
         Channel_gate_discord_state (existing)
               ↓
-        keeper room (existing)
+        keeper workspace (existing)
 
 keeper → discord_send_message tool → Channel_gate_discord_state.send_message → REST POST
 ```
@@ -54,7 +54,7 @@ keeper → discord_send_message tool → Channel_gate_discord_state.send_message
 - **In = push.** Gateway WSS. No polling. Heartbeat op 1 every ~30s, dispatch op 0 events arrive when Discord sends them.
 - **Out = one tool.** `discord_send_message(channel_id, content)`. Snowflake `channel_id` covers guild text + DM + thread uniformly.
 - **No `discord_react`, no `discord_send_dm`, no `discord_watch`.** Anything reactions/DMs/threads can do is already covered by send_message + push inbound.
-- **Inbound filter.** One env var `DISCORD_TRIGGER_POLICY` decides which pushed messages reach the keeper room. Three values only — typed variant, no string classifier:
+- **Inbound filter.** One env var `DISCORD_TRIGGER_POLICY` decides which pushed messages reach the keeper workspace. Three values only — typed variant, no string classifier:
   - `mention_only` (default) — only messages that @-mention the bot user
   - `user_only:<discord_user_id>` — only messages from one specific Discord user, in any connected channel/DM/thread
   - `all` — every message in connected channels (high traffic; explicit opt-in)

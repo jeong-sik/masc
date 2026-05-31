@@ -60,13 +60,13 @@ The taxonomy is built around **operator action**. If a log line does not change 
 | Marker (must NOT) | Used as a proxy for "I want this to be visible" — promote to `Error` if action is required, demote to `Info` if not |
 | Cardinality | Medium — bursts of ~10/min on incident, baseline ~1/h |
 | Example (good) | `Log.Misc.warn "tool_usage_log: append failed for %s: %s; recording coverage_gap"` — write failed but coverage_gap captures the loss |
-| Anti-pattern | `silent:coord_join_normalize ... persona_not_found ... logging-only mode, proceeding with original agent_name` — silent fallback that produces identity drift is **`Error`**, not `Warn`. The "silent" prefix is itself a structural marker (see [§ 3.1](#31-silent-fallback)). |
+| Anti-pattern | `silent:workspace_join_normalize ... persona_not_found ... logging-only mode, proceeding with original agent_name` — silent fallback that produces identity drift is **`Error`**, not `Warn`. The "silent" prefix is itself a structural marker (see [§ 3.1](#31-silent-fallback)). |
 
 ### `Info`
 
 | Field | Content |
 |-------|---------|
-| Trigger | A user-visible lifecycle event happened — keeper boot, PR merged, task transition, room join |
+| Trigger | A user-visible lifecycle event happened — keeper boot, PR merged, task transition, workspace join |
 | Operator action | None. Audit trail only. |
 | Marker (must) | Discrete event with low repetition (≤1/keeper/turn or ≤1/request) |
 | Marker (must NOT) | Periodic tick, watchdog heartbeat, "still running" signal — those are `Debug` |
@@ -113,7 +113,7 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 | Pattern | Message contains `silent` or `logging-only mode` or `silently` AND severity is `Info`/`Warn` |
 | Why wrong | A silent fallback IS the failure. The whole point is that downstream behavior diverges from the configured intent (identity drift, wrong cred, default model). The operator MUST know. |
 | Correct | `Error` AND emit a structured field `silent_fallback_kind=<reason>` so dashboards can count |
-| Origin | `silent:coord_join_normalize ... persona_not_found ... logging-only mode` (production 2026-04-27 09:17:48). `nick0cave` joined as `nick0cave-proud-shark` instead of canonical, identity drift not surfaced. |
+| Origin | `silent:workspace_join_normalize ... persona_not_found ... logging-only mode` (production 2026-04-27 09:17:48). `nick0cave` joined as `nick0cave-proud-shark` instead of canonical, identity drift not surfaced. |
 
 ### 3.2 Operator broadcast
 
@@ -185,7 +185,7 @@ This document is the contract; existing 1516 callsites are unaudited. Migration 
 1. **Phase 0 — this document** — ratify the rules. ✓ (PR introducing this file)
 2. **Phase 1 — lint** — add `scripts/ci/check-log-severity-anti-patterns.sh` with rules L1–L5 enforced on `lib/`. Allowlist comments for known intentional deviations.
 3. **Phase 2 — top-5 hotspot reclassify** — `server_runtime_bootstrap.ml`, `keeper_keepalive.ml`, `keeper_unified_turn.ml`, `server_bootstrap_loops.ml`, `keeper_agent_run.ml` (319 sites). One PR per file; each PR audits + reclassifies + verifies cardinality.
-4. **Phase 3 — long tail** — remaining ~1200 sites swept in domain batches (server, keeper, dashboard, oas-bridge, coord). Each batch ≤ 100 sites.
+4. **Phase 3 — long tail** — remaining ~1200 sites swept in domain batches (server, keeper, dashboard, oas-bridge, workspace). Each batch ≤ 100 sites.
 5. **Phase 4 — cardinality dashboard** — Prometheus counter per `(file, level)` exposed on `/metrics`, dashboard surfaces deviations from § 5.
 
 Phases 1–4 are independent PRs. Migration order is not load-bearing — the lint catches drift even if Phase 2 is interleaved.

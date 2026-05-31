@@ -41,7 +41,7 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 
 - OAS `Agent_sdk.Tool.descriptor` audit — masc-mcp 외부 repo
 - `cdal_runtime` sub-library의 `Env_config_core` path caller migration — RFC-OAS-011 격리 보존
-- `auth_doctor` / `auth_login` / `config_doctor` `normalize_masc_base_path_input` — generic string utility, path SSOT 아님
+- `auth_diagnostic` / `auth_login` / `config_diagnostic` `normalize_masc_base_path_input` — generic string utility, path SSOT 아님
 - `worker_runtime_docker` `Env_config_core.*_env_key` — string identifier (값 아님)
 - `Tool_dispatch_emit.finalize` ↔ `guarded_dispatch` inline mirror — dependency cycle 회피용, 별도 RFC
 

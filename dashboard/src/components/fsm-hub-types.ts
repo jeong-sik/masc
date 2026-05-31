@@ -695,7 +695,7 @@ export type SwimlaneSegment = {
   value: string
 }
 
-/** Cross-panel hover coordination payload. When a swimlane segment is
+/** Cross-panel hover workspace collaboration payload. When a swimlane segment is
     under the cursor, the SwimlaneTimeline publishes which lane, value,
     and time window it covers, and downstream panels (TransitionTrail,
     PipelineStep) highlight rows that overlap. */

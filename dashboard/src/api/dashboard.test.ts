@@ -1288,7 +1288,7 @@ describe('fetchKeeperConfig', () => {
         goal: 'Ship stable keeper ops',
         short_goal: 'Diagnose agent liveness',
         mid_goal: 'Reduce restart confusion',
-        long_goal: 'Keep coordination stable',
+        long_goal: 'Keep workspace collaboration stable',
         will: 'Stay on call',
         needs: 'Accurate runtime state',
         desires: 'Clear operator feedback',
@@ -1365,9 +1365,9 @@ describe('fetchKeeperConfig', () => {
         disposition_reason: 'healthy',
         needs_attention: false,
       },
-      coordination: {
+      workspace collaboration: {
         mention_targets: 'sangsu',
-        joined_room_ids: 'default',
+        joined_workspace_ids: 'default',
         active_goal_ids: ['goal-runtime'],
         active_goals: [
           { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
@@ -1451,8 +1451,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
     expect(result.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.coordination.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.coordination.active_goals[0]?.title).toBe('Ship runtime clarity')
+    expect(result.workspace collaboration.active_goal_ids).toEqual(['goal-runtime'])
+    expect(result.workspace collaboration.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
   })
 

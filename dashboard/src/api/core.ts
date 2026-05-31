@@ -279,7 +279,7 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/shell',
   '/api/v1/dashboard/project-snapshot',
   '/api/v1/dashboard/namespace-truth',
-  '/api/v1/dashboard/room-truth',
+  '/api/v1/dashboard/workspace-truth',
   '/api/v1/dashboard/execution',
   '/api/v1/dashboard/planning',
   '/api/v1/dashboard/mission',
@@ -405,7 +405,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
       }
     case '/api/v1/dashboard/project-snapshot':
     case '/api/v1/dashboard/namespace-truth':
-    case '/api/v1/dashboard/room-truth':
+    case '/api/v1/dashboard/workspace-truth':
       return {
         status: 'initializing',
         generated_at: generatedAt,
@@ -438,7 +438,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
           done: 0,
           cancelled: 0,
         },
-        coordination_fsm: {
+        workspace collaboration_fsm: {
           schema_version: 1,
           mode: 'advisory',
           summary: {
@@ -456,7 +456,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
       return {
         generated_at: generatedAt,
         summary: {
-          room_health: 'initializing',
+          workspace_health: 'initializing',
         },
         incidents: [],
         recommended_actions: [],
@@ -756,7 +756,7 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
 }
 
 export function fetchOperatorDigest(options: {
-  targetType?: 'namespace' | 'room'
+  targetType?: 'namespace' | 'workspace'
   targetId?: string
   includeWorkers?: boolean
 } = {}): Promise<OperatorDigest> {

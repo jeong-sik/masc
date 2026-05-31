@@ -3,7 +3,7 @@
 #
 # Tests:
 #   1. gRPC health check returns SERVING
-#   2. gRPC reflection lists MascCoordination and Health
+#   2. gRPC reflection lists MascWorkspace and Health
 #   3. Subscribe RPC returns subscription_started event
 #   4. Subscribe stream receives broadcast events through the MCP bridge
 #   5. Server stays healthy after subscriber disconnect
@@ -33,7 +33,7 @@ wait_for_grpc_health() {
       grpcurl -plaintext \
         -import-path "${PROTO_DIR}" \
         -proto grpc_health_v1.proto \
-        -d '{"service":"masc.coordination.v1.MascCoordination"}' \
+        -d '{"service":"masc.workspace collaboration.v1.MascWorkspace"}' \
         "${MASC_GRPC_ADDR}" \
         grpc.health.v1.Health/Check 2>&1 || true
     )"
@@ -59,10 +59,10 @@ else
 fi
 
 services="$(grpcurl -plaintext "${MASC_GRPC_ADDR}" list 2>&1 || true)"
-if echo "$services" | grep -q "masc.coordination.v1.MascCoordination"; then
-  pass "gRPC reflection: MascCoordination listed"
+if echo "$services" | grep -q "masc.workspace collaboration.v1.MascWorkspace"; then
+  pass "gRPC reflection: MascWorkspace listed"
 else
-  fail "gRPC reflection" "MascCoordination missing from reflection output"
+  fail "gRPC reflection" "MascWorkspace missing from reflection output"
 fi
 if echo "$services" | grep -q "grpc.health.v1.Health"; then
   pass "gRPC reflection: Health listed"
@@ -73,10 +73,10 @@ fi
 subscribe_resp="$(
   grpcurl -plaintext -max-time 5 \
     -import-path "${PROTO_DIR}" \
-    -proto masc_coordination.proto \
+    -proto masc_workspace collaboration.proto \
     -d '{"agent_name":"e2e-harness","session_id":"grpc-e2e-harness","since_seq":"0","event_types":["message"]}' \
     "${MASC_GRPC_ADDR}" \
-    masc.coordination.v1.MascCoordination/Subscribe 2>&1 || true
+    masc.workspace collaboration.v1.MascWorkspace/Subscribe 2>&1 || true
 )"
 if echo "$subscribe_resp" | grep -q "subscription_started"; then
   pass "Subscribe: received subscription_started event"
@@ -87,10 +87,10 @@ fi
 subscribe_output="$(harness_mktemp_file "masc-transport-grpc")"
 grpcurl -plaintext \
   -import-path "${PROTO_DIR}" \
-  -proto masc_coordination.proto \
+  -proto masc_workspace collaboration.proto \
   -d '{"agent_name":"e2e-grpc-listener","session_id":"grpc-e2e-listener","since_seq":"0","event_types":["message"]}' \
   "${MASC_GRPC_ADDR}" \
-  masc.coordination.v1.MascCoordination/Subscribe >"${subscribe_output}" 2>&1 &
+  masc.workspace collaboration.v1.MascWorkspace/Subscribe >"${subscribe_output}" 2>&1 &
 subscribe_pid=$!
 sleep 1
 

@@ -169,9 +169,9 @@ keeper→tool 실행이 *macOS 운영자 workstation의 특정 디렉토리 layo
 | `lib/keeper/keeper_runtime_resilience.ml:24-43` | scheduling guard | runtime resilience check before autonomous fan-out |
 | `agent_tool_execute_command_parse.ml:217` | dispatch (gh family) | `[ "/bin/zsh"; "-lc"; ... ]` remaining gh command-parse site |
 | `lib/keeper/keeper_workspace_ops.ml:339,387,661,702,746` | dispatch (shell ops) | `"/bin/ls"`, `"/bin/cat"`, `"/bin/pwd"`, `"/usr/bin/head"`, `"/usr/bin/tail"`, `"/usr/bin/wc"` 6 sites |
-| `lib/tool_inline_dispatch_coord.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191, 210, 253, 331, 570` | persistence (agent identity) | `Printf.sprintf "/tmp/.masc_agent[_mcp]_%s" sid` **7 sites**. `TERM_SESSION_ID` 없으면 `"default"` silent collision |
+| `lib/tool_inline_dispatch_workspace.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191, 210, 253, 331, 570` | persistence (agent identity) | `Printf.sprintf "/tmp/.masc_agent[_mcp]_%s" sid` **7 sites**. `TERM_SESSION_ID` 없으면 `"default"` silent collision |
 | `lib/worker_dev_tools.ml:85` | dispatch (Fleet worker) | hard-coded home workspace root — 사용자별 binding |
-| `lib/coord/coord_utils_backend_setup.ml:103`, `config_dir_resolver.ml:59`, `env_config_core.ml:353`, `cdal/adversarial_eval.ml:294, 301` | test-mode auto-detection | `String.starts_with ~prefix:"test_" executable` 5 sites — 보안 risk (binary rename으로 test mode silently 진입) |
+| `lib/workspace/workspace_utils_backend_setup.ml:103`, `config_dir_resolver.ml:59`, `env_config_core.ml:353`, `cdal/adversarial_eval.ml:294, 301` | test-mode auto-detection | `String.starts_with ~prefix:"test_" executable` 5 sites — 보안 risk (binary rename으로 test mode silently 진입) |
 
 NixOS/Alpine/Linux server에서 silent fail.
 
@@ -187,7 +187,7 @@ OAS측 `Tool.disclosure_level` Hybrid + `Disclosure_resolver`는 `lib/pipeline/s
 |---|---|
 | **#2 String/substring classifier** | `keeper_internal_tools` 32-entry string list (`tool_catalog_surfaces.ml:28-96`) + `Tool_dispatch.registry : (string, handler) Hashtbl.t`. 두 repo 횡단 동일 anti-pattern. |
 | **#2 Prefix-gated** | `String.starts_with ~prefix:"masc_"` (`mcp_server_eio_tool_profile.ml:296`), `String.starts_with ~prefix:"test_"` 5 sites |
-| **Unknown → Permissive Default** | `Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID")` (`tool_inline_dispatch_coord.ml:186, 266`) → silent identity collision |
+| **Unknown → Permissive Default** | `Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID")` (`tool_inline_dispatch_workspace.ml:186, 266`) → silent identity collision |
 | **#1 Scattered hardcoded default** | ~~`/tmp/.masc_agent[_mcp]_<sid>` 7 sites, `/bin/zsh` 5 sites, `.masc-ide` 4 sites~~ — *모두 closed*: `/tmp/.masc_agent` (§1.5 PR-D), `/bin/zsh` (§1.5 PR-B), `.masc-ide` (#15533). `lib/` 잔존 0건; test 에 migration guard 만 유지. |
 | **Telemetry-as-fix** | Counter without fix는 본 RFC가 자체 안 함 — 4-tuple emission은 typed Outcome이 *fix*된 결과. counter는 alarm이 아닌 invariant check. |
 
@@ -491,7 +491,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 - `lib/keeper/keeper_tag_dispatch.ml` — Entry 3 fallback
 - `lib/keeper/host_config_provider.ml:3` — `/tmp/keeper-creds`
 - `lib/keeper/agent_tool_execute_runtime.ml:745, 802` — `/bin/bash`
-- `lib/tool_inline_dispatch_coord.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191-570` — `/tmp/.masc_agent[_mcp]_<sid>` 7 sites
+- `lib/tool_inline_dispatch_workspace.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191-570` — `/tmp/.masc_agent[_mcp]_<sid>` 7 sites
 - `lib/worker_oas.ml` (886 lines) — disclosure activation 대상
 
 ### 9.2 분석 보고서 (`~/me/.tmp/keeper-tool-cycle-audit/`)

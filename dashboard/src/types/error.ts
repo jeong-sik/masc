@@ -41,7 +41,7 @@ const CLASSIFIERS: ReadonlyArray<[RegExp, ErrorCode]> = [
   [/rate.?limit|too many requests/i, 'rate_limited'],
   [/validation|invalid|missing.*param|required/i, 'validation_error'],
   [/not implemented|unsupported/i, 'not_implemented'],
-  [/precondition|room not joined|not in room/i, 'precondition_failed'],
+  [/precondition|workspace not joined|not in workspace/i, 'precondition_failed'],
   [/internal|unexpected|unhandled|exception/i, 'internal_error'],
 ]
 

@@ -264,7 +264,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                         </span>
                         <div class="min-w-0 flex-1">
                           <div class="text-xs text-[var(--color-fg-primary)]">${eventDetail(event, 160)}</div>
-                           ${(() => { const ns = visibleNamespaceLabel(event.room_id); return ns
+                           ${(() => { const ns = visibleNamespaceLabel(event.workspace_id); return ns
                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)]">namespace: ${ns}</div>`
                              : null; })()}
                         </div>
@@ -391,7 +391,7 @@ function DerivedActivityPanels({ data }: { data: ActivityGraphResponse }) {
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           <span>필터: ${timeRangeLabel(activityRange())}</span>
-          ${(() => { const ns = visibleNamespaceLabel(data.window.room_id); return ns
+          ${(() => { const ns = visibleNamespaceLabel(data.window.workspace_id); return ns
             ? html`<span>namespace: ${ns}</span>`
             : null; })()}
         </div>

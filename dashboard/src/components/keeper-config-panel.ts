@@ -145,14 +145,14 @@ export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
 }
 
 export function coerceSharedMemoryScope(raw: string | undefined): SharedMemoryScope {
-  return raw === 'room' ? 'room' : 'disabled'
+  return raw === 'workspace' ? 'workspace' : 'disabled'
 }
 
 export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
-    active_goal_ids: c.coordination.active_goal_ids.length > 0
-      ? c.coordination.active_goal_ids
+    active_goal_ids: c.workspace collaboration.active_goal_ids.length > 0
+      ? c.workspace collaboration.active_goal_ids
       : c.active_goal_ids,
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
@@ -173,8 +173,8 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   const payload: KeeperConfigUpdatePayload = {}
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
-  const origActiveGoalIds = orig.coordination.active_goal_ids.length > 0
-    ? orig.coordination.active_goal_ids
+  const origActiveGoalIds = orig.workspace collaboration.active_goal_ids.length > 0
+    ? orig.workspace collaboration.active_goal_ids
     : orig.active_goal_ids
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
@@ -718,7 +718,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const goalOptions: GoalTreeNode[] = goalOptionsLoaded ? goalState.data : []
   const selectedActiveGoalIds = rd
     ? rd.active_goal_ids
-    : (c.coordination.active_goal_ids.length > 0 ? c.coordination.active_goal_ids : c.active_goal_ids)
+    : (c.workspace collaboration.active_goal_ids.length > 0 ? c.workspace collaboration.active_goal_ids : c.active_goal_ids)
   const knownGoalIds = new Set(goalOptions.map((goal) => goal.id))
   const unknownSelectedGoalIds = goalOptionsLoaded
     ? selectedActiveGoalIds.filter((goalId) => !knownGoalIds.has(goalId))
@@ -947,21 +947,21 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           </div>
         ` : null}
       </div>
-      ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
+      ${isVerifierRoleKeeper(c.workspace collaboration.mention_targets) ? html`
       <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
         <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
       ` : null}
-      ${c.coordination.mention_targets.length > 0 ? html`
+      ${c.workspace collaboration.mention_targets.length > 0 ? html`
       <div class="mt-1.5">
         <${SectionHeader} size="xs" class="mb-1">멘션 대상</${SectionHeader}>
-        <${ModelList} models=${c.coordination.mention_targets} />
+        <${ModelList} models=${c.workspace collaboration.mention_targets} />
       </div>
       ` : null}
       <div class="mt-1.5">
         <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
-        <${ModelList} models=${c.coordination.joined_room_ids} />
+        <${ModelList} models=${c.workspace collaboration.joined_workspace_ids} />
       </div>
 
       <${SectionHeader} title="핸드오프" />

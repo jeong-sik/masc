@@ -1,4 +1,4 @@
-/** Hand-written TypeScript types derived from proto/masc_coordination.proto.
+/** Hand-written TypeScript types derived from proto/masc_workspace collaboration.proto.
  *
  * These are used by the grpc-web transport until protoc codegen is wired.
  */
@@ -88,7 +88,7 @@ export interface StatusResponse {
   agents: AgentInfo[]
   tasks: TaskInfo[]
   messageCount: number
-  roomPath: string
+  workspacePath: string
 }
 
 export interface AgentInfo {

@@ -241,7 +241,7 @@ Rejected. The current dashboard `useEffect`-free pattern relies on `useQuery` ov
 
 ### 8.8 Alternative — modify agent_sdk to carry a `keeper_owned_run_id` in the envelope
 
-Deferred. The OAS publishers do not currently surface an external `client_correlation_id` field on `event_envelope.t`. Adding it would let masc-mcp pass a stable turn id at `Agent.run` invocation and re-enable write-time stamping. That is a separate OAS-side RFC and a coordination problem; the read-time join works without it. If the manifest-field approach proves insufficient over time, this alternative is the upgrade path — not the entry path.
+Deferred. The OAS publishers do not currently surface an external `client_correlation_id` field on `event_envelope.t`. Adding it would let masc-mcp pass a stable turn id at `Agent.run` invocation and re-enable write-time stamping. That is a separate OAS-side RFC and a workspace collaboration problem; the read-time join works without it. If the manifest-field approach proves insufficient over time, this alternative is the upgrade path — not the entry path.
 
 ## 9. Open items
 

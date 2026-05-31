@@ -20,7 +20,7 @@
 
 # E1 + E2 sites (| Error _ -> ()) — 13 baseline
 lib/goal/goal_janitor.ml:194:E2
-lib/coord/coord_agent.ml:184:E2
+lib/workspace/workspace_agent.ml:184:E2
 lib/mcp_server_eio_resource.ml:46:E2
 lib/runtime/runtime_event_bridge.ml:573:E1
 lib/auth.ml:1291:E1

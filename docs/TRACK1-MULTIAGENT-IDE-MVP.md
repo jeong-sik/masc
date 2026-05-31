@@ -12,7 +12,7 @@ Track 1 maps to the report's Phase 1/MVP stack:
 - Yjs Awareness over `yjs:awareness:*`
 - CodeMirror 6 read-only code viewer backed by server-authored projection docs
 - cytoscape.js Git graph projection grouped by agent/keeper
-- TODO Claim + Turn Queue as observation-driven coordination
+- TODO Claim + Turn Queue as observation-driven workspace collaboration
 - OpenTelemetry-ready attributes for collaboration frame flow
 
 ## Boundary
@@ -62,7 +62,7 @@ It provides:
 - current Phase 1 stack status (`contract`, `installed`, or `observed`)
 - TODO claim and turn-queue projections from existing dashboard data
 - cytoscape-ready Git graph nodes/edges from task worktree metadata
-- coordination fallback branches for active tasks that do not yet expose
+- workspace collaboration fallback branches for active tasks that do not yet expose
   worktree metadata
 
 ## Next Implementation Steps

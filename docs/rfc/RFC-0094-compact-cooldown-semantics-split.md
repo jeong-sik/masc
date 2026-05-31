@@ -289,7 +289,7 @@ storm under failure."
    compact gate's cooldown variable by name? Phase 2 audit step.
 2. **Cross-cycle migration cadence** — running services with old-shape
    meta-json blobs need at least one read-with-backfill cycle before
-   Phase 3 removes the backfill. Coordinate with deployment cadence.
+   Phase 3 removes the backfill. Align with deployment cadence.
 3. **Dashboard cutover** — do we batch the dashboard-panel rename with
    Phase 2 or as a follow-up after Phase 2 stabilizes? Inclined toward
    follow-up to keep the Phase 2 PR small.

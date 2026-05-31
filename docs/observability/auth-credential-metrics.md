@@ -218,9 +218,9 @@ in the meantime.
 
 ## History
 
-- PR-#10440 (2026 earlier) introduced `Auth.ensure_credential_alias` to fix `auth_doctor` and other short-form `load_credential` callers (8/14 keepers failing).
+- PR-#10440 (2026 earlier) introduced `Auth.ensure_credential_alias` to fix `auth_diagnostic` and other short-form `load_credential` callers (8/14 keepers failing).
 - PR-3a #11146 archived bare files only when their token differed from the canonical (dual-identity guard).
-- PR-3b1 #11152 starved the runtime caller (`tool_coord.canonicalize_if_keeper`) so all short-form runtime requests resolve through canonical.
+- PR-3b1 #11152 starved the runtime caller (`tool_workspace.canonicalize_if_keeper`) so all short-form runtime requests resolve through canonical.
 - PR-3b2 #11155 generalised the archive helper to remove any bare-form file regardless of shape -- under the assumption that PR-3b1 had killed every short-form caller. It missed the PR-#10440 alias writer running in the same boot, producing the ping-pong.
 - PR #15112 (2026-05-14) introduced the γ classifier, the retention sweep, the periodic audit fiber, the Prometheus surface, and these alert rules.
 

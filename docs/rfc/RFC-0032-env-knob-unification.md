@@ -177,7 +177,7 @@ Order of migration (by impact, low → high):
 1. `lib/runtime/` — well-isolated, ~30 knobs.
 2. `lib/keeper/` — hot path; ~50 knobs. Migrate per-keeper-submodule.
 3. `lib/dashboard/` — ~20 knobs.
-4. `lib/server/`, `lib/oas*/`, `lib/coord/` — remainder.
+4. `lib/server/`, `lib/oas*/`, `lib/workspace/` — remainder.
 
 Each module migration is one PR. Total PR count: ~10–15.
 

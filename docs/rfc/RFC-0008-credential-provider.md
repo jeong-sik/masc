@@ -48,7 +48,7 @@ type error =
   | Tear_down_failed of { identity : string; reason : string }
 
 (** Must be total. Pure up to filesystem read; no network. *)
-val resolve : config:Coord.config -> identity:string -> (binding, error) result
+val resolve : config:Workspace.config -> identity:string -> (binding, error) result
 
 (** Called once per keeper session, after the container is up and (for Option B)
     after bootstrap argv has executed. Implementations MUST rewrite [hosts.yml:user]

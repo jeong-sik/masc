@@ -361,5 +361,5 @@ and main is verified green.
 - **RFC-0056**: Incremental sub-library extraction (Phase 0 cdal + Phase 1A–1K leaves). This RFC is the strategic successor for the keeper namespace specifically.
 - **RFC-0042**: Closed sum type for keeper turn terminal code. The `*_failure_site` / `*_failure_kind` modules under Phase 2.A audit are RFC-0042 lineage.
 - **RFC-0050**: Dashboard component ownership decomposition. Same anti-LoC-cap stance; same workaround rejection bar.
-- **Track A research**: `knowledge/research/2026-05-15-ocaml-large-system-decomposition-patterns.md` (worktree-resident; merge-bound).
+- **Track A research**: `knowledge/research/2026-05-15-ocaml-large-system-decomposition-patterns.md` (worktree-loaded; merge-bound).
 - **MEMORY**: `feedback_hardcoding_and_legacy_zero_tolerance` (2026-05-14), `feedback_extraction_audit_must_grep_both_bare_and_wrapped`.

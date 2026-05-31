@@ -11,7 +11,7 @@
 
 ### 1.1 Domain route modules (16)
 
-`server_routes_http_routes_<domain>.ml` for: `activity`, `artifacts`, `attribution`, `autonomous`, `runtime`, `channel_gate`, `dashboard`, `frontend`, `git_graph`, `legendary_bash`, `multimodal`, `provider_runs`, `resilience`, `room`, `sidecar`, `verification`.
+`server_routes_http_routes_<domain>.ml` for: `activity`, `artifacts`, `attribution`, `autonomous`, `runtime`, `channel_gate`, `dashboard`, `frontend`, `git_graph`, `legendary_bash`, `multimodal`, `provider_runs`, `resilience`, `workspace`, `sidecar`, `verification`.
 
 ### 1.2 Infrastructure (~10)
 

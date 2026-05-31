@@ -38,7 +38,7 @@ import { routeLinkLabels } from './ide-context-route-helpers'
  * Conflict avoidance (RFC §10): the `keeper-trace` IDE_LAYERS entry
  * declares `conflictsWith: ['runtime']` so activating either layer drops
  * the other automatically — see `layered-overlay.ts`. PR-β does not
- * coordinate with runtime-overlay directly; the layer registry handles it.
+ * orchestrate with runtime-overlay directly; the layer registry handles it.
  */
 
 export const TRACE_CHIP_CAP = 3

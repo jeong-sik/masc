@@ -18,7 +18,7 @@ CONSTANTS
 VARIABLES
     online,          \* Set of currently online agents
     subscriptions,   \* Function: agent -> set of subscribed event types
-    messageQueue,    \* Sequence of pending messages (room storage)
+    messageQueue,    \* Sequence of pending messages (workspace storage)
     delivered,       \* Function: agent -> set of received message IDs
     msgCounter       \* Counter for unique message IDs
 
@@ -46,13 +46,13 @@ Init ==
 -----------------------------------------------------------------------------
 (* Actions *)
 
-(* Agent joins the room *)
+(* Agent joins the workspace *)
 Join(agent) ==
     /\ agent \notin online
     /\ online' = online \cup {agent}
     /\ UNCHANGED <<subscriptions, messageQueue, delivered, msgCounter>>
 
-(* Agent leaves the room *)
+(* Agent leaves the workspace *)
 Leave(agent) ==
     /\ agent \in online
     /\ online' = online \ {agent}

@@ -28,7 +28,7 @@ Result:
 | descriptor ∖ surface | 82 | `keeper_board_*` (managed-keeper twins), `masc_board_delete`, `masc_config`, `masc_get_metrics`, … (intentionally not operator-visible) |
 | intersect | 46 | already descriptor-backed surface entries |
 
-Two SSOTs that should be one. RFC-0179 + RFC-0182 brought descriptors to *most* of the `masc_*` operator surface, but **9 lifecycle/authoring tools never entered the descriptor system at all** because their handlers live in `lib/tool_inline_dispatch.ml` (MCP server-level inline path), not in `Tool_coord.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.
+Two SSOTs that should be one. RFC-0179 + RFC-0182 brought descriptors to *most* of the `masc_*` operator surface, but **9 lifecycle/authoring tools never entered the descriptor system at all** because their handlers live in `lib/tool_inline_dispatch.ml` (MCP server-level inline path), not in `Tool_workspace.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.
 
 The descriptor enum (`In_process | Filesystem | Shell_ir | Remote_mcp`) is closed and assumes the descriptor *owns* execution. Tools handled by inline dispatch have no slot.
 
@@ -93,9 +93,9 @@ let handle ctx ~descriptor ~args =
 
 | name | cluster id | input_schema source |
 |---|---|---|
-| `masc_start` | `masc.coord.start` | `Tool_schemas_coord.schemas` |
-| `masc_join` | `masc.coord.join` | `Tool_schemas_coord.schemas` |
-| `masc_leave` | `masc.coord.leave` | `Tool_schemas_coord.schemas` |
+| `masc_start` | `masc.workspace.start` | `Tool_schemas_workspace.schemas` |
+| `masc_join` | `masc.workspace.join` | `Tool_schemas_workspace.schemas` |
+| `masc_leave` | `masc.workspace.leave` | `Tool_schemas_workspace.schemas` |
 | `masc_broadcast` | `masc.comm.broadcast` | `Tool_schemas_comm.schemas` |
 | `masc_messages` | `masc.comm.messages` | `Tool_schemas_comm.schemas` |
 | `masc_who` | `masc.comm.who` | `Tool_schemas_comm.schemas` |
@@ -110,7 +110,7 @@ Each entry pulls `description` and `input_schema` from the inline dispatch's exi
 | Phase | PR scope | Verifiable end-state |
 |---|---|---|
 | **P1** | `External_inline` + `Tool_external_inline` enum extension. `handle` returns `None` for `External_inline`. Zero descriptor entries added yet. | Build green. `internal_descriptors` count unchanged. Test: a synthetic `External_inline` descriptor routes through `handle` → `None`. |
-| **P2** | Add 3 coord lifecycle descriptors (`masc_start/join/leave`). | `audit_descriptor_surface` shows 6 missing, not 9. `masc_start` etc. carry `Public_mcp` visibility. |
+| **P2** | Add 3 workspace lifecycle descriptors (`masc_start/join/leave`). | `audit_descriptor_surface` shows 6 missing, not 9. `masc_start` etc. carry `Public_mcp` visibility. |
 | **P3** | Add 3 comm descriptors (`masc_broadcast/messages/who`). | 3 missing. Inline path untouched. |
 | **P4** | Add 3 remaining (`masc_keeper_sandbox_status`, 2 persona). | 0 missing. **Visibility projection** introduced: `public_mcp_surface_tools = filter (visibility = Public_mcp) all_descriptors |> sort_uniq`. Existing hand list deleted. Compile-time test fails if any surface drift. |
 | **P5** (follow-up) | Audit other surfaces (`spawned_agent_surface_tools` etc.) → separate RFC. | Out of scope for 0190. |
@@ -133,7 +133,7 @@ This RFC does *not* trigger workaround signatures:
 
 ## 9. Rejected alternatives
 
-- **(A-pragmatic)** Add 9 descriptors with `In_process` executor + dispatch arms in `handle_masc_coord` / `handle_masc_persona` / `handle_masc_keeper` that call back into `Tool_inline_dispatch`. Rejected: introduces dual handlers for the same tool name (descriptor cluster *and* inline path), guaranteed drift under future changes.
+- **(A-pragmatic)** Add 9 descriptors with `In_process` executor + dispatch arms in `handle_masc_workspace` / `handle_masc_persona` / `handle_masc_keeper` that call back into `Tool_inline_dispatch`. Rejected: introduces dual handlers for the same tool name (descriptor cluster *and* inline path), guaranteed drift under future changes.
 - **(B-only)** Keep the hand list, add a test that asserts every surface entry exists in *some* known set (descriptor or allowlist). Rejected as the *final* state — drift cannot be eliminated, only reported. Acceptable as an *interim* gate (see RFC-0190 implementation companion: invariant test PR can land before P1 to ratchet the count down).
 
 ## 10. Acceptance criteria

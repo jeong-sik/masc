@@ -250,7 +250,7 @@ type health_state =
 
 type t
 
-val create : Coord.config -> t
+val create : Workspace.config -> t
 
 val start_probe_fiber : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> t -> unit
 (** Spawn one fiber per [providers.X.healthcheck enabled=true] block. *)
@@ -281,7 +281,7 @@ Wire-in:
   produces an empty list, fall through to the original list (no deadlock).
 - `lib/runtime/runtime_runtime.ml` (or whatever owns the runtime context per
   config) — own one `Provider_health.t` per runtime config.
-- `lib/coord/coord_lifecycle.ml` (or the equivalent top-level
+- `lib/workspace/workspace_lifecycle.ml` (or the equivalent top-level
   `Eio.Switch.run` site) — call `start_probe_fiber` at startup, with the
   switch attached to the supervisor's lifetime.
 

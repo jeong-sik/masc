@@ -328,7 +328,7 @@ fn update_monitor_agents(_count: u32, _summary: &str) {
     }
 }
 
-/// Update the Monitor panel "Room Activity" event feed.
+/// Update the Monitor panel "Workspace Activity" event feed.
 fn update_monitor_events(_summary: &str) {
     #[cfg(target_arch = "wasm32")]
     {

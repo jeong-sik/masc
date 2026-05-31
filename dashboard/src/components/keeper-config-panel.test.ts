@@ -52,7 +52,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       goal: 'Ship stable keeper ops',
       short_goal: 'Diagnose agent liveness',
       mid_goal: 'Reduce restart confusion',
-      long_goal: 'Keep coordination stable',
+      long_goal: 'Keep workspace collaboration stable',
       will: 'Stay on call',
       needs: 'Accurate runtime state',
       desires: 'Clear operator feedback',
@@ -115,9 +115,9 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       presence_keepalive: true,
       presence_keepalive_sec: 30,
     },
-    coordination: {
+    workspace collaboration: {
       mention_targets: ['sangsu'],
-      joined_room_ids: ['default'],
+      joined_workspace_ids: ['default'],
       active_goal_ids: ['goal-runtime'],
       active_goals: [
         { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
@@ -241,8 +241,8 @@ describe('sandbox coerce helpers', () => {
     expect(coerceNetworkMode(undefined)).toBe('inherit')
   })
 
-  it('coerceSharedMemoryScope maps room, falls back to disabled otherwise', () => {
-    expect(coerceSharedMemoryScope('room')).toBe('room')
+  it('coerceSharedMemoryScope maps workspace, falls back to disabled otherwise', () => {
+    expect(coerceSharedMemoryScope('workspace')).toBe('workspace')
     expect(coerceSharedMemoryScope('disabled')).toBe('disabled')
     expect(coerceSharedMemoryScope('unknown')).toBe('disabled')
     expect(coerceSharedMemoryScope(undefined)).toBe('disabled')
@@ -277,9 +277,9 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       cooldown_sec: 0,
     } as KeeperConfig['handoff'],
     runtime: {} as KeeperConfig['runtime'],
-    coordination: {
+    workspace collaboration: {
       mention_targets: [],
-      joined_room_ids: [],
+      joined_workspace_ids: [],
       active_goal_ids: [],
       active_goals: [],
       active_goal_count: 0,
@@ -351,7 +351,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.network_mode).toBe('none')
   })
 
-  it('emits all three when switching to hardened+none+room in one save', () => {
+  it('emits all three when switching to hardened+none+workspace in one save', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'local',
       network_mode: 'inherit',
@@ -375,9 +375,9 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   it('emits active_goal_ids when goal bindings change', () => {
     const c = makeKeeperConfigForSandbox({
       active_goal_ids: ['goal-a'],
-      coordination: {
+      workspace collaboration: {
         mention_targets: [],
-        joined_room_ids: [],
+        joined_workspace_ids: [],
         active_goal_ids: ['goal-a'],
         active_goals: [{ id: 'goal-a', title: 'Goal A', horizon: 'short' }],
         active_goal_count: 1,

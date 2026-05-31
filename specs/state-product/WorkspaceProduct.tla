@@ -1,10 +1,10 @@
---------------------------- MODULE CoordinationProduct ---------------------------
+--------------------------- MODULE WorkspaceProduct ---------------------------
 \* Advisory Goal x Task x Board x Reward orthogonal product.
 \*
 \* Mirrors:
 \*
 \* Advisory product spec only. There is no current OCaml
-\* coordination_product module; keep this spec detached until a new
+\* workspace collaboration_product module; keep this spec detached until a new
 \* implementation owner is introduced.
 \*
 \* This model checks cross-axis safety only. Each axis can evolve
@@ -13,8 +13,8 @@
 \* instead of blocking writes.
 \*
 \* Two-config pattern:
-\*   CoordinationProduct.cfg       -- clean spec, invariants must hold
-\*   CoordinationProduct-buggy.cfg -- buggy spec, invariants MUST be violated
+\*   WorkspaceProduct.cfg       -- clean spec, invariants must hold
+\*   WorkspaceProduct-buggy.cfg -- buggy spec, invariants MUST be violated
 
 VARIABLES goal, task, board, reward, earned
 

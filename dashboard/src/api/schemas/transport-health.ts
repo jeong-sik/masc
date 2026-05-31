@@ -55,7 +55,7 @@ const SummarySchema = object({
 
 const SseOuterSchema = object({
   sessions_observer: fallback(number(), 0),
-  sessions_coordinator: fallback(number(), 0),
+  sessions_workspace client: fallback(number(), 0),
   sessions_presence: fallback(number(), 0),
   sessions_total: fallback(number(), 0),
   external_subscribers: fallback(number(), 0),
@@ -77,7 +77,7 @@ const SseOuterSchema = object({
 
 interface SseSection {
   sessions_observer: number
-  sessions_coordinator: number
+  sessions_workspace client: number
   sessions_presence: number
   sessions_total: number
   external_subscribers: number
@@ -177,7 +177,7 @@ const Http2Schema = object({
 
 const ClusterSchema = object({
   cluster: fallback(string(), 'default'),
-  room_id: fallback(string(), 'default'),
+  workspace_id: fallback(string(), 'default'),
   topology_available: fallback(boolean(), false),
   topology_source: fallback(string(), 'unknown'),
   // These five use `asNumber(x) ?? null` — absent → null, not undefined.
@@ -268,7 +268,7 @@ export function parseTransportHealthData(data: unknown): TransportHealthData {
     summary: outer.summary,
     sse: {
       sessions_observer: outer.sse.sessions_observer,
-      sessions_coordinator: outer.sse.sessions_coordinator,
+      sessions_workspace client: outer.sse.sessions_workspace client,
       sessions_presence: outer.sse.sessions_presence,
       sessions_total: outer.sse.sessions_total,
       external_subscribers: outer.sse.external_subscribers,

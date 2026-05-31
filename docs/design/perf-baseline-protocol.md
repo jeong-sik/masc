@@ -87,7 +87,7 @@ histogram bucket 등록이 선행되어야 한다. 본 PR 은 그 사실을
 | cold vs warm 분리 | `phase=cold|warm` label | **미부착** | Phase 0.2.C |
 
 `benchmarks/quick-bench.sh` 와 `benchmarks/benchmark.sh` 가 lane
-분리 (session/read/coordination/runtime/a2a/lock) 를 이미 한다.
+분리 (session/read/workspace collaboration/runtime/a2a/lock) 를 이미 한다.
 이 lane 들은 cold vs warm 의 proxy 로 쓸 수 있지만, **dispatcher
 레벨에서 phase label 이 붙은 histogram 이 더 정확하다**. 본
 baseline 은 lane 별 percentile 을 quick-bench 출력으로 보존하고,

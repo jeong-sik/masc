@@ -17,7 +17,7 @@ implementation_prs: [16929, 17316, 17336]
 > (shell-ir GADT coverage, #19283→#19387), and every increase required a
 > paired baseline regenerate PR (#19231, #19433). The recurring
 > baseline-drift false-fails blocked every open PR until a regenerate PR
-> landed — the ratchet became a coordination tax rather than a guard.
+> landed — the ratchet became a workspace collaboration tax rather than a guard.
 >
 > Removed: `scripts/code-smell/measure.sh`,
 > `scripts/lint/godfile-size-regression.sh`, `ci/code-smell-baseline.json`,

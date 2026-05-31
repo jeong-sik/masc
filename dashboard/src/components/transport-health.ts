@@ -415,8 +415,8 @@ export function TransportHealthPanel() {
     : `topology ${data.cluster.topology_source}`
   const namespaceChip =
     data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
-      ? `${data.cluster.cluster} / namespace ${data.cluster.room_id}`
-      : `namespace ${data.cluster.room_id}`
+      ? `${data.cluster.cluster} / namespace ${data.cluster.workspace_id}`
+      : `namespace ${data.cluster.workspace_id}`
   const truthLine = transportTruthLine(data)
 
   return html`
@@ -484,7 +484,7 @@ export function TransportHealthPanel() {
             <${SectionCard} label="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
-                <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
+                <${MetricRow} label="코디네이터" value=${data.sse.sessions_workspace client} />
                 <${MetricRow} label="프레즌스" value=${data.sse.sessions_presence} />
                 <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
                 <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />

@@ -55,7 +55,7 @@ Seven KPIs (`scripts/audit-shell-ir-consumption.sh` measures all of them):
 - Replacing all string-based safety in hooks (`.claude/hooks/git_guard.ml`
   uses substring matching). Out of scope; recorded as future RFC
   candidate in §S6.
-- Touching MASC-coord state machine. The Shell IR shape is orthogonal
+- Touching MASC-workspace state machine. The Shell IR shape is orthogonal
   to the keeper lifecycle FSM (RFC-0135).
 
 ## §3 · Phase plan

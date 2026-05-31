@@ -27,7 +27,7 @@ Phase 2 closes both gaps without giving the trust loop authority to silently rew
 
 ## Phase 2a — Operator recommendation (observation only)
 
-### `lib/coord/coord_hooks.ml`
+### `lib/workspace/workspace_hooks.ml`
 
 Add a Hebbian-style observation callback (mirrors `hebbian_on_task_done_fn`, `activity_emit_fn`):
 

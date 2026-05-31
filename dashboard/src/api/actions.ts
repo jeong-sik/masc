@@ -26,7 +26,7 @@ export async function sendBroadcast(_actorHint: string, message: string): Promis
   })
 }
 
-export async function fetchRoomMessages(limit = 40): Promise<string[]> {
+export async function fetchWorkspaceMessages(limit = 40): Promise<string[]> {
   const text = await callMcpTool('masc_messages', { limit })
   return text
     .split('\n')

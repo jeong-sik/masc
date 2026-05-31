@@ -743,7 +743,7 @@ function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; ev
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
               <th scope="col" class="px-2 py-1.5 text-left">agent</th>
-              <th scope="col" class="px-2 py-1.5 text-left">room</th>
+              <th scope="col" class="px-2 py-1.5 text-left">workspace</th>
               <th scope="col" class="px-2 py-1.5 text-left">kind</th>
             </tr>
           </thead>
@@ -752,7 +752,7 @@ function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; ev
               <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
                 <td class="px-2 py-1.5 font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
                 <td class="px-2 py-1.5 text-text-strong">${e.agent_name}</td>
-                <td class="px-2 py-1.5 font-mono text-text-muted">${e.room_id}</td>
+                <td class="px-2 py-1.5 font-mono text-text-muted">${e.workspace_id}</td>
                 <td class="px-2 py-1.5">
                   <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${severityClass(e.kind)}">
                     ${fmtKind(e.kind)}

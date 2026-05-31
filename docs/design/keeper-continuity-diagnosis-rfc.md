@@ -131,10 +131,10 @@ Phase 1 결과에 따라 결정. 미리 설계하지 않는다.
 
 ### 수정 범위
 
-- `set_room`/`join` 시 해당 room에서 `cleanup_zombies` 1회 호출
-  - 구현 위치: `tool_inline_dispatch_room.ml:185` (set_room), `:226` (join)
-  - **주의**: `set_room` 핸들러는 중간에 `state.Mcp_server.room_config`를 교체. `cleanup_zombies` 호출은 **새로 resolve된 config**로. 교체 전 `ctx.config`로 호출하면 이전 room에서 GC 실행.
-- multi-room gap 증명 필요: gap이 없으면 "set_room 시 1회 cleanup" 연결만으로 종결.
+- `set_workspace`/`join` 시 해당 workspace에서 `cleanup_zombies` 1회 호출
+  - 구현 위치: `tool_inline_dispatch_workspace.ml:185` (set_workspace), `:226` (join)
+  - **주의**: `set_workspace` 핸들러는 중간에 `state.Mcp_server.workspace_config`를 교체. `cleanup_zombies` 호출은 **새로 resolve된 config**로. 교체 전 `ctx.config`로 호출하면 이전 workspace에서 GC 실행.
+- multi-workspace gap 증명 필요: gap이 없으면 "set_workspace 시 1회 cleanup" 연결만으로 종결.
 
 ## Phase 4: Naming Cleanup
 
@@ -147,7 +147,7 @@ Source files (functional 변경): 9 files, 19 occurrences + TUI.
 | `server_runtime_bootstrap.ml:156,172,173,178` | dir creation, prune |
 | `keeper_types_profile.ml:501,508` | `keeper_dir` return |
 | `keeper_types_support.ml:23,24,28` | path helpers |
-| `room_gc.ml:295` | orphan cleanup |
+| `workspace_gc.ml:295` | orphan cleanup |
 | `tool_housekeep.ml:18,21,171` | path classification |
 | `keeper_schema.ml` | API descriptions |
 | `bin/masc_tui.ml:990+` | TUI display |
@@ -211,6 +211,6 @@ migrate_recursive old_dir new_dir:
 ```
 Phase 1 (OAS checkpoint 진단 — GATE, debug log 2개만 코드 변경)
   → Phase 2 (진단 결과에 따른 fix)
-    → Phase 3 (GC: set_room/join 시 cleanup 연결)
+    → Phase 3 (GC: set_workspace/join 시 cleanup 연결)
       → Phase 4 (naming: full inventory + 재귀 migration)
 ```

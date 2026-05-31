@@ -64,7 +64,7 @@ gRPC / phi-accrual은 `adaptive-heartbeat-grpc-and-phi-rollout-rfc.md` 에서 �
 | Flag | Default | Meaning | Rollback role |
 |---|---|---|---|
 | `MASC_KEEPER_ADAPTIVE_HEARTBEAT_ENABLED` | `true` | adaptive heartbeat master switch | emergency master disable |
-| `MASC_KEEPER_WORK_AS_HEARTBEAT` | `true` | successful room heartbeat 기반 freshness skip | subsystem disable |
+| `MASC_KEEPER_WORK_AS_HEARTBEAT` | `true` | successful workspace heartbeat 기반 freshness skip | subsystem disable |
 | `MASC_KEEPER_MAX_SILENCE_SEC` | `120` | freshness lease upper bound | tuning only |
 | `MASC_KEEPER_SELF_PRESERVATION_ENABLED` | `true` | mass-failure suppression | subsystem disable |
 | `MASC_KEEPER_SELF_PRESERVATION_RATIO` | `0.3` | suppression ratio threshold | tuning only |
@@ -138,7 +138,7 @@ Stage 0 artifact acceptance criteria:
 
 정책:
 
-- one room or 1-3 durable keepers only
+- one workspace or 1-3 durable keepers only
 - adaptive flags는 production target defaults 그대로 사용
 - gRPC remains disabled
 - canary 동안 operator가 `Dead`, `Crashed`, `failure_reason`, `last_successful_heartbeat_age_sec` 를 직접 확인할 수 있어야 한다
@@ -151,7 +151,7 @@ Promotion gate:
 - existing global PERFORMANCE-SLO 위반 없음
 - zero unexpected `Dead` resurrection
 - zero reconcile relaunch of registered keeper
-- zero freshness skip after failed room heartbeat
+- zero freshness skip after failed workspace heartbeat
 - zero unplanned self-preservation trigger
 - explicit proof that reconcile exclusion is keyed by `is_registered`
 
@@ -192,7 +192,7 @@ Promotion gate:
 | keeper continuity fail | stop promotion immediately |
 | `Dead` resurrection observed | rollback immediately |
 | registered `Crashed` or `Dead` keeper가 reconcile로 재기동 | rollback immediately |
-| failed `Room.heartbeat_in_room` 이후 freshness skip 발생 | rollback immediately |
+| failed `Workspace.heartbeat_in_workspace` 이후 freshness skip 발생 | rollback immediately |
 | unplanned self-preservation trigger | stop promotion and investigate |
 | global MCP/REST/SSE SLO breach | stop promotion; rollback if linked to candidate |
 
@@ -219,7 +219,7 @@ Promotion gate:
 
 - registered crashed/dead keeper가 reconcile에 의해 다시 뜬다
 - `Dead` tombstone이 operator 의도 없이 사라진다
-- failed room heartbeat가 turn success로 가려진다
+- failed workspace heartbeat가 turn success로 가려진다
 
 Decision rule:
 

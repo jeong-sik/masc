@@ -11,7 +11,7 @@ describe('normalizeStatusDetail', () => {
         {
           role: 'user',
           content:
-            '## Current World State\n\n### Room State\n- Failed tasks: 9\n- Active agents: 5\n\n### Context\n- Utilization: 72%\n- Idle: 132s',
+            '## Current World State\n\n### Workspace State\n- Failed tasks: 9\n- Active agents: 5\n\n### Context\n- Utilization: 72%\n- Idle: 132s',
           ts_unix: 10,
         },
         {

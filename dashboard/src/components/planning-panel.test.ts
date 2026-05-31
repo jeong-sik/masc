@@ -21,12 +21,12 @@ vi.mock('../router', () => ({
   }),
 }))
 
-const coordinationSignal = signal<unknown>(null)
+const workspace collaborationSignal = signal<unknown>(null)
 const tasksSignal = signal<unknown[]>([])
 const goalsSignal = signal<unknown[]>([])
 
 vi.mock('../store', () => ({
-  get coordinationFsmSnapshot() { return coordinationSignal },
+  get workspace collaborationFsmSnapshot() { return workspace collaborationSignal },
   get tasks() { return tasksSignal },
   get goals() { return goalsSignal },
 }))
@@ -56,7 +56,7 @@ function setRoute(view?: string, focus?: string) {
 describe('PlanningPanel', () => {
   beforeEach(() => {
     setRoute()
-    coordinationSignal.value = null
+    workspace collaborationSignal.value = null
     tasksSignal.value = []
     goalsSignal.value = []
     openTaskDetailMock.mockReset()
@@ -97,8 +97,8 @@ describe('PlanningPanel', () => {
     expect(screen.getByTestId('goal-tree')).toBeTruthy()
   })
 
-  it('renders coordination health violations', () => {
-    coordinationSignal.value = {
+  it('renders workspace collaboration health violations', () => {
+    workspace collaborationSignal.value = {
       mode: 'advisory',
       summary: {
         products: 1,

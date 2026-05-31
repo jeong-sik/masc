@@ -184,7 +184,7 @@ function normalizeActionDescriptor(raw: unknown): OperatorActionDescriptor | nul
 function normalizeSummary(raw: unknown): DashboardMissionSummary {
   const root = isRecord(raw) ? raw : {}
   return {
-    room_health: asString(root.room_health),
+    workspace_health: asString(root.workspace_health),
     cluster: asString(root.cluster),
     project: asString(root.project),
     paused: asBoolean(root.paused),

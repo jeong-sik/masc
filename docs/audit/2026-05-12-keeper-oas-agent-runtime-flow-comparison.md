@@ -390,7 +390,7 @@ flowchart TD
 - MASC patches and saves the OAS checkpoint after the run.
 - Memory is injected hook-first, but continuity still depends on text blocks and state snapshots.
 
-The improvement target is not "add more compaction"; it is a clearer SSOT: OAS should own runtime transcript/checkpoint state, and MASC should own coordination receipts, sidecars, governance, and durable memory policy.
+The improvement target is not "add more compaction"; it is a clearer SSOT: OAS should own runtime transcript/checkpoint state, and MASC should own workspace collaboration receipts, sidecars, governance, and durable memory policy.
 
 ## 6. External Runtime Comparison
 

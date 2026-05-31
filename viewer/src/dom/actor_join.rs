@@ -20,7 +20,7 @@ use crate::config;
 use crate::dom::action_panel::friendly_js_error;
 #[cfg(target_arch = "wasm32")]
 use crate::game::lifecycle::TrpgLifecycleState;
-use crate::game::state::{RoomState, TurnProgressState};
+use crate::game::state::{WorkspaceState, TurnProgressState};
 
 // ─── Marker Resource ────────────────────────
 
@@ -54,18 +54,18 @@ pub fn unbind_actor_join(mut commands: Commands) {
 
 // ─── Interaction State Sync System ──────────
 
-/// Disable join controls when the room is not in an interactive state.
-/// This prevents confusing claim errors for ended/idle/unavailable rooms.
+/// Disable join controls when the workspace is not in an interactive state.
+/// This prevents confusing claim errors for ended/idle/unavailable workspaces.
 pub fn sync_join_panel_interaction_state(
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
     progress: Res<TurnProgressState>,
 ) {
-    let _ = (&room_state, &progress);
+    let _ = (&workspace_state, &progress);
 
     #[cfg(target_arch = "wasm32")]
     {
         let lifecycle =
-            TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+            TrpgLifecycleState::from_workspace_progress(&workspace_state.status, &progress.workspace_status);
         let can_join = lifecycle.accepts_player_input();
 
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -266,7 +266,7 @@ async fn claim_actor(actor_id: &str, keeper_name: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = config::build_masc_url("api/v1/trpg/actors/claim");
-    let room_id = config::current_room_id();
+    let workspace_id = config::current_workspace_id();
 
     // If keeper_name is empty, default to "Anonymous Viewer"
     let keeper = if keeper_name.trim().is_empty() {
@@ -276,7 +276,7 @@ async fn claim_actor(actor_id: &str, keeper_name: &str) -> Result<(), JsValue> {
     };
 
     let body = serde_json::json!({
-        "room_id": room_id,
+        "workspace_id": workspace_id,
         "actor_id": actor_id,
         "keeper_name": keeper
     })
@@ -321,14 +321,14 @@ async fn release_actor(actor_id: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = config::build_masc_url("api/v1/trpg/actors/release");
-    let room_id = config::current_room_id();
+    let workspace_id = config::current_workspace_id();
 
     // Retrieve keeper name from hidden state if possible, or send empty (server might require it?)
     // The current API spec for release requires `keeper_name`.
     let keeper = get_claimed_keeper_from_dom().unwrap_or("Anonymous Viewer".to_string());
 
     let body = serde_json::json!({
-        "room_id": room_id,
+        "workspace_id": workspace_id,
         "actor_id": actor_id,
         "keeper_name": keeper,
         "reason": "Viewer user left"
@@ -441,7 +441,7 @@ fn set_claimed_state(actor_id: &str) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
-    let room_id = config::current_room_id();
+    let workspace_id = config::current_workspace_id();
 
     if let Some(el) = doc.get_element_by_id("claimed-actor-id") {
         if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
@@ -461,9 +461,9 @@ fn set_claimed_state(actor_id: &str) {
         }
     }
 
-    if let Some(el) = doc.get_element_by_id("claimed-room-id") {
+    if let Some(el) = doc.get_element_by_id("claimed-workspace-id") {
         if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
-            input.set_value(&room_id);
+            input.set_value(&workspace_id);
         }
     }
 }
@@ -484,7 +484,7 @@ fn clear_claimed_state() {
             input.set_value("");
         }
     }
-    if let Some(el) = doc.get_element_by_id("claimed-room-id") {
+    if let Some(el) = doc.get_element_by_id("claimed-workspace-id") {
         if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
             input.set_value("");
         }
@@ -518,9 +518,9 @@ fn get_claimed_keeper_from_dom() -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn get_claimed_room_id_from_dom() -> Option<String> {
+fn get_claimed_workspace_id_from_dom() -> Option<String> {
     let doc = web_sys::window().and_then(|w| w.document())?;
-    let el = doc.get_element_by_id("claimed-room-id")?;
+    let el = doc.get_element_by_id("claimed-workspace-id")?;
     let input = el.dyn_ref::<web_sys::HtmlInputElement>()?;
     let val = input.value();
     if val.is_empty() {
@@ -538,9 +538,9 @@ fn restore_join_panel_state() {
         return;
     };
 
-    let current_room = config::current_room_id();
-    let claimed_room = get_claimed_room_id_from_dom().unwrap_or_default();
-    if claimed_room.trim().is_empty() || claimed_room.trim() != current_room {
+    let current_workspace = config::current_workspace_id();
+    let claimed_workspace = get_claimed_workspace_id_from_dom().unwrap_or_default();
+    if claimed_workspace.trim().is_empty() || claimed_workspace.trim() != current_workspace {
         clear_claimed_state();
         swap_to_join_panel();
         return;
@@ -558,7 +558,7 @@ fn friendly_claim_error(raw: &str) -> String {
         "이미 다른 keeper가 점유한 캐릭터입니다.".to_string()
     } else if lower.contains("not found") || lower.contains("unknown actor") {
         "캐릭터 ID를 찾을 수 없습니다.".to_string()
-    } else if lower.contains("room ended") || lower.contains("session ended") {
+    } else if lower.contains("workspace ended") || lower.contains("session ended") {
         "종료된 세션에서는 참여할 수 없습니다.".to_string()
     } else if lower.contains("unavailable") {
         "현재 세션 상태에서는 참여할 수 없습니다.".to_string()

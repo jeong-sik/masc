@@ -21,21 +21,21 @@ interface TimelineRow {
   stateBlockCount: number
 }
 
-interface RoomBucket {
-  room: string
+interface WorkspaceBucket {
+  workspace: string
   rows: TimelineRow[]
 }
 
-export interface MessageRoomModel {
-  rooms: RoomBucket[]
+export interface MessageWorkspaceModel {
+  workspaces: WorkspaceBucket[]
   totalMessages: number
   totalMentions: number
   totalStateBlocks: number
 }
 
-function normalizeRoom(value: string | null | undefined): string {
-  const room = value?.trim().replace(/^#+/, '')
-  return room || 'execution'
+function normalizeWorkspace(value: string | null | undefined): string {
+  const workspace = value?.trim().replace(/^#+/, '')
+  return workspace || 'execution'
 }
 
 function messageTimestampMs(message: Message): number | null {
@@ -54,8 +54,8 @@ function timelineSort(left: TimelineRow, right: TimelineRow): number {
   return left.index - right.index
 }
 
-export function buildMessageRoomModel(messageList: readonly Message[]): MessageRoomModel {
-  const byRoom = new Map<string, TimelineRow[]>()
+export function buildMessageWorkspaceModel(messageList: readonly Message[]): MessageWorkspaceModel {
+  const byWorkspace = new Map<string, TimelineRow[]>()
   let totalMentions = 0
   let totalStateBlocks = 0
 
@@ -64,8 +64,8 @@ export function buildMessageRoomModel(messageList: readonly Message[]): MessageR
     const stateBlockCount = extractStateBlocks(message.content).length
     totalMentions += mentionTargets.length
     totalStateBlocks += stateBlockCount
-    const room = normalizeRoom(message.room)
-    const rows = byRoom.get(room) ?? []
+    const workspace = normalizeWorkspace(message.workspace)
+    const rows = byWorkspace.get(workspace) ?? []
     rows.push({
       message,
       index,
@@ -73,19 +73,19 @@ export function buildMessageRoomModel(messageList: readonly Message[]): MessageR
       mentionTargets,
       stateBlockCount,
     })
-    byRoom.set(room, rows)
+    byWorkspace.set(workspace, rows)
   })
 
-  const rooms = Array.from(byRoom.entries())
-    .map(([room, rows]) => ({ room, rows: rows.sort(timelineSort) }))
+  const workspaces = Array.from(byWorkspace.entries())
+    .map(([workspace, rows]) => ({ workspace, rows: rows.sort(timelineSort) }))
     .sort((left, right) => {
-      if (left.room === 'execution') return -1
-      if (right.room === 'execution') return 1
-      return left.room.localeCompare(right.room)
+      if (left.workspace === 'execution') return -1
+      if (right.workspace === 'execution') return 1
+      return left.workspace.localeCompare(right.workspace)
     })
 
   return {
-    rooms,
+    workspaces,
     totalMessages: messageList.length,
     totalMentions,
     totalStateBlocks,
@@ -137,21 +137,21 @@ function TimelineMessage({ row }: { row: TimelineRow }) {
   `
 }
 
-export function MessageRoomTimeline() {
-  const model = useMemo(() => buildMessageRoomModel(messages.value), [messages.value])
-  const [selectedRoom, setSelectedRoom] = useState<string | null>(null)
-  const activeRoom = model.rooms.some(room => room.room === selectedRoom)
-    ? selectedRoom
-    : model.rooms[0]?.room ?? null
-  const active = activeRoom ? model.rooms.find(room => room.room === activeRoom) ?? null : null
-  const composerRoom = activeRoom ?? 'default'
+export function MessageWorkspaceTimeline() {
+  const model = useMemo(() => buildMessageWorkspaceModel(messages.value), [messages.value])
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null)
+  const activeWorkspace = model.workspaces.some(workspace => workspace.workspace === selectedWorkspace)
+    ? selectedWorkspace
+    : model.workspaces[0]?.workspace ?? null
+  const active = activeWorkspace ? model.workspaces.find(workspace => workspace.workspace === activeWorkspace) ?? null : null
+  const composerWorkspace = activeWorkspace ?? 'default'
 
   return html`
-    <section class="grid gap-4" aria-labelledby="message-room-timeline-heading">
+    <section class="grid gap-4" aria-labelledby="message-workspace-timeline-heading">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Messages</div>
-          <h2 id="message-room-timeline-heading" class="mt-1 text-xl font-semibold text-[var(--color-fg-primary)]">Room timeline</h2>
+          <h2 id="message-workspace-timeline-heading" class="mt-1 text-xl font-semibold text-[var(--color-fg-primary)]">Workspace timeline</h2>
         </div>
         <${ActionButton}
           variant="ghost"
@@ -167,8 +167,8 @@ export function MessageRoomTimeline() {
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Rooms</div>
-          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.rooms.length}</div>
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Workspaces</div>
+          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.workspaces.length}</div>
         </div>
         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Messages</div>
@@ -180,32 +180,32 @@ export function MessageRoomTimeline() {
         </div>
       </div>
 
-      ${model.rooms.length === 0
+      ${model.workspaces.length === 0
         ? html`
-            <${ComposerV2} roomId=${composerRoom} />
+            <${ComposerV2} workspaceId=${composerWorkspace} />
             <${EmptyState} message="메시지 타임라인이 없습니다" compact />
           `
         : html`
-            <div class="flex flex-wrap gap-2" role="tablist" aria-label="Message rooms">
-              ${model.rooms.map(room => html`
+            <div class="flex flex-wrap gap-2" role="tablist" aria-label="Message workspaces">
+              ${model.workspaces.map(workspace => html`
                 <button
                   type="button"
                   role="tab"
-                  aria-selected=${room.room === activeRoom}
+                  aria-selected=${workspace.workspace === activeWorkspace}
                   class=${`rounded-[var(--r-1)] border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    room.room === activeRoom
+                    workspace.workspace === activeWorkspace
                       ? 'border-[var(--color-accent)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
                       : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
                   }`}
-                  onClick=${() => setSelectedRoom(room.room)}
+                  onClick=${() => setSelectedWorkspace(workspace.workspace)}
                 >
-                  #${room.room}
-                  <span class="ml-2 text-3xs tabular-nums opacity-70">${room.rows.length}</span>
+                  #${workspace.workspace}
+                  <span class="ml-2 text-3xs tabular-nums opacity-70">${workspace.rows.length}</span>
                 </button>
               `)}
             </div>
-            <${ComposerV2} roomId=${composerRoom} />
-            <section role="tabpanel" aria-label=${active ? `#${active.room} timeline` : 'Message timeline'} class="grid gap-2.5">
+            <${ComposerV2} workspaceId=${composerWorkspace} />
+            <section role="tabpanel" aria-label=${active ? `#${active.workspace} timeline` : 'Message timeline'} class="grid gap-2.5">
               ${active?.rows.map(row => html`<${TimelineMessage} key=${boardMessageRowKey(row.message, row.index)} row=${row} />`)}
             </section>
           `}

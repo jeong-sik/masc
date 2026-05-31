@@ -23,7 +23,7 @@ Open Core 분리 시 EE(Enterprise Edition) tier로 이동 가능한 모듈을 *
 | 모듈 | EE 적합성 근거 |
 |---|---|
 | `lib/auth.ml` + `.mli` | 인증 핵심. EE는 *확장*만 (SAML2/SCIM/SSO) |
-| `lib/auth_doctor.ml` + `.mli` | auth 진단 도구. compliance 시나리오에서 EE 차별화 가능 |
+| `lib/auth_diagnostic.ml` + `.mli` | auth 진단 도구. compliance 시나리오에서 EE 차별화 가능 |
 | `lib/auth_login.ml` + `.mli` | login 흐름 |
 | `lib/auth_resolve.ml` + `.mli` | identity 해소 |
 | `lib/auth_strict_mode.ml` + `.mli` | strict mode (compliance) — Enterprise compliance 요구에 부합 |

@@ -137,7 +137,7 @@ require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
 require_not_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` |'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
-require_not_contains docs/spec/09-server-transport.md '| Room | `/api/v1/room/*`'
+require_not_contains docs/spec/09-server-transport.md '| Workspace | `/api/v1/workspace/*`'
 require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'
 
 require_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | POST | Keeper config 수정 (PATCH semantic) |'

@@ -2,7 +2,7 @@ import type { RouteState } from './types'
 import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
-import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
+import { refreshOperatorWorkspaceDigest, refreshOperatorSnapshot } from './operator-store'
 
 async function refreshActivityGraphSurface(): Promise<void> {
   const { refreshActivityGraph } = await import('./components/activity-graph-store')
@@ -59,7 +59,7 @@ type RefreshTask =
   | 'inspector'
   | 'surfaceReadiness'
   | 'operatorSnapshot'
-  | 'operatorRoomDigest'
+  | 'operatorWorkspaceDigest'
 
 // Monitor data ownership is partitioned by section. Two tiers:
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
@@ -111,7 +111,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.view === 'surfaces') {
         return ['surfaceReadiness']
       }
-      return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']
+      return ['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest']
     case 'workspace':
       if (routeState.params.section === 'planning') {
         return ['goals', 'execution']
@@ -158,7 +158,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   },
   surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
-  operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
+  operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

@@ -73,7 +73,7 @@ const ActivityGraphTimelineEventRawSchema = object({
   ts_ms: optional(number()),
   ts_iso: string(),
   seq: number(),
-  room_id: string(),
+  workspace_id: string(),
   tags: array(string()),
   payload: record(string(), unknown()),
 })
@@ -142,7 +142,7 @@ const ActivityGraphTimelineEventSchema = pipe(
       ts: raw.ts ?? raw.ts_ms ?? Date.parse(raw.ts_iso),
       ts_iso: raw.ts_iso,
       seq: raw.seq,
-      room_id: raw.room_id,
+      workspace_id: raw.workspace_id,
       tags: raw.tags,
       payload,
     }
@@ -150,7 +150,7 @@ const ActivityGraphTimelineEventSchema = pipe(
 )
 
 // `stats` and `kind_counts` are open number-valued maps — the backend
-// adds new counters (per-tool, per-category) without coordinating the
+// adds new counters (per-tool, per-category) without alignment the
 // dashboard release. Consumers read specific keys defensively
 // (`stats.event_count ?? 0`), so an open `record` keeps new keys
 // visible without churning this schema on every backend addition.
@@ -166,7 +166,7 @@ const ActivityGraphHeatmapSchema = object({
 
 const ActivityGraphWindowSchema = object({
   limit: number(),
-  room_id: nullable(string()),
+  workspace_id: nullable(string()),
   kinds: array(string()),
 })
 

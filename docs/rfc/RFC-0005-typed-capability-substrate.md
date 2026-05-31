@@ -483,8 +483,8 @@ A0 이후 이 9개 타입에 arm을 추가할 때:
 #### A4a — Simple callers (3일, ~20 사이트)
 - `lib/notify.ml`, `graphql_client.ml`, `sandbox.ml`, `retired_file_tool.ml` ...
 
-#### A4b — Coord/Swarm/Autoresearch (3일, ~20 사이트)
-- `lib/coord/*`, `lib/swarm/*`, `lib/autoresearch/*`, `lib/auto_responder.ml`
+#### A4b — Workspace/Swarm/Autoresearch (3일, ~20 사이트)
+- `lib/workspace/*`, `lib/swarm/*`, `lib/autoresearch/*`, `lib/auto_responder.ml`
 
 #### A4c — Keeper (4일, 31 사이트, 48h shadow)
 - `lib/keeper/agent_tool_command_runtime.ml` (19) 외

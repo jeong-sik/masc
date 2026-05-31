@@ -376,7 +376,7 @@ type keeper_stats = {
 }
 ```
 
-**적용 순서**: `keeper_stats` → `room_state` → `agent_state`. 현재 `Atomic.make`/`Atomic.get`/`Atomic.set`
+**적용 순서**: `keeper_stats` → `workspace_state` → `agent_state`. 현재 `Atomic.make`/`Atomic.get`/`Atomic.set`
 패턴을 `[@atomic]` record field로 점진 전환. 단, OCaml 5.4 컴파일 필요.
 
 **`Iarray` (불변 배열) 적용 대상**:

@@ -53,7 +53,7 @@ interface ApiActivityEvent {
   readonly seq: number
   readonly ts_ms: number
   readonly ts_iso: string
-  readonly room_id: string
+  readonly workspace_id: string
   readonly kind: string
   readonly actor?: { readonly kind: string; readonly id: string } | null
   readonly subject?: { readonly kind: string; readonly id: string } | null
@@ -69,7 +69,7 @@ interface ApiActivityResponse {
 
 interface ActivityFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
-  readonly roomId: string
+  readonly workspaceId: string
   readonly ok: boolean
 }
 
@@ -111,7 +111,7 @@ const PROGRESS_SURFACES: ReadonlyArray<ProgressSurfaceSpec> = [
   { key: 'worker_run_id', label: 'Run', routeLabel: 'Telemetry' },
 ]
 
-const DEFAULT_ROOM_ID = 'run-default'
+const DEFAULT_WORKSPACE_ID = 'run-default'
 type MutableRunActivityContext = {
   -readonly [K in keyof RunActivityContext]?: RunActivityContext[K]
 }
@@ -180,10 +180,10 @@ function detailFromPayload(payload: unknown, kind: string): string | undefined {
   return kind
 }
 
-function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent {
+function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityEvent {
   return {
     id: `evt-${event.seq}`,
-    run_id: roomId,
+    run_id: workspaceId,
     timestamp_ms: event.ts_ms,
     keeper_id: event.actor?.id ?? 'system',
     verb: verbFromKind(event.kind),
@@ -200,13 +200,13 @@ async function fetchActivityEvents(): Promise<ActivityFetchResult> {
     const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
-      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: true }
+      return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: true }
     }
-    const roomId = rawEvents[0].room_id || DEFAULT_ROOM_ID
-    const mapped = rawEvents.map(e => mapApiEvent(e, roomId))
-    return { events: mapped, roomId, ok: true }
+    const workspaceId = rawEvents[0].workspace_id || DEFAULT_WORKSPACE_ID
+    const mapped = rawEvents.map(e => mapApiEvent(e, workspaceId))
+    return { events: mapped, workspaceId, ok: true }
   } catch {
-    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
+    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: false }
   }
 }
 
@@ -336,7 +336,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   } = props
   const activeFile = rawActiveFile ?? ''
   const store = useMemo(() => {
-    const store = createRunActivityStore(DEFAULT_ROOM_ID)
+    const store = createRunActivityStore(DEFAULT_WORKSPACE_ID)
     store.seed(EMPTY_ACTIVITY)
     return store
   }, [])
@@ -355,10 +355,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, roomId, ok } = await fetchActivityEvents()
+      const { events, workspaceId, ok } = await fetchActivityEvents()
       if (cancelled) return
       if (ok) {
-        store.reset(roomId)
+        store.reset(workspaceId)
         store.seed(events)
         setRefreshState({
           tone: 'live',

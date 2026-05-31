@@ -90,7 +90,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 132 | Operator snapshot cache TTL (seconds). Default: 30. |
 | `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 120 | Whether operator judge background loop is enabled. Default: true. |
 | `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 123 | Operator judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_OPERATOR_JUDGE_TTL_SEC` | typed:int | unclassified | unclassified | 126 | Judgment TTL for operator judge cleanup, clamped to >= 15s. Default: 60. |
+| `MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC` | typed:int | unclassified | unclassified | 126 | Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60. |
 | `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 129 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 58 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 62 | Max age for rate limit entries before cleanup (seconds) |
@@ -155,9 +155,9 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES` | typed:int | unclassified | unclassified | 272 | Maximum consecutive heartbeat failures before raising Keeper_fiber_crash (structured crash via dispatch_event). Defau... |
 | `MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES` | typed:int | unclassified | unclassified | 659 | Maximum consecutive failures for the same (tool_name, args_hash) before blocking further attempts. Prevents infinite ... |
 | `MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES` | typed:int | unclassified | unclassified | 279 | Maximum consecutive unified turn failures before marking keeper as crashed. Covers LLM timeout, rate limit, and other... |
-| `MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS` | typed:int | unclassified | unclassified | 318 | Max idle turns for scheduled autonomous keeper turns. With tool_choice=Any and max_turns=50, keepers have room to exp... |
+| `MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS` | typed:int | unclassified | unclassified | 318 | Max idle turns for scheduled autonomous keeper turns. With tool_choice=Any and max_turns=50, keepers have workspace to exp... |
 | `MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE` | typed:int | unclassified | unclassified | 325 | Max idle turns for reactive (board/mention triggered) keeper turns. Reactive turns have an explicit trigger — more ... |
-| `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | unclassified | unclassified | 246 | Maximum seconds since last successful room heartbeat before presence sync is required again. Floor = keepalive interv... |
+| `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | unclassified | unclassified | 246 | Maximum seconds since last successful workspace heartbeat before presence sync is required again. Floor = keepalive interv... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 78 | Maximum metrics file size in bytes before rotation (default: 10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | typed:int | unclassified | unclassified | 81 | Number of rotated files to keep (default: 1, i.e. .1 only) |
 | `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | typed:int | unclassified | unclassified | 426 | Maximum turns per single OAS Agent.run call. Keeper resumes via checkpoint in the next keepalive cycle when {!Runtime... |
@@ -178,7 +178,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_WATCHDOG_POLL_SEC` | typed:float | unclassified | unclassified | 582 | Watchdog poll interval in seconds. Must be >= 5. Default: 30. |
 | `MASC_KEEPER_WATCHDOG_PROGRESS_SEC` | typed:float | Timeouts | operator | 567 | Seconds since the last in-turn progress signal before an active turn is considered mid-turn-stale. Default: 300 (5 mi... |
 | `MASC_KEEPER_WATCHDOG_STALE_SEC` | typed:float | unclassified | unclassified | 542 | Seconds since last turn before a Running keeper is considered idle-stale. Must be >= 60. Default: 300 (5 minutes). In... |
-| `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 240 | Master switch. When true, successful Coord.heartbeat after a unified turn counts as presence proof, allowing the next... |
+| `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 240 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the next... |
 | `MASC_PAYLOAD_TELEMETRY` | typed:bool | unclassified | unclassified | 729 | Master switch for wake-payload measurement. Default off so the hot path is untouched until a baseline sweep is explic... |
 
 ## Env_config_keeper_retry_backoff (4 knobs; typed classification 1/4)
@@ -242,7 +242,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_CDAL_GATE_ENABLED` | feature_flag | n/a | n/a | 339 | Block task completion when CDAL verdict is Violated/Inconclusive. Default: false. |
 | `MASC_CDAL_VERDICT_LOOKUP_LIMIT` | typed:int | unclassified | unclassified | 346 | Max verdicts to scan when looking up the latest verdict by task_id. Beyond this limit, older entries are silently ski... |
 | `MASC_CLAIM_TTL_SECONDS` | typed:float | unclassified | unclassified | 89 | Maximum time a task can stay Claimed/InProgress without agent heartbeat before being auto-released back to Todo (seco... |
-| `MASC_COORD_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 951 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Coord_git}: [rev-parse], [s... |
+| `MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 951 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse], [s... |
 | `MASC_DASHBOARD_CTX_COMPACTING` | typed:float | unclassified | unclassified | 681 |  |
 | `MASC_DASHBOARD_CTX_HANDOFF_IMMINENT` | typed:float | unclassified | unclassified | 677 | Keeper context-ratio lifecycle thresholds. Higher ratio = closer to context limit = more urgency. |
 | `MASC_DASHBOARD_CTX_PREPARING` | typed:float | unclassified | unclassified | 679 |  |
@@ -285,7 +285,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_LOCK_EXPIRY_WARNING_SEC` | typed:float | unclassified | unclassified | 26 | Lock expiry warning threshold (seconds before expiry) |
 | `MASC_LOCK_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 22 | Default lock timeout (seconds) |
 | `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | typed:int | unclassified | unclassified | 630 | Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. |
-| `MASC_MESSAGE_MAX_COUNT` | typed:int | unclassified | unclassified | 226 | Maximum number of message files to retain per room (default 200). Oldest messages (by filename sort) are deleted when... |
+| `MASC_MESSAGE_MAX_COUNT` | typed:int | unclassified | unclassified | 226 | Maximum number of message files to retain per workspace (default 200). Oldest messages (by filename sort) are deleted when... |
 | `MASC_METRICS_FLUSH_SEC` | typed:float | unclassified | unclassified | 818 | Tool metrics flush interval (seconds). Default: 300 (5 min). |
 | `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 622 | SSE drain interval (seconds). Default: 2.0. |
 | `MASC_OPENAI_COMPAT` | feature_flag | n/a | n/a | 314 | Whether OpenAI-compatible endpoint is enabled. Default: false. |
@@ -444,3 +444,4 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 833 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 93 |  |
 | `MASC_WS_SLICE_INDEX_ENABLED` | string_literal | n/a | n/a | 96 |  |
+

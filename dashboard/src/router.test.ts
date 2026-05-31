@@ -27,8 +27,8 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('board')
   })
 
-  it('redirects removed warroom params to operations', () => {
-    navigate('command', { section: 'warroom', surface: 'swarm' })
+  it('redirects removed operations params to operations', () => {
+    navigate('command', { section: 'operations', surface: 'swarm' })
     expect(route.value.tab).toBe('command')
     expect(route.value.params.section).toBe('operations')
     expect(route.value.params.surface).toBeUndefined()

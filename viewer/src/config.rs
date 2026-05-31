@@ -17,7 +17,7 @@ const COMPILE_TIME_MASC_MCP_URL: &str = "";
 /// Backward-compatible static base URL for legacy call sites.
 pub const MASC_MCP_URL: &str = COMPILE_TIME_MASC_MCP_URL;
 
-pub const DEFAULT_ROOM_ID: &str = "default";
+pub const DEFAULT_WORKSPACE_ID: &str = "default";
 
 fn normalize_base_url(base: &str) -> String {
     base.trim().trim_end_matches('/').to_string()
@@ -372,45 +372,45 @@ pub fn apply_auth_headers(headers: &web_sys::Headers) -> Result<(), wasm_bindgen
     Ok(())
 }
 
-// ─── Room ID Management ─────────────────────
+// ─── Workspace ID Management ─────────────────────
 
-/// Get current room ID from DOM attribute (set by dashboard/home) or URL param.
-pub fn current_room_id() -> String {
+/// Get current workspace ID from DOM attribute (set by dashboard/home) or URL param.
+pub fn current_workspace_id() -> String {
     #[cfg(target_arch = "wasm32")]
     {
-        // 1. Prefer runtime room bound to dashboard state.
+        // 1. Prefer runtime workspace bound to dashboard state.
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id("dashboard") {
-                if let Some(room) = el.get_attribute("data-room-id") {
-                    if let Some(room) = sanitize_room_id(&room) {
-                        return room;
+                if let Some(workspace) = el.get_attribute("data-workspace-id") {
+                    if let Some(workspace) = sanitize_workspace_id(&workspace) {
+                        return workspace;
                     }
                 }
             }
         }
 
-        // 2. Fallback to URL param ?room=...
+        // 2. Fallback to URL param ?workspace=...
         if let Some(win) = web_sys::window() {
             if let Ok(search) = win.location().search() {
-                if let Some(room) = parse_query_param(&search, "room") {
-                    return sanitize_room_id(&room).unwrap_or_else(|| DEFAULT_ROOM_ID.to_string());
+                if let Some(workspace) = parse_query_param(&search, "workspace") {
+                    return sanitize_workspace_id(&workspace).unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
                 }
             }
         }
     }
 
-    DEFAULT_ROOM_ID.to_string()
+    DEFAULT_WORKSPACE_ID.to_string()
 }
 
-/// Set current room ID (persisted via URL or just runtime state).
+/// Set current workspace ID (persisted via URL or just runtime state).
 /// In this viewer, we primarily use the dashboard data attribute.
 #[allow(unused_variables)]
-pub fn set_current_room_id(room_id: &str) {
+pub fn set_current_workspace_id(workspace_id: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id("dashboard") {
-                let _ = el.set_attribute("data-room-id", room_id);
+                let _ = el.set_attribute("data-workspace-id", workspace_id);
             }
         }
 
@@ -424,8 +424,8 @@ pub fn set_current_room_id(room_id: &str) {
                     .and_then(|search| parse_query_param(&search, "mode"))
                     .filter(|mode| !mode.trim().is_empty() && mode != "home");
                 let url = match mode_param {
-                    Some(mode) => format!("?mode={}&room={}", mode, room_id),
-                    None => format!("?room={}", room_id),
+                    Some(mode) => format!("?mode={}&workspace={}", mode, workspace_id),
+                    None => format!("?workspace={}", workspace_id),
                 };
                 let _ =
                     history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url));
@@ -434,12 +434,12 @@ pub fn set_current_room_id(room_id: &str) {
     }
 }
 
-pub fn current_room_revision() -> u32 {
+pub fn current_workspace_revision() -> u32 {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id("dashboard") {
-                if let Some(rev_str) = el.get_attribute("data-room-rev") {
+                if let Some(rev_str) = el.get_attribute("data-workspace-rev") {
                     if let Ok(rev) = rev_str.parse::<u32>() {
                         return rev;
                     }
@@ -450,7 +450,7 @@ pub fn current_room_revision() -> u32 {
     0
 }
 
-pub fn sanitize_room_id(raw: &str) -> Option<String> {
+pub fn sanitize_workspace_id(raw: &str) -> Option<String> {
     let s = raw.trim();
     if s.is_empty() || s.len() > 64 {
         return None;
@@ -488,14 +488,14 @@ pub fn trpg_uses_polling() -> bool {
 }
 
 pub fn trpg_state_url() -> String {
-    build_masc_url(&format!("api/v1/trpg/state?room_id={}", current_room_id()))
+    build_masc_url(&format!("api/v1/trpg/state?workspace_id={}", current_workspace_id()))
 }
 
 /// Legacy JSON poll endpoint.
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
     build_masc_url(&format!(
-        "api/v1/trpg/stream?room_id={}&after_seq={}",
-        current_room_id(),
+        "api/v1/trpg/stream?workspace_id={}&after_seq={}",
+        current_workspace_id(),
         after_seq
     ))
 }
@@ -503,12 +503,12 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
         ViewerMode::Trpg => Some(build_masc_url(&format!(
-            "api/v1/trpg/stream/sse?room_id={}",
-            current_room_id()
+            "api/v1/trpg/stream/sse?workspace_id={}",
+            current_workspace_id()
         ))),
-        ViewerMode::Monitor => Some(build_masc_url("sse?room=monitor")),
-        ViewerMode::Experiment => Some(build_masc_url("sse?room=experiment")),
-        ViewerMode::Social => Some(build_masc_url("sse?room=social")),
+        ViewerMode::Monitor => Some(build_masc_url("sse?workspace=monitor")),
+        ViewerMode::Experiment => Some(build_masc_url("sse?workspace=experiment")),
+        ViewerMode::Social => Some(build_masc_url("sse?workspace=social")),
         ViewerMode::Home => None,
     }
 }
@@ -518,12 +518,12 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
 pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
     match mode_name {
         "Trpg" => Some(build_masc_url(&format!(
-            "api/v1/trpg/stream/sse?room_id={}",
-            current_room_id()
+            "api/v1/trpg/stream/sse?workspace_id={}",
+            current_workspace_id()
         ))),
-        "Monitor" => Some(build_masc_url("sse?room=monitor")),
-        "Experiment" => Some(build_masc_url("sse?room=experiment")),
-        "Social" => Some(build_masc_url("sse?room=social")),
+        "Monitor" => Some(build_masc_url("sse?workspace=monitor")),
+        "Experiment" => Some(build_masc_url("sse?workspace=experiment")),
+        "Social" => Some(build_masc_url("sse?workspace=social")),
         _ => None,
     }
 }
@@ -539,8 +539,8 @@ mod tests {
             "/api/v1/trpg/state"
         );
         assert_eq!(
-            compose_masc_url("", "/sse?room=monitor"),
-            "/sse?room=monitor"
+            compose_masc_url("", "/sse?workspace=monitor"),
+            "/sse?workspace=monitor"
         );
     }
 
@@ -549,16 +549,16 @@ mod tests {
         assert_eq!(
             compose_masc_url(
                 "https://masc-mcp-production.up.railway.app",
-                "api/v1/trpg/state?room_id=default"
+                "api/v1/trpg/state?workspace_id=default"
             ),
-            "https://masc-mcp-production.up.railway.app/api/v1/trpg/state?room_id=default"
+            "https://masc-mcp-production.up.railway.app/api/v1/trpg/state?workspace_id=default"
         );
         assert_eq!(
             compose_masc_url(
                 "https://masc-mcp-production.up.railway.app/",
-                "/sse?room=monitor"
+                "/sse?workspace=monitor"
             ),
-            "https://masc-mcp-production.up.railway.app/sse?room=monitor"
+            "https://masc-mcp-production.up.railway.app/sse?workspace=monitor"
         );
     }
 
@@ -566,15 +566,15 @@ mod tests {
     fn sse_endpoint_routes_masc_modes_to_legacy_sse() {
         assert_eq!(
             sse_endpoint(&ViewerMode::Monitor).as_deref(),
-            Some("/sse?room=monitor")
+            Some("/sse?workspace=monitor")
         );
         assert_eq!(
             sse_endpoint(&ViewerMode::Experiment).as_deref(),
-            Some("/sse?room=experiment")
+            Some("/sse?workspace=experiment")
         );
         assert_eq!(
             sse_endpoint(&ViewerMode::Social).as_deref(),
-            Some("/sse?room=social")
+            Some("/sse?workspace=social")
         );
     }
 
@@ -582,15 +582,15 @@ mod tests {
     fn sse_endpoint_by_name_matches_stateful_variant() {
         assert_eq!(
             sse_endpoint_by_name("Monitor").as_deref(),
-            Some("/sse?room=monitor")
+            Some("/sse?workspace=monitor")
         );
         assert_eq!(
             sse_endpoint_by_name("Experiment").as_deref(),
-            Some("/sse?room=experiment")
+            Some("/sse?workspace=experiment")
         );
         assert_eq!(
             sse_endpoint_by_name("Social").as_deref(),
-            Some("/sse?room=social")
+            Some("/sse?workspace=social")
         );
     }
 
@@ -598,9 +598,9 @@ mod tests {
     fn redact_auth_query_masks_sensitive_values() {
         assert_eq!(
             redact_auth_query(
-                "/api/v1/trpg/stream/sse?room_id=default&token=abc123&agent=viewer&auth_token=qwe"
+                "/api/v1/trpg/stream/sse?workspace_id=default&token=abc123&agent=viewer&auth_token=qwe"
             ),
-            "/api/v1/trpg/stream/sse?room_id=default&token=***&agent=viewer&auth_token=***"
+            "/api/v1/trpg/stream/sse?workspace_id=default&token=***&agent=viewer&auth_token=***"
         );
     }
 

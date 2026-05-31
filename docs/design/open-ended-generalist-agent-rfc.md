@@ -41,7 +41,7 @@ MASC already has enough adjacent primitives that the useful next step is not to 
 
 | Open-ended agent concept | Current MASC primitive | Decision |
 |---|---|---|
-| Environment observation | `keeper_world_observation` plus room, board, task, repo, and runtime signals | Adopt as the MASC world-state boundary |
+| Environment observation | `keeper_world_observation` plus workspace, board, task, repo, and runtime signals | Adopt as the MASC world-state boundary |
 | Action module | Keeper tool calls through OAS-backed autonomous paths | Already present; do not replace with code-agent default |
 | Iterative feedback | Tool results, execution receipts, proof artifacts, keeper metrics | Adopt as evidence inputs |
 | Skill library | `procedural_memory.ml`, institution procedural patterns, OAS memory bridge | Extend by curation, not by new memory silo first |
@@ -207,7 +207,7 @@ This artifact can inform future verifier or benchmark work, but it cannot write 
 - Reward advice carries `authority = advisory_only`.
 - Tests cover that advisory artifacts cannot change `contract_verdict`.
 - Dashboard or operator surfaces visually separate verdict, friction, advice, and candidate queues.
-- OAS remains coordinator-agnostic; MASC-specific state stays in MASC adapters and coordination surfaces.
+- OAS remains workspace client-agnostic; MASC-specific state stays in MASC adapters and workspace collaboration surfaces.
 
 ## 8. Evidence
 

@@ -76,7 +76,7 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 
 MASC는 OAS 위에 멀티에이전트 협업 기능을 확장한다:
 
-- **Room 조정**: 에이전트들이 같은 Room에서 태스크를 공유하고 브로드캐스트
+- **Workspace 조정**: 에이전트들이 같은 Workspace에서 태스크를 공유하고 브로드캐스트
 - **Board**: 에이전트 커뮤니티 게시판 (포스트, 투표, 댓글)
 - **Deliberation**: 트리거 기반 의사결정 엔진 (heuristic 또는 MODEL)
 
@@ -94,7 +94,7 @@ MASC는 OAS 위에 멀티에이전트 협업 기능을 확장한다:
 
 ### 1.4 Keeper란 무엇인가
 
-Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
+Keeper는 OAS의 Persistent Agent를 MASC Workspace 위에서 운용하는 단위다.
 
 핵심 특성:
 - **영속적 실행**: keepalive fiber가 주기적으로 heartbeat을 전송하며 에이전트 존재를 유지
@@ -106,7 +106,7 @@ Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
 
 | 항목 | Agent | Keeper |
 |------|-------|--------|
-| 정의 | Room에 참여하는 기본 단위 | 영속적으로 동작하는 Agent |
+| 정의 | Workspace에 참여하는 기본 단위 | 영속적으로 동작하는 Agent |
 | 수명 | 태스크 완료까지 | 무제한 (세대 교체로 연속) |
 | Heartbeat | 선택 | 필수 (keepalive fiber) |
 | Context 관리 | 수동 | 자동 (3-tier 임계값) |
@@ -128,7 +128,7 @@ Generation은 keeper의 context handoff 횟수를 나타내는 정수다. keeper
 | **Handoff** | post-turn lifecycle에서 같은 keeper를 새 trace/session으로 이어붙이는 rollover |
 | **Capsule** | handoff 전후 continuity를 위해 유지되는 checkpoint/summary 단위. 현재 구현은 별도 child agent 생성보다 checkpoint rollover에 가깝다 |
 | **Compaction** | 컨텍스트 토큰을 줄이기 위한 압축 (tool output 정리, 메시지 병합 등) |
-| **Keepalive** | keeper의 heartbeat fiber, 주기적으로 Room 존재를 갱신 |
+| **Keepalive** | keeper의 heartbeat fiber, 주기적으로 Workspace 존재를 갱신 |
 | **Proactive** | 사용자 입력 없이 keeper가 자발적으로 메시지를 생성하는 행동 |
 | **Deliberation** | keeper가 행동할지 여부를 결정하는 트리거 + 의사결정 과정 |
 
@@ -232,7 +232,7 @@ Handoff 후 경계는 다음처럼 읽는다.
 | handoff 완료 | `keeper_post_turn` + `keeper_rollover` | 새 trace checkpoint, `generation + 1`, `trace_history` append | 새 trace session + keeper meta | `KeeperGenerationLineage.tla`, `Drift_guard.verify_handoff` |
 | memory bank write | `keeper_agent_run` | `[STATE]` 기반 note | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction policy |
 | episode flush | `keeper_agent_run` | snapshot 기반 episode | `.masc/institution_episodes.jsonl` | episode schema + JSONL cap |
-| task 완료/취소 | `coord_task` | relation/materializer + activity signal | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
+| task 완료/취소 | `workspace_task` | relation/materializer + activity signal | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
 ### 2.4 Heartbeat 시스템
 
@@ -245,7 +245,7 @@ Keepalive는 Eio fiber로 구현되어 주기적으로 실행된다.
 | snapshot_interval_sec | 300초 | JSONL 메트릭 스냅샷 간격 (환경변수 `MASC_KEEPER_SNAPSHOT_SEC`, runtime key `keeper.snapshot_sec`) |
 
 Heartbeat fiber가 수행하는 작업 (매 주기):
-1. Room에서 agent 존재 갱신
+1. Workspace에서 agent 존재 갱신
 2. (snapshot 주기마다) context 상태 스냅샷을 JSONL 메트릭에 기록
 3. Deliberation triage 실행 (model_deliberation 모드일 때)
 4. Proactive 메시지 발신 여부 판단
@@ -706,7 +706,7 @@ Unified keeper의 내부 decision record는 `{keeper_dir}/{name}.decisions.jsonl
 각 레코드에는:
 - `id`: 고유 결정 ID (`dec-{timestamp_ms}-{hash}`)
 - `trigger_signals`: turn 시점에 관찰된 트리거 후보 (`direct_mention`, `board_activity`, `new_unclaimed_task` 등)
-- `observed_affordances`: 당시 가능한 액션 후보 (`task_claim`, `reply_in_room`, `board_post_or_comment` 등)
+- `observed_affordances`: 당시 가능한 액션 후보 (`task_claim`, `reply_in_workspace`, `board_post_or_comment` 등)
 - `turn_mode`: 실제 최종 결과 분류 (`tool_use`, `text_response`, `skip_text`, `noop`). 에러 여부는 `outcome`이 담당한다.
 - `tools_used`: 실제 호출된 tool 목록
 - `claim_was_available` / `claim_executed`: task claim 기회와 실행 여부
@@ -727,7 +727,7 @@ OAS `Checkpoint.t`를 통해 keeper 상태가 저장된다.
 - compaction 시 (checkpoint 갱신)
 - heartbeat snapshot 시 (주기적)
 
-**저장 내용** (OAS Checkpoint 생성, perpetual_loop.ml / perpetual_oas.ml에 인라인):
+**저장 내용** (OAS Checkpoint 생성, continuous_loop.ml / continuous_oas.ml에 인라인):
 - `session_id`, `generation`, `turn_count`, `trace_id` (MASC 메타데이터 → OAS Context Session scope)
 - `messages` (MASC 메시지 → OAS 메시지 변환)
 - `system_prompt`
@@ -767,7 +767,7 @@ flowchart TD
 | 증상 | 원인 | 대응 |
 |------|------|------|
 | `last_seen_ago_s`가 내부 heartbeat window를 크게 초과 | heartbeat fiber 중단 | `masc_keeper_up`으로 재시작 |
-| health_state = `stale` | 네트워크 또는 Room 접근 문제 | MASC 서버 상태 확인 (`curl /health`) |
+| health_state = `stale` | 네트워크 또는 Workspace 접근 문제 | MASC 서버 상태 확인 (`curl /health`) |
 | `is_zombie = true` | agent의 last_seen이 너무 오래됨 | keeper 재생성 또는 `masc_cleanup_zombies` |
 
 ### 7.3 context_ratio 높음
@@ -932,7 +932,7 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 |------|------|
 | [BOOT-ENV-STATE-INVENTORY.md](./BOOT-ENV-STATE-INVENTORY.md) | boot / path / state / active config inventory |
 | [GLOSSARY.md](./GLOSSARY.md) | 용어 정의 |
-| [QUICK-START.md](./QUICK-START.md) | repo coordination 시작 경로 |
+| [QUICK-START.md](./QUICK-START.md) | repo workspace collaboration 시작 경로 |
 | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | retired command-plane reference |
 | [SPEC-INDEX.md](./spec/SPEC-INDEX.md) + [01-system-overview.md](./spec/01-system-overview.md) | 아키텍처 SSOT |
 | [EXECUTE-RUNBOOK.md](./EXECUTE-RUNBOOK.md) | Execute flag matrix + dark-launch observer 절차 |

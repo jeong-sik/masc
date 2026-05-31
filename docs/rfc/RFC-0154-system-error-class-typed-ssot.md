@@ -35,7 +35,7 @@ classification, one wire tag, one dashboard lookup table*.
   touching the callers. Explicit `~exn` migration remains available
   for callers that need errno precision; not required for correctness.
 - **Module location**: §3.1 placed the SSOT at `lib/system_error_class.ml`.
-  Implementation discovered that `lib/coord/` (sub-library `masc_coord`)
+  Implementation discovered that `lib/workspace/` (sub-library `masc_workspace`)
   needed access for the fourth inline matcher consolidation, so PR-2
   moved the module to `lib/core/system_error_class.ml` where every
   sub-library can depend on it.
@@ -78,7 +78,7 @@ OS-level 실패 (FD exhaustion, disk exhaustion, …) 의 *분류* 가 backend �
 |------|--------------|---------|------|
 | `lib/keeper_fd_pressure.ml:97-110` | `is_fd_exhaustion_text` | 6 | boolean predicate |
 | `lib/keeper_disk_pressure.ml:55-65` | `is_disk_exhaustion_text` | 6 | boolean predicate |
-| `lib/coord/coord_utils_ops.ml:410` | inline list | 6 (FD 복붙) | local match |
+| `lib/workspace/workspace_utils_ops.ml:410` | inline list | 6 (FD 복붙) | local match |
 | `lib/keeper/keeper_stale_watchdog.ml:203` | inline literal | 1 (FD 단독) | watchdog flag |
 
 검증 grep:
@@ -299,4 +299,4 @@ AGENT-LLM-A.md `software-development.md` §워크어라운드 거부 체크리�
 
 1. **`Other of string` 의 어디까지 typed 화?** — 본 RFC 는 *backend reactor + RFC* 가 동시 존재하는 클래스만 named variant. POSIX errno 추가 demand 가 누적되면 별도 RFC 로 확장.
 2. **Wire schema cutoff** — 14 일은 임의 선택. 외부 reader 인벤토리 (`masc.telemetry_coverage_gap.v1` consumer) 가 모두 SSOT 안에 있으면 더 빠르게 가능. PR-3 시점에 재평가.
-3. **`coord_utils_ops.ml:410` inline matcher** — `runtime_*` 영역이라 RFC-0142 와의 경계가 살짝 겹침. `is_fd_exhaustion_text` 의 caller 인지 확인 후 PR-2 에서 본 RFC 적용 / RFC-0142 보류 결정.
+3. **`workspace_utils_ops.ml:410` inline matcher** — `runtime_*` 영역이라 RFC-0142 와의 경계가 살짝 겹침. `is_fd_exhaustion_text` 의 caller 인지 확인 후 PR-2 에서 본 RFC 적용 / RFC-0142 보류 결정.

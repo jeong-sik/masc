@@ -346,7 +346,7 @@ SummarizeOld의 `summarizer`는 LLM을 호출하지 않는다. 각 메시지의 
 | Depth | 대상 소스 | 적용 상황 |
 |-------|----------|----------|
 | Skip | 없음 | Conversational, Task_command |
-| Light | Recent_broadcasts, Masc_cache | Status_check, Coordination, 답이 broadcast에 있는 Knowledge_query |
+| Light | Recent_broadcasts, Masc_cache | Status_check, Workspace, 답이 broadcast에 있는 Knowledge_query |
 | Full | Recent_broadcasts, Masc_cache, File_context | Knowledge_query |
 
 ### 7.3 Intent Classification

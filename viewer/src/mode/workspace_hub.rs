@@ -1,4 +1,4 @@
-//! Room hub — room management, local-storage persistence, and room-selector UI.
+//! Workspace hub — workspace management, local-storage persistence, and workspace-selector UI.
 
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
@@ -10,56 +10,56 @@ use crate::game::lifecycle::TrpgLifecycleState;
 
 use super::mcp_rpc::mcp_tool_call;
 use super::{
-    actor_admin_room_id, actor_admin_set_status, clear_trpg_dom, refresh_actor_admin_list,
-    render_auto_round_toggle, set_current_room_id, set_element_display, sync_session_pause_buttons,
+    actor_admin_workspace_id, actor_admin_set_status, clear_trpg_dom, refresh_actor_admin_list,
+    render_auto_round_toggle, set_current_workspace_id, set_element_display, sync_session_pause_buttons,
     unique_non_empty,
 };
 
-const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
-pub(super) const KNOWN_ROOMS_STORAGE_KEY: &str = "masc_viewer_known_rooms";
-pub(super) const ROOM_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_room_hub_visible";
-pub(super) const ROOM_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_room_hub_running_only";
+const RECENT_WORKSPACES_STORAGE_KEY: &str = "masc_viewer_recent_workspaces";
+pub(super) const KNOWN_WORKSPACES_STORAGE_KEY: &str = "masc_viewer_known_workspaces";
+pub(super) const WORKSPACE_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_workspace_hub_visible";
+pub(super) const WORKSPACE_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_workspace_hub_running_only";
 const INLINE_SELECTOR_MAX_OPTIONS: usize = 5;
-const ROOM_AUTO_FOCUS_DEFAULT_ROOM_ONLY: bool = true;
-const ROOM_AUTO_FOCUS_SCORE_RUNNING: u8 = 4;
-const ROOM_AUTO_FOCUS_SCORE_IDLE: u8 = 3;
-const ROOM_AUTO_FOCUS_SCORE_STOPPED: u8 = 2;
-const ROOM_AUTO_FOCUS_SCORE_LOADING: u8 = 1;
+const WORKSPACE_AUTO_FOCUS_DEFAULT_WORKSPACE_ONLY: bool = true;
+const WORKSPACE_AUTO_FOCUS_SCORE_RUNNING: u8 = 4;
+const WORKSPACE_AUTO_FOCUS_SCORE_IDLE: u8 = 3;
+const WORKSPACE_AUTO_FOCUS_SCORE_STOPPED: u8 = 2;
+const WORKSPACE_AUTO_FOCUS_SCORE_LOADING: u8 = 1;
 
-pub(super) fn load_recent_rooms() -> Vec<String> {
+pub(super) fn load_recent_workspaces() -> Vec<String> {
     let raw = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(RECENT_ROOMS_STORAGE_KEY).ok().flatten())
+        .and_then(|storage| storage.get_item(RECENT_WORKSPACES_STORAGE_KEY).ok().flatten())
         .unwrap_or_default();
     unique_non_empty(
         raw.split('\n')
-            .filter_map(crate::config::sanitize_room_id)
+            .filter_map(crate::config::sanitize_workspace_id)
             .collect::<Vec<_>>(),
     )
 }
 
-fn save_recent_rooms(rooms: &[String]) {
-    let value = rooms.join("\n");
+fn save_recent_workspaces(workspaces: &[String]) {
+    let value = workspaces.join("\n");
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(RECENT_ROOMS_STORAGE_KEY, &value);
+        let _ = storage.set_item(RECENT_WORKSPACES_STORAGE_KEY, &value);
     }
 }
 
-pub(super) fn remember_recent_room(room_id: &str) {
-    let Some(room) = crate::config::sanitize_room_id(room_id) else {
+pub(super) fn remember_recent_workspace(workspace_id: &str) {
+    let Some(workspace) = crate::config::sanitize_workspace_id(workspace_id) else {
         return;
     };
-    let mut rooms = load_recent_rooms();
-    rooms.retain(|existing| existing != &room);
-    rooms.insert(0, room);
-    if rooms.len() > 12 {
-        rooms.truncate(12);
+    let mut workspaces = load_recent_workspaces();
+    workspaces.retain(|existing| existing != &workspace);
+    workspaces.insert(0, workspace);
+    if workspaces.len() > 12 {
+        workspaces.truncate(12);
     }
-    save_recent_rooms(&rooms);
+    save_recent_workspaces(&workspaces);
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct RoomSnapshot {
+pub(super) struct WorkspaceSnapshot {
     pub(super) id: String,
     pub(super) status: String,
     pub(super) turn: u32,
@@ -68,49 +68,49 @@ pub(super) struct RoomSnapshot {
     pub(super) task_count: i64,
 }
 
-pub(super) fn room_lane_label(status: &str) -> &'static str {
+pub(super) fn workspace_lane_label(status: &str) -> &'static str {
     TrpgLifecycleState::from_status(status).lane()
 }
 
-fn room_display_label(room_id: &str) -> String {
-    if room_id.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
-        format!("{} (기본 방)", crate::config::DEFAULT_ROOM_ID)
+fn workspace_display_label(workspace_id: &str) -> String {
+    if workspace_id.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID) {
+        format!("{} (기본 방)", crate::config::DEFAULT_WORKSPACE_ID)
     } else {
-        room_id.to_string()
+        workspace_id.to_string()
     }
 }
 
 fn auto_focus_score(status: &str) -> Option<u8> {
     match TrpgLifecycleState::from_status(status) {
-        TrpgLifecycleState::Running => Some(ROOM_AUTO_FOCUS_SCORE_RUNNING),
-        TrpgLifecycleState::Idle => Some(ROOM_AUTO_FOCUS_SCORE_IDLE),
-        TrpgLifecycleState::Stopped => Some(ROOM_AUTO_FOCUS_SCORE_STOPPED),
-        TrpgLifecycleState::Loading => Some(ROOM_AUTO_FOCUS_SCORE_LOADING),
+        TrpgLifecycleState::Running => Some(WORKSPACE_AUTO_FOCUS_SCORE_RUNNING),
+        TrpgLifecycleState::Idle => Some(WORKSPACE_AUTO_FOCUS_SCORE_IDLE),
+        TrpgLifecycleState::Stopped => Some(WORKSPACE_AUTO_FOCUS_SCORE_STOPPED),
+        TrpgLifecycleState::Loading => Some(WORKSPACE_AUTO_FOCUS_SCORE_LOADING),
         _ => None,
     }
 }
 
-fn select_room_for_ended_default(current_room: &str, rooms: &[RoomSnapshot]) -> Option<String> {
-    if ROOM_AUTO_FOCUS_DEFAULT_ROOM_ONLY
-        && !current_room.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID)
+fn select_workspace_for_ended_default(current_workspace: &str, workspaces: &[WorkspaceSnapshot]) -> Option<String> {
+    if WORKSPACE_AUTO_FOCUS_DEFAULT_WORKSPACE_ONLY
+        && !current_workspace.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID)
     {
         return None;
     }
 
-    let current_is_ended = rooms
+    let current_is_ended = workspaces
         .iter()
-        .find(|room| room.id.eq_ignore_ascii_case(current_room))
-        .map(|room| TrpgLifecycleState::from_status(&room.status) == TrpgLifecycleState::Ended)
+        .find(|workspace| workspace.id.eq_ignore_ascii_case(current_workspace))
+        .map(|workspace| TrpgLifecycleState::from_status(&workspace.status) == TrpgLifecycleState::Ended)
         .unwrap_or(false);
     if !current_is_ended {
         return None;
     }
 
-    rooms
+    workspaces
         .iter()
-        .filter(|room| !room.id.eq_ignore_ascii_case(current_room))
-        .filter_map(|room| {
-            auto_focus_score(&room.status).map(|score| (score, room.turn, room.id.clone()))
+        .filter(|workspace| !workspace.id.eq_ignore_ascii_case(current_workspace))
+        .filter_map(|workspace| {
+            auto_focus_score(&workspace.status).map(|score| (score, workspace.turn, workspace.id.clone()))
         })
         .max_by_key(|(score, turn, _)| (*score, *turn))
         .map(|(_, _, id)| id)
@@ -118,10 +118,10 @@ fn select_room_for_ended_default(current_room: &str, rooms: &[RoomSnapshot]) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{inline_selector_rooms, select_room_for_ended_default, RoomSnapshot};
+    use super::{inline_selector_workspaces, select_workspace_for_ended_default, WorkspaceSnapshot};
 
-    fn snapshot(id: &str, status: &str, turn: u32) -> RoomSnapshot {
-        RoomSnapshot {
+    fn snapshot(id: &str, status: &str, turn: u32) -> WorkspaceSnapshot {
+        WorkspaceSnapshot {
             id: id.to_string(),
             status: status.to_string(),
             turn,
@@ -133,132 +133,125 @@ mod tests {
 
     #[test]
     fn ended_default_prefers_running_over_idle() {
-        let rooms = vec![
+        let workspaces = vec![
             snapshot("default", "ended", 11),
-            snapshot("idle-room", "idle", 99),
-            snapshot("running-room", "running", 1),
+            snapshot("idle-workspace", "idle", 99),
+            snapshot("running-workspace", "running", 1),
         ];
         assert_eq!(
-            select_room_for_ended_default("default", &rooms),
-            Some("running-room".to_string())
+            select_workspace_for_ended_default("default", &workspaces),
+            Some("running-workspace".to_string())
         );
     }
 
     #[test]
     fn ended_default_uses_turn_as_tiebreaker_within_same_lane() {
-        let rooms = vec![
+        let workspaces = vec![
             snapshot("default", "ended", 4),
             snapshot("run-a", "running", 2),
             snapshot("run-b", "running", 7),
         ];
         assert_eq!(
-            select_room_for_ended_default("default", &rooms),
+            select_workspace_for_ended_default("default", &workspaces),
             Some("run-b".to_string())
         );
     }
 
     #[test]
-    fn non_default_room_never_auto_switches() {
-        let rooms = vec![
+    fn non_default_workspace_never_auto_switches() {
+        let workspaces = vec![
             snapshot("custom", "ended", 4),
             snapshot("run-b", "running", 7),
         ];
-        assert_eq!(select_room_for_ended_default("custom", &rooms), None);
+        assert_eq!(select_workspace_for_ended_default("custom", &workspaces), None);
     }
 
     #[test]
-    fn default_room_without_ended_status_does_not_switch() {
-        let rooms = vec![
+    fn default_workspace_without_ended_status_does_not_switch() {
+        let workspaces = vec![
             snapshot("default", "running", 4),
             snapshot("run-b", "running", 7),
         ];
-        assert_eq!(select_room_for_ended_default("default", &rooms), None);
+        assert_eq!(select_workspace_for_ended_default("default", &workspaces), None);
     }
 
     #[test]
     fn ended_default_returns_none_when_no_eligible_target_exists() {
-        let rooms = vec![
+        let workspaces = vec![
             snapshot("default", "ended", 4),
             snapshot("archived", "ended", 1),
             snapshot("broken", "unavailable", 0),
         ];
-        assert_eq!(select_room_for_ended_default("default", &rooms), None);
+        assert_eq!(select_workspace_for_ended_default("default", &workspaces), None);
     }
 
     #[test]
-    fn inline_selector_rooms_keeps_known_rooms_when_selected_is_default() {
+    fn inline_selector_workspaces_keeps_known_workspaces_when_selected_is_default() {
         let known = vec![
             "default".to_string(),
-            "alpha-room".to_string(),
-            "beta-room".to_string(),
+            "alpha-workspace".to_string(),
+            "beta-workspace".to_string(),
         ];
-        let rooms = inline_selector_rooms("default", &known);
+        let workspaces = inline_selector_workspaces("default", &known);
         assert_eq!(
-            rooms,
+            workspaces,
             vec![
                 "default".to_string(),
-                "alpha-room".to_string(),
-                "beta-room".to_string()
+                "alpha-workspace".to_string(),
+                "beta-workspace".to_string()
             ]
         );
     }
 
     #[test]
-    fn inline_selector_rooms_prioritizes_selected_room_and_dedups() {
+    fn inline_selector_workspaces_prioritizes_selected_workspace_and_dedups() {
         let known = vec![
-            "alpha-room".to_string(),
-            "beta-room".to_string(),
+            "alpha-workspace".to_string(),
+            "beta-workspace".to_string(),
             "default".to_string(),
         ];
-        let rooms = inline_selector_rooms("beta-room", &known);
-        assert_eq!(
-            rooms,
-            vec![
-                "beta-room".to_string(),
-                "default".to_string(),
-                "alpha-room".to_string()
-            ]
-        );
+        let workspaces = inline_selector_workspaces("beta-workspace", &known);
+        assert_eq!(workspaces, vec!["beta-workspace".to_string(), "default".to_string(), "alpha-workspace".to_string()]);
     }
 
     #[test]
-    fn inline_selector_rooms_caps_option_count() {
+    fn inline_selector_workspaces_caps_option_count() {
         let known = (0..20)
-            .map(|idx| format!("room-{idx:02}"))
+            .map(|idx| format!("workspace-{idx:02}"))
             .collect::<Vec<_>>();
-        let rooms = inline_selector_rooms("current-room", &known);
-        assert_eq!(rooms.len(), 5);
-        assert_eq!(rooms[0], "current-room");
-        assert_eq!(rooms[1], "default");
+        let workspaces = inline_selector_workspaces("current-workspace", &known);
+        assert_eq!(workspaces.len(), 5);
+        assert_eq!(workspaces[0], "current-workspace");
+        assert_eq!(workspaces[1], "default");
     }
 
     #[test]
-    fn inline_selector_rooms_prioritizes_non_generated_ids() {
+    fn inline_selector_workspaces_prioritizes_non_generated_ids() {
         let known = vec![
             "adventure-1771512523460".to_string(),
-            "room-current-1772042447265-497".to_string(),
-            "alpha-room".to_string(),
-            "beta-room".to_string(),
+            "workspace-current-1772042447265-497".to_string(),
+            "alpha-workspace".to_string(),
+            "beta-workspace".to_string(),
         ];
-        let rooms = inline_selector_rooms("current-room", &known);
+        let workspaces = inline_selector_workspaces("current-workspace", &known);
         assert_eq!(
-            rooms,
+            workspaces,
             vec![
-                "current-room".to_string(),
+                "current-workspace".to_string(),
                 "default".to_string(),
-                "alpha-room".to_string(),
-                "beta-room".to_string(),
+                "alpha-workspace".to_string(),
+                "beta-workspace".to_string(),
                 "adventure-1771512523460".to_string()
             ]
         );
     }
 }
 
-fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_room: &str) {
-    let Some(hub) = doc.get_element_by_id("room-hub") else {
+fn render_workspace_hub(doc: &web_sys::Document, workspaces: &[WorkspaceSnapshot], selected_workspace: &str) {
+    let Some(hub) = doc.get_element_by_id("workspace-hub") else {
         return;
     };
-    let running_only = load_room_hub_running_only();
+    let running_only = load_workspace_hub_running_only();
     let mut current = Vec::new();
     let mut running = Vec::new();
     let mut stopped = Vec::new();
@@ -266,37 +259,37 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     let mut unavailable = Vec::new();
     let mut ended_hidden_count = 0usize;
 
-    for room in rooms {
-        let lane = room_lane_label(&room.status);
-        let is_current = room.id == selected_room;
+    for workspace in workspaces {
+        let lane = workspace_lane_label(&workspace.status);
+        let is_current = workspace.id == selected_workspace;
         let current_attr = if is_current {
             " data-current=\"1\""
         } else {
             " data-current=\"0\""
         };
-        let status_text = if room.status.trim().is_empty() {
+        let status_text = if workspace.status.trim().is_empty() {
             "unknown".to_string()
         } else {
-            room.status.clone()
+            workspace.status.clone()
         };
         let lifecycle = TrpgLifecycleState::from_status(&status_text);
         let card = format!(
             concat!(
-                "<button class=\"room-chip\" data-room-id=\"{id}\" data-room-status=\"{status}\"{current}>",
-                "<span class=\"room-chip-id\">{label}<span class=\"room-chip-state {state_class}\">{state_label}</span></span>",
-                "<span class=\"room-chip-meta\">turn {turn} · {phase} · a{agents}/t{tasks}</span>",
+                "<button class=\"workspace-chip\" data-workspace-id=\"{id}\" data-workspace-status=\"{status}\"{current}>",
+                "<span class=\"workspace-chip-id\">{label}<span class=\"workspace-chip-state {state_class}\">{state_label}</span></span>",
+                "<span class=\"workspace-chip-meta\">turn {turn} · {phase} · a{agents}/t{tasks}</span>",
                 "</button>"
             ),
-            id = html_escape(&room.id),
-            label = html_escape(&room_display_label(&room.id)),
+            id = html_escape(&workspace.id),
+            label = html_escape(&workspace_display_label(&workspace.id)),
             status = html_escape(&status_text),
             current = current_attr,
             state_class = lifecycle.css_class(),
             state_label = lifecycle.label_ko(),
-            turn = room.turn,
-            phase = html_escape(&room.phase),
-            agents = room.agent_count,
-            tasks = room.task_count
+            turn = workspace.turn,
+            phase = html_escape(&workspace.phase),
+            agents = workspace.agent_count,
+            tasks = workspace.task_count
         );
         if is_current {
             current.push(card);
@@ -314,12 +307,12 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
 
     let lane_html = |title: &str, rows: Vec<String>, lane: &str| -> String {
         let body = if rows.is_empty() {
-            "<div class=\"room-chip-empty\">(없음)</div>".to_string()
+            "<div class=\"workspace-chip-empty\">(없음)</div>".to_string()
         } else {
             rows.join("")
         };
         format!(
-            "<div class=\"room-lane\" data-lane=\"{lane}\"><div class=\"room-lane-title\">{title}</div><div class=\"room-chip-list\">{body}</div></div>",
+            "<div class=\"workspace-lane\" data-lane=\"{lane}\"><div class=\"workspace-lane-title\">{title}</div><div class=\"workspace-chip-list\">{body}</div></div>",
             lane = lane,
             title = title,
             body = body
@@ -348,14 +341,14 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
             lane_html("오류", unavailable, "unavailable")
         )
     };
-    let current_text = crate::config::sanitize_room_id(selected_room)
-        .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
-    let current_label = room_display_label(&current_text);
+    let current_text = crate::config::sanitize_workspace_id(selected_workspace)
+        .unwrap_or_else(|| crate::config::DEFAULT_WORKSPACE_ID.to_string());
+    let current_label = workspace_display_label(&current_text);
     let html = format!(
         concat!(
-            "<div class=\"room-hub-tools\">",
-            "<span class=\"room-hub-summary\">현재 게임: <code>{current}</code> · 표시 {previous_count}개{hidden_ended}</span>",
-            "<button id=\"room-hub-running-toggle\" class=\"room-hub-filter\" type=\"button\" aria-pressed=\"{pressed}\">",
+            "<div class=\"workspace-hub-tools\">",
+            "<span class=\"workspace-hub-summary\">현재 게임: <code>{current}</code> · 표시 {previous_count}개{hidden_ended}</span>",
+            "<button id=\"workspace-hub-running-toggle\" class=\"workspace-hub-filter\" type=\"button\" aria-pressed=\"{pressed}\">",
             "진행 중만",
             "</button>",
             "</div>",
@@ -371,8 +364,8 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     hub.set_inner_html(&html);
 }
 
-fn bind_room_hub_buttons(doc: &web_sys::Document) {
-    if let Ok(nodes) = doc.query_selector_all("#room-hub .room-chip") {
+fn bind_workspace_hub_buttons(doc: &web_sys::Document) {
+    if let Ok(nodes) = doc.query_selector_all("#workspace-hub .workspace-chip") {
         for i in 0..nodes.length() {
             let Some(node) = nodes.item(i) else { continue };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
@@ -381,16 +374,16 @@ fn bind_room_hub_buttons(doc: &web_sys::Document) {
             if el.get_attribute("data-bound").as_deref() == Some("1") {
                 continue;
             }
-            let Some(room_id) = el.get_attribute("data-room-id") else {
+            let Some(workspace_id) = el.get_attribute("data-workspace-id") else {
                 continue;
             };
             let _ = el.set_attribute("data-bound", "1");
-            let room_copy = room_id.clone();
+            let workspace_copy = workspace_id.clone();
             let cb = Closure::wrap(Box::new(move || {
                 let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                     return;
                 };
-                apply_room_switch_from_ui(&doc, &room_copy, false);
+                apply_workspace_switch_from_ui(&doc, &workspace_copy, false);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
                 target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
@@ -399,7 +392,7 @@ fn bind_room_hub_buttons(doc: &web_sys::Document) {
         }
     }
 
-    if let Some(toggle) = doc.get_element_by_id("room-hub-running-toggle") {
+    if let Some(toggle) = doc.get_element_by_id("workspace-hub-running-toggle") {
         if toggle.get_attribute("data-bound").as_deref() != Some("1") {
             let _ = toggle.set_attribute("data-bound", "1");
             let cb = Closure::wrap(Box::new(move || {
@@ -407,14 +400,14 @@ fn bind_room_hub_buttons(doc: &web_sys::Document) {
                     return;
                 };
                 let pressed = doc
-                    .get_element_by_id("room-hub-running-toggle")
+                    .get_element_by_id("workspace-hub-running-toggle")
                     .and_then(|el| el.get_attribute("aria-pressed"))
                     .map(|v| v == "true")
                     .unwrap_or(false);
-                save_room_hub_running_only(!pressed);
+                save_workspace_hub_running_only(!pressed);
                 let doc_for_fetch = doc.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    let _ = refresh_rooms_from_server(&doc_for_fetch).await;
+                    let _ = refresh_workspaces_from_server(&doc_for_fetch).await;
                 });
             }) as Box<dyn FnMut()>);
             let _ = toggle.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -425,8 +418,8 @@ fn bind_room_hub_buttons(doc: &web_sys::Document) {
     }
 }
 
-fn sync_room_hub_selection(doc: &web_sys::Document, selected_room: &str) {
-    let Ok(nodes) = doc.query_selector_all("#room-hub .room-chip") else {
+fn sync_workspace_hub_selection(doc: &web_sys::Document, selected_workspace: &str) {
+    let Ok(nodes) = doc.query_selector_all("#workspace-hub .workspace-chip") else {
         return;
     };
     for i in 0..nodes.length() {
@@ -434,14 +427,14 @@ fn sync_room_hub_selection(doc: &web_sys::Document, selected_room: &str) {
         let Some(el) = node.dyn_ref::<web_sys::Element>() else {
             continue;
         };
-        let room = el.get_attribute("data-room-id").unwrap_or_default();
-        let current = if room == selected_room { "1" } else { "0" };
+        let workspace = el.get_attribute("data-workspace-id").unwrap_or_default();
+        let current = if workspace == selected_workspace { "1" } else { "0" };
         let _ = el.set_attribute("data-current", current);
     }
 }
 
-async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), String> {
-    let url = crate::config::build_masc_url(&format!("api/v1/trpg/state?room_id={}", room_id));
+async fn fetch_workspace_runtime(workspace_id: &str) -> Result<(String, u32, String), String> {
+    let url = crate::config::build_masc_url(&format!("api/v1/trpg/state?workspace_id={}", workspace_id));
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(web_sys::RequestMode::Cors);
@@ -473,21 +466,21 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
     let json: Value =
         serde_json::from_str(&body).map_err(|e| format!("state JSON 파싱 실패: {}", e))?;
 
-    let room = json.get("room").unwrap_or(&Value::Null);
+    let workspace = json.get("workspace").unwrap_or(&Value::Null);
     let state = json.get("state").unwrap_or(&Value::Null);
 
-    let mut status = room
+    let mut status = workspace
         .get("status")
         .and_then(Value::as_str)
         .or_else(|| state.get("status").and_then(Value::as_str))
         .unwrap_or("idle")
         .to_string();
-    let turn = room
+    let turn = workspace
         .get("turn")
         .and_then(Value::as_u64)
         .or_else(|| state.get("turn").and_then(Value::as_u64))
         .unwrap_or(0) as u32;
-    let phase = room
+    let phase = workspace
         .get("phase")
         .and_then(Value::as_str)
         .or_else(|| state.get("phase").and_then(Value::as_str))
@@ -495,7 +488,7 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
         .to_string();
 
     if let Ok(pause_status) =
-        mcp_tool_call("masc_pause_status", json!({ "room_id": room_id })).await
+        mcp_tool_call("masc_pause_status", json!({ "workspace_id": workspace_id })).await
     {
         if pause_status
             .get("paused")
@@ -528,41 +521,41 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
     Ok((status, turn, phase))
 }
 
-pub(super) fn load_known_rooms() -> Vec<String> {
+pub(super) fn load_known_workspaces() -> Vec<String> {
     let raw = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(KNOWN_ROOMS_STORAGE_KEY).ok().flatten())
+        .and_then(|storage| storage.get_item(KNOWN_WORKSPACES_STORAGE_KEY).ok().flatten())
         .unwrap_or_default();
     unique_non_empty(
         raw.split('\n')
-            .filter_map(crate::config::sanitize_room_id)
+            .filter_map(crate::config::sanitize_workspace_id)
             .collect::<Vec<_>>(),
     )
 }
 
-fn save_known_rooms(rooms: &[String]) {
-    let value = rooms.join("\n");
+fn save_known_workspaces(workspaces: &[String]) {
+    let value = workspaces.join("\n");
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(KNOWN_ROOMS_STORAGE_KEY, &value);
+        let _ = storage.set_item(KNOWN_WORKSPACES_STORAGE_KEY, &value);
     }
 }
 
-pub(super) fn candidate_room_ids() -> Vec<String> {
+pub(super) fn candidate_workspace_ids() -> Vec<String> {
     unique_non_empty(
-        std::iter::once(crate::config::current_room_id())
-            .chain(std::iter::once(crate::config::DEFAULT_ROOM_ID.to_string()))
-            .chain(load_recent_rooms().into_iter())
-            .chain(load_known_rooms().into_iter())
+        std::iter::once(crate::config::current_workspace_id())
+            .chain(std::iter::once(crate::config::DEFAULT_WORKSPACE_ID.to_string()))
+            .chain(load_recent_workspaces().into_iter())
+            .chain(load_known_workspaces().into_iter())
             .collect::<Vec<_>>(),
     )
 }
 
-fn load_room_hub_visible() -> bool {
+fn load_workspace_hub_visible() -> bool {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|storage| {
             storage
-                .get_item(ROOM_HUB_VISIBLE_STORAGE_KEY)
+                .get_item(WORKSPACE_HUB_VISIBLE_STORAGE_KEY)
                 .ok()
                 .flatten()
         })
@@ -570,21 +563,21 @@ fn load_room_hub_visible() -> bool {
         .unwrap_or(true)
 }
 
-fn save_room_hub_visible(visible: bool) {
+fn save_workspace_hub_visible(visible: bool) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let _ = storage.set_item(
-            ROOM_HUB_VISIBLE_STORAGE_KEY,
+            WORKSPACE_HUB_VISIBLE_STORAGE_KEY,
             if visible { "1" } else { "0" },
         );
     }
 }
 
-fn load_room_hub_running_only() -> bool {
+fn load_workspace_hub_running_only() -> bool {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|storage| {
             storage
-                .get_item(ROOM_HUB_RUNNING_ONLY_STORAGE_KEY)
+                .get_item(WORKSPACE_HUB_RUNNING_ONLY_STORAGE_KEY)
                 .ok()
                 .flatten()
         })
@@ -592,38 +585,35 @@ fn load_room_hub_running_only() -> bool {
         .unwrap_or(false)
 }
 
-fn save_room_hub_running_only(enabled: bool) {
+fn save_workspace_hub_running_only(enabled: bool) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let _ = storage.set_item(
-            ROOM_HUB_RUNNING_ONLY_STORAGE_KEY,
+            WORKSPACE_HUB_RUNNING_ONLY_STORAGE_KEY,
             if enabled { "1" } else { "0" },
         );
     }
 }
 
-fn sync_room_hub_top_offset(doc: &web_sys::Document) {
+fn sync_workspace_hub_top_offset(doc: &web_sys::Document) {
     let top_px = doc
         .get_element_by_id("top-bar")
-        .and_then(|el| {
-            el.dyn_ref::<web_sys::HtmlElement>()
-                .map(|bar| bar.offset_height())
-        })
+        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().map(|bar| bar.offset_height()))
         .map(|height| height.max(84))
         .unwrap_or(84);
     if let Some(hub) = doc
-        .get_element_by_id("room-hub")
+        .get_element_by_id("workspace-hub")
         .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
     {
         let _ = hub
             .style()
-            .set_property("--room-hub-top", &format!("{}px", top_px));
+            .set_property("--workspace-hub-top", &format!("{}px", top_px));
     }
 }
 
-fn set_room_hub_visible(doc: &web_sys::Document, visible: bool) {
-    sync_room_hub_top_offset(doc);
-    set_element_display(doc, "room-hub", if visible { "grid" } else { "none" });
-    if let Some(toggle) = doc.get_element_by_id("room-hub-toggle") {
+fn set_workspace_hub_visible(doc: &web_sys::Document, visible: bool) {
+    sync_workspace_hub_top_offset(doc);
+    set_element_display(doc, "workspace-hub", if visible { "grid" } else { "none" });
+    if let Some(toggle) = doc.get_element_by_id("workspace-hub-toggle") {
         let _ = toggle.set_attribute("aria-pressed", if visible { "true" } else { "false" });
         toggle.set_text_content(Some(if visible {
             "방 목록 닫기"
@@ -633,84 +623,84 @@ fn set_room_hub_visible(doc: &web_sys::Document, visible: bool) {
     }
 }
 
-fn remember_known_rooms(extra_rooms: &[String]) {
-    let mut rooms = load_known_rooms();
-    for raw in extra_rooms {
-        let Some(room) = crate::config::sanitize_room_id(raw) else {
+fn remember_known_workspaces(extra_workspaces: &[String]) {
+    let mut workspaces = load_known_workspaces();
+    for raw in extra_workspaces {
+        let Some(workspace) = crate::config::sanitize_workspace_id(raw) else {
             continue;
         };
-        if rooms.iter().any(|existing| existing == &room) {
+        if workspaces.iter().any(|existing| existing == &workspace) {
             continue;
         }
-        rooms.push(room);
+        workspaces.push(workspace);
     }
-    rooms = unique_non_empty(rooms);
-    if rooms.len() > 64 {
-        rooms = rooms.split_off(rooms.len() - 64);
+    workspaces = unique_non_empty(workspaces);
+    if workspaces.len() > 64 {
+        workspaces = workspaces.split_off(workspaces.len() - 64);
     }
-    save_known_rooms(&rooms);
+    save_known_workspaces(&workspaces);
 }
 
-fn is_known_room_id(room_id: &str) -> bool {
-    let Some(room) = crate::config::sanitize_room_id(room_id) else {
+fn is_known_workspace_id(workspace_id: &str) -> bool {
+    let Some(workspace) = crate::config::sanitize_workspace_id(workspace_id) else {
         return false;
     };
-    if room.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
+    if workspace.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID) {
         return true;
     }
-    let mut known = load_known_rooms();
-    known.extend(load_recent_rooms());
-    known.push(crate::config::current_room_id());
+    let mut known = load_known_workspaces();
+    known.extend(load_recent_workspaces());
+    known.push(crate::config::current_workspace_id());
     known
         .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(&room))
+        .any(|existing| existing.eq_ignore_ascii_case(&workspace))
 }
 
-fn confirm_unknown_room_switch(doc: &web_sys::Document, room_id: &str) -> bool {
-    let room_label = room_display_label(room_id);
+fn confirm_unknown_workspace_switch(doc: &web_sys::Document, workspace_id: &str) -> bool {
+    let workspace_label = workspace_display_label(workspace_id);
     let message = format!(
         "'{}' 방은 현재 목록에 없습니다.\n빈 방으로 이동합니다. (세션은 시작되지 않음)\n계속할까요?",
-        room_label
+        workspace_label
     );
     let proceed = web_sys::window()
         .and_then(|window| window.confirm_with_message(&message).ok())
         .unwrap_or(true);
     if !proceed {
-        if let Some(pill) = doc.get_element_by_id("room-status") {
-            let current = crate::config::current_room_id();
-            let current_label = room_display_label(&current);
+        if let Some(pill) = doc.get_element_by_id("workspace-status") {
+            let current = crate::config::current_workspace_id();
+            let current_label = workspace_display_label(&current);
             pill.set_text_content(Some(&format!("현재 게임: {} · 이동 취소", current_label)));
         }
     }
     proceed
 }
 
-fn inline_selector_rooms(selected_room: &str, known_rooms: &[String]) -> Vec<String> {
-    let is_generated = |room: &str| {
-        let key = room.to_ascii_lowercase();
+fn inline_selector_workspaces(selected_workspace: &str, known_workspaces: &[String]) -> Vec<String> {
+    let is_generated = |workspace: &str| {
+        let key = workspace.to_ascii_lowercase();
         key.starts_with("adventure-")
-            || key.starts_with("room-current-")
+            || key.starts_with("workspace-current-")
             || key.starts_with("persist-")
     };
 
-    let mut rooms = Vec::with_capacity(known_rooms.len() + 2);
-    rooms.push(selected_room.to_string());
-    rooms.push(crate::config::DEFAULT_ROOM_ID.to_string());
-    rooms.extend(known_rooms.iter().cloned());
+    let mut workspaces = Vec::with_capacity(known_workspaces.len() + 2);
+    workspaces.push(selected_workspace.to_string());
+    workspaces.push(crate::config::DEFAULT_WORKSPACE_ID.to_string());
+    workspaces.extend(known_workspaces.iter().cloned());
 
-    let deduped = unique_non_empty(rooms);
+    let deduped = unique_non_empty(workspaces);
     let mut prioritized = Vec::with_capacity(deduped.len());
     let mut generated = Vec::new();
 
-    for room in deduped {
-        if room == selected_room || room.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
-            prioritized.push(room);
+    for workspace in deduped {
+        if workspace == selected_workspace || workspace.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID) {
+            prioritized.push(workspace);
             continue;
         }
-        if is_generated(&room) {
-            generated.push(room);
+        if is_generated(&workspace) {
+            generated.push(workspace);
         } else {
-            prioritized.push(room);
+            prioritized.push(workspace);
         }
     }
     prioritized.extend(generated);
@@ -720,21 +710,21 @@ fn inline_selector_rooms(selected_room: &str, known_rooms: &[String]) -> Vec<Str
     prioritized
 }
 
-pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
-    let selected = crate::config::sanitize_room_id(selected_room)
-        .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
-    let rooms = inline_selector_rooms(&selected, &load_recent_rooms());
-    sync_room_hub_top_offset(doc);
+pub(super) fn sync_workspace_controls(doc: &web_sys::Document, selected_workspace: &str) {
+    let selected = crate::config::sanitize_workspace_id(selected_workspace)
+        .unwrap_or_else(|| crate::config::DEFAULT_WORKSPACE_ID.to_string());
+    let workspaces = inline_selector_workspaces(&selected, &load_recent_workspaces());
+    sync_workspace_hub_top_offset(doc);
 
     if let Some(select) = doc
-        .get_element_by_id("room-selector-inline")
+        .get_element_by_id("workspace-selector-inline")
         .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
     {
-        let html = rooms
+        let html = workspaces
             .iter()
-            .map(|room| {
-                let safe = html_escape(room);
-                let label = html_escape(&room_display_label(room));
+            .map(|workspace| {
+                let safe = html_escape(workspace);
+                let label = html_escape(&workspace_display_label(workspace));
                 format!(r#"<option value="{safe}">{label}</option>"#)
             })
             .collect::<Vec<_>>()
@@ -743,16 +733,16 @@ pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
         select.set_value(&selected);
     }
     if let Some(input) = doc
-        .get_element_by_id("room-input-inline")
+        .get_element_by_id("workspace-input-inline")
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
         if input.value().trim().eq_ignore_ascii_case(&selected) {
             input.set_value("");
         }
     }
-    if let Some(pill) = doc.get_element_by_id("room-status") {
+    if let Some(pill) = doc.get_element_by_id("workspace-status") {
         let lifecycle = TrpgLifecycleState::Loading;
-        let selected_label = room_display_label(&selected);
+        let selected_label = workspace_display_label(&selected);
         pill.set_text_content(Some(&format!(
             "현재 게임: {} · {}",
             selected_label,
@@ -761,27 +751,27 @@ pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
         let _ = pill.set_attribute("data-lifecycle", lifecycle.css_class());
         let _ = pill.set_attribute("title", lifecycle.help_text());
     }
-    sync_room_hub_selection(doc, &selected);
+    sync_workspace_hub_selection(doc, &selected);
 }
 
-fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str, manual_input: bool) {
-    let Some(room) = crate::config::sanitize_room_id(raw_room) else {
-        log::warn!("Ignoring invalid room id from UI: {}", raw_room);
+fn apply_workspace_switch_from_ui(doc: &web_sys::Document, raw_workspace: &str, manual_input: bool) {
+    let Some(workspace) = crate::config::sanitize_workspace_id(raw_workspace) else {
+        log::warn!("Ignoring invalid workspace id from UI: {}", raw_workspace);
         return;
     };
-    let unknown_room = !is_known_room_id(&room);
-    if manual_input && unknown_room && !confirm_unknown_room_switch(doc, &room) {
+    let unknown_workspace = !is_known_workspace_id(&workspace);
+    if manual_input && unknown_workspace && !confirm_unknown_workspace_switch(doc, &workspace) {
         return;
     }
 
-    remember_known_rooms(std::slice::from_ref(&room));
-    set_current_room_id(doc, &room);
-    if unknown_room {
-        if let Some(pill) = doc.get_element_by_id("room-status") {
-            let room_label = room_display_label(&room);
+    remember_known_workspaces(std::slice::from_ref(&workspace));
+    set_current_workspace_id(doc, &workspace);
+    if unknown_workspace {
+        if let Some(pill) = doc.get_element_by_id("workspace-status") {
+            let workspace_label = workspace_display_label(&workspace);
             pill.set_text_content(Some(&format!(
                 "현재 게임: {} · 빈 방(세션 없음, 새 게임 필요)",
-                room_label
+                workspace_label
             )));
             let _ = pill.set_attribute("data-lifecycle", TrpgLifecycleState::Idle.css_class());
             let _ = pill.set_attribute(
@@ -796,9 +786,9 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str, manual_inp
     render_auto_round_toggle(doc);
     crate::game::round_runner::set_auto_round_running(false);
     clear_trpg_dom(doc);
-    sync_room_hub_selection(doc, &room);
+    sync_workspace_hub_selection(doc, &workspace);
     if let Some(input) = doc
-        .get_element_by_id("room-input-inline")
+        .get_element_by_id("workspace-input-inline")
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
         input.set_value("");
@@ -808,32 +798,32 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str, manual_inp
         if let Ok(rows) = refresh_actor_admin_list(&doc_for_refresh).await {
             actor_admin_set_status(
                 &doc_for_refresh,
-                &format!("room {} 액터 {}명", actor_admin_room_id(), rows.len()),
+                &format!("workspace {} 액터 {}명", actor_admin_workspace_id(), rows.len()),
                 "status-ok",
             );
         }
     });
-    let doc_for_rooms = doc.clone();
+    let doc_for_workspaces = doc.clone();
     wasm_bindgen_futures::spawn_local(async move {
-        if let Err(e) = refresh_rooms_from_server(&doc_for_rooms).await {
-            log::warn!("room 목록 동기화 실패(방 이동 직후): {}", e);
+        if let Err(e) = refresh_workspaces_from_server(&doc_for_workspaces).await {
+            log::warn!("workspace 목록 동기화 실패(방 이동 직후): {}", e);
         }
     });
-    log::info!("Viewer room switched to {}", room);
+    log::info!("Viewer workspace switched to {}", workspace);
 }
 
-pub(super) async fn refresh_rooms_from_server(
+pub(super) async fn refresh_workspaces_from_server(
     doc: &web_sys::Document,
-) -> Result<Vec<RoomSnapshot>, String> {
-    let room_ids = candidate_room_ids();
-    if room_ids.is_empty() {
-        return Err("추적할 room 후보가 없습니다.".to_string());
+) -> Result<Vec<WorkspaceSnapshot>, String> {
+    let workspace_ids = candidate_workspace_ids();
+    if workspace_ids.is_empty() {
+        return Err("추적할 workspace 후보가 없습니다.".to_string());
     }
 
-    let mut snapshots = room_ids
+    let mut snapshots = workspace_ids
         .iter()
-        .map(|room_id| RoomSnapshot {
-            id: room_id.clone(),
+        .map(|workspace_id| WorkspaceSnapshot {
+            id: workspace_id.clone(),
             status: "idle".to_string(),
             turn: 0,
             phase: "-".to_string(),
@@ -843,7 +833,7 @@ pub(super) async fn refresh_rooms_from_server(
         .collect::<Vec<_>>();
 
     for row in &mut snapshots {
-        match fetch_room_runtime(&row.id).await {
+        match fetch_workspace_runtime(&row.id).await {
             Ok((status, turn, phase)) => {
                 row.status = status;
                 row.turn = turn;
@@ -856,15 +846,15 @@ pub(super) async fn refresh_rooms_from_server(
         }
     }
 
-    remember_known_rooms(&room_ids);
-    let mut current = crate::config::current_room_id();
-    if let Some(replacement) = select_room_for_ended_default(&current, &snapshots) {
+    remember_known_workspaces(&workspace_ids);
+    let mut current = crate::config::current_workspace_id();
+    if let Some(replacement) = select_workspace_for_ended_default(&current, &snapshots) {
         log::info!(
-            "Current room {} is ended; auto-switching to {}",
+            "Current workspace {} is ended; auto-switching to {}",
             current,
             replacement
         );
-        set_current_room_id(doc, &replacement);
+        set_current_workspace_id(doc, &replacement);
         clear_trpg_dom(doc);
         current = replacement;
     }
@@ -873,14 +863,14 @@ pub(super) async fn refresh_rooms_from_server(
         .filter(|row| TrpgLifecycleState::from_status(&row.status) == TrpgLifecycleState::Ended)
         .map(|row| row.id.to_ascii_lowercase())
         .collect::<std::collections::HashSet<_>>();
-    let mut recent_rooms = load_recent_rooms();
-    recent_rooms.retain(|room| {
-        room.eq_ignore_ascii_case(&current) || !ended_ids.contains(&room.to_ascii_lowercase())
+    let mut recent_workspaces = load_recent_workspaces();
+    recent_workspaces.retain(|workspace| {
+        workspace.eq_ignore_ascii_case(&current) || !ended_ids.contains(&workspace.to_ascii_lowercase())
     });
-    save_recent_rooms(&recent_rooms);
-    sync_room_controls(doc, &current);
-    render_room_hub(doc, &snapshots, &current);
-    bind_room_hub_buttons(doc);
+    save_recent_workspaces(&recent_workspaces);
+    sync_workspace_controls(doc, &current);
+    render_workspace_hub(doc, &snapshots, &current);
+    bind_workspace_hub_buttons(doc);
     let current_status = snapshots
         .iter()
         .find(|row| row.id == current)
@@ -889,7 +879,7 @@ pub(super) async fn refresh_rooms_from_server(
 
     // Auto-round is a gameplay convenience for active rounds only.
     // Keep it off in idle/ended/unavailable to avoid confusing "auto running"
-    // signals when the room cannot actually advance.
+    // signals when the workspace cannot actually advance.
     if TrpgLifecycleState::from_status(current_status) != TrpgLifecycleState::Running {
         if let Some(dashboard) = doc.get_element_by_id("dashboard") {
             let _ = dashboard.set_attribute("data-auto-round", "0");
@@ -902,7 +892,7 @@ pub(super) async fn refresh_rooms_from_server(
     Ok(snapshots)
 }
 
-fn merge_room_snapshot(existing: &mut RoomSnapshot, incoming: RoomSnapshot) {
+fn merge_workspace_snapshot(existing: &mut WorkspaceSnapshot, incoming: WorkspaceSnapshot) {
     if existing.status.trim().is_empty()
         || existing.status.eq_ignore_ascii_case("idle")
         || existing.status.eq_ignore_ascii_case("unknown")
@@ -925,22 +915,22 @@ fn merge_room_snapshot(existing: &mut RoomSnapshot, incoming: RoomSnapshot) {
     existing.task_count = existing.task_count.max(incoming.task_count);
 }
 
-fn dedup_room_snapshots(rows: Vec<RoomSnapshot>) -> Vec<RoomSnapshot> {
+fn dedup_workspace_snapshots(rows: Vec<WorkspaceSnapshot>) -> Vec<WorkspaceSnapshot> {
     use std::collections::HashMap;
 
-    let mut out: Vec<RoomSnapshot> = Vec::new();
+    let mut out: Vec<WorkspaceSnapshot> = Vec::new();
     let mut index_by_id: HashMap<String, usize> = HashMap::new();
 
     for mut row in rows {
         row.id =
-            crate::config::sanitize_room_id(&row.id).unwrap_or_else(|| row.id.trim().to_string());
+            crate::config::sanitize_workspace_id(&row.id).unwrap_or_else(|| row.id.trim().to_string());
         if row.id.is_empty() {
             continue;
         }
         let key = row.id.to_ascii_lowercase();
         if let Some(idx) = index_by_id.get(&key).copied() {
             if let Some(existing) = out.get_mut(idx) {
-                merge_room_snapshot(existing, row);
+                merge_workspace_snapshot(existing, row);
             }
             continue;
         }
@@ -952,13 +942,13 @@ fn dedup_room_snapshots(rows: Vec<RoomSnapshot>) -> Vec<RoomSnapshot> {
     out
 }
 
-pub(super) fn bind_room_controls(doc: &web_sys::Document) {
-    let Some(select_el) = doc.get_element_by_id("room-selector-inline") else {
+pub(super) fn bind_workspace_controls(doc: &web_sys::Document) {
+    let Some(select_el) = doc.get_element_by_id("workspace-selector-inline") else {
         return;
     };
-    let room_now = crate::config::current_room_id();
-    sync_room_controls(doc, &room_now);
-    set_room_hub_visible(doc, load_room_hub_visible());
+    let workspace_now = crate::config::current_workspace_id();
+    sync_workspace_controls(doc, &workspace_now);
+    set_workspace_hub_visible(doc, load_workspace_hub_visible());
 
     if select_el.get_attribute("data-bound").as_deref() == Some("1") {
         return;
@@ -970,7 +960,7 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
             return;
         };
         let selected = doc
-            .get_element_by_id("room-selector-inline")
+            .get_element_by_id("workspace-selector-inline")
             .and_then(|el| {
                 el.dyn_ref::<web_sys::HtmlSelectElement>()
                     .map(|s| s.value())
@@ -979,23 +969,23 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
         if selected.trim().is_empty() {
             return;
         }
-        apply_room_switch_from_ui(&doc, &selected, false);
+        apply_workspace_switch_from_ui(&doc, &selected, false);
     }) as Box<dyn FnMut()>);
     let _ = select_el.dyn_ref::<web_sys::EventTarget>().map(|target| {
         target.add_event_listener_with_callback("change", select_cb.as_ref().unchecked_ref())
     });
     select_cb.forget();
 
-    if let Some(apply_btn) = doc.get_element_by_id("room-apply-btn") {
+    if let Some(apply_btn) = doc.get_element_by_id("workspace-apply-btn") {
         let apply_cb = Closure::wrap(Box::new(move || {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
             let typed = doc
-                .get_element_by_id("room-input-inline")
+                .get_element_by_id("workspace-input-inline")
                 .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
                 .unwrap_or_default();
-            apply_room_switch_from_ui(&doc, &typed, true);
+            apply_workspace_switch_from_ui(&doc, &typed, true);
         }) as Box<dyn FnMut()>);
         let _ = apply_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
             target.add_event_listener_with_callback("click", apply_cb.as_ref().unchecked_ref())
@@ -1003,7 +993,7 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
         apply_cb.forget();
     }
 
-    if let Some(input_el) = doc.get_element_by_id("room-input-inline") {
+    if let Some(input_el) = doc.get_element_by_id("workspace-input-inline") {
         let key_cb = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
             if event.key() != "Enter" {
                 return;
@@ -1012,10 +1002,10 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                 return;
             };
             let typed = doc
-                .get_element_by_id("room-input-inline")
+                .get_element_by_id("workspace-input-inline")
                 .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
                 .unwrap_or_default();
-            apply_room_switch_from_ui(&doc, &typed, true);
+            apply_workspace_switch_from_ui(&doc, &typed, true);
         }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
         let _ = input_el.dyn_ref::<web_sys::EventTarget>().map(|target| {
             target.add_event_listener_with_callback("keydown", key_cb.as_ref().unchecked_ref())
@@ -1023,14 +1013,14 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
         key_cb.forget();
     }
 
-    if let Some(refresh_btn) = doc.get_element_by_id("room-refresh-btn") {
+    if let Some(refresh_btn) = doc.get_element_by_id("workspace-refresh-btn") {
         let refresh_cb = Closure::wrap(Box::new(move || {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
-            if let Some(pill) = doc.get_element_by_id("room-status") {
-                let current = crate::config::current_room_id();
-                let current_label = room_display_label(&current);
+            if let Some(pill) = doc.get_element_by_id("workspace-status") {
+                let current = crate::config::current_workspace_id();
+                let current_label = workspace_display_label(&current);
                 pill.set_text_content(Some(&format!(
                     "현재 게임: {} · 목록 불러오는 중...",
                     current_label
@@ -1038,17 +1028,17 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
             }
             let doc_for_fetch = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match refresh_rooms_from_server(&doc_for_fetch).await {
-                    Ok(rooms) => {
-                        let current = crate::config::current_room_id();
-                        let ended_count = rooms
+                match refresh_workspaces_from_server(&doc_for_fetch).await {
+                    Ok(workspaces) => {
+                        let current = crate::config::current_workspace_id();
+                        let ended_count = workspaces
                             .iter()
                             .filter(|row| {
                                 TrpgLifecycleState::from_status(&row.status)
                                     == TrpgLifecycleState::Ended
                             })
                             .count();
-                        let current_is_ended = rooms
+                        let current_is_ended = workspaces
                             .iter()
                             .find(|row| row.id.eq_ignore_ascii_case(&current))
                             .map(|row| {
@@ -1057,22 +1047,22 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                             })
                             .unwrap_or(false);
                         let visible_count =
-                            rooms.len().saturating_sub(ended_count) + usize::from(current_is_ended);
-                        if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
-                            let current_label = room_display_label(&current);
+                            workspaces.len().saturating_sub(ended_count) + usize::from(current_is_ended);
+                        if let Some(pill) = doc_for_fetch.get_element_by_id("workspace-status") {
+                            let current_label = workspace_display_label(&current);
                             pill.set_text_content(Some(&format!(
                                 "현재 게임: {} · 표시 {} / 전체 {}",
                                 current_label,
                                 visible_count,
-                                rooms.len()
+                                workspaces.len()
                             )));
                         }
                     }
                     Err(e) => {
-                        log::warn!("room 목록 새로고침 실패: {}", e);
-                        let current = crate::config::current_room_id();
-                        if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
-                            let current_label = room_display_label(&current);
+                        log::warn!("workspace 목록 새로고침 실패: {}", e);
+                        let current = crate::config::current_workspace_id();
+                        if let Some(pill) = doc_for_fetch.get_element_by_id("workspace-status") {
+                            let current_label = workspace_display_label(&current);
                             pill.set_text_content(Some(&format!(
                                 "현재 게임: {} · 목록 실패",
                                 current_label
@@ -1088,19 +1078,19 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
         refresh_cb.forget();
     }
 
-    if let Some(hub_toggle) = doc.get_element_by_id("room-hub-toggle") {
+    if let Some(hub_toggle) = doc.get_element_by_id("workspace-hub-toggle") {
         let hub_cb = Closure::wrap(Box::new(move || {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
             let visible = doc
-                .get_element_by_id("room-hub-toggle")
+                .get_element_by_id("workspace-hub-toggle")
                 .and_then(|el| el.get_attribute("aria-pressed"))
                 .map(|v| v == "true")
                 .unwrap_or(false);
             let next = !visible;
-            set_room_hub_visible(&doc, next);
-            save_room_hub_visible(next);
+            set_workspace_hub_visible(&doc, next);
+            save_workspace_hub_visible(next);
         }) as Box<dyn FnMut()>);
         let _ = hub_toggle.dyn_ref::<web_sys::EventTarget>().map(|target| {
             target.add_event_listener_with_callback("click", hub_cb.as_ref().unchecked_ref())

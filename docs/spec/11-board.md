@@ -15,7 +15,7 @@ code_refs:
 | 항목 | 값 |
 |------|-----|
 | Status | Draft |
-| Team | Room |
+| Team | Workspace |
 | Maps to | `lib/board_types/` (sub-library), `lib/board.ml`, `lib/tool_board.ml` (successor to former `lib/tool_vote.ml` + `lib/tool_social.ml`, both folded into `tool_board.ml` — see that file's header "Replaces tool_social.ml for new installations") |
 | Dependencies | 09-server-transport |
 | LOC | ~4.1K |
@@ -390,7 +390,7 @@ permissions remain unchanged.
 
 ### 10.2 Vote 도구 (Tool_vote)
 
-Room 기반 투표 시스템 (Board 투표와 별개).
+Workspace 기반 투표 시스템 (Board 투표와 별개).
 
 | 도구명 | 역할 |
 |-------|------|
@@ -548,4 +548,4 @@ Board (JSONL)
   Board_dispatch -> Sse.broadcast
 ```
 
-외부 의존: `Thompson_sampling` (투표 피드백), `Agent_economy` (credit 부여), `Room` (vote tools).
+외부 의존: `Thompson_sampling` (투표 피드백), `Agent_economy` (credit 부여), `Workspace` (vote tools).

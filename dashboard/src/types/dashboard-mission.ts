@@ -2,7 +2,7 @@ import type { KeeperDiagnostic, KeeperTrustSummary, Message, MissionSignalTruth,
 import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
 
 export interface DashboardMissionSummary {
-  room_health?: string
+  workspace_health?: string
   cluster?: string
   project?: string
   paused?: boolean
@@ -466,7 +466,7 @@ export interface OperatorReviewDecision {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'root' | 'namespace' | 'room' | 'keeper'
+  target_type: 'root' | 'namespace' | 'workspace' | 'keeper'
   target_id?: string | null
   health?: string
   judgment_owner?: string | null

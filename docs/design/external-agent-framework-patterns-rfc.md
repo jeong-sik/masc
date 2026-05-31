@@ -36,7 +36,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 
 - Agent-LLM-A Agent SDK, Provider-D Agents SDK, Google ADK, CrewAI, LangGraph를
   `masc-mcp` core runtime 위에 직접 embedding 하는 것
-- role-play crew abstraction을 coordination core로 채택하는 것
+- role-play crew abstraction을 workspace collaboration core로 채택하는 것
 - code-generating execution model을 keeper default로 바꾸는 것
 
 ## Decision Summary
@@ -62,7 +62,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 
 - `MASC`는 언제/왜/누가 실행되는지를 결정하고,
   `OAS`는 단일 agent runtime을 담당하는 현재 boundary를 유지한다.
-- repo-local, single-machine, trusted-network coordination이라는 front-door promise를 유지한다.
+- repo-local, single-machine, trusted-network workspace collaboration이라는 front-door promise를 유지한다.
 - keeper playground containment를 sandbox SSOT로 유지한다.
 
 ## What to Change
@@ -163,7 +163,7 @@ Priority: P4
 What to change:
 
 - current A2A/Agent Card surface를 유지하되,
-  `local-only coordination`과 `remote discovery`를 구분해 contract를 정리한다.
+  `local-only workspace collaboration`과 `remote discovery`를 구분해 contract를 정리한다.
 - Agent Card는 capability discovery surface로만 유지하고,
   memory/tool/state internals를 노출하지 않는다는 원칙을 명문화한다.
 

@@ -363,8 +363,8 @@ deny list에 등록되었으나 구현이 없는 도구:
 ```
 masc_config_set          → C2 관련, 구현 없음
 masc_config_reset        → C2 관련, 구현 없음
-masc_room_delete         → 구현 없음
-masc_room_destroy        → 구현 없음
+masc_workspace_delete         → 구현 없음
+masc_workspace_destroy        → 구현 없음
 masc_admin_reset         → 구현 없음
 masc_admin_cleanup       → 구현 없음
 masc_spawn               → tool_tag_init에 이름만 등록, handler 없음
@@ -385,7 +385,7 @@ masc_pg_query            → 구현 없음
 
 - 586 모듈, 1961 의존 엣지
 - 최대 SCC: 115개 모듈 (전체의 20%)
-- Hub: Room (139 dependents), Tool_args (59), Keeper_types (44)
+- Hub: Workspace (139 dependents), Tool_args (59), Keeper_types (44)
 - Tool↔Keeper 순환이 핵심 원인
 - worktree `refactor/3593-scc-quick-fixes` 존재, Phase 0만 완료
 
@@ -531,7 +531,7 @@ Wave 2 완료 조건: `find .masc/keepers -name "memory.jsonl" | wc -l` > 0 + co
 | 순서 | 갭 | 노력 | 산출물 |
 |------|-----|------|--------|
 | 8 | H5: Feature Flags | 3-5일 | flag 레지스트리 + 평가 API |
-| 9 | M5: GC 디커플링 | 3-5일 | per-room GC 또는 Pulse 분리 |
+| 9 | M5: GC 디커플링 | 3-5일 | per-workspace GC 또는 Pulse 분리 |
 | 10 | H3: Auth/API | 5-8일 | auth 설계 문서 + 기본 구현 |
 | 11 | M4: OAS 경계 | 3-5일 | bridge audit + 도메인 용어 제거 |
 
@@ -596,7 +596,7 @@ find .masc/keepers -name "memory.jsonl" -o -name "memory_bank.jsonl" | wc -l
 grep -c "masc_config" lib/tool_dispatch.ml
 
 # M1: phantom tool 정리 확인
-grep "masc_config_set\|masc_room_delete\|masc_admin_reset\|masc_spawn\|masc_execute\b\|masc_neo4j_query\|masc_pg_query" \
+grep "masc_config_set\|masc_workspace_delete\|masc_admin_reset\|masc_spawn\|masc_execute\b\|masc_neo4j_query\|masc_pg_query" \
   lib/keeper/keeper_hooks_oas.ml | grep -v "(\*" | wc -l
 # 주석 처리되지 않은 phantom 항목 수 (목표: 0 또는 forward-looking 주석 포함)
 ```

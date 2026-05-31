@@ -7,7 +7,7 @@ import {
   type IdeContextFocus,
   type IdeContextFocusRouteLink,
 } from './ide-state'
-import { createIdeDataCoordinator } from './ide-data-coordinator'
+import { createIdeDataWorkspace client } from './ide-data-workspace client'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -407,28 +407,28 @@ function paramsWithRails(
 }
 
 export function IdeShell() {
-  const coordinator = useMemo(() => createIdeDataCoordinator(), [])
+  const workspace client = useMemo(() => createIdeDataWorkspace client(), [])
 
-  useEffect(() => () => coordinator.dispose(), [coordinator])
+  useEffect(() => () => workspace client.dispose(), [workspace client])
   const annotations = useSubscribedSnapshot(
-    coordinator.annotations,
-    coordinator.subscribeAnnotations,
+    workspace client.annotations,
+    workspace client.subscribeAnnotations,
   )
   const diffRows = useSubscribedSnapshot(
-    coordinator.diffRows,
-    coordinator.subscribeDiffRows,
+    workspace client.diffRows,
+    workspace client.subscribeDiffRows,
   )
   const repositories = useSubscribedValue(
-    coordinator.repositories,
-    coordinator.subscribeRepositories,
+    workspace client.repositories,
+    workspace client.subscribeRepositories,
   )
   const activeRepositoryId = useSubscribedValue(
-    coordinator.activeRepositoryId,
-    coordinator.subscribeActiveRepositoryId,
+    workspace client.activeRepositoryId,
+    workspace client.subscribeActiveRepositoryId,
   )
   const workspaceSource = useSubscribedValue(
-    coordinator.workspaceSource,
-    coordinator.subscribeWorkspaceSource,
+    workspace client.workspaceSource,
+    workspace client.subscribeWorkspaceSource,
   )
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
@@ -656,14 +656,14 @@ export function IdeShell() {
       >
         <div class="ide-plane-tree">
           <${IdeExplorer}
-            fileTreeStore=${coordinator.fileTreeStore}
-            workspaceSource=${coordinator.workspaceSource}
-            subscribeWorkspaceSource=${coordinator.subscribeWorkspaceSource}
-            repositories=${coordinator.repositories}
-            activeRepositoryId=${coordinator.activeRepositoryId}
-            onRepositoryChange=${coordinator.setActiveRepositoryId}
-            onRepositoryScan=${coordinator.scanRepositories}
-            subscribeRepositories=${coordinator.subscribeRepositories}
+            fileTreeStore=${workspace client.fileTreeStore}
+            workspaceSource=${workspace client.workspaceSource}
+            subscribeWorkspaceSource=${workspace client.subscribeWorkspaceSource}
+            repositories=${workspace client.repositories}
+            activeRepositoryId=${workspace client.activeRepositoryId}
+            onRepositoryChange=${workspace client.setActiveRepositoryId}
+            onRepositoryScan=${workspace client.scanRepositories}
+            subscribeRepositories=${workspace client.subscribeRepositories}
           />
         </div>
         <div
@@ -672,8 +672,8 @@ export function IdeShell() {
           <${IdeEditor}
             activeView=${activeView}
             activeLayers=${activeLayers}
-            documentStore=${coordinator.documentStore}
-            ownershipStore=${coordinator.ownershipStore}
+            documentStore=${workspace client.documentStore}
+            ownershipStore=${workspace client.ownershipStore}
             diffRows=${() => diffRows}
             findOpen=${findOpen}
             onFindOpen=${handleFindOpen}
@@ -695,8 +695,8 @@ export function IdeShell() {
                 data-testid="ide-right-context-stack"
               >
                 <${IdeBranchContextPanel}
-                  activeRepositoryId=${coordinator.activeRepositoryId}
-                  subscribeActiveRepositoryId=${coordinator.subscribeActiveRepositoryId}
+                  activeRepositoryId=${workspace client.activeRepositoryId}
+                  subscribeActiveRepositoryId=${workspace client.subscribeActiveRepositoryId}
                 />
                 <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                 <${IdePersistencePanel} keeperName=${terminalKeeper} />

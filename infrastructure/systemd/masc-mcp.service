@@ -17,7 +17,7 @@
 #   sudo journalctl -u masc-mcp.service -f
 
 [Unit]
-Description=MASC MCP server (Multi-Agent Streaming Coordination)
+Description=MASC MCP server (Multi-Agent Shared Context)
 Documentation=https://github.com/jeong-sik/masc-mcp
 After=network-online.target
 Wants=network-online.target

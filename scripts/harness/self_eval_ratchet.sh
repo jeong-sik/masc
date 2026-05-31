@@ -78,7 +78,7 @@ for tool in "${TOOLS[@]}"; do
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
-    # P0: core coordination tools failing is critical
+    # P0: core workspace collaboration tools failing is critical
     case "$tool" in
       masc_join|masc_add_task|masc_status|masc_heartbeat)
         P0=$((P0 + 1))

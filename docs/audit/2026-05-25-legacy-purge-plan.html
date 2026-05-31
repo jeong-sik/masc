@@ -210,9 +210,9 @@
             <td>Resolver-preservation tests were removed. Backstop grep is clean for <code>resolve_config</code> in <code>lib/keeper</code> and <code>test/test_keeper_registry.ml</code>.</td>
           </tr>
           <tr>
-            <td>Room-state <code>active_agents</code> object recovery</td>
+            <td>Workspace-state <code>active_agents</code> object recovery</td>
             <td><span class="status done">draft PR #18380</span></td>
-            <td>Stop recovering object-shaped <code>active_agents</code> entries with <code>name</code> / <code>agent_name</code>; canonical room state now repairs only bare string names.</td>
+            <td>Stop recovering object-shaped <code>active_agents</code> entries with <code>name</code> / <code>agent_name</code>; canonical workspace state now repairs only bare string names.</td>
             <td>The old recovery test is now a negative object-drop assertion, and the public recovery doc no longer advertises object entries. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
@@ -240,10 +240,10 @@
             <td>Backstop grep is clean for the removed symbol in touched identity/test paths. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td><code>Coord_state</code> compatibility re-exports</td>
+            <td><code>Workspace_state</code> compatibility re-exports</td>
             <td><span class="status done">draft PR #18386</span></td>
-            <td>Remove the backward-compatible re-export block for <code>Coord_bootstrap</code>, <code>Coord_identity</code>, <code>Coord_task_id</code>, and <code>Coord_backlog</code> helper APIs.</td>
-            <td>The one remaining repo caller of <code>Coord_state.read_backlog_r</code> now calls <code>Coord_backlog.read_backlog_r</code> directly. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+            <td>Remove the backward-compatible re-export block for <code>Workspace_bootstrap</code>, <code>Workspace_identity</code>, <code>Workspace_task_id</code>, and <code>Workspace_backlog</code> helper APIs.</td>
+            <td>The one remaining repo caller of <code>Workspace_state.read_backlog_r</code> now calls <code>Workspace_backlog.read_backlog_r</code> directly. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td>gh legacy result adapter</td>
@@ -330,10 +330,10 @@
             <td>Tests and callers now import from SSOT modules directly. Dashboard typecheck passes; targeted Vitest covers 3 files / 87 tests. ESLint reports 0 errors, with ignored-file warnings from the existing config.</td>
           </tr>
           <tr>
-            <td>Dashboard execution session <code>room</code> alias</td>
+            <td>Dashboard execution session <code>workspace</code> alias</td>
             <td><span class="status done">merged #18527</span></td>
-            <td>Stop emitting the execution-session <code>room</code> mirror for canonical <code>namespace</code>, remove the frontend <code>DashboardExecutionSessionBrief.room</code> field, and stop promoting room-only payloads in the normalizer.</td>
-            <td>Compatibility tests now assert room-only payloads are not promoted and normalized session briefs do not carry <code>room</code>. Local OCaml format/parse, dashboard typecheck, targeted Vitest, diff check, and targeted ESLint all pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+            <td>Stop emitting the execution-session <code>workspace</code> mirror for canonical <code>namespace</code>, remove the frontend <code>DashboardExecutionSessionBrief.workspace</code> field, and stop promoting workspace-only payloads in the normalizer.</td>
+            <td>Compatibility tests now assert workspace-only payloads are not promoted and normalized session briefs do not carry <code>workspace</code>. Local OCaml format/parse, dashboard typecheck, targeted Vitest, diff check, and targeted ESLint all pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>masc_transition</code> input/action compat aliases</td>
@@ -590,7 +590,7 @@
           <tr>
             <td>Legacy file and repo-isolation surfaces</td>
             <td><span class="status done">merged #18644</span></td>
-            <td>Delete the obsolete file-shell and repo-isolation implementation stack, tool descriptors, schemas, workflow guide, coordination product snapshots, and compatibility-only coverage that kept those old surfaces alive.</td>
+            <td>Delete the obsolete file-shell and repo-isolation implementation stack, tool descriptors, schemas, workflow guide, workspace collaboration product snapshots, and compatibility-only coverage that kept those old surfaces alive.</td>
             <td>Merged as <code>556b45c21</code>. Follow-up fallout fixes #18645, #18646, and #18647 are now on <code>origin/main</code>.</td>
           </tr>
           <tr>
@@ -720,10 +720,10 @@
             <td>Merged as <code>b3e993c70</code>. Static grep is clean for the live tool/action names outside negative tests, and the branch is included in <code>origin/main</code>.</td>
           </tr>
           <tr>
-            <td><code>Keeper_coordination</code> exec-context relay facade</td>
+            <td><code>Keeper_workspace collaboration</code> exec-context relay facade</td>
             <td><span class="status done">merged #18773</span></td>
-            <td>Remove the checkpoint, compaction, trace-id, board-write, and model-label re-export relay from <code>Keeper_coordination</code>. <code>Keeper_execution</code> now binds those public helpers directly to <code>Keeper_context_runtime</code>, while <code>Keeper_coordination</code> keeps only room/cursor ownership.</td>
-            <td>Merged as <code>8b98a8e96</code>. Backstop grep is clean for the removed <code>Keeper_coordination</code> relay symbols and the old <code>include Keeper_coordination</code> path.</td>
+            <td>Remove the checkpoint, compaction, trace-id, board-write, and model-label re-export relay from <code>Keeper_workspace collaboration</code>. <code>Keeper_execution</code> now binds those public helpers directly to <code>Keeper_context_runtime</code>, while <code>Keeper_workspace collaboration</code> keeps only workspace/cursor ownership.</td>
+            <td>Merged as <code>8b98a8e96</code>. Backstop grep is clean for the removed <code>Keeper_workspace collaboration</code> relay symbols and the old <code>include Keeper_workspace collaboration</code> path.</td>
           </tr>
           <tr>
             <td><code>Keeper_metrics.metric_*</code> string constant facade</td>
@@ -818,7 +818,7 @@
           <tr>
             <td><code>Tool_result</code> legacy projection boundary</td>
             <td><span class="status now">draft PR #18905</span></td>
-            <td>Promote <code>Tool_result.result</code> to the only in-process result shape and remove the record/projection bridge from dispatch, board, inline, coord, misc, operator, and test callers.</td>
+            <td>Promote <code>Tool_result.result</code> to the only in-process result shape and remove the record/projection bridge from dispatch, board, inline, workspace, misc, operator, and test callers.</td>
             <td>Backstop grep is clean for active <code>lib/</code> and <code>test/</code> callers except the intentional removal note in <code>tool_result</code> itself. Focused Dune was blocked by the machine-wide bare-Dune guard; format, diff, and structure ratchets passed.</td>
           </tr>
           <tr>

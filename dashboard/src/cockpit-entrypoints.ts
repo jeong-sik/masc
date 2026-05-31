@@ -171,7 +171,7 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'comms', aliases: ['bd-feed'], target: { tab: 'workspace', params: { section: 'board' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-thr', 'board-thread'], target: { tab: 'workspace', params: { section: 'board', focus: 'thread' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-tog', 'board-direct-automation'], target: { tab: 'workspace', params: { section: 'board', focus: 'automation' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-rm', 'messages-room'], target: { tab: 'workspace', params: { section: 'board', focus: 'messages-room' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['ms-rm', 'messages-workspace'], target: { tab: 'workspace', params: { section: 'board', focus: 'messages-workspace' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-inb', 'messages-mention-inbox'], target: { tab: 'workspace', params: { section: 'board', focus: 'mention-inbox' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-st', 'messages-state-block'], target: { tab: 'workspace', params: { section: 'board', focus: 'state-block' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['cm-bc', 'composer-broadcast'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'broadcast' } }, coverage: 'covered' },

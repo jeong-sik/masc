@@ -153,7 +153,7 @@ production launch knobs.
 
 Representative code paths:
 
-- [`coord_utils_backend_setup.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/coord/coord_utils_backend_setup.ml)
+- [`workspace_utils_backend_setup.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/workspace/workspace_utils_backend_setup.ml)
 - [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml)
 
 ## Rules for New Environment Variables

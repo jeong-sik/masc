@@ -96,7 +96,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 
 The goal lifecycle surface is configured as the `masc.goal` policy group and is
 routed to `dispatch`, `research`, and `delivery` presets. Social and
-messaging keepers keep board/task coordination without goal mutation access.
+messaging keepers keep board/task workspace collaboration without goal mutation access.
 
 ## Research Profile Additions
 

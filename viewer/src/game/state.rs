@@ -46,9 +46,9 @@ impl TurnPhase {
     }
 }
 
-/// Global game room state.
+/// Global game workspace state.
 #[derive(Resource, Debug, Default)]
-pub struct RoomState {
+pub struct WorkspaceState {
     pub id: String,
     pub status: String,
     pub turn: u32,
@@ -89,7 +89,7 @@ pub enum ConnectionStatus {
 /// Runtime progress derived from TRPG stream events.
 #[derive(Resource, Debug, Default)]
 pub struct TurnProgressState {
-    pub room_status: String,
+    pub workspace_status: String,
     pub turn: u32,
     pub phase: String,
     pub dm_keeper: String,

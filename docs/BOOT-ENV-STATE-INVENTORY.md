@@ -33,7 +33,7 @@ Scope:
 | Input | What it controls | Used by |
 | --- | --- | --- |
 | `--base-path` | Startup runtime root selection. `main_eio` exports this to `MASC_BASE_PATH`. | `bin/main_eio.ml`, all `.masc` path helpers |
-| `MASC_BASE_PATH` | Runtime base path once the server is running. `.masc` lives under this directory. | `Env_config_core`, `Room_utils`, keeper/board/control-plane/logging paths |
+| `MASC_BASE_PATH` | Runtime base path once the server is running. `.masc` lives under this directory. | `Env_config_core`, `Workspace_utils`, keeper/board/control-plane/logging paths |
 | `MASC_CONFIG_DIR` | Explicit config root override. Highest-precedence config selector. | `Config_dir_resolver`, bootstrap, keeper/persona config resolution |
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
 | `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
@@ -225,7 +225,7 @@ without mutating the parent environment.
 - `<runtime_root>/tasks/backlog.json`: active backlog state.
 - `<runtime_root>/tasks-archive.json`: archived or cleaned-up tasks.
 - `<runtime_root>/agents/`: agent membership and state snapshots.
-- `<runtime_root>/messages/`: room and broadcast message artifacts.
+- `<runtime_root>/messages/`: workspace and broadcast message artifacts.
 - `<runtime_root>/current_task`: planning pointer for the current claimed task.
 - `<base-path>/planning/<task_id>/`: planning-with-files context:
   - `task_plan.md`
@@ -342,7 +342,7 @@ Current host note:
 - `<runtime_root>/auth/`
   - `config.json`
   - `initial_admin`
-  - `room_secret.hash`
+  - `workspace_secret.hash`
   - `agents/`
 - `<runtime_root>/connectors/discord/status.json`
 - `<runtime_root>/connectors/discord/bindings.json`
@@ -628,7 +628,7 @@ MASC_NEO4J_TIMEOUT_SEC
 MASC_OPERATOR_CACHE_TTL
 MASC_OPERATOR_JUDGE_ENABLED
 MASC_OPERATOR_JUDGE_INTERVAL_SEC
-MASC_OPERATOR_JUDGE_TTL_SEC
+MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC
 MASC_OPERATOR_JUDGE_SESSION_TTL_SEC
 MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC
 MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC

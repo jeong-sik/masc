@@ -283,9 +283,9 @@ refresh_latest_evidence_from_status() {
   LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '.diagnostic.health_state // ""')"
   if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running // false')" == "true" ]] \
     && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists // false')" == "true" ]]; then
-    LATEST_HEARTBEAT="room-keepalive-active"
+    LATEST_HEARTBEAT="workspace-keepalive-active"
   else
-    LATEST_HEARTBEAT="room-keepalive-missing"
+    LATEST_HEARTBEAT="workspace-keepalive-missing"
   fi
 }
 
@@ -343,7 +343,7 @@ heartbeat_text() {
   fi
 }
 
-room_status_text() {
+workspace_status_text() {
   if call_mcp_tool 1003 "masc_status" '{}' 20; then
     tool_text
   else
@@ -355,17 +355,17 @@ capture_snapshot() {
   local phase="$1"
   local snapshot_file="$SNAP_DIR/${phase}-keeper-status.json"
   local heartbeat_file="$SNAP_DIR/${phase}-heartbeat.txt"
-  local room_file="$SNAP_DIR/${phase}-room-status.txt"
-  local status_json heartbeat_output room_output
+  local workspace_file="$SNAP_DIR/${phase}-workspace-status.txt"
+  local status_json heartbeat_output workspace_output
 
   status_json="$(keeper_status_json)"
   write_json_pretty "$snapshot_file" "$status_json"
   heartbeat_output="$(heartbeat_text)"
   write_text "$heartbeat_file" "$heartbeat_output"
-  room_output="$(room_status_text)"
-  write_text "$room_file" "$room_output"
+  workspace_output="$(workspace_status_text)"
+  write_text "$workspace_file" "$workspace_output"
 
-  printf '%s\n%s\n%s\n' "$snapshot_file" "$heartbeat_file" "$room_file"
+  printf '%s\n%s\n%s\n' "$snapshot_file" "$heartbeat_file" "$workspace_file"
 }
 
 runtime_terminal_summary() {
@@ -774,7 +774,7 @@ EOF
 }
 
 real_run() {
-  local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file room_file
+  local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file workspace_file
   local baseline_continuity_ts baseline_compactions baseline_generation baseline_handoffs baseline_trace
   local turn status_after heartbeat_after agent_name compaction_done handoff_done
 
@@ -830,9 +830,9 @@ real_run() {
     if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
       && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
       BOOTSTRAP_PASS=1
-      append_phase "bootstrap" "pass" "isolated keeper started with active keepalive and room presence" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "pass" "isolated keeper started with active keepalive and workspace presence" "$snapshot_file" "$heartbeat_file"
     else
-      append_phase "bootstrap" "fail" "keeper started but room presence/keepalive were not observed" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "fail" "keeper started but workspace presence/keepalive were not observed" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
   fi
@@ -873,7 +873,7 @@ real_run() {
       && [[ "$(printf '%s' "$status_json" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
       && [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]]; then
       LIVENESS_PASS=1
-      append_phase "liveness" "pass" "live keeper turn observed with room presence and recent output" "$snapshot_file" "$heartbeat_file"
+      append_phase "liveness" "pass" "live keeper turn observed with workspace presence and recent output" "$snapshot_file" "$heartbeat_file"
     else
       append_phase "liveness" "fail" "keeper metadata exists but no fresh live turn was proven" "$snapshot_file" "$heartbeat_file"
       return 1

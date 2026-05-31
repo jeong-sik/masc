@@ -12,7 +12,7 @@ vi.mock('./api/dashboard', () => apiMocks)
 const missionPayload = {
   generated_at: '2026-03-25T09:00:00Z',
   summary: {
-    room_health: 'ok',
+    workspace_health: 'ok',
     namespace: 'default',
   },
   incidents: [],
@@ -53,7 +53,7 @@ const missionPayload = {
 const initializingMissionPayload = {
   generated_at: '2026-03-25T09:05:00Z',
   summary: {
-    room_health: 'initializing',
+    workspace_health: 'initializing',
   },
   incidents: [],
   recommended_actions: [],
@@ -84,12 +84,12 @@ describe('refreshMissionSnapshot', () => {
 
     const mission = missionStore.missionSnapshot.value as
       | {
-          summary?: { room_health?: string | null }
+          summary?: { workspace_health?: string | null }
           agent_briefs?: unknown[]
         }
       | null
     expect(apiMocks.fetchDashboardMission).toHaveBeenCalledWith()
-    expect(mission?.summary?.room_health).toBe('ok')
+    expect(mission?.summary?.workspace_health).toBe('ok')
     expect(mission?.agent_briefs).toHaveLength(1)
   })
 
@@ -106,12 +106,12 @@ describe('refreshMissionSnapshot', () => {
 
     const mission = missionStore.missionSnapshot.value as
       | {
-          summary?: { room_health?: string | null }
+          summary?: { workspace_health?: string | null }
           sessions?: unknown[]
           keeper_briefs?: unknown[]
         }
       | null
-    expect(mission?.summary?.room_health).toBe('ok')
+    expect(mission?.summary?.workspace_health).toBe('ok')
     expect(mission?.sessions).toHaveLength(1)
     expect(mission?.keeper_briefs).toHaveLength(1)
   })

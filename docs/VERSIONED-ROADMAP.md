@@ -35,7 +35,7 @@ Release lane rules:
 
 - `0.y.0`: feature train release. Each train must have one primary promise.
 - `0.y.z` where `z > 0`: stabilization for the current train only.
-- `1.0.0` is reserved for the point where repo coordination, release truth, and the core operator path are trustworthy without caveats.
+- `1.0.0` is reserved for the point where repo workspace collaboration, release truth, and the core operator path are trustworthy without caveats.
 - Public MCP surface expansion belongs in `minor` or `major`, not in patch.
 - Migration-heavy cleanup belongs in a named train, not in a stabilization patch.
 - Release automation compares tags inside the active major series only, so frozen legacy `v2.*` tags do not block the `0.x` line.

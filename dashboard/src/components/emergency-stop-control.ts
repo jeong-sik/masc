@@ -1,7 +1,7 @@
-// EmergencyStopControl — global header-resident namespace pause/resume control.
+// EmergencyStopControl — global header-loaded namespace pause/resume control.
 //
-// Reuses the flow-control-state signals (flowState/flowLoading/pauseRoom/
-// resumeRoom), so this header control and the Command → Flow Control panel
+// Reuses the flow-control-state signals (flowState/flowLoading/pauseWorkspace/
+// resumeWorkspace), so this header control and the Command → Flow Control panel
 // share state automatically through preact signals — pausing here flips the
 // panel badge to 'Paused' without any extra wiring.
 //
@@ -22,8 +22,8 @@ import {
   flowState,
   flowLoading,
   fetchPauseStatus,
-  pauseRoom,
-  resumeRoom,
+  pauseWorkspace,
+  resumeWorkspace,
 } from './flow-control/flow-control-state'
 
 export function EmergencyStopControl() {
@@ -39,7 +39,7 @@ export function EmergencyStopControl() {
         <${CountBadge} tone="warn">Paused<//>
         ${access.allowed ? html`
           <${ActionButton} variant="ghost" size="sm" disabled=${loading}
-            onClick=${() => void resumeRoom()}>
+            onClick=${() => void resumeWorkspace()}>
             <span class="inline-flex items-center gap-1"><${Play} size=${12} />Resume</span>
           <//>
         ` : null}
@@ -57,7 +57,7 @@ export function EmergencyStopControl() {
             message: 'Pause the entire namespace now? All keeper activity halts until resumed.',
             tone: 'danger',
           })
-          if (confirmed) void pauseRoom()
+          if (confirmed) void pauseWorkspace()
         }}>
         <span class="inline-flex items-center gap-1"><${Square} size=${12} />Emergency Stop</span>
       <//>

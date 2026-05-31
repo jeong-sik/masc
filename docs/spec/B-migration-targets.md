@@ -17,7 +17,7 @@
 | MCP tool schemas | ~371 | 일반적 MCP 서버: 5-15개 |
 | .mli files | 144 | 761개 중 19% |
 | Test files | 319 | test/ 하위 |
-| Sub-libraries | 11 | backend, bridge, core, dated_jsonl, eio_context, fs_compat, masc_log, process, room, time_compat, types |
+| Sub-libraries | 11 | backend, bridge, core, dated_jsonl, eio_context, fs_compat, masc_log, process, workspace, time_compat, types |
 | Flat lib/ .ml files | 294 | Sub-library에 속하지 않은 파일 |
 | Environment variables | 50+ | 설정 파일 없이 env var만으로 운영 |
 | Dashboard | Preact + HTM SPA | Vite 빌드, assets/dashboard/ |
@@ -37,7 +37,7 @@
 | **Total tool code** | **47** | **~34.7K** | -- |
 
 Core 기능(Tier 1)은 전체 tool 코드의 4%에 불과하다.
-Tier 4 (Experimental/Game)가 32%를 차지하며, 이 코드는 coordination과 무관하다.
+Tier 4 (Experimental/Game)가 32%를 차지하며, 이 코드는 workspace collaboration과 무관하다.
 
 ---
 
@@ -47,7 +47,7 @@ Tier 4 (Experimental/Game)가 32%를 차지하며, 이 코드는 coordination과
 
 | File | Lines | Problem |
 |------|-------|---------|
-| `tool_trpg.ml` | 1,934 | Coordination과 무관. 별도 패키지 대상 |
+| `tool_trpg.ml` | 1,934 | Workspace과 무관. 별도 패키지 대상 |
 | `tool_protocol_game_view.ml` | 1,674 | TRPG와 동일 |
 | `tool_mdal.ml` | 1,092 | Metric loop 단독 모듈. 분리 가능 |
 | `tool_risc.ml` | 1,070 | 실험 잔재 |
@@ -145,7 +145,7 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 | Team | 범위 | 핵심 모듈 | 예상 LOC |
 |------|------|----------|---------|
 | **Foundation** | Types, Base, Config, Log | types/, core/, masc_log/, env_config | ~15K |
-| **Room** | Room lifecycle, Task, Heartbeat, Board | room/, tool_room, tool_task, tool_heartbeat, board | ~20K |
+| **Workspace** | Workspace lifecycle, Task, Heartbeat, Board | workspace/, tool_workspace, tool_task, tool_heartbeat, board | ~20K |
 | **Keeper** | Keeper runtime, Memory, Succession | keeper/, tool_keeper, agent_memory | ~25K |
 | **Chain** | Runtime, OAS bridge, Swarm engine | runtime, oas_worker, chain, spawn | ~30K |
 | **Server** | HTTP, MCP protocol, Transport, Auth | mcp_server_eio, transport, tool_auth | ~20K |
@@ -155,7 +155,7 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 ### 추출 순서 (8-Phase, 3-4주 예상)
 
 1. Foundation (types, base, log) -- 의존 없는 leaf
-2. Room (room lifecycle)
+2. Workspace (workspace lifecycle)
 3. Keeper (keeper runtime)
 4. Chain (runtime, spawn)
 5. Server (transport, protocol)
@@ -172,14 +172,14 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 ```
 lib/backend/     lib/bridge/      lib/core/       lib/dated_jsonl/
 lib/eio_context/ lib/fs_compat/   lib/masc_log/   lib/process/
-lib/room/        lib/time_compat/ lib/types/
+lib/workspace/        lib/time_compat/ lib/types/
 ```
 
 ### 즉시 추출 대상 (Phase 2 from ARCHITECTURE-COMPLEXITY)
 
 | 새 패키지 | 포함 모듈 | Lines | 근거 |
 |-----------|----------|-------|------|
-| `masc-games` | tool_trpg, tool_protocol_game_view, trpg_*.ml | 3,600+ | Coordination과 완전 무관 |
+| `masc-games` | tool_trpg, tool_protocol_game_view, trpg_*.ml | 3,600+ | Workspace과 완전 무관 |
 | `masc-experiments` | tool_risc, tool_experiment | TBD | 실험 잔재, optional로 전환 |
 
 ### 구조 분할 대상
@@ -193,7 +193,7 @@ lib/room/        lib/time_compat/ lib/types/
 
 | Module | Priority | 근거 |
 |--------|----------|------|
-| room.ml | High | Core lifecycle, 다른 모든 모듈이 의존 |
+| workspace.ml | High | Core lifecycle, 다른 모든 모듈이 의존 |
 | runtime.ml | High | OAS bridge의 핵심 계약 |
 | keeper_autonomy.ml | High | Keeper 자율 실행 계약 |
 | spawn.ml | Medium | 61 references, Swarm 핵심 |
@@ -207,7 +207,7 @@ lib/room/        lib/time_compat/ lib/types/
 | Issue | Count | Source |
 |-------|-------|--------|
 | Duplicate/trivial coverage files | 32 | ROADMAP |
-| Hollow test files (빈 테스트) | 4 | void, voice_stream, backend_eio, room_portal |
+| Hollow test files (빈 테스트) | 4 | void, voice_stream, backend_eio, workspace_portal |
 | Total test files | 319 | test/ 하위 |
 
 ### 32 Duplicate Coverage Files
@@ -222,7 +222,7 @@ test/ 디렉토리에 `*_coverage.ml` 파일이 32개 존재하며, 상당수가
 1. `test_void.ml`
 2. `test_voice_stream.ml`
 3. `test_backend_eio.ml`
-4. `test_room_portal.ml`
+4. `test_workspace_portal.ml`
 
 ---
 
@@ -249,7 +249,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 00-glossary.md              -- 용어집
 01-system-overview.md       -- 시스템 개요
 02-types-and-invariants.md  -- 타입과 불변식
-03-room-coordination.md     -- Room 조율
+03-workspace-workspace collaboration.md     -- Workspace 조율
 04-chain-engine.md          -- Chain/Runtime 엔진
 05-keeper-agent.md          -- Keeper 에이전트
 06-command-plane.md         -- Command Plane

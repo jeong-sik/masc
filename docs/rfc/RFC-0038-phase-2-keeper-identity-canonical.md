@@ -31,10 +31,10 @@ RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `
 
 **sub-agent 발견: `same_task_actor`는 현재 코드베이스에 존재하지 않음.**
 
-RFC 초안에서 인용한 `coord_task.ml:109`의 `same_task_actor`는 과거 commit(`3904e285b8`)의 코드로, 현재 HEAD에서는 리팩토링되어 `Coord_task_lifecycle.decide` 낙에 `same_agent` closure로 이동:
+RFC 초안에서 인용한 `workspace_task.ml:109`의 `same_task_actor`는 과거 commit(`3904e285b8`)의 코드로, 현재 HEAD에서는 리팩토링되어 `Workspace_task_lifecycle.decide` 낙에 `same_agent` closure로 이동:
 
 ```ocaml
-(* lib/coord/coord_task_lifecycle.ml:48 *)
+(* lib/workspace/workspace_task_lifecycle.ml:48 *)
 let same_agent assignee = String.equal assignee agent_name in
 ```
 
@@ -44,11 +44,11 @@ let same_agent assignee = String.equal assignee agent_name in
 
 | 파일 | 라인 | 패턴 | 역할 |
 |------|------|------|------|
-| `coord_task_lifecycle.ml` | 48 | `String.equal assignee agent_name` | **FSM ownership core** |
-| `coord_task.ml` | 129 | `a <> agent_name` | assignee mismatch hint |
-| `coord_task.ml` | 149 | `a = agent_name` | remediation ownership |
-| `coord_task.ml` | 841 | `assignee = agent_name` | cancel_task_r guard |
-| `coord_task_schedule.ml` | 293, 423 | `String.equal assignee agent_name` | scheduling match |
+| `workspace_task_lifecycle.ml` | 48 | `String.equal assignee agent_name` | **FSM ownership core** |
+| `workspace_task.ml` | 129 | `a <> agent_name` | assignee mismatch hint |
+| `workspace_task.ml` | 149 | `a = agent_name` | remediation ownership |
+| `workspace_task.ml` | 841 | `assignee = agent_name` | cancel_task_r guard |
+| `workspace_task_schedule.ml` | 293, 423 | `String.equal assignee agent_name` | scheduling match |
 | `tool_task.ml` | 235, 379 | `String.equal assignee agent_name` | tool-layer check |
 
 → **0개 typed identity comparison**. `Keeper_identity.canonical_keeper_name_from_agent_name` 등 canonicalization helper가 존재하나 task FSM에서는 전혀 사용되지 않음.
@@ -67,7 +67,7 @@ sub-agent가 3개의 dual-name matching workaround를 발견:
 let matches_you assignee =
   String.equal assignee ctx.agent_name || String.equal assignee actual_name
 
-(* lib/tool_coord.ml:424 *)
+(* lib/tool_workspace.ml:424 *)
 let matches_you assignee =
   String.equal assignee ctx.agent_name || String.equal assignee actual_name
 
@@ -181,7 +181,7 @@ let transition_task_r ~identity ~task_state =
 - backward-compat: 기존 string 비교는 deprecation 경고
 
 ### PR-C: Task FSM migration
-- `coord_task.ml` `same_task_actor` → `Keeper_identity.equal`
+- `workspace_task.ml` `same_task_actor` → `Keeper_identity.equal`
 - `transition_task_r` → canonical form으로 state 갱신
 - PR #14038의 test coverage 재사용
 

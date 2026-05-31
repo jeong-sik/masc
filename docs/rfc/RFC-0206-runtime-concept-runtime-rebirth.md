@@ -88,7 +88,7 @@ runtime 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selectio
 | **P2** | `runtime_toml.ml`(Otoml→config), `runtime_adapter.ml`(binding→Provider_config.t). load_list/of_binding 배선. keeper_runtime.toml fixture + no-default fixture(Error) 검증 | ~7 | load_list end-to-end; init_default; startup fail-fast |
 | **P3** | singleton 경계 결정. ref 기반 유지 + `"tool_strict"` fallback 삭제(uninit→fail loud). eager-init crash 회피(lazy/explicit + test fixture) | ~5 | 90 사이트 안전 re-home |
 | **P4** | keeper 소비자 re-home(dominant 77파일). Runtime_name/runner/error_classify/catalog_runtime → raw id, get_default_runtime_id, keeper_meta_contract, keeper_turn_phase. 5파일 batch | ~16 batch | 844 dangling 대부분 해소 |
-| **P5** | 주변 소비자: config_doctor, dashboard runtime lens, admission_queue, server, otel, operator. dune deps에서 runtime lib 제거 | ~21 | full build green; dangling 0 |
+| **P5** | 주변 소비자: config_diagnostic, dashboard runtime lens, admission_queue, server, otel, operator. dune deps에서 runtime lib 제거 | ~21 | full build green; dangling 0 |
 | **P6** | invariant retarget(`Turn_dispatching`), load_list fail-fast test(no-default→Error, bad-id→Error, subset filtering), mutation-test | ~6 | 검증 가능한 완료 기준 |
 
 ## 7. 리스크

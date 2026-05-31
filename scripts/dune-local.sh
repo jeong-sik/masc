@@ -391,7 +391,7 @@ fi
 # the wrapper could still hold them.
 #
 # Skipped when:
-#   GITHUB_ACTIONS=true     – CI builds are clean-room
+#   GITHUB_ACTIONS=true     – CI builds are clean-workspace
 #   MASC_DUNE_DRY_RUN=1     – dry-run never mutates state
 #   subcommand == clean     – clean removes everything anyway
 #   MASC_SKIP_STALE_CLEANUP=1 – operator opt-out
@@ -496,7 +496,7 @@ fi
 # after every successful pin guard pass so it stays current.
 #
 # Skipped when:
-#   GITHUB_ACTIONS=true     – CI builds are clean-room
+#   GITHUB_ACTIONS=true     – CI builds are clean-workspace
 #   MASC_DUNE_DRY_RUN=1     – dry-run never mutates _build
 #   subcommand == clean     – clean already removes everything
 #   MASC_SKIP_PIN_CHECK=1   – without pin check, marker is meaningless

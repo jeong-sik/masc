@@ -23,7 +23,7 @@ An external 2025-05 plan document (~2040 lines) proposes adding image / video / 
 | §7.1 frontend file targets | 7 | 3 inexistent (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`) |
 | §7.1 backend file targets | 3 | 2 inexistent (`lib/board_store.ml`, `lib/board_handler.ml`) — actual: `lib/board.ml`, `lib/board_dispatch.ml`, `lib/board_core.ml` |
 | §7.2 SQL migration | 4 statements | N/A — board uses file-based store with TTL sweeper, no PostgreSQL |
-| §7.3 keeper protocol | 1 | mismatched — `ws://` callback channel proposed; actual: internal masc tool calls + coord broadcast |
+| §7.3 keeper protocol | 1 | mismatched — `ws://` callback channel proposed; actual: internal masc tool calls + workspace broadcast |
 
 The plan's **intent** (give board posts a media surface and automate analysis) is sound and unblocks several user requests. The **prescription** has to be rewritten against masc-mcp's actual stack before any line of code lands.
 
@@ -40,7 +40,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 
 - N1. PostgreSQL schema, migrations, or any DB-backed persistence. The board is file-based; cross-stack rewrites are out of scope.
 - N2. MinIO, S3, CloudFront, Cloudflare Images. Cloud storage is a future RFC if production volume justifies it.
-- N3. Redis, RabbitMQ, SQS, or any external message broker. masc-mcp's coord broadcast is the existing primitive.
+- N3. Redis, RabbitMQ, SQS, or any external message broker. masc-mcp's workspace broadcast is the existing primitive.
 - N4. Python sidecar workers (Sharp, libvips, image-optimization daemon). The OCaml monorepo serves the surface; image variant generation is deferred to a later phase if measured load justifies it.
 - N5. Frontend implementation files that the external plan named but that don't exist (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`). Frontend work goes through actual files (`board-surface.ts`, `post-detail.ts`).
 - N6. A `Vision Worker (Python)` cross-language process. provider_adapter is in OCaml.
@@ -57,7 +57,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 | API dispatch | `lib/board_dispatch.ml`, `lib/board.ml`, `lib/board_core.ml` |
 | AI provider abstraction | `lib/provider_adapter.ml` (1626 LOC + 397 mli) — `runtime_kind` (Local / Cli_agent / Direct_api), `auth_mode`, `model_family`, `model_policy` |
 | Provider-D compat surface | `lib/server/server_openai_compat.ml` — receives Provider-D-style requests but is not vision-aware today |
-| Frontend board components | 12 files in `dashboard/src/components/board/` — board-state, board-surface (863 LOC), post-detail (538 LOC), mention-inbox, message-room-timeline, board-curation-panel, board-karma-panel, reaction-bar, state-block-messages, sub-board-surface, index, plus tests |
+| Frontend board components | 12 files in `dashboard/src/components/board/` — board-state, board-surface (863 LOC), post-detail (538 LOC), mention-inbox, message-workspace-timeline, board-curation-panel, board-karma-panel, reaction-bar, state-block-messages, sub-board-surface, index, plus tests |
 
 ## 4. Phased proposal
 

@@ -46,7 +46,7 @@ end
 
 `Task_id.generate`와 `Thread_id.generate`는 `timestamp-seqhex` 패턴으로 고유 ID를 생성한다. `Turn_id.generate`는 thread_id에 순번을 연결한다.
 
-> 참고: `room_info.id`, `task.id`, `message.from_agent` 등 일부 레코드 필드는 아직 `string`을 직접 사용한다. newtype 전환이 완료되지 않은 부분이며, 점진적으로 마이그레이션 대상이다.
+> 참고: `workspace_info.id`, `task.id`, `message.from_agent` 등 일부 레코드 필드는 아직 `string`을 직접 사용한다. newtype 전환이 완료되지 않은 부분이며, 점진적으로 마이그레이션 대상이다.
 
 ---
 
@@ -101,10 +101,10 @@ type agent = {
 }
 ```
 
-### 2.5 Room Info / Room Registry
+### 2.5 Workspace Info / Workspace Registry
 
 ```ocaml
-type room_info = {
+type workspace_info = {
   id : string;                 (* slugified name *)
   name : string;
   description : string option;
@@ -114,10 +114,10 @@ type room_info = {
   task_count : int;
 }
 
-type room_registry = {
-  rooms : room_info list;
-  default_room : string;       (* default: "default" *)
-  current_room : string option;
+type workspace_registry = {
+  workspaces : workspace_info list;
+  default_workspace : string;       (* default: "default" *)
+  current_workspace : string option;
 }
 ```
 
@@ -173,10 +173,10 @@ type message = {
 }
 ```
 
-### 2.10 Room State
+### 2.10 Workspace State
 
 ```ocaml
-type room_state = {
+type workspace_state = {
   protocol_version : string;
   project : string;
   started_at : string;
@@ -296,7 +296,7 @@ type claim_next_result =
 
 MASC 는 비즈니스 로직 에러를 단일 sum type `masc_error` 로 표현한다.
 
-> Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Room / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Room / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
+> Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Workspace / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Workspace / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
 
 ### 3 masc_error (Unified)
 
@@ -389,7 +389,7 @@ type module_tag =
   | Mod_a2a
   | Mod_run
   | Mod_compact
-  | Mod_agent | Mod_task | Mod_room
+  | Mod_agent | Mod_task | Mod_workspace
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper
   | Mod_inline
@@ -448,7 +448,7 @@ type t = {
   agent_name : string;
   channel : channel option;
   user_id : string option;
-  room_id : string option;
+  workspace_id : string option;
   capabilities : string list;
   registered_at : float;
   mutable last_seen : float;   (* 유일한 mutable 필드 *)
@@ -467,7 +467,7 @@ module Registry : sig
   val register : registry -> t -> t
   val find_by_session : registry -> string -> t option
   val find_by_name : registry -> string -> t option
-  val touch : registry -> string -> ?room_id:string -> unit -> unit
+  val touch : registry -> string -> ?workspace_id:string -> unit -> unit
   val unregister : registry -> string -> unit
   val list_active : registry -> within_seconds:float -> t list
   val count : registry -> int
@@ -491,7 +491,7 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 
 ## 6. Agent Ecosystem Types (RETIRED)
 
-`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/agent_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/coord/coord_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
+`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/agent_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/workspace/workspace_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
 
 ---
 
@@ -560,7 +560,7 @@ type agent_credential = {
 ```ocaml
 type auth_config = {
   enabled : bool;
-  room_secret_hash : string option;
+  workspace_secret_hash : string option;
   require_token : bool;
   token_expiry_hours : int;     (* 기본값: 24 *)
 }
@@ -595,7 +595,7 @@ type rate_limit_error = {
 
 `lib/message_schema.mli`는 swarm 내부 메시지를 위한 `validation_mode` 3-variant, `structured_message` 5-variant(`TaskUpdate`/`StatusReport`/`Request`/`Response`/`Freeform`), `swarm_envelope` record를 노출하던 모듈이었고, Gen37에서 frontmatter code_refs 정리 시점에 #2848 dead-code sweep과 함께 제거된 것이 확인됐다. `grep -rn "validation_mode\|swarm_envelope" lib/ test/` → 0 hits.
 
-현재 coordination 경로는 `board_posts` + keeper FSM으로 통합됐으며 별도 "structured message / envelope" 타입 레이어는 노출되지 않는다. Swarm 문맥에서 message delivery 의미론이 필요하면 `docs/spec/11-board.md`를 참조한다.
+현재 workspace collaboration 경로는 `board_posts` + keeper FSM으로 통합됐으며 별도 "structured message / envelope" 타입 레이어는 노출되지 않는다. Swarm 문맥에서 message delivery 의미론이 필요하면 `docs/spec/11-board.md`를 참조한다.
 
 ---
 

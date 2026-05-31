@@ -13,7 +13,7 @@
       --panel: #ffffff;
       --server: #266e73;
       --keeper: #8c4a23;
-      --coord: #5966a8;
+      --workspace: #5966a8;
       --common: #4f6b3f;
       --gap: #b3261e;
       --warn: #9a6a00;
@@ -126,7 +126,7 @@
       vertical-align: 1px;
     }
     .tag.big { background: var(--keeper); }
-    .tag.mid { background: var(--coord); }
+    .tag.mid { background: var(--workspace); }
     .tag.common { background: var(--common); }
     .tag.server { background: var(--server); }
     .tag.gap { background: var(--gap); }
@@ -153,7 +153,7 @@
       padding: 12px;
     }
     .node.keeper { border-top-color: var(--keeper); }
-    .node.coord { border-top-color: var(--coord); }
+    .node.workspace { border-top-color: var(--workspace); }
     .node.common { border-top-color: var(--common); }
     .node.gap { border-top-color: var(--gap); }
     .node h4 { margin: 0 0 6px; font-size: 0.92rem; }
@@ -385,7 +385,7 @@
         <a href="#front-door">프론트도어</a>
         <a href="#mcp-flow">MCP Tool Call</a>
         <a href="#keeper-flow">Keeper Turn</a>
-        <a href="#coord-flow">Task / Goal</a>
+        <a href="#workspace-flow">Task / Goal</a>
         <a href="#runtime-flow">Runtime / OAS</a>
         <a href="#dashboard-flow">Dashboard</a>
         <a href="#truth-flow">Persistence Truth</a>
@@ -398,7 +398,7 @@
       </nav>
       <div class="legend">
         <div class="key"><span class="swatch" style="background: var(--keeper)"></span>Big module / keeper core</div>
-        <div class="key"><span class="swatch" style="background: var(--coord)"></span>Mid module / coordination</div>
+        <div class="key"><span class="swatch" style="background: var(--workspace)"></span>Mid module / workspace collaboration</div>
         <div class="key"><span class="swatch" style="background: var(--common)"></span>Common substrate</div>
         <div class="key"><span class="swatch" style="background: var(--server)"></span>Server / dashboard</div>
         <div class="key"><span class="swatch" style="background: var(--gap)"></span>Gap / refactor pressure</div>
@@ -422,7 +422,7 @@
         <div class="grid three tight">
           <div class="card">
             <h3><span class="tag big">Big</span>현재 제품의 중심축</h3>
-            <p>Repo coordination, Keeper runtime, Dashboard/operator read visibility가 canonical front door입니다. Command Plane과 team-session은 역사/호환 맥락으로 밀려났습니다.</p>
+            <p>Repo workspace collaboration, Keeper runtime, Dashboard/operator read visibility가 canonical front door입니다. Command Plane과 team-session은 역사/호환 맥락으로 밀려났습니다.</p>
             <span class="ref">docs/spec/01-system-overview.md:136, docs/COMMAND-PLANE-RUNBOOK.md:6</span>
           </div>
           <div class="card">
@@ -449,7 +449,7 @@
               <span class="chip">Dashboard read models</span>
               <span class="chip">Keeper lifecycle/FSM</span>
               <span class="chip">Runtime/OAS execution</span>
-              <span class="chip">Task/Goal coordination</span>
+              <span class="chip">Task/Goal workspace collaboration</span>
             </div>
           </div>
           <div class="layer">
@@ -482,7 +482,7 @@
 
       <section id="front-door">
         <h2>프론트도어 순서도</h2>
-        <p class="section-intro">현재 supported entry는 repo coordination, keeper runtime, dashboard/operator visibility입니다. Command Plane은 removed/compatibility 응답으로 다뤄야 합니다.</p>
+        <p class="section-intro">현재 supported entry는 repo workspace collaboration, keeper runtime, dashboard/operator visibility입니다. Command Plane은 removed/compatibility 응답으로 다뤄야 합니다.</p>
         <div class="flow row">
           <div class="node">
             <h4>Client</h4>
@@ -502,13 +502,13 @@
           </div>
           <div class="node keeper">
             <h4>State surfaces</h4>
-            <p>Coord, Keeper, Board, Goal, Runtime, Dashboard projections.</p>
+            <p>Workspace, Keeper, Board, Goal, Runtime, Dashboard projections.</p>
           </div>
         </div>
         <div class="sequence">
           <div class="step"><div><strong>Server bootstraps runtime state.</strong><span><code>Server_runtime_bootstrap.run</code> initializes Eio resources, server state, startup tasks, keepers, and the HTTP accept loop.</span><span class="ref">lib/server/server_runtime_bootstrap.mli:1, :38, :130</span></div></div>
           <div class="step"><div><strong>Base path is normalized before runtime assembly.</strong><span><code>bin/main_eio.ml</code> validates explicit base path, prevents source repo runtime-root misuse, creates <code>&lt;base&gt;/.masc</code>, locks port/base path, then exports <code>MASC_BASE_PATH</code>.</span><span class="ref">bin/main_eio.ml:521, :577, :606</span></div></div>
-          <div class="step"><div><strong>Route table is composed once.</strong><span><code>Server_routes_http.make_routes</code> wires frontend, room, dashboard, provider, runtime, activity, sidecar, repositories, workspace, IDE, credentials, keeper repos.</span><span class="ref">lib/server/server_routes_http.ml:9-41</span></div></div>
+          <div class="step"><div><strong>Route table is composed once.</strong><span><code>Server_routes_http.make_routes</code> wires frontend, workspace, dashboard, provider, runtime, activity, sidecar, repositories, workspace, IDE, credentials, keeper repos.</span><span class="ref">lib/server/server_routes_http.ml:9-41</span></div></div>
           <div class="step"><div><strong>HTTP auth wraps route handlers.</strong><span><code>Server_auth</code> centralizes token extraction, role/permission checks, public-read rules, CORS, and admin/tool auth combinators.</span><span class="ref">lib/server/server_auth.mli:1, :56, :237, :283</span></div></div>
           <div class="step"><div><strong>Command Plane compatibility must not become a front door again.</strong><span>H2 gateway responds to <code>/api/v1/command-plane*</code> with removed-surface response.</span><span class="ref">lib/server/server_h2_gateway.ml:984-985, :1023-1024</span></div></div>
         </div>
@@ -520,8 +520,8 @@
           <div class="node server"><h4>POST /mcp</h4><p>Accept/session/protocol negotiation.</p></div>
           <div class="node server"><h4>JSON-RPC dispatch</h4><p><code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, resources, prompts.</p></div>
           <div class="node common"><h4>Tool envelope</h4><p>Timeout, read-only retry, telemetry, runtime-MCP keeper trace.</p></div>
-          <div class="node coord"><h4>Tool_dispatch</h4><p>Token + tag registry + pre hooks + dispatch observers.</p></div>
-          <div class="node keeper"><h4>Handler module</h4><p>Coord, task, keeper, board, runtime, operator, code, local runtime.</p></div>
+          <div class="node workspace"><h4>Tool_dispatch</h4><p>Token + tag registry + pre hooks + dispatch observers.</p></div>
+          <div class="node keeper"><h4>Handler module</h4><p>Workspace, task, keeper, board, runtime, operator, code, local runtime.</p></div>
         </div>
         <div class="grid two">
           <div class="card">
@@ -551,7 +551,7 @@
           <div class="node keeper"><h4>Board/event triage</h4><p>mentions, board events, scope messages.</p></div>
           <div class="node keeper"><h4>Unified turn</h4><p>phase gate, prompt, tool surface, budget, retry.</p></div>
           <div class="node common"><h4>OAS Agent.run</h4><p>provider stream, tools, checkpoint, raw trace.</p></div>
-          <div class="node coord"><h4>Post-turn</h4><p>receipt, manifest, registry, task/goal effects.</p></div>
+          <div class="node workspace"><h4>Post-turn</h4><p>receipt, manifest, registry, task/goal effects.</p></div>
         </div>
         <div class="sequence">
           <div class="step"><div><strong>Keepalive fiber reads current keeper meta and syncs registry.</strong><span>Disk meta mtime gate avoids reparse storms; registry remains dashboard live source.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1706-1748</span></div></div>
@@ -566,13 +566,13 @@
         </div>
       </section>
 
-      <section id="coord-flow">
+      <section id="workspace-flow">
         <h2>Task / Goal 순서도</h2>
         <div class="grid two">
           <div class="card">
             <h3>Task lifecycle</h3>
             <div class="sequence">
-              <div class="step"><div><strong>Add / claim</strong><span><code>masc_add_task</code>, <code>masc_claim_next</code>, <code>masc_transition</code> enter <code>Tool_task</code>, then Coord JSONL-backed operations.</span><span class="ref">lib/tool_task.mli:10-20, lib/task_dispatch.mli:1-21</span></div></div>
+              <div class="step"><div><strong>Add / claim</strong><span><code>masc_add_task</code>, <code>masc_claim_next</code>, <code>masc_transition</code> enter <code>Tool_task</code>, then Workspace JSONL-backed operations.</span><span class="ref">lib/tool_task.mli:10-20, lib/task_dispatch.mli:1-21</span></div></div>
               <div class="step"><div><strong>Transition</strong><span><code>masc_transition</code> validates action and status, with verification/approval gates where enabled.</span><span class="ref">lib/tool_task.mli:17, lib/task_dispatch.mli:91-116</span></div></div>
               <div class="step"><div><strong>Verification</strong><span>Submit-for-verification, approve, reject, PR evidence, and anti-rationalization verdicts are task lifecycle side effects.</span><span class="ref">lib/tool_task.ml:350, :1268, :1326</span></div></div>
             </div>
@@ -581,8 +581,8 @@
             <h3>Goal lifecycle</h3>
             <div class="sequence">
               <div class="step"><div><strong>Goal store</strong><span>Durable state is <code>&lt;base&gt;/.masc/goals.json</code>, with version and phase/status compatibility bridge.</span><span class="ref">lib/goal/goal_store.mli:1-20, :180-200</span></div></div>
-              <div class="step"><div><strong>Goal tools</strong><span><code>masc_goal_list/upsert/transition/verify/review</code> are parsed and authorized in <code>Coord_goals</code>.</span><span class="ref">lib/coord_goals.mli:1-7, :53-84</span></div></div>
-              <div class="step"><div><strong>Completion gates</strong><span>Completion checks task coverage, sub-goals, verification votes, and optional approval.</span><span class="ref">lib/coord_goals.mli:53-72</span></div></div>
+              <div class="step"><div><strong>Goal tools</strong><span><code>masc_goal_list/upsert/transition/verify/review</code> are parsed and authorized in <code>Workspace_goals</code>.</span><span class="ref">lib/workspace_goals.mli:1-7, :53-84</span></div></div>
+              <div class="step"><div><strong>Completion gates</strong><span>Completion checks task coverage, sub-goals, verification votes, and optional approval.</span><span class="ref">lib/workspace_goals.mli:53-72</span></div></div>
             </div>
           </div>
         </div>
@@ -594,11 +594,11 @@
       <section id="runtime-flow">
         <h2>Runtime / OAS Boundary 순서도</h2>
         <div class="flow row">
-          <div class="node coord"><h4>MASC decision</h4><p>task, goal, keeper profile, tool requirements.</p></div>
+          <div class="node workspace"><h4>MASC decision</h4><p>task, goal, keeper profile, tool requirements.</p></div>
           <div class="node common"><h4>Runtime runtime</h4><p>named runtime -> model labels -> provider configs.</p></div>
           <div class="node keeper"><h4>Tool lane filter</h4><p>runtime MCP policy, required tool support.</p></div>
           <div class="node common"><h4>OAS execution</h4><p>Agent.run, context, checkpoint, provider stream.</p></div>
-          <div class="node coord"><h4>MASC projection</h4><p>receipt, manifest, dashboard redacted runtime lane.</p></div>
+          <div class="node workspace"><h4>MASC projection</h4><p>receipt, manifest, dashboard redacted runtime lane.</p></div>
         </div>
         <div class="grid two">
           <div class="card">
@@ -620,7 +620,7 @@
           <div class="node server"><h4>SPA shell</h4><p>v1 navigation and legacy redirects.</p></div>
           <div class="node server"><h4>REST hydrate</h4><p>canonical read models under <code>/api/v1/dashboard/*</code>.</p></div>
           <div class="node common"><h4>SSE freshness</h4><p>task, agent, board, decision, operator events.</p></div>
-          <div class="node coord"><h4>Mutation routes</h4><p>Only guarded admin/operator actions.</p></div>
+          <div class="node workspace"><h4>Mutation routes</h4><p>Only guarded admin/operator actions.</p></div>
           <div class="node gap"><h4>Compatibility</h4><p>mission/execution/proof/config remain supporting read models.</p></div>
         </div>
         <div class="sequence">
@@ -638,7 +638,7 @@
         <div class="flow row">
           <div class="node common"><h4>base_path</h4><p>Runtime root selection.</p></div>
           <div class="node common"><h4>config_root</h4><p><code>MASC_CONFIG_DIR</code> or <code>&lt;base&gt;/.masc/config</code>.</p></div>
-          <div class="node coord"><h4>Coord files</h4><p>tasks, goals, board, agents, messages.</p></div>
+          <div class="node workspace"><h4>Workspace files</h4><p>tasks, goals, board, agents, messages.</p></div>
           <div class="node keeper"><h4>Keeper stores</h4><p>meta, manifests, receipts, checkpoints, tool calls.</p></div>
           <div class="node common"><h4>Audit JSONL</h4><p>dated append, atomic writer, retention.</p></div>
         </div>
@@ -646,7 +646,7 @@
           <thead><tr><th>Truth surface</th><th>Current code owner</th><th>Contract</th></tr></thead>
           <tbody>
             <tr><td><code>.masc/goals.json</code></td><td><code>Goal_store</code></td><td>Versioned JSON with phase/status bridge; raw writes require external locking.</td></tr>
-            <tr><td>Task backlog</td><td><code>Coord</code> via <code>Task_dispatch.Jsonl</code></td><td>Single JSONL/file backend today; future backend pivot is explicit.</td></tr>
+            <tr><td>Task backlog</td><td><code>Workspace</code> via <code>Task_dispatch.Jsonl</code></td><td>Single JSONL/file backend today; future backend pivot is explicit.</td></tr>
             <tr><td>Keeper runtime</td><td><code>Keeper_registry</code> + keeper meta stores</td><td>In-memory live state plus disk meta; registry is dashboard live truth.</td></tr>
             <tr><td>Execution receipts</td><td><code>Keeper_execution_receipt</code></td><td>Typed terminal outcome, TLA receipt mapping, tool/runtime/sandbox evidence.</td></tr>
             <tr><td>Append logs</td><td><code>Jsonl_atomic</code>, <code>Dated_jsonl</code></td><td>In-process mutex serialization; cross-process race protection is not in scope.</td></tr>
@@ -672,9 +672,9 @@
           </thead>
           <tbody>
             <tr>
-              <td>Repo coordination</td>
-              <td><code>Tool_coord</code>, <code>Tool_task</code>, <code>Coord</code></td>
-              <td><code>Task_dispatch</code>, <code>coord_task_*</code></td>
+              <td>Repo workspace collaboration</td>
+              <td><code>Tool_workspace</code>, <code>Tool_task</code>, <code>Workspace</code></td>
+              <td><code>Task_dispatch</code>, <code>workspace_task_*</code></td>
               <td><code>Masc_domain.task_status</code>, file locks</td>
               <td>start/status -> claim -> current_task -> heartbeat -> transition -> verification/done</td>
             </tr>
@@ -701,7 +701,7 @@
             </tr>
             <tr>
               <td>Goal tree</td>
-              <td><code>Goal_store</code>, <code>Coord_goals</code></td>
+              <td><code>Goal_store</code>, <code>Workspace_goals</code></td>
               <td><code>Goal_phase</code>, <code>Goal_verification</code></td>
               <td>task coverage, verification policy, JSON state version</td>
               <td>upsert -> transition -> await verification/approval -> quorum -> completed/rejected</td>
@@ -821,7 +821,7 @@
               <td>boot smoke + health/startup route tests</td>
             </tr>
             <tr>
-              <td><code>tool_task.ml</code> / <code>coord_task.ml</code></td>
+              <td><code>tool_task.ml</code> / <code>workspace_task.ml</code></td>
               <td>1,496 / 1,214</td>
               <td>tool parsing, lifecycle status, verification, anti-rationalization, SSE</td>
               <td>typed lifecycle reducer before tool handler refactor</td>
@@ -842,7 +842,7 @@
               <td>auth diagnostics tests + dashboard auth route tests + keeper internal token tests</td>
             </tr>
             <tr>
-              <td><code>coord_goals.ml</code> / <code>goal_store.ml</code></td>
+              <td><code>workspace_goals.ml</code> / <code>goal_store.ml</code></td>
               <td>1,095 / goal store typed state</td>
               <td>parsing, lifecycle, task coverage, verification quorum, approval</td>
               <td>pure goal transition reducer + store I/O adapter</td>
@@ -930,7 +930,7 @@
               </li>
               <li>
                 <strong>Tool authorization and join guards run before dispatch</strong>
-                <span><code>Auth.authorize_tool_v2</code>, room initialization, and join requirements can short-circuit into structured tool errors.</span>
+                <span><code>Auth.authorize_tool_v2</code>, workspace initialization, and join requirements can short-circuit into structured tool errors.</span>
                 <code>lib/mcp_server_eio_execute.ml:482-520, :760-799</code>
               </li>
               <li>
@@ -1061,7 +1061,7 @@
           </article>
 
           <article class="logic-card">
-            <h3><span class="tag mid">Coord</span>Task / Goal / Verification</h3>
+            <h3><span class="tag mid">Workspace</span>Task / Goal / Verification</h3>
             <ol class="logic-steps">
               <li>
                 <strong>Tool layer parses transition intent and gates verifier agents</strong>
@@ -1076,27 +1076,27 @@
               <li>
                 <strong>Claim validates initialization, identity, join, and required tools</strong>
                 <span><code>claim_task_r</code> locks backlog, validates joined agent, checks do-not-reclaim, ownership conflicts, and required-tool guards.</span>
-                <code>lib/coord/coord_task_claim.ml:234-315</code>
+                <code>lib/workspace/workspace_task_claim.ml:234-315</code>
               </li>
               <li>
                 <strong>Claim-next preserves active owned work</strong>
                 <span>Existing Claimed/InProgress work is returned instead of implicitly released, preventing hot-potato keeper loops.</span>
-                <code>lib/coord/coord_task_schedule.ml:473-535</code>
+                <code>lib/workspace/workspace_task_schedule.ml:473-535</code>
               </li>
               <li>
                 <strong>Transition reducer owns status/action legality</strong>
-                <span><code>transition_task_r</code> locks backlog, validates expected version, finds the task, and calls <code>Coord_task_lifecycle.decide</code>.</span>
-                <code>lib/coord/coord_task.ml:49-115, :157-193</code>
+                <span><code>transition_task_r</code> locks backlog, validates expected version, finds the task, and calls <code>Workspace_task_lifecycle.decide</code>.</span>
+                <code>lib/workspace/workspace_task.ml:49-115, :157-193</code>
               </li>
               <li>
                 <strong>Verification side effects are prepared around backlog mutation</strong>
                 <span>Submit callbacks create verification requests before status mutation; verdict callbacks persist pass/fail before approval or rejection mutates task state.</span>
-                <code>lib/tool_task.ml:1206-1246, lib/coord/coord_task.ml:279-411</code>
+                <code>lib/tool_task.ml:1206-1246, lib/workspace/workspace_task.ml:279-411</code>
               </li>
               <li>
                 <strong>Invalid transitions return remediation, not just failure</strong>
                 <span>Ownership mismatch and state/action combinations produce targeted recovery hints for keepers.</span>
-                <code>lib/coord/coord_task.ml:193-245</code>
+                <code>lib/workspace/workspace_task.ml:193-245</code>
               </li>
               <li>
                 <strong>Goal state is JSON-backed and lock-updated</strong>
@@ -1106,12 +1106,12 @@
               <li>
                 <strong>Goal transition validates actor, readiness, policy, and phase</strong>
                 <span>Request-complete checks readiness, computes effective verifier policy, then calls <code>Goal_phase.decide_transition</code>.</span>
-                <code>lib/coord_goals.ml:573-623</code>
+                <code>lib/workspace_goals.ml:573-623</code>
               </li>
               <li>
                 <strong>Verification open writes request then moves phase</strong>
                 <span>Request creator is excluded from policy snapshot, goal phase becomes AwaitingVerification, and goal events are emitted.</span>
-                <code>lib/coord_goals.ml:623-710</code>
+                <code>lib/workspace_goals.ml:623-710</code>
               </li>
               <li>
                 <strong>Goal votes are locked, eligibility-checked, and quorum-evaluated</strong>
@@ -1160,7 +1160,7 @@
               </li>
               <li>
                 <strong>Dashboard warms bootstrap routes and synthesizes initializing envelopes</strong>
-                <span>Shell, project snapshot, namespace truth, room truth, execution, planning, and mission are warm-path API reads.</span>
+                <span>Shell, project snapshot, namespace truth, workspace truth, execution, planning, and mission are warm-path API reads.</span>
                 <code>dashboard/src/api/core.ts:272-415</code>
               </li>
               <li>
@@ -1348,7 +1348,7 @@
             </tr>
             <tr>
               <td>Task/goal lifecycle</td>
-              <td><code>tool_task.ml</code>, <code>coord_task*.ml</code>, <code>coord_goals.ml</code>, <code>goal_verification.ml</code></td>
+              <td><code>tool_task.ml</code>, <code>workspace_task*.ml</code>, <code>workspace_goals.ml</code>, <code>goal_verification.ml</code></td>
               <td>domain reducers plus persistence adapters</td>
               <td>version lock, ownership, verification redirect, verification orphan recovery, quorum and approval semantics, manual reject vs quorum fail semantics</td>
             </tr>
@@ -1385,7 +1385,7 @@
               <td><code>task-387</code> first snapshot</td>
               <td>Six WBS lanes from #16077 and explicit file manifest</td>
               <td><a href="generated/reverse-engineering/symbol-graph.v1.json"><code>docs/generated/reverse-engineering/symbol-graph.v1.json</code></a></td>
-              <td>Every WBS slice names at least one guard test or an omission row. Current snapshot is a static seed; live LSP invocation is recorded as an omission. Snapshot ranges are bound to the JSON <code>base_commit</code>, not live current-main coordinates.</td>
+              <td>Every WBS slice names at least one guard test or an omission row. Current snapshot is a static seed; live LSP invocation is recorded as an omission. Snapshot ranges are bound to the JSON <code>base_commit</code>, not live current-main orchestrates.</td>
             </tr>
             <tr>
               <td><code>task-411</code> landing gate</td>

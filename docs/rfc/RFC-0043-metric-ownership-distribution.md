@@ -129,7 +129,7 @@ auth:        6
 provider:    4
 memory:      4
 dashboard:   4
-coord:       4
+workspace:       4
 telemetry:   3
 mcp:         3
 http:        3

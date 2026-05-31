@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { selectPreferredIdeRepositoryId } from './ide-data-coordinator'
+import { selectPreferredIdeRepositoryId } from './ide-data-workspace client'
 import type { Repository } from '../../api/repositories'
 
 function repo(

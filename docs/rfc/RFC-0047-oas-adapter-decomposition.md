@@ -140,7 +140,7 @@ Closed across 10 PRs:
   graph.
 - **Concurrent activity.** Keeper sub-library extraction work (memory
   `project_keeper_sublib_extraction_analysis.md`) and FsmHub SSOT
-  (RFC-0046, in flight) MUST be coordinated. Runtime extraction (this
+  (RFC-0046, in flight) MUST be synchronized. Runtime extraction (this
   RFC's phase 3) and keeper extraction touch overlapping files.
   Recommendation: serialize. This RFC lands first.
 - **`include_subdirs unqualified` retained.** The single-library flat

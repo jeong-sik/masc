@@ -34,7 +34,7 @@ afterEach(() => {
 describe('fetchActivityGraph', () => {
   it('uses ACTIVITY_TIMEOUT_MS and omits actor headers', async () => {
     const raw = { nodes: [], edges: [] }
-    const parsed = { nodes: [], edges: [], stats: {}, kind_counts: {}, heatmap: { matrix: [], max: 0, total: 0 }, timeline: [], generated_at: '2026-04-18T00:00:00Z', window: { limit: 0, room_id: null, kinds: [] } }
+    const parsed = { nodes: [], edges: [], stats: {}, kind_counts: {}, heatmap: { matrix: [], max: 0, total: 0 }, timeline: [], generated_at: '2026-04-18T00:00:00Z', window: { limit: 0, workspace_id: null, kinds: [] } }
     get.mockResolvedValue(raw)
     parseActivityGraphResponse.mockReturnValue(parsed)
 

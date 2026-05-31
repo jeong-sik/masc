@@ -10,7 +10,7 @@ pub struct DiceRollPayload {
     pub turn: u32,
     #[serde(default)]
     #[allow(dead_code)] // read only in wasm32 DOM code
-    pub room_id: String,
+    pub workspace_id: String,
     /// Server sends `actor_id`; legacy SSE sends `character`.
     #[serde(default, alias = "actor_id")]
     pub character: String,
@@ -60,7 +60,7 @@ pub struct NarrativePayload {
     pub turn: u32,
     #[serde(default)]
     #[allow(dead_code)] // read only in wasm32 DOM code
-    pub room_id: String,
+    pub workspace_id: String,
     #[serde(default)]
     pub speaker: Option<String>,
 }
@@ -78,7 +78,7 @@ pub struct TurnAdvancePayload {
     pub turn: u32,
     pub phase: String,
     #[serde(default)]
-    pub room_id: String,
+    pub workspace_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,7 +127,7 @@ pub struct TurnProgressPayload {
     pub phase: String,
     #[serde(default)]
     #[allow(dead_code)] // read only in wasm32 DOM code
-    pub room_id: String,
+    pub workspace_id: String,
     #[serde(default)]
     pub actor_id: String,
     #[serde(default)]
@@ -138,7 +138,7 @@ pub struct TurnProgressPayload {
     #[serde(default)]
     pub reason: String,
     #[serde(default)]
-    pub room_status: String,
+    pub workspace_status: String,
     #[serde(default)]
     pub dm_keeper: String,
     #[serde(default)]
@@ -192,23 +192,23 @@ pub struct TurnProgressUpdated(pub TurnProgressPayload);
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct PartySelectedPayload {
-    pub room_id: String,
+    pub workspace_id: String,
     #[serde(default)]
     pub selected_player_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RoomCreatedPayload {
-    pub room_id: String,
+pub struct WorkspaceCreatedPayload {
+    pub workspace_id: String,
     #[serde(default)]
     #[allow(dead_code)] // read only in wasm32 DOM code
     pub preset: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RoomLifecyclePayload {
+pub struct WorkspaceLifecyclePayload {
     #[allow(dead_code)] // read only in wasm32 DOM code
-    pub room_id: String,
+    pub workspace_id: String,
     #[serde(default)]
     pub status: String,
 }
@@ -217,7 +217,7 @@ pub struct RoomLifecyclePayload {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionStartedPayload {
-    pub room_id: String,
+    pub workspace_id: String,
     #[serde(default)]
     pub session_id: String,
 }
@@ -235,10 +235,10 @@ pub struct KeeperUnavailablePayload {
 pub struct PartySelected(pub PartySelectedPayload);
 
 #[derive(Message, Debug, Clone)]
-pub struct RoomCreated(pub RoomCreatedPayload);
+pub struct WorkspaceCreated(pub WorkspaceCreatedPayload);
 
 #[derive(Message, Debug, Clone)]
-pub struct RoomStarted(pub RoomLifecyclePayload);
+pub struct WorkspaceStarted(pub WorkspaceLifecyclePayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct SessionStarted(pub SessionStartedPayload);
@@ -307,8 +307,8 @@ pub struct ActorLifecyclePayload {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RoomEndedPayload {
-    pub room_id: String,
+pub struct WorkspaceEndedPayload {
+    pub workspace_id: String,
     #[serde(default)]
     #[allow(dead_code)] // read only in wasm32 DOM code
     pub reason: String,
@@ -399,7 +399,7 @@ pub struct ActorReleased(pub ActorLifecyclePayload);
 pub struct ActorUpdated(pub ActorLifecyclePayload);
 
 #[derive(Message, Debug, Clone)]
-pub struct RoomEnded(pub RoomEndedPayload);
+pub struct WorkspaceEnded(pub WorkspaceEndedPayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct TurnActionResolved(pub TurnActionResolvedPayload);

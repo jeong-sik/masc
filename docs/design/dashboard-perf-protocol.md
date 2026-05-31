@@ -4,7 +4,7 @@
 > Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: PR-0.2.H (sibling of PR-0.2.F server perf, PR-0.2.G WS load).
-> Related research: `knowledge/research/2026-04-masc-ide-strategy/ch4_dashboard.md` §4 (lines 230-378), `track-c-coordination-perf.md` §3 (line 148).
+> Related research: `knowledge/research/2026-04-masc-ide-strategy/ch4_dashboard.md` §4 (lines 230-378), `track-c-workspace collaboration-perf.md` §3 (line 148).
 
 ## 1. Scope
 
@@ -92,6 +92,6 @@ Each step is a separate PR. This document is the contract; the workflow is the r
 - `.github/workflows/perf-baseline.yml` — sibling: manual server-side perf script validation
 - `.github/workflows/dashboard-ws-load.yml` — sibling: k6 WS load
 - `knowledge/research/2026-04-masc-ide-strategy/ch4_dashboard.md` §4 lines 230-378 — anti-RUM rationale
-- `knowledge/research/2026-04-masc-ide-strategy/track-c-coordination-perf.md` §3 line 148 — original lighthouse-vitals-pipeline scope
+- `knowledge/research/2026-04-masc-ide-strategy/track-c-workspace collaboration-perf.md` §3 line 148 — original lighthouse-vitals-pipeline scope
 
 *작성: 2026-04-30 / 본 문서는 budget의 contract이며, 임계값은 calibration 후 갱신된다*

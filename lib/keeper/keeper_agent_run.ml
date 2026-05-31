@@ -51,13 +51,13 @@ end
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
-    @param build_turn_prompt Callback: receives the base keeper system prompt
-           and checkpoint message history, returns the final turn system prompt
-    @param user_message The user's message to the keeper
-    @param runtime_id Runtime runtime profile name for model selection
-    @param generation Current generation counter
-    @param max_turns Maximum agent turns (default from keeper runtime config)
-    @param guardrails Optional OAS guardrails for tool safety gates
+     @param build_turn_prompt Callback: receives the base keeper system prompt
+            and checkpoint message history, returns the final turn system prompt
+     @param user_message The user's message to the keeper
+    @param runtime_id Runtime profile name for model selection
+     @param generation Current generation counter
+     @param max_turns Maximum agent turns (default from keeper runtime config)
+     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override; when omitted, resolved
            from [Runtime_inference] with a 0.3 fallback
     @param max_tokens Maximum output tokens override; when omitted, resolved

@@ -67,7 +67,7 @@ let make_meta name =
           [ "name", `String name
           ; "agent_name", `String name
           ; "trace_id", `String ("trace-" ^ name)
-          ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
+          ; "runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ())
           ; "last_model_used", `String "test-model"
           ])
   with

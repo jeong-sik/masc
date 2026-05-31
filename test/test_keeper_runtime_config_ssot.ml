@@ -792,7 +792,7 @@ preset = "social"
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-cascade-default-resync");
             ("goal", `String "stale goal");
-            ("cascade_name", `String "local_only");
+            ("runtime_id", `String "local_only");
           ])
     with
     | Ok meta -> meta

@@ -425,7 +425,7 @@ let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
   in
   `Assoc
     [
-      ("cascade_name", `String cascade_name);
+      ("runtime_id", `String cascade_name);
       ("strategy", Json_util.string_opt_to_json obs.strategy);
       ( "configured_labels",
         `List (List.map (fun label -> `String label) obs.configured_labels) );
@@ -500,7 +500,7 @@ let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
     [
       ("ts", `Float now);
       ("keeper_name", keeper_name_to_json keeper_name);
-      ("cascade_name", `String cascade_name);
+      ("runtime_id", `String cascade_name);
       ("outcome", `String (cascade_outcome_to_string outcome));
       ("top_level_reason", top_level_reason_of_observation observation);
       ( "observation",
@@ -666,7 +666,7 @@ let handle_get_metrics state p =
         in
         `Assoc
           [
-            ("cascade_name", `String name);
+            ("runtime_id", `String name);
             ("calls", `Int c.calls);
             ("successes", `Int c.successes);
             ("failures", `Int c.failures);

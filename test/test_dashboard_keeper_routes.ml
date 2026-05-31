@@ -571,7 +571,7 @@ let invalid_profile_names body =
   | _ -> []
 ;;
 
-let keeper_profile_cascade_name body keeper_name =
+let keeper_profile_runtime_id body keeper_name =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string body in
   let rows = json |> member "keeper_profiles" |> to_list in
@@ -580,7 +580,7 @@ let keeper_profile_cascade_name body keeper_name =
       (fun row -> row |> member "keeper" |> to_string = keeper_name)
       rows
   with
-  | Some row -> row |> member "cascade_name" |> to_string
+  | Some row -> row |> member "runtime_id" |> to_string
   | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
 ;;
 
@@ -630,7 +630,7 @@ let make_keeper_meta_json
            ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
            ; "trace_id", `String ("trace-" ^ name ^ "-seed")
            ; "goal", `String "Route shadow regression fixture"
-           ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
+           ; "runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ())
            ; "updated_at", `String "2026-04-04T00:00:00Z"
            ; "paused", `Bool paused
            ]

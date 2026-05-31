@@ -44,7 +44,7 @@ let make_meta ?(name = "analyst") ?(models = []) () =
       ("name", `String name);
       ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
       ("trace_id", `String "trace-keeper-benchmark-canary");
-      ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+      ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
       ("last_model_used", `String "");
       ("sandbox_profile", `String "local");
       ("network_mode", `String "none");

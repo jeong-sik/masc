@@ -177,7 +177,7 @@ let test_compute_context_ratio_does_not_infer_provider_budget () =
             ("name", `String "ctx-ratio-demo");
             ("agent_name", `String "keeper-ctx-ratio-demo-agent");
             ("trace_id", `String "trace-ctx-ratio-demo");
-            ("cascade_name", `String "primary");
+            ("runtime_id", `String "primary");
           ])
     with
     | Ok meta -> meta
@@ -367,7 +367,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("trace_id", `String "trace-paused-runtime-trust");
                 ("goal", `String "Expose paused keeper failure in summary");
                 ("short_goal", `String "Expose paused keeper failure in summary");
-                ("cascade_name", `String "cascade.primary");
+                ("runtime_id", `String "cascade.primary");
               ])
         with
         | Ok meta ->

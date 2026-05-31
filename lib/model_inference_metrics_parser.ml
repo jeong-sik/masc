@@ -38,11 +38,15 @@ let private_provider_hint_of_fields (fields : (string * Yojson.Safe.t) list) =
   | None -> read "provider"
 ;;
 
-let cascade_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list) =
-  match json_string_field_opt "cascade_name" fields with
-  | Some cascade_name ->
-    Some ((fun s -> s) cascade_name ^ " (cascade)")
-  | None -> None
+let runtime_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list) =
+  match json_string_field_opt "runtime_id" fields with
+  | Some runtime_id ->
+    Some ((fun s -> s) runtime_id ^ " (runtime)")
+  | None ->
+    (match json_string_field_opt "cascade_name" fields with
+     | Some cascade_name ->
+       Some ((fun s -> s) cascade_name ^ " (legacy cascade)")
+     | None -> None)
 ;;
 
 let assoc_fields_opt key fields =
@@ -56,7 +60,7 @@ let first_json_string_field_opt key field_sets =
 ;;
 
 let first_cascade_model_attribution field_sets =
-  List.find_map cascade_model_attribution_of_fields field_sets
+  List.find_map runtime_model_attribution_of_fields field_sets
 ;;
 
 let first_candidate_model field_sets =
@@ -112,7 +116,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          in
          if is_error
          then (
-           (* Error turns: first candidate model or cascade_name. No silent
+           (* Error turns: first candidate model or runtime_id. No silent
               [__error__] sentinel — refuse the row so caller sees the
               attribution gap typed. *)
            let model_result : (string, parse_error) result =

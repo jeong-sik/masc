@@ -303,7 +303,7 @@ let record_pre_dispatch_terminal_observation
             `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
           );
           ("terminal_reason_code", `String terminal_reason_code);
-          ("cascade_name", `String cascade_name_string);
+          ("runtime_id", `String cascade_name_string);
           ( "error_message",
             match error_message with
             | None -> `Null
@@ -366,7 +366,7 @@ let record_pre_dispatch_terminal_observation
                 , `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
                 )
               ; "terminal_reason_code", `String terminal_reason_code
-              ; "cascade_name", `String cascade_name_string
+              ; "runtime_id", `String cascade_name_string
               ])
         ()
     in

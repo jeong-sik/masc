@@ -171,7 +171,7 @@ let error_entry ~cascade_name ~ts ?provider () =
         match provider with
         | Some v -> `String v
         | None -> `Null);
-      ("cascade_name", `String cascade_name);
+      ("runtime_id", `String cascade_name);
       ("candidate_models", `List [`String "model-a"; `String "model-b"]);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
@@ -225,7 +225,7 @@ let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
       `Assoc [
         ("model_used", `Null);
         ("selected_model", `Null);
-        ("cascade_name", `String cascade_name);
+        ("runtime_id", `String cascade_name);
         ("outcome", `String "success");
         ("stop_reason", `String "completed");
         ("usage_reported", `Bool false);
@@ -244,7 +244,7 @@ let sparse_provider_context_entry ~outcome ~cascade_name ~ts () =
     ("tools_used", `List []);
     ( "provider_context",
       `Assoc [
-        ("cascade_name", `String cascade_name);
+        ("runtime_id", `String cascade_name);
         ("selected_model", `Null);
         ("candidate_models", `List []);
       ] );

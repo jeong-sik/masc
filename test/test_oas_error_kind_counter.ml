@@ -12,13 +12,13 @@ module Prom = Masc_mcp.Prometheus
 
 let typed_cascade_name = Cascade_name.of_string_exn
 
-(* #10285: cascade_name label was added.  Query [(kind, cascade_name)]
+(* #10285: runtime_id label was added.  Query [(kind, runtime_id)]
    pair.  Tests that only care about kind regardless of cascade pass
-   the expected cascade_name explicitly so assertions stay exact. *)
+   the expected runtime_id explicitly so assertions stay exact. *)
 let counter_for ?(cascade_name = "unknown") kind =
   Prom.metric_value_or_zero
     OWN.masc_oas_error_total_metric
-    ~labels:[ ("kind", kind); ("cascade_name", cascade_name) ]
+    ~labels:[ ("kind", kind); ("runtime_id", cascade_name) ]
     ()
 
 let test_metric_name_stable () =
@@ -74,7 +74,7 @@ let test_cascade_exhausted_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "cascade_exhausted{cascade_name=primary} counter +1"
+    "cascade_exhausted{runtime_id=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -93,7 +93,7 @@ let test_capacity_backpressure_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "capacity_backpressure{cascade_name=primary} counter +1"
+    "capacity_backpressure{runtime_id=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -111,7 +111,7 @@ let test_resumable_cli_session_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "resumable_cli_session{cascade_name=primary} counter +1"
+    "resumable_cli_session{runtime_id=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -131,7 +131,7 @@ let test_no_tool_capable_provider_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "no_tool_capable_provider{cascade_name=tool_required} counter +1"
+    "no_tool_capable_provider{runtime_id=tool_required} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -208,7 +208,7 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
     `Assoc
       [
         ("kind", `String "no_tool_capable_provider");
-        ("cascade_name", `String "tool_required");
+        ("runtime_id", `String "tool_required");
         ("configured_labels", `List [ `String "agent_code"; `String "provider_c" ]);
         ("required_tool_names", `List [ `String "tool_execute" ]);
         ( "provider_rejections",
@@ -280,7 +280,7 @@ let test_admission_queue_timeout_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "admission_queue_timeout{cascade_name=primary} counter +1"
+    "admission_queue_timeout{runtime_id=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -330,7 +330,7 @@ let test_kind_isolation () =
     b_before (counter_for b);
   ignore a
 
-(* #10285: cascade_name label separation -------------------------- *)
+(* #10285: runtime_id label separation -------------------------- *)
 
 let test_resumable_cli_session_per_cascade_isolation () =
   (* The exact #10285 shape: resumable_cli_session events are
@@ -360,10 +360,10 @@ let test_resumable_cli_session_per_cascade_isolation () =
     b_before
     (counter_for ~cascade_name:cascade_b kind)
 
-let test_empty_cascade_name_collapses_to_unknown () =
+let test_empty_runtime_id_collapses_to_unknown () =
   (* Defensive: a cascade-aware variant whose payload happens to
-     carry an empty cascade_name (whitespace-only allowed) must NOT
-     emit a series with [cascade_name=""].  Empty-label rows are
+     carry an empty runtime_id (whitespace-only allowed) must NOT
+     emit a series with [runtime_id=""].  Empty-label rows are
      rejected by some Prometheus scraper configs and collapse in
      Grafana group-by. *)
   let kind = "resumable_cli_session" in
@@ -378,7 +378,7 @@ let test_empty_cascade_name_collapses_to_unknown () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "blank cascade_name routes to 'unknown'"
+    "blank runtime_id routes to 'unknown'"
     (unknown_before +. 1.0)
     (counter_for ~cascade_name:"unknown" kind)
 
@@ -392,7 +392,7 @@ let test_non_cascade_aware_variant_uses_unknown () =
       (OWN.Turn_timeout { elapsed_sec = 99.0 })
   in
   Alcotest.(check (float 0.0001))
-    "non-cascade-aware variant labels cascade_name=unknown"
+    "non-cascade-aware variant labels runtime_id=unknown"
     (before +. 1.0)
     (counter_for ~cascade_name:"unknown" kind)
 
@@ -432,14 +432,14 @@ let () =
           Alcotest.test_case "kind labels separate" `Quick
             test_kind_isolation;
         ] );
-      ( "cascade_name_label_10285",
+      ( "runtime_id_label_10285",
         [
           Alcotest.test_case
             "resumable_cli_session per-cascade isolation" `Quick
             test_resumable_cli_session_per_cascade_isolation;
           Alcotest.test_case
-            "blank cascade_name collapses to unknown" `Quick
-            test_empty_cascade_name_collapses_to_unknown;
+            "blank runtime_id collapses to unknown" `Quick
+            test_empty_runtime_id_collapses_to_unknown;
           Alcotest.test_case
             "non-cascade-aware variant uses unknown" `Quick
             test_non_cascade_aware_variant_uses_unknown;

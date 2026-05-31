@@ -30,7 +30,7 @@ val eio_context_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 
 val cascade_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 (** Lift a cascade-catalog diagnostic into an [Agent_sdk.Error.Config]
-    error with field ["cascade_name"]. *)
+    error with field ["runtime_id"]. *)
 
 (** {1 Provider resolution} *)
 

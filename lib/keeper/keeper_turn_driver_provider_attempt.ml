@@ -1,7 +1,5 @@
 (** Provider-attempt provenance and health helpers for keeper turn driver. *)
 
-open Keeper_runtime_attempt
-
 let provider_attempt_status_of_result = function
   | Ok _ -> "provider_returned"
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }))
@@ -39,15 +37,15 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_runtime : string option
+  ; provider_source_cascade : string option
   }
 
 let base_provider_attempt_provenance =
-  { model_source = "named_runtime"
-  ; resolved_model_source = "runtime_catalog_binding"
-  ; capability_source = "provider_config_from_runtime_catalog"
-  ; fallback_authority = "declared_runtime"
-  ; provider_source_runtime = None
+  { model_source = "named_cascade"
+  ; resolved_model_source = "cascade_catalog_binding"
+  ; capability_source = "provider_config_from_cascade_catalog"
+  ; fallback_authority = "declared_cascade"
+  ; provider_source_cascade = None
   }
 
 let provider_attempt_provenance_fields p =
@@ -58,10 +56,10 @@ let provider_attempt_provenance_fields p =
     ; ("fallback_authority", `String p.fallback_authority)
     ]
   in
-  match p.provider_source_runtime with
+  match p.provider_source_cascade with
   | None -> base
-  | Some source_runtime ->
-      ("provider_source_runtime", `String source_runtime) :: base
+  | Some source_cascade ->
+      ("provider_source_cascade", `String source_cascade) :: base
 
 type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
@@ -137,7 +135,7 @@ let success_selected_model_raw candidate =
 
 (* Error/rejected/exhausted observations intentionally leave the concrete
    selected model absent. Downstream attribution uses candidate_models or the
-   runtime route for those outcomes. *)
+   cascade route for those outcomes. *)
 let error_selected_model_raw = None
 
 let health_error_kind label =
@@ -162,6 +160,180 @@ let record_candidate_health_rejected candidate ~reason =
       ~error_kind
       ~error_reason:reason
       ())
+
+(* Hard-quota SDK error classifiers, re-homed from the deleted cascade attempt
+   FSM (RFC-0206).  Generic provider-error classification, not cascade-specific. *)
+let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
+    : string option =
+  match api_err with
+  | Llm_provider.Retry.RateLimited { message; _ } -> Some message
+  | Llm_provider.Retry.NetworkError { message; _ } -> Some message
+  | Llm_provider.Retry.Overloaded { message } -> Some message
+  | Llm_provider.Retry.ServerError { message; _ } -> Some message
+  | Llm_provider.Retry.InvalidRequest { message } -> Some message
+  | Llm_provider.Retry.AuthError _
+  | Llm_provider.Retry.NotFound _
+  | Llm_provider.Retry.ContextOverflow _
+  | Llm_provider.Retry.Timeout _ -> None
+
+let cli_wrapped_hard_quota_indicators = [
+  "hard_quota";
+  "terminalquotaerror";
+  "quota_exhausted";
+  "exhausted your capacity on this model";
+  "quota will reset after";
+  "\"api_error_status\":429";
+  "you've hit your limit";
+  "monthly usage limit";
+  "org's monthly usage limit";
+  "resets apr ";
+  "reached your specified api usage limits";
+  "you will regain access on";
+]
+
+let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
+  let contains needle = String_util.contains_substring_ci message needle in
+  List.exists contains cli_wrapped_hard_quota_indicators
+  ||
+  (contains "exited with code 1"
+   && contains "\"api_error_status\":429"
+   && contains "you've hit your limit")
+
+let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> true
+  | Agent_sdk.Error.Api api_err ->
+    Llm_provider.Retry.is_hard_quota api_err
+    ||
+    (match api_error_message_for_quota_scan api_err with
+     | Some message -> message_looks_like_cli_wrapped_hard_quota message
+     | None -> false)
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> false
+
+let capacity_backpressure_indicators = [
+  "client capacity";
+  "capacity exhausted";
+  "local_resource_exhaustion";
+  "slot full";
+]
+
+let message_looks_like_capacity_backpressure (message : string) : bool =
+  let contains needle = String_util.contains_substring_ci message needle in
+  List.exists contains capacity_backpressure_indicators
+
+let message_looks_like_terminal_provider_runtime_failure message =
+  let contains needle = String_util.contains_substring_ci message needle in
+  (contains "provider cli rejected" && contains "exit 1")
+  || (contains "provider cli startup crash" && contains "unicodedecodeerror")
+  || contains "unicodedecodeerror"
+  || (contains "jsonrpcmessage"
+      && (contains "validationerror" || contains "invalid json"))
+  || (contains "error parsing sse message"
+      && (contains "jsonrpc" || contains "jsonrpcmessage"))
+
+let network_error_kind_is_terminal
+    (kind : Llm_provider.Http_client.network_error_kind) : bool =
+  match kind with
+  | Llm_provider.Http_client.Connection_refused -> true
+  | Llm_provider.Http_client.Dns_failure -> true
+  | Llm_provider.Http_client.Tls_error
+  | Llm_provider.Http_client.Timeout
+  | Llm_provider.Http_client.Local_resource_exhaustion
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown -> false
+
+let sdk_error_is_terminal_provider_runtime_failure
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  let direct_typed_network =
+    match err with
+    | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { kind; _ }) ->
+        network_error_kind_is_terminal kind
+    | _ -> false
+  in
+  let direct_api_message =
+    match err with
+    | Agent_sdk.Error.Api
+        (Llm_provider.Retry.NetworkError { message; _ }
+        | Llm_provider.Retry.Overloaded { message }
+        | Llm_provider.Retry.ServerError { message; _ }
+        | Llm_provider.Retry.InvalidRequest { message }
+        | Llm_provider.Retry.RateLimited { message; _ }
+        | Llm_provider.Retry.AuthError { message }
+        | Llm_provider.Retry.NotFound { message }
+        | Llm_provider.Retry.ContextOverflow { message; _ }
+        | Llm_provider.Retry.Timeout { message }) ->
+        message_looks_like_terminal_provider_runtime_failure message
+    | _ -> false
+  in
+  direct_typed_network
+  || direct_api_message
+  || message_looks_like_terminal_provider_runtime_failure
+       (Agent_sdk.Error.to_string err)
+
+let sdk_error_is_required_tool_contract_violation
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Agent
+      (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
+    contract = Agent_sdk.Completion_contract_id.Require_tool_use
+  | _ -> false
+
+(* RFC-0206: cascade rotation is gone, but "max turns exceeded" still surfaces
+   as a structured masc_internal_error envelope on a single dispatch. *)
+let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some
+      (Keeper_internal_error.Cascade_exhausted
+         { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) -> true
+  | Some _ | None -> false
+
+let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
+  : float option option =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
+    when not (Llm_provider.Retry.is_hard_quota api_err) ->
+    Some retry_after
+  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
+    Some retry_after
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> None
+
+let fallback_class_hard_quota = "hard_quota"
+let fallback_class_max_turns = "max_turns"
+let fallback_class_required_tool_contract_violation =
+  "required_tool_contract_violation"
+
+let sdk_error_cascade_fallback_class (err : Agent_sdk.Error.sdk_error) :
+    string option =
+  if sdk_error_is_hard_quota err then Some fallback_class_hard_quota
+  else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
+  else if sdk_error_is_required_tool_contract_violation err then
+    Some fallback_class_required_tool_contract_violation
+  else None
 
 let record_candidate_health_error candidate sdk_err =
   let error_reason = Agent_sdk.Error.to_string sdk_err in

@@ -41,7 +41,7 @@ val provider_rejection_for_required_tool_unsupported :
   Keeper_internal_error.provider_rejection
 
 val no_tool_capable_provider_of_pre_dispatch_rejections :
-  runtime_id:string ->
+  cascade_name:string ->
   configured_labels:string list ->
   runtime_manifest_required_tool_names:string list ->
   runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
@@ -72,18 +72,9 @@ val fail_open_health_filtered_candidates :
     ~health_filtered_candidates] preserves health-filtered candidates unless
     the health/cooldown filter would empty an otherwise tool-capable candidate
     set. In that all-cooldown case it returns the pre-health-filter candidates
-    plus [true], allowing the runtime to attempt at least one provider and
+    plus [true], allowing the cascade to attempt at least one provider and
     surface the real upstream result instead of stopping at
     [no_providers_available]. *)
-
-val provider_rejections_for_no_tool_error :
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  tools:Agent_sdk.Tool.t list ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  Runtime_candidate.t list ->
-  Keeper_internal_error.provider_rejection list
 
 val apply_stream_idle_timeout_default : float option -> float option
 

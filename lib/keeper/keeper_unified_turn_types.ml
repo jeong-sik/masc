@@ -6,7 +6,7 @@
     use [Keeper_unified_turn.<name>] unchanged. *)
 
 let turn_event_bus_manifest_decision
-      (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
+      (summary : Keeper_turn_cascade_budget.turn_event_bus_summary)
   =
   let overflow =
     match summary.overflow_imminent with
@@ -77,49 +77,49 @@ let sdk_error_of_retry_slot_reacquire_timeout
        })
 ;;
 
-let runtime_exhaustion_detail_code detail =
+let cascade_exhaustion_detail_code detail =
   let contains needle = String_util.contains_substring_ci detail needle in
   if contains "no_first_token"
-  then "runtime_exhausted_no_first_token"
+  then "cascade_exhausted_no_first_token"
   else if contains "inter_chunk_idle"
-  then "runtime_exhausted_inter_chunk_idle"
+  then "cascade_exhausted_inter_chunk_idle"
   else if contains "http 429" || contains "usage limit" || contains "rate limit"
-  then "runtime_exhausted_rate_limited"
+  then "cascade_exhausted_rate_limited"
   else if contains "max_execution_time"
-  then "runtime_exhausted_max_execution_time"
+  then "cascade_exhausted_max_execution_time"
   else if contains "wall-clock timeout"
-  then "runtime_exhausted_wall_clock_timeout"
+  then "cascade_exhausted_wall_clock_timeout"
   else if contains "connection closed by peer"
-  then "runtime_exhausted_connection_closed"
+  then "cascade_exhausted_connection_closed"
   else if contains "connection refused"
-  then "runtime_exhausted_connection_refused"
-  else "runtime_exhausted_provider_failure"
+  then "cascade_exhausted_connection_refused"
+  else "cascade_exhausted_provider_failure"
 ;;
 
-let runtime_exhaustion_reason_code
-      (reason : Keeper_meta_contract.runtime_exhaustion_reason)
+let cascade_exhaustion_reason_code
+      (reason : Keeper_meta_contract.cascade_exhaustion_reason)
   =
   match reason with
-  | Keeper_meta_contract.Connection_refused -> "runtime_exhausted_connection_refused"
-  | Keeper_meta_contract.Dns_failure -> "runtime_exhausted_dns_failure"
-  | Keeper_meta_contract.No_providers_available -> "runtime_exhausted_no_providers_available"
-  | Keeper_meta_contract.All_providers_failed -> "runtime_exhausted_all_providers_failed"
+  | Keeper_meta_contract.Connection_refused -> "cascade_exhausted_connection_refused"
+  | Keeper_meta_contract.Dns_failure -> "cascade_exhausted_dns_failure"
+  | Keeper_meta_contract.No_providers_available -> "cascade_exhausted_no_providers_available"
+  | Keeper_meta_contract.All_providers_failed -> "cascade_exhausted_all_providers_failed"
   | Keeper_meta_contract.Candidates_filtered_after_cycles ->
-    "runtime_exhausted_candidates_filtered"
-  | Keeper_meta_contract.Max_turns_exceeded -> "runtime_exhausted_max_turns"
+    "cascade_exhausted_candidates_filtered"
+  | Keeper_meta_contract.Max_turns_exceeded -> "cascade_exhausted_max_turns"
   | Keeper_meta_contract.Structural_attempt_timeout _ ->
-    "runtime_exhausted_structural_attempt_timeout"
-  | Keeper_meta_contract.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
-  | Keeper_meta_contract.No_tool_capable _ -> "runtime_exhausted_no_tool_capable"
-  | Keeper_meta_contract.Other_detail detail -> runtime_exhaustion_detail_code detail
+    "cascade_exhausted_structural_attempt_timeout"
+  | Keeper_meta_contract.Capacity_exhausted -> "cascade_exhausted_capacity_exhausted"
+  | Keeper_meta_contract.No_tool_capable _ -> "cascade_exhausted_no_tool_capable"
+  | Keeper_meta_contract.Other_detail detail -> cascade_exhaustion_detail_code detail
 ;;
 
-let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
+let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
   match Keeper_internal_error.classify_masc_internal_error_of_string raw_error with
-  (* No_tool_capable specific cases first — more specific than generic Runtime_exhausted *)
+  (* No_tool_capable specific cases first — more specific than generic Cascade_exhausted *)
   | Some
-      (Keeper_internal_error.Runtime_exhausted
-         { runtime_id = ntcp_runtime_id
+      (Keeper_meta_contract.Cascade_exhausted
+         { cascade_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
          ; _
          }) ->
@@ -142,19 +142,19 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          { code = "no_tool_capable_provider"
          ; detail =
              Printf.sprintf
-               "no tool-capable provider found (runtime=%s labels=[%s] \
+               "no tool-capable provider found (cascade=%s labels=[%s] \
                 required_tools=[%s]%s)"
-               (ntcp_runtime_id)
+               (ntcp_cascade_name)
                (String.concat ", " detail.configured_labels)
                (String.concat ", " detail.required_tool_names)
                rejection_summary
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = Some (ntcp_runtime_id)
+         ; cascade_name = Some (ntcp_cascade_name)
          })
   | Some
-      (Keeper_internal_error.Runtime_exhausted
-         { runtime_id = ntcp_runtime_id
+      (Keeper_meta_contract.Cascade_exhausted
+         { cascade_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable None
          ; _
          }) ->
@@ -164,17 +164,17 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = "no tool-capable provider found"
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = Some (ntcp_runtime_id)
+         ; cascade_name = Some (ntcp_cascade_name)
          })
-  (* Generic Runtime_exhausted catch-all — after No_tool_capable specifics *)
-  | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
+  (* Generic Cascade_exhausted catch-all — after No_tool_capable specifics *)
+  | Some (Keeper_meta_contract.Cascade_exhausted { reason; cascade_name }) ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = runtime_exhaustion_reason_code reason
+         { code = cascade_exhaustion_reason_code reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = Some (runtime_id)
+         ; cascade_name = Some (cascade_name)
          })
   | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
@@ -183,7 +183,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = None
+         ; cascade_name = None
          })
   | Some
       ( Keeper_internal_error.Resumable_cli_session _
@@ -194,11 +194,11 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
       | Keeper_internal_error.Provider_timeout _
       | Keeper_internal_error.Max_tokens_ceiling_violation _
       | Keeper_internal_error.Ambiguous_post_commit _
-      (* RFC-0158: pre-dispatch admission denial is not a runtime-exhaustion
+      (* RFC-0158: pre-dispatch admission denial is not a cascade-exhaustion
          reason; the keeper decided not to attempt a provider call. *)
       | Keeper_internal_error.Retry_admission_denied _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
-         runtime-exhaustion reasons; they map to opaque
+         cascade-exhaustion reasons; they map to opaque
          internal-error events upstream. *)
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
@@ -220,7 +220,7 @@ let registry_failure_reason_of_terminal_reason
   : Keeper_registry.failure_reason option
   =
   let detail = Keeper_types_profile.short_preview raw_error in
-  match runtime_exhausted_failure_reason_of_raw_error ~detail raw_error with
+  match cascade_exhausted_failure_reason_of_raw_error ~detail raw_error with
   | Some _ as reason -> reason
   | None ->
   match terminal_reason.disposition with
@@ -239,16 +239,16 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = None
+         ; cascade_name = None
          })
-  | Keeper_turn_disposition.Runtime_attempts_exhausted ->
+  | Keeper_turn_disposition.Cascade_attempts_exhausted ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "runtime_attempts_exhausted"
+         { code = "cascade_attempts_exhausted"
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = None
+         ; cascade_name = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
@@ -380,7 +380,7 @@ let record_streaming_cancelled_observation
       ~(config : Coord.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
-      ~(runtime_id : string)
+      ~(cascade_name : string)
       ~(keeper_turn_id : int)
       ()
   : unit
@@ -406,7 +406,7 @@ let record_streaming_cancelled_observation
     ~config
     ~meta:run_meta
     ~generation:run_generation
-    ~runtime_id
+    ~cascade_name
     ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"

@@ -464,13 +464,13 @@ function StressBoard() {
       </div>
       <div className="st-grid" role="list" aria-label="Stress cards">
         {P2f.stress.map((s, i) => (
-          <article key={i} role="listitem" aria-label={`${s.agent} · ${s.kind} · count ${s.count} · room ${s.room} · ${s.at.replace('Z','')}`} className={`scard ${s.kind}`}>
+          <article key={i} role="listitem" aria-label={`${s.agent} · ${s.kind} · count ${s.count} · workspace ${s.workspace} · ${s.at.replace('Z','')}`} className={`scard ${s.kind}`}>
             <div className="h" aria-hidden="true">
               <span className="ag">{s.agent}</span>
               <span className="at">{s.at.replace('Z','')}</span>
             </div>
             <span className="kind" aria-hidden="true">{s.kind}</span>
-            <span className="cn" aria-hidden="true">count · <span className="v">{s.count}</span> · room {s.room}</span>
+            <span className="cn" aria-hidden="true">count · <span className="v">{s.count}</span> · workspace {s.workspace}</span>
           </article>
         ))}
       </div>

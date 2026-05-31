@@ -22,8 +22,8 @@
 
 (package
  (name masc_mcp)
- (synopsis "Multi-Agent Streaming Coordination MCP Server in OCaml")
- (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
+ (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
+ (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
  (depends
   (ocaml (>= 5.4))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —

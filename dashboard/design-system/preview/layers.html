@@ -404,7 +404,7 @@
         </div>
         <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 10px 18px 14px; border-top: 1px dashed var(--color-border-default);">
           <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">①</b> Order: base &lt; sticky &lt; dropdown &lt; overlay &lt; drawer &lt; modal &lt; toast. Toast always wins — surfaces the most ephemeral signal.</div>
-          <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">②</b> Gaps (20 → 30, 40 → 60) reserve room for future layers without renumbering. Avoid filling the gaps with raw integers in component CSS.</div>
+          <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">②</b> Gaps (20 → 30, 40 → 60) reserve workspace for future layers without renumbering. Avoid filling the gaps with raw integers in component CSS.</div>
           <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">③</b> Component overrides (e.g. <code style="color:var(--color-fg-disabled)">--z-overlay-keeper, 3020</code>) shadow the base scale — escape hatch only, audit before adding.</div>
         </div>
       </div>

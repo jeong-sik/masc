@@ -170,37 +170,37 @@ function renderMsgBody(body, mentions = []) {
   return parts;
 }
 
-// C2-A · Room timeline
-function MessageRoomTimeline() {
-  const [room, setRoom] = useState('default');
-  const msgs = P2e.messages.filter(m => m.room === room);
+// C2-A · Workspace timeline
+function MessageWorkspaceTimeline() {
+  const [workspace, setWorkspace] = useState('default');
+  const msgs = P2e.messages.filter(m => m.workspace === workspace);
   return (
-    <section className="cbp" aria-label="Message room timeline">
+    <section className="cbp" aria-label="Message workspace timeline">
       <ZoneHeader
-        title="MESSAGES · ROOM TIMELINE"
+        title="MESSAGES · WORKSPACE TIMELINE"
         branch="main"
         keepers={["sangsu","nick0cave","masc-improver","qa-king"]}
-        meta={`#${room} · seq up to ${msgs[0]?.seq || 0}`}
+        meta={`#${workspace} · seq up to ${msgs[0]?.seq || 0}`}
       />
       <div className="body flat" style={{padding:0}}>
-        <div className="ms-room">
-          <div className="roomlist" role="tablist" aria-label="Rooms" aria-orientation="vertical">
-            {P2e.rooms.map(r => (
+        <div className="ms-workspace">
+          <div className="workspacelist" role="tablist" aria-label="Workspaces" aria-orientation="vertical">
+            {P2e.workspaces.map(r => (
               <button key={r.id}
                       type="button"
                       role="tab"
-                      aria-selected={room===r.id}
-                      aria-controls="ms-room-panel"
-                      tabIndex={room===r.id ? 0 : -1}
+                      aria-selected={workspace===r.id}
+                      aria-controls="ms-workspace-panel"
+                      tabIndex={workspace===r.id ? 0 : -1}
                       aria-label={`#${r.name}, ${r.unread} unread`}
-                      className={`room ${room===r.id?'on':''}`}
-                      onClick={()=>setRoom(r.id)}>
+                      className={`workspace ${workspace===r.id?'on':''}`}
+                      onClick={()=>setWorkspace(r.id)}>
                 <span className="nm" aria-hidden="true">{r.name}</span>
                 <span className={`un ${r.unread===0?'zero':''}`} aria-hidden="true">{r.unread}</span>
               </button>
             ))}
           </div>
-          <div className="feed" id="ms-room-panel" role="tabpanel" aria-label={`#${room} timeline · ${msgs.length} messages`}>
+          <div className="feed" id="ms-workspace-panel" role="tabpanel" aria-label={`#${workspace} timeline · ${msgs.length} messages`}>
             <div className="timeline" role="log" aria-live="polite">
               {msgs.map(m => (
                 <article key={m.seq} className="ms-msg" aria-label={`#${m.seq} · ${m.from} ${m.kind} at ${m.at}: ${m.body}`}>
@@ -242,10 +242,10 @@ function MentionInbox() {
         <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-accent-fg)', letterSpacing:'.1em', textTransform:'uppercase', padding:'2px 0'}}>━━ for me · {mine.length}</div>
         <div className="ms-inbox" role="log" aria-live="polite" aria-label={`${mine.length} mentions for me`}>
           {mine.map(m => (
-            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`}>
+            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.workspace} at ${m.at}: ${m.body}`}>
               <div className="h" aria-hidden="true">
                 <span className="au">{m.from}</span>
-                <span className="rm">→ #{m.room}</span>
+                <span className="rm">→ #{m.workspace}</span>
                 <span className="at">{m.at} · #{m.seq}</span>
               </div>
               <div className="text">{renderMsgBody(m.body, m.mentions)}</div>
@@ -255,10 +255,10 @@ function MentionInbox() {
         <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.1em', textTransform:'uppercase', padding:'8px 0 2px', borderTop:'1px dashed var(--color-border-strong)'}}>━━ other mentions · {otherMentions.length}</div>
         <div className="ms-inbox" role="log" aria-live="polite" aria-label={`${otherMentions.length} other mentions`}>
           {otherMentions.map(m => (
-            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`} style={{borderLeftColor:'var(--color-status-info)', opacity:.7}}>
+            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.workspace} at ${m.at}: ${m.body}`} style={{borderLeftColor:'var(--color-status-info)', opacity:.7}}>
               <div className="h" aria-hidden="true">
                 <span className="au">{m.from}</span>
-                <span className="rm">→ #{m.room}</span>
+                <span className="rm">→ #{m.workspace}</span>
                 <span className="at">{m.at} · #{m.seq}</span>
               </div>
               <div className="text">{renderMsgBody(m.body, m.mentions)}</div>
@@ -290,14 +290,14 @@ function StateBlockMessage() {
             <article key={m.seq}
                      role="listitem"
                      className="ms-msg"
-                     aria-label={`#${m.seq} · ${m.from} ${m.kind} → #${m.room} · ${m.at}: ${m.body} · state: ${m.state}`}
+                     aria-label={`#${m.seq} · ${m.from} ${m.kind} → #${m.workspace} · ${m.at}: ${m.body} · state: ${m.state}`}
                      style={{padding:'8px 10px', background:'var(--color-bg-surface)', border:'1px solid var(--color-border-default)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
               <div className="seq" aria-hidden="true">#{m.seq}</div>
               <div className="body">
                 <div className="h" aria-hidden="true">
                   <span className="au">{m.from}</span>
                   <span className={`kk ${m.kind}`}>{m.kind}</span>
-                  <span className="at">→ #{m.room} · {m.at}</span>
+                  <span className="at">→ #{m.workspace} · {m.at}</span>
                 </div>
                 <div className="text">{renderMsgBody(m.body, m.mentions)}</div>
                 <div className="state-block" aria-label={`State block: ${m.state}`}>{m.state}</div>
@@ -325,7 +325,7 @@ function ComposerV2Broadcast() {
             <button type="button" role="radio" aria-checked="false">dm</button>
             <button type="button" role="radio" aria-checked="false">state</button>
           </div>
-          <span className="room-sel" aria-label="Target room: default">default</span>
+          <span className="workspace-sel" aria-label="Target workspace: default">default</span>
           <span className="grow" aria-hidden="true" />
           <span aria-label="Sequence 9 keepers, 38 chars" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.04em'}}>
             seq {P2e.messages[0].seq + 1} · 9 keepers · 38 chars
@@ -384,7 +384,7 @@ function ComposerV2Mention() {
             <button type="button" role="radio" aria-checked="false">dm</button>
             <button type="button" role="radio" aria-checked="false">state</button>
           </div>
-          <span className="room-sel" aria-label="Target room: merge-blockers">merge-blockers</span>
+          <span className="workspace-sel" aria-label="Target workspace: merge-blockers">merge-blockers</span>
           <span className="grow" aria-hidden="true" />
           <button type="button" className="send">send ⌘↵</button>
         </div>
@@ -411,7 +411,7 @@ function ComposerV2State() {
             <button type="button" role="radio" aria-checked="false">dm</button>
             <button type="button" role="radio" aria-checked="true" className="on">state</button>
           </div>
-          <span className="room-sel" aria-label="Target room: default">default</span>
+          <span className="workspace-sel" aria-label="Target workspace: default">default</span>
           <span aria-label="Structured · machine-readable" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-accent-fg)', letterSpacing:'.04em'}}>
             ◆ structured · machine-readable
           </span>
@@ -439,6 +439,6 @@ function ComposerV2State() {
 
 Object.assign(window, {
   BoardFeed, BoardThread, BoardHotAuto,
-  MessageRoomTimeline, MentionInbox, StateBlockMessage,
+  MessageWorkspaceTimeline, MentionInbox, StateBlockMessage,
   ComposerV2Broadcast, ComposerV2Mention, ComposerV2State,
 });

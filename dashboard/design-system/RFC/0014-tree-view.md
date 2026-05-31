@@ -40,7 +40,7 @@ and async children are first-class concerns; rendering is consumer's.
   array (or async loader) — primitive does not call APIs.
 - Drag-to-reorder. The MASC tree surfaces are read-mostly; reorder
   is a follow-up RFC if a write-tree surface emerges.
-- Multi-tree coordination (drag between trees). Out of scope.
+- Multi-tree workspace collaboration (drag between trees). Out of scope.
 
 ## 3. Public API
 

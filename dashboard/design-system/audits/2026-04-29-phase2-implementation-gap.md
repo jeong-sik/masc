@@ -350,7 +350,7 @@ These zones have **zero dedicated production surface** or a **misaligned partial
 |------|-------|------------------|------------------|-----|--------|
 | G3 Accountability | Work | 2 (ledger, matrix) | None | Zero | High |
 | C1 Board Zone | Comms | 3 (feed, thread, hot/auto) | None | Zero | Mid |
-| C2 Messages / Broadcast | Comms | 3 (room, inbox, state block) | None | Zero | High |
+| C2 Messages / Broadcast | Comms | 3 (workspace, inbox, state block) | None | Zero | High |
 | C3 Composer v2 | Comms | 3 (broadcast, mention, state) | None | Zero | High |
 | O2 Audit Ledger | Observability | 3 (ledger, by actor, summary) | None | Zero | High |
 | O4 Cost & Latency | Observability | 3 (per-agent, heatmap, latency) | `cost-dashboard.ts` (per-**model**, not per-agent) | Misaligned | Mid |
@@ -394,13 +394,13 @@ These zones have **zero dedicated production surface** or a **misaligned partial
 
 ### C2 · Messages / Broadcast
 
-**Preview** (`cb-root.jsx:180-184`): Room timeline, mention inbox (@keeper), [STATE] block focus.
+**Preview** (`cb-root.jsx:180-184`): Workspace timeline, mention inbox (@keeper), [STATE] block focus.
 
-**Production search**: `rg -i "broadcast|message.*room|mention.*inbox|state.*block" src/components/` returned zero hits. The `masc_broadcast` MCP tool exists but no dashboard surface consumes it.
+**Production search**: `rg -i "broadcast|message.*workspace|mention.*inbox|state.*block" src/components/` returned zero hits. The `masc_broadcast` MCP tool exists but no dashboard surface consumes it.
 
 **Gap**: Zero.
 
-**Effort**: **High** — needs SSE or polling endpoint for room messages + 3 new components.
+**Effort**: **High** — needs SSE or polling endpoint for workspace messages + 3 new components.
 
 ---
 

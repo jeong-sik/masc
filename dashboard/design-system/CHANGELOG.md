@@ -52,7 +52,7 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `src/components/ide/keeper-line-ownership-store.ts` publishes dashboard snapshots for the IDE blame gutter; the editor mock now consumes the store instead of hardcoded row ownership.
 
 - **Anchored thread rail substrate**
-  - `design-system/headless-core/anchored-thread-rail.ts` implements RFC 0021's current-file thread scoping, line lookup, and focus coordination.
+  - `design-system/headless-core/anchored-thread-rail.ts` implements RFC 0021's current-file thread scoping, line lookup, and focus workspace collaboration.
   - `src/components/ide/anchored-thread-rail-store.ts` publishes dashboard snapshots for the CONVERSATION rail; the rail mock now consumes the store instead of hardcoded card fields.
 
 - **Run activity store substrate**

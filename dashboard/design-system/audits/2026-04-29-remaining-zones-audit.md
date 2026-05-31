@@ -58,16 +58,16 @@ Every spec field has a production equivalent (`ts → timestamp`). Production ex
 
 ## Detail — C2 Messages
 
-**Spec** (`cb-group-e.jsx:157-313`): three variants — Room timeline, Mention inbox, State-block message focus.
+**Spec** (`cb-group-e.jsx:157-313`): three variants — Workspace timeline, Mention inbox, State-block message focus.
 
-**Production**: `dashboard/src/components/keeper-chat-panel.ts` is a per-keeper chat surface (not a room timeline). `dashboard/src/components/chat/primitives.ts` provides chat primitives. `MASC_broadcast` exists via `callMcpTool('masc_broadcast', ...)` in `actions.ts:24`.
+**Production**: `dashboard/src/components/keeper-chat-panel.ts` is a per-keeper chat surface (not a workspace timeline). `dashboard/src/components/chat/primitives.ts` provides chat primitives. `MASC_broadcast` exists via `callMcpTool('masc_broadcast', ...)` in `actions.ts:24`.
 
 **Gap** — partial:
-- C2-A Room timeline: missing as a zone (chat is per-keeper, not per-room)
+- C2-A Workspace timeline: missing as a zone (chat is per-keeper, not per-workspace)
 - C2-B Mention inbox: missing entirely
 - C2-C State-block message: missing as a structured-message form
 
-The data plumbing is partly there (broadcast tool call works), but a "rooms" abstraction that would group messages cross-keeper is not surfaced. **Backend partial-blocked**: `masc_broadcast` exists for sending but no `/api/v1/rooms` for fan-out reading. Reconciliation requires either a room API or a synthesized stream-by-broadcast view.
+The data plumbing is partly there (broadcast tool call works), but a "workspaces" abstraction that would group messages cross-keeper is not surfaced. **Backend partial-blocked**: `masc_broadcast` exists for sending but no `/api/v1/workspaces` for fan-out reading. Reconciliation requires either a workspace API or a synthesized stream-by-broadcast view.
 
 ## Detail — Backend-blocked zones (K2 / O2 / O3 / O5 / G1-C)
 
@@ -85,7 +85,7 @@ Each requires backend work outside Phase F scope.
 
 **Spec** (`cb-group-e.jsx:317-440`): Composer with broadcast / dm / state-block modes.
 
-The composer would have to live inside a chat surface. Today's production chat surface is per-keeper (`keeper-chat-panel.ts`), not a multi-room board. Building the composer in isolation produces dead code; the room/board chat surface needs to exist first (= C2 unblocked).
+The composer would have to live inside a chat surface. Today's production chat surface is per-keeper (`keeper-chat-panel.ts`), not a multi-workspace board. Building the composer in isolation produces dead code; the workspace/board chat surface needs to exist first (= C2 unblocked).
 
 ## Detail — G4 Pagination / G5 Breadcrumb (partial primitives)
 
@@ -101,7 +101,7 @@ Phase F (Reconciliation) backlog as it actually stands after this audit:
 | Bucket | Zones |
 |--------|-------|
 | ✅ Already covered (close as no-op) | C1, K3, G3 |
-| 🟡 Partial — frontend extension possible | C2 (reconciliation requires backend room API), G4/G5 (optional primitives) |
+| 🟡 Partial — frontend extension possible | C2 (reconciliation requires backend workspace API), G4/G5 (optional primitives) |
 | 🔴 Backend-blocked | K2, O2, O3, O5, G1-C |
 | 🔴 Large (multi-PR) | O1 Runtime Inspector |
 | 🟡 Use-site missing | C3 (depends on C2) |

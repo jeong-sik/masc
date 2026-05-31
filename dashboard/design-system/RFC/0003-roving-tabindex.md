@@ -254,7 +254,7 @@ focus state. Each consumer migration is a separate PR.
 2. **Multi-rover within the same FocusScope** — e.g., a sidebar with
    a TreeView followed by a Toolbar. Each has its own rover. The
    FocusScope contains both. This RFC assumes that pattern works
-   without coordination because each rover only manages its own
+   without workspace collaboration because each rover only manages its own
    children. Confirm with explicit test in §7.
 3. **RTL flip** — `ArrowLeft`/`ArrowRight` should swap when the
    container is in RTL. Mark deferred to a follow-up RFC unless an

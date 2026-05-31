@@ -83,7 +83,7 @@ function CommsPlane({ branch, keepers }) {
         { id:"bd-feed", label:"Board · Feed",      render: () => <window.BoardFeed/> },
         { id:"bd-thr",  label:"Board · Thread",    render: () => <window.BoardThread/> },
         { id:"bd-tog",  label:"Board · direct/automation", render: () => <window.BoardHotAuto/> },
-        { id:"ms-rm",   label:"Messages · Room",   render: () => <window.MessageRoomTimeline/> },
+        { id:"ms-rm",   label:"Messages · Workspace",   render: () => <window.MessageWorkspaceTimeline/> },
         { id:"ms-inb",  label:"Messages · Mention inbox",   render: () => <window.MentionInbox/> },
         { id:"ms-st",   label:"Messages · [STATE] block",   render: () => <window.StateBlockMessage/> },
         { id:"cm-bc",   label:"Composer · Broadcast",       render: () => <window.ComposerV2Broadcast/> },

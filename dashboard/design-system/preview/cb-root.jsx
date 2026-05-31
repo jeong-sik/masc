@@ -177,8 +177,8 @@ function App() {
         <DCArtboard id="bd-tog"  label="C · direct vs automation"   width={780} height={460}><BoardHotAuto/></DCArtboard>
       </DCSection>
 
-      <DCSection id="msgs" title="C2 · Messages / Broadcast" subtitle="Real messages/*_broadcast.json — seq, room, mentions, [STATE] blocks.">
-        <DCArtboard id="ms-rm"   label="A · Room timeline"          width={920} height={500}><MessageRoomTimeline/></DCArtboard>
+      <DCSection id="msgs" title="C2 · Messages / Broadcast" subtitle="Real messages/*_broadcast.json — seq, workspace, mentions, [STATE] blocks.">
+        <DCArtboard id="ms-rm"   label="A · Workspace timeline"          width={920} height={500}><MessageWorkspaceTimeline/></DCArtboard>
         <DCArtboard id="ms-inb"  label="B · Mention inbox (@nick0cave)" width={780} height={460}><MentionInbox/></DCArtboard>
         <DCArtboard id="ms-st"   label="C · [STATE] block focus"    width={780} height={420}><StateBlockMessage/></DCArtboard>
       </DCSection>

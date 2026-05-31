@@ -75,10 +75,10 @@ SCAN_FILES=(
 # Drift (line move) makes the entry stale and must be cleaned in the
 # same PR. The runtime check accepts any of the listed lines.
 PREAPPROVED=(
-  # Debug format string inside Printf.sprintf — internal observability
-  # (real provider identity, not boundary redaction). The model field
-  # above it is already routed via Boundary_redaction.
-  "lib/keeper/keeper_turn_driver_wrappers.ml:94"
+  # Empty: internal-observability "runtime" literals now carry inline
+  # `(* RFC-0132-EXEMPT: ... *)` pragmas instead of file:line entries, which
+  # go stale on every line shift (the RFC-0206 dispatch collapse moved the
+  # former keeper_turn_driver_wrappers.ml:94 site and broke this gate).
 )
 
 violations_tmp="$(mktemp -t rfc0132-pr3.violations.XXXXXX)"
@@ -88,7 +88,8 @@ trap 'rm -f "$violations_tmp" "$stale_tmp"' EXIT
 is_preapproved() {
   local key="$1"
   local entry
-  for entry in "${PREAPPROVED[@]}"; do
+  # `${arr[@]+...}` guard: expands to nothing on an empty array under `set -u`.
+  for entry in "${PREAPPROVED[@]+"${PREAPPROVED[@]}"}"; do
     [[ "$key" == "$entry" ]] && return 0
   done
   return 1
@@ -141,7 +142,7 @@ for f in "${SCAN_FILES[@]}"; do
 done
 
 # Detect stale preapproved entries: line no longer carries `"runtime"`.
-for entry in "${PREAPPROVED[@]}"; do
+for entry in "${PREAPPROVED[@]+"${PREAPPROVED[@]}"}"; do
   path="${entry%%:*}"
   line="${entry#*:}"
   [[ -f "$path" ]] || { echo "$entry (file missing)" >>"$stale_tmp"; continue; }

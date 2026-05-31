@@ -139,6 +139,7 @@ let run_keeper_cycle
       append_manifest
         ~site:"runtime_routed"
         ~runtime_id:effective_runtime_id
+        (* RFC-0132-EXEMPT: internal observability — manifest decision reason label, not a redacted public surface *)
         ~decision:(`Assoc [ "reason", `String "runtime" ])
         Keeper_runtime_manifest.Runtime_routed;
       (* Concrete runtime health/capacity is owned by OAS/provider adapters.

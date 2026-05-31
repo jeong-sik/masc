@@ -26,23 +26,23 @@ let materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy =
   let inline_names =
     List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) effective_tools
   in
-  let runtime_names =
+  let runtime_ids =
     match runtime_mcp_policy with
     | Some policy -> policy.Llm_provider.Llm_transport.allowed_tool_names
     | None -> []
   in
-  Json_util.dedupe_keep_order (inline_names @ runtime_names)
+  Json_util.dedupe_keep_order (inline_names @ runtime_ids)
 
 let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   let inline_names =
     List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) effective_tools
   in
-  let runtime_names =
+  let runtime_ids =
     match runtime_mcp_policy with
     | Some policy -> policy.Llm_provider.Llm_transport.allowed_tool_names
     | None -> []
   in
-  match inline_names <> [], runtime_names <> [], runtime_mcp_policy with
+  match inline_names <> [], runtime_ids <> [], runtime_mcp_policy with
   | true, true, _ -> "mixed"
   | true, false, _ -> "inline"
   | false, true, _ -> "runtime_mcp"
@@ -114,7 +114,7 @@ let provider_rejection_for_required_tool_unsupported ~provider_label
    }
     : Keeper_internal_error.provider_rejection)
 
-let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
+let no_tool_capable_provider_of_pre_dispatch_rejections ~runtime_id
     ~configured_labels ~runtime_manifest_required_tool_names ~runtime_mcp_policy
     ~tools ~required_lane_provider_rejections ~pre_dispatch_provider_rejections =
   match runtime_manifest_required_tool_names, pre_dispatch_provider_rejections with
@@ -141,7 +141,7 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
       Some
         (Keeper_internal_error.Runtime_exhausted
            {
-             runtime_id = cascade_name;
+             runtime_id;
              reason = Keeper_meta_contract.No_tool_capable (Some detail);
            })
 

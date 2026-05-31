@@ -6,7 +6,7 @@
     use [Keeper_unified_turn.<name>] unchanged. *)
 
 let turn_event_bus_manifest_decision
-      (summary : Keeper_turn_cascade_budget.turn_event_bus_summary)
+      (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =
   let overflow =
     match summary.overflow_imminent with
@@ -118,8 +118,11 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
   match Keeper_internal_error.classify_masc_internal_error_of_string raw_error with
   (* No_tool_capable specific cases first — more specific than generic Runtime_exhausted *)
   | Some
-      (Keeper_meta_contract.Runtime_exhausted
-         (Keeper_meta_contract.No_tool_capable (Some detail))) ->
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = ntcp_runtime_id
+         ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
+         ; _
+         }) ->
     let rejection_summary =
       match detail.provider_rejections with
       | [] -> ""
@@ -139,35 +142,39 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          { code = "no_tool_capable_provider"
          ; detail =
              Printf.sprintf
-               "no tool-capable provider found (runtime labels=[%s] \
+               "no tool-capable provider found (runtime=%s labels=[%s] \
                 required_tools=[%s]%s)"
+               (ntcp_runtime_id)
                (String.concat ", " detail.configured_labels)
                (String.concat ", " detail.required_tool_names)
                rejection_summary
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = Some (ntcp_runtime_id)
          })
   | Some
-      (Keeper_meta_contract.Runtime_exhausted
-         (Keeper_meta_contract.No_tool_capable None)) ->
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = ntcp_runtime_id
+         ; reason = Keeper_meta_contract.No_tool_capable None
+         ; _
+         }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = "no_tool_capable_provider"
          ; detail = "no tool-capable provider found"
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = Some (ntcp_runtime_id)
          })
   (* Generic Runtime_exhausted catch-all — after No_tool_capable specifics *)
-  | Some (Keeper_meta_contract.Runtime_exhausted reason) ->
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = runtime_exhaustion_reason_code reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = Some (runtime_id)
          })
   | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
@@ -176,7 +183,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
   | Some
       ( Keeper_internal_error.Resumable_cli_session _
@@ -232,16 +239,16 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
-  | Keeper_turn_disposition.Cascade_attempts_exhausted ->
+  | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "cascade_attempts_exhausted"
+         { code = "runtime_attempts_exhausted"
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
@@ -373,7 +380,7 @@ let record_streaming_cancelled_observation
       ~(config : Coord.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
-      ~(cascade_name : string)
+      ~(runtime_id : string)
       ~(keeper_turn_id : int)
       ()
   : unit
@@ -399,7 +406,7 @@ let record_streaming_cancelled_observation
     ~config
     ~meta:run_meta
     ~generation:run_generation
-    ~cascade_name
+    ~runtime_id
     ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"

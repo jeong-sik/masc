@@ -37,15 +37,15 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_cascade : string option
+  ; provider_source_runtime : string option
   }
 
 let base_provider_attempt_provenance =
-  { model_source = "named_cascade"
-  ; resolved_model_source = "cascade_catalog_binding"
-  ; capability_source = "provider_config_from_cascade_catalog"
-  ; fallback_authority = "declared_cascade"
-  ; provider_source_cascade = None
+  { model_source = "named_runtime"
+  ; resolved_model_source = "runtime_catalog_binding"
+  ; capability_source = "provider_config_from_runtime_catalog"
+  ; fallback_authority = "declared_runtime"
+  ; provider_source_runtime = None
   }
 
 let provider_attempt_provenance_fields p =
@@ -56,10 +56,10 @@ let provider_attempt_provenance_fields p =
     ; ("fallback_authority", `String p.fallback_authority)
     ]
   in
-  match p.provider_source_cascade with
+  match p.provider_source_runtime with
   | None -> base
-  | Some source_cascade ->
-      ("provider_source_cascade", `String source_cascade) :: base
+  | Some source_runtime ->
+      ("provider_source_runtime", `String source_runtime) :: base
 
 type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
@@ -327,7 +327,7 @@ let fallback_class_max_turns = "max_turns"
 let fallback_class_required_tool_contract_violation =
   "required_tool_contract_violation"
 
-let sdk_error_cascade_fallback_class (err : Agent_sdk.Error.sdk_error) :
+let sdk_error_runtime_fallback_class (err : Agent_sdk.Error.sdk_error) :
     string option =
   if sdk_error_is_hard_quota err then Some fallback_class_hard_quota
   else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns

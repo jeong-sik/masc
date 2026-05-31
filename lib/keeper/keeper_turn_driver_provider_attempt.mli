@@ -1,8 +1,8 @@
 (** Provider-attempt provenance and health helpers for keeper turn driver. *)
 
 (** {1 Provider SDK error classifiers}
-    Re-homed from the deleted cascade attempt FSM (RFC-0206); generic
-    provider-error classification, not cascade-specific. *)
+    Re-homed from the deleted runtime attempt FSM (RFC-0206); generic
+    provider-error classification, not runtime-specific. *)
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 val message_looks_like_capacity_backpressure : string -> bool
@@ -14,7 +14,7 @@ val sdk_error_is_required_tool_contract_violation :
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
-val sdk_error_cascade_fallback_class :
+val sdk_error_runtime_fallback_class :
   Agent_sdk.Error.sdk_error -> string option
 
 val provider_attempt_status_of_result :

@@ -4,18 +4,17 @@
 
     This is the structured *typed envelope* carried across the
     [Agent_sdk.Error.Internal _] boundary for keeper turn failures.  It is the
-    re-homed successor of the deleted [cascade_internal_error] /
-    [cascade_error_from_sdk] / [cascade_error_classify] modules (RFC-0206
-    runtime purge): the dispatch engine that constructed many of these variants
+    re-homed successor of the deleted runtime dispatch error helpers
+    (RFC-0206 runtime purge): the dispatch engine that constructed many of these variants
     is gone, but the envelope itself outlives it — provider/turn failures still
     need structured carrying.
 
     The originating-runtime field is now a plain [string] (the former
-    [Cascade_name.t] type is deleted).  JSON keys and the per-kind label
+    [Runtime_id.t] type is deleted).  JSON keys and the per-kind label
     strings are preserved verbatim because the operator dashboard
     ([dashboard/src]) parses [kind] / [runtime_id] off the wire. *)
 
-(* The originating runtime id is a plain string runtime.  Kept as a named
+(* The originating runtime id is a plain string.  Kept as a named
    identity helper so the JSON codec below reads identically to its pre-purge
    form (each variant serialises the id under the historical ["runtime_id"]
    key the dashboard still parses). *)

@@ -136,27 +136,19 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     in
     let runtime_id = trimmed "runtime_id" in
     let legacy_model = trimmed "model" in
-    let legacy_cascade_name = trimmed "cascade_name" in
     let conflict left_name left_value right_name right_value =
       Error
         (Printf.sprintf
            "keeper.%s (%s) and legacy keeper.%s (%s) must match"
            left_name left_value right_name right_value)
     in
-    match runtime_id, legacy_model, legacy_cascade_name with
-    | Some runtime_id, Some legacy_model, _
+    match runtime_id, legacy_model with
+    | Some runtime_id, Some legacy_model
       when runtime_id <> legacy_model ->
       conflict "runtime_id" runtime_id "model" legacy_model
-    | Some runtime_id, _, Some legacy_cascade_name
-      when runtime_id <> legacy_cascade_name ->
-      conflict "runtime_id" runtime_id "cascade_name" legacy_cascade_name
-    | None, Some legacy_model, Some legacy_cascade_name
-      when legacy_model <> legacy_cascade_name ->
-      conflict "model" legacy_model "cascade_name" legacy_cascade_name
-    | Some runtime_id, _, _ -> Ok (Some runtime_id)
-    | None, Some legacy_model, _ -> Ok (Some legacy_model)
-    | None, None, Some legacy_cascade_name -> Ok (Some legacy_cascade_name)
-    | None, None, None -> Ok None
+    | Some runtime_id, _ -> Ok (Some runtime_id)
+    | None, Some legacy_model -> Ok (Some legacy_model)
+    | None, None -> Ok None
   in
   let result =
     Result.bind result (fun () ->
@@ -281,7 +273,6 @@ let parsed_field_key_names =
   ; "social_model"
   ; "runtime_id"
   ; "model"
-  ; "cascade_name"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -330,7 +321,6 @@ let canonical_keeper_toml_key_names =
   ; "social_model"
   ; "runtime_id"
   ; "model"
-  ; "cascade_name"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]

@@ -19,7 +19,7 @@ val build_runtime_execution
   -> ( Keeper_turn_runtime_budget.runtime_execution
      , Agent_sdk.Error.sdk_error )
      result
-(** Build a [runtime_execution] for the given runtime name under
+(** Build a [runtime_execution] for the given [runtime_id] under
     [meta]'s context.
 
     Failure modes (returned as [Error]):

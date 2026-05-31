@@ -265,8 +265,8 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
-  | Keeper_registry.Provider_runtime_error { code; detail; runtime_id }
-    when code = "no_tool_capable_provider" ->
+  | Keeper_registry.Provider_runtime_error { code; detail; runtime_id = _ }
+     when code = "no_tool_capable_provider" ->
     Some
       (runtime_blocker_surface_of_typed_class
          ~summary:

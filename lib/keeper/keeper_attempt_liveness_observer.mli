@@ -48,7 +48,7 @@ type t
 val create :
   mode:Keeper_attempt_liveness_config.mode ->
   budget:Keeper_attempt_liveness.budget ->
-  runtime_label:string ->
+  runtime_id:string ->
   ?provider_label:string ->
   ?external_wait:(unit -> bool) ->
   ?candidate_key:string ->

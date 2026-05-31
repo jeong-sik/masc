@@ -59,13 +59,13 @@ val per_provider_timeout_for_turn
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
-    @param build_turn_prompt Callback: receives the base keeper system prompt
-           and checkpoint message history, returns the final turn system prompt
-    @param user_message The user's message to the keeper
-    @param runtime_id Typed runtime runtime profile name for model selection
-    @param world_observation Structured keeper world snapshot used by
-           required-tool contract checks. When omitted, the contract gate
-           does not infer world state from prompt text.
+     @param build_turn_prompt Callback: receives the base keeper system prompt
+            and checkpoint message history, returns the final turn system prompt
+     @param user_message The user's message to the keeper
+    @param runtime_id Typed runtime profile name for model selection
+     @param world_observation Structured keeper world snapshot used by
+            required-tool contract checks. When omitted, the contract gate
+            does not infer world state from prompt text.
     @param provider_filter Optional provider restriction
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default from env config)

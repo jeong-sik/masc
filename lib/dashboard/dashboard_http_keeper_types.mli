@@ -17,7 +17,7 @@ val runtime_warning_ctx_ratio : float
 
 val live_keeper_runtime_id_result :
   string -> (string, [ `Unresolved of string ]) result
-(** Resolve a raw runtime name to its live (post-rotation) identifier.
+(** Resolve a raw runtime id to its live (post-rotation) identifier.
     Returns [Error (`Unresolved raw)] when the input cannot be resolved
     to any catalog member; the caller is expected to surface the
     unresolved input directly (e.g. as JSON [null] on the canonical

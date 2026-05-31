@@ -286,7 +286,6 @@ val resolve_max_context_resolution
 
 val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
 type room_presence_error = {
-  room_id : string;
   exn_msg : string;
 }
 

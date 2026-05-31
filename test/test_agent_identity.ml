@@ -246,8 +246,7 @@ module RegistryTests = struct
     
     match Agent_identity.Registry.find_by_session reg identity.session_key with
     | Some updated ->
-        check bool "last_seen updated" true (updated.last_seen > old_time);
-        check (option string) "room_id updated" (Some "new-room") updated.room_id
+        check bool "last_seen updated" true (updated.last_seen > old_time)
     | None -> fail "identity not found after touch"
 
   let test_list_active () =

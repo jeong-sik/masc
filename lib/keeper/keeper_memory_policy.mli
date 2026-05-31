@@ -22,8 +22,6 @@ val state_end_re : Re.re
 (** {1 Room observation} *)
 
 type keeper_policy_observation = {
-  source_kind : string;
-  room_id : string option;
   from_agent : string;
   message : string;
   direct_mention : bool;
@@ -31,7 +29,6 @@ type keeper_policy_observation = {
   message_chars : int;
   total_turns : int;
   active_goal_count : int;
-  joined_room_count : int;
   last_turn_ago_s : float;
 }
 (** Structured view of a single room message used by the alerting
@@ -42,7 +39,7 @@ val observation_has_question : string -> bool
 
 val keeper_policy_observation_of_room_message :
   meta:Keeper_meta_contract.keeper_meta ->
-  room_id:string -> Masc_domain.message -> keeper_policy_observation
+  Masc_domain.message -> keeper_policy_observation
 (** Build a [keeper_policy_observation] from a room message in [meta]'s
     context. *)
 

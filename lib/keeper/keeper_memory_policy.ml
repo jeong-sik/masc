@@ -42,8 +42,6 @@ let state_start_re = Re.str "[STATE]" |> Re.compile
 let state_end_re = Re.str "[/STATE]" |> Re.compile
 
 type keeper_policy_observation = {
-  source_kind: string;
-  room_id: string option;
   from_agent: string;
   message: string;
   direct_mention: bool;
@@ -51,7 +49,6 @@ type keeper_policy_observation = {
   message_chars: int;
   total_turns: int;
   active_goal_count: int;
-  joined_room_count: int;
   last_turn_ago_s: float;
 }
 
@@ -60,7 +57,6 @@ let observation_has_question (message : string) =
 
 let keeper_policy_observation_of_room_message
     ~(meta : keeper_meta)
-    ~(room_id : string)
     (msg : Masc_domain.message) : keeper_policy_observation =
   let now_ts = Time_compat.now () in
   let mention_targets =
@@ -70,8 +66,6 @@ let keeper_policy_observation_of_room_message
     if meta.runtime.usage.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
   in
   {
-    source_kind = "room_message";
-    room_id = Some room_id;
     from_agent = msg.from_agent;
     message = msg.content;
     direct_mention = Mention.any_mentioned ~targets:mention_targets msg.content;
@@ -79,7 +73,6 @@ let keeper_policy_observation_of_room_message
     message_chars = String.length msg.content;
     total_turns = meta.runtime.usage.total_turns;
     active_goal_count = List.length meta.active_goal_ids;
-    joined_room_count = List.length meta.joined_room_ids;
     last_turn_ago_s;
   }
 

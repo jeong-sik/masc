@@ -111,7 +111,7 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta)
     | [] -> mentions_acc, scope_acc, List.rev cursor_acc
     | _ when remaining <= 0 -> mentions_acc, scope_acc, List.rev cursor_acc
     | room_id :: rest ->
-      let since_seq = room_cursor_for meta room_id in
+      let since_seq = 0 in
       let messages =
         try Coord.get_all_messages_raw config ~since_seq with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -131,11 +131,11 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta)
        | `Done -> consume_rooms remaining mentions_acc scope_acc cursor_acc rest
        | `Saturated -> mentions_acc, scope_acc, List.rev cursor_acc)
   in
-  consume_rooms batch_limit [] [] [] meta.joined_room_ids
+  consume_rooms batch_limit [] [] [] []
 ;;
 
-let apply_message_cursor_updates (meta : keeper_meta) (updates : (string * int) list)
+let apply_message_cursor_updates (meta : keeper_meta) (_updates : (string * int) list)
   : keeper_meta
   =
-  List.fold_left (fun acc (room_id, seq) -> set_room_cursor acc room_id seq) meta updates
+  meta
 ;;

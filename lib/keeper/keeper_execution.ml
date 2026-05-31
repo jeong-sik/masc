@@ -18,6 +18,4 @@ let compaction_policy_of_keeper = Keeper_context_runtime.compaction_policy_of_ke
 let generate_trace_id = Keeper_context_runtime.generate_trace_id
 let effective_model_labels_for_turn = Keeper_context_runtime.effective_model_labels_for_turn
 let ensure_keeper_room_presence = Keeper_coordination.ensure_keeper_room_presence
-let room_cursor_for = Keeper_coordination.room_cursor_for
-let set_room_cursor = Keeper_coordination.set_room_cursor
 let memory_check_default_json = Keeper_context_runtime.memory_check_default_json

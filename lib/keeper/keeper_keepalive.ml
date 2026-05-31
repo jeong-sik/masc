@@ -485,8 +485,8 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     let (synced, presence_errors) = ensure_keeper_room_presence ctx.config m in
     List.iter
       (fun (e : Keeper_context_runtime.room_presence_error) ->
-        Log.Keeper.warn "keepalive_room_presence_error keeper=%s room=%s exn=%s"
-          m.name e.room_id e.exn_msg)
+        Log.Keeper.warn "keepalive_room_presence_error keeper=%s exn=%s"
+          m.name e.exn_msg)
       presence_errors;
     (* Reset stale timestamp from previous server lifecycle.
 

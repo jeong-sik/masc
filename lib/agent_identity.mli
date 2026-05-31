@@ -35,7 +35,6 @@ type t = {
   agent_name : string;
   channel : channel option;
   user_id : string option;
-  room_id : string option;
   capabilities : string list;
   registered_at : float;
   mutable last_seen : float;
@@ -63,7 +62,7 @@ module Registry : sig
   val register : registry -> t -> t
   val find_by_session : registry -> string -> t option
   val find_by_name : registry -> string -> t option
-  val touch : registry -> string -> ?room_id:string -> unit -> unit
+  val touch : registry -> string -> unit -> unit
   val unregister : registry -> string -> unit
   val list_active : registry -> within_seconds:float -> t list
   val count : registry -> int

@@ -25,7 +25,7 @@ val load_context_from_checkpoint :
   base_dir:string ->
   Keeper_context_runtime.session_context * Keeper_context_runtime.working_context option
 
-(** Ensure keeper is joined to all configured rooms. *)
+(** Ensure keeper workspace presence. *)
 val ensure_keeper_room_presence
   :  Coord.config
   -> keeper_meta
@@ -53,12 +53,6 @@ val generate_trace_id : ?now:float -> unit -> string
 val effective_model_labels_for_turn : keeper_meta -> string list
 
 (** {1 Coord Cursor} *)
-
-(** Get last-seen sequence number for a room. *)
-val room_cursor_for : keeper_meta -> string -> int
-
-(** Set last-seen sequence number for a room. *)
-val set_room_cursor : keeper_meta -> string -> int -> keeper_meta
 
 (** {1 Mention Detection} *)
 

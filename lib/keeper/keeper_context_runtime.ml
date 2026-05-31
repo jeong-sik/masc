@@ -378,7 +378,6 @@ let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities 
       | Error _ -> true)
 
 type room_presence_error = {
-  room_id : string;
   exn_msg : string;
 }
 
@@ -398,9 +397,9 @@ let ensure_keeper_room_presence config (meta : keeper_meta)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     let exn_msg = Printexc.to_string exn in
     Log.Keeper.error "workspace_presence_failed keeper=%s exn=%s" meta.name exn_msg;
-    meta, [ { room_id = ""; exn_msg } ]
+    meta, [ { exn_msg } ]
 
-let exact_direct_mention_presentlet exact_direct_mention_present ~(targets : string list) (content : string) :
+let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 

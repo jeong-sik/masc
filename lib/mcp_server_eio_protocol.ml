@@ -194,7 +194,33 @@ let handle_initialize_eio ?(profile = Full) id params =
              ]))
 ;;
 
+let profile_instructions = function
+  | Full -> TP.default_instructions
+  | Managed_agent -> TP.managed_agent_instructions
+  | Operator_remote -> TP.operator_remote_instructions
+;;
+
+let handle_server_discover_eio ?(profile = Full) id =
+  make_response
+    ~id
+    (`Assoc
+        [ "resultType", `String "complete"
+        ; ( "supportedVersions"
+          , `List
+              (List.map
+                 (fun version -> `String version)
+                 Mcp_transport_protocol.supported_protocol_versions) )
+        ; "capabilities", Mcp_server.capabilities
+        ; "serverInfo", Mcp_server.server_info
+        ; "instructions", `String (profile_instructions profile)
+        ])
+;;
+
 let public_tool_help_schemas () = Config.visible_tool_schemas ()
+
+let cache_hint_fields ~scope ~ttl_ms =
+  [ "ttlMs", `Int ttl_ms; "cacheScope", `String scope ]
+;;
 
 let handle_list_tools_eio
       ?(profile = Full)
@@ -265,6 +291,7 @@ let handle_list_tools_eio
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"private" ~ttl_ms:5000
       @ [ ( "_meta"
           , `Assoc
               [ "totalCount", `Int total_count; "pageSize", `Int (TP.list_page_size ()) ]
@@ -312,6 +339,7 @@ let handle_list_resources_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"private" ~ttl_ms:5000
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -331,6 +359,7 @@ let handle_list_resource_templates_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"public" ~ttl_ms:30000
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -351,6 +380,7 @@ let handle_list_prompts_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"public" ~ttl_ms:30000
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -620,6 +650,7 @@ let handle_request
           else (
             try
               match req.method_ with
+              | "server/discover" -> handle_server_discover_eio ~profile id
               | "initialize" -> handle_initialize_eio ~profile id req.params
               | "initialized" | "notifications/initialized" -> make_response ~id `Null
               | "resources/list" ->

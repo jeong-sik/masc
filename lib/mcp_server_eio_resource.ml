@@ -19,6 +19,9 @@ let make_error_typed ?data ~id (code : Mcp_error_code.t) message =
 let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
+let cache_hint_fields ~scope ~ttl_ms =
+  [ ("ttlMs", `Int ttl_ms); ("cacheScope", `String scope) ]
+
 let handle_read_resource_eio state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
@@ -362,7 +365,10 @@ let handle_read_resource_eio state id params =
                 ("text", `String text);
               ]
             ] in
-            make_response ~id (`Assoc [("contents", contents)])
+            make_response ~id
+              (`Assoc
+                ([ ("contents", contents) ]
+                @ cache_hint_fields ~scope:"private" ~ttl_ms:5000))
       end
   | Some _ ->
       make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params"

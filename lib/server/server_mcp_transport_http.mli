@@ -79,6 +79,9 @@ val get_protocol_version_for_session :
 val request_force_json_response : Httpun.Request.t -> bool
 val classify_mcp_accept :
   Httpun.Request.t -> Mcp_transport_protocol.Http_negotiation.accept_mode
+val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
+val validate_2026_request_headers :
+  Httpun.Request.t -> string -> (unit, string) result
 val should_use_sse_for_body :
   Httpun.Request.t ->
   string ->

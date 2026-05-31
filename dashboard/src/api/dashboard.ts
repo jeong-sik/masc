@@ -2172,6 +2172,15 @@ function normalizeKeeperSandboxEnvironment(
   }
 }
 
+function normalizePerProviderTimeoutMode(
+  raw: unknown,
+  perProviderTimeoutSec: number | null,
+): KeeperConfig['execution']['per_provider_timeout_mode'] {
+  return asNullableString(raw) === 'override' || perProviderTimeoutSec != null
+    ? 'override'
+    : 'turn_budget_heuristic'
+}
+
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
   const data = isRecord(raw) ? raw : {}
   const prompt = isRecord(data.prompt) ? data.prompt : {}
@@ -2225,11 +2234,10 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model_label: null,
       last_model_used_label: null,
       per_provider_timeout_sec: perProviderTimeoutSec,
-      per_provider_timeout_mode:
-        asNullableString(execution.per_provider_timeout_mode)
-        ?? (perProviderTimeoutSec != null
-            ? 'override'
-            : 'turn_budget_heuristic'),
+      per_provider_timeout_mode: normalizePerProviderTimeoutMode(
+        execution.per_provider_timeout_mode,
+        perProviderTimeoutSec,
+      ),
       verify: asLooseBoolean(execution.verify),
       selected_runtime_id: asNullableString(execution.selected_runtime_id) ?? '',
       selected_runtime_canonical:

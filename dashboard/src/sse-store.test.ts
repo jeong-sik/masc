@@ -376,7 +376,7 @@ describe('setupSSEReaction reconnect hydration', () => {
       title: 'Malformed kind note',
       content: 'body',
       author: 'agent-a',
-      post_kind: 1 as unknown as string,
+      post_kind: 1 as unknown as BoardPost['post_kind'],
       hearth: 'ops',
     })
     vi.advanceTimersByTime(1_000)

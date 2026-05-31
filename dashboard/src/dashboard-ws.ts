@@ -45,7 +45,6 @@ interface DashboardWsDiscoveryResult {
   fromCache: boolean
 }
 
-const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
 const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
 
 let socket: WebSocket | null = null

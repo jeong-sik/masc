@@ -32,6 +32,29 @@ function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
   return { group, item }
 }
 
+function normalizeKeeperTrustSeverity(raw: unknown): KeeperTrustLatestEvent['severity'] | null {
+  const severity = asString(raw)?.trim().toLowerCase()
+  switch (severity) {
+    case 'ok':
+    case 'warn':
+    case 'bad':
+      return severity
+    default:
+      return null
+  }
+}
+
+function normalizeKeeperSandboxProfile(raw: unknown): Keeper['sandbox_profile'] {
+  const profile = asString(raw)?.trim().toLowerCase()
+  switch (profile) {
+    case 'local':
+    case 'docker':
+      return profile
+    default:
+      return null
+  }
+}
+
 /** Maps lowercase backend phase strings (`keeper_state_machine.ml:phase_to_string`)
  *  to PascalCase `KeeperPhase` values. The two unions must stay 1:1 — this is
  *  enforced at compile time by `_BACKEND_PHASE_COVERAGE_CHECK` below.
@@ -260,7 +283,7 @@ function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent |
   const ts = asString(raw.ts)
   const title = asString(raw.title)
   const summary = asString(raw.summary)
-  const severity = asString(raw.severity)
+  const severity = normalizeKeeperTrustSeverity(raw.severity)
   if (!kind || !ts || !title || !summary || !severity) return null
   return {
     kind,
@@ -283,7 +306,7 @@ export function normalizeKeeperTrustTerminalReason(raw: unknown): KeeperTrustTer
   return {
     code,
     source: asString(raw.source) ?? null,
-    severity: asString(raw.severity) ?? null,
+    severity: normalizeKeeperTrustSeverity(raw.severity),
     summary: asString(raw.summary) ?? null,
     next_action: asString(raw.next_action) ?? null,
   }
@@ -687,7 +710,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
               long: asString(row.goal_horizons.long) ?? null,
             }
           : null,
-        sandbox_profile: asString(row.sandbox_profile) ?? null,
+        sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,
         effective_sandbox_image: asString(row.effective_sandbox_image) ?? null,

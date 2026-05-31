@@ -137,7 +137,7 @@ let test_required_field_is_list () =
 (* ============================================================ *)
 
 (* test_masc_init_schema removed: masc_init tool pruned *)
-(* test_masc_join_schema and test_masc_leave_schema removed with lifecycle collapse. *)
+(* test_masc_bind_schema and test_masc_unbind_schema removed with lifecycle collapse. *)
 
 let test_masc_start_schema () =
   match find_tool "masc_start" with

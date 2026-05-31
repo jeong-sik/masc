@@ -419,7 +419,7 @@ bench_read_path() {
 bench_workspace collaboration() {
   collect_tool_samples "mcp_workspace_broadcast" "masc_broadcast" \
     "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,message:"benchmark",format:"compact"}')" \
-    "$ITERATIONS" "joined agent write path"
+    "$ITERATIONS" "bound agent write path"
 }
 
 bench_a2a() {

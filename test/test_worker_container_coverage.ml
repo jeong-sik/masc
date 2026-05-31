@@ -38,7 +38,7 @@ let explicit_events config =
   Telemetry_eio.read_all_events config
   |> List.filter (fun (record : Telemetry_eio.event_record) ->
          match record.event with
-         | Telemetry_eio.Agent_session_bound _ -> false
+         | Telemetry_eio.Agent_bound _ -> false
          | _ -> true)
 
 let test_parse_text_tool_calls_single () =

@@ -90,8 +90,8 @@ val default_thread_id : string
 val of_agent_session_bound : agent_name:string -> event
 (** [agent_session_bound] → [Run_started] with [custom_name="AGENT_SESSION_BOUND"]. *)
 
-val of_agent_left : agent_name:string -> event
-(** [agent_unbound] → [Run_finished] with [custom_name="AGENT_LEFT"]. *)
+val of_agent_unbound : agent_name:string -> event
+(** [agent_unbound] → [Run_finished] with [custom_name="AGENT_UNBOUND"]. *)
 
 val of_broadcast :
   agent_name:string -> message:string -> message_id:string -> event list

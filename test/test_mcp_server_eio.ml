@@ -949,7 +949,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
      fixture directly so downstream managed-profile assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
-  let _joined =
+  let _bound =
     Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   let _added =
@@ -994,7 +994,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
-  let _joined =
+  let _bound =
     Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
@@ -1049,7 +1049,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
-  let _joined =
+  let _bound =
     Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
@@ -1116,7 +1116,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
-  let _joined =
+  let _bound =
     Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
@@ -1372,7 +1372,7 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
-    "explicit alias resolves to joined nickname"
+    "explicit alias resolves to bound nickname"
     joined_nickname resolved.agent_name;
 
   cleanup_dir base_path
@@ -2837,7 +2837,7 @@ let eio_tests = [
   (* Governance status tool test removed *)
   (* execution_session_step direct call test removed — team session cleanup *)
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
-  "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
+  "explicit alias reuses bound nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
   "internal _agent_name is caller identity", `Quick,

@@ -116,7 +116,7 @@ type oas_envelope = {
 }
 
 type sse_event = [
-  | Agent_joined of agent_joined_payload
+  | Agent_bound of agent_bound_payload
   | Keeper_heartbeat of keeper_heartbeat_payload
   | Oas of oas_event_wrapper  (* ~ opaque *)
   | ...

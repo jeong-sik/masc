@@ -203,7 +203,7 @@ let observe_agent_lifecycle
     if telemetry_enabled ()
     then (
       match event with
-      | Session_ended -> Telemetry_eio.track_agent_left config ~agent_id ~reason:"session_ended"
+      | Session_ended -> Telemetry_eio.track_agent_unbound config ~agent_id ~reason:"session_ended"
       | Session_bound | Session_rebound ->
         Telemetry_eio.track_agent_session_bound config ~agent_id ())
   with

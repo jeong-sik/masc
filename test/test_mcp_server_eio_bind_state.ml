@@ -1,7 +1,7 @@
-let test_resolve_join_state_skips_read_only_lookup () =
+let test_resolve_bind_state_skips_read_only_lookup () =
   let called = ref false in
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
+  let bound =
+    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:false
       ~agent_name:"agent_code"
@@ -10,12 +10,12 @@ let test_resolve_join_state_skips_read_only_lookup () =
         true)
   in
   Alcotest.(check bool) "lookup skipped" false !called;
-  Alcotest.(check bool) "read-only defaults false" false joined
+  Alcotest.(check bool) "read-only defaults false" false bound
 
-let test_resolve_join_state_checks_join_required_tools () =
+let test_resolve_bind_state_checks_bind_required_tools () =
   let called = ref false in
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
+  let bound =
+    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"agent_code"
@@ -24,12 +24,12 @@ let test_resolve_join_state_checks_join_required_tools () =
         true)
   in
   Alcotest.(check bool) "lookup performed" true !called;
-  Alcotest.(check bool) "join result preserved" true joined
+  Alcotest.(check bool) "bind result preserved" true bound
 
-let test_resolve_join_state_skips_unknown_agent () =
+let test_resolve_bind_state_skips_unknown_agent () =
   let called = ref false in
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
+  let bound =
+    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"unknown"
@@ -38,12 +38,12 @@ let test_resolve_join_state_skips_unknown_agent () =
         true)
   in
   Alcotest.(check bool) "unknown agent skipped" false !called;
-  Alcotest.(check bool) "unknown agent treated unjoined" false joined
+  Alcotest.(check bool) "unknown agent treated unbound" false bound
 
-let test_resolve_join_state_alias_does_not_probe_canonical () =
+let test_resolve_bind_state_alias_does_not_probe_canonical () =
   let candidates = ref [] in
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
+  let bound =
+    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"agent_code-rotated"
@@ -51,41 +51,41 @@ let test_resolve_join_state_alias_does_not_probe_canonical () =
         candidates := candidate :: !candidates;
         candidate = "keeper-agent_code-agent")
   in
-  Alcotest.(check bool) "canonical alias not recovered" false joined;
+  Alcotest.(check bool) "canonical alias not recovered" false bound;
   let recorded = List.rev !candidates in
   Alcotest.(check (list string))
     "only raw agent checked"
     [ "agent_code-rotated" ]
     recorded
 
-let test_resolve_join_state_unknown_alias_stays_false () =
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
+let test_resolve_bind_state_unknown_alias_stays_false () =
+  let bound =
+    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"a-b"
       ~check_join:(fun _candidate -> false)
   in
-  Alcotest.(check bool) "non-keeper input stays unjoined" false joined
+  Alcotest.(check bool) "non-keeper input stays unbound" false bound
 
 let () =
   Alcotest.run
-    "Mcp_server_eio_join_state"
+    "Mcp_server_eio_bind_state"
     [ ( "bind_state"
-      , [ ( "resolve_join_state skips read-only lookup"
+      , [ ( "resolve_bind_state skips read-only lookup"
           , `Quick
-          , test_resolve_join_state_skips_read_only_lookup )
-        ; ( "resolve_join_state checks join-required tools"
+          , test_resolve_bind_state_skips_read_only_lookup )
+        ; ( "resolve_bind_state checks bind-required tools"
           , `Quick
-          , test_resolve_join_state_checks_join_required_tools )
-        ; ( "resolve_join_state skips unknown agent"
+          , test_resolve_bind_state_checks_bind_required_tools )
+        ; ( "resolve_bind_state skips unknown agent"
           , `Quick
-          , test_resolve_join_state_skips_unknown_agent )
-        ; ( "resolve_join_state alias does not probe canonical"
+          , test_resolve_bind_state_skips_unknown_agent )
+        ; ( "resolve_bind_state alias does not probe canonical"
           , `Quick
-          , test_resolve_join_state_alias_does_not_probe_canonical )
-        ; ( "resolve_join_state unknown alias stays false"
+          , test_resolve_bind_state_alias_does_not_probe_canonical )
+        ; ( "resolve_bind_state unknown alias stays false"
           , `Quick
-          , test_resolve_join_state_unknown_alias_stays_false )
+          , test_resolve_bind_state_unknown_alias_stays_false )
         ] )
     ]

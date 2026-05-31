@@ -20,7 +20,7 @@ type agent_purge_cleanup_result =
   { agent_name : string
   ; pending_confirms_removed : int
   ; heartbeats_stopped : int
-  ; workspace_leave_result : string
+  ; workspace_unbind_result : string
   }
 
 type agent_purge_cleanup_target =
@@ -180,13 +180,13 @@ let agent_purge_cleanup_result_to_json
     { agent_name
     ; pending_confirms_removed
     ; heartbeats_stopped
-    ; workspace_leave_result
+    ; workspace_unbind_result
     } =
   `Assoc
     [ ("agent_name", `String agent_name)
     ; ("pending_confirms_removed", `Int pending_confirms_removed)
     ; ("heartbeats_stopped", `Int heartbeats_stopped)
-    ; ("workspace_leave_result", `String workspace_leave_result)
+    ; ("workspace_unbind_result", `String workspace_unbind_result)
     ]
 ;;
 
@@ -236,14 +236,14 @@ let purge_agent_filesystem_artifacts config agent_names =
          |> List.fold_left ( + ) 0
        in
        let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
-       let workspace_leave_result =
+       let workspace_unbind_result =
          Workspace.end_session ~stop_heartbeats:false config ~agent_name
        in
        let aliases_label = String.concat "," aliases in
        Log.Misc.info
          "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d workspace_unbind=%S"
          agent_name aliases_label pending_confirms_removed heartbeats_stopped
-         workspace_leave_result;
+         workspace_unbind_result;
        aliases
        |> List.iter (fun alias ->
             remove_path_if_exists ~context:"agent_purge"
@@ -256,7 +256,7 @@ let purge_agent_filesystem_artifacts config agent_names =
        { agent_name
        ; pending_confirms_removed
        ; heartbeats_stopped
-       ; workspace_leave_result
+       ; workspace_unbind_result
        })
 ;;
 

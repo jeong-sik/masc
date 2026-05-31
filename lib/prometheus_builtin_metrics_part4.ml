@@ -379,7 +379,7 @@ let register
      fallback_used (true | false)."
     `Counter;
   add
-    metric_workspace_join_normalize_outcome
+    metric_workspace_bind_normalize_outcome
     "Total Workspace.bind_session identity normalizations by Keeper_identity.normalize_all_names \
      (RFC P3-a). Labels: outcome (ok | empty_input | persona_not_found | \
      credential_missing | name_ambiguous | ephemeral_suffix_rejected). Non-ok outcomes \

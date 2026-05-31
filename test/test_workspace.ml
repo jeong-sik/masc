@@ -701,7 +701,7 @@ let test_is_agent_session_bounded_after_default_join () =
       | Some agent -> agent.name
       | None -> failwith "expected provider_f agent"
     in
-    Alcotest.(check bool) "joined agent detected" true
+    Alcotest.(check bool) "bound agent detected" true
       (Workspace.is_agent_session_bounded config ~agent_name:gemini_name)
   )
 
@@ -883,7 +883,7 @@ let test_release_stale_claims_releases_stale_verification () =
 
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
-    (* Heartbeat for non-joined agent *)
+    (* Heartbeat for non-bound agent *)
     let result = Workspace.heartbeat config ~agent_name:"nonexistent" in
     Alcotest.(check bool) "heartbeat for nonexistent" true (contains_warning result)
   )
@@ -1083,7 +1083,7 @@ let test_find_by_capability_no_match () =
 
 let test_register_capabilities_nonexistent_agent () =
   with_test_env (fun config ->
-    (* Register for non-joined agent *)
+    (* Register for non-bound agent *)
     let result = Workspace.register_capabilities config ~agent_name:"ghost"
       ~capabilities:["magic"] in
     Alcotest.(check bool) "register for nonexistent" true (contains_warning result)
@@ -1816,7 +1816,7 @@ let () =
     (* === Heartbeat & Zombie Detection Tests === *)
     "heartbeat", [
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
-      Alcotest.test_case "default join keeps joined status" `Quick test_is_agent_session_bounded_after_default_join;
+      Alcotest.test_case "default join keeps bound status" `Quick test_is_agent_session_bounded_after_default_join;
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves workspace state" `Quick test_workspace_bootstrap_preserves_backend_state;

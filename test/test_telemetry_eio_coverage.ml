@@ -74,25 +74,25 @@ let write_dated_file dir month day lines =
    ============================================================ *)
 
 let test_event_agent_session_bounded () =
-  let e = Telemetry_eio.Agent_joined {
+  let e = Telemetry_eio.Agent_bound {
     agent_id = "agent_llm_a-001";
     capabilities = ["code"; "review"];
   } in
   match e with
-  | Telemetry_eio.Agent_joined r ->
+  | Telemetry_eio.Agent_bound r ->
       check string "agent_id" "agent_llm_a-001" r.agent_id;
       check int "capabilities" 2 (List.length r.capabilities)
-  | _ -> fail "expected Agent_joined"
+  | _ -> fail "expected Agent_bound"
 
-let test_event_agent_left () =
-  let e = Telemetry_eio.Agent_left {
+let test_event_agent_unbound () =
+  let e = Telemetry_eio.Agent_unbound {
     agent_id = "agent_llm_a-001";
     reason = "session ended";
   } in
   match e with
-  | Telemetry_eio.Agent_left r ->
+  | Telemetry_eio.Agent_unbound r ->
       check string "reason" "session ended" r.reason
-  | _ -> fail "expected Agent_left"
+  | _ -> fail "expected Agent_unbound"
 
 let test_event_task_started () =
   let e = Telemetry_eio.Task_started {
@@ -176,7 +176,7 @@ let test_event_tool_called () =
 let test_event_record_type () =
   let r : Telemetry_eio.event_record = {
     timestamp = 1704067200.0;
-    event = Telemetry_eio.Agent_joined {
+    event = Telemetry_eio.Agent_bound {
       agent_id = "test";
       capabilities = [];
     };
@@ -393,7 +393,7 @@ let test_metrics_json_roundtrip () =
    ============================================================ *)
 
 let test_event_to_json_agent_session_bounded () =
-  let e = Telemetry_eio.Agent_joined {
+  let e = Telemetry_eio.Agent_bound {
     agent_id = "test";
     capabilities = ["a"; "b"];
   } in
@@ -421,24 +421,24 @@ let test_count_active_agents_empty () =
   let events : Telemetry_eio.event_record list = [] in
   check int "empty" 0 (Telemetry_eio.count_active_agents events)
 
-let test_count_active_agents_one_joined () =
+let test_count_active_agents_one_bound () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_bound { agent_id = "a1"; capabilities = [] } };
   ] in
-  check int "one joined" 1 (Telemetry_eio.count_active_agents events)
+  check int "one bound" 1 (Telemetry_eio.count_active_agents events)
 
-let test_count_active_agents_joined_then_left () =
+let test_count_active_agents_bound_then_unbound () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
-    { timestamp = 2.0; event = Agent_left { agent_id = "a1"; reason = "done" } };
+    { timestamp = 1.0; event = Agent_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 2.0; event = Agent_unbound { agent_id = "a1"; reason = "done" } };
   ] in
-  check int "joined then left" 0 (Telemetry_eio.count_active_agents events)
+  check int "bound then unbound" 0 (Telemetry_eio.count_active_agents events)
 
 let test_count_active_agents_multiple () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
-    { timestamp = 2.0; event = Agent_joined { agent_id = "a2"; capabilities = [] } };
-    { timestamp = 3.0; event = Agent_left { agent_id = "a1"; reason = "x" } };
+    { timestamp = 1.0; event = Agent_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 2.0; event = Agent_bound { agent_id = "a2"; capabilities = [] } };
+    { timestamp = 3.0; event = Agent_unbound { agent_id = "a1"; reason = "x" } };
   ] in
   check int "multiple" 1 (Telemetry_eio.count_active_agents events)
 
@@ -627,7 +627,7 @@ let () =
   run "Telemetry Eio Coverage" [
     "event", [
       test_case "agent_session_bounded" `Quick test_event_agent_session_bounded;
-      test_case "agent_unbound" `Quick test_event_agent_left;
+      test_case "agent_unbound" `Quick test_event_agent_unbound;
       test_case "task_started" `Quick test_event_task_started;
       test_case "task_completed" `Quick test_event_task_completed;
       test_case "handoff_triggered" `Quick test_event_handoff_triggered;
@@ -660,8 +660,8 @@ let () =
     ];
     "count_active_agents", [
       test_case "empty" `Quick test_count_active_agents_empty;
-      test_case "one joined" `Quick test_count_active_agents_one_joined;
-      test_case "joined then left" `Quick test_count_active_agents_joined_then_left;
+      test_case "one bound" `Quick test_count_active_agents_one_bound;
+      test_case "bound then unbound" `Quick test_count_active_agents_bound_then_unbound;
       test_case "multiple" `Quick test_count_active_agents_multiple;
     ];
     "count_tasks_in_progress", [

@@ -87,15 +87,15 @@ let test_event_to_sse_format () =
 
 (* ---------- MASC → AG-UI Mapping Tests ---------- *)
 
-let test_of_agent_session_bound () =
-  let e = of_agent_session_bound ~agent_name:"agent_llm_a" in
+let test_of_agent_session_bounded () =
+  let e = of_agent_session_bounded ~agent_name:"agent_llm_a" in
   assert (e.event_type = Run_started);
   assert (e.thread_id = "default");
   assert (e.run_id = Some "agent_llm_a");
   assert (e.custom_name = Some "AGENT_JOINED")
 
-let test_of_agent_left () =
-  let e = of_agent_left ~agent_name:"agent_llm_a" in
+let test_of_agent_unbound () =
+  let e = of_agent_unbound ~agent_name:"agent_llm_a" in
   assert (e.event_type = Run_finished);
   assert (e.thread_id = "default");
   assert (e.run_id = Some "agent_llm_a")
@@ -197,8 +197,8 @@ let () =
     ("event_to_json_optional_fields", test_event_to_json_with_optional_fields);
     ("event_to_json_custom", test_event_to_json_custom);
     ("event_to_sse_format", test_event_to_sse_format);
-    ("of_agent_session_bound", test_of_agent_session_bound);
-    ("of_agent_left", test_of_agent_left);
+    ("of_agent_session_bounded", test_of_agent_session_bounded);
+    ("of_agent_unbound", test_of_agent_unbound);
     ("of_broadcast", test_of_broadcast);
     ("of_task_claimed", test_of_task_claimed);
     ("of_task_done", test_of_task_done);

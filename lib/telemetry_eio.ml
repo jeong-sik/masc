@@ -26,7 +26,7 @@ let show_error_kind = error_kind_to_string
 (** Telemetry event types *)
 type event =
   | Agent_session_bound of { agent_id: string; capabilities: string list }
-  | Agent_left of { agent_id: string; reason: string }
+  | Agent_unbound of { agent_id: string; reason: string }
   | Task_started of { task_id: string; agent_id: string }
   | Task_completed of { task_id: string; duration_ms: int; success: bool }
   | Handoff_triggered of { from_agent: string; to_agent: string; reason: string }
@@ -281,7 +281,7 @@ let summarize_tool_usage ?fs config : tool_usage_summary =
             incr total_calls;
             update_tool_usage stats_by_tool ~tool_name ~success
               ~timestamp:record.timestamp
-        | Agent_session_bound _ | Agent_left _ | Task_started _ | Task_completed _
+        | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
         | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
       ) records;
       let summary = {
@@ -331,7 +331,7 @@ let summarize_agent_activity ?fs config ~since : agent_activity list =
             Hashtbl.replace by_agent agent_id
               { agent_id; tool_calls = 0; success_count = 0; failure_count = 0;
                 first_seen = record.timestamp; last_seen = record.timestamp }
-      | Agent_left _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Agent_unbound _ | Task_started _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_assigned _ -> ()
   ) records;
   Hashtbl.fold (fun _ v acc -> v :: acc) by_agent []
@@ -369,11 +369,11 @@ let count_active_agents events =
     ~present:(fun r ->
       match r.event with
       | Agent_session_bound { agent_id; _ } -> Some agent_id
-      | Agent_left _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Agent_unbound _ | Task_started _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
     ~absent:(fun r ->
       match r.event with
-      | Agent_left { agent_id; _ } -> Some agent_id
+      | Agent_unbound { agent_id; _ } -> Some agent_id
       | Agent_session_bound _ | Task_started _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
 
@@ -382,19 +382,19 @@ let count_tasks_in_progress events =
     ~present:(fun r ->
       match r.event with
       | Task_started { task_id; _ } -> Some task_id
-      | Agent_session_bound _ | Agent_left _ | Task_completed _ | Handoff_triggered _
+      | Agent_session_bound _ | Agent_unbound _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
     ~absent:(fun r ->
       match r.event with
       | Task_completed { task_id; _ } -> Some task_id
-      | Agent_session_bound _ | Agent_left _ | Task_started _ | Handoff_triggered _
+      | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
 
 let count_completed_tasks events =
   List_util.count_if (fun r ->
     match r.event with
     | Task_completed _ -> true
-    | Agent_session_bound _ | Agent_left _ | Task_started _ | Handoff_triggered _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
     | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
   ) events
 
@@ -402,7 +402,7 @@ let avg_duration events =
   let durations = List.filter_map (fun r ->
     match r.event with
     | Task_completed { duration_ms; _ } -> Some (float_of_int duration_ms)
-    | Agent_session_bound _ | Agent_left _ | Task_started _ | Handoff_triggered _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
     | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None
   ) events in
   match durations with
@@ -415,13 +415,13 @@ let calculate_handoff_rate events =
   let handoffs = List_util.count_if (fun r ->
     match r.event with
     | Handoff_triggered _ -> true
-    | Agent_session_bound _ | Agent_left _ | Task_started _ | Task_completed _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
     | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
   ) events in
   let task_events = List_util.count_if (fun r ->
     match r.event with
     | Task_started _ | Task_completed _ -> true
-    | Agent_session_bound _ | Agent_left _ | Handoff_triggered _ | Error_occurred _
+    | Agent_session_bound _ | Agent_unbound _ | Handoff_triggered _ | Error_occurred _
     | Tool_called _ | Tool_assigned _ -> false
   ) events in
   if task_events = 0 then 0.0
@@ -431,7 +431,7 @@ let calculate_error_rate events =
   let errors = List_util.count_if (fun r ->
     match r.event with
     | Error_occurred _ -> true
-    | Agent_session_bound _ | Agent_left _ | Task_started _ | Task_completed _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
     | Handoff_triggered _ | Tool_called _ | Tool_assigned _ -> false
   ) events in
   let total = List.length events in
@@ -456,8 +456,8 @@ let get_metrics ?fs config : metrics =
 let track_agent_session_bound ?fs config ~agent_id ?(capabilities=[]) () =
   track ?fs config (Agent_session_bound { agent_id; capabilities })
 
-let track_agent_left ?fs config ~agent_id ~reason =
-  track ?fs config (Agent_left { agent_id; reason })
+let track_agent_unbound ?fs config ~agent_id ~reason =
+  track ?fs config (Agent_unbound { agent_id; reason })
 
 let track_task_started ?fs config ~task_id ~agent_id =
   track ?fs config (Task_started { task_id; agent_id })

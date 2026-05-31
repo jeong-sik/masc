@@ -1,6 +1,6 @@
 (* #9770: pin canonical metric name + label vocabulary for the
    bind_required guard counter.  The execute path emits this
-   counter whenever an agent calls a join-required tool without
+   counter whenever an agent calls a bind-required tool without
    first calling [masc_bind] (or [masc_start]).
 
    Test exercises the counter directly — the guard's surrounding
@@ -11,7 +11,7 @@
 
 let counter_for ~tool ~agent_name ~reason =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_tool_join_required_guard
+    Masc_mcp.Prometheus.metric_tool_bind_required_guard
     ~labels:[
       ("tool", tool);
       ("agent_name", agent_name);
@@ -21,9 +21,9 @@ let counter_for ~tool ~agent_name ~reason =
 
 let test_metric_name_stable () =
   Alcotest.(check string)
-    "join-required guard canonical metric name"
-    "masc_tool_join_required_guard_total"
-    Masc_mcp.Prometheus.metric_tool_join_required_guard
+    "bind-required guard canonical metric name"
+    "masc_tool_bind_required_guard_total"
+    Masc_mcp.Prometheus.metric_tool_bind_required_guard
 
 let test_increments_workspace_uninitialized () =
   let tool = "masc_claim_next" in
@@ -31,7 +31,7 @@ let test_increments_workspace_uninitialized () =
   let reason = "workspace_uninitialized" in
   let before = counter_for ~tool ~agent_name ~reason in
   Masc_mcp.Prometheus.inc_counter
-    Masc_mcp.Prometheus.metric_tool_join_required_guard
+    Masc_mcp.Prometheus.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_name);
               ("reason", reason) ]
@@ -41,19 +41,19 @@ let test_increments_workspace_uninitialized () =
     (before +. 1.0)
     (counter_for ~tool ~agent_name ~reason)
 
-let test_increments_agent_not_joined () =
+let test_increments_agent_not_bound () =
   let tool = "masc_claim_next" in
   let agent_name = "nic-test-9770" in
-  let reason = "agent_not_joined" in
+  let reason = "agent_not_bound" in
   let before = counter_for ~tool ~agent_name ~reason in
   Masc_mcp.Prometheus.inc_counter
-    Masc_mcp.Prometheus.metric_tool_join_required_guard
+    Masc_mcp.Prometheus.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_name);
               ("reason", reason) ]
     ();
   Alcotest.(check (float 0.0001))
-    "agent_not_joined +1"
+    "agent_not_bound +1"
     (before +. 1.0)
     (counter_for ~tool ~agent_name ~reason)
 
@@ -67,24 +67,24 @@ let test_label_isolation_across_reasons () =
     counter_for ~tool ~agent_name ~reason:"workspace_uninitialized"
   in
   Masc_mcp.Prometheus.inc_counter
-    Masc_mcp.Prometheus.metric_tool_join_required_guard
+    Masc_mcp.Prometheus.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_name);
-              ("reason", "agent_not_joined") ]
+              ("reason", "agent_not_bound") ]
     ();
   Alcotest.(check (float 0.0001))
-    "workspace_uninitialized counter unchanged when agent_not_joined fires"
+    "workspace_uninitialized counter unchanged when agent_not_bound fires"
     before_workspace
     (counter_for ~tool ~agent_name ~reason:"workspace_uninitialized")
 
 let test_label_isolation_across_agents () =
   let tool = "masc_claim_next" in
-  let reason = "agent_not_joined" in
+  let reason = "agent_not_bound" in
   let agent_a = "alpha-9770" in
   let agent_b = "beta-9770" in
   let before_a = counter_for ~tool ~agent_name:agent_a ~reason in
   Masc_mcp.Prometheus.inc_counter
-    Masc_mcp.Prometheus.metric_tool_join_required_guard
+    Masc_mcp.Prometheus.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_b);
               ("reason", reason) ]
@@ -95,7 +95,7 @@ let test_label_isolation_across_agents () =
     (counter_for ~tool ~agent_name:agent_a ~reason)
 
 let () =
-  Alcotest.run "join_required_guard_counter_9770" [
+  Alcotest.run "bind_required_guard_counter_9770" [
     "metric_name", [
       Alcotest.test_case "canonical name stable" `Quick
         test_metric_name_stable;
@@ -103,8 +103,8 @@ let () =
     "counter", [
       Alcotest.test_case "workspace_uninitialized increments" `Quick
         test_increments_workspace_uninitialized;
-      Alcotest.test_case "agent_not_joined increments" `Quick
-        test_increments_agent_not_joined;
+      Alcotest.test_case "agent_not_bound increments" `Quick
+        test_increments_agent_not_bound;
     ];
     "isolation", [
       Alcotest.test_case "reasons isolated" `Quick

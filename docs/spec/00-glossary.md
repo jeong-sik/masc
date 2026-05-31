@@ -363,7 +363,7 @@ MASC 비즈니스 로직 에러의 단일 통합 타입. Init, Agent, Task, Port
 Task 도메인 에러: `TaskNotFound`, `TaskAlreadyClaimed { task_id; by }`, `TaskNotClaimed`, `TaskInvalidState`. `-> lib/types/types_auth.ml`
 
 **Agent Error (masc_error variants)**
-Agent 도메인 에러: `AgentNotFound`, `AgentNotJoined`, `AgentAlreadyJoined`. `-> lib/types/types_auth.ml`
+Agent 도메인 에러: `AgentNotFound`, `AgentNotBound`, `AgentAlreadyBound`. `-> lib/types/types_auth.ml`
 
 **Portal Error (masc_error variants)**
 Portal 도메인 에러: `PortalNotOpen`, `PortalAlreadyOpen { agent; target }`, `PortalClosed`. `-> lib/types/types_auth.ml`

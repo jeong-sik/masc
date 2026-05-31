@@ -138,10 +138,10 @@ let of_agent_session_bound ~agent_name : event =
     Run_started
 
 (** Map MASC agent_unbound to AG-UI RUN_FINISHED *)
-let of_agent_left ~agent_name : event =
+let of_agent_unbound ~agent_name : event =
   make_event ~thread_id:default_thread_id
     ~run_id:(Some agent_name)
-    ~custom_name:(Some "AGENT_LEFT")
+    ~custom_name:(Some "AGENT_UNBOUND")
     ~custom_value:(Some (`Assoc [("agent", `String agent_name)]))
     Run_finished
 

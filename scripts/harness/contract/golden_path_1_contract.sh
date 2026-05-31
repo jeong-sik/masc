@@ -137,7 +137,7 @@ fi
 
 # ── Step 8/8: done ──
 echo "[8/8] masc_transition (done)"
-r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"done\",\"notes\":\"Completed GP1 contract flow: joined workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success.\"}")"
+r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"done\",\"notes\":\"Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success.\"}")"
 if require_ok "$r8"; then
   step_pass
 else

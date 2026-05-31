@@ -74,8 +74,8 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
 
   (* Dedup: if agent already has a session, update last_seen and return early *)
   let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
-  let already_joined = Sys.file_exists agent_file_dedup in
-  if already_joined then begin
+  let already_bound = Sys.file_exists agent_file_dedup in
+  if already_bound then begin
     (match read_agent_with_repair config agent_file_dedup with
      | Ok existing_agent ->
        let is_inactive = existing_agent.status = Inactive in

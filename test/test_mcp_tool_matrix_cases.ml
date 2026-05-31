@@ -299,7 +299,7 @@ let ensure_initialized fixture =
     (Masc_mcp.Workspace.init fixture.state.workspace_config
        ~agent_name:(Some fixture.agent_name))
 
-let ensure_joined fixture =
+let ensure_bound fixture =
   let result =
     execute_tool fixture ~name:"masc_start"
       ~arguments:
@@ -364,9 +364,9 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   (match init_mode with
   | Fresh -> ()
   | Init_only -> ensure_initialized fixture
-  | Init_joined ->
+  | Init_bound ->
       ensure_initialized fixture;
-      ensure_joined fixture);
+      ensure_bound fixture);
   fixture
 
 let ensure_goal fixture =
@@ -774,7 +774,7 @@ let state_guard_fragments =
     "required";
     "invalid";
     "must be";
-    "join required";
+    "bind required";
     "workspace not initialized";
     "already exists";
     "no active";

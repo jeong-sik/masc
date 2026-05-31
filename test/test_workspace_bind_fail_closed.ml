@@ -92,7 +92,7 @@ let rec rm_rf path =
     else try Sys.remove path with Sys_error _ -> ()
 
 let with_tmp_base f =
-  let tmp_dir = Filename.temp_file "masc_join_gate" "" in
+  let tmp_dir = Filename.temp_file "masc_bind_gate" "" in
   Sys.remove tmp_dir;
   Unix.mkdir tmp_dir 0o755;
   Fun.protect
@@ -170,7 +170,7 @@ let test_join_gate_uses_both_checks () =
 (* --------------------------------------------------------------------- *)
 
 let () =
-  run "workspace_join_fail_closed"
+  run "workspace_bind_fail_closed"
     [
       ( "identity_rejection",
         [

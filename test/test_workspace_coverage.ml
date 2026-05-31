@@ -395,7 +395,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
     let agent_name =
       match Workspace.get_agents_raw config with
       | [ agent ] -> agent.Masc_domain.name
-      | _ -> Alcotest.fail "expected exactly one joined agent"
+      | _ -> Alcotest.fail "expected exactly one bound agent"
     in
     let _ = Workspace.add_task config ~title:"Done already" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
@@ -440,7 +440,7 @@ let test_status_hides_stale_agent_current_task_without_writing () =
       let agent_name =
         match Workspace.get_agents_raw config with
         | [ agent ] -> agent.Masc_domain.name
-        | _ -> Alcotest.fail "expected exactly one joined agent"
+        | _ -> Alcotest.fail "expected exactly one bound agent"
       in
       let _ =
         Workspace.add_task config ~title:"Awaiting verifier" ~priority:1 ~description:""
@@ -1271,11 +1271,11 @@ let test_join_leave_emit_observability () =
            | _ -> false)
          ~details:[ "event_family", "agent_lifecycle"; "event_kind", "leave" ]);
     let telemetry_events = Telemetry_eio.read_all_events config in
-    let has_joined =
+    let has_bound =
       List.exists
         (fun (entry : Telemetry_eio.event_record) ->
            match entry.event with
-           | Telemetry_eio.Agent_joined { agent_id; _ } -> String.equal agent_id provider_f
+           | Telemetry_eio.Agent_bound { agent_id; _ } -> String.equal agent_id provider_f
            | _ -> false)
         telemetry_events
     in
@@ -1283,7 +1283,7 @@ let test_join_leave_emit_observability () =
       List.exists
         (fun (entry : Telemetry_eio.event_record) ->
            match entry.event with
-           | Telemetry_eio.Agent_left { agent_id; reason } ->
+           | Telemetry_eio.Agent_unbound { agent_id; reason } ->
              String.equal agent_id provider_f && String.equal reason "leave"
            | _ -> false)
         telemetry_events
@@ -1624,7 +1624,7 @@ let test_get_messages_raw () =
 
 let test_is_agent_session_bounded () =
   with_test_env (fun config ->
-    (* agent_llm_a is joined from init *)
+    (* agent_llm_a is bound from init *)
     (* Note: agent names are auto-generated with nicknames, so we check by type prefix *)
     let agents : Masc_domain.agent list = Workspace.get_agents_raw config in
     let has_agent =

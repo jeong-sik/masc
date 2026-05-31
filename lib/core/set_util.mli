@@ -13,7 +13,7 @@
     [present] that are NOT also produced by [absent]. Implementation: one
     pass over [xs] populates both the [absent_set] and [present_set]
     tables, followed by a single [Hashtbl.fold] over [present_set] that
-    skips keys also in [absent_set]. Used to model [joined \ left] (active
+    skips keys also in [absent_set]. Used to model [bound \ left] (active
     agents) or [started \ completed] (in-progress tasks) over a flat event
     stream. Replaces O(N x M) [List.filter ... List.mem] pipelines with
     O(N) work. *)

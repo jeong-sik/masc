@@ -60,7 +60,7 @@ The taxonomy is built around **operator action**. If a log line does not change 
 | Marker (must NOT) | Used as a proxy for "I want this to be visible" — promote to `Error` if action is required, demote to `Info` if not |
 | Cardinality | Medium — bursts of ~10/min on incident, baseline ~1/h |
 | Example (good) | `Log.Misc.warn "tool_usage_log: append failed for %s: %s; recording coverage_gap"` — write failed but coverage_gap captures the loss |
-| Anti-pattern | `silent:workspace_join_normalize ... persona_not_found ... logging-only mode, proceeding with original agent_name` — silent fallback that produces identity drift is **`Error`**, not `Warn`. The "silent" prefix is itself a structural marker (see [§ 3.1](#31-silent-fallback)). |
+| Anti-pattern | `silent:workspace_bind_normalize ... persona_not_found ... logging-only mode, proceeding with original agent_name` — silent fallback that produces identity drift is **`Error`**, not `Warn`. The "silent" prefix is itself a structural marker (see [§ 3.1](#31-silent-fallback)). |
 
 ### `Info`
 
@@ -113,7 +113,7 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 | Pattern | Message contains `silent` or `logging-only mode` or `silently` AND severity is `Info`/`Warn` |
 | Why wrong | A silent fallback IS the failure. The whole point is that downstream behavior diverges from the configured intent (identity drift, wrong cred, default model). The operator MUST know. |
 | Correct | `Error` AND emit a structured field `silent_fallback_kind=<reason>` so dashboards can count |
-| Origin | `silent:workspace_join_normalize ... persona_not_found ... logging-only mode` (production 2026-04-27 09:17:48). `nick0cave` joined as `nick0cave-proud-shark` instead of canonical, identity drift not surfaced. |
+| Origin | `silent:workspace_bind_normalize ... persona_not_found ... logging-only mode` (production 2026-04-27 09:17:48). `nick0cave` bound as `nick0cave-proud-shark` instead of canonical, identity drift not surfaced. |
 
 ### 3.2 Operator broadcast
 

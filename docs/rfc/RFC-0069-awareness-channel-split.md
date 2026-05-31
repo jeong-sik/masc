@@ -98,8 +98,8 @@ let broadcast ?trace_context config ~from_agent ~content =
 |--------|----------|-------------|
 | `workspace_task.claim_task` | `workspace_task.ml:853` | `📋 Claimed <task_id>` 등 (claim/transition 알림) |
 | `workspace_task_create.batch_add_tasks` | `workspace_task_create.ml:229` | `✅ Added N tasks: <summary>` (배치 task 추가) |
-| `workspace_lifecycle.rejoin` | `workspace_lifecycle.ml:108` | `👋 <agent> rejoined the namespace` |
-| `workspace_lifecycle.join` | `workspace_lifecycle.ml:172` | `👋 <agent> joined the namespace` |
+| `workspace_lifecycle.rejoin` | `workspace_lifecycle.ml:108` | `👋 <agent> rebound the namespace` |
+| `workspace_lifecycle.join` | `workspace_lifecycle.ml:172` | `👋 <agent> bound the namespace` |
 | `workspace_lifecycle.leave` | `workspace_lifecycle.ml:237` | `👋 <agent> left the namespace` |
 | 사용자 채팅/멘션 | `tool_inline_dispatch_comm.ml:37` 경유 | 일반 broadcast (멘션 포함) |
 

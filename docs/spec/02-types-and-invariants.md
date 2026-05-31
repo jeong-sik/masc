@@ -307,8 +307,8 @@ type masc_error =
   | NotInitialized
   | AlreadyInitialized
   | AgentNotFound of string
-  | AgentNotJoined of string
-  | AgentAlreadyJoined of string
+  | AgentNotBound of string
+  | AgentAlreadyBound of string
   | TaskNotFound of string
   | TaskAlreadyClaimed of { task_id: string; by: string }
   | TaskNotClaimed of string
@@ -607,7 +607,7 @@ type rate_limit_error = {
 
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
-| INV-TYPE-001 | 에이전트 name은 룸 내에서 유일하다. 동일 이름으로 `masc_bind` 시 `AgentAlreadyJoined` 반환. | `masc_bind` 중복 호출 테스트 |
+| INV-TYPE-001 | 에이전트 name은 binding scope에서 유일하다. 동일 이름으로 `masc_bind` 시 `AgentAlreadyBound` 반환. | `masc_bind` 중복 호출 테스트 |
 | INV-TYPE-002 | Newtype ID 모듈(`Agent_id`, `Task_id`, `Thread_id`, `Turn_id`)은 모듈 경계에서 타입이 불투명하다. 서로 다른 ID 타입 간 직접 비교/대입은 컴파일 에러다. | 컴파일러가 강제 |
 
 ### State Machine

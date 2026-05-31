@@ -205,7 +205,7 @@ let () =
           test_case "find_similar_names returns close match" `Quick (fun () ->
               register_full ~tool_name:"__sim_masc_claim_next" ~handler:echo_handler ();
               register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler ();
-              register_full ~tool_name:"__sim_masc_join" ~handler:echo_handler ();
+              register_full ~tool_name:"__sim_masc_bind" ~handler:echo_handler ();
               let suggestions =
                 Tool_dispatch.find_similar_names
                   ~query:"__sim_masc_claim_task" ()

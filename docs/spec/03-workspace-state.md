@@ -648,7 +648,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 |----|------|----------|
 | INV-WORKSPACE-001 | Workspace state 갱신은 반드시 `with_file_lock`으로 보호된다 | `workspace_state.update_state` |
 | INV-WORKSPACE-002 | `active_agents`는 중복 없는 리스트다 (`filter ((<>) name)` 후 추가) | `workspace_lifecycle.join` |
-| INV-WORKSPACE-003 | 에이전트는 join 없이 claim/broadcast를 수행할 수 없다 | `tool_task.handle_claim` (is_agent_joined 검사) |
+| INV-WORKSPACE-003 | 에이전트는 bind 없이 claim/broadcast를 수행할 수 없다 | `tool_task.handle_claim` (is_agent_bound 검사) |
 | INV-WORKSPACE-004 | 태스크 전이는 assignee 일치 또는 `force=true` 조건을 충족해야 한다 | `workspace_task.transition_task_r` |
 | INV-WORKSPACE-005 | `backlog.version`은 단조 증가한다 (매 mutation +1) | `workspace_task`, `workspace_task_schedule` |
 | INV-WORKSPACE-006 | Zombie threshold: 일반 에이전트 300s, Keeper 3600s | `resilience.Zombie.is_zombie_for_agent` |
@@ -669,7 +669,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | ID | 설명 | 수정 위치 |
 |----|------|----------|
 | BUG-004 | claim_next가 이전 claim을 해제하지 않아 orphaned task 발생 | `workspace_task_schedule.claim_next_r` (auto-release) |
-| BUG-005 | join 없이 claim 가능했음 | `workspace_task.claim_task_r` (agent_bound 검사 추가) |
+| BUG-005 | bind 없이 claim 가능했음 | `workspace_task.claim_task_r` (agent_bound 검사 추가) |
 | BUG-009 | stale Todo 태스크가 큐를 막음 | `workspace_task_schedule` (auto-archive, threshold 7일) |
 | BUG-010 | 빈 title/잘못된 priority 태스크 생성 가능 | `tool_task.handle_add_task` (validation 추가) |
 | BUG-1600 | workspace-scoped 에이전트 조회 시 root 디렉토리 미검사 | `workspace_agent.update_agent_r` (dual path 검사) |

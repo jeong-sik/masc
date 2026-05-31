@@ -110,7 +110,7 @@ val status_summary_string :
     2. Project line (only when project ≠ cluster)
     3. Scope + path
     4. Snapshot line (counters)
-    5. You-line (agent / joined / owned / current)
+    5. You-line (agent / bound / owned / current)
     6. Task binding line (assigned set / drift reason)
     7. Planning lines (missing-task / deliverable-conflict)
     8. Credential line (only when required)

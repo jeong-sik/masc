@@ -176,7 +176,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
                     "derived" )
                 else if runtime_count = 0 then
                   ( "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
-                    "No agents or keepers joined yet; namespace is idle.",
+                    "No agents or keepers bound yet; namespace is idle.",
                     "namespace",
                     "fallback" )
                 else

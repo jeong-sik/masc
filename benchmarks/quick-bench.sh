@@ -166,12 +166,6 @@ bench_bootstrap_agent() {
   bench_call_tool "masc_start" "$(jq -cn --arg path "$BENCH_ROOM_PATH" '{path:$path}')" >/dev/null
 }
 
-bench_leave_agent() {
-  if [[ -n "$MCP_SESSION_ID" ]]; then
-    bench_call_tool "masc_leave" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent}')" >/dev/null 2>&1 || true
-  fi
-}
-
 measure_avg() {
   local label="$1"
   local tool_name="$2"
@@ -205,7 +199,6 @@ echo "Warmup iterations: $BENCH_WARMUP_ITERATIONS"
 echo ""
 
 bench_initialize_session
-trap bench_leave_agent EXIT
 
 echo "Operation                     Latency"
 echo "──────────────────────────────────────────────"

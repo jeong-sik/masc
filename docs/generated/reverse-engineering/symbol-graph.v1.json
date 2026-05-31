@@ -23,7 +23,7 @@
     },
     "emit_command": "scripts/ide/export-symbol-graph --emit > docs/generated/reverse-engineering/symbol-graph.v1.json",
     "live_lsp_invoked": false,
-    "notes": "Initial task-387 snapshot is a base-commit-bound static seed from base_commit. display_range values are not current-main coordinates. Later exporter PRs should replace static ranges with live LSP responses."
+    "notes": "Initial task-387 snapshot is a base-commit-bound static seed from base_commit. display_range values are not current-main positions. Later exporter PRs should replace static ranges with live LSP responses."
   },
   "limits": {
     "max_files": 80,
@@ -76,9 +76,9 @@
       "tasks": ["task-373", "task-374", "task-375", "task-376"],
       "primary_files": [
         "lib/tool_task.ml",
-        "lib/coord/coord_task.ml",
-        "lib/coord/coord_task_lifecycle.ml",
-        "lib/coord_goals.ml",
+        "lib/workspace/workspace_task.ml",
+        "lib/workspace/workspace_task_lifecycle.ml",
+        "lib/workspace_goals.ml",
         "lib/goal/goal_verification.ml"
       ],
       "guard_tests": [
@@ -333,11 +333,11 @@
       ]
     },
     {
-      "path": "lib/coord/coord_task.ml",
+      "path": "lib/workspace/workspace_task.ml",
       "language": "ocaml",
       "symbols": [
         {
-          "id": "sym:coord_task:transition_task_r",
+          "id": "sym:workspace_task:transition_task_r",
           "name": "transition_task_r",
           "kind": "function",
           "display_range": {"start_line": 49, "end_line": 245},
@@ -345,7 +345,7 @@
           "tests": ["test/test_verification_fsm.ml"]
         },
         {
-          "id": "sym:coord_task:verification_side_effects",
+          "id": "sym:workspace_task:verification_side_effects",
           "name": "verification side effects",
           "kind": "flow",
           "display_range": {"start_line": 279, "end_line": 411},
@@ -358,11 +358,11 @@
       ]
     },
     {
-      "path": "lib/coord_goals.ml",
+      "path": "lib/workspace_goals.ml",
       "language": "ocaml",
       "symbols": [
         {
-          "id": "sym:coord_goals:request_complete_flow",
+          "id": "sym:workspace_goals:request_complete_flow",
           "name": "request complete flow",
           "kind": "flow",
           "display_range": {"start_line": 573, "end_line": 710},
@@ -674,11 +674,11 @@
     {
       "kind": "decides_transition",
       "from": "sym:tool_task:transition_dispatch",
-      "to": "sym:coord_task:transition_task_r"
+      "to": "sym:workspace_task:transition_task_r"
     },
     {
       "kind": "evaluates_quorum",
-      "from": "sym:coord_goals:request_complete_flow",
+      "from": "sym:workspace_goals:request_complete_flow",
       "to": "sym:goal_verification:evaluate_quorum"
     },
     {
@@ -705,7 +705,7 @@
     },
     {
       "code": "base_commit_bound_static_ranges",
-      "reason": "Static display ranges are valid only for base_commit 22f3665e5218 and may drift as main changes; they must not be treated as current-main coordinates.",
+      "reason": "Static display ranges are valid only for base_commit 22f3665e5218 and may drift as main changes; they must not be treated as current-main positions.",
       "follow_up": "Refresh the artifact through the read-only exporter before using line ranges for refactor execution."
     },
     {

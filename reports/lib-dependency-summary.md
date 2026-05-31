@@ -13,11 +13,11 @@
 | scc_count | 1 | - |
 | largest_scc_size | 224 | - |
 
-## Room/Coordination Dependents
+## Workspace Dependents
 
 | Module | Dependents | Delta |
 | --- | --- | --- |
-| Coord | 193 | - |
+| Workspace | 193 | - |
 
 ## Top Hub Modules
 
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 1 | Prometheus | 230 |
 | 2 | Keeper_types | 224 |
-| 3 | Coord | 193 |
+| 3 | Workspace | 193 |
 | 4 | Keeper_metrics | 151 |
 | 5 | Keeper_registry | 81 |
 | 6 | Keeper_id | 66 |

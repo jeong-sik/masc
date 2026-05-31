@@ -292,11 +292,11 @@ let assemble_hooks
                          ~retry_count))
                   else None
                 in
-                let cascade_seed =
+                let runtime_seed =
                   Runtime_inference.for_cascade ~name:cascade_name_string
                 in
                 let current_budget =
-                  match cascade_seed.thinking_budget with
+                  match runtime_seed.thinking_budget with
                   | Some _ as v -> v
                   | None -> current_params.thinking_budget
                 in
@@ -320,7 +320,7 @@ let assemble_hooks
                   { current_params with
                     thinking_budget = adaptive_thinking_budget
                   ; enable_thinking =
-                      (match cascade_seed.thinking_enabled with
+                      (match runtime_seed.thinking_enabled with
                        | Some false -> Some false
                        | _ ->
                          (match adaptive_thinking_override with

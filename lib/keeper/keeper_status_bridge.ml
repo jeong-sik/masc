@@ -536,13 +536,13 @@ let optional_existing_path_json ?source = function
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the
    TOML path + the single-arm [source_kind]. *)
-let cascade_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
+let runtime_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
   let source =
     Cascade_toml_materializer.source_info ~config_path:resolution.cascade.path
   in
-  [ ( "cascade_catalog_source_kind"
+  [ ( "runtime_catalog_source_kind"
     , `String (Cascade_toml_materializer.source_kind_to_string source.kind) )
-  ; "cascade_catalog_source_path", `String source.source_path
+  ; "runtime_catalog_source_path", `String source.source_path
   ]
 ;;
 
@@ -599,7 +599,7 @@ let source_provenance_json config (meta : keeper_meta) =
      ; "config_resolution", Config_dir_resolver.to_json resolution
      ; "precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]
      ]
-     @ cascade_catalog_source_fields resolution
+     @ runtime_catalog_source_fields resolution
      @ [ "has_live_override", `Bool (override_fields <> [])
        ; "override_fields", Json_util.json_string_list override_fields
        ; ( "override_field_sources"

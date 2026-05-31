@@ -222,7 +222,7 @@ function seedExecutionSession() {
     ],
     broadcast_count: 3,
     portal_count: 0,
-    cascade_attempted: 1,
+    runtime_attempted: 1,
     cascade_success: 0,
     cascade_failed: 1,
     fallback_task_created: 1,

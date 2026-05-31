@@ -241,7 +241,7 @@ let purge_agent_filesystem_artifacts config agent_names =
        in
        let aliases_label = String.concat "," aliases in
        Log.Misc.info
-         "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d workspace_leave=%S"
+         "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d workspace_unbind=%S"
          agent_name aliases_label pending_confirms_removed heartbeats_stopped
          workspace_leave_result;
        aliases

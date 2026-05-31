@@ -153,12 +153,12 @@ let policy_tool_names =
       "masc_goal_upsert";
       "masc_goal_verify";
       "masc_heartbeat";
-      "masc_join";
+      "masc_bind";
       "masc_keeper_list";
       "masc_keeper_msg";
       "masc_keeper_msg_result";
       "masc_keeper_status";
-      "masc_leave";
+      "masc_unbind";
       "masc_messages";
       "masc_plan_get";
       "masc_plan_get_task";
@@ -169,7 +169,7 @@ let policy_tool_names =
       "masc_transition";
       "masc_web_fetch";
       "masc_web_search";
-      "masc_who";
+      "masc_agents";
       "tool_edit_file";
       "tool_execute";
       "tool_read_file";

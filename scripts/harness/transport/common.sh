@@ -174,7 +174,7 @@ mcp_join_agent() {
   local agent_name="$2"
   mcp_call_tool \
     "$session_id" \
-    "masc_join" \
+    "masc_bind" \
     "$(printf '{"agent_name":"%s","capabilities":[]}' "$agent_name")" \
     2
 }

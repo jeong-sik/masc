@@ -25,9 +25,9 @@ let essential_tools = [
     "Stop a periodic heartbeat started by masc_heartbeat_start.";
   make_schema "masc_broadcast"
     "Send a message visible to ALL agents via SSE push.";
-  make_schema "masc_join"
+  make_schema "masc_bind"
     "Join the MASC namespace to collaborate with other AI agents.";
-  make_schema "masc_leave"
+  make_schema "masc_unbind"
     "Leave the MASC namespace and mark yourself as offline.";
   make_schema "masc_status"
     "Get current namespace status: active agents, task queue, recent broadcasts.";
@@ -35,7 +35,7 @@ let essential_tools = [
     "Render the MASC dashboard summarizing namespaces, agents, and tasks.";
   make_schema "masc_agents"
     "Get detailed status of all agents: current tasks, capabilities.";
-  make_schema "masc_who"
+  make_schema "masc_agents"
     "List all agents currently in the workspace with their capabilities.";
   make_schema "masc_tasks"
     "List tasks in backlog with their status and assignee.";
@@ -107,8 +107,8 @@ let test_broadcast_in_top3 () =
 let test_join_in_top3 () =
   let result = Tool_prefilter.filter
     ~tools:essential_tools ~query:"join the namespace" ~k:3 in
-  check bool "masc_join in top-3" true
-    (has_tool "masc_join" result)
+  check bool "masc_bind in top-3" true
+    (has_tool "masc_bind" result)
 
 let test_add_task_in_top3 () =
   let result = Tool_prefilter.filter

@@ -24,7 +24,7 @@ Result:
 
 | Direction | Count | Examples |
 |---|---|---|
-| surface ∖ descriptor | **9** | `masc_start`, `masc_join`, `masc_leave`, `masc_broadcast`, `masc_messages`, `masc_who`, `masc_keeper_sandbox_status`, `masc_persona_generate`, `masc_keeper_create_from_persona` |
+| surface ∖ descriptor | **9** | `masc_start`, `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `masc_agents`, `masc_keeper_sandbox_status`, `masc_persona_generate`, `masc_keeper_create_from_persona` |
 | descriptor ∖ surface | 82 | `keeper_board_*` (managed-keeper twins), `masc_board_delete`, `masc_config`, `masc_get_metrics`, … (intentionally not operator-visible) |
 | intersect | 46 | already descriptor-backed surface entries |
 
@@ -94,11 +94,11 @@ let handle ctx ~descriptor ~args =
 | name | cluster id | input_schema source |
 |---|---|---|
 | `masc_start` | `masc.workspace.start` | `Tool_schemas_workspace.schemas` |
-| `masc_join` | `masc.workspace.join` | `Tool_schemas_workspace.schemas` |
-| `masc_leave` | `masc.workspace.leave` | `Tool_schemas_workspace.schemas` |
+| `masc_bind` | `masc.workspace.bind` | `Tool_schemas_workspace.schemas` |
+| `masc_unbind` | `masc.workspace.unbind` | `Tool_schemas_workspace.schemas` |
 | `masc_broadcast` | `masc.comm.broadcast` | `Tool_schemas_comm.schemas` |
 | `masc_messages` | `masc.comm.messages` | `Tool_schemas_comm.schemas` |
-| `masc_who` | `masc.comm.who` | `Tool_schemas_comm.schemas` |
+| `masc_agents` | `masc.comm.agents` | `Tool_schemas_comm.schemas` |
 | `masc_keeper_sandbox_status` | `masc.keeper.sandbox_status` | existing keeper schema |
 | `masc_persona_generate` | `masc.persona.generate` | persona authoring schema |
 | `masc_keeper_create_from_persona` | `masc.persona.create_from` | persona authoring schema |

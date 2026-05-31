@@ -125,7 +125,7 @@ const NOISY_TOOL_NAMES = new Set([
   'masc_status',
   'masc_tasks',
   'masc_messages',
-  'masc_who',
+  'masc_agents',
   'keeper_tasks_list',
   'keeper_stay_silent',
   'extend_turns',

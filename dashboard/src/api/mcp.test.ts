@@ -321,7 +321,7 @@ describe('callMcpTool', () => {
     setupMcpSessionMocks('sess-explicit-internal')
 
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_join', { _agent_name: 'agent-code-tool-matrix' })
+    await callMcpTool('masc_bind', { _agent_name: 'agent-code-tool-matrix' })
 
     const toolCall = findCallByMethod('tools/call')
     expect(toolCall).toBeDefined()
@@ -404,7 +404,7 @@ describe('callMcpTool', () => {
 
     const { callMcpTool } = await import('./mcp')
 
-    await expect(callMcpTool('masc_join', { _agent_name: 'dashboard' })).rejects.toThrow(
+    await expect(callMcpTool('masc_bind', { _agent_name: 'dashboard' })).rejects.toThrow(
       'No credential found for dashboard',
     )
   })

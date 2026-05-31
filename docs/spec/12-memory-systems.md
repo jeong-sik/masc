@@ -243,7 +243,7 @@ institution
 - onboarding steps
 - alumni network
 
-`format_for_welcome`은 `masc_join` 응답에 포함되는 축약 버전.
+`format_for_welcome`은 `masc_bind` 응답에 포함되는 축약 버전.
 
 ### 4.4 Pattern Effectiveness
 

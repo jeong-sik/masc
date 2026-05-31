@@ -607,7 +607,7 @@ type rate_limit_error = {
 
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
-| INV-TYPE-001 | 에이전트 name은 룸 내에서 유일하다. 동일 이름으로 `masc_join` 시 `AgentAlreadyJoined` 반환. | `masc_join` 중복 호출 테스트 |
+| INV-TYPE-001 | 에이전트 name은 룸 내에서 유일하다. 동일 이름으로 `masc_bind` 시 `AgentAlreadyJoined` 반환. | `masc_bind` 중복 호출 테스트 |
 | INV-TYPE-002 | Newtype ID 모듈(`Agent_id`, `Task_id`, `Thread_id`, `Turn_id`)은 모듈 경계에서 타입이 불투명하다. 서로 다른 ID 타입 간 직접 비교/대입은 컴파일 에러다. | 컴파일러가 강제 |
 
 ### State Machine

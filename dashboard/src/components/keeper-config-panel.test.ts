@@ -117,7 +117,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     },
     workspace collaboration: {
       mention_targets: ['sangsu'],
-      joined_workspace_ids: ['default'],
+      bound_workspace_ids: ['default'],
       active_goal_ids: ['goal-runtime'],
       active_goals: [
         { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
@@ -279,7 +279,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     runtime: {} as KeeperConfig['runtime'],
     workspace collaboration: {
       mention_targets: [],
-      joined_workspace_ids: [],
+      bound_workspace_ids: [],
       active_goal_ids: [],
       active_goals: [],
       active_goal_count: 0,
@@ -377,7 +377,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       active_goal_ids: ['goal-a'],
       workspace collaboration: {
         mention_targets: [],
-        joined_workspace_ids: [],
+        bound_workspace_ids: [],
         active_goal_ids: ['goal-a'],
         active_goals: [{ id: 'goal-a', title: 'Goal A', horizon: 'short' }],
         active_goal_count: 1,

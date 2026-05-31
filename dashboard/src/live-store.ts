@@ -200,8 +200,8 @@ type LiveEventKindTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' 
 export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
   const type = entry.eventType
   if (type === 'broadcast') return 'info'
-  if (type === 'agent_joined') return 'ok'
-  if (type === 'agent_left') return 'neutral'
+  if (type === 'agent_bound') return 'ok'
+  if (type === 'agent_unbound') return 'neutral'
   if (type === 'task_update') return 'ok'
   if (type === 'board_post') return 'info'
   if (type === 'board_comment') return 'info'
@@ -231,8 +231,8 @@ export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
 export function journalEventKindLabel(entry: JournalEntry): string {
   const type = entry.eventType
   if (type === 'broadcast') return 'broadcast'
-  if (type === 'agent_joined') return 'joined'
-  if (type === 'agent_left') return 'left'
+  if (type === 'agent_bound') return 'joined'
+  if (type === 'agent_unbound') return 'left'
   if (type === 'task_update') return 'task'
   if (type === 'board_post') return 'post'
   if (type === 'board_comment') return 'comment'

@@ -1286,7 +1286,7 @@ interface KeeperConfigRuntime {
 
 interface KeeperConfigWorkspace {
   mention_targets: string[]
-  joined_workspace_ids: string[]
+  bound_workspace_ids: string[]
   active_goal_ids: string[]
   active_goals: KeeperConfigActiveGoal[]
   active_goal_count: number

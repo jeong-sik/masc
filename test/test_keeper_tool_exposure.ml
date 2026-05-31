@@ -1415,7 +1415,7 @@ let () =
       , [ test_case "dangerous tools denied" `Quick (fun () ->
             (* Post-pruning: keeper_denied surface narrowed to
            [masc_reset; masc_spawn]. Most former dangerous tools
-           (masc_workspace_delete, masc_force_leave, masc_config_set,
+           (masc_workspace_delete, masc_force_unbind, masc_config_set,
            masc_execute / masc_execute_dry_run) were removed from the
            registry entirely. *)
             let dl = Keeper_hooks_oas.keeper_denied_tools in

@@ -41,8 +41,8 @@ Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
 Excluded from keeper exposure:
-- inline MCP-runtime tools such as `masc_start`, `masc_join`, `masc_leave`,
-  `masc_broadcast`, `masc_messages`, `masc_listen`, and `masc_who`
+- inline MCP-runtime tools such as `masc_start`, `masc_bind`, `masc_unbind`,
+  `masc_broadcast`, `masc_messages`, `masc_listen`, and `masc_agents`
 - other tools that depend on MCP runtime-only context rather than keeper context
 
 ## Continuity Positioning

@@ -669,7 +669,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | ID | 설명 | 수정 위치 |
 |----|------|----------|
 | BUG-004 | claim_next가 이전 claim을 해제하지 않아 orphaned task 발생 | `workspace_task_schedule.claim_next_r` (auto-release) |
-| BUG-005 | join 없이 claim 가능했음 | `workspace_task.claim_task_r` (agent_joined 검사 추가) |
+| BUG-005 | join 없이 claim 가능했음 | `workspace_task.claim_task_r` (agent_bound 검사 추가) |
 | BUG-009 | stale Todo 태스크가 큐를 막음 | `workspace_task_schedule` (auto-archive, threshold 7일) |
 | BUG-010 | 빈 title/잘못된 priority 태스크 생성 가능 | `tool_task.handle_add_task` (validation 추가) |
 | BUG-1600 | workspace-scoped 에이전트 조회 시 root 디렉토리 미검사 | `workspace_agent.update_agent_r` (dual path 검사) |

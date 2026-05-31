@@ -144,7 +144,7 @@ Active Agents (2)
 **Workflow**:
 ```bash
 # Agent joins and creates worktree
-masc_join --agent agent-llm-a --capabilities "typescript,review"
+masc_bind --agent agent-llm-a --capabilities "typescript,review"
 git worktree add .worktrees/claude-PK-12345 -b agent-llm-a/PK-12345 origin/develop
 
 # Agent works in isolated worktree
@@ -211,7 +211,7 @@ CASPER의 실용적 조언에 따라 최소 기능부터 시작:
 
 ### Must Have
 - [x] `masc_init` - 룸 초기화
-- [x] `masc_join` - 에이전트 참여 (capabilities 포함)
+- [x] `masc_bind` - 에이전트 참여 (capabilities 포함)
 - [x] `masc_broadcast` - 메시지 브로드캐스트
 - [x] `masc_status` - 상태 조회
 
@@ -261,7 +261,7 @@ git worktree prune
 ```jsonl
 // Agent lifecycle
 {"seq":1,"type":"agent_join","agent":"agent-llm-a","capabilities":["ts","review"],"ts":"..."}
-{"seq":2,"type":"agent_leave","agent":"agent-llm-a","reason":"session_end","ts":"..."}
+{"seq":2,"type":"agent_unbind","agent":"agent-llm-a","reason":"session_end","ts":"..."}
 
 // Worktree lifecycle
 {"seq":3,"type":"worktree_prepared","agent":"agent-llm-a","branch":"agent-llm-a/PK-123","ts":"..."}

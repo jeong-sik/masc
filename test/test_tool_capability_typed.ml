@@ -71,7 +71,7 @@ let test_has_catalog_inferred_capabilities () =
   (check bool)
     "static inline metadata grants Mcp_context_required"
     true
-    (Masc_mcp.Tool_capability.has Mcp_context_required "masc_who");
+    (Masc_mcp.Tool_capability.has Mcp_context_required "masc_agents");
   (check bool)
     "static destructive metadata grants Destructive"
     true

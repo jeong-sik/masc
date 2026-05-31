@@ -1,4 +1,4 @@
-(** Regression test for masc_join fail-closed identity gate (RFC P3-a).
+(** Regression test for masc_bind fail-closed identity gate (RFC P3-a).
 
     Prior to RFC P3-a promotion, [handle_join] logged normalize errors and
     proceeded with the original [agent_name] (fail-open).  The fail-closed

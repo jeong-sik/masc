@@ -2298,7 +2298,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     runtime_trust: runtimeTrust,
     workspace collaboration: {
       mention_targets: normalizeStringList(workspace collaboration.mention_targets),
-      joined_workspace_ids: normalizeStringList(workspace collaboration.joined_workspace_ids),
+      bound_workspace_ids: normalizeStringList(workspace collaboration.bound_workspace_ids),
       active_goal_ids: normalizeStringList(workspace collaboration.active_goal_ids),
       active_goals: normalizeKeeperConfigActiveGoals(workspace collaboration.active_goals),
       active_goal_count: asInt(workspace collaboration.active_goal_count) ?? 0,

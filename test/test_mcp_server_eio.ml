@@ -1325,7 +1325,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   in
   let resolve arguments =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
-      ~tool_name:"masc_join" ~arguments ~identity
+      ~tool_name:"masc_bind" ~arguments ~identity
       ~cached_resolved_agent:(Some "cached-stale-nickname")
       ~auth_token:None ~internal_keeper_runtime:false
       ~workspace_initialized:(fun () -> false)

@@ -170,7 +170,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 
 | Family | Event names |
 | --- | --- |
-| Workspace / workspace | `agent_joined`, `agent_left`, `broadcast`, `task_update` |
+| Workspace / workspace | `agent_bound`, `agent_unbound`, `broadcast`, `task_update` |
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Approval / governance | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `governance_param_changed`, `approval:pending`, `approval:resolved` |

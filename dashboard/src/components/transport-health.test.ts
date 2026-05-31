@@ -395,8 +395,8 @@ describe('TransportHealthPanel', () => {
     expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
 
     vi.useFakeTimers()
-    lastEvent.value = { type: 'agent_joined' }
-    lastEvent.value = { type: 'agent_left' }
+    lastEvent.value = { type: 'agent_bound' }
+    lastEvent.value = { type: 'agent_unbound' }
     lastEvent.value = { type: 'task_claimed' }
     await vi.advanceTimersByTimeAsync(1_199)
     expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
@@ -523,10 +523,10 @@ describe('shouldRefreshFromEvent', () => {
     [{ type: 'keeper_heartbeat' }, false],
     [{ type: 'broadcast' }, true],
     [{ type: 'masc/broadcast' }, true],
-    [{ type: 'agent_joined' }, true],
-    [{ type: 'masc/agent_joined' }, true],
-    [{ type: 'agent_left' }, true],
-    [{ type: 'masc/agent_left' }, true],
+    [{ type: 'agent_bound' }, true],
+    [{ type: 'masc/agent_bound' }, true],
+    [{ type: 'agent_unbound' }, true],
+    [{ type: 'masc/agent_unbound' }, true],
     [{ type: 'task_claimed' }, true],
     [{ type: 'masc/task_started' }, true],
     [{ type: 'keeper_state_changed' }, true],

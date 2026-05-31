@@ -214,10 +214,10 @@ keeper_voice_{agent,listen,session_end,session_start,sessions,speak}
 masc_add_task / masc_agent_card / masc_agents / masc_approval_pending /
 masc_batch_add_tasks / masc_broadcast / masc_claim_next /
 masc_goal_{list,review,transition,upsert,verify} /
-masc_heartbeat / masc_join / masc_keeper_{list,msg,msg_result,status} /
-masc_leave / masc_messages / masc_plan_get / masc_plan_get_task /
+masc_heartbeat / masc_bind / masc_keeper_{list,msg,msg_result,status} /
+masc_unbind / masc_messages / masc_plan_get / masc_plan_get_task /
 masc_status / masc_task_history / masc_tasks / masc_tool_help /
-masc_transition / masc_web_search / masc_who /
+masc_transition / masc_web_search / masc_agents /
 tool_{edit_file,execute,read_file,search_files,write_file}
 ```
 

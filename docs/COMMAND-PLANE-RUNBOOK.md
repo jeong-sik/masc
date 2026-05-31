@@ -70,7 +70,7 @@ Step-by-step:
 
 ```json
 {
-  "tool": "masc_join",
+  "tool": "masc_bind",
   "arguments": {
     "agent_name": "agent-code",
     "capabilities": ["ocaml", "dashboard", "documentation"]
@@ -332,7 +332,7 @@ Removed. `masc_team_session_*` tool family, `team_session_swarm_runner.ml`, and 
 ## Which Tool Now?
 
 - project namespace가 안 잡혔다: `masc_start`
-- agent가 roster에 없다: `masc_join`
+- agent가 roster에 없다: `masc_bind`
 - task는 claimed인데 current_task가 없다: `masc_plan_set_task`
 - agent가 stale/zombie처럼 보인다: `masc_heartbeat`
 - strict action이 멈춰 있다: `masc_operator_snapshot` 후 `masc_operator_confirm`

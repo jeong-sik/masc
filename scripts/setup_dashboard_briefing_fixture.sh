@@ -85,7 +85,7 @@ async function mcpCall(name, args) {
 async function seedWorkspace() {
   await mcpCall('masc_init', { agent_name: 'mission-fixture-root' });
   for (const agent of fixtureAgents) {
-    await mcpCall('masc_join', {
+    await mcpCall('masc_bind', {
       agent_name: agent.name,
       capabilities: agent.capabilities,
     });

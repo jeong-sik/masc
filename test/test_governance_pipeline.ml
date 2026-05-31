@@ -133,12 +133,12 @@ let test_risk_medium_transition_claim () =
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_join () =
-  let risk = Gp.assess_risk ~tool_name:"masc_join" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_bind" ~input:no_args in
   Alcotest.(check string) "join is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_leave () =
-  let risk = Gp.assess_risk ~tool_name:"masc_leave" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_unbind" ~input:no_args in
   Alcotest.(check string) "leave is medium"
     "medium" (Gp.risk_level_to_string risk)
 
@@ -532,7 +532,7 @@ let test_production_allows_low () =
 
 let test_production_allows_medium () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow medium")
@@ -563,7 +563,7 @@ let test_enterprise_allows_low () =
 
 let test_enterprise_allows_medium () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "enterprise should allow medium")
@@ -593,7 +593,7 @@ let test_paranoid_allows_low () =
 
 let test_paranoid_confirms_medium () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for medium"
@@ -713,7 +713,7 @@ let test_hook_paranoid_blocks_medium () =
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
-  let result = hook ~name:"masc_join" ~args:`Null in
+  let result = hook ~name:"masc_bind" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
        Alcotest.(check bool) "blocked" false (Tool_result.is_success r);

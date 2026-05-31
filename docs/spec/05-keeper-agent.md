@@ -95,7 +95,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
-- **Scope**: `mention_targets`, `joined_workspace_ids`
+- **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
 - **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
 - **Handoff**: `auto_handoff`, `handoff_threshold`, `handoff_cooldown_sec`
@@ -149,7 +149,7 @@ type session_context = {
 ### 3.4 Workspace Boundary
 
 Legacy workspace-targeting typed aliases were removed during single-workspace flattening.
-JSON/MCP 경계에는 `mention_targets`, `joined_workspace_ids` 같은 workspace collaboration 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
+JSON/MCP 경계에는 `mention_targets`, `bound_workspace_ids` 같은 workspace collaboration 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
 `policy_mode`, `policy_shell_mode`, `trigger_mode`, `initiative_*`는 제거되었다.
 
 ### 3.5 fiber_health

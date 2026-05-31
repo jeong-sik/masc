@@ -136,8 +136,8 @@ dashboard route table (`dashboard/src/sse-store.ts:121-143`):
 
 ```ts
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  'masc/agent_joined':  { target: 'execution' },
-  'masc/agent_left':    { target: 'execution' },
+  'masc/agent_bound':  { target: 'execution' },
+  'masc/agent_unbound':    { target: 'execution' },
   'masc/broadcast':     { target: 'execution' },
   keeper_handoff:       { target: 'execution' },
   keeper_compaction:    { target: 'execution' },

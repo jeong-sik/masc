@@ -47,14 +47,14 @@ step_fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
 cleanup() {
   if [ "$JOINED" -eq 1 ]; then
-    call_tool 1099 "masc_leave" "{\"agent_name\":\"$AGENT_NAME\"}" >/dev/null 2>&1 || true
+    call_tool 1099 "masc_unbind" "{\"agent_name\":\"$AGENT_NAME\"}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
 
 # ── Step 1/8: join ──
-echo "[1/8] masc_join"
-r1="$(call_tool 1001 "masc_join" "{\"agent_name\":\"$AGENT_NAME\",\"capabilities\":[\"test\",\"contract\"]}")"
+echo "[1/8] masc_bind"
+r1="$(call_tool 1001 "masc_bind" "{\"agent_name\":\"$AGENT_NAME\",\"capabilities\":[\"test\",\"contract\"]}")"
 if require_ok "$r1"; then
   JOINED=1
   step_pass

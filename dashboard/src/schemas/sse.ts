@@ -23,8 +23,8 @@ type SchemaLike<T> = {
 }
 
 const FIXED_SSE_EVENT_TYPES = new Set([
-  'agent_joined',
-  'agent_left',
+  'agent_bound',
+  'agent_unbound',
   'broadcast',
   'task_update',
   'board_post',

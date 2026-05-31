@@ -1,7 +1,7 @@
 (* #9770: pin canonical metric name + label vocabulary for the
-   join_required guard counter.  The execute path emits this
+   bind_required guard counter.  The execute path emits this
    counter whenever an agent calls a join-required tool without
-   first calling [masc_join] (or [masc_start]).
+   first calling [masc_bind] (or [masc_start]).
 
    Test exercises the counter directly — the guard's surrounding
    plumbing (audit emit + system-prompt assembly) is not needed

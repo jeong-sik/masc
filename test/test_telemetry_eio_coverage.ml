@@ -73,16 +73,16 @@ let write_dated_file dir month day lines =
    event Type Tests
    ============================================================ *)
 
-let test_event_agent_session_bound () =
-  let e = Telemetry_eio.Agent_session_bound {
+let test_event_agent_session_bounded () =
+  let e = Telemetry_eio.Agent_joined {
     agent_id = "agent_llm_a-001";
     capabilities = ["code"; "review"];
   } in
   match e with
-  | Telemetry_eio.Agent_session_bound r ->
+  | Telemetry_eio.Agent_joined r ->
       check string "agent_id" "agent_llm_a-001" r.agent_id;
       check int "capabilities" 2 (List.length r.capabilities)
-  | _ -> fail "expected Agent_session_bound"
+  | _ -> fail "expected Agent_joined"
 
 let test_event_agent_left () =
   let e = Telemetry_eio.Agent_left {
@@ -176,7 +176,7 @@ let test_event_tool_called () =
 let test_event_record_type () =
   let r : Telemetry_eio.event_record = {
     timestamp = 1704067200.0;
-    event = Telemetry_eio.Agent_session_bound {
+    event = Telemetry_eio.Agent_joined {
       agent_id = "test";
       capabilities = [];
     };
@@ -392,8 +392,8 @@ let test_metrics_json_roundtrip () =
    event_to_json Tests
    ============================================================ *)
 
-let test_event_to_json_agent_session_bound () =
-  let e = Telemetry_eio.Agent_session_bound {
+let test_event_to_json_agent_session_bounded () =
+  let e = Telemetry_eio.Agent_joined {
     agent_id = "test";
     capabilities = ["a"; "b"];
   } in
@@ -423,21 +423,21 @@ let test_count_active_agents_empty () =
 
 let test_count_active_agents_one_joined () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
   ] in
   check int "one joined" 1 (Telemetry_eio.count_active_agents events)
 
 let test_count_active_agents_joined_then_left () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
     { timestamp = 2.0; event = Agent_left { agent_id = "a1"; reason = "done" } };
   ] in
   check int "joined then left" 0 (Telemetry_eio.count_active_agents events)
 
 let test_count_active_agents_multiple () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
-    { timestamp = 2.0; event = Agent_session_bound { agent_id = "a2"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 2.0; event = Agent_joined { agent_id = "a2"; capabilities = [] } };
     { timestamp = 3.0; event = Agent_left { agent_id = "a1"; reason = "x" } };
   ] in
   check int "multiple" 1 (Telemetry_eio.count_active_agents events)
@@ -589,7 +589,7 @@ let test_track_applies_default_retention_days () =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
         in
         write_dated_file telemetry_dir "2020-01" "01" [ {|{"old":true}|} ];
-        Telemetry_eio.track_agent_session_bound config ~agent_id:"retention-test" ();
+        Telemetry_eio.track_agent_session_bounded config ~agent_id:"retention-test" ();
         check bool "old telemetry file pruned by default retention" false
           (Sys.file_exists old_file))))
 
@@ -611,7 +611,7 @@ let test_track_applies_telemetry_max_bytes () =
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
         write_dated_file telemetry_dir "2020-01" "02"
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
-        Telemetry_eio.track_agent_session_bound config ~agent_id:"max-bytes-test" ();
+        Telemetry_eio.track_agent_session_bounded config ~agent_id:"max-bytes-test" ();
         check bool "old telemetry file 1 pruned by max bytes" false
           (Sys.file_exists old_file_1);
         check bool "old telemetry file 2 pruned by max bytes" false
@@ -626,8 +626,8 @@ let test_track_applies_telemetry_max_bytes () =
 let () =
   run "Telemetry Eio Coverage" [
     "event", [
-      test_case "agent_session_bound" `Quick test_event_agent_session_bound;
-      test_case "agent_left" `Quick test_event_agent_left;
+      test_case "agent_session_bounded" `Quick test_event_agent_session_bounded;
+      test_case "agent_unbound" `Quick test_event_agent_left;
       test_case "task_started" `Quick test_event_task_started;
       test_case "task_completed" `Quick test_event_task_completed;
       test_case "handoff_triggered" `Quick test_event_handoff_triggered;
@@ -655,7 +655,7 @@ let () =
         test_parse_event_records_drop_increments_counter;
     ];
     "event_to_json", [
-      test_case "agent_session_bound" `Quick test_event_to_json_agent_session_bound;
+      test_case "agent_session_bounded" `Quick test_event_to_json_agent_session_bounded;
       test_case "task_completed" `Quick test_event_to_json_task_completed;
     ];
     "count_active_agents", [

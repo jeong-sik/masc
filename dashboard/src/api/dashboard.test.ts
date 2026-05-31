@@ -1367,7 +1367,7 @@ describe('fetchKeeperConfig', () => {
       },
       workspace collaboration: {
         mention_targets: 'sangsu',
-        joined_workspace_ids: 'default',
+        bound_workspace_ids: 'default',
         active_goal_ids: ['goal-runtime'],
         active_goals: [
           { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },

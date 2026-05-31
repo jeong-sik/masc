@@ -108,17 +108,17 @@ echo "[3/36] masc_start"
 r_start="$(call_tool 5003 "masc_start" "$(jq -cn --arg path "$BASE_PATH" --arg task_title "Public Tool Sweep Seed" '{path:$path,task_title:$task_title}')")"
 expect_ok "masc_start" "$r_start"
 
-echo "[4/36] masc_join"
-r_join="$(call_tool 5004 "masc_join" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,capabilities:["contract","public-sweep"]}')")"
-expect_ok_or_guard "masc_join" "$r_join" 'already joined'
+echo "[4/36] masc_bind"
+r_join="$(call_tool 5004 "masc_bind" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,capabilities:["contract","public-sweep"]}')")"
+expect_ok_or_guard "masc_bind" "$r_join" 'already joined'
 
 echo "[5/36] masc_status"
 r_status="$(call_tool 5005 "masc_status" '{}')"
 expect_ok "masc_status" "$r_status"
 
-echo "[6/36] masc_who"
-r_who="$(call_tool 5006 "masc_who" '{}')"
-expect_ok "masc_who" "$r_who"
+echo "[6/36] masc_agents"
+r_who="$(call_tool 5006 "masc_agents" '{}')"
+expect_ok "masc_agents" "$r_who"
 
 echo "[7/36] masc_agents"
 r_agents="$(call_tool 5007 "masc_agents" '{}')"
@@ -275,8 +275,8 @@ echo "[35/36] masc_webrtc_answer"
 r_webrtc_answer="$(call_tool 5037 "masc_webrtc_answer" "$(jq -cn --arg offer_id "$offer_id" --arg agent_name "$AGENT_NAME" '{offer_id:$offer_id,agent_name:$agent_name,ice_candidates:["candidate:answer"]}')")"
 expect_ok "masc_webrtc_answer" "$r_webrtc_answer"
 
-echo "[36/36] masc_leave"
-r_leave="$(call_tool 5038 "masc_leave" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name}')")"
-expect_ok "masc_leave" "$r_leave"
+echo "[36/36] masc_unbind"
+r_leave="$(call_tool 5038 "masc_unbind" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name}')")"
+expect_ok "masc_unbind" "$r_leave"
 
 echo "PASS: public MCP tool live sweep"

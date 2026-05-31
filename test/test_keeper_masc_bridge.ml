@@ -190,7 +190,7 @@ let test_default_tool_access_exposes_masc () =
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "filters unsupported inline tool" false
-    (List.mem "masc_who" names)
+    (List.mem "masc_agents" names)
 
 let test_messaging_preset_exposes_board () =
   prime_keeper_bridge ();
@@ -212,7 +212,7 @@ let test_custom_opens_specific_tools_only () =
     make_meta
       ~tool_access:
         (
-           [ "masc_status"; "masc_tasks"; "masc_join" ])
+           [ "masc_status"; "masc_tasks"; "masc_bind" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -221,8 +221,8 @@ let test_custom_opens_specific_tools_only () =
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_tasks" true
     (List.mem "masc_tasks" names);
-  Alcotest.(check bool) "filters masc_join" false
-    (List.mem "masc_join" names);
+  Alcotest.(check bool) "filters masc_bind" false
+    (List.mem "masc_bind" names);
   Alcotest.(check bool) "no masc_board_post" false
     (List.mem "masc_board_post" names)
 
@@ -232,7 +232,7 @@ let test_deny_overrides_allow () =
     make_meta
       ~tool_access:
         (
-           [ "masc_status"; "masc_tasks"; "masc_join" ])
+           [ "masc_status"; "masc_tasks"; "masc_bind" ])
       ~tool_denylist:[ "masc_tasks" ] ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -273,7 +273,7 @@ let test_custom_keeps_registered_inline_board_tool () =
     make_meta
       ~tool_access:
         (
-           [ "keeper_board_post"; "masc_who" ])
+           [ "keeper_board_post"; "masc_agents" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -282,7 +282,7 @@ let test_custom_keeps_registered_inline_board_tool () =
   Alcotest.(check bool) "raw masc_board_post filtered out" false
     (List.mem "masc_board_post" names);
   Alcotest.(check bool) "drops unsupported inline tool" false
-    (List.mem "masc_who" names)
+    (List.mem "masc_agents" names)
 
 let with_masc_schema_ref schemas f =
   KET.with_masc_schemas_for_test schemas f
@@ -762,7 +762,7 @@ let test_schemas_match_names () =
     make_meta
       ~tool_access:
         (
-           [ "masc_status"; "masc_join"; "masc_tasks" ])
+           [ "masc_status"; "masc_bind"; "masc_tasks" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in

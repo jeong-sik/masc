@@ -3,8 +3,8 @@ import type { BoardActorIdentity, BoardPost } from './core'
 // --- SSE Events ---
 
 export type SSEEventType =
-  | 'agent_joined'
-  | 'agent_left'
+  | 'agent_bound'
+  | 'agent_unbound'
   | 'broadcast'
   | 'task_update'
   | 'board_post'
@@ -223,8 +223,8 @@ export interface SSEEvent {
 // --- Journal ---
 
 export type JournalEventType =
-  | 'agent_joined'
-  | 'agent_left'
+  | 'agent_bound'
+  | 'agent_unbound'
   | 'broadcast'
   | 'task_update'
   | 'board_post'

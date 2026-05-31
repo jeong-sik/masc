@@ -961,7 +961,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : null}
       <div class="mt-1.5">
         <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
-        <${ModelList} models=${c.workspace collaboration.joined_workspace_ids} />
+        <${ModelList} models=${c.workspace collaboration.bound_workspace_ids} />
       </div>
 
       <${SectionHeader} title="핸드오프" />

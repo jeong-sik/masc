@@ -92,7 +92,7 @@ let () =
               check (option bool) "readonly" (Some true) meta.readonly;
               check (option bool) "idempotent" (Some true) meta.idempotent);
           test_case "default tools have None annotations" `Quick (fun () ->
-              let meta = Tool_catalog.metadata "masc_join" in
+              let meta = Tool_catalog.metadata "masc_bind" in
               check (option bool) "readonly" None meta.readonly;
               check (option bool) "destructive" None meta.destructive;
               check (option bool) "idempotent" None meta.idempotent);

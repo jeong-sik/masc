@@ -102,14 +102,14 @@ let test_approval_pending_inline_allowed () =
 
 let test_other_inline_blocked () =
   with_workspace (fun config ->
-    match dispatch_inline config "masc_who" with
+    match dispatch_inline config "masc_agents" with
     | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions MCP context" true
           (contains_substring (Tool_result.message tr) "requires MCP session context")
     | Some _tr ->
-        fail "masc_who should remain blocked in keeper context"
+        fail "masc_agents should remain blocked in keeper context"
     | None ->
-        fail "masc_who returned None")
+        fail "masc_agents returned None")
 
 let () =
   Alcotest.run "Keeper_tag_dispatch" [

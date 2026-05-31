@@ -123,7 +123,7 @@ type sse_event = [
 ] <json adapter.ocaml="Sse_event_adapter">
 ```
 
-`<json adapter>` 가 variant tag 를 `{"type":"agent_joined", ...fields}` 형태로 flatten. `masc/board_post`, `oas:turn_completed` 등 특수 문자는 adapter 내부에서 OCaml constructor (`Masc_board_post`) ↔ wire string (`"masc/board_post"`) 매핑.
+`<json adapter>` 가 variant tag 를 `{"type":"agent_bound", ...fields}` 형태로 flatten. `masc/board_post`, `oas:turn_completed` 등 특수 문자는 adapter 내부에서 OCaml constructor (`Masc_board_post`) ↔ wire string (`"masc/board_post"`) 매핑.
 
 **emit 경로 교체 전략**:
 - Phase A0 은 도메인별 sub-PR (agent_*, keeper_*, oas_*, board_*) 분할 가능 — 각 sub-PR 은 **byte-equal golden test** 로 기존 emit 동일성 보장

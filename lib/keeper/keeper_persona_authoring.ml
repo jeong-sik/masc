@@ -855,7 +855,7 @@ let handle_persona_generate ctx args =
              | None ->
                (match trimmed_arg "runtime_id" with
                 | Some value -> value
-                | None -> Archetypes.default_generation_runtime_id)
+                | None -> Lazy.force Archetypes.default_generation_runtime_id)
            in
            let temperature =
              get_float_opt args "temperature"

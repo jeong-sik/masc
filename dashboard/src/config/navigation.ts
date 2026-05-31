@@ -19,7 +19,6 @@ type SurfaceSectionId =
   | 'cognition'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
-  | 'doctor'         // Dedicated entry for /api/v1/dashboard/doctor (formerly buried inside Command → Operations → Inspector → "진단" sub-tab)
   | 'transport-health' // Dedicated entry for /api/v1/dashboard/transport-health (was 5-hop buried inside Command → Operations → Inspector → "서버 설정" → ServerConfig → TransportHealthPanel)
   | 'feature-health' // Dedicated entry for /api/v1/dashboard/feature-health (was 4-hop buried inside Command → Operations → Inspector → "피처 플래그" sub-tab)
   // command
@@ -193,13 +192,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Observatory',
       description: 'Activity and runtime evidence.',
       params: { section: 'observatory' },
-    },
-    {
-      id: 'doctor',
-      label: 'Doctor',
-      description: 'Sidecar and config doctor diagnostics.',
-      params: { section: 'doctor' },
-      hidden: true,
     },
     {
       id: 'transport-health',

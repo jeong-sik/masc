@@ -396,46 +396,6 @@ let add_routes ~sw ~clock router =
            (fun state _agent_name req reqd -> handler state req reqd)
            request reqd
        else with_public_read handler request reqd)
-  |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let self_bin = dashboard_doctor_self_bin () in
-         (* /api/v1/dashboard/doctor previously fork-exec'd the server
-            binary on every request and drained its JSON stdout
-            synchronously on the Eio main domain.  Both costs (process
-            spawn and the doctor scan itself) blocked every other HTTP
-            fiber sharing the domain.  Cache the response per self_bin
-            with stale-while-revalidate, and run the spawn on a worker
-            domain via [Domain_pool_ref]. *)
-         let cache_key = "dashboard.doctor:" ^ self_bin in
-         let payload =
-           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               try
-                 let buf, _status =
-                   With_process.with_process_args_in
-                     self_bin
-                     [| self_bin; "doctor"; "all"; "--json" |]
-                     (With_process.drain_to_buffer ~chunk:4096)
-                 in
-                 (* Parse so the cache stores a structured value rather than
-                    a raw string; serialised back below. *)
-                 try Yojson.Safe.from_string (Buffer.contents buf) with
-                 | Yojson.Json_error _ ->
-                   Yojson.Safe.from_string
-                     (dashboard_doctor_degraded_json ~self_bin
-                        ~exn:(Failure "doctor returned invalid JSON"))
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
-                 Yojson.Safe.from_string
-                   (dashboard_doctor_degraded_json ~self_bin ~exn)))
-         in
-         Http.Response.json_value
-           ~compress:true
-           ~request:req
-           payload
-           reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in

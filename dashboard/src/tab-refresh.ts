@@ -39,11 +39,6 @@ async function refreshServerConfigSurface(): Promise<void> {
   await refreshServerConfig()
 }
 
-async function refreshDoctorSurface(): Promise<void> {
-  const { refreshDoctor } = await import('./components/doctor-panel')
-  await refreshDoctor()
-}
-
 async function refreshSurfaceReadinessSurface(): Promise<void> {
   const { refreshSurfaceReadiness } = await import('./components/surface-readiness-panel')
   await refreshSurfaceReadiness()
@@ -69,7 +64,7 @@ type RefreshTask =
 // Monitor data ownership is partitioned by section. Two tiers:
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
 //            each declare their own view-aware or static refresh plan.
-//   Tier 2 — hidden diagnostic sections (cascade-config / doctor /
+//   Tier 2 — hidden diagnostic sections (
 //            transport-health / feature-health) share an identical light
 //            fallback plan. Their mounted panels own telemetry polling, so
 //            route visits only need to refresh namespace/mission context.
@@ -160,7 +155,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   inspector: () => {
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
-    void refreshDoctorSurface()
   },
   surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },

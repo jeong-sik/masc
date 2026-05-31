@@ -103,11 +103,6 @@ function HiddenDiagnosticsLinks() {
       section: 'transport-health',
     },
     {
-      label: 'Doctor',
-      detail: 'Sidecar, base-path, and config diagnostics.',
-      section: 'doctor',
-    },
-    {
       label: 'Feature cleanup',
       detail: 'Feature flag rollout, inactive, and deprecated states.',
       section: 'feature-health',

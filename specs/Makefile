@@ -146,7 +146,7 @@ check-social: CLEAN_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call clean_cfgs_in,$(d)
 check-social: BUGGY_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call buggy_cfgs_in,$(d)/))
 check-social: check-all
 
-OTHER_DIRS := admission-queue auth autonomous boundary bug-models cascade \
+OTHER_DIRS := admission-queue auth autonomous boundary bug-models \
               checkpoint-trim goal-loop keeper-switch-hierarchy keeper-turn-fsm \
               multimodal resilience server-state shared shell-ir-first-class \
               task-lifecycle

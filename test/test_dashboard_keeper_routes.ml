@@ -584,7 +584,7 @@ let keeper_profile_runtime_id body keeper_name =
   | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
 ;;
 
-let cascade_profile_first_candidate body profile_name =
+let runtime_profile_first_candidate body profile_name =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string body in
   let rows = json |> member "profiles" |> to_list in

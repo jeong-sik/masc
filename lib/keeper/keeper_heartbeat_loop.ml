@@ -387,7 +387,7 @@ let run_keepalive_unified_turn
           ();
         match
           Keeper_turn_slot.with_keeper_turn_slot_control
-            ~cascade_profile:(runtime_id_of_meta meta_after_triage)
+            ~runtime_profile:(runtime_id_of_meta meta_after_triage)
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
             (fun ~semaphore_wait_ms ~slot_control ->

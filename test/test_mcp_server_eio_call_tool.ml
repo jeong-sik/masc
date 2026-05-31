@@ -311,7 +311,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check (option (list string)) "runtime mcp missing required tools empty"
         (Some []) ctx.missing_required_tools;
       check (option string) "cascade profile" (Some (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta))
-        ctx.cascade_profile)
+        ctx.runtime_profile)
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Eio_main.run @@ fun env ->
@@ -456,7 +456,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
          |> List.length);
       check string "runtime contract cascade profile"
         (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta)
-        (runtime_contract |> U.member "cascade_profile" |> U.to_string);
+        (runtime_contract |> U.member "runtime_profile" |> U.to_string);
       let masc_root =
         Filename.concat base_path Common.masc_dirname
       in
@@ -500,7 +500,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "trajectory runtime cascade profile"
         (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta)
         (trajectory_json |> U.member "runtime_contract"
-         |> U.member "cascade_profile" |> U.to_string);
+         |> U.member "runtime_profile" |> U.to_string);
       check string "trajectory action tool" "tool_execute"
         (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
          |> U.to_string);

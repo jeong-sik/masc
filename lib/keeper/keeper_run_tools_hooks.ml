@@ -639,7 +639,7 @@ let assemble_hooks
                   ~required_tool_candidates:
                     computed_surface.required_tool_candidate_names
                   ~missing_required_tools:computed_surface.missing_required_tool_names
-                  ~cascade_profile:cascade_name_string
+                  ~runtime_profile:cascade_name_string
                   ();
                 (let now = Time_compat.now () in
                  let hook_elapsed_ms =

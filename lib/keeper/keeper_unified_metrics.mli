@@ -129,7 +129,7 @@ val record_turn_latency_bucket :
 val record_turn_latency_by_model_bucket :
   keeper:string ->
   channel:string ->
-  cascade_profile:string ->
+  runtime_profile:string ->
   latency_ms:int ->
   unit
 

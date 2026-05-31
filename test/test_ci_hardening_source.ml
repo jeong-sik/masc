@@ -1234,7 +1234,7 @@ let test_keeper_direct_reply_contracts () =
   (* Historical: direct_reply once forked cascade name into
      "keeper_reply"/"keeper_turn", but neither was ever defined in
      cascade.json — the drift collapsed to the default cascade via
-     Keeper_cascade_profile.canonicalize. The fork is gone; the
+     Keeper_runtime_profile.canonicalize. The fork is gone; the
      direct_reply flag now only affects persona prompt + skill-route
      suppression (checked below). *)
   check bool "keeper manual turns resolve declared cascade through runtime catalog" true

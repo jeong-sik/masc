@@ -55,7 +55,7 @@ val runtime_contract_json_from_fields :
   ?required_tools:string list ->
   ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
-  ?cascade_profile:string ->
+  ?runtime_profile:string ->
   unit ->
   Yojson.Safe.t
 (** Build the runtime contract projection from turn-context fields. *)

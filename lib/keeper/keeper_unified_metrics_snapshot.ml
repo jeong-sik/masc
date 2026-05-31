@@ -78,7 +78,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
      overridable).  Emitted once per snapshot write so the
      counter rate matches the JSONL row rate. *)
   record_turn_latency_bucket ~keeper:meta.name ~latency_ms;
-  let cascade_profile =
+  let runtime_profile =
     match result.runtime_observation with
     | Some observation ->
         observation.Keeper_observation.cascade_name
@@ -90,7 +90,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   record_turn_latency_by_model_bucket
     ~keeper:meta.name
     ~channel
-    ~cascade_profile
+    ~runtime_profile
     ~latency_ms;
   Prometheus.inc_counter
     Keeper_metrics.(to_string TurnCompleted)

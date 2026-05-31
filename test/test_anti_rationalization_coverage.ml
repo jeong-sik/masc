@@ -167,8 +167,8 @@ let () = test "review_result_evaluator_cascade_default" (fun () ->
   let r = Anti_rationalization.review (make_request "") in
   assert
     (r.evaluator_cascade
-     = Keeper_cascade_profile.cascade_name_for_use
-         Keeper_cascade_profile.Cross_verifier))
+     = Keeper_runtime_profile.cascade_name_for_use
+         Keeper_runtime_profile.Cross_verifier))
 
 let () = test "review_result_custom_evaluator_cascade" (fun () ->
   let r = Anti_rationalization.review ~evaluator_cascade:"cross_verifier" (make_request "") in

@@ -31,27 +31,27 @@ module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 (* #19327 cascade purge: Cascade_name is a plain string alias. *)
 let oas_error_cascade_name raw =
-  Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw
+  Masc_mcp.Keeper_runtime_profile.normalize_declared_name raw
   |> Cascade_name.of_string_exn
 ;;
 
 let phase_recovery_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Phase_recovery
+  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+    Masc_mcp.Keeper_runtime_profile.Phase_recovery
 ;;
 
 let tool_required_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Tool_required
+  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+    Masc_mcp.Keeper_runtime_profile.Tool_required
 ;;
 
 let keeper_turn_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Keeper_turn
+  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+    Masc_mcp.Keeper_runtime_profile.Keeper_turn
 ;;
 
 let normalize_keeper_runtime_declared_name raw =
-  Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name raw
+  Masc_mcp.Keeper_runtime_profile.normalize_keeper_runtime_declared_name raw
 ;;
 
 (* After tier removal a keeper whose declared name is a legacy "tier-group.*"/

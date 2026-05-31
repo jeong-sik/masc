@@ -218,7 +218,7 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
     ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools
-    ?cascade_profile () : Yojson.Safe.t =
+    ?runtime_profile () : Yojson.Safe.t =
   `Assoc
     [
       ("keeper_name", `String keeper_name);
@@ -241,7 +241,7 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
         Json_util.json_string_list (nonempty_list required_tool_candidates) );
       ( "missing_required_tools",
         Json_util.json_string_list (nonempty_list missing_required_tools) );
-      ("cascade_profile", string_opt_json cascade_profile);
+      ("runtime_profile", string_opt_json runtime_profile);
     ]
 
 

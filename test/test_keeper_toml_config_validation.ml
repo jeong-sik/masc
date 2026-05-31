@@ -304,7 +304,7 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
-let minimal_cascade_profile_metadata_toml = {|
+let minimal_runtime_profile_metadata_toml = {|
 [providers.ollama]
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
@@ -486,7 +486,7 @@ let test_runtime_id_accepts_catalog_entry () =
   (* Tests that the live declarative catalog is consulted during
      validation. *)
   let catalog =
-    try Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ()
+    try Masc_mcp.Keeper_runtime_profile.keeper_catalog_names ()
     with _ -> []
   in
   let test_name =
@@ -515,7 +515,7 @@ let test_runtime_id_accepts_catalog_entry () =
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
 
 let test_runtime_id_accepts_unrouted_assignable_catalog_entry () =
-  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  with_temp_config_dir minimal_runtime_profile_metadata_toml
   @@ fun ~config_root:_ ~cascade_path:_ ->
   let result =
     with_temp_toml
@@ -568,7 +568,7 @@ target = "cascade.ollama_cloud_primary"
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   check string "assignable concrete route target is preserved"
     "cascade.ollama_cloud_primary"
-    (Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+    (Masc_mcp.Keeper_runtime_profile.normalize_keeper_runtime_declared_name
        ~config_path:cascade_path "cascade.ollama_cloud_primary")
 
 let rejection_error_messages rejection =

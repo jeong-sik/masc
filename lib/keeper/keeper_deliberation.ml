@@ -41,7 +41,6 @@ let deliberation_trigger_to_json trigger =
 
 type deliberation_action =
   | Noop of string
-  | ReplyInRoom of { room_id: string; content: string }
   | BoardPost of { content: string; hearth: string option }
   | BoardComment of { post_id: string; content: string }
   | BoardVote of { post_id: string; direction: string }
@@ -52,7 +51,6 @@ type deliberation_action =
 
 let rec deliberation_action_to_string = function
   | Noop reason -> "noop:" ^ reason
-  | ReplyInRoom _ -> "reply_in_room"
   | BoardPost _ -> "board_post"
   | BoardComment _ -> "board_comment"
   | BoardVote _ -> "board_vote"
@@ -67,7 +65,6 @@ let rec deliberation_action_to_string = function
 (** Map typed action to stable policy labels used by policy logging and reward models. *)
 let deliberation_action_to_policy_label = function
   | Noop _ -> "noop"
-  | ReplyInRoom _ -> "reply_in_room"
   | BoardPost _ -> "board_post"
   | BoardComment _ -> "board_comment"
   | BoardVote _ -> "board_vote"
@@ -79,13 +76,6 @@ let deliberation_action_to_policy_label = function
 let rec deliberation_action_to_json = function
   | Noop reason ->
       `Assoc [ ("type", `String "noop"); ("reason", `String reason) ]
-  | ReplyInRoom { room_id; content } ->
-      `Assoc
-        [
-          ("type", `String "reply_in_room");
-          ("room_id", `String room_id);
-          ("content", `String content);
-        ]
   | BoardPost { content; hearth } ->
       `Assoc
         [
@@ -288,11 +278,10 @@ let deliberation_meta_of_json (json : Yojson.Safe.t) : deliberation_meta =
 
 (* ---------- Baseline action: typed replacement for the 2-line heuristic ---------- *)
 
-(** Deterministic baseline using the typed action space.
-    Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
+(** Deterministic baseline using the typed action space. *)
 let deterministic_baseline_action (obs : world_observation) : deliberation_action =
   if obs.direct_mention then
-    ReplyInRoom { room_id = ""; content = "" }
+    Noop "direct mention requires explicit board/task action"
   else
     Noop "no_trigger"
 
@@ -435,9 +424,6 @@ let is_self_directed (obs : world_observation) =
 
 let rec legality_error (obs : world_observation) = function
   | Noop _ -> None
-  | ReplyInRoom _ ->
-      if has_room_signal obs then None
-      else Some "reply_in_room requires direct mention or a question"
   | BoardPost _ ->
       if has_board_signal obs || obs.active_goal_count > 0
          || is_self_directed obs then None
@@ -572,11 +558,6 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
   | "noop" ->
       let reason = Safe_ops.json_string ~default:"no reason" "reason" params in
       Ok (Noop reason)
-  | "reply_in_room" ->
-      let room_id = Safe_ops.json_string ~default:"default" "room_id" params in
-      let content = Safe_ops.json_string ~default:"" "content" params in
-      if content = "" then Error "reply_in_room requires non-empty content"
-      else Ok (ReplyInRoom { room_id; content })
   | "task_claim" ->
       let task_id = Safe_ops.json_string ~default:"" "task_id" params in
       let reason = Safe_ops.json_string ~default:"" "reason" params in
@@ -686,7 +667,7 @@ let structured_result_schema : structured_result Agent_sdk.Structured.schema =
       [
         {
           Agent_sdk.Types.name = "action";
-          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
+          description = "One of: noop, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
           param_type = Agent_sdk.Types.String;
           required = true;
         };

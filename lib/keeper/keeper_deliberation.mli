@@ -24,7 +24,6 @@ val deliberation_trigger_to_json : deliberation_trigger -> Yojson.Safe.t
 
 type deliberation_action =
   | Noop of string
-  | ReplyInRoom of { room_id: string; content: string }
   | BoardPost of { content: string; hearth: string option }
   | BoardComment of { post_id: string; content: string }
   | BoardVote of { post_id: string; direction: string }

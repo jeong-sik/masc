@@ -345,7 +345,6 @@ let ensure_keeper_meta config name =
     if any_changed then begin
       let cats = List.filter_map Fun.id [
         (if proactive_changed then Some "proactive" else None);
-        (if signal_changed then Some "signal" else None);
         (if denylist_changed then Some "denylist" else None);
         (if social_model_changed then Some "social_model" else None);
         (if runtime_changed then Some "runtime" else None);

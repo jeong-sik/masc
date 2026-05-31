@@ -128,7 +128,7 @@ scripts/dune-local.sh build bin/main_eio.exe
 scripts/run-local.sh --target-dir "$PWD"
 PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
 curl "http://127.0.0.1:${PORT}/health"
-./_build/default/bin/main_eio.exe doctor --base-path "$PWD"
+MASC_BASE_PATH="$PWD" ./_build/default/bin/main_eio.exe login --json
 ```
 
 `scripts/dune-local.sh` 는 worktree 동시 빌드 직렬화를 위한 글로벌 lock 을 씁니다 (`/tmp/me-dune-local.lock`). 여러 worktree 에서 `dune build` 를 동시에 돌리면 대기열을 탑니다.
@@ -225,7 +225,7 @@ RFC-0156: OAS `total` timeout은 더 이상 사용하지 않고, `MASC_KEEPER_TU
 운영 메모:
 
 - `repo/config` 는 체크인 시드일 뿐 *live* 가 아닙니다. live 는 `MASC_CONFIG_DIR` 또는 `<base-path>/.masc/config`.
-- 설정에 의심이 들면 `main_eio.exe doctor --base-path "$PWD"` 부터.
+- 설정에 의심이 들면 active root 규칙부터 확인합니다: `MASC_CONFIG_DIR`가 있으면 그 값, 없으면 `<base-path>/.masc/config`.
 
 Reload 계약 ([docs/TOML-RELOAD-MATRIX.md](docs/TOML-RELOAD-MATRIX.md)):
 
@@ -292,7 +292,7 @@ planner / implementer / supervisor 를 다른 도구로 분리할 때:
   ```
 
 - 수동 rebuild: `cd dashboard && pnpm run build`
-- `Forbidden` / `cannot CanAdmin` 이 나오면 `./_build/default/bin/main_eio.exe doctor auth --base-path "$PWD"` 먼저.
+- `Forbidden` / `cannot CanAdmin` 이 나오면 `MASC_BASE_PATH="$PWD" ./_build/default/bin/main_eio.exe login --json` 먼저.
 
 External 채널 어댑터의 경계는 Channel Gate:
 
@@ -374,7 +374,7 @@ raw `opam exec -- dune ...` 은 의도적인 CI-parity 점검 때만. 평소 개
 - `0.0.0.0` / `::` bind 시 strict auth 강제, 로컬 `/mcp` 도 `require_token=true` 가 아니면 fail-closed.
 - `/mcp/operator` 는 bearer-token + 원격 안전한 축소 surface. full `/mcp` 를 외부에 노출하지 않습니다.
 - command-plane 호환 lane 은 retired. 새 caller 가 의존하지 말 것.
-- role / bearer mismatch (예: `codex cannot CanAdmin`) 진단은 `doctor auth` 부터.
+- role / bearer mismatch (예: `codex cannot CanAdmin`) 진단은 login JSON과 dashboard auth runbook부터.
 - 상세: [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md), [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md)
 
 ## Document Map
@@ -384,15 +384,14 @@ raw `opam exec -- dune ...` 은 의도적인 CI-parity 점검 때만. 평소 개
 | 문서 | 내용 |
 |------|------|
 | [docs/QUICK-START.md](docs/QUICK-START.md) | 설치, health, 첫 워크플로 |
-| [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md) | 활성 config / init 진단, root 선정 |
-| [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md) | boot / path / state 인벤토리 |
+| [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md) | boot / path / state / active config inventory |
 | [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) | HTTP / stdio MCP 클라이언트 템플릿 |
 | [docs/RUNTIME-TOML.md](docs/RUNTIME-TOML.md) | keeper_runtime.toml 작성 매뉴얼 |
 | [docs/RUNTIME-COOKBOOK.md](docs/RUNTIME-COOKBOOK.md) | 복붙용 로컬 / 개인 예시 |
 | [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS / MASC 소유 경계 |
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | keeper 라이프사이클, sandbox profile, Docker one-shot/managed 실행, 트러블슈팅 |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | supervisor / operator 워크플로 |
-| [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | dashboard auth, `doctor auth` |
+| [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | dashboard auth, login JSON |
 | [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) | 환경변수 boot 계약 |
 | [docs/TOML-RELOAD-MATRIX.md](docs/TOML-RELOAD-MATRIX.md) | toml 별 reload 시점 |
 | [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md) | 릴리즈 smoke + proof bundle |

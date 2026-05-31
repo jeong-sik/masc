@@ -59,13 +59,13 @@ For dashboard-side keeper lifecycle control, the target shape is:
 }
 ```
 
-## 3. Run `doctor auth`
+## 3. Run auth login diagnostics
 
-Use the auth doctor before editing tokens or role files:
+Use login JSON before editing tokens or role files:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
-./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH"
+MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json
 ```
 
 Useful interpretations:
@@ -87,7 +87,7 @@ Useful interpretations:
 If you want structured output for automation:
 
 ```bash
-./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH" --json \
+MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json \
   | jq '{status,codex_mcp:{token_status:.codex_mcp.token_status,config:.codex_mcp.config},warnings,next_actions}'
 ```
 
@@ -129,7 +129,7 @@ If Agent-Code still reports that `masc` is not logged in, check the pipeline
 projection instead of retrying OAuth login:
 
 ```bash
-./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH" --json \
+MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json \
   | jq '.codex_mcp.config.stages'
 ```
 
@@ -143,7 +143,7 @@ External config generation scripts (e.g. `init-agent-code-config.sh`,
 `~/.agent-code/config.toml` without preserving the `[mcp_servers.masc]` stanza, or
 if they inject a literal `Authorization = "Bearer ..."` header.
 
-The canonical `[mcp_servers.masc]` shape — as checked by `doctor auth` — is:
+The canonical `[mcp_servers.masc]` shape — as checked by login JSON — is:
 
 ```toml
 [mcp_servers.masc]
@@ -223,8 +223,8 @@ Recommended local convention (enforced by the operator's wrapper, not the
 server): `agent-llm-a` should use `MASC_AGENT-LLM-A_MCP_TOKEN` / `X-MASC-Agent: agent-llm-a`,
 and `provider-f` should use `MASC_PROVIDER-F_MCP_TOKEN` / `X-MASC-Agent: provider-f`.
 
-`doctor auth --json` no longer exposes a `.mcp_clients[]` section; compose
-per-client readiness checks externally over the raw doctor output and your
+`login --json` no longer exposes a `.mcp_clients[]` section; compose
+per-client readiness checks externally over the raw login output and your
 own client roster.
 
 ## 6. Supported Local Start
@@ -240,7 +240,7 @@ MASC_BASE_PATH="$BASE_PATH" \
   --base-path "$BASE_PATH"
 ```
 
-Then run `./_build/default/bin/main_eio.exe doctor --base-path "$BASE_PATH"` and re-check `/health` to confirm the effective base path is the path you intended.
+Then rerun the login JSON and `/health` checks with `MASC_BASE_PATH="$BASE_PATH"` to confirm the effective base path is the path you intended.
 
 ## 7. Bootstrap an Admin Bearer
 
@@ -259,7 +259,7 @@ BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 The command prints the raw bearer once, writes the matching private raw-token
 file under the live auth root, and includes a dashboard URL.
 
-If `doctor auth` says `dashboard_dev_token: available=yes`, the easiest local path is the dev-token bootstrap:
+If login JSON says `dashboard_dev_token: available=yes`, the easiest local path is the dev-token bootstrap:
 
 ```bash
 TOKEN="$(curl -sS http://127.0.0.1:8935/api/v1/dashboard/dev-token | jq -r '.token')"
@@ -430,6 +430,6 @@ If you used only `dashboard-dev` dev-token bootstrap, there may be no auth files
 - `effective_role=worker`:
   your bearer is valid but not admin
 - `agent-code cannot CanAdmin` or `agent-code-mcp-client is role=worker`:
-  the request is authenticated with a worker bearer; rerun `doctor auth` and switch to an admin bearer
+  the request is authenticated with a worker bearer; rerun login JSON and switch to an admin bearer
 - `{"error":"not found"}` on keeper boot/shutdown:
   you may still be running an older server build without the fixed route classifier

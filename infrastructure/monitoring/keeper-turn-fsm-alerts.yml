@@ -53,7 +53,7 @@ groups:
 
       # Step 4f redirect: runtime_build error + run_turn errors
       # (Step 4j) both land here.  A spike means either a
-      # provider regression or a runtime_catalog mis-config.
+      # provider regression or a runtime config mis-config.
       - alert: KeeperTurnProviderErrorSurge
         expr: |
           sum by (keeper) (
@@ -71,8 +71,8 @@ groups:
             transitions at {{ $value }}/s for 15m.  Possible causes:
               - upstream LLM provider degraded (check
                 masc_keeper_oas_timeout_classifications)
-              - runtime catalog includes an unreachable provider
-                (check Runtime_catalog_validator boot diagnostics)
+              - runtime config includes an unreachable provider
+                (check boot diagnostics)
               - subprocess auth fallback regressed (check
                 Auth_resolve trace for Per_keeper_token_file
                 source)

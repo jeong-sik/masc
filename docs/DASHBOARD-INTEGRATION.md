@@ -53,7 +53,7 @@ code_refs:
   - `#monitoring?section=runtime` — Runtime & Runtime
   - `#monitoring?section=observatory` — Evidence Timeline
   - `#monitoring?section=runtime-config` (hidden diagnostic)
-  - `#monitoring?section=doctor` (hidden diagnostic)
+  - `#monitoring?section=diagnostics` (hidden diagnostic)
   - `#monitoring?section=transport-health` (hidden diagnostic)
   - `#monitoring?section=feature-health` (hidden diagnostic)
   - `#monitoring?section=journey` (hidden diagnostic)
@@ -111,13 +111,13 @@ code_refs:
   - Tool Monitor: compact tool operations board plus tool-quality, governance, attribution, and event-log lenses.
   - Runtime & Runtime: provider/runtime health and advanced runtime sub-views.
   - Evidence Timeline: default evidence track timeline with explicit Activity Graph and Live lenses.
-- `runtime-config`, `doctor`, `transport-health`, `feature-health`, `journey`, `cognition`은 routeable compatibility/diagnostic/deep-link surface로 남지만 primary sidebar에는 노출하지 않는다.
+- `runtime-config`, `diagnostics`, `transport-health`, `feature-health`, `journey`, `cognition`은 routeable compatibility/diagnostic/deep-link surface로 남지만 primary sidebar에는 노출하지 않는다.
 - Keeper Cognition은 top-level Monitor sibling이 아니라 Keeper Operations의 selected keeper detail/deep-link path로 취급한다.
 - Keeper Operations selected detail은 `Cognition`, `Tool Access`, `Runtime Trace` lens를 통해 hidden/deep-link surfaces로 연결한다.
 - Tool Monitor default view는 full telemetry/full quality panels를 나란히 터뜨리지 않고 tool success, failures, attention tools, failure categories, and lane links만 먼저 보여준다.
 - Evidence Timeline default view는 Activity Graph card panels를 자동으로 붙이지 않는다. Activity Graph는 `#monitoring?section=observatory&view=activity`, Live는 `#monitoring?section=observatory&view=live`에서만 열린다.
-- Transport/Feature/Doctor 상세는 Monitor daily default가 아니라 diagnostics/admin 성격이다. Monitor에는 degraded badge나 diagnostic link만 노출한다.
-- Runtime & Runtime default view는 OAS/runtime signal을 먼저 보여주고 `transport-health`, `doctor`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
+- Transport/Feature/Diagnostics 상세는 Monitor daily default가 아니라 diagnostics/admin 성격이다. Monitor에는 degraded badge나 diagnostic link만 노출한다.
+- Runtime & Runtime default view는 OAS/runtime signal을 먼저 보여주고 `transport-health`, `diagnostics`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
 
 ## Canonical Read Models
 - `GET /api/v1/dashboard/shell`

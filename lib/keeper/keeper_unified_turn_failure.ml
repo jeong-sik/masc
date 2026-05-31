@@ -25,12 +25,6 @@ let record_failure_and_maybe_escalate
   let threshold =
     Runtime_params.get Governance_registry.keeper_max_turn_failures
   in
-  Keeper_turn_runtime_budget.record_turn_failure_stress
-    ~meta
-    ~is_auto_recoverable
-    ~consecutive:count
-    ~threshold
-    ~err;
   if EC.is_runtime_exhausted_error err && count > 0
   then
     Keeper_registry.set_failure_reason

@@ -497,7 +497,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                      ~now_ts
               in
               (* C0: Trust Observatory — raw signals side-by-side, no synthesis.
-                 Reputation (overall_score), Thompson (alpha/beta), Stress (5 kinds).
+                 Reputation (overall_score), Thompson (alpha/beta).
                  Gated by MASC_DECISION_LAYER_LEVEL >= 3. *)
               let trust_observatory =
                 if compact
@@ -526,18 +526,6 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                       ("votes_down", `Int stats.total_votes_down);
                     ]
                   in
-                  let stress =
-                    let all_events = Agent_stress.recent 50 in
-                    let keeper_events = List.filter (fun ev ->
-                      match ev with
-                      | `Assoc fields ->
-                        (match List.assoc_opt "agent_name" fields with
-                         | Some (`String n) -> n = m.name || n = m.agent_name
-                         | _ -> false)
-                      | _ -> false
-                    ) all_events in
-                    `List (List.filteri (fun i _ -> i < 10) keeper_events)
-                  in
                   let accountability =
                     accountability_summary ~keeper_name:m.name
                       ~agent_name:m.agent_name
@@ -546,7 +534,6 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                     ("reputation", reputation);
                     ("accountability", accountability);
                     ("thompson", thompson);
-                    ("stress_recent", stress);
                   ]
               in
               let runtime_trust =

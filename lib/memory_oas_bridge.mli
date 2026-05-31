@@ -15,8 +15,7 @@
 
     The .ml has many internal helpers
     (file-stamp caching, episode dedup,
-    metadata accessors, error-kind normalisation, stress
-    metric emission).  External callers reach 14 dotted
+    metadata accessors, error-kind normalisation).  External callers reach 14 dotted
     symbols; everything else stays private at this
     boundary. *)
 
@@ -109,9 +108,7 @@ val store_failed_turn_episode :
     store.  Length-caps [error_message] via
     {!String_util.utf8_safe} (preview at 403 bytes,
     context at 4099 bytes) so a runaway stack trace cannot
-    blow up the JSONL row.  Calls
-    {!emit_stress_for_failure} on a known timeout-class
-    [error_kind] for downstream stress accounting. *)
+    blow up the JSONL row. *)
 
 (** {1 Failure-learning helpers} *)
 
@@ -219,7 +216,7 @@ val render_lesson_prompt_context :
     branches on the [option] to decide whether to attach
     the block. *)
 
-(** {1 Failure metrics + stress mapping} *)
+(** {1 Failure metrics} *)
 
 val institution_episode_failure_kind_metric : string
 (** Metric name (canonical
@@ -228,22 +225,3 @@ val institution_episode_failure_kind_metric : string
     Pinned at this boundary because
     [test/test_institution_episodes_failure_learnings_10325.ml]
     asserts the wire string for telemetry compatibility. *)
-
-val timeout_error_kinds : error_kind list
-(** SSOT list of typed error-kind labels the
-    {!stress_kind_for_error_kind} mapper treats as
-    timeout-class.  Pinned because
-    [test/test_agent_stress_timeout_wire_10341.ml] asserts
-    its length to keep the catalogue from drifting. Legacy timeout-budget
-    wire labels are intentionally not listed; callers should emit
-    owner-specific timeout kinds such as [provider_timeout]. *)
-
-val stress_kind_for_error_kind :
-  error_kind -> Agent_stress.stress_kind option
-(** Maps an error kind label onto an
-    {!Agent_stress.kind} when the kind belongs to the
-    timeout family ([timeout_error_kinds] internal list).
-    Returns [None] for non-timeout errors so the caller
-    can decide whether to bump a stress counter at all.
-    Tested by
-    [test/test_agent_stress_timeout_wire_10341.ml]. *)

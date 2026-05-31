@@ -93,7 +93,7 @@ read, (3) 관련 `.mli`/문서/RFC 인용, (4) `git log`로 최근 활동 확인
 |--------|------|------|------|
 | §6.1 `record`가 init 누락 시 silent no-op | **B** | `server_runtime_bootstrap.ml`이 startup에 `Heuristic_metrics.init` 호출. `test_heuristic_metrics_boot_wireup.ml`이 init→record→flush 검증. production caller는 init 보장 후에만 record. | 변경 없음. |
 | §6.2 `degenerate_min_records = 20` 매직 | C | issue #7718 evidence 코멘트 첨부. 매직이지만 정당화됨. | 변경 없음. |
-| §6.3 `unique_decision_tuples` vanity metric | **D** | `/api/v1/dashboard/stress` 엔드포인트가 직접 소비 (`server_routes_http_routes_provider_runs.ml`이 `coverage_report_to_json` 호출). audit이 caller를 못 찾음. | 변경 없음. |
+| §6.3 `unique_decision_tuples` vanity metric | **D**. audit이 caller를 못 찾음. | 변경 없음. |
 
 ### §7 Local Runtime Pool
 

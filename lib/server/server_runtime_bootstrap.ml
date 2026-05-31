@@ -115,7 +115,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
      /api/v1/dashboard/heuristics. Keep storage initialized so existing
      rows remain visible while no new degenerate rows are emitted. *)
   Heuristic_metrics.init ~base_path;
-  Agent_stress.init ~base_path;
   (* Load tool policy presets from config/tool_policy.toml *)
   (match Agent_tool_dispatch_runtime.init_policy_config ~base_path with
    | Ok () -> ()

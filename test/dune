@@ -102,7 +102,6 @@
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
-  test_agent_stress
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
@@ -232,7 +231,6 @@
   test_keeper_egress_audit
   test_tool_input_validation
   test_failure_learnings_10325
-  test_agent_stress_emit_10341
   test_cdal_evidence_gate
   test_task_stage
   test_ocaml_north_star_task_lifecycle
@@ -273,7 +271,6 @@
   test_keeper_topk_llm
   test_warn_root_causes
   test_keeper_agent_memory_episode_activity
-  test_agent_stress_timeout_wire_10341
   test_institution_episodes_failure_learnings_10325
   test_institution_of_string_fail_closed
   test_mid_turn_resume
@@ -373,7 +370,6 @@
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
-  test_agent_stress
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
@@ -503,7 +499,6 @@
   test_keeper_egress_audit
   test_tool_input_validation
   test_failure_learnings_10325
-  test_agent_stress_emit_10341
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_cdal_evidence_gate
@@ -548,7 +543,6 @@
   test_keeper_topk_llm
   test_warn_root_causes
   test_keeper_agent_memory_episode_activity
-  test_agent_stress_timeout_wire_10341
   test_institution_episodes_failure_learnings_10325
   test_institution_of_string_fail_closed
   test_mid_turn_resume

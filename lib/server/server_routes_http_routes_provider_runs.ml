@@ -126,36 +126,6 @@ let empty_cost_latency_json ~window =
 let dashboard_feed_limit req =
   int_query_param req "limit" ~default:200 |> clamp ~min_v:1 ~max_v:200
 
-let o5_agent_board_inputs (config : Coord.config) =
-  let queue_depth =
-    Prometheus.metric_value_or_zero Keeper_metrics.(to_string TurnQueueDepth)
-      ~labels:[("channel", "autonomous_queue")] ()
-    |> int_of_float
-    |> max 0
-  in
-  let now = Unix.gettimeofday () in
-  Keeper_meta_store.keeper_names config
-  |> List.filter_map (fun name ->
-       match Keeper_meta_store.read_meta config name with
-       | Ok (Some meta) ->
-           let blocked_on =
-             match meta.runtime.last_blocker with
-             | Some info ->
-               let value = String.trim info.detail in
-               if value = "" then
-                 Some (Keeper_meta_contract.blocker_class_to_string info.klass)
-               else Some value
-             | None -> None
-           in
-           Some {
-             Agent_stress.agent = meta.name;
-             ctx_pressure = Operator_control_snapshot.compute_context_ratio meta;
-             queue_depth = Some queue_depth;
-             blocked_on;
-             ts = Some now;
-           }
-       | Ok None | Error _ -> None)
-
 let dashboard_heuristics_json req =
   let limit = int_query_param req "limit" ~default:100 in
   let events = Heuristic_metrics.recent limit in
@@ -166,12 +136,6 @@ let dashboard_heuristics_coverage_json req =
   Heuristic_metrics.recent_coverage limit
   |> Heuristic_metrics.coverage_report_to_json
 
-let dashboard_stress_json ~config req =
-  let limit = int_query_param req "limit" ~default:100 in
-  let events = Agent_stress.recent limit in
-  let agents = o5_agent_board_inputs config in
-  Agent_stress.dashboard_feed_json ~limit ~agents events
-
 let respond_dashboard_heuristics request reqd =
   with_public_read (fun _state req reqd ->
     let json = dashboard_heuristics_json req in
@@ -181,13 +145,6 @@ let respond_dashboard_heuristics request reqd =
 let respond_dashboard_heuristics_coverage request reqd =
   with_public_read (fun _state req reqd ->
     let json = dashboard_heuristics_coverage_json req in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  ) request reqd
-
-let respond_dashboard_stress request reqd =
-  with_public_read (fun state req reqd ->
-    let config = state.Mcp_server.coord_config in
-    let json = dashboard_stress_json ~config req in
     Http.Response.json_value ~compress:true ~request:req json reqd
   ) request reqd
 
@@ -365,5 +322,3 @@ let add_routes ~sw router =
        respond_dashboard_heuristics_coverage
   |> Http.Router.get "/api/v1/heuristics/coverage"
        respond_dashboard_heuristics_coverage
-  |> Http.Router.get "/api/v1/dashboard/stress" respond_dashboard_stress
-  |> Http.Router.get "/api/v1/agent_stress" respond_dashboard_stress

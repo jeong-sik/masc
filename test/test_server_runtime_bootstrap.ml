@@ -806,6 +806,7 @@ let test_tool_usage_log_uses_cluster_root () =
       with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
           Tool_usage_log.init ~base_path:dir ~cluster_name:"cluster-alpha" ();
           Tool_usage_log.log_call
+            ~on_io_failure:(fun ~site:_ _ -> ())
             ~tool_name:"keeper_tasks_list" ~success:true
             ~caller:(Some "oracle");
           let expected_dir =

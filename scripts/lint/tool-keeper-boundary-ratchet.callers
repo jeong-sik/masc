@@ -1,0 +1,17 @@
+# Tool -> Keeper boundary ratchet baseline (frozen debt list).
+# Files here still call a Keeper_<module> from the tool surface.
+# This list may SHRINK (severance PRs remove entries) but must NOT GROW.
+# Regenerate with: bash scripts/lint/tool-keeper-boundary-ratchet.sh --regenerate
+# Owner: RFC-0194 §3 (tool surface dependency direction).
+#
+lib/multimodal/tool_emission.ml
+lib/tool_control.ml
+lib/tool_coord.ml
+lib/tool_deep_review.ml
+lib/tool_inline_dispatch_coord.ml
+lib/tool_inline_dispatch.ml
+lib/tool_registration_check.ml
+lib/tool_resource_axis.ml
+lib/tool_task_handlers.ml
+lib/tool_task_payloads.ml
+lib/tool_unified.ml

@@ -247,7 +247,13 @@ let record_to_json ~tool_name ~success ~caller =
 
 (* -- Write -- *)
 
-let log_call ~tool_name ~success ~caller =
+(* [on_io_failure] is injected by the installer (server bootstrap) so this
+   generic tool-usage logger does not reference the keeper FD/disk pressure
+   subsystem directly. Tool->Keeper dependency direction: a tool-surface module
+   must not name keeper internals (generalizes RFC-0084's dispatch-path rule to
+   the whole surface). Keeper-facing IO-failure handling is supplied at the
+   install boundary (lib/server/server_bootstrap_maintenance.ml). *)
+let log_call ~on_io_failure ~tool_name ~success ~caller =
   match !store_ref with
   | None ->
       Log.Misc.debug "tool_usage_log: store not initialized, skipping %s" tool_name
@@ -255,8 +261,7 @@ let log_call ~tool_name ~success ~caller =
       let json = record_to_json ~tool_name ~success ~caller in
       (try Dated_jsonl.append store json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Keeper_fd_pressure.note_exception ~site:"tool_usage_log.append" exn;
-         Keeper_disk_pressure.note_exception ~site:"tool_usage_log.append" exn;
+         on_io_failure ~site:"tool_usage_log.append" exn;
          Log.Misc.warn "tool_usage_log: append failed for %s: %s"
            tool_name (Stdlib.Printexc.to_string exn);
          let durable_store = Dated_jsonl.base_dir store in
@@ -283,13 +288,14 @@ let extract_caller (result : Tool_result.result) : string option =
 
 (* Log only handled System_internal dispatches. Non-handled outcomes are
    represented by dispatch telemetry, not tool-usage rows. *)
-let install () =
+let install ~on_io_failure =
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some (result : Tool_result.result) ->
       let tool_name = Tool_result.tool_name result in
       if is_system_internal tool_name then
         log_call
+          ~on_io_failure
           ~tool_name
           ~success:(Tool_result.is_success result)
           ~caller:(extract_caller result)

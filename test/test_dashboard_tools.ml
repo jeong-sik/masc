@@ -507,6 +507,7 @@ let test_tool_usage_store_failure_records_coverage_gap () =
         "not a directory";
       Lib.Tool_usage_log.init ~base_path:dir ();
       Lib.Tool_usage_log.log_call
+        ~on_io_failure:(fun ~site:_ _ -> ())
         ~tool_name:"keeper_tasks_list"
         ~success:true
         ~caller:(Some "oracle");

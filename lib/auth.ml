@@ -529,22 +529,22 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 (* Coord secret                                  *)
 (* ============================================ *)
 
-(** Initialize coord secret *)
-let init_coord_secret config : string =
+(** Initialize workspace secret *)
+let init_workspace_secret config : string =
   ensure_auth_dirs config;
   let secret = generate_token () in
   let hash = sha256_hash secret in
-  save_private_text_file (coord_secret_file config) hash;
+  save_private_text_file (workspace_secret_file config) hash;
   (* Update auth config with hash *)
   let cfg = load_auth_config config in
-  save_auth_config config { cfg with coord_secret_hash = Some hash };
+  save_auth_config config { cfg with workspace_secret_hash = Some hash };
   secret (* Return raw secret to show user once *)
 ;;
 
-(** Verify coord secret *)
-let verify_coord_secret config secret : bool =
+(** Verify workspace secret *)
+let verify_workspace_secret config secret : bool =
   let hash = sha256_hash secret in
-  let file = coord_secret_file config in
+  let file = workspace_secret_file config in
   if Sys.file_exists file
   then (
     let stored_hash = String.trim (In_channel.with_open_text file In_channel.input_all) in
@@ -560,7 +560,7 @@ let verify_coord_secret config secret : bool =
     Creates a bootstrap admin token for the enabling agent to prevent
     circular permission deadlock (BUG-025). *)
 let enable_auth config ~require_token ~agent_name : string * string option =
-  let secret = init_coord_secret config in
+  let secret = init_workspace_secret config in
   let cfg = load_auth_config config in
   save_auth_config config { cfg with enabled = true; require_token };
   let bootstrap_token =

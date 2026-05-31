@@ -510,7 +510,7 @@ let port =
 let host =
   let default = Env_config.masc_host () in
   let doc =
-    "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable coord auth with `require_token=true`."
+    "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable workspace auth with `require_token=true`."
   in
   Arg.(value & opt string default & info ["host"] ~docv:"HOST" ~doc)
 

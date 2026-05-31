@@ -3,7 +3,7 @@
     Tests for MASC Authentication & Authorization:
     - generate_token: random token generation
     - sha256_hash: cryptographic hashing
-    - auth_dir, agents_dir, coord_secret_file, auth_config_file: path helpers
+    - auth_dir, agents_dir, workspace_secret_file, auth_config_file: path helpers
 *)
 
 (* Initialize RNG for crypto operations *)
@@ -131,12 +131,12 @@ let test_agents_dir_contains_agents () =
        true
      with Not_found -> false)
 
-let test_coord_secret_file_nonempty () =
-  let path = Auth.coord_secret_file "/tmp/test" in
+let test_workspace_secret_file_nonempty () =
+  let path = Auth.workspace_secret_file "/tmp/test" in
   check bool "nonempty" true (String.length path > 0)
 
-let test_coord_secret_file_contains_hash () =
-  let path = Auth.coord_secret_file "/tmp/test" in
+let test_workspace_secret_file_contains_hash () =
+  let path = Auth.workspace_secret_file "/tmp/test" in
   check bool "contains .hash" true
     (try
        let _ = Str.search_forward (Str.regexp "\\.hash") path 0 in
@@ -1047,9 +1047,9 @@ let () =
       test_case "nonempty" `Quick test_agents_dir_nonempty;
       test_case "contains agents" `Quick test_agents_dir_contains_agents;
     ];
-    "coord_secret_file", [
-      test_case "nonempty" `Quick test_coord_secret_file_nonempty;
-      test_case "contains hash" `Quick test_coord_secret_file_contains_hash;
+    "workspace_secret_file", [
+      test_case "nonempty" `Quick test_workspace_secret_file_nonempty;
+      test_case "contains hash" `Quick test_workspace_secret_file_contains_hash;
     ];
     "auth_config_file", [
       test_case "nonempty" `Quick test_auth_config_file_nonempty;

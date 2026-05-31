@@ -209,14 +209,14 @@ let test_credential_saved_private () =
             (Printf.sprintf "create_token should succeed: %s"
                (Masc_domain.masc_error_to_string e)))
 
-let test_coord_secret_saved_private () =
+let test_workspace_secret_saved_private () =
   let dir = setup_test_room () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
-      ignore (Auth.init_coord_secret dir);
-      check int "coord secret mode 0600" 0o600
-        (permission_bits (Auth.coord_secret_file dir)))
+      ignore (Auth.init_workspace_secret dir);
+      check int "workspace secret mode 0600" 0o600
+        (permission_bits (Auth.workspace_secret_file dir)))
 
 let test_verify_token () =
   let dir = setup_test_room () in
@@ -1533,6 +1533,6 @@ let () =
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;
-      test_case "coord secret saved private" `Quick test_coord_secret_saved_private;
+      test_case "workspace secret saved private" `Quick test_workspace_secret_saved_private;
     ];
   ]

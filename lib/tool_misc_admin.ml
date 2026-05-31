@@ -235,7 +235,7 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args : tool_result =
       (match expiry_hours with
       | Error err -> error_workflow ~tool_name ~start_time err
       | Ok token_expiry_hours ->
-          let coord_secret =
+          let workspace_secret =
             match enabled_opt with
             | Some true when not current.enabled ->
                 let (secret, _bootstrap) =
@@ -261,7 +261,7 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args : tool_result =
           ok_result_typed ~tool_name ~start_time
             [
               ("section", `String "auth");
-              ("coord_secret", Json_util.string_opt_to_json_trimmed coord_secret);
+              ("workspace_secret", Json_util.string_opt_to_json_trimmed workspace_secret);
               ("result", auth_snapshot_json ctx);
             ])
   | _ ->

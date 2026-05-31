@@ -23,7 +23,7 @@ let sha256_hash input = Digestif.SHA256.(digest_string input |> to_hex)
 
 let auth_dir config = Common.auth_dir_from_base_path ~base_path:config
 let agents_dir config = Common.agents_dir_from_base_path ~base_path:config
-let coord_secret_file config = Filename.concat (auth_dir config) "coord_secret.hash"
+let workspace_secret_file config = Filename.concat (auth_dir config) "workspace_secret.hash"
 let auth_config_file config = Filename.concat (auth_dir config) "config.json"
 let initial_admin_file config = Filename.concat (auth_dir config) "initial_admin"
 

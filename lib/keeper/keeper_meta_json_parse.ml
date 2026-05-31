@@ -120,27 +120,12 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_instructions = personality.instructions in
     let pk_cascade_name_result =
       (* RFC-0206: [runtime_id] is the canonical persisted/input name if a
-         pre-scrub JSON payload still carries model-selection state.
-         [cascade_name] is accepted only as a legacy alias for older files.
-         If both appear with different non-empty values, fail loud instead of
-         silently choosing one model-selection identity. *)
+         pre-scrub JSON payload still carries model-selection state. *)
       let runtime_id_opt =
         Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim
       in
-      let legacy_cascade_name_opt =
-        Safe_ops.json_string_opt "cascade_name" json |> Option.map String.trim
-      in
-      match runtime_id_opt, legacy_cascade_name_opt with
-      | Some runtime_id, Some legacy_cascade_name
-        when runtime_id <> "" && legacy_cascade_name <> ""
-             && runtime_id <> legacy_cascade_name ->
-        Error
-          (Printf.sprintf
-             "keeper meta parse error: runtime_id (%s) and legacy cascade_name (%s) \
-              disagree"
-             runtime_id legacy_cascade_name)
-      | Some runtime_id, _ when runtime_id <> "" -> Ok runtime_id
-      | _, Some legacy_cascade_name when legacy_cascade_name <> "" -> Ok legacy_cascade_name
+      match runtime_id_opt with
+      | Some runtime_id when runtime_id <> "" -> Ok runtime_id
       | _ -> Ok (Keeper_config.default_cascade_name ())
     in
     (match pk_cascade_name_result with

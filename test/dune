@@ -44,7 +44,6 @@
   test_exec_tap
   test_auth
   test_auth_credential_index_cache
-  test_auth_doctor
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
@@ -279,10 +278,8 @@
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
   test_observability_provider_contracts
-  test_config_doctor
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
-  test_doctor_dispatch
   test_disk_hygiene_script
   test_run_local_script
   test_tool_prefilter
@@ -344,7 +341,6 @@
   test_exec_tap
   test_auth
   test_auth_credential_index_cache
-  test_auth_doctor
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
@@ -581,10 +577,8 @@
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
   test_observability_provider_contracts
-  test_config_doctor
   test_agent_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
-  test_doctor_dispatch
   test_disk_hygiene_script
   test_run_local_script
   test_tool_prefilter

@@ -47,7 +47,6 @@ type inputs = {
 (** {1 SSOT filenames}
 
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
-val cascade_toml_filename : string
 val tool_policy_toml_filename : string
 val keeper_runtime_toml_filename : string
 
@@ -71,14 +70,6 @@ val reset : unit -> unit
 
     Convenience functions that call [resolve ()] internally. *)
 
-(** Path to the legacy runtime config file when the config root resolves to a
-    usable directory and the file exists. Returns [None] when the resolver
-    state is [Invalid_env]/[Missing] or the file is absent. *)
-val cascade_path_opt : unit -> string option
-
-(** Candidate path to the legacy runtime config file, independent of whether
-    the file exists. *)
-val cascade_path_candidate : unit -> string
 val prompts_dir : unit -> string
 val keepers_dir : unit -> string
 val personas_dir_opt : unit -> string option

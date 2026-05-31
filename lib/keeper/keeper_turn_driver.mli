@@ -12,10 +12,9 @@
 
 (** {1 MASC/OAS structured errors}
 
-    Re-exported from {!Runtime_error_classify} (which itself includes
-    {!Cascade_internal_error}). Using [include module type of] instead of a
-    manual type copy so the interface stays structurally identical to the
-    implementation's [include Runtime_error_classify]. *)
+    Re-exported from {!Runtime_error_classify}. Using [include module type of]
+    instead of a manual type copy so the interface stays structurally identical
+    to the implementation's [include Runtime_error_classify]. *)
 
 include module type of Runtime_error_classify
 

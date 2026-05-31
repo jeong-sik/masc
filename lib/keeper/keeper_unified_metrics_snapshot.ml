@@ -82,7 +82,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     match result.cascade_observation with
     | Some observation ->
         observation.Keeper_observation.cascade_name
-    | None -> (cascade_name_of_meta meta)
+    | None -> (runtime_id_of_meta meta)
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
      This keeps the existing keeper-only counter stable while making

@@ -539,7 +539,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                      ~keeper_name:meta.name
                      ~agent_name:meta.agent_name
                      ~cascade_name:
-                       (                          (Keeper_meta_contract.cascade_name_of_meta meta))
+                       (                          (Keeper_meta_contract.runtime_id_of_meta meta))
                      ~trace_id:
                        (Keeper_id.Trace_id.to_string
                           entry.meta.runtime.trace_id)
@@ -577,7 +577,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    ();
                  Log.Keeper.error
                    "%s: watchdog terminating fiber (provider_timeout unresolved after idle %.0fs; count=%d; preserving provider timeout root cause) [cascade=%s]"
-                   meta.name stall_seconds count (Keeper_meta_contract.cascade_name_of_meta meta);
+                   meta.name stall_seconds count (Keeper_meta_contract.runtime_id_of_meta meta);
                  emit_watchdog_broadcast ~failure_reason:(Some failure_reason)
                    ~stall_seconds
                | _ ->
@@ -692,14 +692,14 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  ();
                Log.Keeper.error
                  "%s: stale watchdog terminating fiber (%s) [cascade=%s window_count=%d/6h]"
-                 meta.name reason_desc (Keeper_meta_contract.cascade_name_of_meta meta) window_count;
+                 meta.name reason_desc (Keeper_meta_contract.runtime_id_of_meta meta) window_count;
                if window_count >= escalation_threshold then begin
                  let cascade_recovered () =
                    match ctx.net with
                    | None -> false
                    | Some net ->
                        (match Cascade_catalog_runtime.resolve_named_providers_strict
-                                ~sw:ctx.sw ~net ~cascade_name:(Keeper_meta_contract.cascade_name_of_meta meta) () with
+                                ~sw:ctx.sw ~net ~cascade_name:(Keeper_meta_contract.runtime_id_of_meta meta) () with
                         | Error _ -> false
                         | Ok candidates ->
                             (* Strict variant returns a typed rejection
@@ -722,7 +722,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                                  Cascade_runtime_candidate.has_recovery_evidence))
                  in
                  if cascade_recovered () then
-                   Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name (Keeper_meta_contract.cascade_name_of_meta meta)
+                   Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name (Keeper_meta_contract.runtime_id_of_meta meta)
                  else begin
                  Prometheus.inc_counter
                    Keeper_metrics.(to_string StaleTerminationThresholdBreached)

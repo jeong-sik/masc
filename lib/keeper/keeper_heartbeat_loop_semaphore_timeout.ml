@@ -103,7 +103,7 @@ let handle_semaphore_wait_timeout
     ();
   let persisted_blocker, log_diagnostic =
     semaphore_wait_timeout_diagnostics
-      ~cascade_name:(cascade_name_of_meta meta_after_triage)
+      ~cascade_name:(runtime_id_of_meta meta_after_triage)
       timeout
   in
   let blocker_class = semaphore_wait_timeout_blocker_class timeout in

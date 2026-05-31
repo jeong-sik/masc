@@ -30,7 +30,7 @@ let provider_context_json ~(meta : keeper_meta)
         match r.cascade_observation with
         | Some observation ->
             observation.cascade_name
-        | None -> cascade_name_of_meta meta
+        | None -> runtime_id_of_meta meta
       in
       `Assoc
         [ ("runtime_id", `String cascade_name)
@@ -39,7 +39,7 @@ let provider_context_json ~(meta : keeper_meta)
         ]
   | None ->
       `Assoc
-        [ ("runtime_id", `String (cascade_name_of_meta meta))
+        [ ("runtime_id", `String (runtime_id_of_meta meta))
         ; ("selected_model", `Null)
         ; "candidate_models", `List []
         ]

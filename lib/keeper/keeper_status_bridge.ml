@@ -34,7 +34,7 @@ let effective_declarative_cascade_name
   | None, Some _ -> (Keeper_config.default_cascade_name ())
   | None, None ->
     Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-      (cascade_name_of_meta meta)
+      (runtime_id_of_meta meta)
 ;;
 
 type override_field_detail =
@@ -80,7 +80,7 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        defaults.tool_denylist
        meta.tool_denylist
   |> (fun acc ->
-  let cascade_name = cascade_name_of_meta meta in
+  let cascade_name = runtime_id_of_meta meta in
   if effective_cascade_name <> cascade_name
   then
     override_field
@@ -319,7 +319,7 @@ let last_cascade_attempt_json (meta : keeper_meta) =
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
     [ "source", `String "keeper_runtime.last_cascade_attempt"
-    ; "runtime_id", `String (cascade_name_of_meta meta)
+    ; "runtime_id", `String (runtime_id_of_meta meta)
     ; "last_cascade_attempt", last_cascade_attempt_json meta
     ]
 ;;

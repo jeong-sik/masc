@@ -392,7 +392,7 @@ let append_decision_record
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
-                ("runtime_id", `String (cascade_name_of_meta meta));
+                ("runtime_id", `String (runtime_id_of_meta meta));
                 ("candidate_models", `List []);
                 ( "error_category", Json_util.string_opt_to_json error_category );
                 ("outcome", `String outcome);

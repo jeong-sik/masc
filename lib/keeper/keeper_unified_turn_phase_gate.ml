@@ -53,7 +53,7 @@ let decide_and_record
       ~meta
       ~generation
       ~cascade_name:
-        (           (cascade_name_of_meta meta))
+        (           (runtime_id_of_meta meta))
       ~outcome:`Cancelled
       ~terminal_reason_code:"supervisor_stop"
       ~activity_kind:"keeper.turn_cancelled"
@@ -93,7 +93,7 @@ let decide_and_record
         ~meta
         ~generation
         ~cascade_name:
-          (             (cascade_name_of_meta meta))
+          (             (runtime_id_of_meta meta))
         ~outcome:`Skipped
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_skipped"
@@ -129,7 +129,7 @@ let decide_and_record
         ~meta
         ~generation
         ~cascade_name:
-          (             (cascade_name_of_meta meta))
+          (             (runtime_id_of_meta meta))
         ~outcome:`Error
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_blocked"

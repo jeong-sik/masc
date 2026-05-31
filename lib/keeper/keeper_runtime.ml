@@ -147,7 +147,7 @@ let effective_declarative_cascade_name
   | None, Some _ -> (Keeper_config.default_cascade_name ())
   | None, None ->
       Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-        (cascade_name_of_meta meta)
+        (runtime_id_of_meta meta)
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -215,7 +215,7 @@ let ensure_keeper_meta config name =
           match defaults.model, defaults.manifest_path with
           | Some cascade_name, _ -> cascade_name
           | None, Some _ -> (Keeper_config.default_cascade_name ())
-          | None, None -> cascade_name_of_meta meta
+          | None, None -> runtime_id_of_meta meta
         in
         let msg =
           Printf.sprintf
@@ -331,7 +331,7 @@ let ensure_keeper_meta config name =
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)
     let cascade_changed =
-      String.trim (cascade_name_of_meta meta)
+      String.trim (runtime_id_of_meta meta)
       <> resolved_target_cascade_name
     in
     (* #10061: persisted state vs TOML source can differ by a single

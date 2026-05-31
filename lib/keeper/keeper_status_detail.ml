@@ -687,7 +687,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
          in
          let model_observability =
            model_observability_json
-             ~current_cascade_name:(cascade_name_of_meta m)
+             ~current_cascade_name:(runtime_id_of_meta m)
              ~runtime_blocker_fields
              latest_metrics
          in

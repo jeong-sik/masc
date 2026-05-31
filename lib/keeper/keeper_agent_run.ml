@@ -723,7 +723,7 @@ let run_turn
                    Error
                      (Keeper_agent_run_tool_surface_violation.to_sdk_error
                         ~keeper_name:meta.name
-                        ~cascade_name:(Keeper_meta_contract.cascade_name_of_meta meta)
+                        ~cascade_name:(Keeper_meta_contract.runtime_id_of_meta meta)
                         ~requested_tool_names_seen:acc.requested_tool_names_seen
                         ~unexpected_tool_names))
                  else (

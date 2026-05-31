@@ -520,8 +520,8 @@ let test_masc_persona_authoring_schemas () =
             Contract.risk_posture_choices (enum_strings "risk_posture");
           Alcotest.(check string) "language default follows contract"
             Contract.default_generation_language (default_string "language");
-          Alcotest.(check string) "cascade default follows contract"
-            Contract.default_generation_cascade_name (default_string "cascade_name");
+          Alcotest.(check string) "runtime default follows contract"
+            Contract.default_generation_cascade_name (default_string "runtime_id");
           Alcotest.(check bool) "proactive default follows contract"
             Contract.default_generation_proactive_enabled (default_bool "proactive_enabled")
       | None -> Alcotest.fail "masc_persona_generate missing properties"));

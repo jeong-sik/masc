@@ -10,7 +10,7 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
-(** Health constants + compute_health_score + live_keeper_runtime_id moved
+(** Health constants + compute_health_score + live runtime-id resolver moved
     to Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
 include Dashboard_http_keeper_types
 module Outcomes = Dashboard_http_keeper_outcomes

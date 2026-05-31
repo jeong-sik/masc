@@ -248,7 +248,7 @@ let keeper_config_json (config : Coord.config) (name : string)
       (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the
-         legacy [live_keeper_runtime_id] would produce. *)
+         legacy live runtime-id facade would produce. *)
       let selected_runtime_canonical_json =
         match live_keeper_runtime_id_result runtime_id with
         | Ok runtime ->

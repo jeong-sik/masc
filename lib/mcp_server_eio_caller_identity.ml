@@ -130,7 +130,7 @@ let resolve_auth_fallback_agent_name
           agent_name)
   | _ -> agent_name
 
-let resolve_explicit_joined_alias ~config ~room_initialized ~log_mcp_exn
+let resolve_explicit_bound_alias ~config ~room_initialized ~log_mcp_exn
     ~has_explicit_agent_name agent_name =
   if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name)
   then (
@@ -139,21 +139,21 @@ let resolve_explicit_joined_alias ~config ~room_initialized ~log_mcp_exn
       try
         if room_initialized () then (
           try
-            if Coord.is_agent_joined config ~agent_name:resolved then
+            if Coord.is_agent_session_bound config ~agent_name:resolved then
               resolved
             else
               agent_name
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-              log_mcp_exn ~label:"is_agent_joined" exn;
+              log_mcp_exn ~label:"is_agent_session_bound" exn;
               agent_name)
         else
           agent_name
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-          log_mcp_exn ~label:"resolve_explicit_joined_alias" exn;
+          log_mcp_exn ~label:"resolve_explicit_bound_alias" exn;
           agent_name)
     else
       agent_name)
@@ -206,7 +206,7 @@ let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~
       agent_name
   in
   let agent_name =
-    resolve_explicit_joined_alias ~config ~room_initialized ~log_mcp_exn
+    resolve_explicit_bound_alias ~config ~room_initialized ~log_mcp_exn
       ~has_explicit_agent_name agent_name
   in
   {

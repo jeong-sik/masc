@@ -43,7 +43,7 @@ type agent =
   ; status : agent_status
   ; capabilities : string list
   ; current_task : string option [@default None]
-  ; joined_at : string
+  ; session_bound_at : string
   ; last_seen : string
   ; meta : agent_meta option [@default None]
   }
@@ -52,7 +52,7 @@ type agent =
 val agent_to_yojson : agent -> Yojson.Safe.t
 val agent_of_yojson : Yojson.Safe.t -> (agent, string) result
 val iso8601_of_unix_seconds : float -> string
-val normalize_agent_last_seen : joined_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
+val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
 val short_json_repr : Yojson.Safe.t -> string
 
 type task_action =

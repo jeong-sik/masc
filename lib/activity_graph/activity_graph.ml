@@ -628,7 +628,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
 (* Span start events paired with their matching end events *)
 let span_start_kind = function
   | "task.claimed" | "task.started" -> Some "task"
-  | "agent.joined" -> Some "presence"
+  | "agent.session_bound" -> Some "presence"
   | "operation.started" -> Some "operation"
   | "keeper.autonomy_started" -> Some "autonomy"
   | _ -> None

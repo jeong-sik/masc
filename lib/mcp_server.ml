@@ -508,7 +508,7 @@ let create_state ~base_path =
     net = None;
   } in
   Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_joined state.room_config ~agent_name:name
+    try Coord.is_agent_session_bound state.room_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 
@@ -554,7 +554,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   (* Board post kind auto-classification: reads state.room_config so
      room changes via set_room are reflected automatically. *)
   Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_joined state.room_config ~agent_name:name
+    try Coord.is_agent_session_bound state.room_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 

@@ -61,7 +61,7 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id))
     ; "status", `String (Masc_domain.string_of_agent_status agent.status)
     ; "current_task", Json_util.string_opt_to_json agent.current_task
-    ; "joined_at", `String agent.joined_at
+    ; "session_bound_at", `String agent.session_bound_at
     ; "last_seen", `String agent.last_seen
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
     ; "emoji", `String profile.emoji

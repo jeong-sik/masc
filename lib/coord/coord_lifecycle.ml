@@ -159,7 +159,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     status = Active;
     capabilities;
     current_task = None;
-    joined_at = now_iso ();
+    session_bound_at = now_iso ();
     last_seen = now_iso ();
     meta = Some meta;
   } in

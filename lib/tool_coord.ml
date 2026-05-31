@@ -17,7 +17,7 @@ module Float = Stdlib.Float
 
 (** Tool_coord - Coord management operations
     Handles: status, reset, init, check
-    Note: join, leave, set_room, who require state/registry and remain in mcp_server_eio.ml
+    Note: stateful coord helpers remain in server dispatch modules
 *)
 
 open Coord_types
@@ -32,8 +32,6 @@ type context = Coord_types.context =
   }
 
 type assertion_kind = Coord_assertions.assertion_kind =
-  | Room_set
-  | Joined
   | Task_claimed
   | Current_task_set
 
@@ -161,8 +159,8 @@ let credential_state (ctx : context) ~actual_name =
    share the single-warn-arm shape; [Eio.Cancel.Cancelled] is re-raised
    explicitly so cancellation propagation is preserved across all of
    them. *)
-let safe_resolve_agent_name (ctx : context) ~joined =
-  if not joined
+let safe_resolve_agent_name (ctx : context) ~session_bound =
+  if not session_bound
   then ctx.agent_name
   else (
     try Coord.resolve_agent_name ctx.config ctx.agent_name with
@@ -175,8 +173,8 @@ let safe_resolve_agent_name (ctx : context) ~joined =
       ctx.agent_name)
 ;;
 
-let safe_current_task (ctx : context) ~joined =
-  if not joined
+let safe_current_task (ctx : context) ~session_bound =
+  if not session_bound
   then None
   else (
     try Planning_eio.get_current_task ctx.config with
@@ -319,28 +317,28 @@ let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;
   let state = Coord.read_state ctx.config in
   let backlog = safe_read_backlog ctx in
-  let joined =
+  let session_bound =
     (* status_summary_string is read-only on the coord file; a missing
-       or malformed file is treated as "not joined" because that's the
+       or malformed file is treated as "session not bound" because that's the
        most useful default for status rendering. But the silent path
-       hid an operationally meaningful failure (file missing post-join,
+       hid an operationally meaningful failure (file missing after session bind,
        config corrupted) — surface it via warn while keeping the
        [false] default. *)
-    try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with
+    try Coord.is_agent_session_bound ctx.config ~agent_name:ctx.agent_name with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Coord.warn
-        "is_agent_joined failed for %s: %s"
+        "is_agent_session_bound failed for %s: %s"
         ctx.agent_name
         (Stdlib.Printexc.to_string exn);
       false
   in
-  let actual_name = safe_resolve_agent_name ctx ~joined in
+  let actual_name = safe_resolve_agent_name ctx ~session_bound in
   let credential_state = credential_state ctx ~actual_name in
   let credential_blocked =
     credential_state.credential_required && not credential_state.credential_available
   in
-  let current_task = safe_current_task ctx ~joined in
+  let current_task = safe_current_task ctx ~session_bound in
   let effective_cluster_name = effective_cluster_name ctx.config in
   let active_task_assignees = Coord.active_task_assignees_by_task_id backlog in
   let agents =
@@ -481,8 +479,8 @@ let status_summary_string (ctx : context) =
   let attention_items =
     let items = [] in
     let items =
-      if not joined
-      then items @ [ "You are not joined in the project namespace. Call masc_start." ]
+      if not session_bound
+      then items @ [ "Your agent session is not bound. Call masc_start." ]
       else items
     in
     let items =
@@ -578,7 +576,7 @@ let status_summary_string (ctx : context) =
   in
   Coord_status_rendering.status_summary_string
     ~ctx
-    ~joined
+    ~session_bound
     ~actual_name
     ~credential_state
     ~credential_blocked
@@ -638,7 +636,7 @@ type agent_state =
 
 let inspect_state ctx =
   let binding =
-    let actual_name = safe_resolve_agent_name ctx ~joined:true in
+    let actual_name = safe_resolve_agent_name ctx ~session_bound:true in
     let matches_you assignee =
       String.equal assignee ctx.agent_name || String.equal assignee actual_name
     in
@@ -648,7 +646,7 @@ let inspect_state ctx =
     in
     resolve_current_binding
       ~assigned_task_ids
-      ~planning_current:(safe_current_task ctx ~joined:true)
+      ~planning_current:(safe_current_task ctx ~session_bound:true)
   in
   let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
   let current_task_set = binding.current_task_set in
@@ -686,7 +684,7 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
   else
     (* RFC-0189: heartbeat failure stems from agent-state issues
        ("agent not found", "invalid file") that the caller can
-       resolve (join the room, refresh credentials).
+       resolve (bind the session, refresh credentials).
        [Workflow_rejection]. *)
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)

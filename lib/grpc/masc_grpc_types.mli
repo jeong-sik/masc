@@ -14,7 +14,7 @@ type agent_info =
   ; status : string
   ; capabilities : string list
   ; last_heartbeat_ms : int64
-  ; joined_at_ms : int64
+  ; session_bound_at_ms : int64
   ; current_task_id : string
   }
 

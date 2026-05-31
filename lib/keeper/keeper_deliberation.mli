@@ -24,7 +24,6 @@ val deliberation_trigger_to_json : deliberation_trigger -> Yojson.Safe.t
 
 type deliberation_action =
   | Noop of string
-  | ReplyInRoom of { room_id: string; content: string }
   | BoardPost of { content: string; hearth: string option }
   | BoardComment of { post_id: string; content: string }
   | BoardVote of { post_id: string; direction: string }
@@ -130,8 +129,7 @@ val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
 
 (** {1 Baseline action} *)
 
-(** Deterministic baseline using the typed action space.
-    Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
+(** Deterministic baseline using the typed action space. *)
 val deterministic_baseline_action : world_observation -> deliberation_action
 
 (** {1 Phase 2: Deliberation Evaluation} *)

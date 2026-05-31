@@ -137,10 +137,6 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'runtime', view: 'cost' },
     })
-    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cascade' })).toEqual({
-      tab: 'monitoring',
-      params: { section: 'cascade-config' },
-    })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'keeper-cognition' })).toEqual({
       tab: 'monitoring',
       params: { section: 'cognition', view: 'keeper' },

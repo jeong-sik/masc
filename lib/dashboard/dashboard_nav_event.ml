@@ -31,7 +31,6 @@ let valid_sections =
       ; "agents"
       ; "cognition"
       ; "runtime"
-      ; "cascade-config"
       ; "fleet-health"
       ; "transport-health"
       ; "feature-health"

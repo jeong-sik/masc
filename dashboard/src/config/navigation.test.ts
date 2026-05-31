@@ -154,7 +154,6 @@ describe('monitoring navigation labels', () => {
     expect(allIds).toContain('feature-health')
     expect(allIds).toContain('cognition')
     expect(ids).not.toContain('journey')
-    expect(ids).not.toContain('cascade-config')
     expect(ids).not.toContain('transport-health')
     expect(ids).not.toContain('feature-health')
     expect(ids).not.toContain('cognition')

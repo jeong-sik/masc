@@ -136,16 +136,16 @@ check_json \
   "surface-readiness has canonical surface count" \
   "$BASE/api/v1/dashboard/surface-readiness" \
   "len(d.get('surfaces', []))" \
-  '^23$'
+  '^22$'
 check_json \
   "surface-readiness matches canonical surface ids" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.cascade-config', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
+  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
   '^True$'
 check_json \
   "surface-readiness dropped retired surfaces" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'workspace.collab-mvp'])" \
+  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'monitoring.cascade-config', 'workspace.collab-mvp'])" \
   '^True$'
 
 echo "[3/7] Monitoring"

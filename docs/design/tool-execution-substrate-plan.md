@@ -53,13 +53,12 @@ Current main already points in the right direction.
   dispatches via the decided IR path.
 - The keeper capability matrix already states that GitHub PR and issue work
   uses `Execute` with `executable = "gh"` and typed `argv`.
-- A 2026-05-27 live `scripts/audit-shell-ir-consumption.sh --json` run shows
-  the Shell IR substrate remains mostly in target range. One metric needs audit
-  maintenance: `g3_gate_typed_refs_in_keeper = 2`, while RFC-0160's historical
-  target was `>= 4`. This appears to be a measurement drift caused by routing
-  through the centralized `Agent_tool_execute_shell_ir` facade rather than
-  direct `gate_typed` calls in many keeper files. PR-E must prove this or fix
-  a real coverage regression before closing.
+- A 2026-06-01 live `scripts/audit-shell-ir-consumption.sh --json` run on
+  `origin/main` (`1096d319ba`) shows the Shell IR substrate inside the RFC-0160
+  targets: G1=3 files / 3 refs, G2 string=0 / IR=2, G3=5, G4 phantom=18 with
+  6 decided-dispatch consumers, G5=4, G6=1, G7=0, and G8=110/110 with the
+  single allowed generic arm. The baseline ratchet also passes with no
+  G1/G7/G8 regression and no unclassified parse sites.
 
 The remaining risk is not missing a `Gh_cli` executor. The risk is letting
 micro-tools re-enter through convenience pressure.
@@ -331,6 +330,14 @@ Expected state:
   if all `Shell_ir` executor paths still route through
   `Agent_tool_execute_shell_ir.dispatch` or `dispatch_classified`.
 
+Current status, 2026-06-01: verified on `origin/main` at `1096d319ba`.
+`scripts/audit-shell-ir-consumption.sh --json` reports G3=5 and G7=0, and
+`scripts/audit-shell-ir-consumption.sh --baseline
+scripts/shell-ir-consumption-baseline.json` returns OK. PR-E is no longer an
+open measurement gap; it is a closeout evidence point. The remaining Shell IR
+cleanup is optional hardening: the three allowed non-test `Bash.parse_string`
+callers are still the canonical string-to-IR entrypoints.
+
 ### PR-F: GitHub Workflow Guidance Cleanup
 
 Delete or rewrite any docs, prompts, or hints that imply dedicated GitHub tools
@@ -378,12 +385,14 @@ If answers 1 or 2 are yes, do not add a tool.
 IR, classifies the IR, gates destructive/write behavior, and dispatches the
 classified IR.
 
-[evidence] 2026-05-27, confidence High: local repo
+[evidence] 2026-06-01, confidence High: local repo command output on
+`origin/main` at `1096d319ba`
 `docs/rfc/RFC-0160-shell-ir-first-class.md` records Shell IR first-class status
-as implemented. A live audit on 2026-05-27 returned G1=3, G2 string=0/IR=2,
-G4 phantom=18, G5=4, G6=1, and G7=0. It also returned G3=2, which requires
-metric follow-up because the current facade structure may make the old direct
-`gate_typed` grep heuristic stale.
+as implemented. A live `scripts/audit-shell-ir-consumption.sh --json` run
+returned G1=3 files / 3 refs, G2 string=0/IR=2, G3=5, G4 phantom=18 with
+6 decided-dispatch consumers, G5=4, G6=1, G7=0, and G8=110/110 with one
+allowed generic arm. The matching baseline run returned `OK (RFC-0160 ratchet:
+no G1/G7/G8 regression, no unclassified sites)`.
 
 [evidence] 2026-05-27, confidence High: local repo
 `docs/KEEPER-CAPABILITY-MATRIX.md` records GitHub PR/issue work as `Execute`

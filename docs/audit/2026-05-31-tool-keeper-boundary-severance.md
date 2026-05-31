@@ -17,23 +17,21 @@ false-positive classes — (a) `Tool_name.Keeper` / `Keeper.` name-namespace con
 (b) `Keeper_internal` / `Keeper_denied` which are `Tool_catalog_surfaces.surface`
 constructors, not keeper modules — and after stripping nested comments + string literals,
 the measured severance set started at **12 tool-surface files that called a
-`Keeper_<module>`**. Current ratchet debt is **10** after the
-2026-06-01 `tool_emission` severance:
+`Keeper_<module>`**.
 
-| File | Keeper module(s) called | Bucket | Severance |
-|------|-------------------------|--------|-----------|
-| `lib/tool_usage_log.ml` | `Keeper_fd_pressure`, `Keeper_disk_pressure` | infra-leak | **DONE** — `~on_io_failure` injected at install boundary |
-| `lib/multimodal/tool_emission.ml` | `Keeper_emitter` (+`Multimodal_keeper_bridge`) | infra-leak | **DONE** — injected emitter port; keeper hook supplies `Keeper_emitter.emit` |
-| `lib/tool_unified.ml` | `Keeper_observation.runtime_metrics_json` | infra-leak | Runtime-demolition zone — re-eval after main green (field may be deleted) |
-| `lib/tool_task_payloads.ml` | `Keeper_tools_oas_workflow.workflow_rejection_*` | infra-leak | relocate pure payload builders to neutral module (RFC-0195 territory) |
-| `lib/tool_resource_axis.ml` | `Keeper_tool_alias.*` | misplaced | relocate `keeper_tool_alias` → `tool_alias` (surface concern). ⚠️ collides with #19290 |
-| `lib/tool_registration_check.ml` | `Keeper_tool_policy`, `Keeper_tool_policy_config` | infra-leak | ⚠️ collides with #19290/#19282; sequence after they land |
-| `lib/tool_control.ml` | `Keeper_meta_store`, `Keeper_registry`, `Keeper_types_profile_toml_normalizers` | domain-handler | invert via injected reader interface |
-| `lib/tool_coord.ml` | `Keeper_identity`, `Keeper_runtime` | domain-handler | invert: identity-resolver interface keeper registers into |
-| `lib/tool_deep_review.ml` | `Keeper_turn_driver.run_named` | domain-handler | inject turn-runner capability |
-| `lib/tool_inline_dispatch.ml` | `Keeper_approval_queue.*` | domain-handler | inject approval-queue port |
-| `lib/tool_inline_dispatch_coord.ml` | `Keeper_identity.*` | domain-handler | shared identity-resolver port (with tool_coord) |
-| `lib/tool_task_handlers.ml` | `Keeper_config`, `Keeper_registry`, `Keeper_identity`, `Keeper_current_task_reconcile`, `Keeper_tool_policy`, `Keeper_meta_store` | domain-handler | largest; multiple injected ports |
+Current main status, 2026-06-01 (`origin/main` at `1096d319ba`): the severance
+set is empty. `bash scripts/lint/tool-keeper-boundary-ratchet.sh --print`
+reports `tool_keeper_callers current=0 baseline=0`, and
+`bash scripts/audit-keeper-tool-boundary-matrix.sh` reports all 168 scoped
+keeper files covered by `docs/design/keeper-tool-boundary-matrix.md`.
+
+Historical drain:
+
+- 12 initial tool-surface files called `Keeper_<module>`.
+- `tool_usage_log` severed fd/disk pressure through injected failure handling.
+- `tool_emission` severed keeper emission through an injected emitter port.
+- #19632 (`Decouple tool surfaces from keeper internals`) drained the remaining
+  reverse-dependency set and regenerated the ratchet baseline to zero.
 
 `tool_keeper*.ml` (keeper-purpose handlers — keeper IS their domain) are out of scope for
 this gate. The dispatch path (`tool_dispatch.ml`) is already keeper-clean (RFC-0084).
@@ -53,40 +51,28 @@ direction is compiler-enforced; the lint holds the line until then.
 ## 3. This is not a workaround
 
 The ratchet is an invariant-enforcement gate (the compiler can't express the direction in a
-flat library), not a "counter-as-fix": severance PRs have already reduced the baseline
-12→11 (`tool_usage_log`) and 11→10 (`tool_emission`), proving the ratchet drives toward zero.
-Removal target: empty baseline / sub-library split.
+flat library), not a "counter-as-fix": severance PRs reduced the baseline
+12 -> 11 (`tool_usage_log`), 11 -> 10 (`tool_emission`), and finally 10 -> 0
+(#19632). The removal target is now achieved at the ratchet level; the remaining
+root fix is a future sub-library split so the compiler enforces the direction.
 
-## 4. Sequencing (in-flight PR collisions)
+## 4. Sequencing (closed at ratchet level)
 
-- Clear runway (no in-flight PR): `tool_usage_log` (done), `tool_emission` (done), `tool_inline_dispatch*`,
-  `tool_control`, `tool_coord`, `tool_deep_review`, `tool_task_handlers`, `tool_task_payloads`.
-- Contended — sequence AFTER they land: `tool_registration_check`, `tool_resource_axis`
-  (#19290 / #19282 typed-predicate pair touches these + `keeper_tool_policy`).
-- Hold: `tool_unified` (Runtime demolition in-flight; `runtime_metrics_json` may be removed).
+No per-file Tool -> Keeper severance remains on current main. The only
+structural follow-up is the compiler-enforced split described in §2. Older
+in-flight typed-tool PRs may still conflict with the files touched by #19632,
+but they are rebase problems, not live Tool -> Keeper debt.
 
 ## 5. Status
 
-main is currently red from the in-flight Runtime demolition (25 `Runtime_*`
-unbound-module errors, identical set on pristine main — this PR adds none). Verification is
-asymmetric because a flat library stops typechecking at the first broken module:
+2026-06-01 current-main verification:
 
-- `tool_usage_log.{ml,mli}` severance: **compile-verified** (`_build` `.cmt` regenerated
-  after the edit; reached and typechecked).
-- `server_bootstrap_maintenance.ml` injection: **reasoned-correct, not compile-verified**
-  (downstream of the broken keeper modules; only its `.cmti` was produced, the `.ml` was
-  never reached). The DI type logic is sound (`~site` punning matches the original
-  `?site` call) but reachability is unproven until main greens.
-- `scripts/lint/tool-keeper-boundary-ratchet.sh`: **fully verified** (compile-independent;
-  tested for pass, drift-up fail, stale-baseline fail, and comment/string false-positives).
-
-Full `dune build @check` + `@runtest` and Ready transition are gated on main returning to green.
-
-2026-06-01 progress update:
-
-- `tool_emission` no longer calls `Keeper_emitter` directly; `Keeper_tool_emission_hook`
-  now injects the keeper emitter port at the keeper boundary.
-- `scripts/lint/tool-keeper-boundary-ratchet.callers` regenerated to 10 entries.
+- `scripts/lint/tool-keeper-boundary-ratchet.sh --print`: current=0,
+  baseline=0.
+- `scripts/lint/no-tool-substrate-adapter-surface.sh --fail`: 0 forbidden
+  active substrate/micro-tool hits and 0 stale allowlist entries.
+- `scripts/audit-keeper-tool-boundary-matrix.sh`: OK, 168 scoped keeper files
+  covered by `docs/design/keeper-tool-boundary-matrix.md`.
 
 ## 6. Open decision — RFC ownership
 

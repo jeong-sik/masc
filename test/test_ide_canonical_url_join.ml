@@ -117,12 +117,10 @@ let test_sandbox_write_joins_with_worktree_read () =
          "expected By_url _ on both sides, got %s / %s"
          (match sandbox_partition with
           | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan")
+          | Ide_paths.By_url s -> "By_url " ^ s)
          (match worktree_partition with
           | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan"));
+          | Ide_paths.By_url s -> "By_url " ^ s));
     (* 5. rel_path is the repo-relative remainder in both cases. *)
     check string "sandbox rel_path stripped" "lib/foo.ml" sandbox_rel;
     check string "worktree rel_path stripped" "lib/foo.ml" worktree_rel)
@@ -236,12 +234,10 @@ let test_sandbox_playground_path_joins_with_worktree () =
          "expected By_url _ on both sides, got %s / %s"
          (match sandbox_partition with
           | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan")
+          | Ide_paths.By_url s -> "By_url " ^ s)
          (match worktree_partition with
           | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan"));
+          | Ide_paths.By_url s -> "By_url " ^ s));
     check string "sandbox rel stripped to repo-relative" "lib/foo.ml" sandbox_rel;
     check string "worktree rel stripped" "lib/foo.ml" worktree_rel)
 ;;

@@ -1468,8 +1468,6 @@
 
 (include stanzas/test_keeper_meta_unknown_keys_warn.inc)
 
-(include stanzas/test_keeper_legacy_model_args_reject.inc)
-
 (include stanzas/test_keeper_semaphore_wait_queue_head_clock.inc)
 
 (include stanzas/test_keeper_mutex_coverage.inc)

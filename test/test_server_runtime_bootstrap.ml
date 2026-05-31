@@ -1553,7 +1553,7 @@ let test_health_response_survives_deleted_cwd () =
              |> member "effective_base_path"
              |> to_string)))
 
-let execution_label = functionlet execution_label = function
+let execution_label = function
   | Server_runtime_bootstrap.Parallel -> "parallel"
   | Server_runtime_bootstrap.Serial -> "serial"
 
@@ -1606,7 +1606,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
         (Server_runtime_bootstrap.lazy_startup_task_names ())
   | _ -> Alcotest.fail "unexpected lazy startup group shape"
 
-let test_startup_state_json () =
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -2691,7 +2690,7 @@ let () =
             test_room_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "otel exporter setup failure is soft" `Quick
             test_otel_exporter_setup_failure_is_soft;
-          Alcotest.test_case "lazy startup plan parallelizes independent tasks"          Alcotest.test_case "lazy startup plan parallelizes independent tasks"
+          Alcotest.test_case "lazy startup plan parallelizes independent tasks"
             `Quick test_lazy_startup_plan_groups_independent_tasks;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;

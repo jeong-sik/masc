@@ -338,9 +338,9 @@ let () =
     [
       ( "registry_dispatch",
         [
-          test_case "phase event uses room base_path" `Quick
+          test_case "phase event uses workspace base_path" `Quick
             test_dispatch_keeper_phase_event_uses_room_base_path;
-          test_case "post-turn lifecycle events use room base_path" `Quick
+          test_case "post-turn lifecycle events use workspace base_path" `Quick
             test_dispatch_post_turn_lifecycle_events_uses_room_base_path;
           test_case "unscoped lifecycle event is rejected" `Quick
             test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;

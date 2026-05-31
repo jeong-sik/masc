@@ -1,4 +1,4 @@
-(** Receipt helpers used by coord task scheduling claim gates. *)
+(** Receipt helpers used by task scheduling claim gates. *)
 
 open Masc_domain
 open Coord_utils

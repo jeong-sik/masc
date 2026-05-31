@@ -94,5 +94,5 @@ val summary_signature : Meta_cognition_types.summary_input -> string
     lossy field — every other field round-trips losslessly into
     the digest.  A future "let's use a finer bucket" change must
     coordinate with the digest cache: existing cached digests
-    become invalid for the same coord state and the dashboard
+    become invalid for the same workspace state and the dashboard
     will see one round of digest churn. *)

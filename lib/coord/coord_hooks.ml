@@ -105,7 +105,7 @@ let observe_agent_lifecycle_fn
       (fun _config ~agent_id:_ ~event:_ ~details:_ -> ())
 
 (** Shared observability hook for task transitions.
-    Used by room task modules so every successful state transition is logged
+    Used by task modules so every successful state transition is logged
     consistently regardless of which tool or transport triggered it.
     #8605 family: [transition] is the canonical [Masc_domain.task_action]
     variant -- typos at call sites fail to compile and the JSON wire

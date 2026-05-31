@@ -9,4 +9,4 @@ let () =
         let result = S.resolve_masc_base_path "/some/other/path" in
         check string "returns cached value" cached_path result)
   in
-  run __FILE__ [ "coord base path cache", [ tc ] ]
+  run __FILE__ [ "workspace base path cache", [ tc ] ]

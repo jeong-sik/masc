@@ -406,7 +406,7 @@ let read_event_lines config ~limit =
     List.rev !collected
 
 (** Issue #8474: FSM transition matrix.  Each entry mirrors a match-arm
-    in [Coord_task.transition_task_r] (lib/coord/coord_task.ml ~line
+    in [task transition] (lib/coord/task_state.ml ~line
     831).  Verifier-FSM rows ([submit_for_verification],
     [approve_verification], [reject_verification]) are gated at runtime
     by [MASC_VERIFICATION_FSM_ENABLED] but listed unconditionally so

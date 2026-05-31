@@ -413,5 +413,5 @@ let () =
   test_write_intent_pr ();
   test_no_write_intent ();
   test_explicit_required_tools_preserved ();
-  print_endline "test_coord_task_lifecycle: all assertions passed"
+  print_endline "test_task_state_lifecycle: all assertions passed"
 ;;

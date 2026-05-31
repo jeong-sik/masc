@@ -1,6 +1,6 @@
 (** Coord_query -- Task/agent/message query and listing functions.
 
-    Read-only operations on coord state: raw list retrieval, orphan auditing,
+    Read-only operations on workspace state: raw list retrieval, orphan auditing,
     message collection, agent-session-bound checks, and formatted listing. *)
 
 open Masc_domain

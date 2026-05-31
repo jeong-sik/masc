@@ -275,7 +275,7 @@ let handoff_verified ~similarity : t =
 
     Issue #8364: previously emitted [status="in_progress"], which is the
     state AFTER the [Start] action. The [Claim] FSM transition is
-    [Todo -> Claimed] (see [lib/coord/coord_task.ml:752]); a separate
+    [Todo -> Claimed] (see [lib/coord/task_state.ml:752]); a separate
     [Start] is required to reach [InProgress]. Routing through the
     Variant SSOT prevents this from drifting again. *)
 let task_claimed ~task_id ~agent : t =

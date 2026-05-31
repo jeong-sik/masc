@@ -1,6 +1,6 @@
 (* RFC-0109 Phase E regression guard.
 
-   Before Phase E, [coord_task_verification.ml] applied a substring
+   Before Phase E, task-state verification applied a substring
    classifier (`pr_url` / `/pull/` / `commit:` / `branch:` / `file:` ...
    token matching) inside the transition layer's
    [verification_submission_evidence_refs]. Analysis-only tasks (no
@@ -106,7 +106,7 @@ let test_handoff_context_evidence_refs_survive_plain_string () =
 
 let () =
   Alcotest.run
-    "coord_task_verification_phase_e"
+    "task_state_verification_phase_e"
     [ ( "phase_e_regression"
       , [ Alcotest.test_case "analysis-only plain notes" `Quick
             test_analysis_only_with_plain_notes_keeps_notes

@@ -1406,15 +1406,15 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
       (contains_substring line "masc.mcp.ttl_sec=");
     Alcotest.(check bool) "oneshot cleanup attempts docker rm" true
       (contains_substring log "\nrm -f masc-keeper-");
-    Alcotest.(check bool) "room tasks mounted under runtime root" true
+    Alcotest.(check bool) "tasks mounted under runtime root" true
       (contains_substring
          line
          (tasks_host ^ ":/tmp/masc-runtime/.masc/tasks:ro"));
-    Alcotest.(check bool) "room tasks not nested under playground bind mount" false
+    Alcotest.(check bool) "tasks not nested under playground bind mount" false
       (contains_substring
          line
          (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro"));
-    Alcotest.(check bool) "room tasks not mounted at host absolute target" false
+    Alcotest.(check bool) "tasks not mounted at host absolute target" false
       (contains_substring
          line
          (tasks_host ^ ":" ^ tasks_host ^ ":ro"));

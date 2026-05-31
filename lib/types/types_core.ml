@@ -311,7 +311,7 @@ let task_display_assignee = function
   | Todo -> "unclaimed"
 
 (** Extract assignee as [Some string], or [None] for Todo/Cancelled.
-    Canonical ownership-check helper — used by coord_task, gRPC, etc. *)
+    Canonical ownership-check helper — used by task_state, gRPC, etc. *)
 let task_assignee_of_status = function
   | Claimed { assignee; _ } -> Some assignee
   | InProgress { assignee; _ } -> Some assignee

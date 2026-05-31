@@ -1455,9 +1455,9 @@ let () =
         test_resolve_with_policy_remembers_medium_allow;
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
         test_resolve_with_policy_does_not_remember_high_allow;
-      Alcotest.test_case "dashboard approve-always rules use room base_path" `Quick
+      Alcotest.test_case "dashboard approve-always rules use workspace base_path" `Quick
         test_dashboard_resolve_and_delete_rules_use_room_base_path;
-      Alcotest.test_case "submit_pending audit uses room base_path" `Quick
+      Alcotest.test_case "submit_pending audit uses workspace base_path" `Quick
         test_submit_pending_audit_uses_room_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;

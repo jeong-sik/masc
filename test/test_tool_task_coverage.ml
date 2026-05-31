@@ -1473,7 +1473,7 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
    [transition_submit_for_verification_rejects_placeholder_evidence_ref])
    have been removed: their intent was the exact behaviour Phase E
    removes.  Phase E semantics is now pinned by
-   [test/test_coord_task_verification_phase_e.ml] (5 cases) and by
+   [test/test_task_state_verification_phase_e.ml] (5 cases) and by
    the typed CDAL verdict consultation in
    [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)

@@ -1,5 +1,5 @@
-(** Verification-evidence helpers for coord task lifecycle,
-    extracted from coord_task.ml.
+(** Verification-evidence helpers for task lifecycle,
+    extracted from task_state.ml.
 
     Phase D (RFC-0109 #18715) routed contracted submissions through the
     typed [Cdal_evidence_gate] decision. Phase E (this module rewrite)

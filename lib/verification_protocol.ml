@@ -17,7 +17,7 @@
      [task.contract.completion_contract] wrapped in [Verification.Custom].
    - [evidence_refs]: the artefact list the verifier expects to see →
      [task.contract.verify_gate_evidence] plus required evidence refs,
-     passed in by the caller at [coord_task.ml] so this function does
+     passed in by the caller at task-state lifecycle so this function does
      not reach into task.contract twice for different fields. *)
 type submit_request_spec =
   { criteria : Verification.criterion list

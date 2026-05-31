@@ -4,7 +4,7 @@ open Masc_mcp
 
 let with_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_room_messages_%d_%d" (Unix.getpid ())
+    (Printf.sprintf "masc_messages_%d_%d" (Unix.getpid ())
        (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   Eio_main.run @@ fun env ->

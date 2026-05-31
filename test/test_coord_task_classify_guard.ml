@@ -123,7 +123,7 @@ let test_empty_list_with_required_tools_rejects () =
   | Error _ -> ()
 
 let () =
-  Alcotest.run "coord_task_classify.required_tool_claim_guard"
+  Alcotest.run "task_state_classify.required_tool_claim_guard"
     [
       ( "unknown surface (None)",
         [

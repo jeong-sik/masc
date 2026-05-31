@@ -2,7 +2,7 @@
 
     Runs as an Eio daemon fiber per [base_path]: every
     [Env_config.Operator.judge_interval_sec], it asks an operator-judge
-    keeper to evaluate coord health using freshly built facts, then
+    keeper to evaluate workspace health using freshly built facts, then
     caches the verdict (and "is the judge online?" status) for HTTP
     consumption.
 

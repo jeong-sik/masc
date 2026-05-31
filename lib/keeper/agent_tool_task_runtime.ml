@@ -592,7 +592,7 @@ let handle_keeper_task_tool
      | Coord.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
-          (coord_task_schedule.ml:302). When the task is already InProgress,
+          (task_state_schedule.ml:302). When the task is already InProgress,
           dispatching Start produces an InvalidState transition error every
           cycle. Only auto-start when the task is in a pre-start state. *)
        let needs_start =

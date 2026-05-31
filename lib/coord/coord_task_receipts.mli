@@ -1,4 +1,4 @@
-(** Receipt helpers used by coord task scheduling claim gates. *)
+(** Receipt helpers used by task scheduling claim gates. *)
 
 val build_allowed_set : string list -> (string, unit) Hashtbl.t
 val underscore_name : string -> string

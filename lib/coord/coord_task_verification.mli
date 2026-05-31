@@ -1,4 +1,4 @@
-(** Verification-evidence helpers for coord task lifecycle.
+(** Verification-evidence helpers for task lifecycle.
 
     Substring-classifier predicates were retired in Phase E (RFC-0109
     closeout). The legacy [text_has_verification_artifact_ref] /

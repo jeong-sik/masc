@@ -36,7 +36,7 @@ function mentionsLabel(targets: readonly string[]): string {
 }
 
 export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
-  const cascade = config.execution.selected_cascade_name || '—'
+  const runtime = config.execution.selected_runtime_id || '—'
   const sandbox = config.sandbox_profile ?? '(unknown sandbox_profile)'
   const network = config.network_mode ?? '(unknown network_mode)'
   const handoff = `${config.handoff.auto ? 'on' : 'off'} · threshold ${config.handoff.threshold}`
@@ -57,7 +57,7 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
         <span class="text-2xs text-text-disabled">read-only · 변경은 아래 편집 영역</span>
       </header>
       <dl class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
-        <${ToolAccessRow} label="cascade" value=${cascade} />
+        <${ToolAccessRow} label="runtime" value=${runtime} />
         <${ToolAccessRow} label="sandbox" value=${sandbox} />
         <${ToolAccessRow} label="network" value=${network} />
         <${ToolAccessRow} label="auto handoff" value=${handoff} />

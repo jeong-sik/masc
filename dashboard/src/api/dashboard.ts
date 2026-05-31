@@ -2231,9 +2231,14 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
             ? 'override'
             : 'turn_budget_heuristic'),
       verify: asLooseBoolean(execution.verify),
-      selected_cascade_name: asNullableString(execution.selected_cascade_name) ?? '',
-      selected_cascade_canonical:
-        asNullableString(execution.selected_cascade_canonical)
+      selected_runtime_id:
+        asNullableString(execution.selected_runtime_id)
+        ?? asNullableString(execution.selected_cascade_name)
+        ?? '',
+      selected_runtime_canonical:
+        asNullableString(execution.selected_runtime_canonical)
+        ?? asNullableString(execution.selected_cascade_canonical)
+        ?? asNullableString(execution.selected_runtime_id)
         ?? asNullableString(execution.selected_cascade_name)
         ?? '',
     },

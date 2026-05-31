@@ -1306,8 +1306,8 @@ describe('fetchKeeperConfig', () => {
         per_provider_timeout_sec: 12.5,
         per_provider_timeout_mode: 'override',
         verify: 'true',
-        selected_cascade_name: 'keeper_unified',
-        selected_cascade_canonical: 'keeper_unified',
+        selected_runtime_id: 'keeper_unified',
+        selected_runtime_canonical: 'keeper_unified',
       },
       compaction: {
         profile: 'balanced',
@@ -1439,8 +1439,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.sandbox_environment?.require_userns).toBe(true)
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)
-    expect(result.execution.selected_cascade_name).toBe('keeper_unified')
-    expect(result.execution.selected_cascade_canonical).toBe('keeper_unified')
+    expect(result.execution.selected_runtime_id).toBe('keeper_unified')
+    expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.per_provider_timeout_sec).toBe(12.5)
     expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])

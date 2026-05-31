@@ -542,8 +542,8 @@ function dockerStatusLabel(c: KeeperConfig): string {
 }
 
 function cascadeSelectionSummary(c: KeeperConfig): string {
-  const selected = c.execution.selected_cascade_name || MISSING_DATA_DASH
-  const canonical = c.execution.selected_cascade_canonical || selected
+  const selected = c.execution.selected_runtime_id || MISSING_DATA_DASH
+  const canonical = c.execution.selected_runtime_canonical || selected
   const manifest = c.sources.default_manifest_path
   const selectionPart = manifest
     ? `선택은 ${manifest} 에서 관리됩니다.`
@@ -732,7 +732,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${Callout}
         title="편집 가능 범위"
-        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 런타임은 keeper별 설정이 아니라 resolved config root의 cascade.toml 해석 결과로 결정됩니다."
+        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 런타임은 keeper별 설정이 아니라 resolved runtime 설정로 결정됩니다."
       />
 
       ${promptSection}
@@ -746,16 +746,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${MajorSectionHeader} title="소스" />
       <${Callout}
-        title="Cascade 선택"
+        title="Runtime 선택"
         body=${cascadeSelectionSummary(c)}
       />
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
-      <${ConfigRow} label="선택 cascade" value=${c.execution.selected_cascade_name || MISSING_DATA_DASH} />
-      ${c.execution.selected_cascade_canonical
-        && c.execution.selected_cascade_canonical !== c.execution.selected_cascade_name
+      <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
+      ${c.execution.selected_runtime_canonical
+        && c.execution.selected_runtime_canonical !== c.execution.selected_runtime_id
         ? html`<${ConfigRow}
-            label="정규화 cascade"
-            value=${c.execution.selected_cascade_canonical}
+            label="정규화 runtime"
+            value=${c.execution.selected_runtime_canonical}
           />`
         : null}
       <${BoolRow} label="라이브 오버라이드" value=${c.sources.has_live_override} />

@@ -1328,7 +1328,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
       ~tool_name:"masc_join" ~arguments ~identity
       ~cached_resolved_agent:(Some "cached-stale-nickname")
       ~auth_token:None ~internal_keeper_runtime:false
-      ~coord_initialized:(fun () -> false)
+      ~room_initialized:(fun () -> false)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   let agent_code =
@@ -1368,7 +1368,7 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~arguments:(`Assoc [ ("agent_name", `String "alpha-agent") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
-      ~coord_initialized:(fun () -> true)
+      ~room_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
@@ -1460,6 +1460,7 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1467,7 +1468,8 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
-  ignore ((* fire-and-forget: test fixture session setup. *) Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.coord_config ~title:"explicit-alias-claim-next"
        ~priority:2 ~description:"");
@@ -1491,6 +1493,7 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1498,7 +1501,8 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
-  ignore ((* fire-and-forget: test fixture session setup. *) Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.coord_config ~title:"explicit-alias-transition"
        ~priority:2 ~description:"");
@@ -1528,6 +1532,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1566,9 +1571,11 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
-  ignore ((* fire-and-forget: test fixture session setup. *) Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.coord_config ~title:"claim-next-auth-preflight"
        ~priority:2 ~description:"");
@@ -1594,9 +1601,11 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
-  ignore ((* fire-and-forget: test fixture session setup. *) Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Masc_mcp.Coord.bind_session state.coord_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.coord_config ~title:"transition-auth-preflight"
        ~priority:2 ~description:"");
@@ -1628,6 +1637,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1676,7 +1686,7 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
       ~identity ~cached_resolved_agent:None
       ~auth_token:(Some "http-auth-token")
       ~internal_keeper_runtime:false
-      ~coord_initialized:(fun () -> true)
+      ~room_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1699,7 +1709,7 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
-      ~coord_initialized:(fun () -> true)
+      ~room_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1722,7 +1732,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
       ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
-      ~coord_initialized:(fun () -> true)
+      ~room_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
@@ -1765,6 +1775,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
@@ -1800,6 +1811,7 @@ let test_handle_request_tools_call_logs_structured_mcp_details () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
       let request =
         Yojson.Safe.to_string
@@ -1875,6 +1887,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
         (Keeper_registry.register ~base_path keeper_name
            (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:None);
       let request =
         Yojson.Safe.to_string
@@ -2522,6 +2535,7 @@ let test_handle_request_resources_read_matrix () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* See: fixture setup; returned init state is not used. *)
   ignore (Masc_mcp.Coord.init state.coord_config ~agent_name:(Some "fixture-root"));
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755

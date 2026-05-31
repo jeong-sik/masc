@@ -44,14 +44,10 @@ let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 ;;
 
-(* Room-less message feed.  The room-state purge removed the per-room cursor
-   [last_seen_seq_by_room] and the [joined_room_ids] iteration this scan used to
-   walk.  [Coord.get_all_messages_raw ~since_seq] was already a single global
-   stream (the per-room loop just called it once per room), so the feed
-   collapses to one scan since the global [meta.runtime.last_seen_message_seq]
-   cursor.  Direct @mention detection (the feed's contract) is preserved; the
-   former broad-scope branch was gated on the now-purged
-   [room_signal_prompt_enabled] setting, so scope_messages is always empty. *)
+(* Message feed cursor for direct @mention detection.  The feed advances through
+   [Coord.get_all_messages_raw ~since_seq] using
+   [meta.runtime.last_seen_message_seq], so each keeper scans each message once
+   across heartbeats. *)
 let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta)
   : (string * string) list * (string * string) list * (string * int) list
   =

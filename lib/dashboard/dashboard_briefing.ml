@@ -199,12 +199,8 @@ let rec evidence_preview_strings json =
       fields |> List.map snd |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
   | _ -> []
 
-(* Issue #8395: root-level attention uses [target_type="coord"].  This
-   predicate previously compared only to the literal "coord", so the
-   canonical form fell through to the public queue.  Delegate to the
-   shared canonical target check used by [Dashboard_briefing_assembly]. *)
 let is_internal_attention incident =
-  Operator_digest_types.is_root_target_type (string_field "target_type" incident)
+  Operator_digest_types.is_omitted_target_type (string_field "target_type" incident)
 
 let related_sessions_for_attention incident sessions =
   let direct_session =
@@ -360,11 +356,7 @@ let build_projection ?actor ~config ~sw ~clock
                 ("error", `String message);
               ])
   in
-  let namespace_json =
-    match member_assoc "coord" snapshot_json with
-    | `Assoc _ as value -> value
-    | _ -> member_assoc "coord" snapshot_json
-  in
+  let namespace_json = snapshot_json in
   let incidents =
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->

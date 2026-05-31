@@ -57,7 +57,6 @@ type keeper = {
 type response = {
   keepers : keeper list;
   cycle : int;                  (* current cycle number *)
-  coord : string option;         [@default None]
   generated_at : string;        (* ISO-8601 UTC *)
 }
 [@@deriving yojson { strict = false }]

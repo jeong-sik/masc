@@ -626,8 +626,8 @@ let operator_entries =
       "Operator judge background loop (feature flag)";
     entry ~default:"60" "MASC_OPERATOR_JUDGE_INTERVAL_SEC"
       "Operator judge interval (clamped >=15 seconds)";
-    entry ~default:"60" "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC"
-      "Coord TTL for operator judge cleanup (clamped >=15 seconds)";
+    entry ~default:"60" "MASC_OPERATOR_JUDGE_TTL_SEC"
+      "Judgment TTL for operator judge cleanup (clamped >=15 seconds)";
     entry ~default:"300" "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC"
       "Session TTL for operator judge cleanup (clamped >=30 seconds)";
   ]

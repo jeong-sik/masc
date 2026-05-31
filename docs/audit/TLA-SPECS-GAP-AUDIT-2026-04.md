@@ -86,9 +86,8 @@ Scanning `specs/INDEX.md` for `clean={X} buggy={X}` matches:
 | `bug-models/KeeperPhaseRace.tla` | `{TypeOK, CrashImpliesThreshold, RecordOnlyOnCrash, CounterBoundedByObservations}` |
 | `bug-models/MemoryCompaction.tla` | `{ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected}` |
 | `bug-models/SSEBroadcastBlock.tla` | `{TypeOK, NoPermanentBlock}` |
-| `bug-models/SessionRegistryGhost.tla` | `{TypeOK, ConsistencyInvariant}` |
 
-**21 specs** have textually identical clean and buggy invariant sets.
+**20 specs** have textually identical clean and buggy invariant sets.
 
 This **may** still be valid: the buggy cfg can override the `Spec`/`Init`/`Next` action (e.g. via a separate `SpecBuggy` definition that includes `BugAction`) while keeping the same invariants — that *is* the AGENT-LLM-A.md pattern. To confirm, the buggy `.cfg` file must reference a different `SPECIFICATION` than the clean `.cfg`.
 

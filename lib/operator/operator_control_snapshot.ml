@@ -624,10 +624,6 @@ let _snapshot_recent_completed_limit () =
   Dashboard_http_helpers.operator_snapshot_recent_completed_limit ()
 ;;
 
-(* sessions_json removed — team session cleanup. Sessions always return []. *)
-
-let coord_json = Operator_control_snapshot_coord.coord_json
-
 (* snapshot_view variant + parser extracted to
    [Operator_control_snapshot_view] (godfile decomp). *)
 type snapshot_view = Operator_control_snapshot_view.snapshot_view =
@@ -809,7 +805,6 @@ let snapshot_json
       | Summary | Messages | Full -> true
       | Sessions | Keepers -> false
     in
-    (* Team sessions removed — status_cache and session digests no longer needed. *)
     let status_cache : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 0 in
     let summary_fields =
       timed "summary_fields" (fun () ->
@@ -821,13 +816,13 @@ let snapshot_json
           | Summary | Full -> true
           | Sessions | Keepers | Messages -> false
         then (
-          let coord_attention =
-            build_coord_attention_items config |> List.sort compare_attention
+          let operator_attention =
+            build_operator_attention_items config |> List.sort compare_attention
           in
-          let coord_recommendation_items = coord_recommendations config in
-          [ "attention_summary", summary_of_attention_items coord_attention
+          let operator_recommendation_items = operator_recommendations config in
+          [ "attention_summary", summary_of_attention_items operator_attention
           ; ( "recommendation_summary"
-            , summary_of_recommendations ~actor:actor_name coord_recommendation_items )
+            , summary_of_recommendations ~actor:actor_name operator_recommendation_items )
           ])
         else [])
     in
@@ -844,11 +839,10 @@ let snapshot_json
         ([ "trace_id", `String trace_id
          ; "server_profile", operator_server_profile_json
          ; "operator_judge_runtime", operator_judge_runtime_json config
-         ; "judgment_owner", `String "fallback_read_model"
-         ; "authoritative_judgment_available", `Bool false
-         ; "admission_queue", Admission_queue.snapshot_json ()
-         ; "coord", coord_json config
-         ]
+	         ; "judgment_owner", `String "fallback_read_model"
+	         ; "authoritative_judgment_available", `Bool false
+	         ; "admission_queue", Admission_queue.snapshot_json ()
+	         ]
          @ ((* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
             let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in
             let sessions_ref = ref empty_section in
@@ -856,7 +850,6 @@ let snapshot_json
             let persistent_ref = ref empty_section in
             Eio.Fiber.all
               [ (fun () ->
-                  (* Team sessions removed — always empty *)
                   ignore (lightweight_summary, status_cache);
                   sessions_ref := empty_section)
               ; (fun () ->

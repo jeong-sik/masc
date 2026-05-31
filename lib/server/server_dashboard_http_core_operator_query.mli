@@ -14,10 +14,7 @@ val operator_snapshot_query_json :
 
 val operator_digest_query_json :
   actor:string option ->
-  target_type:string option ->
-  target_id:string option ->
   include_workers:bool option ->
-  effective_target_type:string ->
   default_namespace_request:bool ->
   Yojson.Safe.t
 

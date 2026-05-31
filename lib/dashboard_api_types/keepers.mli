@@ -57,7 +57,6 @@ val keeper_to_yojson : keeper -> Yojson.Safe.t
 type response = {
   keepers : keeper list;
   cycle : int;                 (** current cycle number *)
-  coord : string option;
   generated_at : string;       (** ISO-8601 UTC *)
 }
 

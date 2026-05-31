@@ -1,32 +1,15 @@
 (** Active-guidance layer for operator digest.
 
     Resolves whether a fresh operator judgment exists for the given
-    target and builds the guidance fields accordingly.  Falls back to
+    surface and builds the guidance fields accordingly.  Falls back to
     deterministic recommendations when no judgment is available. *)
 
 module U = Yojson.Safe.Util
 
-let normalize_target_type value =
-  String.trim value |> String.lowercase_ascii
-
-let judgment_surface_for_target_type target_type =
-  if Operator_digest_types.is_root_target_type target_type then Some "command.namespace"
-  else None
-
-let fresh_operator_judgment config ~target_type ~target_id =
-  let target_type = normalize_target_type target_type in
-  match
-    ( Operator_judgment.target_type_of_string target_type,
-      judgment_surface_for_target_type target_type )
-  with
-  | Some judgment_target_type, Some surface -> (
-      match
-        Operator_judgment.latest_active config ~surface
-          ~target_type:judgment_target_type ~target_id
-      with
-      | Some value when Operator_judgment.is_fresh value ->
-          Some (Operator_judgment.to_yojson value)
-      | _ -> None)
+let fresh_operator_judgment config =
+  match Operator_judgment.latest_active config ~surface:"command.namespace" with
+  | Some value when Operator_judgment.is_fresh value ->
+      Some (Operator_judgment.to_yojson value)
   | _ -> None
 
 let judgment_summary_json judgment_json =
@@ -43,14 +26,13 @@ let judgment_summary_json judgment_json =
       ("disagreement_with_truth", judgment_json |> U.member "disagreement_with_truth");
     ]
 
-let active_guidance_fields ~config ~actor ~target_type ~target_id
-    ~fallback_recommendations ~fallback_summary =
+let active_guidance_fields ~config ~actor ~fallback_recommendations ~fallback_summary =
   let fallback_recommendation_json =
     `List
       (List.map (Operator_digest_types.recommended_action_to_yojson ~actor)
          fallback_recommendations)
   in
-  match fresh_operator_judgment config ~target_type ~target_id with
+  match fresh_operator_judgment config with
   | Some judgment_json ->
       let recommended_action_opt =
         Json_util.get_object judgment_json "recommended_action"

@@ -8,7 +8,8 @@
     RFC-0088 §4 Option A (2026-05-15): [For_testing.warn_telemetry_drop]
     now takes a typed [Coord_telemetry_drop_event.t] instead of two free
     strings. The Prometheus label values remain byte-for-byte identical
-    (["agent_lifecycle", "leave"] / ["agent_lifecycle", "join"]) so the
+    (["agent_lifecycle", "session_ended"] /
+    ["agent_lifecycle", "session_bound"]) so the
     assertions below — which still pin the wire label values — are the
     correct regression coverage for the swap-over. *)
 
@@ -31,13 +32,14 @@ let test_lifecycle_drop_increments_counter () =
     (Failure "simulated non-Eio telemetry drop");
   let after = counter_value ~event_family ~event_kind in
   Alcotest.(check (float 0.001))
-    "drop counter increments by exactly 1 for the leave label"
+    "drop counter increments by exactly 1 for the session_ended label"
     1.0 (after -. before)
 
-(* Same path, join variant: the warn label switches to "join" so a
-   single regression on the wrong label key (e.g. hard-coded "leave")
+(* Same path, session-bound variant: the warn label switches to
+   "session_bound" so a single regression on the wrong label key
+   (e.g. hard-coded "session_ended")
    would still pass the test above. *)
-let test_lifecycle_drop_join_label () =
+let test_lifecycle_drop_session_bound_label () =
   let event : Coord_telemetry_drop_event.t =
     Agent_lifecycle Session_bound
   in
@@ -48,7 +50,7 @@ let test_lifecycle_drop_join_label () =
     (Failure "simulated non-Eio telemetry drop");
   let after = counter_value ~event_family ~event_kind in
   Alcotest.(check (float 0.001))
-    "drop counter increments by exactly 1 for the join label"
+    "drop counter increments by exactly 1 for the session_bound label"
     1.0 (after -. before)
 
 (* RFC-0088 §4 Option A: confirm the wire mapping is byte-for-byte
@@ -93,10 +95,10 @@ let () =
     [
       ( "non_eio_drop",
         [
-          Alcotest.test_case "leave label increments counter" `Quick
+          Alcotest.test_case "session_ended label increments counter" `Quick
             test_lifecycle_drop_increments_counter;
-          Alcotest.test_case "join label increments counter" `Quick
-            test_lifecycle_drop_join_label;
+          Alcotest.test_case "session_bound label increments counter" `Quick
+            test_lifecycle_drop_session_bound_label;
           Alcotest.test_case "wire mapping stable across all 3 families"
             `Quick test_wire_mapping_stable;
         ] );

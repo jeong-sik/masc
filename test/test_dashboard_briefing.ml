@@ -73,15 +73,20 @@ let write_pending_confirm config _session_id =
 
 let seed_coord config session_id =
   ignore (Lib.Coord.init config ~agent_name:(Some "fixture-root"));
-  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"mission-local64-smoke"
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Lib.Coord.bind_session config ~agent_name:"mission-local64-smoke"
             ~capabilities:[ "operator"; "fixture"; "local64" ] ());
-  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-alpha"
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-alpha"
             ~capabilities:[ "worker"; "local64"; "manager" ] ());
-  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-beta"
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-beta"
             ~capabilities:[ "worker"; "local64"; "metacog" ] ());
-  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-gamma"
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-gamma"
             ~capabilities:[ "worker"; "local64"; "executor" ] ());
-  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-delta"
+  (* See: fixture session setup; returned agent record is not used. *)
+  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-delta"
             ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
     (Lib.Coord.broadcast config ~from_agent:"mission-local64-smoke"
@@ -163,15 +168,15 @@ let test_dashboard_briefing_projection () =
         (internal_signals
          |> List.exists (fun row ->
               contains (row |> member "summary" |> to_string) "pending confirmation"));
-      (* coord broadcast actions require microarch signal tones "warn"/"bad",
+      (* Broadcast actions require microarch signal tones "warn"/"bad",
          which need non-empty command-plane operations. In a clean test
-         fixture all 9 signals default to "ok", so coord_recommendations
-         returns []. Verify internal_signals carries the pending-confirm
-         incident instead — that is the reachable coord-level signal. *)
-      check bool "internal signals are coord-scoped" true
+         fixture all 9 signals default to "ok", so recommendations are
+         empty. Verify internal_signals carries the pending-confirm incident
+         without emitting a pseudo target. *)
+      check bool "internal signals omit pseudo target" true
         (internal_signals
          |> List.for_all (fun row ->
-              row |> member "target_type" |> to_string = "coord")))
+              row |> member "target_type" = `Null)))
 
 let test_dashboard_briefing_http_full_contract () =
   let dir = test_dir () in

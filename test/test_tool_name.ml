@@ -22,15 +22,18 @@ let all_masc : Tool_name.Masc.t list =
   ; Batch_add_tasks; Board_cleanup; Board_comment; Board_comment_vote
   ; Board_curation_read; Board_curation_submit
   ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
-  ; Board_profile; Board_search
-  ; Board_stats; Board_vote; Broadcast; Check; Claim_next
+  ; Board_profile; Board_reaction; Board_search
+  ; Board_stats; Board_sub_board_create; Board_sub_board_delete
+  ; Board_sub_board_get; Board_sub_board_list; Board_sub_board_update
+  ; Board_vote; Broadcast; Check; Claim_next
   ; Cleanup_zombies; Dashboard; Deliver
+  ; Goal_list; Goal_transition; Goal_upsert; Goal_verify
   ; Heartbeat; Messages; Note_add
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
   ; Plan_update; Reset
   ; Status; Task_history; Tasks; Tool_grant; Tool_help
-  ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search
+  ; Tool_list; Tool_revoke; Transition; Update_priority; Web_fetch; Web_search
   ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
   ; Pause; Resume; Start; Tool_admin_snapshot; Tool_admin_update
   ; Tool_stats ]
@@ -84,7 +87,8 @@ let test_roundtrip_toplevel () =
    These are shared-surface tools whose canonical string id starts
    with "tool_" rather than "keeper_" (see PR #18520, #18779). *)
 let keeper_shared_surface_prefixes =
-  [ "tool_execute"; "tool_edit_file"; "tool_read_file"; "tool_search_files" ]
+  [ "tool_execute"; "tool_edit_file"; "tool_read_file"; "tool_search_files"
+  ; "tool_write_file" ]
 
 let test_keeper_prefix () =
   List.iter (fun k ->

@@ -1,6 +1,6 @@
 let clamp_limit limit = Server_utils.clamp ~min_v:1 ~max_v:200 limit
 let fetch_limit limit = Server_utils.clamp ~min_v:limit ~max_v:1000 (limit * 5)
-let workspace_id = "coord"
+let workspace_id = "workspace"
 let workspace_name = "Workspace timeline"
 
 let take = List.take
@@ -100,7 +100,9 @@ let message_id (msg : Masc_domain.message) = Printf.sprintf "msg-%09d" msg.seq
 
 let is_workspace_message (msg : Masc_domain.message) =
   let msg_type = String.lowercase_ascii (String.trim msg.msg_type) in
-  not (String.starts_with ~prefix:"lifecycle_" msg_type)
+  match msg_type with
+  | "session_bound" | "session_rebound" | "session_ended" -> false
+  | _ -> not (String.starts_with ~prefix:"lifecycle_" msg_type)
 ;;
 
 let block_kind_of_message (msg : Masc_domain.message) =

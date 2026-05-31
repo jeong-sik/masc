@@ -902,7 +902,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
     (namespace_truth_metadata_fields ~config ~generated_at
      @ [
          ("generated_at", `String generated_at);
-        ("coord", namespace_block);
+        ("workspace", namespace_block);
         ( "execution",
         `Assoc
           [

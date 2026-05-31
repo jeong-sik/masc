@@ -51,9 +51,8 @@ Necessary condition: different `SPECIFICATION` name. Sufficient confirmation: sp
 | bug-models/KeeperPhaseRace | Spec | SpecBuggy | **VALID** |
 | bug-models/MemoryCompaction | Spec | SpecBuggy | **VALID** |
 | bug-models/SSEBroadcastBlock | SpecClean | SpecBuggy | **VALID** |
-| bug-models/SessionRegistryGhost | SpecClean | SpecBuggy | **VALID** |
 
-**21/21 VALID. Zero true tautologies.**
+**20/20 VALID. Zero true tautologies.**
 
 ## 4. Spot-check confirmation (sample of 4)
 

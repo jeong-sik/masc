@@ -528,7 +528,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
               let resilience_handles =
-                Keeper_turn_cascade_budget.post_turn_resilience_handles
+                Keeper_turn_runtime_budget.post_turn_resilience_handles
                   ~config:ctx.config ~meta
               in
               let lifecycle =

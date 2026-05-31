@@ -1,7 +1,7 @@
 (* Keeper_unified_turn_pre_dispatch — RFC-0136 PR-3.
 
    Extracted from keeper_unified_turn.ml (L166-228) during the
-   run_keeper_cycle stage decomposition. Owns the cascade-execution
+   run_keeper_cycle stage decomposition. Owns the runtime-execution
    builder + unified-max-tokens fallback. *)
 
 open Keeper_types
@@ -24,11 +24,11 @@ let resolve_unified_max_tokens_fallback
   | Some value -> value
   | None -> Keeper_config.keeper_unified_max_tokens ()
 
-let build_cascade_execution
+let build_runtime_execution
       ~(meta : keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(cascade_name : string)
-  : ( Keeper_turn_cascade_budget.cascade_execution
+  : ( Keeper_turn_runtime_budget.runtime_execution
     , Agent_sdk.Error.sdk_error )
     result
   =
@@ -49,7 +49,7 @@ let build_cascade_execution
            model_labels
        in
        let max_context =
-         Keeper_turn_cascade_budget.resolved_max_context_for_turn
+         Keeper_turn_runtime_budget.resolved_max_context_for_turn
            ~meta
            model_labels
        in
@@ -80,7 +80,7 @@ let build_cascade_execution
             (Keeper_meta_contract.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->
           Ok
-            { Keeper_turn_cascade_budget.cascade_name
+            { Keeper_turn_runtime_budget.cascade_name
             ; max_context_resolution
             ; max_context
             ; temperature

@@ -15,7 +15,7 @@ module Social = Keeper_social_model
 module KCP = Keeper_runtime_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
-include Keeper_turn_cascade_budget
+include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
 (* RFC-0132 PR-2: removed dead [runtime_lane_label] (0 callers). *)
@@ -169,7 +169,7 @@ let run_keeper_cycle
          in
          let effective_cascade_runtime_name = effective_cascade_name in
          (match
-            Keeper_unified_turn_pre_dispatch.build_cascade_execution
+            Keeper_unified_turn_pre_dispatch.build_runtime_execution
               ~meta
               ~profile_defaults
               ~cascade_name:effective_cascade_runtime_name

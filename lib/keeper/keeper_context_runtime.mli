@@ -123,7 +123,7 @@ type post_turn_lifecycle =
 type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
-  ; cascade_budget : int
+  ; runtime_budget : int
   ; turn_budget : int
   ; effective_budget : int
   }

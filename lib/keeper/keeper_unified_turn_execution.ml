@@ -14,12 +14,12 @@ open Result.Syntax
 module KCP = Keeper_runtime_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
-include Keeper_turn_cascade_budget
+include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
 type retry_loop_input =
   { run_meta : keeper_meta
-  ; execution : cascade_execution
+  ; execution : runtime_execution
   ; run_generation : int
   ; attempt : int
   ; is_retry : bool
@@ -40,12 +40,12 @@ type ctx =
   ; config : Coord.config
   ; current_turn_blocker_info : blocker_info option ref
   ; degraded_retry_info : EC.degraded_retry option ref
-  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_cascade_budget.turn_event_bus_summary
+  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
   ; failure_reason : Keeper_turn_fsm.failure_reason option ref
   ; generation : int
   ; keeper_turn_id : int
-  ; last_execution : cascade_execution ref
+  ; last_execution : runtime_execution ref
   ; last_provider_timeout_budget : provider_timeout_budget option ref
   ; max_cost_usd : float option
   ; meta : keeper_meta
@@ -70,7 +70,7 @@ type ctx =
   }
 
 let run (ctx : ctx)
-      ~(initial_execution : cascade_execution)
+      ~(initial_execution : runtime_execution)
       ~(timeout_sec : float)
       ~(remaining_turn_budget_s : unit -> float)
       ~(retry_phase_started_at : float option ref)
@@ -123,7 +123,7 @@ let run (ctx : ctx)
    | Error msg -> Error (Agent_sdk.Error.Internal msg)
    | Ok clock ->
    let do_run
-        ~(execution : cascade_execution)
+        ~(execution : runtime_execution)
         ~run_meta
         ~run_generation
         ~is_retry
@@ -289,11 +289,11 @@ let run (ctx : ctx)
         in
         let attempt_kind =
           if is_retry
-          then Keeper_turn_cascade_budget.Retry_attempt
-          else Keeper_turn_cascade_budget.First_attempt
+          then Keeper_turn_runtime_budget.Retry_attempt
+          else Keeper_turn_runtime_budget.First_attempt
         in
         (match
-           Keeper_turn_cascade_budget.decide_retry_admission_for_turn
+           Keeper_turn_runtime_budget.decide_retry_admission_for_turn
              ~remaining_turn_budget_s:remaining_turn_budget_sec
              ~attempt_kind
              ~allow_wall_clock_retry_budget
@@ -492,7 +492,7 @@ let run (ctx : ctx)
         | Degraded_retry_allowed degraded_retry ->
           (match
              Keeper_unified_turn_pre_dispatch
-             .build_cascade_execution
+             .build_runtime_execution
                ~meta
                ~profile_defaults
                ~cascade_name:

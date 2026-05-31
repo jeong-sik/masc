@@ -146,7 +146,7 @@ type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
 type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;
-  cascade_budget : int;
+  runtime_budget : int;
   turn_budget : int;
   effective_budget : int;
 }
@@ -344,7 +344,7 @@ let resolve_max_context_resolution ~requested_override (_labels : string list)
      budgets both resolve to the default runtime's model context window. *)
   let default_budget = Runtime.default_max_context () |> clamp in
   let primary_budget = default_budget in
-  let cascade_budget = default_budget in
+  let runtime_budget = default_budget in
   let turn_budget =
     match requested_override with
     | Some requested when requested > 0 ->
@@ -352,7 +352,7 @@ let resolve_max_context_resolution ~requested_override (_labels : string list)
     | _ -> primary_budget
   in
   let effective_budget = min turn_budget primary_budget in
-  { requested_override; primary_budget; cascade_budget; turn_budget; effective_budget }
+  { requested_override; primary_budget; runtime_budget; turn_budget; effective_budget }
 
 let resolve_max_context_resolution_of_meta (m : keeper_meta)
     : max_context_resolution =

@@ -49,7 +49,7 @@ PR #17913 merged to main (commit `42f2851387`). Full call chain verified end-to-
 
 ## Key Path
 
-`keeper_task_claim` → `Coord.Claim_next_no_eligible` with `scope_excluded_count` →
+`keeper_task_claim` → `Workspace.Claim_next_no_eligible` with `scope_excluded_count` →
 `No_progress { reason = No_eligible_tasks { scope_excluded_count; blocked_count; verification_blocked_count; required_tool_excluded_count; all_goals_excluded } }` →
 `classify_tool_progress_with_outcome` → `Streak_reset_and_empty_queue_sleep` →
 `record_turn_effect` resets streak and triggers detection latch.

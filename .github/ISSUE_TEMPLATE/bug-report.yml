@@ -17,7 +17,7 @@ body:
     attributes:
       label: Product area
       options:
-        - Repo coordination
+        - Repo workspace
         - Supervised delivery
         - Dashboard and read models
         - Operator and intervention
@@ -44,7 +44,7 @@ body:
     attributes:
       label: Promise affected
       options:
-        - repo coordination
+        - repo workspace
         - ops visibility
         - experimental or internal
     validations:

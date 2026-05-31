@@ -114,21 +114,18 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   (* #10474: emit Prometheus counters for no_tool_provider and proactive
      cycle outcomes so Grafana can surface fleet-wide health ratios. *)
   (match sdk_error with
-   | Some err ->
-       (match Keeper_turn_driver.classify_masc_internal_error err with
-        | Some (Keeper_turn_driver.Runtime_exhausted
+     | Some err ->
+         (match Keeper_turn_driver.classify_masc_internal_error err with
+          | Some (Keeper_turn_driver.Runtime_exhausted
 	                  { runtime_id
 	                  ; reason = Keeper_meta_contract.No_tool_capable _
 	                  ; _
 	                  }) ->
-            let runtime_id =
-              runtime_id
-            in
             Prometheus.inc_counter
               Keeper_metrics.(to_string NoToolProvider)
               ~labels:
                 [ ("keeper", meta.name)
-                ; ("runtime", runtime_id)
+                ; ("runtime_id", runtime_id)
                 ]
               ()
         | _ -> ())

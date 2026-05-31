@@ -208,35 +208,14 @@ let openai_compat_not_found_hint_marker = "OpenAI-compatible endpoint returned 4
 
 let cascade_name_to_string = Fun.id
 
-let resolve_provider_api_key_env_name ~cascade_name ~provider_cfg =
-  let cascade_name = cascade_name_to_string cascade_name in
-  let provider_name =
-    Llm_provider.Provider_registry.provider_name_of_config provider_cfg
-  in
-  let fallback_env =
-    Llm_provider.Provider_config.default_api_key_env provider_cfg.kind
-    |> Option.value ~default:""
-  in
-  let resolve_from_overrides overrides =
-    let find_non_empty key =
-      match List.assoc_opt key overrides with
-      | Some value when String.trim value <> "" -> Some value
-      | _ -> None
-    in
-    match find_non_empty provider_name with
-    | Some env_name -> env_name
-    | None ->
-      (match find_non_empty "*" with
-       | Some env_name -> env_name
-       | None -> fallback_env)
-  in
-  match Cascade_oas_runner.default_config_path () with
-  | Some config_path ->
-    let overrides =
-      Cascade_config.resolve_api_key_env ~config_path ~name:cascade_name
-    in
-    resolve_from_overrides overrides
-  | None -> fallback_env
+let resolve_provider_api_key_env_name ~cascade_name:_
+    ~(provider_cfg : Llm_provider.Provider_config.t) =
+  (* RFC-0206 L2: per-cascade api_key_env overrides were read from the cascade
+     config layer ([Cascade_config]/[Cascade_oas_runner]), which is removed
+     under single-binding. Runtime now resolves the provider api_key directly,
+     so the AuthError hint falls back to the provider's default api_key env. *)
+  Llm_provider.Provider_config.default_api_key_env provider_cfg.kind
+  |> Option.value ~default:""
 
 let enrich_sdk_error ~cascade_name
     ~(provider_cfg : Llm_provider.Provider_config.t)
@@ -248,8 +227,7 @@ let enrich_sdk_error ~cascade_name
       Printf.sprintf "%s (%s: %s)" message hint_marker detail
   in
   match err with
-  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message })
-    when not (Llm_provider.Provider_config.is_subprocess_cli provider_cfg.kind) ->
+  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message }) ->
     let env_name =
       match resolve_provider_api_key_env_name ~cascade_name ~provider_cfg with
       | "" -> "configured provider API key env"
@@ -519,9 +497,9 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
 let provider_label provider =
   match String.trim provider with
   | "" ->
-      Prometheus.inc_counter
-        Prometheus.metric_cascade_attempt_empty_provider_label
-        ();
+      (* RFC-0206 L2: the cascade-attempt empty-provider-label counter was
+         removed with the cascade Prometheus metrics. The WARN below is kept
+         so an empty provider (a call-site bug) is not silently substituted. *)
       let bt =
         Printexc.raw_backtrace_to_string (Printexc.get_callstack 6)
       in
@@ -724,59 +702,14 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
         ()
   | _ -> ()
 
-let classify_saturation_signal_kind
-    (err : Agent_sdk.Error.sdk_error) :
-    Cascade_saturation_signal.kind option =
-  let typed_kind =
-    match Keeper_masc_error_classify.classify_masc_internal_error err with
-    | Some (Keeper_masc_error_classify.Provider_timeout _) ->
-        Some Cascade_saturation_signal.K_time_cap_fired
-    | _ -> None
-  in
-  match typed_kind with
-  | Some _ as kind -> kind
-  | None -> (
-    match err with
-    | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
-        Some Cascade_saturation_signal.K_provider_rate_limited
-    | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
-    | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
-    | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
-    | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
-    | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
-    | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
-    | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
-    | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
-    | Agent_sdk.Error.Provider _
-    | Agent_sdk.Error.Agent _
-    | Agent_sdk.Error.Mcp _
-    | Agent_sdk.Error.Config _
-    | Agent_sdk.Error.Serialization _
-    | Agent_sdk.Error.Io _
-    | Agent_sdk.Error.Orchestration _
-    | Agent_sdk.Error.A2a _
-    | Agent_sdk.Error.Internal _ -> None)
-
-let maybe_emit_cascade_saturation_signal ~cascade_name ~provider:_ err =
-  if Env_config_keeper.CascadeSaturationSignal.enabled () then
-    match classify_saturation_signal_kind err with
-    | None -> ()
-    | Some kind ->
-        let cascade_name_str =
-          provider_label (cascade_name_to_string cascade_name)
-        in
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string CascadeSaturationSignal)
-          ~labels:
-            [
-              (label_kind, Cascade_saturation_signal.kind_to_string kind);
-              (label_cascade, cascade_name_str);
-            ]
-          ()
+(* RFC-0206 L2: cascade saturation-signal telemetry removed. The cascade
+   routing abstraction it instrumented (multi-provider failover) no longer
+   exists under single-binding, so [classify_saturation_signal_kind] and
+   [maybe_emit_cascade_saturation_signal] had no remaining meaning and were
+   dropped along with the deleted [Cascade_saturation_signal] module. *)
 
 let emit_sdk_provider_error_metric ~cascade_name ~provider err =
   emit_oas_run_timeout_metric ~cascade_name ~provider err;
-  maybe_emit_cascade_saturation_signal ~cascade_name ~provider err;
   match sdk_error_to_provider_error ~provider err with
   | None -> None
   | Some provider_error ->

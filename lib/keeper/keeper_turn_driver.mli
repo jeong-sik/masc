@@ -17,12 +17,12 @@
     manual type copy so the interface stays structurally identical to the
     implementation's [include Cascade_error_classify]. *)
 
-include module type of Cascade_error_classify
+include module type of Keeper_masc_error_classify
 
 (** {1 Cascade error helpers} *)
 
 val sdk_error_to_cascade_outcome :
-  Agent_sdk.Error.sdk_error -> Cascade_fsm.provider_outcome option
+  Agent_sdk.Error.sdk_error -> Keeper_provider_outcome.provider_outcome option
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 

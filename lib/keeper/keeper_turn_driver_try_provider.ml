@@ -74,7 +74,7 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
-  ; cascade_engine : Keeper_cascade_engine.t
+  ; cascade_engine : Keeper_runtime_engine.t
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; runtime_manifest_required_tool_names : string list
@@ -92,15 +92,15 @@ let emit_runtime_manifest
   | Some manifest_ctx, Some append ->
     let decision =
       match decision with
-      | None -> Some (`Assoc (Keeper_cascade_engine.manifest_fields ctx.cascade_engine))
+      | None -> Some (`Assoc (Keeper_runtime_engine.manifest_fields ctx.cascade_engine))
       | Some (`Assoc fields) ->
           Some
             (`Assoc
-              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine @ fields))
+              (Keeper_runtime_engine.manifest_fields ctx.cascade_engine @ fields))
       | Some other ->
           Some
             (`Assoc
-              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine
+              (Keeper_runtime_engine.manifest_fields ctx.cascade_engine
                @ [ ("decision", other) ]))
     in
     ctx.seq_ref := !(ctx.seq_ref) + 1;
@@ -196,7 +196,7 @@ let run_try_provider
   =
   let config_result =
     match
-      Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+      Runtime_candidate.resolve_tool_lane_for_oas_tools
         ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
         ~tool_requirement:
           (if ctx.require_tool_choice_support || ctx.require_tool_support
@@ -210,7 +210,7 @@ let run_try_provider
       let runtime_mcp_policy =
         match runtime_mcp_policy, String.trim ctx.keeper_name with
         | Some policy, keeper_name when keeper_name <> "" ->
-          Cascade_runtime_candidate.runtime_mcp_policy_for_agent
+          Runtime_candidate.runtime_mcp_policy_for_agent
             ~agent_name:(Keeper_identity.keeper_agent_name ctx.keeper_name)
             candidate
             (Some policy)
@@ -280,7 +280,7 @@ let run_try_provider
              ~materialized_tools:materialized_tool_names)
       else
         Ok
-          { (Cascade_runtime_candidate.default_config
+          { (Runtime_candidate.default_config
                ~name:ctx.name
                ~system_prompt:ctx.system_prompt
                ~tools:effective_tools
@@ -355,7 +355,7 @@ let run_try_provider
        identities remain on the OAS side.  Prometheus receives only the public,
        bounded provider bucket for TTFT/inter-chunk grouping. *)
     let candidate_key = Keeper_attempt_liveness_config.runtime_candidate_key in
-    let provider_label = Cascade_runtime_candidate.provider_label candidate in
+    let provider_label = Runtime_candidate.provider_label candidate in
     let liveness_observer_opt =
       match liveness_mode with
       | Keeper_attempt_liveness_config.Off ->
@@ -544,7 +544,7 @@ let run_try_provider
        let liveness_success_sample = liveness_success_sample () in
        let result =
          Result.map_error
-           (Cascade_runtime_candidate.enrich_sdk_error
+           (Runtime_candidate.enrich_sdk_error
               ~cascade_name:ctx.error_cascade_name
               candidate)
            result

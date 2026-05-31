@@ -89,8 +89,8 @@ let run_named
     ?per_provider_timeout_s
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let cascade_engine = Keeper_cascade_engine.keeper_managed in
-  match Keeper_cascade_engine.guard_keeper_hot_path cascade_engine with
+  let cascade_engine = Keeper_runtime_engine.keeper_managed in
+  match Keeper_runtime_engine.guard_keeper_hot_path cascade_engine with
   | Error msg -> Error (Agent_sdk.Error.Internal msg)
   | Ok () ->
   match require_eio ?sw ?net () with
@@ -157,7 +157,7 @@ let run_named
     | required_tool_names ->
       List.fold_right
         (fun candidate (kept, rejected) ->
-           let provider_label = Cascade_runtime_candidate.provider_label candidate in
+           let provider_label = Runtime_candidate.provider_label candidate in
            let drop ~lane ~missing_required_tools ~materialized_tool_names =
              let reason =
                Printf.sprintf
@@ -180,7 +180,7 @@ let run_named
              :: rejected
            in
            match
-             Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+             Runtime_candidate.resolve_tool_lane_for_oas_tools
                ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt keeper_name)
                ~tool_requirement:`Required
                ~tools
@@ -195,7 +195,7 @@ let run_named
              let runtime_mcp_policy =
                match runtime_mcp_policy, String.trim keeper_name with
                | Some policy, keeper_name when keeper_name <> "" ->
-                 Cascade_runtime_candidate.runtime_mcp_policy_for_agent
+                 Runtime_candidate.runtime_mcp_policy_for_agent
                    ~agent_name:(Keeper_identity.keeper_agent_name keeper_name)
                    candidate
                    (Some policy)
@@ -224,7 +224,7 @@ let run_named
     required_lane_filtered_candidates
     |> List.filter
          (fun candidate ->
-            match Cascade_runtime_candidate.first_health_cooldown candidate with
+            match Runtime_candidate.first_health_cooldown candidate with
             | None -> true
             | Some (_provider_health_key, msg) ->
                 Log.Misc.debug
@@ -242,7 +242,7 @@ let run_named
       ~health_filtered_candidates
   in
   let local_endpoint_health =
-    match Cascade_runtime_candidate.local_runtime_urls dispatch_seed_candidates with
+    match Runtime_candidate.local_runtime_urls dispatch_seed_candidates with
     | [] -> []
     | endpoints ->
       Llm_provider.Discovery.refresh_and_sync ~sw ~net ~endpoints
@@ -250,7 +250,7 @@ let run_named
              status.url, status.healthy)
   in
   let local_prefiltered_candidates, unhealthy_local_endpoints =
-    Cascade_runtime_candidate.filter_unhealthy_local_runtime_urls
+    Runtime_candidate.filter_unhealthy_local_runtime_urls
       ~endpoint_health:local_endpoint_health
       dispatch_seed_candidates
   in
@@ -346,17 +346,17 @@ let run_named
   in
   let register_capacity_controls candidates =
     List.iter
-      Cascade_runtime_candidate.register_declared_client_capacity
+      Runtime_candidate.register_declared_client_capacity
       candidates;
     let capacity_keys =
-      Cascade_runtime_candidate.capacity_keys candidates
+      Runtime_candidate.capacity_keys candidates
       |> List.map String.trim
       |> List.filter (fun key -> not (String.equal key ""))
       |> Json_util.dedupe_keep_order
     in
     let cli_max_concurrent =
       optional_capacity_override ~knob:"cli_max_concurrent" (fun () ->
-        Cascade_catalog_runtime.resolve_cli_max_concurrent
+        Runtime_catalog.resolve_cli_max_concurrent
           ~sw
           ~net
           ~name:cascade_name
@@ -373,7 +373,7 @@ let run_named
     let http_probe_max_concurrent =
       match
         optional_capacity_override ~knob:"ollama_max_concurrent" (fun () ->
-          Cascade_catalog_runtime.resolve_ollama_max_concurrent
+          Runtime_catalog.resolve_ollama_max_concurrent
             ~sw
             ~net
             ~name:cascade_name
@@ -383,11 +383,11 @@ let run_named
       | None ->
         (* DET-OK: absent or unresolved HTTP-probe capacity uses the stable
            single-flight default at the runtime boundary; configured values are
-           still explicit [Some n] inputs from the cascade catalog. *)
+           still explicit [Some n] inputs from the runtime catalog. *)
         http_probe_default_max_concurrent
     in
     List.iter
-      (Cascade_runtime_candidate.register_http_probe_capable
+      (Runtime_candidate.register_http_probe_capable
          ~max_concurrent:http_probe_max_concurrent)
       candidates
   in
@@ -409,7 +409,7 @@ let run_named
     | None -> candidates
     | Some health ->
       Provider_health.filter_healthy health
-        ~provider_id:Cascade_runtime_candidate.health_key
+        ~provider_id:Runtime_candidate.health_key
         candidates
   in
   let record_provider_health_result candidate ~success ~http_status =
@@ -417,7 +417,7 @@ let run_named
     | None -> ()
     | Some health ->
       Provider_health.record_attempt_result health
-        ~provider_id:(Cascade_runtime_candidate.health_key candidate)
+        ~provider_id:(Runtime_candidate.health_key candidate)
         ~success
         ~http_status
   in
@@ -525,7 +525,7 @@ let run_named
            ~status:"error"
            ~decision:
              (`Assoc
-               (Keeper_cascade_engine.manifest_fields cascade_engine
+               (Keeper_runtime_engine.manifest_fields cascade_engine
                 @ [
                     ("reason", `String (kind_of_masc_internal_error internal_error));
                     ( "required_tool_names",
@@ -661,15 +661,15 @@ let run_named
     | Some manifest_ctx, Some append ->
       let decision =
         match decision with
-        | None -> Some (`Assoc (Keeper_cascade_engine.manifest_fields cascade_engine))
+        | None -> Some (`Assoc (Keeper_runtime_engine.manifest_fields cascade_engine))
         | Some (`Assoc fields) ->
             Some
               (`Assoc
-                (Keeper_cascade_engine.manifest_fields cascade_engine @ fields))
+                (Keeper_runtime_engine.manifest_fields cascade_engine @ fields))
       | Some other ->
             Some
               (`Assoc
-                (Keeper_cascade_engine.manifest_fields cascade_engine
+                (Keeper_runtime_engine.manifest_fields cascade_engine
                  @ [ ("decision", other) ]))
       in
       let decision =
@@ -772,12 +772,12 @@ let run_named
   let* strategy =
     profile_knob_or_default ~knob:"strategy"
       ~default:Cascade_strategy.failover
-      (fun () -> Cascade_catalog_runtime.resolve_strategy ~name:cascade_name ())
+      (fun () -> Runtime_catalog.resolve_strategy ~name:cascade_name ())
   in
   let strategy_name = Cascade_strategy.kind_to_string strategy.kind in
   let () = cascade_strategy_name_ref := Some strategy_name in
   let _ = sw, net in
-  let adapter = Cascade_runtime_candidate.strategy_adapter in
+  let adapter = Runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
     health = Keeper_binding_health.global;
     capacity = Cascade_capacity_probe.capacity;

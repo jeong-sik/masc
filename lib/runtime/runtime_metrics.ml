@@ -3,7 +3,7 @@
     Re-homes the prometheus counter ticks that surviving consumers still call
     from the deleted [Cascade_metrics]. ONLY the consumer-referenced emitters
     are ported; the routing-aware aggregation in [Cascade_metrics]
-    (depended on Cascade_routes/Cascade_runtime/Cascade_inference) is NOT
+    (depended on Cascade_routes/Cascade_runtime/Runtime_inference) is NOT
     restored — it was the routing layer RFC-0206 §5 discards.
 
     The prometheus metric-name strings are preserved verbatim

@@ -123,7 +123,7 @@ val cascade_attempt_terminal_event_json :
   unit ->
   Yojson.Safe.t
 (** Builds the structured JSON payload emitted to system_log for one
-    cascade candidate's terminal state. Exposed for tests so the shape
+    runtime candidate's terminal state. Exposed for tests so the shape
     contract (`event`, `model_id`, `model_label`, `latency_ms`, `outcome`,
     `error_message`, `slot_release_at_phase`,
     `productive_phase_elapsed_ms`, `retry_phase_elapsed_ms`) is locked

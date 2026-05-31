@@ -102,7 +102,7 @@ val classify_filter_rejection :
   filter_rejection_reason option
 (** Classify why a single provider would be rejected by the tool-use gate.
     When [required_capability_profile] is provided, the provider must
-    satisfy the named profile via {!Cascade_capability_profile} or it is
+    satisfy the named profile via {!Runtime_capability_profile} or it is
     rejected with [Capability_profile_mismatch]. *)
 
 val filter_candidate_providers_for_tool_support :

@@ -169,5 +169,5 @@ module For_testing : sig
     materialized_tool_names:string list ->
     string list
 
-  val success_selected_model_raw : Cascade_runtime_candidate.t -> string option
+  val success_selected_model_raw : Runtime_candidate.t -> string option
 end

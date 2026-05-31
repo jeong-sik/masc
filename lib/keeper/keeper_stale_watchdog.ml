@@ -698,7 +698,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    match ctx.net with
                    | None -> false
                    | Some net ->
-                       (match Cascade_catalog_runtime.resolve_named_providers_strict
+                       (match Runtime_catalog.resolve_named_providers_strict
                                 ~sw:ctx.sw ~net ~cascade_name:(Keeper_meta_contract.runtime_id_of_meta meta) () with
                         | Error _ -> false
                         | Ok candidates ->
@@ -717,9 +717,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                              | Error _rejection -> false
                              | Ok healthy ->
                             healthy
-                            |> Cascade_runtime_candidate.of_provider_configs
+                            |> Runtime_candidate.of_provider_configs
                             |> List.exists
-                                 Cascade_runtime_candidate.has_recovery_evidence))
+                                 Runtime_candidate.has_recovery_evidence))
                  in
                  if cascade_recovered () then
                    Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name (Keeper_meta_contract.runtime_id_of_meta meta)

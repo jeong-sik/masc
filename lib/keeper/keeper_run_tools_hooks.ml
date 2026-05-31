@@ -293,7 +293,7 @@ let assemble_hooks
                   else None
                 in
                 let cascade_seed =
-                  Cascade_inference.for_cascade ~name:cascade_name_string
+                  Runtime_inference.for_cascade ~name:cascade_name_string
                 in
                 let current_budget =
                   match cascade_seed.thinking_budget with

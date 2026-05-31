@@ -8,4 +8,4 @@ val provider_config_identity_key : Llm_provider.Provider_config.t -> int
 
 val runtime_candidates_of_providers :
   Llm_provider.Provider_config.t list ->
-  Cascade_runtime_candidate.t list
+  Runtime_candidate.t list

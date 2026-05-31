@@ -263,7 +263,7 @@ let record_attempt_start (capture : cascade_metrics_capture) ~model_id:_ =
     :: capture.attempts_rev
 
 (** [cascade_attempt_terminal_event_json] builds the structured details payload
-    emitted to system_log when a cascade candidate reaches its terminal state
+    emitted to system_log when a runtime candidate reaches its terminal state
     (success: latency_ms set, error none; failure: error set). The shape is the
     contract for downstream log analysers and external operators looking for
     "why did the cascade exhaust" signals. Errors are recorded verbatim — no
@@ -295,7 +295,7 @@ let log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
   in
   let summary =
     Printf.sprintf
-      "cascade candidate terminal: model=%s outcome=%s latency_ms=%s"
+      "runtime candidate terminal: model=%s outcome=%s latency_ms=%s"
       public_runtime_model_label outcome
       (match latency_ms with Some n -> string_of_int n | None -> "n/a")
   in

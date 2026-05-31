@@ -49,7 +49,7 @@ let resolve_cascade_providers
       ~cascade_name:_
       ()
   =
-  (* RFC-0206 single-binding: cascade catalog resolution removed. The providers
+  (* RFC-0206 single-binding: runtime catalog resolution removed. The providers
      are the default runtime's single provider_config, passed through the same
      required tool-use gate so require_tool_support is honored (a non-tool
      default is filtered out, not silently used). [provider_filter] is moot with
@@ -243,7 +243,7 @@ let classify_filter_rejection
     | None -> None
     | Some profile ->
       let caps = Provider_tool_support.capabilities_of_config provider_cfg in
-      if not (Cascade_capability_profile.provider_satisfies_profile profile caps)
+      if not (Runtime_capability_profile.provider_satisfies_profile profile caps)
       then Some (Capability_profile_mismatch profile)
       else None
   in

@@ -532,7 +532,7 @@ let required_tool_rotation_candidate
   && (allow_phase_recovery
       || not
            (String.equal normalized (Keeper_config.default_cascade_name ())))
-  && not (Cascade_capability_profile.is_system_cascade_name normalized)
+  && not (Runtime_capability_profile.is_system_cascade_name normalized)
 
 let tool_required_rotation_cascade_name () =
   try

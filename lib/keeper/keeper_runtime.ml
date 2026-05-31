@@ -199,7 +199,7 @@ let ensure_keeper_meta config name =
       effective_declarative_cascade_name defaults meta
     in
     match
-      Cascade_catalog_runtime.resolve_declared_name
+      Runtime_catalog.resolve_declared_name
         ~raw_name:target_cascade_name
         ()
     with

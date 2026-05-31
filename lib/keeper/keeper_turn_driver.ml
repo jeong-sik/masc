@@ -89,8 +89,8 @@ let run_named
     ?per_provider_timeout_s
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let cascade_engine = Keeper_runtime_engine.keeper_managed in
-  match Keeper_runtime_engine.guard_keeper_hot_path cascade_engine with
+  let runtime_engine = Keeper_runtime_engine.keeper_managed in
+  match Keeper_runtime_engine.guard_keeper_hot_path runtime_engine with
   | Error msg -> Error (Agent_sdk.Error.Internal msg)
   | Ok () ->
   match require_eio ?sw ?net () with
@@ -124,7 +124,7 @@ let run_named
    with
    | Error detail, _ | _, Error detail ->
        Log.Misc.error "cascade %s: %s" cascade_name detail;
-       Error (cascade_catalog_error_to_sdk_error detail)
+       Error (runtime_catalog_error_to_sdk_error detail)
    | Ok configured_labels, Ok candidate_cfgs ->
   let original_candidate_cfgs = candidate_cfgs in
   let original_candidates =
@@ -525,7 +525,7 @@ let run_named
            ~status:"error"
            ~decision:
              (`Assoc
-               (Keeper_runtime_engine.manifest_fields cascade_engine
+               (Keeper_runtime_engine.manifest_fields runtime_engine
                 @ [
                     ("reason", `String (kind_of_masc_internal_error internal_error));
                     ( "required_tool_names",
@@ -649,7 +649,7 @@ let run_named
     on_resume;
     agent_ref;
     event_bus;
-    cascade_engine;
+    runtime_engine;
     runtime_manifest_context;
     runtime_manifest_append;
     runtime_manifest_required_tool_names;
@@ -661,15 +661,15 @@ let run_named
     | Some manifest_ctx, Some append ->
       let decision =
         match decision with
-        | None -> Some (`Assoc (Keeper_runtime_engine.manifest_fields cascade_engine))
+        | None -> Some (`Assoc (Keeper_runtime_engine.manifest_fields runtime_engine))
         | Some (`Assoc fields) ->
             Some
               (`Assoc
-                (Keeper_runtime_engine.manifest_fields cascade_engine @ fields))
+                (Keeper_runtime_engine.manifest_fields runtime_engine @ fields))
       | Some other ->
             Some
               (`Assoc
-                (Keeper_runtime_engine.manifest_fields cascade_engine
+                (Keeper_runtime_engine.manifest_fields runtime_engine
                  @ [ ("decision", other) ]))
       in
       let decision =
@@ -729,7 +729,7 @@ let run_named
     emit_runtime_manifest;
     runtime_manifest_context;
     runtime_manifest_append;
-    cascade_engine;
+    runtime_engine;
     turn_start;
     seq_ref;
     health_cooldown_fail_open;
@@ -767,7 +767,7 @@ let run_named
     | Ok value -> Ok value
     | Error detail ->
         Log.Misc.error "cascade %s: %s" cascade_name detail;
-        Error (cascade_catalog_error_to_sdk_error detail)
+        Error (runtime_catalog_error_to_sdk_error detail)
   in
   let* strategy =
     profile_knob_or_default ~knob:"strategy"

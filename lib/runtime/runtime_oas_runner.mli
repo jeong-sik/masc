@@ -28,7 +28,7 @@ val eio_context_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 (** Lift a context-missing diagnostic string into an [Agent_sdk.Error.Config]
     error with field ["eio_context"]. *)
 
-val cascade_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
+val runtime_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 (** Lift a cascade-catalog diagnostic into an [Agent_sdk.Error.Config]
     error with field ["runtime_id"]. *)
 

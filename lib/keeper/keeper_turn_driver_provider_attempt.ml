@@ -44,8 +44,8 @@ type provider_attempt_provenance =
 
 let base_provider_attempt_provenance =
   { model_source = "named_cascade"
-  ; resolved_model_source = "cascade_catalog_binding"
-  ; capability_source = "provider_config_from_cascade_catalog"
+  ; resolved_model_source = "runtime_catalog_binding"
+  ; capability_source = "provider_config_from_runtime_catalog"
   ; fallback_authority = "declared_cascade"
   ; provider_source_cascade = None
   }

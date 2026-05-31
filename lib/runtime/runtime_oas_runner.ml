@@ -34,7 +34,7 @@ let require_eio ?sw ?net () =
 let eio_context_error_to_sdk_error detail =
   Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field = "eio_context"; detail })
 
-let cascade_catalog_error_to_sdk_error detail =
+let runtime_catalog_error_to_sdk_error detail =
   Agent_sdk.Error.Config
     (Agent_sdk.Error.InvalidConfig { field = "runtime_id"; detail })
 

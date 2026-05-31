@@ -397,6 +397,16 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                             | Error
+                                 (Server_mcp_request_context.Header_mismatch msg)
+                               ->
+                                 let body =
+                                   Printf.sprintf
+                                     {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"},"id":null}|}
+                                     (String.escaped msg)
+                                 in
+                                 h2_respond_json h2_reqd body ~status:`Bad_request
+                                   ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Ok post_context ->
                                  with_server_state h2_reqd (fun state ->
                                    let profile =

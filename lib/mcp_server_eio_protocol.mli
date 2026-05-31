@@ -128,10 +128,10 @@ val handle_request :
     ?mcp_session_id ?auth_token ?internal_keeper_runtime
     state request_str] parses [request_str] as JSON-RPC,
     routes the [method] to the matching internal handler
-    (initialize / tools/list / tools/call / resources/list
-    / resources/read / resources/subscribe / unsubscribe
-    / list_resource_templates / prompts/list / prompts/get
-    / dashboard/* family), and returns the response
+    (server/discover / initialize / tools/list / tools/call
+    / resources/list / resources/read / resources/subscribe /
+    unsubscribe / list_resource_templates / prompts/list /
+    prompts/get / dashboard/* family), and returns the response
     envelope.
 
     Parse failures return a [-32700] Parse error envelope

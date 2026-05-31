@@ -26,6 +26,34 @@ let request ?(headers = []) ?(meth = `POST) target =
 let body method_ =
   Printf.sprintf {|{"jsonrpc":"2.0","id":1,"method":"%s","params":{}}|} method_
 
+let stateless_body ?(method_ = "tools/list") ?name () =
+  let params_fields =
+    [ ("_meta",
+       `Assoc
+         [
+           ( Mcp_transport_protocol.protocol_version_meta_key,
+             `String "2026-07-28" );
+           ( "io.modelcontextprotocol/clientInfo",
+             `Assoc
+               [ ("name", `String "parity-test"); ("version", `String "0.1") ]
+           );
+           ("io.modelcontextprotocol/clientCapabilities", `Assoc []);
+         ] )
+    ]
+    @
+    match name with
+    | None -> []
+    | Some value -> [ ("name", `String value) ]
+  in
+  `Assoc
+    [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 1);
+      ("method", `String method_);
+      ("params", `Assoc params_fields);
+    ]
+  |> Yojson.Safe.to_string
+
 let initialize_body =
   {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"parity-test","version":"0.1"}}}|}
 
@@ -78,6 +106,26 @@ let test_request_context_decides_post_body () =
   let streamable_request =
     request ~headers:[ ("accept", "application/json, text/event-stream") ] "/mcp"
   in
+  let stateless_request =
+    request
+      ~headers:
+        [
+          ("accept", "application/json, text/event-stream");
+          ("mcp-protocol-version", "2026-07-28");
+          ("mcp-method", "tools/list");
+        ]
+      "/mcp"
+  in
+  let stateless_bad_method_request =
+    request
+      ~headers:
+        [
+          ("accept", "application/json, text/event-stream");
+          ("mcp-protocol-version", "2026-07-28");
+          ("mcp-method", "tools/call");
+        ]
+      "/mcp"
+  in
   let json_only_request =
     request ~headers:[ ("accept", "application/json") ] "/mcp"
   in
@@ -120,7 +168,26 @@ let test_request_context_decides_post_body () =
        ~context:(context ()) ~session_is_known:false initialize_body
    with
   | Ok _ -> ()
-  | Error _ -> fail "unknown session should still permit initialize")
+  | Error _ -> fail "unknown session should still permit initialize");
+  (match
+     Request_context.decide_post_body ~request:stateless_request
+       ~context:(context ~session_was_provided:false ()) ~session_is_known:false
+       (stateless_body ())
+   with
+  | Ok decision ->
+      assert_accept_mode "stateless decision" Negotiation.Streamable
+        decision.accept_mode
+  | Error _ -> fail "stateless 2026 request should not require a session");
+  (match
+     Request_context.decide_post_body ~request:stateless_bad_method_request
+       ~context:(context ~session_was_provided:false ()) ~session_is_known:false
+       (stateless_body ())
+   with
+  | Error (Request_context.Header_mismatch msg) ->
+      check bool "header mismatch mentions Mcp-Method" true
+        (contains ~needle:"Mcp-Method" msg)
+  | Ok _ -> fail "mismatched stateless headers should reject"
+  | Error _ -> fail "mismatched stateless headers should use Header_mismatch")
 
 let test_shared_post_admission_matrix () =
   assert_result_ok "initialize may mint a fresh session"
@@ -129,12 +196,18 @@ let test_shared_post_admission_matrix () =
   assert_result_error "tools/call requires a session id"
     (Transport.validate_session_requirement ~session_was_provided:false
        (body "tools/call"));
+  assert_result_ok "2026 stateless request does not require a session id"
+    (Transport.validate_session_requirement ~session_was_provided:false
+       (stateless_body ()));
   assert_result_ok "known session passes Q3"
     (Transport.validate_session_known ~session_was_provided:true ~is_known:true
        (body "tools/call"));
   assert_result_error "unknown session blocks tools/call"
     (Transport.validate_session_known ~session_was_provided:true ~is_known:false
        (body "tools/call"));
+  assert_result_ok "unknown supplied session is ignored for 2026 stateless"
+    (Transport.validate_session_known ~session_was_provided:true ~is_known:false
+       (stateless_body ()));
   assert_result_ok "unknown session still permits initialize"
     (Transport.validate_session_known ~session_was_provided:true ~is_known:false
        initialize_body);

@@ -558,6 +558,64 @@ let test_handle_request_initialize_rejects_unsupported_protocol_version () =
 
   cleanup_dir base_path
 
+let test_handle_request_server_discover_2026 () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `String "discover-1");
+          ("method", `String "server/discover");
+          ( "params",
+            `Assoc
+              [
+                ( "_meta",
+                  `Assoc
+                    [
+                      ( Mcp_transport_protocol.protocol_version_meta_key,
+                        `String "2026-07-28" );
+                      ( "io.modelcontextprotocol/clientInfo",
+                        `Assoc
+                          [ ("name", `String "test"); ("version", `String "0.1") ]
+                      );
+                      ("io.modelcontextprotocol/clientCapabilities", `Assoc []);
+                    ] );
+              ] );
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let result = result_fields_exn response in
+  Alcotest.(check (option string)) "complete result"
+    (Some "complete")
+    (match List.assoc_opt "resultType" result with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  (match List.assoc_opt "supportedVersions" result with
+   | Some (`List versions) ->
+       let versions =
+         List.filter_map
+           (function
+             | `String value -> Some value
+             | _ -> None)
+           versions
+       in
+       Alcotest.(check bool) "advertises 2026-07-28" true
+         (List.mem "2026-07-28" versions);
+       Alcotest.(check bool) "keeps 2025-11-25 compatibility" true
+         (List.mem "2025-11-25" versions)
+   | _ -> Alcotest.fail "supportedVersions not a list");
+  Alcotest.(check bool) "has serverInfo" true
+    (List.mem_assoc "serverInfo" result);
+  Alcotest.(check bool) "has capabilities" true
+    (List.mem_assoc "capabilities" result);
+  cleanup_dir base_path
+
 let test_handle_request_tools_list () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -626,6 +684,17 @@ let test_handle_request_tools_list () =
   let meta = tools_list_meta_exn first_page in
   let total_count = int_field_exn "tools/list _meta" meta "totalCount" in
   let page_size = int_field_exn "tools/list _meta" meta "pageSize" in
+  let result_fields = result_fields_exn first_page in
+  Alcotest.(check (option int)) "tools/list ttlMs"
+    (Some 5000)
+    (match List.assoc_opt "ttlMs" result_fields with
+     | Some (`Int value) -> Some value
+     | _ -> None);
+  Alcotest.(check (option string)) "tools/list cacheScope"
+    (Some "private")
+    (match List.assoc_opt "cacheScope" result_fields with
+     | Some (`String value) -> Some value
+     | _ -> None);
   Alcotest.(check bool) "next cursor matches totalCount/pageSize"
     (total_count > page_size)
     (Option.is_some (next_cursor_of_response first_page));
@@ -2692,6 +2761,8 @@ let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
   "handle initialize rejects unsupported protocol version", `Quick,
     test_handle_request_initialize_rejects_unsupported_protocol_version;
+  "handle server/discover advertises 2026", `Quick,
+    test_handle_request_server_discover_2026;
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;

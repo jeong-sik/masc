@@ -111,6 +111,8 @@ let body_tools_call_name body_str =
 
 let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
 
+let session_cookie_headers = Server_mcp_transport_http_headers.session_cookie_headers
+
 let sse_headers = Server_mcp_transport_http_headers.sse_headers
 
 let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
@@ -122,8 +124,8 @@ let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version =
         ("cache-control", "no-cache");
         ("connection", "close");
         ("x-accel-buffering", "no");
-        session_cookie_header session_id;
       ]
+      @ session_cookie_headers protocol_version session_id
       @ mcp_headers session_id protocol_version
       @ deps.cors_headers origin)
 
@@ -320,6 +322,29 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                           ("code", `Int (Mcp_error_code.to_wire_code Invalid_request));
                           ("message", `String msg);
                         ] );
+                  ])
+            in
+            let headers =
+              Httpun.Headers.of_list
+                (("content-length", string_of_int (String.length body))
+                :: json_headers ~deps session_id protocol_version origin)
+            in
+            let response = Httpun.Response.create ~headers `Bad_request in
+            safe_respond_with_string reqd response body;
+            Error ()
+        | Error (Server_mcp_request_context.Header_mismatch msg) ->
+            let body =
+              Yojson.Safe.to_string
+                (`Assoc
+                  [
+                    ("jsonrpc", `String "2.0");
+                    ( "error",
+                      `Assoc
+                        [
+                          ("code", `Int (-32001));
+                          ("message", `String msg);
+                        ] );
+                    ("id", `Null);
                   ])
             in
             let headers =

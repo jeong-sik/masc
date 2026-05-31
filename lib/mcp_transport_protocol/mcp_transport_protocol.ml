@@ -159,12 +159,26 @@ module Http_negotiation = struct
     else Rejected
 end
 
-let supported_protocol_versions = Mcp_protocol.Version.supported_versions
+let protocol_version_2026_07_28 = "2026-07-28"
+let protocol_version_draft_2026_v1 = "DRAFT-2026-v1"
+
+let supported_protocol_versions =
+  let rec add acc version =
+    if List.mem version acc then acc else acc @ [ version ]
+  in
+  List.fold_left add []
+    (protocol_version_2026_07_28
+     :: protocol_version_draft_2026_v1
+     :: Mcp_protocol.Version.supported_versions)
 
 let default_protocol_version = Mcp_protocol.Version.latest
 
 let is_supported_protocol_version version =
-  Mcp_protocol.Version.is_supported version
+  List.mem version supported_protocol_versions
+
+let is_stateless_protocol_version version =
+  String.equal version protocol_version_2026_07_28
+  || String.equal version protocol_version_draft_2026_v1
 
 let validate_protocol_version version =
   if is_supported_protocol_version version then
@@ -185,6 +199,30 @@ let protocol_version_from_params = function
       | Some (`String version) -> version
       | _ -> default_protocol_version)
   | _ -> default_protocol_version
+
+let protocol_version_meta_key = "io.modelcontextprotocol/protocolVersion"
+
+let protocol_version_from_request_meta_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "params" fields with
+      | Some (`Assoc params) -> (
+          match List.assoc_opt "_meta" params with
+          | Some (`Assoc meta) -> (
+              match List.assoc_opt protocol_version_meta_key meta with
+              | Some (`String version) -> Some version
+              | _ -> None)
+          | _ -> None)
+      | _ -> None)
+  | _ -> None
+
+let protocol_version_from_request_meta_body body_str =
+  try Yojson.Safe.from_string body_str |> protocol_version_from_request_meta_json
+  with Yojson.Json_error _ -> None
+
+let body_uses_stateless_protocol body_str =
+  match protocol_version_from_request_meta_body body_str with
+  | Some version -> is_stateless_protocol_version version
+  | None -> false
 
 let protocol_version_from_initialize_request_json = function
   | `Assoc fields -> (

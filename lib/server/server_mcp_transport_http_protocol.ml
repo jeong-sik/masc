@@ -38,9 +38,11 @@ let method_from_body body_str =
 
 let validate_session_requirement ~session_was_provided body_str =
   if session_was_provided then Ok ()
+  else if Mcp_transport_protocol.body_uses_stateless_protocol body_str then Ok ()
   else
     match method_from_body body_str with
-    | Some "initialize" | Some "notifications/initialized" | Some "ping" ->
+    | Some "initialize" | Some "notifications/initialized" | Some "ping"
+    | Some "server/discover" ->
         Ok ()
     | Some _ | None ->
         Error
@@ -60,9 +62,11 @@ let validate_session_requirement ~session_was_provided body_str =
 let validate_session_known ~session_was_provided ~is_known body_str =
   if not session_was_provided then Ok ()
   else if is_known then Ok ()
+  else if Mcp_transport_protocol.body_uses_stateless_protocol body_str then Ok ()
   else
     match method_from_body body_str with
-    | Some "initialize" | Some "notifications/initialized" | Some "ping" ->
+    | Some "initialize" | Some "notifications/initialized" | Some "ping"
+    | Some "server/discover" ->
         Ok ()
     | Some _ | None ->
         Error
@@ -79,6 +83,12 @@ let request_force_json_response =
   Server_mcp_transport_http_headers.request_force_json_response
 
 let classify_mcp_accept = Server_mcp_transport_http_headers.classify_mcp_accept
+
+let request_uses_stateless_protocol =
+  Server_mcp_transport_http_headers.request_uses_stateless_protocol
+
+let validate_2026_request_headers =
+  Server_mcp_transport_http_headers.validate_2026_request_headers
 
 let should_use_sse_for_body =
   Server_mcp_transport_http_headers.should_use_sse_for_body

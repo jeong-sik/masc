@@ -151,6 +151,95 @@ let test_initialize_never_uses_sse () =
     (Transport.should_use_sse_for_body request body
        Mcp_transport_protocol.Http_negotiation.Streamable)
 
+let stateless_body ?(method_ = "tools/list") ?name () =
+  let params_fields =
+    [ ( "_meta",
+        `Assoc
+          [
+            ( Mcp_transport_protocol.protocol_version_meta_key,
+              `String "2026-07-28" );
+            ( "io.modelcontextprotocol/clientInfo",
+              `Assoc
+                [ ("name", `String "http-test"); ("version", `String "0.1") ]
+            );
+            ("io.modelcontextprotocol/clientCapabilities", `Assoc []);
+          ] )
+    ]
+    @
+    match name with
+    | None -> []
+    | Some value -> [ ("name", `String value) ]
+  in
+  `Assoc
+    [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 1);
+      ("method", `String method_);
+      ("params", `Assoc params_fields);
+    ]
+  |> Yojson.Safe.to_string
+
+let test_validate_2026_request_headers () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let ok_request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [
+             ("accept", "application/json, text/event-stream");
+             ("mcp-protocol-version", "2026-07-28");
+             ("mcp-method", "tools/list");
+           ])
+      `POST "/mcp"
+  in
+  (match Transport.validate_2026_request_headers ok_request (stateless_body ()) with
+  | Ok () -> ()
+  | Error msg -> failf "expected valid 2026 headers, got %s" msg);
+  let tool_call_request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [
+             ("accept", "application/json, text/event-stream");
+             ("mcp-protocol-version", "2026-07-28");
+             ("mcp-method", "tools/call");
+             ("mcp-name", "masc_status");
+           ])
+      `POST "/mcp"
+  in
+  (match
+     Transport.validate_2026_request_headers tool_call_request
+       (stateless_body ~method_:"tools/call" ~name:"masc_status" ())
+   with
+  | Ok () -> ()
+  | Error msg -> failf "expected valid Mcp-Name headers, got %s" msg);
+  let mismatch_request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [
+             ("accept", "application/json, text/event-stream");
+             ("mcp-protocol-version", "2026-07-28");
+             ("mcp-method", "resources/list");
+           ])
+      `POST "/mcp"
+  in
+  match Transport.validate_2026_request_headers mismatch_request (stateless_body ()) with
+  | Ok () -> fail "expected mismatched Mcp-Method to reject"
+  | Error msg ->
+      check bool "mentions header mismatch" true
+        (String_util.contains_substring msg "HeaderMismatch")
+
+let test_stateless_headers_do_not_emit_session_id () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let headers = Transport.mcp_headers "session-x" "2026-07-28" in
+  check (option string) "no mcp-session-id"
+    None
+    (List.assoc_opt "mcp-session-id" headers);
+  check (option string) "keeps protocol version"
+    (Some "2026-07-28")
+    (List.assoc_opt "mcp-protocol-version" headers)
+
 let test_sse_guard_registry_is_shared_with_cleanup_loop () =
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let module Cleanup_view = Masc_mcp.Server_mcp_transport_http_sse in
@@ -213,6 +302,10 @@ let () =
         test_case "initialize json-only is rejected" `Quick test_initialize_json_only_accepted;
         test_case "no accept header rejected" `Quick test_no_accept_header_rejected;
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
+        test_case "2026 headers are validated" `Quick
+          test_validate_2026_request_headers;
+        test_case "2026 headers omit session id" `Quick
+          test_stateless_headers_do_not_emit_session_id;
         test_case "sse guard registry is shared" `Quick
           test_sse_guard_registry_is_shared_with_cleanup_loop;
         test_case "preserve guard keeps cooldown" `Quick

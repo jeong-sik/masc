@@ -46,7 +46,6 @@ type try_provider_ctx =
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
-  ; cli_transport_overrides : Runtime_agent.cli_transport_overrides option
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; (* Session / checkpoint *)
     allowed_paths : string list
@@ -345,7 +344,6 @@ let run_try_provider
           ; raw_trace = ctx.raw_trace
           ; yield_on_tool = ctx.yield_on_tool
           ; runtime_mcp_policy
-          ; cli_transport_overrides = ctx.cli_transport_overrides
           }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in

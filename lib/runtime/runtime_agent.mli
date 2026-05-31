@@ -14,7 +14,6 @@
 
     Internal helpers stay private at this boundary
     ([invalid_runtime_config],
-    [cli_model_override],
     [provider_supports_inline_tools],
     [provider_supports_runtime_mcp_lane],
     [dedupe_preserve_order],
@@ -22,7 +21,6 @@
     [public_mcp_tool_requires_bound_actor],
     [public_mcp_tools_of_oas_tools],
     [tool_names_are_public_mcp],
-    [non_http_transport_of_provider],
     [persist_checkpoint], [build_checkpoint],
     [partial_response_of_stop]). *)
 
@@ -41,22 +39,6 @@ type stop_reason = Runtime_agent_context.stop_reason =
     when the keeper hit a mutation tool while in
     read-only mode (the [tool_name] surfaces which tool
     triggered the gate). *)
-
-(** {1 CLI transport overrides} *)
-
-type cli_transport_overrides =
-  Runtime_transport.cli_transport_overrides = {
-  cwd : string option;
-  claude_mcp_config : string option;
-  claude_allowed_tools : string list option;
-  claude_permission_mode : string option;
-  claude_max_turns : int option;
-  gemini_yolo : bool option;
-  cli_subprocess_idle_sec : float option;
-}
-(** Per-call overrides threaded into local CLI transports.
-    [cli_subprocess_idle_sec] is honoured by transports that execute their
-    subprocess directly; see {!Runtime_transport.cli_transport_overrides}. *)
 
 (** {1 Config} *)
 
@@ -107,7 +89,6 @@ type config = Runtime_agent_context.config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
-  cli_transport_overrides : cli_transport_overrides option;
 }
 
 val default_config :
@@ -163,7 +144,6 @@ val provider_caps_of_config :
   Llm_provider.Provider_config.t ->
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
-val cli_tool_d_max_turns_hard_cap : int
 val provider_effective_max_turns :
   Llm_provider.Provider_config.provider_kind -> int -> int
 
@@ -204,12 +184,6 @@ val resolve_tool_lane_for_oas_tools :
     Agent_sdk.Error.sdk_error )
   result
 
-(** {1 Per-call switch transport} *)
-
-val make_per_call_switch_transport :
-  (sw:Eio.Switch.t -> Llm_provider.Llm_transport.t) ->
-  Llm_provider.Llm_transport.t
-
 module For_testing : sig
   val request_runtime_fields_on_base_config :
     base:Llm_provider.Provider_config.t ->
@@ -217,9 +191,6 @@ module For_testing : sig
     Llm_provider.Provider_config.t
 
   val provider_http_slot_transport :
-    Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
-
-  val provider_cli_slot_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 end
 
@@ -247,8 +218,7 @@ val build :
   config:config ->
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
 (** Builds an [Agent_sdk.Agent.t] from a {!config} ready for a
-    fresh run.  Resolves the per-call non-HTTP transport
-    via {!non_http_transport_of_provider}; threads
+    fresh run over the HTTP provider transport; threads
     [config.approval] into the OAS builder when present. *)
 
 val resume_from_checkpoint :

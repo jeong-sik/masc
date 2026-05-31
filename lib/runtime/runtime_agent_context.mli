@@ -82,10 +82,8 @@ type config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
-  cli_transport_overrides :
-    Runtime_transport.cli_transport_overrides option;
 }
-(** Per-worker configuration.  49 fields — concrete record because
+(** Per-worker configuration.  48 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

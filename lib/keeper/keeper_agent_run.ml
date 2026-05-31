@@ -494,13 +494,6 @@ let run_turn
        (Provider_a/OpenAI/Provider_f/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.
 
-       CLI subprocess transports use a separate envelope:
-       [cli_subprocess_idle_sec], wired into [cli_transport_overrides]
-       below and forwarded to [Cli_common_subprocess.run_stream_lines]
-       via [stdout_idle_timeout_s] (Provider_c CLI today; Claude Code / Provider_f
-       CLI / Codex CLI need an OAS upstream change to expose the same
-       parameter in their transport configs).
-
        Default 120 s catches real network/stream hangs while preserving
        legitimate reasoning pauses + provider keepalives. If the total
        OAS timeout is shorter, the idle gap is clamped to that total cap
@@ -509,58 +502,6 @@ let run_turn
          Some
            (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
               ~total_timeout_s:timeout_s)
-       in
-       let claude_mcp_config =
-         (* #10049 Option C: auto-construct from the keeper bearer token +
-            server host/port when env is unset. Gated behind
-            MASC_AUTO_CONSTRUCT_CLAUDE_MCP (default true). The existing
-            explicit-env path still wins, and operators can opt out by setting
-            the flag false. *)
-         Keeper_cli_mcp_config.effective_for_keeper
-           ~base_path:config.base_path
-           ~agent_name:meta.agent_name
-           ~configured:keeper_oas_context.claude_mcp_config
-       in
-       (* Observability for issue #10049: warn only when the effective config
-          is still missing after the auto-construction fallback. Otherwise the
-          log incorrectly says the subprocess cannot see MCP even though the
-          transport override is about to provide the generated config. *)
-       let configured_model_labels =
-         Keeper_model_labels.configured_model_labels_of_meta meta
-       in
-       let requires_runtime_mcp_header_sync =
-         Cascade_runtime_candidate.labels_require_runtime_mcp_header_sync
-           configured_model_labels
-       in
-       if
-         Keeper_cli_mcp_config.missing_catalog_warning_required_for_effective
-           ~requires_runtime_mcp_header_sync
-           ~effective_claude_mcp_config:claude_mcp_config
-       then
-         Log.Keeper.warn
-           "keeper %s (cascade=%s): cli-backed providers selected but \
-            effective claude_mcp_config is None; MCP tool catalog will not \
-            be visible to the subprocess (token missing, flag disabled, or \
-           auto-construction failed)"
-           meta.name
-           cascade_name_string;
-       let cli_transport_overrides =
-         let cli_subprocess_idle_sec =
-           Some (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
-         in
-         Some
-           ({ cwd = Some keeper_sandbox_root
-            ; claude_mcp_config
-            ; claude_allowed_tools = None
-            ; claude_permission_mode = None
-            ; claude_max_turns = Some max_turns
-            ; gemini_yolo =
-                (match approval_mode_effective with
-                 | Some mode -> Some (String.equal (String.lowercase_ascii mode) "yolo")
-                 | None -> None)
-            ; cli_subprocess_idle_sec
-            }
-            : Runtime_agent.cli_transport_overrides)
        in
        Keeper_agent_run_phase0_telemetry.record_if_enabled
          ~meta
@@ -664,7 +605,6 @@ let run_turn
                     ?on_yield
                     ?on_resume
                     ~agent_ref
-                    ?cli_transport_overrides
                     ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool

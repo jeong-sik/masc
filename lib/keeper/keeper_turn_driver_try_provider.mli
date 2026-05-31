@@ -29,7 +29,6 @@ type try_provider_ctx =
       Agent_sdk.Completion_contract.required_tool_satisfaction
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; transport_resolved : Masc_grpc_transport.t
-  ; cli_transport_overrides : Runtime_agent.cli_transport_overrides option
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option

@@ -16,17 +16,6 @@ type stop_reason =
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
 
-type cli_transport_overrides =
-  Runtime_transport.cli_transport_overrides = {
-  cwd : string option;
-  claude_mcp_config : string option;
-  claude_allowed_tools : string list option;
-  claude_permission_mode : string option;
-  claude_max_turns : int option;
-  gemini_yolo : bool option;
-  cli_subprocess_idle_sec : float option;
-}
-
 type config =
   Runtime_agent_context.config = {
   name : string;
@@ -75,7 +64,6 @@ type config =
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
-  cli_transport_overrides : cli_transport_overrides option;
       (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
@@ -135,9 +123,6 @@ let resolve_provider_config_of_label =
 let invalid_runtime_config =
   Runtime_transport.invalid_runtime_config
 
-let cli_model_override =
-  Runtime_transport.cli_model_override
-
 let provider_caps_of_config =
   Runtime_transport.provider_caps_of_config
 
@@ -183,20 +168,11 @@ let runtime_mcp_policy_of_tool_names =
 let provider_label =
   Runtime_transport.provider_label
 
-let cli_tool_d_max_turns_hard_cap =
-  Runtime_transport.cli_tool_d_max_turns_hard_cap
-
 let provider_effective_max_turns =
   Runtime_transport.provider_effective_max_turns
 
 let resolve_tool_lane_for_oas_tools =
   Runtime_transport.resolve_tool_lane_for_oas_tools
-
-let make_per_call_switch_transport =
-  Runtime_transport.make_per_call_switch_transport
-
-let non_http_transport_of_provider =
-  Runtime_transport.non_http_transport_of_provider
 
 let request_runtime_fields_on_base_config
     ~(base : Llm_provider.Provider_config.t)
@@ -242,9 +218,6 @@ let provider_resource_slot_transport
 let provider_http_slot_transport transport =
   provider_resource_slot_transport ~kind:Provider_http transport
 
-let provider_cli_slot_transport transport =
-  provider_resource_slot_transport ~kind:Provider_cli transport
-
 let provider_config_preserving_http_transport
     ~sw
     ~net
@@ -275,30 +248,18 @@ let provider_config_preserving_http_transport
           (patch_request req));
     }
 
-let transport_for_provider ~sw ~net ~provider_cfg ?runtime_mcp_policy
-    ?cli_transport_overrides () =
-  if
-    Llm_provider.Provider_config.is_subprocess_cli
-      provider_cfg.Llm_provider.Provider_config.kind
-  then
-    match
-      non_http_transport_of_provider ~sw ~provider_cfg ?runtime_mcp_policy
-        ?cli_transport_overrides ()
-    with
-    | Ok (Some transport) -> Ok (Some (provider_cli_slot_transport transport))
-    | Ok None -> Ok None
-    | Error _ as err -> err
-  else
-    Ok
-      (Some
-         (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
+let transport_for_provider ~sw ~net ~provider_cfg () =
+  (* CLI subprocess transport removed (2026-05-31); every provider dispatches
+     over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
+     per-request patching, not at transport construction, so it is no longer
+     threaded here. *)
+  Ok (Some (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
 
 module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config
 
   let provider_http_slot_transport = provider_http_slot_transport
-  let provider_cli_slot_transport = provider_cli_slot_transport
 end
 
 (* ================================================================ *)
@@ -357,10 +318,7 @@ let build
     ~(config : config)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match
-    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg
-      ?runtime_mcp_policy:config.runtime_mcp_policy
-      ?cli_transport_overrides:config.cli_transport_overrides
-      ()
+    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg ()
   with
   | Error _ as e -> e
   | Ok transport ->
@@ -455,10 +413,7 @@ let resume_from_checkpoint
     ~(checkpoint : Agent_sdk.Checkpoint.t)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match
-    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg
-      ?runtime_mcp_policy:config.runtime_mcp_policy
-      ?cli_transport_overrides:config.cli_transport_overrides
-      ()
+    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg ()
   with
   | Error _ as e -> e
   | Ok transport ->

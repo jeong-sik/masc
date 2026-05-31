@@ -1,4 +1,4 @@
-(* See cascade_attempt_liveness_observer.mli for documentation.
+(* See runtime_attempt_liveness_observer.mli for documentation.
 
    RFC-0022 PR-2/4 §4-5 — observer constructor, on_event wrapper,
    tick fiber, finalizer. *)
@@ -186,8 +186,8 @@ let react_to_output (t : t) (output : L.output) : unit =
                (* Enforce without a switch wired is a programmer error;
                   log and degrade to Observe rather than raise. *)
                Log.Misc.warn
-                 "cascade_attempt_liveness: enforce mode but no switch \
-                  registered (cascade=%s provider=%s); shadowing kill"
+                 "runtime_attempt_liveness: enforce mode but no switch \
+                  registered (runtime=%s provider=%s); shadowing kill"
                  t.cascade_label t.provider_label))
 
 (* -- on_event wrapper --------------------------------------------- *)
@@ -251,8 +251,8 @@ let external_wait_active (t : t) : bool =
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Misc.warn
-         "cascade_attempt_liveness: external_wait predicate raised \
-          (cascade=%s provider=runtime): %s"
+         "runtime_attempt_liveness: external_wait predicate raised \
+          (runtime=%s provider=runtime): %s"
          t.cascade_label
          (Printexc.to_string exn);
        false)
@@ -275,8 +275,8 @@ let wrap_on_event (t : t)
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
                  Log.Misc.warn
-                   "cascade_attempt_liveness: original on_event raised \
-                    (cascade=%s provider=runtime): %s"
+                   "runtime_attempt_liveness: original on_event raised \
+                    (runtime=%s provider=runtime): %s"
                    t.cascade_label
                    (Printexc.to_string exn)));
         Eio_guard.check_if_ready ();
@@ -285,7 +285,7 @@ let wrap_on_event (t : t)
         | Liveness_kill _ as e -> raise e
         | exn ->
             Log.Misc.warn
-              "cascade_attempt_liveness: step raised (cascade=%s \
+              "runtime_attempt_liveness: step raised (runtime=%s \
                provider=runtime): %s"
               t.cascade_label (Printexc.to_string exn)
       in
@@ -361,7 +361,7 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
           | Liveness_kill _ -> ()
           | exn ->
               Log.Misc.warn
-                "cascade_attempt_liveness tick fiber crashed (cascade=%s \
+                "runtime_attempt_liveness tick fiber crashed (runtime=%s \
                  provider=%s): %s"
                 t.cascade_label t.provider_label (Printexc.to_string exn))
 

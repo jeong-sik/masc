@@ -1,6 +1,6 @@
 (** Cascade attempt-level streaming liveness gate (RFC-0022 PR-1/4).
 
-    Pure FSM that fails the *current cascade attempt* — not the turn —
+    Pure FSM that fails the *current runtime attempt* — not the turn —
     when a provider stops emitting evidence of forward motion. Three
     independent kill classes:
 

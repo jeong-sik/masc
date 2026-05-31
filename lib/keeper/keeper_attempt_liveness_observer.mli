@@ -3,7 +3,7 @@
     Glue layer between {!Keeper_attempt_liveness} (pure FSM) and the
     streaming attempt loop in [oas_worker_named.ml]. Owns:
 
-    - The mutable FSM state ref bound to one cascade attempt.
+    - The mutable FSM state ref bound to one runtime attempt.
     - Translation from [Agent_sdk.Types.sse_event] to
       {!Keeper_attempt_liveness.Stream_chunk.kind}.
     - Tick fiber forked under the caller's [Eio.Switch.t] that polls
@@ -55,7 +55,7 @@ val create :
   started_at:float ->
   unit ->
   t
-(** Build an observer for one cascade attempt.
+(** Build an observer for one runtime attempt.
 
     [provider_label], when supplied, is a public bounded provider bucket used
     for Prometheus grouping. Empty or unrecognized labels fall back to a stable

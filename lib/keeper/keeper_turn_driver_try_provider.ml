@@ -364,7 +364,7 @@ let run_try_provider
            into whether the streaming master switch is the gating factor for
            openai_compat candidates. Removed at Phase 0 closeout. *)
         Log.Misc.debug
-          "rfc0095-trace: liveness_mode=Off observer disabled cascade=%s provider=%s \
+          "rfc0095-trace: liveness_mode=Off observer disabled runtime=%s provider=%s \
            candidate=%s"
           ctx.cascade_name
           provider_label
@@ -376,7 +376,7 @@ let run_try_provider
           Keeper_attempt_liveness_config.budget_for_candidate ~candidate_key
         in
         Log.Misc.debug
-          "cascade_attempt_liveness: candidate=%s provider=%s budget_source=%s ttft=%.1fs \
+          "runtime_attempt_liveness: candidate=%s provider=%s budget_source=%s ttft=%.1fs \
            inter_chunk=%.1fs wall=%.1fs"
           candidate_key
           provider_label
@@ -417,7 +417,7 @@ let run_try_provider
         (Timeout
            { message =
                Printf.sprintf
-                 "Cascade attempt liveness guard killed runtime lane %s: %s"
+                 "Runtime attempt liveness guard killed runtime lane %s: %s"
                  ctx.cascade_name
                  kind
            })

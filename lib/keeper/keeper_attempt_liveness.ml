@@ -66,7 +66,7 @@ type output =
   | Outcome of failure
   | Completed
 
-(** Metric recorder — caller (e.g. cascade_attempt_liveness_observer)
+(** Metric recorder — caller (e.g. runtime_attempt_liveness_observer)
     supplies callbacks for TTFT seconds, TBT seconds, and liveness outcome.
     Pure FSM stays IO-free; side effects live in the recorder. *)
 type recorder = {

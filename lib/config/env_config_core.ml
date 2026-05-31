@@ -277,7 +277,7 @@ let get_port ~default name =
 
 (** Env var names exposed as SSOT constants so out-of-process callers
     that read/write the variable by name (docker worker putenv, sidecar
-    lookup, config doctor diagnostics, runtime-bootstrap putenv) can
+    lookup, config auth diagnostics, runtime-bootstrap putenv) can
     reference the same literal. Issue 8352. *)
 let base_path_env_key = "MASC_BASE_PATH"
 let base_path_input_env_key = "MASC_BASE_PATH_INPUT"

@@ -38,6 +38,6 @@ val start_background_maintenance :
   Mcp_server.server_state -> string * string
 (** Spawn the periodic maintenance fibers (institution episode capping,
     cost ledger flush, dashboard cache warmer, etc.) under [sw].
-    Returns a [(summary, doctor_hint)] pair printed at boot so an
+    Returns a [(summary, diagnostics_hint)] pair printed at boot so an
     operator can see what schedules are active and where to look when
     one stops. *)

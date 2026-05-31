@@ -1,4 +1,4 @@
-"""Doctor framework 단위 테스트.
+"""Diagnostics framework 단위 테스트.
 
 실제 네트워크/파일시스템 의존 없이 Check 조립 / 렌더링 / exit code / auto-fix
 콜백 동작만 검증한다.
@@ -10,10 +10,10 @@ import json
 
 import pytest
 
-from gate_shared.doctor import (
+from gate_shared.diagnostics import (
     AutoFix,
     Check,
-    Doctor,
+    Diagnostics,
     Severity,
     check_dependencies_installed,
     exit_code_for,
@@ -40,18 +40,18 @@ def test_severity_symbols_render_prefix() -> None:
 def test_title_uses_underline_style_not_markdown_heading() -> None:
     """제목은 전통적 underline 스타일 (`Title\\n=====`) 로 렌더돼야 한다.
 
-    `masc-mcp doctor all` 섹션 divider (``====``) 와 일관된 외형 유지,
+    `masc-mcp diagnostics all` 섹션 divider (``====``) 와 일관된 외형 유지,
     그리고 pretty 출력에서 markdown 기호(`# `) 가 보이지 않도록.
     """
 
     text = render_pretty(
-        "Discord Sidecar Doctor",
+        "Discord Sidecar Diagnostics",
         [Check(name="a", severity=Severity.ok, message="")],
         use_color=False,
     )
     lines = text.splitlines()
-    assert lines[0] == "Discord Sidecar Doctor"
-    assert lines[1] == "=" * len("Discord Sidecar Doctor")
+    assert lines[0] == "Discord Sidecar Diagnostics"
+    assert lines[1] == "=" * len("Discord Sidecar Diagnostics")
     # markdown heading 기호는 제거됐어야 한다
     assert not text.startswith("# ")
     assert "\n# Discord" not in text
@@ -137,7 +137,7 @@ def test_action_item_marks_auto_fix_callback_available() -> None:
     ]
     text = render_pretty("T", checks, use_color=False)
     assert "[자동 치유] 재시작" in text
-    assert "# doctor --fix 로 실행" in text
+    assert "# diagnostics --fix 로 실행" in text
 
 
 def test_summary_line_in_korean() -> None:
@@ -196,7 +196,7 @@ def test_severity_needs_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_doctor_runs_all_checks_even_when_one_raises() -> None:
+async def test_diagnostics_runs_all_checks_even_when_one_raises() -> None:
     async def good() -> Check:
         return Check(name="good", severity=Severity.ok, message="")
 
@@ -206,7 +206,7 @@ async def test_doctor_runs_all_checks_even_when_one_raises() -> None:
     async def other() -> Check:
         return Check(name="other", severity=Severity.warn, message="skip-me")
 
-    d = Doctor("unit")
+    d = Diagnostics("unit")
     d.register_many([good, bad, other])
     results = await d.run()
     names = [c.name for c in results]
@@ -245,7 +245,7 @@ async def test_auto_fix_callback_invoked_only_for_warn_or_error() -> None:
     async def emit_bad() -> Check:
         return bad_check
 
-    d = Doctor("unit")
+    d = Diagnostics("unit")
     d.register_many([emit_ok, emit_bad])
     initial = await d.run()
     rerun, outcomes = await d.run_auto_fixes(initial)
@@ -288,7 +288,7 @@ async def test_run_auto_fixes_captures_failure_and_continues() -> None:
     async def emit_c2() -> Check:
         return c2
 
-    d = Doctor("unit")
+    d = Diagnostics("unit")
     d.register_many([emit_c1, emit_c2])
     initial = await d.run()
     _, outcomes = await d.run_auto_fixes(initial)
@@ -299,13 +299,13 @@ async def test_run_auto_fixes_captures_failure_and_continues() -> None:
 
 
 def test_render_fix_outcomes_empty_returns_empty_string() -> None:
-    from gate_shared.doctor import render_fix_outcomes  # noqa: PLC0415
+    from gate_shared.diagnostics import render_fix_outcomes  # noqa: PLC0415
 
     assert render_fix_outcomes([], use_color=False) == ""
 
 
 def test_render_fix_outcomes_shows_success_and_failure() -> None:
-    from gate_shared.doctor import FixOutcome, render_fix_outcomes  # noqa: PLC0415
+    from gate_shared.diagnostics import FixOutcome, render_fix_outcomes  # noqa: PLC0415
 
     outcomes = [
         FixOutcome(

@@ -192,7 +192,7 @@ let permissions_for_role = function
 
 (* Direct (role, permission) variant match — O(1), no per-call list
    allocation.  Hot path: [Auth.check_permission] runs this on every
-   protected operation; [Auth_doctor] runs it 10+ times per snapshot.
+   protected operation; [auth diagnostics] runs it 10+ times per snapshot.
    The previous [List.mem permission (permissions_for_role role)] form
    built a fresh 12-element (Worker) / 15-element (Admin) list each
    call.

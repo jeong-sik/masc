@@ -1,9 +1,9 @@
-"""Doctor framework for MASC connector sidecars.
+"""Diagnostics framework for MASC connector sidecars.
 
 진단(Diagnose) → 보고(Report) → 힌트(Hint) → 자가치유(Fix) 의 네 단계를 표준화한다.
-각 커넥터는 ``Check`` 들을 등록하고 ``Doctor.run()`` 으로 실행한다.
+각 커넥터는 ``Check`` 들을 등록하고 ``Diagnostics.run()`` 으로 실행한다.
 
-외모는 ``flutter doctor`` / ``brew doctor`` / ``rustup check`` 를 참고한다:
+외모는 ``flutter diagnostics`` / ``brew diagnostics`` / ``rustup check`` 를 참고한다:
 
     [✓] gate reachable (http://localhost:8935)
     [!] DISCORD_ADMIN_ROLE_ID not set
@@ -11,7 +11,7 @@
           fix: export DISCORD_ADMIN_ROLE_ID=<role_id>
     [✗] binding store path not writable
         ↳ .gate/runtime/discord/bindings.json 을 만들 수 없습니다.
-          auto-fix 가능: doctor --fix
+          auto-fix 가능: diagnostics --fix
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ __all__ = [
     "AutoFix",
     "Check",
     "CheckFn",
-    "Doctor",
+    "Diagnostics",
     "FixOutcome",
     "NETWORK_TIMEOUT_SEC",
     "Severity",
@@ -117,7 +117,7 @@ def _colorize(text: str, sev: Severity, *, use_color: bool) -> str:
 
 
 def _banner(counts: dict[Severity, int], *, use_color: bool) -> str:
-    """검사 결과를 한 줄로 요약한 상단 배너. ``flutter doctor`` 헤드라인 풍.
+    """검사 결과를 한 줄로 요약한 상단 배너. ``flutter diagnostics`` 헤드라인 풍.
 
     error > warn > (모두 skip) > ok 순으로 우선 판정한다. skip 만 있을 때
     "통과" 로 표시하면 전제가 깨진 상태를 정상처럼 오해하게 된다.
@@ -176,7 +176,7 @@ def _action_items(checks: Sequence[Check]) -> list[str]:
             if c.auto_fix.command:
                 items.append(f"       $ {c.auto_fix.command}")
             if c.auto_fix.callback is not None:
-                items.append("       # doctor --fix 로 실행")
+                items.append("       # diagnostics --fix 로 실행")
     return items
 
 
@@ -203,15 +203,15 @@ def render_pretty(
 ) -> str:
     """사람이 읽기 좋은 출력.
 
-    레이아웃은 ``flutter doctor`` / ``brew doctor`` 외형을 참고:
+    레이아웃은 ``flutter diagnostics`` / ``brew diagnostics`` 외형을 참고:
 
-    1. 제목 (전통적 underline 스타일 — ``Discord Sidecar Doctor`` + ``====``)
+    1. 제목 (전통적 underline 스타일 — ``Discord Sidecar Diagnostics`` + ``====``)
     2. 배너 — 전체 상태 한 줄 요약
     3. 검사 목록 — 등록 순서 유지 (검진 흐름이 곧 읽는 순서)
     4. 조치 항목 — warn/error 에서 나온 hint + auto-fix 를 번호 목록으로
     5. 합계 — 한글 카운트
 
-    Note: `masc-mcp doctor all` 이 섹션마다 ``====`` divider 를 넣으므로,
+    Note: `masc-mcp diagnostics all` 이 섹션마다 ``====`` divider 를 넣으므로,
     사이드카 제목도 동일한 underline 을 써서 단독/통합 실행 양쪽에서
     시각적으로 자연스럽게 이어지도록 한다 (이전의 markdown ``#`` 접두 제거).
     """
@@ -244,7 +244,7 @@ def render_pretty(
             if c.auto_fix.command:
                 lines.append(f"        $ {c.auto_fix.command}")
             if c.auto_fix.callback is not None:
-                lines.append("        auto-fix 가능: doctor --fix")
+                lines.append("        auto-fix 가능: diagnostics --fix")
     actions = _action_items(checks)
     if actions:
         lines.append("")
@@ -328,7 +328,7 @@ def exit_code_for(checks: Sequence[Check]) -> int:
     return 0
 
 
-class Doctor:
+class Diagnostics:
     def __init__(self, title: str) -> None:
         self._title = title
         self._checks: list[CheckFn] = []
@@ -411,7 +411,7 @@ def check_dependencies_installed(packages: Sequence[str]) -> CheckFn:
     dependencies — critical for diagnosing "nothing is installed yet"
     states where importing the sidecar's own config module would crash.
 
-    Register this first in a Doctor so the operator sees a single clear
+    Register this first in a Diagnostics so the operator sees a single clear
     'missing deps' check instead of a raw ImportError traceback.
     """
 

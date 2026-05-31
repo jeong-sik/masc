@@ -35,8 +35,6 @@ lib/attempt_state.ml:129
 lib/audit_log.ml:351
 lib/audit_log.ml:384
 lib/audit_log.ml:393
-lib/auth_doctor.ml:374
-lib/auth_doctor.ml:499
 lib/auth_error_kind.ml:43
 lib/auth_login.ml:36
 lib/auth.ml:271
@@ -157,9 +155,6 @@ lib/chronicle_ingest.ml:42
 lib/chronicle_ingest.ml:224
 lib/chronicle_ingest.ml:230
 lib/chronicle_validate.ml:44
-lib/codex_mcp_config_doctor.ml:69
-lib/codex_mcp_config_doctor.ml:86
-lib/codex_mcp_config_doctor.ml:91
 lib/config/env_config_runtime.ml:343
 lib/coord_assertions.ml:58
 lib/coord_goals.ml:220
@@ -287,7 +282,6 @@ lib/dashboard/dashboard_worktree_status.ml:109
 lib/dashboard/dashboard_worktree_status.ml:132
 lib/dashboard/dashboard_worktree_status.ml:218
 lib/dashboard/judge_json_recovery.ml:36
-lib/doctor_dispatch.ml:9
 lib/drift_guard.ml:50
 lib/drift_guard.ml:108
 lib/eval_calibration.ml:31

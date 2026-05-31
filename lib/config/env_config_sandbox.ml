@@ -222,7 +222,7 @@ module Shell_timeout = struct
 end
 
 (* --------------------------------------------------------------- *)
-(* Doctor / observability surface                                  *)
+(* Diagnostics / observability surface                                  *)
 (* --------------------------------------------------------------- *)
 
 (* Helper: does an env var currently exist (non-empty after trim)? *)

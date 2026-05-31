@@ -133,7 +133,7 @@ let run_safe ~caller ~timeout_s fn =
        classifier can route bridge-boundary failures off the
        [Reason_internal_error] catch-all. *)
     Error
-      (Keeper_meta_contract.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
          (Keeper_meta_contract.Internal_bridge_exception
             { caller; exn_repr = Printexc.to_string exn }))
 

@@ -16,7 +16,7 @@ let keep_last_n n item lst =
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
-  match Keeper_meta_contract.classify_masc_internal_error_of_string trimmed with
+  match Keeper_internal_error.classify_masc_internal_error_of_string trimmed with
   | Some (Keeper_meta_contract.Ambiguous_post_commit { tools; _ }) -> tools
   | _ ->
     (* Legacy: extract from bracket notation "prefix: [tool1, tool2]; ..." *)

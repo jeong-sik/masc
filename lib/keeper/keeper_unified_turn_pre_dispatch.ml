@@ -77,7 +77,7 @@ let build_runtime_execution
         with
         | Error err ->
           Error
-            (Keeper_meta_contract.sdk_error_of_masc_internal_error err)
+            (Keeper_internal_error.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->
           Ok
             { Keeper_turn_runtime_budget.cascade_name

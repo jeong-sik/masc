@@ -8,14 +8,13 @@
     @since God file decomposition — extracted from oas_worker.ml *)
 
 open Result.Syntax
-open Runtime_name
 
 (* Sub-module includes (God file decomposition).
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
 include Runtime_oas_runner
-include Runtime_error_classify
 include Runtime_attempt_fsm
+include Keeper_internal_error
 include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
@@ -176,7 +175,7 @@ let run_named
                reason;
              kept,
              ({ provider_label; reason }
-               : Keeper_meta_contract.provider_rejection)
+               : Keeper_internal_error.provider_rejection)
              :: rejected
            in
            match
@@ -494,7 +493,7 @@ let run_named
             ; required_tool_names
             ; provider_rejections =
                 List.map
-                  (fun (r : Keeper_meta_contract.provider_rejection) ->
+                  (fun (r : Keeper_internal_error.provider_rejection) ->
                      (r.provider_label, r.reason))
                   provider_rejections
             }
@@ -515,7 +514,7 @@ let run_named
        | Some manifest_ctx, Some append ->
          let provider_rejection_reasons =
            provider_rejections
-           |> List.map (fun (r : Keeper_meta_contract.provider_rejection) ->
+           |> List.map (fun (r : Keeper_internal_error.provider_rejection) ->
                   r.reason)
            |> Json_util.dedupe_keep_order
          in

@@ -5,8 +5,7 @@
 
     @since God file decomposition *)
 
-open Keeper_meta_contract
-open Runtime_name
+open Keeper_internal_error
 
 (* Synthetic backoff default for paths where the upstream provides no
    [retry_after] hint.  Carried as [Synthetic_default] so provenance is

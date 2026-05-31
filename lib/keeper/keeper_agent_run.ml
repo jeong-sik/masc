@@ -171,12 +171,12 @@ let run_turn
     | Error internal_error ->
       let detail =
         Option.value
-          ~default:(Keeper_meta_contract.kind_of_masc_internal_error internal_error)
-          (Keeper_meta_contract.summary_of_masc_internal_error internal_error)
+          ~default:(Keeper_internal_error.kind_of_masc_internal_error internal_error)
+          (Keeper_internal_error.summary_of_masc_internal_error internal_error)
       in
       Log.Keeper.error "%s: %s" meta.name detail;
       ( ctx.max_tokens,
-        Some (Keeper_meta_contract.sdk_error_of_masc_internal_error internal_error) )
+        Some (Keeper_internal_error.sdk_error_of_masc_internal_error internal_error) )
   in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in

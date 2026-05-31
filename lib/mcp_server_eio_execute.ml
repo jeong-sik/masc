@@ -62,9 +62,9 @@ let execute_tool_eio
   Prometheus.record_request ();
   let config = state.Mcp_server.coord_config in
   let registry = state.Mcp_server.session_registry in
-  (* Fix 3: Cache coord_initialized to avoid repeated stat syscalls.
+  (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls.
      Updated after auto-init succeeds. *)
-  let coord_init_cached = ref (Coord.is_initialized config) in
+  let workspace_init_cached = ref (Coord.is_initialized config) in
   (* Fix 4: Check resolved-name cache for fast identity resolution.
      On 2nd+ call in the same MCP session, the cached name preserves the
      nickname selected by the prior session binding without relying on sidecar files. *)
@@ -81,7 +81,7 @@ let execute_tool_eio
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
       ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
-      ~coord_initialized:(fun () -> !coord_init_cached)
+      ~workspace_initialized:(fun () -> !workspace_init_cached)
       ~log_mcp_exn
   in
   let agent_name = caller_identity.agent_name in
@@ -212,7 +212,7 @@ let execute_tool_eio
           in
           (match owner_keeper_identity with
            | Some (keeper_name, keeper_id)
-             when agent_name <> "unknown" && !coord_init_cached ->
+             when agent_name <> "unknown" && !workspace_init_cached ->
              (try
                 Coord_task.update_local_agent_state config ~agent_name (fun agent ->
                   let meta =
@@ -260,7 +260,7 @@ let execute_tool_eio
               | Tool_catalog.Real | Tool_catalog.Adapter | Tool_catalog.Placeholder ->
                 false
             in
-            if (not skip_heartbeat) && !coord_init_cached
+            if (not skip_heartbeat) && !workspace_init_cached
             then (
               try
                 let (_ : string) = Coord.heartbeat config ~agent_name in

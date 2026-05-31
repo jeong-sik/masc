@@ -1,6 +1,6 @@
-(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
 
-    Public API for running OAS agents through MASC-managed named cascade
+    Public API for running OAS agents through MASC-managed named runtime
     profiles ([run_named])
     or explicit model label ([run_model_by_label]), with optional MASC
     tool bridging variants.
@@ -28,7 +28,7 @@ let provider_config_identity_key =
 let runtime_candidates_of_providers =
   Keeper_turn_driver_admission.runtime_candidates_of_providers
 let run_named
-    ~cascade_name
+    ~runtime_id
     ?base_path
     ?(keeper_name = "")
     ~goal
@@ -90,14 +90,14 @@ let run_named
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
-  (* Single-runtime dispatch (RFC-0206 cascade purge).  The former named-cascade
+  (* Single-runtime dispatch (RFC-0206 runtime purge).  The former named-runtime
      resolution + multi-candidate selection / health / capacity / strategy /
      cycle / admission-rotation machinery is deleted.  There is exactly one
      default Runtime: resolve its provider config, build one execution
      candidate, and run a single provider attempt.  A failed runtime surfaces
      its [sdk_error] directly — there is nothing left to "exhaust". *)
-  let cascade_name = String.trim cascade_name in
-  let error_cascade_name = cascade_name in
+  let runtime_id = String.trim runtime_id in
+  let error_runtime_id = runtime_id in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   (* Keeper-internal tools cannot degrade to a text-only CLI palette: the model
      would see no callable schema and emit misleading diagnostics. *)
@@ -117,12 +117,12 @@ let run_named
     Error
       (Agent_sdk.Error.Internal
          (Printf.sprintf "no default runtime configured (requested: %s)"
-            cascade_name))
+            runtime_id))
   | Some runtime ->
   let candidate =
     Runtime_candidate.of_provider_config runtime.Runtime.provider_config
   in
-  let name = Printf.sprintf "oas-%s" cascade_name in
+  let name = Printf.sprintf "oas-%s" runtime_id in
   let transport_resolved =
     match transport with
     | Some t -> t
@@ -131,8 +131,8 @@ let run_named
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
   let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
-    cascade_name;
-    error_cascade_name;
+    runtime_id;
+    error_runtime_id;
     keeper_name;
     name;
     goal;

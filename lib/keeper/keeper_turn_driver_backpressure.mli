@@ -14,7 +14,7 @@ val capacity_backpressure_source_of_http_error :
     when the error indicates capacity exhaustion. *)
 val capacity_backpressure_of_http_error :
   ?source:Keeper_internal_error.capacity_backpressure_source ->
-  cascade_name:string ->
+  runtime_id:string ->
   Llm_provider.Http_client.http_error option ->
   Keeper_internal_error.masc_internal_error option
 
@@ -24,7 +24,7 @@ val capacity_backpressure_of_http_error :
     [No_retry_hint]) so a synthetic default is never read as an explicit
     hint. *)
 val capacity_backpressure_of_pending :
-  cascade_name:string ->
+  runtime_id:string ->
   (Keeper_internal_error.capacity_backpressure_source * string
    * Keeper_internal_error.capacity_retry_after) option ->
   Keeper_internal_error.masc_internal_error option
@@ -33,7 +33,7 @@ val capacity_backpressure_of_pending :
     when the error indicates provider capacity exhaustion or a
     backpressure-like internal message. *)
 val capacity_backpressure_of_sdk_error :
-  cascade_name:string ->
+  runtime_id:string ->
   message_looks_like_capacity_backpressure:(string -> bool) ->
   sdk_error_of_masc_internal_error:(Keeper_internal_error.masc_internal_error ->
                                     Agent_sdk.Error.sdk_error) ->

@@ -1,6 +1,6 @@
-(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
 
-    Public API for running OAS agents through MASC-managed named cascade
+    Public API for running OAS agents through MASC-managed named runtime
     profiles ([run_named]) or explicit model label ([run_model_by_label]),
     with optional MASC tool bridging variants.
 
@@ -37,7 +37,7 @@ val sdk_error_soft_rate_limited :
 
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
-val sdk_error_cascade_fallback_class :
+val sdk_error_runtime_fallback_class :
   Agent_sdk.Error.sdk_error -> string option
 
 (** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
@@ -55,7 +55,7 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_cascade : string option
+  ; provider_source_runtime : string option
   }
 
 type provider_attempt_started_record =
@@ -83,10 +83,10 @@ val provider_attempt_started_decision :
 val provider_attempt_finished_decision :
   provider_attempt_finished_record -> Yojson.Safe.t
 
-(** {1 Named cascade execution} *)
+(** {1 Named runtime execution} *)
 
 val run_named :
-  cascade_name:string ->
+  runtime_id:string ->
   ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->
@@ -144,10 +144,10 @@ val run_named :
   ?per_provider_timeout_s:float ->
   unit ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
-(** Run a single [Agent.run] call with MASC-driven cascade model fallback.
-    MASC drives the cascade FSM directly: resolves cascade providers,
-    tries each with OAS, and uses [Cascade_fsm.decide] on failure.
-    The cascade loop runs inside a capacity-managed queue permit. *)
+(** Run a single [Agent.run] call with MASC-driven runtime model fallback.
+    MASC drives the runtime FSM directly: resolves runtime providers,
+    tries each with OAS, and uses [Runtime_fsm.decide] on failure.
+    The runtime loop runs inside a capacity-managed queue permit. *)
 
 module For_testing : sig
   val checkpoint_after_attempt :

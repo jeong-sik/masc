@@ -135,7 +135,7 @@ let success_selected_model_raw candidate =
 
 (* Error/rejected/exhausted observations intentionally leave the concrete
    selected model absent. Downstream attribution uses candidate_models or the
-   cascade route for those outcomes. *)
+   runtime route for those outcomes. *)
 let error_selected_model_raw = None
 
 let health_error_kind label =
@@ -161,8 +161,8 @@ let record_candidate_health_rejected candidate ~reason =
       ~error_reason:reason
       ())
 
-(* Hard-quota SDK error classifiers, re-homed from the deleted cascade attempt
-   FSM (RFC-0206).  Generic provider-error classification, not cascade-specific. *)
+(* Hard-quota SDK error classifiers, re-homed from the deleted runtime attempt
+   FSM (RFC-0206).  Generic provider-error classification, not runtime-specific. *)
 let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
     : string option =
   match api_err with
@@ -286,12 +286,12 @@ let sdk_error_is_required_tool_contract_violation
     contract = Agent_sdk.Completion_contract_id.Require_tool_use
   | _ -> false
 
-(* RFC-0206: cascade rotation is gone, but "max turns exceeded" still surfaces
+(* RFC-0206: runtime rotation is gone, but "max turns exceeded" still surfaces
    as a structured masc_internal_error envelope on a single dispatch. *)
 let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some
-      (Keeper_internal_error.Cascade_exhausted
+      (Keeper_internal_error.Runtime_exhausted
          { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) -> true
   | Some _ | None -> false
 

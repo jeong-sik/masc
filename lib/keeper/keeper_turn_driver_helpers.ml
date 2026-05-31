@@ -5,7 +5,7 @@
     that compute provider-attempt timeout bounds, health-key derivations,
     tool-name aggregations, etc. Lifting them out of the 1459-LOC
     [keeper_turn_driver.ml] is a foundation step toward the eventual
-    A/B/C decomposition (Agent SDK call / cascade strategy / keeper
+    A/B/C decomposition (Agent SDK call / runtime strategy / keeper
     bookkeeping) deferred from RFC-0047 Phase 4.
 
     No behavior change. Mechanical extraction.
@@ -139,9 +139,9 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
         }
       in
       Some
-        (Keeper_internal_error.Cascade_exhausted
+        (Keeper_internal_error.Runtime_exhausted
            {
-             cascade_name;
+             runtime_id = cascade_name;
              reason = Keeper_meta_contract.No_tool_capable (Some detail);
            })
 

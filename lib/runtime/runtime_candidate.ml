@@ -1,6 +1,6 @@
 (** Runtime_candidate — single-dispatch execution candidate (RFC-0206).
 
-    cascade->Runtime annihilation: the deleted [Cascade_runtime_candidate]
+    Runtime dispatch
     wrapped a [Provider_config.t] with health / capacity / probe keys to feed
     the multi-candidate selection FSM. With single-binding dispatch there is
     exactly one Runtime, so the candidate collapses to its provider config and
@@ -38,8 +38,8 @@ let default_config ~name ~system_prompt ~tools (t : t) =
   Runtime_agent.default_config ~name ~provider_cfg:t ~system_prompt ~tools
 
 (* Error decoration collapsed to identity: the deleted version added provider
-   auth-env / not-found hints via the annihilated cascade attempt-fsm helpers. *)
-let enrich_sdk_error ~cascade_name:(_ : string) (_ : t)
+   auth-env / not-found hints via the annihilated runtime attempt-fsm helpers. *)
+let enrich_sdk_error ~runtime_id:(_ : string) (_ : t)
     (err : Agent_sdk.Error.sdk_error) =
   err
 
@@ -95,6 +95,11 @@ type context_window_hint =
   ; is_local_model : bool
   }
 
+type attempt_timeout_resolution =
+  { timeout_s : float option
+  ; source : string
+  }
+
 (* Collapsed: the deleted version was already a no-op stub (tier-based local
    classification removed); context window comes from the Runtime model spec. *)
 let context_window_hint_of_labels labels =
@@ -125,3 +130,107 @@ let strip_latest_suffix runtime_id =
 
 let normalize_runtime_name_for_bucket label =
   runtime_id_of_label_or_raw label |> strip_latest_suffix
+
+let nonempty_string_opt s =
+  let s = String.trim s in
+  if String.equal s "" then None else Some s
+
+let runtime_url_of_label label =
+  match Provider_kind_resolver.resolve label with
+  | Provider_kind_resolver.Registered { provider_name; _ } ->
+    nonempty_string_opt (registry_default_base_url provider_name)
+  | Provider_kind_resolver.Custom_url { base_url; _ } ->
+    nonempty_string_opt base_url
+  | Provider_kind_resolver.Unknown _ -> None
+
+let label_matches_runtime_id ~label ~runtime_id =
+  let label_id = normalize_runtime_name_for_bucket label in
+  let runtime_id = String.trim runtime_id |> strip_latest_suffix in
+  (not (String.equal runtime_id "")) && String.equal label_id runtime_id
+
+let has_resolvable_runtime_label labels =
+  List.exists (fun label -> Option.is_some (runtime_id_of_label label)) labels
+
+let labels_require_runtime_mcp_header_sync labels =
+  let _ = labels in
+  false
+
+let unknown_runtime_label = "unknown"
+
+let provider_label_of_runtime_label ?provider_kind label =
+  let _ = provider_kind in
+  match nonempty_string_opt label with
+  | Some label -> label
+  | None -> unknown_runtime_label
+
+let is_structurally_unmetered_runtime_provider label =
+  let _ = label in
+  false
+
+let runtime_label_for_active_id ~configured_labels ~active =
+  let active = String.trim active in
+  match
+    List.find_opt
+      (fun label -> label_matches_runtime_id ~label ~runtime_id:active)
+      configured_labels
+  with
+  | Some label -> label
+  | None ->
+    if String.equal active "" then unknown_runtime_label else active
+
+let resolve_reported_runtime_id ~labels ~reported_runtime_id =
+  runtime_label_for_active_id ~configured_labels:labels ~active:reported_runtime_id
+  |> normalize_runtime_name_for_bucket
+
+let threshold_multipliers_of_runtime_id runtime_id =
+  let _ = runtime_id in
+  (1.0, 1.0)
+
+let first_health_cooldown (_ : t) = None
+let has_recovery_evidence (_ : t) = false
+
+let effective_attempt_timeout_resolution ~is_last ~configured_timeout_s (_ : t) =
+  let _ = is_last in
+  match configured_timeout_s with
+  | Some timeout_s -> { timeout_s = Some timeout_s; source = "configured" }
+  | None -> { timeout_s = None; source = "runtime_default" }
+
+let effective_attempt_timeout_s ~is_last ~configured_timeout_s t =
+  (effective_attempt_timeout_resolution ~is_last ~configured_timeout_s t).timeout_s
+
+let tool_filter_rejection_label ~keeper_name ?runtime_mcp_policy ~tools
+    ~require_tool_choice_support ~require_tool_support (t : t) =
+  let _ =
+    ( keeper_name,
+      runtime_mcp_policy,
+      tools,
+      require_tool_choice_support,
+      require_tool_support,
+      t )
+  in
+  None
+
+let capacity_key (t : t) = health_key t
+
+let capacity_keys candidates =
+  candidates |> List.map capacity_key |> List.sort_uniq String.compare
+
+let declared_client_capacity (_ : t) = None
+let register_declared_client_capacity (_ : t) = ()
+
+let runtime_urls candidates =
+  candidates
+  |> List.filter_map (fun (cfg : t) -> nonempty_string_opt cfg.base_url)
+  |> List.sort_uniq String.compare
+
+let local_runtime_urls candidates = runtime_urls candidates
+
+let filter_unhealthy_local_runtime_urls ~endpoint_health candidates =
+  let _ = endpoint_health in
+  (candidates, [])
+
+let http_probe_urls candidates = runtime_urls candidates
+
+let register_http_probe_capable ~max_concurrent (_ : t) =
+  let _ = max_concurrent in
+  ()

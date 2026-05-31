@@ -160,7 +160,7 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_persona_generate", Masc_domain.CanBroadcast);
       ("masc_persona_save", Masc_domain.CanBroadcast);
       ("masc_keeper_reset", Masc_domain.CanBroadcast);
-      ("masc_join", Masc_domain.CanJoin);
+      ("masc_start", Masc_domain.CanBroadcast);
       ("masc_broadcast", Masc_domain.CanBroadcast);
       ("masc_portal_send", Masc_domain.CanSendPortal);
       ("channel_gate", Masc_domain.CanBroadcast);

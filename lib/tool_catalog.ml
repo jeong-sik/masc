@@ -292,7 +292,7 @@ let explicit_metadata : (string * metadata) list =
         broadcast_tool );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
     ("masc_reset", reset_tool);
-    ("masc_start", join_tool);
+    ("masc_start", broadcast_tool);
     ("masc_task_history", read_state_tool);
     ("masc_add_task", add_task_tool);
     ("masc_batch_add_tasks", add_task_tool);

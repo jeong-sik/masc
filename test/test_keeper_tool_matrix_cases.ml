@@ -130,15 +130,15 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let tools = KTO.make_tools ~config ~meta ~ctx_snapshot () in
   (match init_mode with
    | Init_joined ->
-       (* Join under both the raw meta name (used by masc_* tools called
+       (* Bind under both the raw meta name (used by masc_* tools called
           through the keeper) and the prefixed keeper alias. Some keeper
           tools resolve the agent through the prefixed alias while
           dispatched masc tools use the raw meta identity. *)
        ignore
-         (Masc_mcp.Coord.join config ~agent_name:meta.name
+         (Masc_mcp.Coord.bind_session config ~agent_name:meta.name
             ~capabilities:[] ());
        ignore
-         (Masc_mcp.Coord.join config ~agent_name:("keeper-" ^ meta.name)
+         (Masc_mcp.Coord.bind_session config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
   { generic; config; meta; ctx_snapshot; tools }

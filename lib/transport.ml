@@ -98,8 +98,11 @@ module JsonRpc = struct
       else
         let id = Json_util.get_string json "id" in
         let method_name = Json_util.get_string_with_default json ~key:"method" ~default:"" in
-        let params = Yojson.Safe.Util.member "params" json in
-        Ok { id; method_name; params; headers = [] }
+        if String.trim method_name = "" then
+          Error "Missing JSON-RPC method"
+        else
+          let params = Yojson.Safe.Util.member "params" json in
+          Ok { id; method_name; params; headers = [] }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (Printexc.to_string e)
@@ -195,6 +198,7 @@ module Rest = struct
     | "masc_operator_confirm" -> Some Bearer_required
     | "masc_status"
     | "masc_tasks"
+    | "masc_agents"
     | "masc_messages"
     | "masc_operator_snapshot"
     | "masc_operator_digest"
@@ -218,6 +222,7 @@ module Rest = struct
     [
       ("masc_status", [ (GET, "/api/v1/status") ]);
       ("masc_tasks", [ (GET, "/api/v1/tasks") ]);
+      ("masc_agents", [ (GET, "/api/v1/agents") ]);
       ("masc_messages", [ (GET, "/api/v1/messages") ]);
       ("masc_operator_snapshot", [ (GET, "/api/v1/operator") ]);
       ("masc_operator_digest", [ (GET, "/api/v1/operator/digest") ]);

@@ -167,15 +167,20 @@ let test_permission_for_tool_reset () =
   | Some Masc_domain.CanReset -> ()
   | _ -> fail "expected CanReset"
 
-let test_permission_for_tool_join () =
-  match Auth.permission_for_tool "masc_join" with
-  | Some Masc_domain.CanJoin -> ()
-  | _ -> fail "expected CanJoin"
+let test_permission_for_tool_start () =
+  match Auth.permission_for_tool "masc_start" with
+  | Some Masc_domain.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_leave () =
+let test_permission_for_tool_join_removed () =
+  match Auth.permission_for_tool "masc_join" with
+  | None -> ()
+  | _ -> fail "expected None (removed tool)"
+
+let test_permission_for_tool_leave_removed () =
   match Auth.permission_for_tool "masc_leave" with
-  | Some Masc_domain.CanLeave -> ()
-  | _ -> fail "expected CanLeave"
+  | None -> ()
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_status () =
   match Auth.permission_for_tool "masc_status" with
@@ -189,8 +194,8 @@ let test_permission_for_tool_runtime_verify () =
   | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
-let test_permission_for_tool_who () =
-  match Auth.permission_for_tool "masc_who" with
+let test_permission_for_tool_agents () =
+  match Auth.permission_for_tool "masc_agents" with
   | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
@@ -1063,10 +1068,11 @@ let () =
     "permission_for_tool", [
       test_case "init" `Quick test_permission_for_tool_init;
       test_case "reset" `Quick test_permission_for_tool_reset;
-      test_case "join" `Quick test_permission_for_tool_join;
-      test_case "leave" `Quick test_permission_for_tool_leave;
+      test_case "start" `Quick test_permission_for_tool_start;
+      test_case "join removed" `Quick test_permission_for_tool_join_removed;
+      test_case "leave removed" `Quick test_permission_for_tool_leave_removed;
       test_case "status" `Quick test_permission_for_tool_status;
-      test_case "who" `Quick test_permission_for_tool_who;
+      test_case "agents" `Quick test_permission_for_tool_agents;
       test_case "tasks" `Quick test_permission_for_tool_tasks;
       test_case "add_task" `Quick test_permission_for_tool_add_task;
       test_case "claim" `Quick test_permission_for_tool_claim;

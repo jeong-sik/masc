@@ -589,7 +589,7 @@ let execute_tool_eio
                       ~agent_name
                       (runtime_error_result
                          ~tool_name:name
-                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))))
+                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))
 ;;
 
 (* RFC-0182 §3.1 — register Tool_coord.dispatch with the dependency

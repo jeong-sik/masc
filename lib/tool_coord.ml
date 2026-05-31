@@ -576,7 +576,7 @@ let status_summary_string (ctx : context) =
   in
   Coord_status_rendering.status_summary_string
     ~ctx
-    ~session_bound
+    ~joined:session_bound
     ~actual_name
     ~credential_state
     ~credential_blocked

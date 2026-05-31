@@ -63,10 +63,8 @@ let strict_success_names =
     "masc_claim_next";
     "masc_dashboard";
     "masc_heartbeat";
-    "masc_join";
     "masc_keeper_down";
     "masc_keeper_list";
-    "masc_leave";
     "masc_library_add";
     "masc_library_list";
     "masc_messages";
@@ -80,7 +78,6 @@ let strict_success_names =
     "masc_transition";
     "masc_transport_status";
     "masc_websocket_discovery";
-    "masc_who";
     "masc_workflow_guide";
     (* Removed post-pruning:
        masc_init, masc_auth_*, masc_handover_*, masc_verify_* *)
@@ -296,27 +293,26 @@ let execute_tool_ok fixture ~name ~arguments =
   else failwith (Printf.sprintf "setup tool failed for %s: %s" name ((Tool_result.message result)))
 
 let ensure_initialized fixture =
-  (* masc_init pruned from registry. Initialise the coord state
-     directly so downstream masc_join and other tools can work. *)
+  (* masc_init pruned from registry. Initialise the coord state directly so
+     downstream tools can work. *)
   ignore
     (Masc_mcp.Coord.init fixture.state.coord_config
        ~agent_name:(Some fixture.agent_name))
 
 let ensure_joined fixture =
   let result =
-    execute_tool fixture ~name:"masc_join"
+    execute_tool fixture ~name:"masc_start"
       ~arguments:
         (`Assoc
           [
-            ("agent_name", `String fixture.agent_name);
-            ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
+            ("path", `String fixture.base_path);
           ])
   in
   if (Tool_result.is_success result) then ()
   else begin
     let body = (Tool_result.message result) in
     if contains_substring body "already joined" then ()
-    else failwith ("masc_join failed: " ^ body)
+    else failwith ("masc_start failed: " ^ body)
   end
 
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
@@ -482,8 +478,8 @@ let ensure_library_topic fixture =
   match fixture.library_topic with
   | Some topic -> topic
   | None ->
-      mkdir_p (Filename.concat fixture.base_path "me/docs/library");
-      mkdir_p (Filename.concat fixture.base_path "me/docs/library/candidates");
+      mkdir_p (Filename.concat fixture.base_path "docs/library");
+      mkdir_p (Filename.concat fixture.base_path "docs/library/candidates");
       ignore
         (execute_tool_ok fixture ~name:"masc_library_add"
            ~arguments:
@@ -527,8 +523,8 @@ let prepare_for_name fixture name =
   then
     ignore (ensure_code_file fixture);
   if name = "masc_library_add" then begin
-    mkdir_p (Filename.concat fixture.base_path "me/docs/library");
-    mkdir_p (Filename.concat fixture.base_path "me/docs/library/candidates")
+    mkdir_p (Filename.concat fixture.base_path "docs/library");
+    mkdir_p (Filename.concat fixture.base_path "docs/library/candidates")
   end;
   if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_promote"; "masc_library_search" ] then
     ignore (ensure_library_topic fixture);
@@ -766,6 +762,7 @@ let provider_guard_fragments =
     "connection refused";
     "failed to connect";
     "no runtime";
+    "runtime not initialized";
     "spawn error";
     "no such file";
   ]
@@ -812,6 +809,10 @@ let guard_fragments_for_name name =
   if String.equal name "masc_web_search" then
     web_search_guard_fragments
   else if
+    string_starts_with ~prefix:"keeper_" name
+  then
+    endpoint_unavailable_guard_fragments @ state_guard_fragments
+  else if
     string_starts_with ~prefix:"tool_" name
   then
     endpoint_unavailable_guard_fragments @ state_guard_fragments @ git_guard_fragments
@@ -844,7 +845,6 @@ let case_for_name name =
   let init_mode =
     match name with
     | "masc_init" | "masc_start" | "masc_set_coord" -> Fresh
-    | "masc_join" -> Init_only
     | _ -> Init_joined
   in
   let prepare fixture = prepare_for_name fixture name in

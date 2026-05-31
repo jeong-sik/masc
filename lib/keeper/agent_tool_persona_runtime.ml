@@ -181,28 +181,16 @@ let append_present_string_list_field acc key json =
 
 let tool_access_toml_section json =
   match Safe_ops.json_member_opt "tool_access" json with
-  | Some (`Assoc _ as tool_access) -> (
-      match Safe_ops.json_string_opt "kind" tool_access with
-      | Some "preset" -> (
-          match Safe_ops.json_string_opt "preset" tool_access with
-          | Some preset ->
-              let fields = [ toml_string preset |> Printf.sprintf "preset = %s" ] in
-              let fields =
-                match Safe_ops.json_member_opt "also_allow" tool_access with
-                | Some (`List _) ->
-                    append_string_list_field fields "also_allow"
-                      (Safe_ops.json_string_list "also_allow" tool_access)
-                | Some _ | None -> fields
-              in
-              Ok ("[keeper.tool_access]" :: "kind = \"preset\"" :: List.rev fields)
-          | None -> Error "tool_access.preset is required for durable TOML")
-      | Some "custom" ->
-          Error
-            "tool_access.kind=custom cannot be persisted to keeper TOML yet; use a preset-based tool_access policy for persona-backed durable keepers"
-      | Some other ->
-          Error (Printf.sprintf "invalid tool_access.kind for durable TOML: %s" other)
-      | None -> Error "tool_access.kind is required for durable TOML")
-  | Some _ -> Error "tool_access must be an object for durable TOML"
+  | Some (`List _ as tool_access) -> (
+      match tool_access_of_meta_json (`Assoc [ ("tool_access", tool_access) ]) with
+      | Ok tools ->
+          Ok
+            [
+              "[keeper.tool_access]";
+              Printf.sprintf "tools = %s" (toml_string_array tools);
+            ]
+      | Error msg -> Error msg)
+  | Some _ -> Error "tool_access must be an array of strings for durable TOML"
   | None -> Ok []
 
 let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :

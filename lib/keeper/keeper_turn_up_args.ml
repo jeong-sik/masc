@@ -135,13 +135,6 @@ let resolve_tool_name_list ~preferred ~fallback =
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
-let reject_removed_tool_access_kind access_json =
-  match Json_util.assoc_member_opt "kind" access_json with
-  | Some (`String ("restricted" | "unrestricted")) ->
-      Error
-        "tool_access.kind must be \"preset\" or \"custom\"; removed kinds \"restricted\" and \"unrestricted\" are not supported for this endpoint"
-  | _ -> Ok ()
-
 let parse_tool_access_input (args : Yojson.Safe.t) :
     (string list option, string) result =
   let removed_tool_policy_keys =
@@ -156,17 +149,14 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
          (String.concat ", " removed_tool_policy_keys))
   else
     match Json_util.assoc_member_opt "tool_access" args with
-    | Some ((`Assoc _) as access_json) -> (
-        match reject_removed_tool_access_kind access_json with
-        | Error msg -> Error msg
-        | Ok () -> (
-            match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-            | Ok access -> Ok (Some access)
-            | Error msg -> Error msg))
+    | Some (`List _ as access_json) -> (
+        match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+        | Ok access -> Ok (Some access)
+        | Error msg -> Error msg)
     | Some `Null -> Ok None
     | Some other ->
         Error
-          (Printf.sprintf "tool_access must be an object (received %s)"
+          (Printf.sprintf "tool_access must be an array of strings (received %s)"
              (Json_util.kind_name other))
     | None -> Ok None
 

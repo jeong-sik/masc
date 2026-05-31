@@ -92,9 +92,8 @@ These are the identity fields that should live in persona by default.
 | `desires` | Optional | Keeper self-model: desires | Identity field. |
 | `instructions` | Optional | Persona-specific instructions | Identity field. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
-| `tool_preset` | Optional | Default tool policy preset | Canonical place for default tool intent. |
-| `tool_also_allow` | Optional | Additional tools layered onto preset | Use sparingly. |
-| `tool_denylist` | Optional | Tools to remove from the resolved preset | Optional policy refinement. |
+| `tool_access` | Optional | Default tool allowlist | String array of callable tool names. |
+| `tool_denylist` | Optional | Tools to remove from the allowlist | Optional policy refinement. |
 | `policy_voice_enabled` | Optional | Whether voice tools should be surfaced | Policy default, not runtime state. |
 | `shards` | Optional | Default tool shards | Optional specialization hook. |
 
@@ -139,7 +138,7 @@ persona_name = "analyst"
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the basic-mode git/gh dispatcher can upgrade network+credential mounts per-command. Hard mode requires `docker`. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (basic-mode git/gh dispatcher can promote to `inherit`); `local` defaults to `inherit`. Hard mode requires `none`. |
 | `runtime_id` | Optional | Deployment-specific runtime override | Only when not using the default runtime. |
-| `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
+| `tool_access` | Optional | Deployment-specific tool allowlist override | Only when intentionally overriding persona default. |
 | `repo_cli_identity` | Optional | Bound repo CLI identity bundle | Resolves to `.masc/repo-cli-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |
 | `git_identity_mode` | Optional | Commit identity policy | `keeper_alias` keeps git author separate from GitHub auth; `repo_cli_identity` is reserved for future explicit coupling. |
 | `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` claims only tasks linked to these goals. If the scoped pool has no task claimable with the keeper's current capabilities, the claim stops; only auto-repaired keeper-purpose goals may fall back to all claimable tasks. |
@@ -158,8 +157,8 @@ These are still accepted by the loader, but for consistency they should be used 
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
 | `room_signal_prompt_enabled` | bool | Override room-signal prompt behavior |
 | `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
-| `tool_also_allow` | string array | Extra tool names added to the preset surface |
-| `tool_denylist` | string array | Tool names blocked regardless of preset |
+| `tool_access` | string array | Explicit callable tool names |
+| `tool_denylist` | string array | Tool names blocked after allowlist resolution |
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
@@ -175,7 +174,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
 | `git_identity_mode` | `keeper_alias`, `repo_cli_identity` |
-| `tool_preset` | `minimal`, `social`, `messaging`, `research`, `delivery`, `full` |
+| `tool_access` | string array of registered tool names |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
 | `runtime_id` | keeper-assignable declarative runtime profiles exposed by the active catalog: route targets, tier names, or runtime names that are not marked `keeper-assignable = false` |
 
@@ -203,7 +202,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
-| `also_allow` | Renamed to `tool_also_allow` in `keeper.toml`. Use `tool_access.also_allow` only inside the JSON `tool_access` object. |
+| `also_allow`, `tool_also_allow`, `tool_preset`, `tool_custom_allowlist` | Tool policy is the canonical `tool_access` string-array allowlist. |
 | `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `keeper_runtime.toml`. Do not pin per-keeper. |
 | `allowed_providers` | Provider/model ownership lives in `keeper_runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |

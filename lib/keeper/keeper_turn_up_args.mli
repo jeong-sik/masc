@@ -78,12 +78,6 @@ val parse_enum_string_opt :
 val resolve_tool_name_list :
   preferred:string list option -> fallback:string list option -> string list
 
-(** Reject removed [tool_access.kind = "restricted" | "unrestricted"]
-    payloads — the dashboard endpoint only accepts [preset] or
-    [custom]. *)
-val reject_removed_tool_access_kind :
-  Yojson.Safe.t -> (unit, string) result
-
 (** Parse the canonical [tool_access] field.
     Removed top-level tool-policy args are rejected. *)
 val parse_tool_access_input :

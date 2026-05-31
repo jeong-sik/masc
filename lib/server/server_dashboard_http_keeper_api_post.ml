@@ -77,11 +77,11 @@ let handle_keeper_tools_post state req reqd =
                    in
                    let tool_access_result =
                      match Json_util.assoc_member_opt "tool_access" args with
-                     | Some (`Assoc _ as access_json) ->
+                     | Some (`List _ as access_json) ->
                          Keeper_meta_contract.tool_access_of_meta_json
                            (`Assoc [ ("tool_access", access_json) ])
                      | Some `Null -> Error "tool_access required"
-                     | None | Some _ -> Error "tool_access must be an object"
+                     | None | Some _ -> Error "tool_access must be an array of strings"
                    in
                    Result.map
                      (fun tool_access ->

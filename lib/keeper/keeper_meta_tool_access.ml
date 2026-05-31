@@ -106,9 +106,9 @@ let default_tool_access_of_meta_json () =
 
 (** Parse [tool_access] from persisted meta JSON.
     Canonical form is a JSON array of tool names.
-    Legacy forms are accepted for backward compat:
-    - [{ "kind": "custom", "tools": [...] }] → the [tools] array
-    - [{ "kind": "preset", ... }] → default surface (presets removed) *)
+    Legacy object forms are accepted only as a migration drain:
+    - [{ "tools": [...] }] -> the [tools] array
+    - objects without [tools] -> default surface *)
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Json_util.assoc_member_opt "tool_access" json with
   | Some `Null | None -> Ok (default_tool_access_of_meta_json ())
@@ -120,15 +120,8 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
      | Ok tools -> Ok (normalize_tool_access tools)
      | Error msg -> Error msg)
   | Some (`Assoc _ as access_json) ->
-    (match Json_util.get_string access_json "kind" with
-     | Some "preset" ->
-       (* Legacy preset entries: fall back to default access.
-          Keeper bootstrap resyncs from TOML which now requires explicit lists. *)
-       Log.Keeper.warn
-         "keeper meta has deprecated tool_access.kind='preset'; \
-          defaulting to keeper_internal surface until next bootstrap";
-       Ok (default_tool_access_of_meta_json ())
-     | Some "custom" ->
+    (match Json_util.assoc_member_opt "tools" access_json with
+     | Some _ ->
        (match
           string_list_field_result
             ~field_name:"tools"
@@ -137,11 +130,7 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         with
         | Ok tools -> Ok (normalize_tool_access tools)
         | Error msg -> Error msg)
-     | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
-     | None ->
-       (* Empty tool_access: {} — missing kind field.
-          Safe to default: ensure_keeper_meta resyncs from TOML on bootstrap. *)
-       Ok (default_tool_access_of_meta_json ()))
+     | None -> Ok (default_tool_access_of_meta_json ()))
   | Some other ->
     Error
       (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"
@@ -185,8 +174,8 @@ let default_tool_access_of_meta_json_typed () =
 ;;
 
 (** Parse [tool_access] from persisted meta JSON into typed tools.
-    Same legacy forms as [tool_access_of_meta_json] but returns typed
-    variants.  Unknown names are silently dropped at the boundary. *)
+    Same migration-drain behavior as [tool_access_of_meta_json] but returns
+    typed variants.  Unknown names are silently dropped at the boundary. *)
 let tool_access_of_meta_json_typed (json : Yojson.Safe.t) =
   match Json_util.assoc_member_opt "tool_access" json with
   | Some `Null | None -> Ok (default_tool_access_of_meta_json_typed ())
@@ -198,13 +187,8 @@ let tool_access_of_meta_json_typed (json : Yojson.Safe.t) =
      | Ok tools -> Ok (tool_access_of_string_list tools)
      | Error msg -> Error msg)
   | Some (`Assoc _ as access_json) ->
-    (match Json_util.get_string access_json "kind" with
-     | Some "preset" ->
-       Log.Keeper.warn
-         "keeper meta has deprecated tool_access.kind='preset'; \
-          defaulting to keeper_internal surface until next bootstrap";
-       Ok (default_tool_access_of_meta_json_typed ())
-     | Some "custom" ->
+    (match Json_util.assoc_member_opt "tools" access_json with
+     | Some _ ->
        (match
           string_list_field_result
             ~field_name:"tools"
@@ -213,7 +197,6 @@ let tool_access_of_meta_json_typed (json : Yojson.Safe.t) =
         with
         | Ok tools -> Ok (tool_access_of_string_list tools)
         | Error msg -> Error msg)
-     | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
      | None -> Ok (default_tool_access_of_meta_json_typed ()))
   | Some other ->
     Error

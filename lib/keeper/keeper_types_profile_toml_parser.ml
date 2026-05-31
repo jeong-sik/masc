@@ -15,28 +15,22 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let has_raw key = List.mem_assoc key doc in
   let tool_access_key key = k ("tool_access." ^ key) in
   let tool_access_defaults_result =
-    let kind_key = tool_access_key "kind" in
     let tools_key = tool_access_key "tools" in
-    let preset_key = tool_access_key "preset" in
-    let also_allow_key = tool_access_key "also_allow" in
-    match Keeper_toml_loader.toml_string_opt doc kind_key with
-    | None
-      when has_raw preset_key || has_raw also_allow_key || has_raw tools_key ->
-        Error
-          "keeper.tool_access.kind is required when keeper.tool_access.* keys are present"
-    | None -> Ok None
-    | Some "preset" ->
-        Error
-          "keeper.tool_access.kind=\"preset\" is no longer supported. \
-           Use kind=\"custom\" with an explicit tools list."
-    | Some "custom" ->
-        let tools = Keeper_toml_loader.toml_string_list doc tools_key in
-        Ok (Some (normalize_name_list tools))
-    | Some raw ->
+    let removed_keys =
+      [ "kind"; "preset"; "also_allow" ]
+      |> List.map tool_access_key
+      |> List.filter has_raw
+    in
+    match removed_keys with
+    | _ :: _ ->
         Error
           (Printf.sprintf
-             "invalid keeper.tool_access.kind '%s' (allowed: custom)"
-             raw)
+             "removed keeper.tool_access keys: %s. Use [keeper.tool_access] tools = [...]"
+             (String.concat ", " removed_keys))
+    | [] when has_raw tools_key ->
+        let tools = Keeper_toml_loader.toml_string_list doc tools_key in
+        Ok (Some (normalize_name_list tools))
+    | [] -> Ok None
   in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml
@@ -266,7 +260,6 @@ let parsed_field_key_names =
   ; "network_mode"
   ; "repo_cli_identity"
   ; "git_identity_mode"
-  ; "tool_access.kind"
   ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"
@@ -314,7 +307,6 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "repo_cli_identity"
   ; "git_identity_mode"
-  ; "tool_access.kind"
   ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"

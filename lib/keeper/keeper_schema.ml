@@ -286,9 +286,13 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Optional: long-term goal horizon (default: goal).");
         ]);
+        ("runtime_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: Runtime binding id for keeper execution. Replaces legacy models/allowed_models/active_model inputs.");
+        ]);
         ("cascade_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional: keeper-assignable cascade profile. Replaces legacy models/allowed_models/active_model inputs.");
+          ("description", `String "Legacy alias for runtime_id. If both are provided they must match.");
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");

@@ -18,8 +18,8 @@
 \* Bug model: BugSelectRuntime removes phase-aware routing, reproducing
 \* the Groq max_tokens ceiling violation (masc-mcp#6686).
 \*
-\* Mirrors: lib/keeper/keeper_runtime_routing.ml (SelectRuntime action)
-\*          lib/runtime_inference.ml (CapabilityGate action)
+\* Mirrors: lib/keeper/keeper_turn_driver_try_runtime.ml (SelectRuntime action)
+\*          lib/runtime/runtime_inference.ml (CapabilityGate action)
 \*          lib/keeper/keeper_unified_turn.ml (turn lifecycle)
 \*
 \* OCaml mapping:
@@ -34,7 +34,7 @@
 \*                          Comment A for the canonical 13->7 mapping
 \*                          (referred to as "Terminal" shorthand earlier in
 \*                          some prose; the projection symbol is "Stable").)
-\*   effective_runtime  <-> Keeper_runtime_routing.select_runtime result
+\*   effective_runtime  <-> Keeper_turn_driver_try_runtime.run selected candidate
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_runtime_context
 \*   requested_max_tokens <-> Runtime_inference.resolve_max_tokens
 \*
@@ -229,8 +229,8 @@ OverflowedBecomeCompacting ==
                    retry_count, turn_outcome>>
 
 \* ── Turn Lifecycle: Select Runtime ───────────────────────
-\* Mirrors: Keeper_runtime_routing.select_runtime
-\* Pure function: phase -> effective runtime profile.
+\* Mirrors: Keeper_turn_driver_try_runtime.run candidate selection
+\* Pure abstraction: phase -> effective runtime role.
 
 SelectRuntime ==
     /\ turn_status = "idle"
@@ -383,36 +383,22 @@ Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 \* The string literals "none", "local_recovery", and "local_only" used below
 \* are SPEC-LEVEL CANONICAL ROLE NAMES, not literal OCaml return values.
 \*
-\* On the OCaml side (`lib/keeper/keeper_runtime_routing.ml` +
-\* `lib/runtime/runtime_routes.ml`), runtime names are resolved through a
-\* typed `logical_use` enum (`Phase_recovery`, `Phase_buffer`) and a
-\* prioritised resolution chain in `runtime_id_for_use`:
-\*   (a) operator-supplied `routes.<key>` binding, if its target exists
-\*       in the live catalog;
-\*   (b) first catalog entry name (the boot-time default profile);
-\*   (c) `route_spec.aliases` first element, or the route key — *only*
-\*       when the catalog is empty (a state boot validation rejects).
-\* The literal string produced at runtime depends on operator catalog and
-\* routes (RFC-0058 declarative route mapping); only the *default empty
-\* catalog* boot path produces the literal strings written below.
-\*
-\* The invariants below are written as TLA+ string equalities, but those
-\* literals should be read as canonical *role identifiers* — they stand
-\* in for the typed `logical_use` role that production resolves through
-\* the chain above:
+\* On the OCaml side, runtime ids are already resolved before
+\* `Keeper_turn_driver_try_runtime.run` walks the candidate list.  The
+\* literal strings below are therefore canonical *role identifiers* for
+\* the spec, not production return values:
 \*   - "none"           ↔ "no runtime is active for this turn"
-\*   - "local_recovery" ↔ `Phase_recovery` role
-\*   - "local_only"     ↔ `Phase_buffer` role
-\* TLC still compares strings; the *semantic* claim is role identity.
+\*   - "local_recovery" ↔ recovery runtime role
+\*   - "local_only"     ↔ buffer-operation runtime role
+\* TLC still compares strings; the semantic claim is role identity.
 \* See `docs/tla-audit/kct-c3-terminal-runtime-contract-gap-2026-05-12.md`
 \* and `docs/tla-audit/kct-s2s3-failing-buffer-runtime-alignment-2026-05-12.md`
 \* (the latter lands via PR #14787) for the production indirection
 \* analysis.
 
 \* S1: Terminal phase never has an active runtime.
-\* OCaml note: `select_runtime` returns `base_runtime` for terminal phases
-\* (paper contract gap — caller graph upstream-gates the call so the value
-\* is unreachable in production).  See C-3 audit memo above.
+\* OCaml note: runtime attempts are upstream-gated for terminal phases, so
+\* the spec-level empty role has no literal production counterpart.
 NoTerminalRuntime ==
     phase = "Terminal" => effective_runtime = "none"
 
@@ -420,18 +406,14 @@ NoTerminalRuntime ==
 \* Note: if a keeper transitions to Failing MID-TURN, the already-selected
 \* runtime remains — runtime is chosen at turn start, not re-evaluated.
 \* This invariant checks the selection action, not the runtime state.
-\* OCaml: `Failing -> Keeper_config.local_recovery_runtime_id`, which
-\* resolves through `Phase_recovery` route — string match only in the
-\* default catalog.  See S2/S3 audit memo above.
+\* OCaml: failing-turn recovery uses the resolved recovery runtime id.
 FailingUsesRecovery ==
     (phase = "Failing" /\ turn_status = "selecting"
      /\ effective_runtime /= "none") =>
         effective_runtime = "local_recovery"
 
 \* S3 (buffer): Runtime selection in buffer-operation phases must yield
-\* the Phase_buffer role.  OCaml:
-\* `Compacting | HandingOff -> Keeper_config.local_only_runtime_id`,
-\* which resolves through `Phase_buffer` route.  See S2/S3 audit memo.
+\* the buffer-operation role.
 BufferOpsUseLocalOnly ==
     (phase \in {"Compacting", "HandingOff"} /\ turn_status = "selecting"
      /\ effective_runtime /= "none") =>
@@ -454,15 +436,13 @@ SideEffectContainment ==
 \* Runtime-name abstraction: `"none"` here is the SPEC-LEVEL EMPTY-ROLE
 \* SENTINEL — it asserts "no runtime is selected", not a literal string
 \* match against an OCaml return value.  The OCaml side has no literal
-\* "none" — `select_runtime` always returns a real runtime name (even for
-\* terminal phases — see `docs/tla-audit/kct-c3-terminal-runtime-contract
-\* -gap-2026-05-12.md`); the empty-role assertion is preserved
-\* STRUCTURALLY by the caller graph upstream gating the call for non-
-\* active turn_status values.
+\* "none"; the empty-role assertion is preserved structurally by the
+\* caller graph upstream gating runtime attempts for non-active
+\* turn_status values.
 \*
-\* The invariant therefore captures a structural property: the dispatch
-\* table in `lib/keeper/keeper_runtime_routing.ml` returns a non-empty
-\* runtime name for all phases that can co-occur with
+\* The invariant therefore captures a structural property: candidate
+\* selection in `lib/keeper/keeper_turn_driver_try_runtime.ml` uses a
+\* non-empty runtime id for all phases that can co-occur with
 \* turn_status in {selecting, executing, retrying}, namely
 \* {Running, Failing, Compacting, HandingOff}.
 PhaseDecisionConsistency ==

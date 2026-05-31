@@ -133,13 +133,10 @@ type surface =
 let public_mcp_surface_tools =
   [ (* Coord lifecycle *)
     "masc_start"
-  ; "masc_join"
-  ; "masc_leave"
   ; "masc_status"
   ; (* Messaging *)
     "masc_broadcast"
   ; "masc_messages"
-  ; "masc_who"
   ; (* Task coordination *)
     "masc_add_task"
   ; "masc_batch_add_tasks"
@@ -214,9 +211,6 @@ let spawned_agent_surface_tools =
   ; "masc_transition"
   ; "masc_task_history"
   ; "masc_broadcast"
-  ; "masc_join"
-  ; "masc_leave"
-  ; "masc_who"
   ; "masc_agent_update"
   ; "masc_add_task"
   ; "masc_heartbeat"
@@ -393,9 +387,6 @@ let coordination_role_tools : string list =
   ; "masc_tasks"
   ; "masc_add_task"
   ; "masc_broadcast"
-  ; "masc_join"
-  ; "masc_leave"
-  ; "masc_who"
   ; "masc_heartbeat"
   ; "masc_messages"
   ; "masc_board_list"

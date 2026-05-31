@@ -26,8 +26,7 @@ val recovery_hint : string -> string option
 
     - "not initialized" / "no .masc/" → [masc_init] /
       [masc_start(path=…)]
-    - "not joined" / "join the room" → [masc_join] /
-      [masc_start]
+    - "not joined" / "join the room" → [masc_start]
     - "task not found" / ("not found" ∧ "task") → [masc_status]
     - "already claimed" → [masc_status] / [masc_claim_next]
     - "no unclaimed tasks" → [masc_add_task]

@@ -30,7 +30,7 @@ let agent_parse_error_snapshot ~agent_name ~agent_file =
       if raw_head = "" then `Null else `String raw_head);
   ]
 
-(** Join room - with auto-generated nickname and metadata *)
+(** Bind agent session - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None)
     ?(parent_task=None) ?(keeper_name=None) ?(keeper_id=None) () =
@@ -207,7 +207,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
 (* join_in_room removed — namespace concept retired (#unify-namespace).
    Use [join] directly. *)
 
-(** Leave room *)
+(** End agent session *)
 let leave ?(stop_heartbeats = true) config ~agent_name =
   ensure_initialized config;
 

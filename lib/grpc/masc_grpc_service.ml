@@ -78,93 +78,6 @@ let task_info_of_task (task : Masc_domain.task) : T.task_info =
 
 (** {1 Unary Handlers} *)
 
-(** Join handler: agent joins the coordination room. *)
-let handle_join (room_config : Coord_utils_backend_setup.config) (bytes : string) : string
-  =
-  let req = decode_request_or_raise ~rpc:"Join" T.JoinRequest.of_bytes_result bytes in
-  let result =
-    try
-      let msg =
-        Coord.join
-          room_config
-          ~agent_name:req.agent_name
-          ~capabilities:req.capabilities
-          ()
-      in
-      (* Read current agents for the response *)
-      let agents_dir =
-        Filename.concat
-          (Common.masc_dir_from_base_path ~base_path:room_config.base_path)
-          "agents"
-      in
-      let active_agents =
-        if Sys.file_exists agents_dir && Sys.is_directory agents_dir
-        then
-          Sys.readdir agents_dir
-          |> Array.to_list
-          |> List.filter (fun f -> Filename.check_suffix f ".json")
-          |> List.filter_map (fun f ->
-            let path = Filename.concat agents_dir f in
-            try
-              let json = Yojson.Safe.from_string (read_file_safe path) in
-              match Masc_domain.agent_of_yojson json with
-              | Ok agent when agent.Masc_domain.status = Masc_domain.Active ->
-                Some
-                  ({ T.name = agent.name
-                   ; status = "active"
-                   ; capabilities = agent.capabilities
-                   ; last_heartbeat_ms = now_ms ()
-                   ; joined_at_ms = now_ms ()
-                   ; current_task_id = Option.value ~default:"" agent.current_task
-                   }
-                   : T.agent_info)
-              | _ -> None
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Log.Transport.debug "agent parse skip: %s" (Printexc.to_string exn);
-              None)
-        else []
-      in
-      T.JoinResponse.
-        { success = true
-        ; message = msg
-        ; session_id = Printf.sprintf "grpc-%s-%Ld" req.agent_name (now_ms ())
-        ; active_agents
-        }
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      T.JoinResponse.
-        { success = false
-        ; message = Printf.sprintf "Join failed: %s" (Printexc.to_string exn)
-        ; session_id = ""
-        ; active_agents = []
-        }
-  in
-  T.JoinResponse.to_bytes result
-;;
-
-(** Leave handler: agent leaves the coordination room. *)
-let handle_leave (room_config : Coord_utils_backend_setup.config) (bytes : string)
-  : string
-  =
-  let req = decode_request_or_raise ~rpc:"Leave" T.LeaveRequest.of_bytes_result bytes in
-  let result =
-    try
-      let msg = Coord.leave room_config ~agent_name:req.agent_name in
-      T.LeaveResponse.{ success = true; message = msg }
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      T.LeaveResponse.
-        { success = false
-        ; message = Printf.sprintf "Leave failed: %s" (Printexc.to_string exn)
-        }
-  in
-  T.LeaveResponse.to_bytes result
-;;
-
 (** Broadcast handler: send a message to all agents. *)
 let handle_broadcast (room_config : Coord_utils_backend_setup.config) (bytes : string)
   : string
@@ -631,8 +544,6 @@ let create_service
   : Grpc_eio.Service.t
   =
   Grpc_eio.Service.create service_name
-  |> Grpc_eio.Service.add_unary "Join" (handle_join room_config)
-  |> Grpc_eio.Service.add_unary "Leave" (handle_leave room_config)
   |> Grpc_eio.Service.add_unary "Broadcast" (handle_broadcast room_config)
   |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status room_config)
   |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call tool_dispatcher)

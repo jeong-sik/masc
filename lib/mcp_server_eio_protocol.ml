@@ -126,8 +126,6 @@ let affected_resource_ids_for_tool = function
   | "masc_update_priority"
   | "masc_plan_set_task"
   | "masc_plan_clear_task" -> task_resource_ids
-  | "masc_join"
-  | "masc_leave"
   | "masc_heartbeat" -> agent_resource_ids
   | "masc_broadcast" | "masc_portal_open" | "masc_portal_send" | "masc_portal_close" ->
     message_resource_ids

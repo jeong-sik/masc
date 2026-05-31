@@ -137,7 +137,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Tool_stats
   | TN.Masc TM.Web_fetch
   | TN.Masc TM.Web_search
-  | TN.Masc TM.Who
   | TN.Masc TM.Board_sub_board_get
   | TN.Masc TM.Board_sub_board_list
   | TN.Masc TM.Approval_pending
@@ -165,8 +164,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Goal_upsert
   | TN.Masc TM.Goal_verify
   | TN.Masc TM.Heartbeat
-  | TN.Masc TM.Join
-  | TN.Masc TM.Leave
   | TN.Masc TM.Note_add
   | TN.Masc TM.Operator_confirm
   | TN.Masc TM.Pause
@@ -307,8 +304,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Goal_upsert
       | TM.Goal_verify
       | TM.Heartbeat
-      | TM.Join
-      | TM.Leave
       | TM.Mcp_session
       | TM.Messages
       | TM.Note_add
@@ -333,8 +328,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Transition
       | TM.Update_priority
       | TM.Web_fetch
-      | TM.Web_search
-      | TM.Who ) ->
+      | TM.Web_search ) ->
       Some Masc_core
 
 let tool_group name =

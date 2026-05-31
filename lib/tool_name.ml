@@ -246,8 +246,6 @@ module Masc = struct
     | Goal_upsert
     | Goal_verify
     | Heartbeat
-    | Join
-    | Leave
     | Messages
     | Note_add
     | Operator_action
@@ -272,7 +270,6 @@ module Masc = struct
     | Update_priority
     | Web_fetch
     | Web_search
-    | Who
     | Approval_pending
     | Approval_get
     | Config
@@ -324,8 +321,6 @@ module Masc = struct
     | Goal_upsert -> "masc_goal_upsert"
     | Goal_verify -> "masc_goal_verify"
     | Heartbeat -> "masc_heartbeat"
-    | Join -> "masc_join"
-    | Leave -> "masc_leave"
     | Messages -> "masc_messages"
     | Note_add -> "masc_note_add"
     | Operator_action -> "masc_operator_action"
@@ -350,7 +345,6 @@ module Masc = struct
     | Update_priority -> "masc_update_priority"
     | Web_fetch -> "masc_web_fetch"
     | Web_search -> "masc_web_search"
-    | Who -> "masc_who"
     | Approval_pending -> "masc_approval_pending"
     | Approval_get -> "masc_approval_get"
     | Config -> "masc_config"
@@ -403,8 +397,6 @@ module Masc = struct
     | "masc_goal_upsert" -> Some Goal_upsert
     | "masc_goal_verify" -> Some Goal_verify
     | "masc_heartbeat" -> Some Heartbeat
-    | "masc_join" -> Some Join
-    | "masc_leave" -> Some Leave
     | "masc_messages" -> Some Messages
     | "masc_note_add" -> Some Note_add
     | "masc_operator_action" -> Some Operator_action
@@ -429,7 +421,6 @@ module Masc = struct
     | "masc_update_priority" -> Some Update_priority
     | "masc_web_fetch" -> Some Web_fetch
     | "masc_web_search" -> Some Web_search
-    | "masc_who" -> Some Who
     | "masc_approval_pending" -> Some Approval_pending
     | "masc_approval_get" -> Some Approval_get
     | "masc_config" -> Some Config

@@ -471,7 +471,7 @@ let start
         Log.Server.info "  service: %s" Masc_grpc_service.service_name;
         Log.Server.info "  health: %s/Check" health_service_name;
         Log.Server.info
-          "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
+          "  methods: Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
         Transport_metrics.set_grpc_runtime_listening true;
         Transport_metrics.set_grpc_listen_status "listening";
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)

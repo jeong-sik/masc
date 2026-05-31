@@ -18,7 +18,7 @@ let encode to_proto msg = Ocaml_protoc_plugin.Writer.contents (to_proto msg)
 (** Deserialize a protobuf message from a binary string.
 
     [type_name] identifies the protobuf message type being decoded
-    (e.g. "JoinRequest", "ToolCallResponse"). It is embedded in the
+    (e.g. "ToolCallResponse"). It is embedded in the
     error message so operators see which message type failed instead
     of a context-free "protobuf decode error: ..." line. *)
 let decode_result ~type_name from_proto bytes =
@@ -100,109 +100,6 @@ let task_info_of_proto (p : P.TaskInfo.t) : task_info =
   ; priority = p.priority
   }
 ;;
-
-(** {1 Agent Lifecycle} *)
-
-module JoinRequest = struct
-  type t =
-    { agent_name : string
-    ; capabilities : string list
-    ; metadata : (string * string) list
-    }
-
-  let of_bytes_result bytes =
-    match decode_result ~type_name:"JoinRequest" P.JoinRequest.from_proto bytes with
-    | Ok p ->
-      Ok
-        ({ agent_name = p.agent_name
-         ; capabilities = p.capabilities
-         ; metadata = p.metadata
-         }
-         : t)
-    | Error _ as err -> err
-  ;;
-
-  let of_bytes bytes =
-    match of_bytes_result bytes with
-    | Ok req -> req
-    | Error msg -> invalid_arg msg
-  ;;
-
-  let to_bytes (t : t) =
-    encode
-      P.JoinRequest.to_proto
-      { agent_name = t.agent_name; capabilities = t.capabilities; metadata = t.metadata }
-  ;;
-end
-
-module JoinResponse = struct
-  type t =
-    { success : bool
-    ; message : string
-    ; session_id : string
-    ; active_agents : agent_info list
-    }
-
-  let of_bytes bytes =
-    let p = decode ~type_name:"JoinResponse" P.JoinResponse.from_proto bytes in
-    { success = p.success
-    ; message = p.message
-    ; session_id = p.session_id
-    ; active_agents = List.map agent_info_of_proto p.active_agents
-    }
-  ;;
-
-  let to_bytes (t : t) =
-    encode
-      P.JoinResponse.to_proto
-      { success = t.success
-      ; message = t.message
-      ; session_id = t.session_id
-      ; active_agents = List.map agent_info_to_proto t.active_agents
-      }
-  ;;
-end
-
-module LeaveRequest = struct
-  type t =
-    { agent_name : string
-    ; session_id : string
-    }
-
-  let of_bytes_result bytes =
-    match decode_result ~type_name:"LeaveRequest" P.LeaveRequest.from_proto bytes with
-    | Ok p -> Ok ({ agent_name = p.agent_name; session_id = p.session_id } : t)
-    | Error _ as err -> err
-  ;;
-
-  let of_bytes bytes =
-    match of_bytes_result bytes with
-    | Ok req -> req
-    | Error msg -> invalid_arg msg
-  ;;
-
-  let to_bytes (t : t) =
-    encode
-      P.LeaveRequest.to_proto
-      { agent_name = t.agent_name; session_id = t.session_id }
-  ;;
-end
-
-module LeaveResponse = struct
-  type t =
-    { success : bool
-    ; message : string
-    }
-
-  let of_bytes bytes =
-    let p = decode ~type_name:"LeaveResponse" P.LeaveResponse.from_proto bytes in
-    { success = p.success; message = p.message }
-  ;;
-
-  let to_bytes (t : t) =
-    encode P.LeaveResponse.to_proto { success = t.success; message = t.message }
-  ;;
-end
 
 (** {1 Heartbeat} *)
 

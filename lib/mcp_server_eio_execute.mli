@@ -27,7 +27,7 @@
     (audit wrappers, tool dispatchers, error formatters)
     that are local to its lexical scope. *)
 
-(** {1 Join state resolution} *)
+(** {1 Session binding state resolution} *)
 
 val resolve_join_state :
   room_initialized:bool ->

@@ -205,12 +205,6 @@ let claim_task_tool =
 let complete_task_tool =
   with_required_permission Masc_domain.CanCompleteTask actor_bound_masc_coordination_tool
 
-let join_tool =
-  with_required_permission Masc_domain.CanJoin actor_bound_masc_coordination_tool
-
-let leave_tool =
-  with_required_permission Masc_domain.CanLeave actor_bound_masc_coordination_tool
-
 let admin_tool =
   with_required_permission Masc_domain.CanAdmin destructive_tool
 
@@ -221,15 +215,12 @@ let reset_tool =
   with_required_permission Masc_domain.CanReset destructive_tool
 
 let static_requires_join_tool_names =
-  [ "masc_broadcast"; "masc_leave" ]
+  [ "masc_broadcast" ]
 
 let static_mcp_context_required_tool_names =
   [ "masc_start"
-  ; "masc_join"
-  ; "masc_leave"
   ; "masc_broadcast"
   ; "masc_messages"
-  ; "masc_who"
   ; "masc_approval_get"
   ; "masc_mcp_session"
   ]
@@ -261,7 +252,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_status", read_state_tool);
     ("masc_tasks", read_state_tool);
     ("masc_messages", read_state_tool);
-    ("masc_who", read_state_tool);
     ("masc_agents", read_state_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
@@ -275,8 +265,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_status", read_state_tool);
     ("masc_keeper_persona_audit", read_state_tool);
     ("masc_plan_get", read_state_tool);
-    ("masc_join", join_tool);
-    ("masc_leave", leave_tool);
     ("masc_claim_next", claim_task_tool);
     ("masc_transition", complete_task_tool);
     ("masc_plan_set_task", actor_broadcast_tool);

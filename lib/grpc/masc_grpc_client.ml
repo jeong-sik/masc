@@ -50,18 +50,6 @@ let call_unary_safe t ~sw ~env ~method_ ~request ~decode =
 
 (** {1 Unary RPCs} *)
 
-let join t ~sw ~env ~agent_name ~capabilities ~metadata =
-  let request = T.JoinRequest.to_bytes
-    { agent_name; capabilities; metadata } in
-  call_unary_safe t ~sw ~env ~method_:"Join" ~request
-    ~decode:T.JoinResponse.of_bytes
-
-let leave t ~sw ~env ~agent_name ~session_id =
-  let request = T.LeaveRequest.to_bytes
-    { agent_name; session_id } in
-  call_unary_safe t ~sw ~env ~method_:"Leave" ~request
-    ~decode:T.LeaveResponse.of_bytes
-
 let get_status t ~sw ~env =
   (* StatusRequest is an empty protobuf message: 0 bytes on the wire. *)
   let request = "" in

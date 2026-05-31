@@ -26,7 +26,6 @@ let streaming_capable_tools =
        holds the public contract while non-listed tools default to chunked
        JSON under RFC-0100 PR-3. *)
     "masc_status"
-  ; "masc_join"
   ]
 
 let set =

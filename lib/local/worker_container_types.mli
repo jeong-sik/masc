@@ -6,7 +6,7 @@
       types: the values flowing between {!Worker_runtime},
       {!Worker_oas}, and {!Worker_runtime_helper_protocol}.
     - The MCP transport bridge ({!call_masc_tool},
-      {!join_worker}, {!leave_worker}, {!mcp_endpoint_url}):
+      {!mcp_endpoint_url}):
       a JSON-RPC client that lets a local worker call MASC
       tools without going through the HTTP server's auth
       machinery.
@@ -169,28 +169,6 @@ val call_masc_tool :
     extracted text and [isError] flag, or an error string on
     transport / parse / RPC failure.  Re-raises
     [Eio.Cancel.Cancelled]. *)
-
-val join_worker :
-  sw:Eio.Switch.t ->
-  auth_token:string option ->
-  session_id:string ->
-  worker_name:string ->
-  (tool_exec_result, string) result
-(** Convenience wrapper around {!call_masc_tool} for the
-    [masc_join] tool.  Passes the canonical capability set
-    ([llama], [mcp-worker], [local-tool-loop]) so the room
-    routing knows this is a local worker, not a coordinating
-    keeper. *)
-
-val leave_worker :
-  sw:Eio.Switch.t ->
-  auth_token:string option ->
-  session_id:string ->
-  worker_name:string ->
-  (tool_exec_result, string) result
-(** Convenience wrapper around {!call_masc_tool} for the
-    [masc_leave] tool.  Pairs with {!join_worker} on worker
-    shutdown to retire the agent registration. *)
 
 (** {1 Default system prompt} *)
 

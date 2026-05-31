@@ -269,7 +269,7 @@ let status_summary_string
       if agent_count > max_agents_display then
         Buffer.add_string buf
           (Printf.sprintf
-             "  … and %d more agents (use masc_who for full list)\n"
+             "  … and %d more agents\n"
              (agent_count - max_agents_display)));
   Buffer.add_string buf "\nQuest Board:\n";
   List.iter

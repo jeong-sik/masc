@@ -482,7 +482,7 @@ let status_summary_string (ctx : context) =
     let items = [] in
     let items =
       if not joined
-      then items @ [ "You are not joined in the project namespace. Call masc_join." ]
+      then items @ [ "You are not joined in the project namespace. Call masc_start." ]
       else items
     in
     let items =

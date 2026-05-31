@@ -15,9 +15,9 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_inline_dispatch_coord — room lifecycle tool handlers.
+(** Tool_inline_dispatch_coord — project startup tool handler.
 
-    Handles: masc_start, masc_join, masc_leave.
+    Handles: masc_start.
 
     Extracted from tool_inline_dispatch.ml to reduce file size. *)
 
@@ -126,7 +126,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       (* join exception caught from [Coord.join] — internal failure. *)
       Some
         (inline_err_runtime ~tool_name ~start_time
-           (Printf.sprintf "masc_start failed at join: %s\nHint: try masc_join separately." e))
+           (Printf.sprintf "masc_start failed while binding agent session: %s" e))
     | Ok () ->
       (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
       if String.equal task_title "" then
@@ -182,148 +182,3 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                       agent_name task_id))
         end
       end
-
-(** masc_join — join the active MASC project *)
-let handle_join ~tool_name ~start_time (ctx : context) : Tool_result.result option =
-  let config = ctx.config in
-  let agent_name = ctx.agent_name in
-  let registry = ctx.registry in
-  let state = ctx.state in
-  let mcp_session_id = ctx.mcp_session_id in
-  let sid = Option.value ~default:"-" mcp_session_id in
-  let caps = arg_get_string_list ctx "capabilities" in
-  let proceed_with_join resolved_name =
-    let result =
-      Coord.join config ~agent_name:resolved_name ~capabilities:caps ()
-    in
-    (* GC: reap zombie agents on join. Best-effort.
-       Typed outcome mirrors sibling [Orchestrator] zombie consumer
-       (PR #15510): each Coord.cleanup_zombie_result constructor and
-       exception class is mapped to a distinct severity, so a future
-       variant addition fails compile rather than slipping through a
-       silent catch-all.  [Eio.Cancel.Cancelled] re-raised unchanged. *)
-    let module Join_gc_outcome = struct
-      type t =
-        | Reaped of { count : int; names : string list }
-        | No_op
-        | Misconfigured
-        | Failed of { benign : bool; reason : string }
-    end in
-    let join_gc_outcome : Join_gc_outcome.t =
-      try
-        match Coord.cleanup_zombies config with
-        | Coord.Cleaned { count = 0; _ } -> Join_gc_outcome.No_op
-        | Coord.Cleaned { count; names; _ } ->
-            Join_gc_outcome.Reaped { count; names }
-        | Coord.No_zombies -> Join_gc_outcome.No_op
-        | Coord.No_agents_dir -> Join_gc_outcome.Misconfigured
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          Join_gc_outcome.Failed
-            { benign = Coord_resilience.ZeroZombie.is_benign_error exn
-            ; reason = Stdlib.Printexc.to_string exn
-            }
-    in
-    (match join_gc_outcome with
-     | Join_gc_outcome.Reaped { count; names } ->
-         Log.Gc.info "[sid=%s] join GC reaped %d zombie(s): %s"
-           sid count (String.concat ", " names)
-     | Join_gc_outcome.No_op -> ()
-     | Join_gc_outcome.Misconfigured ->
-         Log.Gc.warn "[sid=%s] join GC: agents dir missing (misconfig)" sid
-     | Join_gc_outcome.Failed { benign = true; reason } ->
-         Log.Gc.debug "[sid=%s] join GC benign failure: %s" sid reason
-     | Join_gc_outcome.Failed { benign = false; reason } ->
-         Log.Gc.error "[sid=%s] join GC failed: %s" sid reason);
-    (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
-    let nickname =
-      try
-        let prefix = "  Nickname: " in
-        let start_idx =
-          let idx = ref 0 in
-          while !idx < String.length result - String.length prefix &&
-                not (String.equal (Stdlib.String.sub result !idx (String.length prefix)) prefix) do
-            Stdlib.incr idx
-          done;
-          !idx + String.length prefix
-        in
-        let end_idx = match String.index_from_opt result start_idx '\n' with
-          | Some idx -> idx
-          | None -> String.length result
-        in
-        String.sub result start_idx (end_idx - start_idx)
-      with Invalid_argument _ -> agent_name
-    in
-    let _ = Session.register registry ~agent_name:nickname in
-    ctx.record_mcp_session_agent nickname;
-    Log.Misc.debug
-      "[sid=%s] masc_join: recorded nickname=%s for MCP session (original=%s)"
-      sid nickname agent_name;
-    let institution_welcome = match state.Mcp_server.fs with
-      | Some fs ->
-          (try Institution_eio.load_and_format_for_welcome ~fs config
-           with
-           | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | exn ->
-               Log.Institution.warn "[sid=%s] Unexpected institution error: %s" sid (Stdlib.Printexc.to_string exn); "")
-      | None -> ""
-    in
-    let final_result = if String.equal institution_welcome "" then result
-      else result ^ institution_welcome in
-    let join_event = `Assoc [
-      ("type", `String "masc/agent_joined");
-      ("agent_name", `String nickname);
-      ("timestamp", `Float (Time_compat.now ()));
-    ] in
-    let _pushed = Session.push_notification_to_active_agents registry ~event:join_event in
-    Mcp_server.sse_broadcast state join_event;
-    Some (inline_ok ~tool_name ~start_time final_result)
-  in
-  (* RFC P3-a — fail-closed identity gate. The identity backend validates
-     the agent identity against persona + credential filesystem checks.
-     When validation fails, the join is rejected rather than silently
-     accepted. Previously, normalize errors were logged and the join
-     proceeded with the original agent_name (fail-open), causing persona
-     drift and downstream credential resolution failures. *)
-  match
-    Coord_identity_backend.validate_join_identity
-      ~agent_name
-      ~base_path:config.base_path
-  with
-  | Ok keeper_name ->
-      Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
-        ~labels:[ ("outcome", "ok") ] ();
-      proceed_with_join keeper_name
-  | Error err ->
-      Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
-        ~labels:[ ("outcome", err.Coord_identity_backend.outcome) ] ();
-      Log.Misc.warn
-        "[sid=%s] [fail-closed:coord_join_normalize] agent=%s outcome=%s \
-         detail=%s - join rejected"
-        sid agent_name err.Coord_identity_backend.outcome err.detail;
-      (* Caller-provided identity / persona / credential files invalid. *)
-      Some
-        (inline_err_workflow ~tool_name ~start_time
-           (Printf.sprintf
-              "masc_join rejected: identity validation failed for '%s' — %s. \
-               Ensure the persona and credential files exist for this agent."
-              agent_name err.detail))
-
-(** masc_leave — leave a MASC room *)
-let handle_leave ~tool_name ~start_time (ctx : context) : Tool_result.result option =
-  let config = ctx.config in
-  let agent_name = ctx.agent_name in
-  let registry = ctx.registry in
-  let state = ctx.state in
-  let leave_event = `Assoc [
-    ("type", `String "masc/agent_left");
-    ("agent_name", `String agent_name);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  let _pushed = Session.push_notification_to_active_agents registry ~event:leave_event in
-  Mcp_server.sse_broadcast state leave_event;
-  let result = Coord.leave config ~agent_name in
-  Session.unregister registry ~agent_name;
-  Some (inline_ok ~tool_name ~start_time result)

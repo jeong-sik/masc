@@ -101,8 +101,6 @@ module Masc : sig
     | Goal_upsert
     | Goal_verify
     | Heartbeat
-    | Join
-    | Leave
     | Messages
     | Note_add
     | Operator_action
@@ -127,7 +125,6 @@ module Masc : sig
     | Update_priority
     | Web_fetch
     | Web_search
-    | Who
     | Approval_pending
     | Approval_get
     | Config

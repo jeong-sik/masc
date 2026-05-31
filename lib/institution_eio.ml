@@ -687,7 +687,7 @@ let load_and_format_for_spawn ~fs (config : config) : string =
   | None -> ""
 ;;
 
-(** Short welcome format for masc_join response.
+(** Short welcome format for agent startup response.
     Concise cultural inheritance - mission + values + one tip.
     @param inst The institution to format
     @return Formatted string for join welcome

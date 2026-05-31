@@ -113,7 +113,7 @@ tools = [
   "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
   "masc_agent_card", "masc_tool_help",
   "masc_task_history", "masc_plan_get", "masc_plan_get_task",
-  "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
+  "masc_heartbeat",
   "masc_messages", "masc_broadcast",
 ]
 

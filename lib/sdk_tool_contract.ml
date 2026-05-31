@@ -117,9 +117,6 @@ let core_remote_operation_names =
     (List.map (fun binding -> binding.canonical_operation) sdk_bindings
     @ [
         "masc_status";
-        "masc_join";
-        "masc_leave";
-        "masc_who";
         "masc_agents";
         "masc_agent_update";
         "masc_messages";

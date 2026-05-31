@@ -171,10 +171,10 @@ let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
   | Heartbeat | Messages | Note_add | Operator_action | Operator_digest
   | Operator_snapshot | Plan_clear_task | Plan_get | Plan_get_task | Plan_init
   | Plan_set_task | Status | Task_history | Tasks | Tool_grant | Tool_help
-  | Tool_list | Tool_revoke | Transition | Web_fetch | Web_search | Who
+  | Tool_list | Tool_revoke | Transition | Web_fetch | Web_search
   | Approval_pending | Approval_get | Config | Gc | Get_metrics | Mcp_session
   | Tool_admin_snapshot | Tool_stats -> Low
-  | Claim_next | Goal_upsert | Goal_verify | Join | Leave | Operator_confirm
+  | Claim_next | Goal_upsert | Goal_verify | Operator_confirm
   | Pause | Resume | Start -> Medium
   | Agent_update | Board_sub_board_create | Board_sub_board_update | Plan_update
   | Update_priority | Tool_admin_update -> High

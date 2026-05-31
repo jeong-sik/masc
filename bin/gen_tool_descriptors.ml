@@ -367,7 +367,7 @@ let masc_plan_set_task_spec : tool_spec =
   ; description =
       "Set the current task for your session so you can omit task_id in subsequent \
        planning calls. Use when starting work on a task after claiming it. After \
-       masc_claim_next; auto-cleared on masc_leave."
+       masc_claim_next; auto-cleared on session end."
   ; parameters =
       [ { p_name = "task_id"
         ; p_type = T_string { enum = None; default = None }
@@ -385,7 +385,7 @@ let masc_plan_get_task_spec : tool_spec =
   ; description =
       "Get the task_id you're currently working on (session-scoped). Use when resuming \
        work after a context switch or verifying your current assignment. Set via \
-       masc_plan_set_task. Auto-cleared on masc_leave."
+       masc_plan_set_task. Auto-cleared on session end."
   ; parameters = []
   ; additional_properties = false
   ; behavior_contract = []
@@ -397,8 +397,7 @@ let masc_plan_clear_task_spec : tool_spec =
   ; description =
       "Clear your current task assignment without completing it (does not change task \
        status). Use when switching to a different task, abandoning work, or resetting \
-       session state. Use masc_transition to change task status separately. Auto-called \
-       on masc_leave."
+       session state. Use masc_transition to change task status separately."
   ; parameters = []
   ; additional_properties = false
   ; behavior_contract = []
@@ -516,52 +515,6 @@ let masc_start_spec : tool_spec =
   }
 ;;
 
-let masc_join_spec : tool_spec =
-  { name = "masc_join"
-  ; description =
-      "Join the active MASC project as agent_name to collaborate with other AI agents. \
-       Call at session start or to re-register presence. Other agents can @mention \
-       you. Check masc_status after joining to see active agents and available tasks."
-  ; parameters =
-      [ { p_name = "agent_name"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description =
-            "Your identity — any string you choose. Conventionally matches \
-             your MCP client name (so other agents can @mention you), but the \
-             server holds no closed list."
-        ; p_required = true
-        }
-      ; { p_name = "capabilities"
-        ; p_type = T_string_array { default = None }
-        ; p_description =
-            "Your strengths (e.g., ['typescript', 'code-review', 'testing'])"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_leave_spec : tool_spec =
-  { name = "masc_leave"
-  ; description =
-      "Leave the active MASC project and mark yourself as offline. Call when: (1) \
-       session ends, (2) switching projects, (3) work complete. Side effects: releases \
-       all your locks, sets presence to offline. Other agents will see you've left via \
-       SSE. Example: masc_leave({agent_name: 'worker-1'})"
-  ; parameters =
-      [ { p_name = "agent_name"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Your agent name"
-        ; p_required = true
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_broadcast_spec : tool_spec =
   { name = "masc_broadcast"
   ; description =
@@ -612,20 +565,6 @@ let masc_messages_spec : tool_spec =
   }
 ;;
 
-let masc_who_spec : tool_spec =
-  { name = "masc_who"
-  ; description =
-      "List all agents currently in the active project with their capabilities. \
-       Shows: agent name, join time, capabilities (e.g., ['typescript', 'testing']). \
-       Use to: find who can help, check if specific agent is online, see team \
-       composition. Agents appear after masc_join, disappear after masc_leave. Tip: \
-       Use capabilities to find the right agent for @mentions."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_tool_help_spec
@@ -654,11 +593,8 @@ let phase6_specs : tool_spec list =
   ; masc_approval_get_spec
     (* PR-2d: inline_coord group *)
   ; masc_start_spec
-  ; masc_join_spec
-  ; masc_leave_spec
   ; masc_broadcast_spec
   ; masc_messages_spec
-  ; masc_who_spec
   ]
 ;;
 

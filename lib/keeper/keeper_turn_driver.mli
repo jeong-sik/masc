@@ -92,10 +92,10 @@ val provider_attempt_started_decision :
 val provider_attempt_finished_decision :
   provider_attempt_finished_record -> Yojson.Safe.t
 
-(** {1 Named cascade execution} *)
+(** {1 Named runtime execution} *)
 
 val run_named :
-  cascade_name:string ->
+  runtime_id:string ->
   ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->

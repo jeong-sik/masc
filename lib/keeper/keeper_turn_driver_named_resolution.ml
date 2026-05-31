@@ -1,4 +1,4 @@
-(** Named cascade resolution setup for keeper turn driver. *)
+(** Named runtime resolution setup for keeper turn driver. *)
 
 type secondary_resolver =
   int ->
@@ -11,11 +11,11 @@ type t = {
   secondary_resolver : secondary_resolver option;
 }
 
-let resolve ~sw ~net ?provider_filter ~cascade_name ~runtime_cascade_name () =
+let resolve ~sw ~net ?provider_filter ~runtime_id ~projection_runtime_id () =
   let named_resolution =
     Runtime_catalog
     .resolve_named_providers_strict_with_secondary_resolver
-      ~sw ~net ?provider_filter ~cascade_name ()
+      ~sw ~net ?provider_filter ~runtime_id ()
   in
   let candidate_cfgs_result =
     match named_resolution with
@@ -29,7 +29,7 @@ let resolve ~sw ~net ?provider_filter ~cascade_name ~runtime_cascade_name () =
   in
   {
     configured_labels_result =
-      Provider_runtime_projection.default_execution_model_strings_result runtime_cascade_name;
+      Provider_runtime_projection.default_execution_model_strings_result projection_runtime_id;
     candidate_cfgs_result;
     secondary_resolver;
   }

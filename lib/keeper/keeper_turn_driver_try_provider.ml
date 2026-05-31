@@ -13,12 +13,12 @@ open Result.Syntax
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
-    Fields are grouped by role: cascade identity, agent config, transport,
+    Fields are grouped by role: runtime identity, agent config, transport,
     session/checkpoint, Eio primitives, callbacks, and event bus. *)
 type try_provider_ctx =
-  { (* Cascade identity *)
-    cascade_name : string
-  ; error_cascade_name : string
+  { (* Runtime identity *)
+    runtime_id : string
+  ; error_runtime_id : string
   ; keeper_name : string
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
@@ -125,7 +125,7 @@ let emit_runtime_manifest
            decision)
     in
     Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-      ~runtime_id:ctx.cascade_name ?logical_seq:(Some !(ctx.seq_ref))
+      ~runtime_id:ctx.runtime_id ?logical_seq:(Some !(ctx.seq_ref))
       ?status ?decision ()
     |> append
   | _ -> ()
@@ -322,7 +322,7 @@ let run_try_provider
           ; tool_retry_policy = ctx.tool_retry_policy
           ; required_tool_satisfaction = ctx.required_tool_satisfaction
           ; description =
-              Some (Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
+              Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved
           ; allowed_paths = ctx.allowed_paths
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
@@ -366,7 +366,7 @@ let run_try_provider
         Log.Misc.debug
           "rfc0095-trace: liveness_mode=Off observer disabled runtime=%s provider=%s \
            candidate=%s"
-          ctx.cascade_name
+          ctx.runtime_id
           provider_label
           candidate_key;
         None
@@ -389,7 +389,7 @@ let run_try_provider
           Keeper_attempt_liveness_observer.create
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
-            ~cascade_label:ctx.cascade_name
+            ~cascade_label:ctx.runtime_id
             ~provider_label
             ~external_wait:(fun () ->
               Keeper_approval_queue.has_pending_for_keeper
@@ -418,7 +418,7 @@ let run_try_provider
            { message =
                Printf.sprintf
                  "Runtime attempt liveness guard killed runtime lane %s: %s"
-                 ctx.cascade_name
+                 ctx.runtime_id
                  kind
            })
     in
@@ -475,7 +475,7 @@ let run_try_provider
     in
     (match
        Runtime_config_builder.with_cli_preflight
-         ~scope:(Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
+         ~scope:(Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
          ~config
          ~goal:ctx.goal
          (fun () ->
@@ -524,7 +524,7 @@ let run_try_provider
                         Log.Misc.info
                           "[cascade-fallback] cascade %s: runtime lane per-provider \
                            timeout after %.1fs, falling back"
-                          ctx.cascade_name
+                          ctx.runtime_id
                           t;
                         Error
                           (Agent_sdk.Error.Api
@@ -545,7 +545,7 @@ let run_try_provider
        let result =
          Result.map_error
            (Runtime_candidate.enrich_sdk_error
-              ~cascade_name:ctx.error_cascade_name
+              ~runtime_id:ctx.error_runtime_id
               candidate)
            result
        in

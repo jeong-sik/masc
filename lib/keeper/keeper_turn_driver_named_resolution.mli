@@ -1,4 +1,4 @@
-(** Named cascade resolution setup for keeper turn driver. *)
+(** Named runtime resolution setup for keeper turn driver. *)
 
 type secondary_resolver =
   int ->
@@ -15,7 +15,7 @@ val resolve :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?provider_filter:string list ->
-  cascade_name:string ->
-  runtime_cascade_name:string ->
+  runtime_id:string ->
+  projection_runtime_id:string ->
   unit ->
   t

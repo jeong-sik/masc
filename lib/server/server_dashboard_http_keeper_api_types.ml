@@ -148,13 +148,13 @@ let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
     [
       ("ts", `String row.ts);
       ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
-      ("cascade_name", Json_util.string_opt_to_json row.cascade_name);
+      ("runtime_id", Json_util.string_opt_to_json row.cascade_name);
       ("model_source", Json_util.string_opt_to_json (decision_string "model_source"));
       ( "resolved_model_source",
         Json_util.string_opt_to_json (decision_string "resolved_model_source") );
       ("capability_source", Json_util.string_opt_to_json (decision_string "capability_source"));
       ("fallback_authority", Json_util.string_opt_to_json (decision_string "fallback_authority"));
-      ( "provider_source_cascade",
+      ( "provider_source_runtime",
         Json_util.string_opt_to_json (decision_string "provider_source_cascade") );
       ("status", `String row.status);
       ("error", Json_util.string_opt_to_json (decision_string "error"));

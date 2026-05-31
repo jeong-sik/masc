@@ -2877,9 +2877,9 @@ proactive_enabled = true
         Masc_mcp.(Keeper_config.default_cascade_name ())
         (json |> member "execution" |> member "selected_cascade_name"
        |> to_string);
-      Alcotest.(check string) "selected cascade canonical"
+      Alcotest.(check string) "selected runtime canonical"
         Masc_mcp.(Keeper_config.default_cascade_name ())
-        (json |> member "execution" |> member "selected_cascade_canonical"
+        (json |> member "execution" |> member "selected_runtime_canonical"
        |> to_string);
       let expected_default_models =
         Masc_mcp.Cascade_runtime.models_of_cascade_name
@@ -3039,7 +3039,7 @@ proactive_enabled = true
        |> to_string);
       Alcotest.(check string) "stale cascade falls back to live default"
         Masc_mcp.(Keeper_config.default_cascade_name ())
-        (stale_json |> member "execution" |> member "selected_cascade_canonical"
+        (stale_json |> member "execution" |> member "selected_runtime_canonical"
        |> to_string);
       Alcotest.(check (list string)) "stale cascade models use live default"
         expected_default_models

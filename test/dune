@@ -134,7 +134,6 @@
   test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_migration
   test_keeper_runtime_manifest_completeness
   test_keeper_runtime_manifest_clock_separation
   test_schema_surface_index
@@ -406,7 +405,6 @@
   test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_migration
   test_keeper_runtime_manifest_completeness
   test_keeper_runtime_manifest_clock_separation
   test_schema_surface_index

@@ -260,7 +260,7 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
     keepers;
   table
 
-let build_agent_briefs config sessions attention_queue _coord_json (keepers : Yojson.Safe.t list) =
+let build_agent_briefs config sessions attention_queue _snapshot_json (keepers : Yojson.Safe.t list) =
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =

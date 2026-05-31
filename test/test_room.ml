@@ -357,7 +357,8 @@ let test_lifecycle_messages_are_typed () =
       (str_contains join_result "joined");
     let leave_result = Coord.end_session config ~agent_name:"provider_f" in
     Alcotest.(check bool) "leave success" true (str_contains leave_result "left");
-    ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"provider_f" ~capabilities:[] ());
+    (* See: fixture session setup; returned agent record is not used. *)
+    ignore (Coord.bind_session config ~agent_name:"provider_f" ~capabilities:[] ());
 
     let messages = Coord.get_all_messages_raw config ~since_seq:0 in
     let has_msg_type msg_type =
@@ -365,9 +366,12 @@ let test_lifecycle_messages_are_typed () =
         (fun (message : Types.message) -> String.equal message.msg_type msg_type)
         messages
     in
-    Alcotest.(check bool) "join typed" true (has_msg_type "lifecycle_join");
-    Alcotest.(check bool) "leave typed" true (has_msg_type "lifecycle_leave");
-    Alcotest.(check bool) "rejoin typed" true (has_msg_type "lifecycle_rejoin");
+    Alcotest.(check bool) "session bound typed" true
+      (has_msg_type "session_bound");
+    Alcotest.(check bool) "session ended typed" true
+      (has_msg_type "session_ended");
+    Alcotest.(check bool) "session rebound typed" true
+      (has_msg_type "session_bound");
     Alcotest.(check bool) "lifecycle pings not plain broadcasts" false
       (List.exists
          (fun (message : Types.message) ->
@@ -1274,7 +1278,8 @@ let test_negative_priority () =
 
 let test_xss_in_message () =
   with_test_env (fun config ->
-    ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"tester" ~capabilities:[] ());
+    (* See: fixture session setup; returned agent record is not used. *)
+    ignore (Coord.bind_session config ~agent_name:"tester" ~capabilities:[] ());
     let xss_payload = "<script>alert('xss')</script>" in
     let result = Coord.broadcast config ~from_agent:"tester" ~content:xss_payload in
     (* Check that raw script tags are not in the result *)
@@ -1295,7 +1300,8 @@ let test_xss_in_agent_name () =
 
 let test_xss_in_message_type () =
   with_test_env (fun config ->
-    ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"tester" ~capabilities:[] ());
+    (* See: fixture session setup; returned agent record is not used. *)
+    ignore (Coord.bind_session config ~agent_name:"tester" ~capabilities:[] ());
     let xss_msg_type = "<script>alert('xss')</script>" in
     ignore
       (Coord.broadcast config ~from_agent:"tester" ~msg_type:xss_msg_type

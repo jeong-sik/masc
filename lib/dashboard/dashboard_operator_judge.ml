@@ -87,7 +87,7 @@ let enabled () = Env_config.Operator.judge_enabled
 
 let interval_sec () = Env_config.Operator.judge_interval_sec
 
-let coord_ttl_sec () = Env_config.Operator.room_ttl_sec
+let judgment_ttl_sec () = Env_config.Operator.judgment_ttl_sec
 
 let session_ttl_sec () = Env_config.Operator.session_ttl_sec
 
@@ -144,20 +144,21 @@ let build_recommended_action ~actor ~target_type ~target_id json =
           in
           let preview =
             `Assoc
-              [
+              ([
                 (key_actor, `String actor);
                 (key_action_type, `String action_type);
-                (key_target_type, `String target_type);
-                (key_target_id, Option.fold ~none:`Null ~some:(fun v -> `String v) target_id);
                 (key_payload, suggested_payload);
               ]
+              @ (if target_type = "" then [] else [ (key_target_type, `String target_type) ])
+              @
+              match target_id with
+              | None -> []
+              | Some value -> [ (key_target_id, `String value) ])
           in
           Some
             (`Assoc
-              [
+              ([
                 (key_action_type, `String action_type);
-                (key_target_type, `String target_type);
-                (key_target_id, Option.fold ~none:`Null ~some:(fun v -> `String v) target_id);
                 (key_severity, `String severity);
                 (key_reason, `String reason);
                 (key_confirm_required, `Bool (confirm_required action_type));
@@ -165,7 +166,12 @@ let build_recommended_action ~actor ~target_type ~target_id json =
                 (key_preview, preview);
                 (key_provenance, `String provenance_judgment);
                 (key_authoritative, `Bool true);
-              ])
+              ]
+              @ (if target_type = "" then [] else [ (key_target_type, `String target_type) ])
+              @
+              match target_id with
+              | None -> []
+              | Some value -> [ (key_target_id, `String value) ]))
       | _ -> None)
   | _ -> None
 
@@ -177,7 +183,7 @@ let prompt_for_facts facts_json =
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt prompt_dashboard_operator_judge
 
-let parse_coord_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
+let parse_operator_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
   match json with
   | `Assoc _ ->
       let summary =
@@ -191,14 +197,13 @@ let parse_coord_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ 
           |> Option.value ~default:0.0
         in
         let fresh_until_unix =
-          generated_at_unix +. float_of_int (coord_ttl_sec ())
+          generated_at_unix +. float_of_int (judgment_ttl_sec ())
         in
         Some
           (Operator_judgment.record config ~surface:"command.namespace"
-             ~target_type:Operator_judgment.Coord ~target_id:None ~summary
-             ~confidence ?model_name:None
+             ~summary ~confidence ?model_name:None
              ?recommended_action:
-               (build_recommended_action ~actor:keeper_name ~target_type:"coord"
+               (build_recommended_action ~actor:keeper_name ~target_type:""
                   ~target_id:None (Option.value ~default:`Null (Json_util.assoc_member_opt member_recommended_action json)))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:
@@ -257,8 +262,8 @@ let compute_judgments
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
 let should_backoff ~sw:_ ~net:_ =
-  (* RFC-0206 single-binding: the deleted
-     [Runtime_runtime.local_capacity_for_selections] probed local-runtime
+  (* RFC-0206 single-binding: the previous
+     runtime capacity probe checked local-runtime
      endpoint queues live. Under single-binding the runtime pool tracks lease
      saturation directly, so back off when every configured concurrency slot on
      a healthy runtime is already leased.
@@ -299,13 +304,13 @@ let refresh_once ~sw ~net
         let generated_at_unix = Unix.gettimeofday () in
         let generated_at = Masc_domain.iso8601_of_unix_seconds generated_at_unix in
         let expires_at =
-          Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (coord_ttl_sec ()))
+          Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (judgment_ttl_sec ()))
         in
-        let coord_judgment =
-          parse_coord_judgment ~config ~generated_at ~generated_at_unix
+        let operator_judgment =
+          parse_operator_judgment ~config ~generated_at ~generated_at_unix
             ~model_used result_json
         in
-        let has_any = Option.is_some coord_judgment in
+        let has_any = Option.is_some operator_judgment in
         with_lock st (fun () ->
             st.refreshing <- false;
             st.judge_online <- has_any;

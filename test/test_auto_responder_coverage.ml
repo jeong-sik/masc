@@ -3,7 +3,6 @@
     Tests for MASC Auto-responder:
     - mode type (Disabled, Model)
     - activity_log_file: log file path
-    - extract_nickname: nickname extraction from response
     - re-exports from Mention
 *)
 

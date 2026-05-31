@@ -1259,7 +1259,8 @@ let test_join_leave_emit_observability () =
          ~action_pred:(function
            | Audit_log.Custom "agent_session_bound" -> true
            | _ -> false)
-         ~details:[ "event_family", "agent_lifecycle"; "event_kind", "session_bound" ]);
+         ~details:
+           [ "event_family", "agent_lifecycle"; "event_kind", "session_bound" ]);
     Alcotest.(check bool)
       "audit leave recorded"
       true
@@ -1269,7 +1270,8 @@ let test_join_leave_emit_observability () =
          ~action_pred:(function
            | Audit_log.Custom "agent_session_ended" -> true
            | _ -> false)
-         ~details:[ "event_family", "agent_lifecycle"; "event_kind", "session_ended" ]);
+         ~details:
+           [ "event_family", "agent_lifecycle"; "event_kind", "session_ended" ]);
     let telemetry_events = Telemetry_eio.read_all_events config in
     let has_joined =
       List.exists
@@ -1284,7 +1286,7 @@ let test_join_leave_emit_observability () =
         (fun (entry : Telemetry_eio.event_record) ->
            match entry.event with
            | Telemetry_eio.Agent_left { agent_id; reason } ->
-             String.equal agent_id provider_f && String.equal reason "leave"
+             String.equal agent_id provider_f && String.equal reason "session_ended"
            | _ -> false)
         telemetry_events
     in
@@ -1299,7 +1301,11 @@ let test_join_leave_emit_observability () =
       (ring_has_entry
          ring_entries
          ~details:
-           [ "event_family", "agent_lifecycle"; "event_kind", "join"; "agent_id", provider_f ]);
+           [
+             "event_family", "agent_lifecycle";
+             "event_kind", "session_bound";
+             "agent_id", provider_f;
+           ]);
     Alcotest.(check bool)
       "ring leave recorded"
       true
@@ -1307,7 +1313,7 @@ let test_join_leave_emit_observability () =
          ring_entries
          ~details:
            [ "event_family", "agent_lifecycle"
-           ; "event_kind", "leave"
+           ; "event_kind", "session_ended"
            ; "agent_id", provider_f
            ]))
 ;;

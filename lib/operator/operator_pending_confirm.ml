@@ -82,31 +82,37 @@ let make_available_action ~action_type ~tool_name ~target_type ~description =
 
 let preview_of_pending_confirm (entry : pending_confirm) =
   `Assoc
-    [
+    ([
       ("trace_id", `String entry.trace_id);
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
-      ("target_type", `String entry.target_type);
-      ("target_id", Json_util.string_option_to_yojson entry.target_id);
       ("payload", entry.payload);
     ]
+    @ (if entry.target_type = "" then [] else [ ("target_type", `String entry.target_type) ])
+    @
+    match entry.target_id with
+    | None -> []
+    | Some value -> [ ("target_id", `String value) ])
 
 let pending_confirm_to_yojson (entry : pending_confirm) =
   `Assoc
-    [
+    ([
       ("token", `String entry.token);
       ("confirm_token", `String entry.token);
       ("trace_id", `String entry.trace_id);
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
-      ("target_type", `String entry.target_type);
-      ("target_id", Json_util.string_option_to_yojson entry.target_id);
       ("payload", entry.payload);
       ("delegated_tool", `String entry.delegated_tool);
       ("created_at", `String entry.created_at);
       ("expires_at", Json_util.string_option_to_yojson entry.expires_at);
       ("preview", preview_of_pending_confirm entry);
     ]
+    @ (if entry.target_type = "" then [] else [ ("target_type", `String entry.target_type) ])
+    @
+    match entry.target_id with
+    | None -> []
+    | Some value -> [ ("target_id", `String value) ])
 
 let pending_confirm_of_yojson json =
   try
@@ -237,19 +243,16 @@ let pending_confirms_json ?actor config =
 let available_actions : available_action list =
   [
     make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
-      ~target_type:"coord"
+      ~target_type:""
       ~description:"Namespace-wide operator broadcast.";
     make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
-      ~target_type:"coord"
+      ~target_type:""
       ~description:"Pause namespace automation and spawning.";
     make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
-      ~target_type:"coord"
+      ~target_type:""
       ~description:"Resume a paused namespace.";
-    make_available_action ~action_type:"social_sweep" ~tool_name:"social_sweep"
-      ~target_type:"coord"
-      ~description:"Run one immediate social sweep across keepers.";
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
-      ~target_type:"coord"
+      ~target_type:""
       ~description:"Inject a backlog task into the namespace.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
@@ -264,13 +267,13 @@ let available_actions : available_action list =
 
 let available_action_to_yojson (entry : available_action) =
   `Assoc
-    [
+    ([
       ("action_type", `String entry.action_type);
       ("tool_name", `String entry.tool_name);
-      ("target_type", `String entry.target_type);
       ("description", `String entry.description);
       ("confirm_required", `Bool entry.confirm_required);
     ]
+    @ (if entry.target_type = "" then [] else [ ("target_type", `String entry.target_type) ]))
 
 let available_actions_json =
   `List (List.map available_action_to_yojson available_actions)

@@ -51,13 +51,9 @@ let operator_snapshot_query_json ~actor ~view ~include_messages ~include_keepers
     ]
 ;;
 
-let operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
-    ~effective_target_type ~default_namespace_request =
+let operator_digest_query_json ~actor ~include_workers ~default_namespace_request =
   `Assoc
     [ "actor", Json_util.string_opt_to_json actor
-    ; "target_type", Json_util.string_opt_to_json target_type
-    ; "target_id", Json_util.string_opt_to_json target_id
-    ; "effective_target_type", `String effective_target_type
     ; "include_workers", Json_util.bool_opt_to_json include_workers
     ; "default_namespace_request", `Bool default_namespace_request
     ]
@@ -137,9 +133,6 @@ let operator_snapshot_default_query () =
 let operator_digest_default_query () =
   operator_digest_query_json
     ~actor:None
-    ~target_type:None
-    ~target_id:None
     ~include_workers:None
-    ~effective_target_type:"coord"
     ~default_namespace_request:true
 ;;

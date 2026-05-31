@@ -217,7 +217,7 @@ let tempo_section (config : Coord_utils.config) : section =
   let content = [Tempo.format_state state] in
   { title = "Tempo"; content; empty_msg = "" }
 
-let active_workspace_id = "root"
+let active_workspace_id = "workspace"
 
 let workspace_snapshot (config : Coord_utils.config) =
   {

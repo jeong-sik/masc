@@ -29,10 +29,9 @@ val judgment_write_json :
     {!Operator_judgment} entry parsed from [args].  Required fields:
 
     - [surface]: ["command.namespace"] or ["intervene"].
-    - [target_type]: ["coord"].
     - [summary] (non-empty after trim).
 
-    Optional: [target_id], [fresh_ttl_sec] (default 60s for
+    Optional: [fresh_ttl_sec] (default 60s for
     command.namespace, 300s for intervene, 120s otherwise; floored
     at 1), [confidence] (default 0.5), [keeper_name],
     [evidence_refs] (string list), [recommended_action] (object),
@@ -103,9 +102,9 @@ val action_request_of_args :
 val normalize_request_target_type :
   action_request -> (action_request, string) result
 (** [normalize_request_target_type r] returns [r] with [target_type]
-    validated against the allowed set ([root] / [keeper] / [""]).
+    validated against the allowed set ([keeper] / [""]).
     Empty [target_type] is replaced by the action-type default.
-    Returns [Error "target_type must be root or keeper"] on invalid
+    Returns [Error "target_type must be omitted or keeper"] on invalid
     inputs. *)
 
 val delegated_tool_for : string -> string

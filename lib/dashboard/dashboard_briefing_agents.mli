@@ -119,12 +119,12 @@ val build_agent_briefs :
   Yojson.Safe.t ->
   Yojson.Safe.t list ->
   Yojson.Safe.t list
-(** [build_agent_briefs config sessions attention_queue coord_json
+(** [build_agent_briefs config sessions attention_queue snapshot_json
       keepers] aggregates per-agent briefs from session contexts +
     attention queue + keeper list.
 
-    [coord_json] is currently unused (placeholder for future coord
-    metadata expansion) — kept in signature for forward compat.
+    [snapshot_json] is currently unused and kept in signature for
+    forward compatibility.
 
     Returns a JSON list, one entry per active / archived agent,
     sorted for dashboard display. *)

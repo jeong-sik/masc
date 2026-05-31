@@ -82,9 +82,9 @@ val summary_of_recommendations :
 
 (** {1 Target type normalisation} *)
 
-(** [true] for the canonical ["coord"] target type. *)
-val is_root_target_type : string -> bool
+(** [true] when no target type is supplied. *)
+val is_omitted_target_type : string -> bool
 
-(** Accepts [None] → [Ok "coord"]; [Some raw] is trimmed + lowercased, then
-    checked via {!is_root_target_type}. Otherwise [Error "target_type must be root"]. *)
+(** Accepts [None] or an empty string. Other values return
+    [Error "target_type must be omitted"]. *)
 val normalize_digest_target_type : string option -> (string, string) result

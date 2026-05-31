@@ -309,8 +309,7 @@ type agent_runtime_state = {
   last_need : string;
   last_turn_tool_calls : tool_call_summary list;
   last_seen_message_seq : int;
-      (** Global message-feed cursor: the highest [Coord] message seq this
-          keeper has already scanned for direct mentions. *)
+  (** Highest message seq this keeper has scanned for direct mentions. *)
 }
 
 (** {1 Keeper meta record} *)

@@ -90,7 +90,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 132 | Operator snapshot cache TTL (seconds). Default: 30. |
 | `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 120 | Whether operator judge background loop is enabled. Default: true. |
 | `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 123 | Operator judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_OPERATOR_JUDGE_ROOM_TTL_SEC` | typed:int | unclassified | unclassified | 126 | Coord TTL for operator judge cleanup, clamped to >= 15s. Default: 60. |
+| `MASC_OPERATOR_JUDGE_TTL_SEC` | typed:int | unclassified | unclassified | 126 | Judgment TTL for operator judge cleanup, clamped to >= 15s. Default: 60. |
 | `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 129 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 58 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 62 | Max age for rate limit entries before cleanup (seconds) |
@@ -444,4 +444,3 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 833 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 93 |  |
 | `MASC_WS_SLICE_INDEX_ENABLED` | string_literal | n/a | n/a | 96 |  |
-

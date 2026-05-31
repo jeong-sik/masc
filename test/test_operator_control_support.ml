@@ -52,19 +52,16 @@ let dispatch_keeper_exn ctx ~name ~args =
   | Some result -> Tool_result.is_success result, Tool_result.message result
   | None -> failwith ("keeper dispatch missing: " ^ name)
 
-(* unit_update_exn / start_operation_exn removed (CP purge: Command_plane_v2 deleted) *)
-
 let iso_of_unix unix_ts =
   let tm = Unix.gmtime unix_ts in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let record_operator_judgment config ~surface ~target_type ~target_id ~summary
-    ?recommended_action ~fresh_for_sec () =
+let record_operator_judgment config ~surface ~summary ?recommended_action ~fresh_for_sec () =
   let now_unix = Unix.gettimeofday () in
   ignore
-    (Operator_judgment.record config ~surface ~target_type ~target_id ~summary
+    (Operator_judgment.record config ~surface ~summary
        ~confidence:0.91 ?recommended_action ~generated_at:(Masc_domain.now_iso ())
        ~generated_at_unix:now_unix
        ~fresh_until:(iso_of_unix (now_unix +. fresh_for_sec))

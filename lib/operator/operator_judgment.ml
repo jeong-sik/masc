@@ -1,13 +1,8 @@
 open Result.Syntax
 
-type target_type =
-  | Coord
-
 type record = {
   judgment_id : string;
   surface : string;
-  target_type : target_type;
-  target_id : string option;
   status : string;
   summary : string;
   confidence : float;
@@ -25,14 +20,6 @@ type record = {
   disagreement_with_truth : bool;
 }
 
-let target_type_to_string = function
-  | Coord -> "coord"
-
-let target_type_of_string = function
-  | "coord" -> Some Coord
-  | _ -> None
-
-
 let operator_dir config =
   Filename.concat (Coord.masc_dir config) "operator"
 
@@ -42,23 +29,13 @@ let judgments_path config =
 let generate_id () =
   "judg-" ^ String.sub (Auth.generate_token ()) 0 20
 
-let key_of ~surface ~target_type ~target_id =
-  let target =
-    match target_id with
-    | Some value ->
-        let trimmed = String.trim value in
-        if trimmed <> "" then trimmed else "__coord__"
-    | None -> "__coord__"
-  in
-  String.concat ":" [ surface; target_type_to_string target_type; target ]
+let key_of ~surface = surface
 
 let to_yojson (value : record) =
   `Assoc
     [
       ("judgment_id", `String value.judgment_id);
       ("surface", `String value.surface);
-      ("target_type", `String (target_type_to_string value.target_type));
-      ("target_id", Json_util.option_to_yojson (fun v -> `String v) value.target_id);
       ("status", `String value.status);
       ("summary", `String value.summary);
       ("confidence", `Float value.confidence);
@@ -80,20 +57,10 @@ let to_yojson (value : record) =
 
 let of_yojson json =
   try
-    let* target_type =
-      match Json_util.get_string json "target_type" with
-      | Some value -> (
-          match target_type_of_string value with
-          | Some parsed -> Ok parsed
-          | None -> Error "invalid target_type")
-      | None -> Error "missing target_type"
-    in
     Ok
       {
         judgment_id = (match Json_util.assoc_member_opt "judgment_id" json with Some (`String s) -> s | _ -> "");
         surface = (match Json_util.assoc_member_opt "surface" json with Some (`String s) -> s | _ -> "");
-        target_type;
-        target_id = Json_util.get_string json "target_id";
         status =
           Json_util.get_string json "status"
           |> Option.value ~default:"active";
@@ -177,25 +144,22 @@ let latest_by_key config =
   let table = Hashtbl.create 16 in
   load_all config
   |> List.iter (fun value ->
-         let key =
-           key_of ~surface:value.surface ~target_type:value.target_type
-             ~target_id:value.target_id
-         in
+         let key = key_of ~surface:value.surface in
          match Hashtbl.find_opt table key with
          | Some current when generated_at_unix current >= generated_at_unix value -> ()
          | _ -> Hashtbl.replace table key value);
   table
 
-let latest_active config ~surface ~target_type ~target_id =
+let latest_active config ~surface =
   let table = latest_by_key config in
-  Hashtbl.find_opt table (key_of ~surface ~target_type ~target_id)
+  Hashtbl.find_opt table (key_of ~surface)
 
-let record config ~surface ~target_type ~target_id ~summary ~confidence
+let record config ~surface ~summary ~confidence
     ?model_name ?runtime_name ?recommended_action ?(evidence_refs = [])
     ?(fallback_used = false) ?(disagreement_with_truth = false) ~generated_at
     ?generated_at_unix ~fresh_until ?fresh_until_unix ~keeper_name () =
   let supersedes =
-    match latest_active config ~surface ~target_type ~target_id with
+    match latest_active config ~surface with
     | Some value -> [ value.judgment_id ]
     | None -> []
   in
@@ -210,12 +174,10 @@ let record config ~surface ~target_type ~target_id ~summary ~confidence
     | None -> Masc_domain.parse_iso8601 fresh_until
   in
   let value =
-    {
-      judgment_id = generate_id ();
-      surface;
-      target_type;
-      target_id;
-      status = "active";
+      {
+        judgment_id = generate_id ();
+        surface;
+        status = "active";
       summary = String.trim summary;
       confidence = max 0.0 (min 1.0 confidence);
       generated_at;

@@ -212,8 +212,10 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -356,6 +358,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
     (fun () ->
       let config = Coord.default_config base_dir in
       (* See: this fixture only needs an initialized coord for digest reads. *)
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
       let meta =
         match
@@ -497,6 +500,7 @@ let test_digest_coord_includes_keeper_runtime_attention () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
       let keeper_ctx : _ Tool_keeper.context =
         {
@@ -602,6 +606,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
@@ -684,8 +689,10 @@ let test_snapshot_has_expected_sections () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       ignore (Coord.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
       ignore (Coord.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
@@ -744,6 +751,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
       let request_namespace_pause actor =
@@ -817,8 +825,10 @@ let test_snapshot_summary_view_excludes_retired_command_plane () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_messages:false
@@ -843,8 +853,10 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:true
@@ -881,8 +893,10 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -992,8 +1006,10 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
       cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1096,8 +1112,10 @@ let test_snapshot_waiters_share_inflight_result () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1173,8 +1191,10 @@ let test_snapshot_waiter_returns_stale_inflight_result () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1232,6 +1252,7 @@ let test_digest_coord_exposes_pending_confirm_attention () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let action_json =
@@ -1288,8 +1309,10 @@ let test_digest_coord_includes_tool_host_failure_attention () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: fixture setup; returned init state is not used. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (* See: fixture session setup; returned agent record is not used. *)
+      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Dashboard_tool_host_events.record ~fs:() config
         {
           Dashboard_tool_host_events.agent_name = "agent_code";

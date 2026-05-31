@@ -4,16 +4,14 @@
     [operator_digest_http_json] is the GET handler backing the
     operator dashboard's digest surface. Two paths:
 
-    1. **Default root request** (no actor, no target_id, no
-       include_workers override, target_type omitted or [root]) — serves the cached
-       [operator_digest_cache] surface immediately (0ms), decorated
-       with the default query metadata.
+    1. **Default request** (no actor and no include_workers override)
+       serves the cached [operator_digest_cache] surface immediately
+       (0ms), decorated with the default query metadata.
 
     2. **Parameterized request** — computes on-demand with a 5s SWR
        cache. Cache key is the colon-delimited concatenation of
-       [actor | effective_target_type | target_id | include_workers]
-       so distinct query shapes are cached independently. The compute
-       closure runs [Operator_control.digest_json] inside
+       [actor | include_workers] so distinct query shapes are cached
+       independently. The compute closure runs [Operator_control.digest_json] inside
        [run_dashboard_compute ~mode:Offloaded_readonly] and decorates
        with [with_projection_diagnostics ~surface:"operator_digest"].
        Validation errors are surfaced as `{error, message, generated_at}`
@@ -55,26 +53,16 @@ let operator_digest_http_json ~state ~sw ~clock request =
     | Some ("1" | "true" | "yes") -> Some true
     | _ -> None
   in
-  let root_target_type value =
-    match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
-    | None -> true
-    | Some "coord" -> true
-    | Some _ -> false
-  in
-  let effective_target_type = Option.value ~default:"coord" target_type in
   let default_namespace_request =
     actor = None
     && target_id = None
     && include_workers = None
-    && root_target_type target_type
+    && Option.bind target_type String_util.trim_to_option = None
   in
   let query =
     Core_operator_query.operator_digest_query_json
       ~actor
-      ~target_type
-      ~target_id
       ~include_workers
-      ~effective_target_type
       ~default_namespace_request
   in
   if default_namespace_request
@@ -86,15 +74,12 @@ let operator_digest_http_json ~state ~sw ~clock request =
     let started_at = Unix.gettimeofday () in
     let cache_key =
       Printf.sprintf
-        "operator_digest:param:%s|%s|%s|%s|%s"
+        "operator_digest:param:%s|%s"
         (Option.value ~default:"" actor)
-        effective_target_type
-        (Option.value ~default:"" target_id)
         (match include_workers with
          | None -> ""
          | Some true -> "1"
          | Some false -> "0")
-        ""
     in
     let compute () =
       match
@@ -121,7 +106,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
                   match
                     Operator_control.digest_json
                       ?actor
-                      ~target_type:effective_target_type
+                      ?target_type
                       ?target_id
                       ?include_workers
                       ctx

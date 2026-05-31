@@ -135,13 +135,8 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ~include_summary_fields:false
         ~lightweight_summary:true ctx
     in
-    let scope_json =
-      match snapshot_json |> member_assoc "coord" with
-      | `Assoc _ as value -> value
-      | _ -> snapshot_json |> member_assoc "coord"
-    in
     let current_namespace =
-      match String_util.option_trim (Some (scope_json |> string_field "project")) with
+      match String_util.option_trim (Some (snapshot_json |> string_field "project")) with
       | Some value -> value
       | None -> "default"
     in

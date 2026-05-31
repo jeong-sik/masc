@@ -38,9 +38,9 @@ val summary_of_recommendations : actor:string -> recommended_action list -> Yojs
 
 val health_from_attention_items : attention_item list -> string
 
-val build_coord_attention_items : Coord.config -> attention_item list
+val build_operator_attention_items : Coord.config -> attention_item list
 
-val coord_recommendations : Coord.config -> recommended_action list
+val operator_recommendations : Coord.config -> recommended_action list
 
 val normalize_digest_target_type :
   string option -> (string, string) result

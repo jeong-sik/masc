@@ -172,16 +172,6 @@ let test_permission_for_tool_start () =
   | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_join_removed () =
-  match Auth.permission_for_tool "masc_join" with
-  | None -> ()
-  | _ -> fail "expected None (removed tool)"
-
-let test_permission_for_tool_leave_removed () =
-  match Auth.permission_for_tool "masc_leave" with
-  | None -> ()
-  | _ -> fail "expected None (removed tool)"
-
 let test_permission_for_tool_status () =
   match Auth.permission_for_tool "masc_status" with
   | Some Masc_domain.CanReadState -> ()
@@ -1069,8 +1059,6 @@ let () =
       test_case "init" `Quick test_permission_for_tool_init;
       test_case "reset" `Quick test_permission_for_tool_reset;
       test_case "start" `Quick test_permission_for_tool_start;
-      test_case "join removed" `Quick test_permission_for_tool_join_removed;
-      test_case "leave removed" `Quick test_permission_for_tool_leave_removed;
       test_case "status" `Quick test_permission_for_tool_status;
       test_case "agents" `Quick test_permission_for_tool_agents;
       test_case "tasks" `Quick test_permission_for_tool_tasks;

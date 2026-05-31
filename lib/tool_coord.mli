@@ -1,9 +1,5 @@
 (** Tool_coord — Coord management MCP tools (status / reset /
-    init / check / assertion).
-
-    Note: [join] / [leave] / [set_coord] / [who] require state +
-    registry and remain in [mcp_server_eio.ml] — those tools are
-    NOT routed through this module's {!dispatch}.
+    check / assertion).
 
     Type re-exports preserve identity with the source modules:
     - {!context} = {!Coord_types.context}

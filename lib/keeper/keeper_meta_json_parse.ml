@@ -18,7 +18,7 @@ type parsed_keeper_identity =
   ; pk_mid_goal : string
   ; pk_long_goal : string
   ; pk_social_model : string
-  ; pk_cascade_name : string
+  ; pk_runtime_id : string
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -118,7 +118,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_needs = personality.needs in
     let pk_desires = personality.desires in
     let pk_instructions = personality.instructions in
-    let pk_cascade_name_result =
+    let pk_runtime_id_result =
       (* RFC-0206: [runtime_id] is the canonical persisted/input name if a
          pre-scrub JSON payload still carries model-selection state. *)
       let runtime_id_opt =
@@ -128,9 +128,9 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       | Some runtime_id when runtime_id <> "" -> Ok runtime_id
       | _ -> Ok (Keeper_config.default_cascade_name ())
     in
-    (match pk_cascade_name_result with
+    (match pk_runtime_id_result with
      | Error e -> Error e
-     | Ok pk_cascade_name ->
+     | Ok pk_runtime_id ->
        Ok
          { pk_name
          ; pk_agent_name
@@ -141,7 +141,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
          ; pk_mid_goal
          ; pk_long_goal
          ; pk_social_model
-         ; pk_cascade_name
+         ; pk_runtime_id
          ; pk_will
          ; pk_needs
          ; pk_desires

@@ -62,8 +62,7 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
 let is_direct_completion_provider
     (provider_cfg : Llm_provider.Provider_config.t) : bool =
   match provider_cfg.kind with
-  | Cli_tool_d | Cli_tool_b | Cli_tool_c | Cli_tool_a -> false
-  | Provider_a | Provider_c | Provider_d_compat | Ollama | Provider_f | Provider_k | Provider_h -> true
+  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope -> true
 
 let provider_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =

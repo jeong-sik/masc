@@ -99,7 +99,6 @@ let binding_auth_kind (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> "none"
   | Runtime_binding.Api_key_env env -> "api_key:" ^ env
-  | Runtime_binding.Cli_cached_login -> "cli_cached_login"
   | Runtime_binding.Oauth_cached_login -> "oauth_cached_login"
   | Runtime_binding.Setup_token_env env -> "setup_token:" ^ env
   | Runtime_binding.File path -> "file:" ^ path
@@ -115,7 +114,6 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env _
-  | Runtime_binding.Cli_cached_login
   | Runtime_binding.Oauth_cached_login
   | Runtime_binding.Setup_token_env _
   | Runtime_binding.File _
@@ -123,8 +121,7 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
 
 let binding_runtime_kind (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
-  | Runtime_binding.Cli -> `Cli_agent
-  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_provider_d_compat ->
+  | Runtime_binding.Http | Runtime_binding.Managed ->
       if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding then
         `Local
       else `Direct_api

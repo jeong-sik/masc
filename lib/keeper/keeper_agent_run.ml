@@ -491,7 +491,7 @@ let run_turn
            ()
        in
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
-       (Provider_a/OpenAI/Provider_f/GLM/Ollama). The deadline resets after each
+       (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.
 
        Default 120 s catches real network/stream hangs while preserving

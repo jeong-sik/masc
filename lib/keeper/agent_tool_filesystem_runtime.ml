@@ -14,7 +14,7 @@ type fs_write_mode =
   | Overwrite
   | Append
   | Patch
-  (** RFC-0006 Phase A.4: read-replace-write for the Provider_a Code
+  (** RFC-0006 Phase A.4: read-replace-write for the Anthropic Code
         [EditFile] cognate. Caller supplies [old_string] + [new_string]
         (and optional [replace_all]) instead of [content]. *)
 

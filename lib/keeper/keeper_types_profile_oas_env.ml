@@ -126,9 +126,9 @@ let effective_oas_env pairs =
     then pairs @ [ "OAS_GEMINI_APPROVAL_MODE", "plan" ]
     else pairs
   in
-  (* Enable Provider_f CLI MCP by default: when not explicitly disabled and
+  (* Enable Gemini CLI MCP by default: when not explicitly disabled and
      no operator override exists, inject the "masc" server name so the
-     Provider_f CLI transport's --allowed-mcp-server-names flag allows the
+     Gemini CLI transport's --allowed-mcp-server-names flag allows the
      MASC MCP server instead of the __oas_no_mcp__ sentinel. *)
   if
     (not gemini_mcp_disabled)

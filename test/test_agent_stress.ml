@@ -13,7 +13,6 @@ let test_turn_failure_json_contract () =
   let event : Stress.event =
     {
       agent_name = "sangsu";
-      room_id = "default";
       kind =
         Stress.Turn_failure {
           consecutive = 2;
@@ -73,7 +72,6 @@ let test_turn_failure_omits_absent_error_kind () =
   let event : Stress.event =
     {
       agent_name = "janitor";
-      room_id = "";
       kind =
         Stress.Turn_failure {
           consecutive = 0;

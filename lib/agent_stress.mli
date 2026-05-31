@@ -59,7 +59,6 @@ and turn_failure = {
 (** A single stress observation. *)
 type event = {
   agent_name : string;
-  room_id : string;
   kind : stress_kind;
   timestamp : float;
 }

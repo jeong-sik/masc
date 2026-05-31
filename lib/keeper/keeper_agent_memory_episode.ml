@@ -190,7 +190,6 @@ let record_failure
          Agent_stress.record
            {
              agent_name = keeper_name;
-             room_id = "";
              kind;
              timestamp = Unix.gettimeofday ();
            });

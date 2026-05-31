@@ -153,7 +153,6 @@ let sync_keeper_presence
         (* RFC-0001 Gate A: record failure streak *)
         Agent_stress.record
           { agent_name = meta_current.name
-          ; room_id = ""
           ; kind = Failure_streak !consecutive_failures
           ; timestamp = Unix.gettimeofday ()
           };

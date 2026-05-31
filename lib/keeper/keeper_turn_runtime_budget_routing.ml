@@ -41,10 +41,8 @@ let record_turn_failure_stress
       ~(err : Agent_sdk.Error.sdk_error)
   : unit
   =
-  let room_id = "" in
   Agent_stress.record
     { agent_name = meta.name
-    ; room_id
     ; kind =
         Turn_failure
           { consecutive

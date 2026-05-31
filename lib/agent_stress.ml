@@ -50,7 +50,6 @@ and turn_failure = {
 
 type event = {
   agent_name : string;
-  room_id : string;
   kind : stress_kind;
   timestamp : float;
 }
@@ -94,7 +93,6 @@ let stress_kind_to_json = function
 let event_to_json (e : event) : Yojson.Safe.t =
   `Assoc [
     ("agent_name", `String e.agent_name);
-    ("room_id", `String e.room_id);
     ("kind", stress_kind_to_json e.kind);
     ("timestamp", `Float e.timestamp);
   ]

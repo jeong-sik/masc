@@ -482,12 +482,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
       | Some repaired -> repaired
       | None -> m
     in
-    let (synced, presence_errors) = ensure_keeper_room_presence ctx.config m in
-    List.iter
-      (fun (e : Keeper_context_runtime.room_presence_error) ->
-        Log.Keeper.warn "keepalive_room_presence_error keeper=%s room=%s exn=%s"
-          m.name e.room_id e.exn_msg)
-      presence_errors;
+    let synced = m in
     (* Reset stale timestamp from previous server lifecycle.
 
        Use [Time_compat.now ()] (not [0.0]). The original intent was to

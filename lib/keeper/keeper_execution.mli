@@ -25,12 +25,6 @@ val load_context_from_checkpoint :
   base_dir:string ->
   Keeper_context_runtime.session_context * Keeper_context_runtime.working_context option
 
-(** Ensure keeper is joined to all configured rooms. *)
-val ensure_keeper_room_presence
-  :  Coord.config
-  -> keeper_meta
-  -> keeper_meta * Keeper_context_runtime.room_presence_error list
-
 (** Default JSON for memory check tool. *)
 val memory_check_default_json : unit -> Yojson.Safe.t
 
@@ -51,14 +45,6 @@ val generate_trace_id : ?now:float -> unit -> string
 
 (** Resolve effective model labels for a turn. *)
 val effective_model_labels_for_turn : keeper_meta -> string list
-
-(** {1 Coord Cursor} *)
-
-(** Get last-seen sequence number for a room. *)
-val room_cursor_for : keeper_meta -> string -> int
-
-(** Set last-seen sequence number for a room. *)
-val set_room_cursor : keeper_meta -> string -> int -> keeper_meta
 
 (** {1 Mention Detection} *)
 

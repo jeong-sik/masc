@@ -360,47 +360,7 @@ let resolve_max_context_resolution_of_meta (m : keeper_meta)
   resolve_max_context_resolution
     ~requested_override:m.max_context_override labels
 
-let keeper_room_capabilities (_meta : keeper_meta) =
-  [ "keeper" ]
-
-let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities =
-  let agent_file =
-    Filename.concat (Coord.agents_dir config)
-      (Coord.safe_filename meta.agent_name ^ ".json")
-  in
-  (* Use backend-aware read_json_opt instead of Sys.file_exists which
-     returns false for non-filesystem backends (PG, Memory). *)
-  match Coord.read_json_opt config agent_file with
-  | None -> true
-  | Some json -> (
-      match Masc_domain.agent_of_yojson json with
-      | Ok agent -> agent.capabilities <> capabilities
-      | Error _ -> true)
-
-type room_presence_error = {
-  room_id : string;
-  exn_msg : string;
-}
-
-let ensure_keeper_room_presence config (meta : keeper_meta)
-  : keeper_meta * room_presence_error list =
-  let capabilities = keeper_room_capabilities meta in
-  try
-    let joined = Coord.is_agent_joined config ~agent_name:meta.agent_name in
-    if not joined then begin
-      Coord.ensure_room_bootstrap config;
-      ignore (Coord.join config ~agent_name:meta.agent_name ~capabilities ())
-    end;
-    if joined && keeper_room_capabilities_need_sync config meta capabilities then
-      ignore (Coord.update_agent_r config ~agent_name:meta.agent_name ~capabilities ());
-    ignore (Coord.heartbeat config ~agent_name:meta.agent_name);
-    meta, []
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    let exn_msg = Printexc.to_string exn in
-    Log.Keeper.error "workspace_presence_failed keeper=%s exn=%s" meta.name exn_msg;
-    meta, [ { room_id = ""; exn_msg } ]
-
-let exact_direct_mention_presentlet exact_direct_mention_present ~(targets : string list) (content : string) :
+let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 

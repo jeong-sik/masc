@@ -469,18 +469,18 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 | `last_heartbeat` | MASC | 마지막 heartbeat 타임스탬프 | keepalive 미실행 |
 | `trace_id` | MASC | `trace-{timestamp}-{random}` 형식 | (항상 존재) |
 | `agent_name` | MASC | `keeper-{name}-agent` 형식 | (항상 존재) |
-| `active_model` | Cascade | `last_model_used` 우선, 없으면 `cascade_name`의 첫 모델 fallback | 아직 실행 기록 없음 |
+| `active_model` | Runtime | `last_model_used` 우선, 없으면 `runtime_id`의 첫 모델 fallback | 아직 실행 기록 없음 |
 | `total_cost_usd` | MASC | 누적 MODEL 호출 비용 | 아직 호출 없음 |
 | `compaction_count` | MASC | compaction 수행 횟수 | 아직 compaction 없음 |
 
-### 3.4 Cascade 결정 필드
+### 3.4 Runtime 결정 필드
 
 여러 소스를 우선순위에 따라 결합하여 결정되는 필드.
 
 | 필드 | 결정 로직 | 코드 위치 |
 |------|----------|----------|
-| **Active Model** | `last_model_used` 우선, 없으면 `cascade_name`의 첫 모델 fallback | `keeper_status_runtime.ml:active_model_of_meta` |
-| **Next Model Hint** | `config/cascade.toml`에서 해석한 cascade 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_status_runtime.ml:next_model_hint_of_meta` |
+| **Active Model** | `last_model_used` 우선, 없으면 `runtime_id`의 첫 모델 fallback | `keeper_status_runtime.ml:active_model_of_meta` |
+| **Next Model Hint** | `config/cascade.toml`에서 해석한 runtime 모델 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_status_runtime.ml:next_model_hint_of_meta` |
 | **Skill (Primary/Secondary)** | 마지막 메트릭 항목의 `skill_primary`, `skill_secondary` 필드 | `keeper_status.ml:last_skill_route` |
 
 ---
@@ -519,7 +519,7 @@ Memory compaction 시 어떤 정보를 우선 보존할지는 통합 정책(`kee
 
 ### 4.3 모델 해석
 
-Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `routes.keeper_turn` 대상 cascade를 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/cascade.toml`이 아니라 resolved config root 기준의 `<resolved-config-root>/cascade.toml`에서 해석된다.
+Keeper 모델 선택은 profile.json 인자가 아니라 `runtime_id`로 결정된다. 기본 keeper는 `routes.keeper_turn` 대상 runtime을 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/cascade.toml`이 아니라 resolved config root 기준의 `<resolved-config-root>/cascade.toml`에서 해석된다.
 
 ### 4.4 작성 예시
 
@@ -595,14 +595,14 @@ masc_keeper_create_from_persona(persona_name: "sangsu")
 
 ---
 
-## 5. 모델 Cascade 시스템
+## 5. 모델 Runtime 시스템
 
 ### 5.1 모델 선택 우선순위
 
 ```mermaid
 flowchart TD
     A[last_model_used 확인] -->|있으면| Z[Active Model 결정]
-    A -->|없으면| B[cascade_name 해석]
+    A -->|없으면| B[runtime_id 해석]
     B --> C[resolved config root/cascade.toml 첫 모델]
     C --> Z
 
@@ -613,10 +613,10 @@ flowchart TD
 
 Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
-1. resolved config root의 `cascade.toml`에서 `cascade_name`의 모델 목록을 읽는다
+1. resolved config root의 `cascade.toml`에서 `runtime_id`의 모델 목록을 읽는다
 2. 현재 `active_model`과 다른 첫 번째 모델을 고른다
 3. 다른 모델이 없으면 현재 모델을 반환한다
-4. cascade가 비어 있으면 `None`
+4. runtime 모델 목록이 비어 있으면 `None`
 
 코드 근거: `keeper_status_runtime.ml:next_model_hint_of_meta`
 
@@ -882,8 +882,8 @@ materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.t
 [`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
-- **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `cascade_name`, `sandbox_profile`, `network_mode`, `repo_cli_identity`, `git_identity_mode`, `active_goal_ids` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_preset ∈ {minimal, social, messaging, research, delivery, full}`, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `git_identity_mode ∈ {keeper_alias, repo_cli_identity}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.toml`에 `<name>_models` 키로 존재해야 함.
+- **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `runtime_id`, `sandbox_profile`, `network_mode`, `repo_cli_identity`, `git_identity_mode`, `active_goal_ids` 등 배치별 override 전용.
+- **Allowed value sets**: `tool_preset ∈ {minimal, social, messaging, research, delivery, full}`, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `git_identity_mode ∈ {keeper_alias, repo_cli_identity}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `cascade.toml`에 `<name>_models` 키로 존재해야 함.
 - **Removed / hard-rejected**: `also_allow` (top-level TOML alias), `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 
@@ -922,7 +922,7 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 ### 8.4 모델 실행
 
-모델 선택은 resolved config root의 `cascade.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `routes.keeper_turn` 대상)이 cascade를 지정하고 `Cascade_runtime`가 실행 모델을 결정한다.
+모델 선택은 resolved config root의 `cascade.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `runtime_id` (기본 `routes.keeper_turn` 대상)가 runtime을 지정하고 runtime resolver가 실행 모델을 결정한다.
 
 ---
 

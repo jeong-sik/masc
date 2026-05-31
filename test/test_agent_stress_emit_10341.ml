@@ -81,8 +81,8 @@ let test_completion_contract_violation_to_parse_degraded () =
     (classify "completion_contract_violation")
 
 let test_unmapped_kinds_return_none () =
-  check opt_kind "cascade_exhausted -> None"
-    None (classify "cascade_exhausted");
+  check opt_kind "runtime_exhausted -> None"
+    None (classify "runtime_exhausted");
   check opt_kind "no_tool_capable_provider -> None"
     None (classify "no_tool_capable_provider");
   check opt_kind "empty string -> None"

@@ -7637,7 +7637,7 @@ let test_should_cap_rotation_ignores_non_contract_violation_error () =
        err)
 ;;
 
-let test_cascade_exhausted_error_detected_from_structured_internal_error () =
+let test_runtime_exhausted_error_detected_from_structured_internal_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
@@ -7650,10 +7650,10 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
     bool
     "structured cascade exhausted error detected"
     true
-    (EC.is_cascade_exhausted_error err)
+    (EC.is_runtime_exhausted_error err)
 ;;
 
-let test_cascade_exhausted_error_ignores_legacy_internal_error () =
+let test_runtime_exhausted_error_ignores_legacy_internal_error () =
   let err =
     Agent_sdk.Error.Internal
       "cascade keeper_unified: all models failed: no providers available"
@@ -7662,7 +7662,7 @@ let test_cascade_exhausted_error_ignores_legacy_internal_error () =
     bool
     "legacy internal cascade exhaustion ignored"
     false
-    (EC.is_cascade_exhausted_error err)
+    (EC.is_runtime_exhausted_error err)
 ;;
 
 let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
@@ -7729,7 +7729,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
     (EC.is_auto_recoverable_turn_error err)
 ;;
 
-let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
+let test_runtime_exhausted_error_includes_resumable_cli_session_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
@@ -7743,7 +7743,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
     bool
     "resumable CLI session error is treated as cascade exhaustion surface"
     true
-    (EC.is_cascade_exhausted_error err)
+    (EC.is_runtime_exhausted_error err)
 ;;
 
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
@@ -9426,7 +9426,7 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
       ~sdk_error:None
       ~reason:
         "Internal error: [masc_oas_error] \
-         {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
+         {\"kind\":\"runtime_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
   in
   check
     string
@@ -9463,7 +9463,7 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
     "blocker keeps failure detail"
     true
     (match state.blocker with
-     | Some blocker -> contains_substring blocker "cascade_exhausted"
+     | Some blocker -> contains_substring blocker "runtime_exhausted"
      | None -> false)
 ;;
 
@@ -11389,11 +11389,11 @@ let () =
         ; test_case
             "structured cascade exhausted error detected"
             `Quick
-            test_cascade_exhausted_error_detected_from_structured_internal_error
+            test_runtime_exhausted_error_detected_from_structured_internal_error
         ; test_case
             "legacy internal cascade exhaustion is ignored"
             `Quick
-            test_cascade_exhausted_error_ignores_legacy_internal_error
+            test_runtime_exhausted_error_ignores_legacy_internal_error
         ; test_case
             "auto-recoverable excludes tool-choice contract violation"
             `Quick
@@ -11417,7 +11417,7 @@ let () =
         ; test_case
             "cascade exhausted surface includes resumable CLI session error"
             `Quick
-            test_cascade_exhausted_error_includes_resumable_cli_session_error
+            test_runtime_exhausted_error_includes_resumable_cli_session_error
         ; test_case
             "bounded OAS timeout keeps adaptive timeout under full budget"
             `Quick

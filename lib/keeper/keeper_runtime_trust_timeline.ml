@@ -351,7 +351,7 @@ let receipt_timeline_event receipt =
           json_string_opt_member "tool_contract_result" receipt
           |> Option.value ~default:"unknown"
         in
-        let cascade_outcome =
+        let runtime_outcome =
           receipt |> json_member "cascade"
           |> json_string_opt_member "outcome"
           |> Option.value ~default:"not_observed"
@@ -367,7 +367,7 @@ let receipt_timeline_event receipt =
           | None ->
               if String.equal tool_contract_result "violated" then "bad"
               else if
-                String.equal cascade_outcome "passed_to_next_model"
+                String.equal runtime_outcome "passed_to_next_model"
                 || (receipt |> json_member "cascade"
                     |> json_bool_opt_member "fallback_applied"
                     |> Option.value ~default:false)
@@ -384,7 +384,7 @@ let receipt_timeline_event receipt =
              ~title:"Execution Receipt"
              ~summary:
                (Printf.sprintf "%s · tool_contract=%s · cascade=%s"
-                  outcome tool_contract_result cascade_outcome)
+                  outcome tool_contract_result runtime_outcome)
              ~severity ())
 
 let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id

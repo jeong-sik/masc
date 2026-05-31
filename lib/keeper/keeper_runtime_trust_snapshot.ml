@@ -530,7 +530,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | `Null -> None
     | json -> json_bool_opt_member "fallback_applied" json
   in
-  let cascade_outcome =
+  let runtime_outcome =
     match cascade_json with
     | `Null -> None
     | json -> json_string_opt_member "outcome" json
@@ -567,8 +567,8 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         | None -> `Null );
       ( "provider_selected_model",
         `Null );
-      ( "cascade_outcome",
-        Json_util.string_opt_to_json cascade_outcome );
+      ( "runtime_outcome",
+        Json_util.string_opt_to_json runtime_outcome );
       ( "sandbox_summary",
         match (sandbox_kind, network_mode) with
         | Some kind, Some mode -> `String (Printf.sprintf "%s / %s" kind mode)

@@ -113,8 +113,8 @@ let append_keeper_receipt
     ?(tool_contract_result : Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
     ?(tool_requirement = Keeper_agent_tool_surface.Required)
-    ?(cascade_outcome : Keeper_execution_receipt.cascade_outcome =
-      Cascade_completed) (config : Coord.config)
+    ?(runtime_outcome : Keeper_execution_receipt.runtime_outcome =
+      Runtime_completed) (config : Coord.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   let started_at = Masc_domain.now_iso () in
   let ended_at = Masc_domain.now_iso () in
@@ -163,7 +163,7 @@ let append_keeper_receipt
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
-      cascade_outcome;
+      runtime_outcome;
       degraded_retry_applied = false;
       degraded_retry_runtime_id = None;
       fallback_reason = None;

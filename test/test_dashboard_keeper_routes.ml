@@ -731,8 +731,8 @@ let append_execution_receipt
       Contract_satisfied_completion)
     ?(tools_used = [ "tool_read_file" ])
     ?(cascade_fallback_applied = true)
-    ?(cascade_outcome : Masc_mcp.Keeper_execution_receipt.cascade_outcome =
-      Cascade_passed_to_next_model)
+    ?(runtime_outcome : Masc_mcp.Keeper_execution_receipt.runtime_outcome =
+      Runtime_passed_to_next_model)
     ?(degraded_retry_applied = true)
     ?(degraded_retry_runtime_id =
       Some (Masc_mcp.Keeper_config.default_runtime_id ()))
@@ -805,7 +805,7 @@ let append_execution_receipt
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied;
-      cascade_outcome;
+      runtime_outcome;
       degraded_retry_applied;
       degraded_retry_runtime_id =
         Option.map Cascade_name.of_string_exn
@@ -1303,7 +1303,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt
     ~cascade_fallback_applied:false
-    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
+    ~runtime_outcome:Masc_mcp.Keeper_execution_receipt.Runtime_completed
     ~degraded_retry_applied:false
     ~degraded_retry_runtime_id:None
     ~fallback_reason:None
@@ -1684,7 +1684,7 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
   append_execution_receipt ~tool_contract_result:Contract_satisfied_execution
     ~tools_used:[ "tool_read_file" ]
     ~cascade_fallback_applied:false
-    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
+    ~runtime_outcome:Masc_mcp.Keeper_execution_receipt.Runtime_completed
     ~degraded_retry_applied:false
     ~degraded_retry_runtime_id:None
     ~fallback_reason:None config ~keeper_name;

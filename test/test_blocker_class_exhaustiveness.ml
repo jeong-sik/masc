@@ -79,9 +79,9 @@ let test_roundtrip () =
 
 let test_no_tool_capable_mapping () =
   let s = blocker_class_to_string (Cascade_exhausted (No_tool_capable None)) in
-  check string "No_tool_capable serializes correctly" "cascade_exhausted_no_tool_capable" s;
-  match blocker_class_of_serialized_string "cascade_exhausted_no_tool_capable" with
-  | None -> fail "deserialization of cascade_exhausted_no_tool_capable returned None"
+  check string "No_tool_capable serializes correctly" "runtime_exhausted_no_tool_capable" s;
+  match blocker_class_of_serialized_string "runtime_exhausted_no_tool_capable" with
+  | None -> fail "deserialization of runtime_exhausted_no_tool_capable returned None"
   | Some (Cascade_exhausted (No_tool_capable None)) -> ()
   | Some other ->
     let s' = blocker_class_to_string other in
@@ -91,16 +91,16 @@ let test_no_tool_capable_mapping () =
 (* ── Uniqueness test ───────────────────────────────────────────── *)
 
 (** [Cascade_exhausted] sub-variants (except [No_tool_capable]) all collapse to
-    the same ["cascade_exhausted"] string — this is the intended lossy design.
+    the same ["runtime_exhausted"] string — this is the intended lossy design.
     We test uniqueness on the *canonical* strings (one per top-level variant). *)
 let test_string_uniqueness () =
   let strings = List.map blocker_class_to_string all_variants in
   let rec check_unique seen = function
     | [] -> ()
     | s :: rest ->
-      (* "cascade_exhausted" appears for every Cascade_exhausted sub-variant
+      (* "runtime_exhausted" appears for every Cascade_exhausted sub-variant
          except No_tool_capable — skip duplicates of that specific string. *)
-      if s = "cascade_exhausted" then check_unique seen rest
+      if s = "runtime_exhausted" then check_unique seen rest
       else if List.mem s seen
       then failf "duplicate blocker_class string: %S" s
       else check_unique (s :: seen) rest

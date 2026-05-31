@@ -2208,12 +2208,12 @@ let test_mark_sdk_turn_started_no_op_without_obs () =
     fail "mark_sdk_turn_started installed observation without keeper-turn"
   | None -> fail "entry missing"
 
-let test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path () =
+let test_mark_turn_runtime_exhausted_materializes_pre_disclosure_path () =
   R.clear ();
   let keeper_name = "k-cascade-exhausted-pre-disclosure" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
-  R.mark_turn_cascade_exhausted ~base_path:bp keeper_name;
+  R.mark_turn_runtime_exhausted ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
     check bool "cascade_state lands on Cascade_exhausted" true
@@ -2223,7 +2223,7 @@ let test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path () =
     check bool "decision_stage records tool policy boundary" true
       (obs.R.decision_stage = R.Packed R.Decision_tool_policy_selected)
   | Some { current_turn_observation = None; _ } ->
-    fail "mark_turn_cascade_exhausted cleared observation"
+    fail "mark_turn_runtime_exhausted cleared observation"
   | None -> fail "entry missing"
 
 let test_mark_turn_cascade_done_materializes_pre_disclosure_path () =
@@ -2260,7 +2260,7 @@ let test_mark_turn_cascade_done_no_op_after_exhausted () =
   let keeper_name = "k-cascade-done-after-exhausted" in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
-  R.mark_turn_cascade_exhausted ~base_path:bp keeper_name;
+  R.mark_turn_runtime_exhausted ~base_path:bp keeper_name;
   R.mark_turn_cascade_done ~base_path:bp keeper_name;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
@@ -2649,8 +2649,8 @@ let () =
             test_registry_progress_wrapper_survives_liveness_off;
           eio_test "mark_sdk_turn_started no-op without observation"
             test_mark_sdk_turn_started_no_op_without_obs;
-          eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"
-            test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path;
+          eio_test "mark_turn_runtime_exhausted materializes pre-disclosure path"
+            test_mark_turn_runtime_exhausted_materializes_pre_disclosure_path;
           eio_test "mark_turn_cascade_done materializes pre-disclosure path"
             test_mark_turn_cascade_done_materializes_pre_disclosure_path;
           eio_test "mark_turn_cascade_done no-op without observation"

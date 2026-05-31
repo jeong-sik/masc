@@ -521,7 +521,7 @@ let append_execution_receipt
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
-      cascade_outcome = Lib.Keeper_execution_receipt.Cascade_passed_to_next_model;
+      runtime_outcome = Lib.Keeper_execution_receipt.Runtime_passed_to_next_model;
       degraded_retry_applied = true;
       degraded_retry_runtime_id =
         Some
@@ -920,7 +920,7 @@ let test_execution_trust_surfaces_latest_receipt () =
             check string "execution row exposes cascade outcome"
               "passed_to_next_model"
               (execution_row |> member "trust" |> member "execution_summary"
-             |> member "cascade_outcome" |> to_string);
+             |> member "runtime_outcome" |> to_string);
             check (list string) "execution row exposes unexpected tools"
               [ "WebSearch" ]
               (execution_row |> member "trust" |> member "execution_summary"

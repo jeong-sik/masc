@@ -409,7 +409,7 @@ let test_cohort_key_turn_failures () =
   check string "turn failure cohort" "turn_failures" key
 
 (** A healthy heartbeat must not erase provider/tool turn failures.
-    Regression for live 2026-05-16 evidence where a cascade_exhausted turn
+    Regression for live 2026-05-16 evidence where a runtime_exhausted turn
     moved Failing -> Running via a keepalive heartbeat before the next real
     successful turn. *)
 let test_fresh_presence_preserves_turn_failures () =

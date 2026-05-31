@@ -28,7 +28,7 @@ let cascade_name raw = Cascade_name.of_string_exn (String.trim raw)
 
 let test_cascade = cascade_name "cascade.test_cascade"
 
-let make_cascade_exhausted reason =
+let make_runtime_exhausted reason =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Cascade_exhausted
        { cascade_name = test_cascade; reason })
@@ -61,18 +61,18 @@ let make_accept_rejected () =
        { scope = "test"; model = None; reason = "no body" })
 
 let test_other_detail_generic_recoverable () =
-  let err = make_cascade_exhausted (Keeper_meta_contract.Other_detail "transport unavailable") in
+  let err = make_runtime_exhausted (Keeper_meta_contract.Other_detail "transport unavailable") in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "Other_detail (non-quota) -> cascade_exhausted"
-      "cascade_exhausted"
+    check string "Other_detail (non-quota) -> runtime_exhausted"
+      "runtime_exhausted"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Generic Cascade_exhausted with Other_detail should be recoverable"
 
 let test_slot_full_other_detail_maps_to_capacity_backpressure () =
   let err =
-    make_cascade_exhausted
+    make_runtime_exhausted
       (Keeper_meta_contract.Other_detail "slot full, cascading to next provider")
   in
   match KEC.recoverable_cascade_failure_reason err with
@@ -84,12 +84,12 @@ let test_slot_full_other_detail_maps_to_capacity_backpressure () =
   | None ->
     fail "slot full should be capacity-backpressure recoverable"
 
-let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
+let test_typed_capacity_backpressure_is_not_runtime_exhausted () =
   let err = make_capacity_backpressure () in
   check bool "typed capacity is auto-recoverable" true
     (KEC.is_auto_recoverable_turn_error err);
-  check bool "typed capacity is not cascade_exhausted" false
-    (KEC.is_cascade_exhausted_error err);
+  check bool "typed capacity is not runtime_exhausted" false
+    (KEC.is_runtime_exhausted_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "typed capacity -> capacity_backpressure" "capacity_backpressure"
@@ -117,28 +117,28 @@ let test_provider_capacity_backpressure_is_capacity_backpressure () =
     fail "Provider CapacityExhausted should be recoverable as capacity"
 
 let test_all_providers_failed_recoverable () =
-  let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
+  let err = make_runtime_exhausted Keeper_meta_contract.All_providers_failed in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "All_providers_failed -> cascade_exhausted"
-      "cascade_exhausted"
+    check string "All_providers_failed -> runtime_exhausted"
+      "runtime_exhausted"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Cascade_exhausted with All_providers_failed should be recoverable"
 
 let test_no_providers_available_recoverable () =
-  let err = make_cascade_exhausted Keeper_meta_contract.No_providers_available in
+  let err = make_runtime_exhausted Keeper_meta_contract.No_providers_available in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "No_providers_available -> cascade_exhausted"
-      "cascade_exhausted"
+    check string "No_providers_available -> runtime_exhausted"
+      "runtime_exhausted"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Cascade_exhausted with No_providers_available should be recoverable"
 
 let test_candidates_filtered_specific_reason () =
   (* Specific reasons must keep their existing labels. *)
-  let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
+  let err = make_runtime_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Candidates_filtered keeps specific label"
@@ -148,7 +148,7 @@ let test_candidates_filtered_specific_reason () =
     fail "Candidates_filtered should be recoverable"
 
 let test_max_turns_specific_reason () =
-  let err = make_cascade_exhausted Keeper_meta_contract.Max_turns_exceeded in
+  let err = make_runtime_exhausted Keeper_meta_contract.Max_turns_exceeded in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Max_turns keeps specific label" "max_turns" (KEC.degraded_retry_reason_to_string reason)
@@ -175,28 +175,28 @@ let test_accept_rejected_non_recoverable () =
   | None -> ()
 
 (* Regression: auto-recoverable cascade exhaustion must still be
-   classified as cascade_exhausted so that the unified turn loop's
+   classified as runtime_exhausted so that the unified turn loop's
    [counts_toward_crash] condition correctly increments the failure
-   counter.  If is_auto_recoverable but NOT is_cascade_exhausted,
+   counter.  If is_auto_recoverable but NOT is_runtime_exhausted,
    the keeper loops forever without auto-pause. *)
-let test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted () =
+let test_auto_recoverable_runtime_exhausted_is_still_runtime_exhausted () =
   let cases =
     [ (Keeper_meta_contract.Candidates_filtered_after_cycles, "Candidates_filtered_after_cycles")
     ; (Keeper_meta_contract.Max_turns_exceeded, "Max_turns_exceeded")
     ]
   in
   List.iter (fun (reason, label) ->
-      let err = make_cascade_exhausted reason in
+      let err = make_runtime_exhausted reason in
       (* These are auto-recoverable *)
       check bool (label ^ " is auto-recoverable") true
         (KEC.is_auto_recoverable_turn_error err);
-      (* But they MUST also be cascade_exhausted *)
-      check bool (label ^ " is cascade_exhausted") true
-        (KEC.is_cascade_exhausted_error err)
+      (* But they MUST also be runtime_exhausted *)
+      check bool (label ^ " is runtime_exhausted") true
+        (KEC.is_runtime_exhausted_error err)
     ) cases
 
 let test_catalog_rotation_preserves_order_without_base_injection () =
-  let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
+  let err = make_runtime_exhausted Keeper_meta_contract.All_providers_failed in
   match
     KEC.degraded_rotation_after_recoverable_error
       ~base_runtime_id:"base_only"
@@ -207,12 +207,12 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
   with
   | Some retry ->
     check string "catalog order wins" "catalog_first" retry.next_runtime_id;
-    check string "fallback reason" "cascade_exhausted"
+    check string "fallback reason" "runtime_exhausted"
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Expected catalog-ordered degraded retry"
 
 let test_rotation_skips_direct_tier_after_attempted_cascade () =
-  let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
+  let err = make_runtime_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match
     KEC.degraded_rotation_after_recoverable_error
       ~base_runtime_id:"cascade.strict_tool_candidates"
@@ -367,7 +367,7 @@ let test_server_error_524_is_transient_network_error_and_cascade_rotation () =
 
 let test_wrapped_524_is_capacity_backpressure () =
   let err =
-    make_cascade_exhausted
+    make_runtime_exhausted
       (Keeper_meta_contract.Other_detail
          "all tiers failed (last runtime=runtime, error=Server error 524: error \
           code: 524)")
@@ -496,14 +496,14 @@ let () =
     [
       ( "recoverable_cascade_failure_reason",
         [
-          test_case "auto-recoverable cascade is still cascade_exhausted" `Quick
-            test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted;
+          test_case "auto-recoverable cascade is still runtime_exhausted" `Quick
+            test_auto_recoverable_runtime_exhausted_is_still_runtime_exhausted;
           test_case "Other_detail (non-quota) is recoverable" `Quick
             test_other_detail_generic_recoverable;
           test_case "slot full Other_detail maps to capacity backpressure" `Quick
             test_slot_full_other_detail_maps_to_capacity_backpressure;
           test_case "typed capacity backpressure is not cascade exhausted" `Quick
-            test_typed_capacity_backpressure_is_not_cascade_exhausted;
+            test_typed_capacity_backpressure_is_not_runtime_exhausted;
           test_case "provider CapacityExhausted is capacity backpressure" `Quick
             test_provider_capacity_backpressure_is_capacity_backpressure;
           test_case "All_providers_failed is recoverable" `Quick

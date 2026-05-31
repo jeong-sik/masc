@@ -28,7 +28,6 @@ let with_config f =
       f config)
 
 let read_lines path =
-let read_lines path =
   let ic = open_in path in
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)

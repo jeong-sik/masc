@@ -65,7 +65,7 @@ let resolve_partition_for_query ~state ~uri =
   | None ->
     (match from_repo_id () with
      | Some slug -> Ide_paths.By_url slug
-     | None -> Ide_paths.Legacy)
+     | None -> Ide_paths.Orphan)
 ;;
 
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
